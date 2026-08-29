@@ -33,23 +33,23 @@ const cap = (
 export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // Operator coordination (operator editor toggles)
   //
-  // F19-12 — the id/label split here is DELIBERATE, not an oversight.
-  // "primary specialist" is retired vocabulary (D9/Q17-5, INTENT §6.5): the
-  // model is `engagements[]` with one `delivers: true`, and the UI has said
-  // "delivering agent" since (execution-profile.tsx's "Assign delivering
-  // agent" / "Delivering agent" header). The LABEL is rendered — on the agents
-  // page, the capability-matrix modal and the policy page — so it moved. The
-  // ID is not rendered anywhere: it is the persisted key in every project.md
-  // `capabilities[].capabilityId`, so renaming it would be a data migration,
-  // and this pass forbids migrations. It stays `assign-primary-specialist`.
+  // Dynamic-dispatch rework (2026-08-29): `assign-primary-specialist` +
+  // `summon-reviewers` collapsed into ONE capability. The static
+  // delivering/reviewer slot split those two ids mirrored is gone — the
+  // operator selects and runs any deployed agent per turn (delivering vs
+  // supporting posture derives from the AGENT's own capability grants), so a
+  // per-slot operator gate no longer maps to anything real. The rename is a
+  // deliberate breaking change (preprod, owner's no-back-compat ruling): an old
+  // grant row for either retired id is simply unknown now, and an ABSENT
+  // `dispatch-agents` grant resolves to the catalog default (direct), so
+  // existing operator deployments keep dispatching.
   //
   // NOTE for whoever changes this label next: `app/server/seed/agent-catalog.server.ts`
   // spells the seeded operator's grants as catalog LABELS and resolves them
   // through `capabilityByLabel`. A label that drifts from that literal does not
   // error — the grant silently degrades to a display-only `extra` with no
   // runtime authority. `agents-route.server.test.ts` pins the mapping.
-  cap("assign-primary-specialist", "Assign the delivering agent", ["operator"], "Assignment"),
-  cap("summon-reviewers", "Summon reviewer specialists", ["operator"], "Assignment"),
+  cap("dispatch-agents", "Select & run agents", ["operator"], "Assignment"),
   cap("generate-packets", "Generate decision & blocking packets", ["operator"], "Coordination"),
   cap("append-typed-events", "Append typed important events", ["operator"], "Coordination"),
   cap("stage-transitions", "Stage transitions", ["operator"], "Permissions", "recommend"),
@@ -226,8 +226,7 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "open-review-pr",
   "merge-pull-request",
   "execute-code-or-write-repo",
-  "assign-primary-specialist",
-  "summon-reviewers",
+  "dispatch-agents",
   "generate-packets",
   "append-typed-events",
   "stage-transitions",

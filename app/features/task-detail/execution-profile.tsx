@@ -1,15 +1,18 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Link } from "react-router";
-import { useDismiss } from "~/ui/use-dismiss";
+import { useState } from "react";
 import { type ProjectRole, roleCan } from "~/shared/rbac";
 import type { TaskSummary } from "~/shared/mapping/task.server";
+import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
+import { LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
+import { AgentSelect } from "./agent-select";
 
-/** Client-safe view of a deployed specialist the assign menu offers (mirrors
- * the loader's DeployedSpecialistView — kept here to avoid a server import). */
+/** Client-safe view of a deployed specialist the run-agent selector offers
+ * (mirrors the loader's DeployedSpecialistView — kept here to avoid a server
+ * import). */
 export interface DeployedSpecialistView {
   id: string;
   name: string;
@@ -20,180 +23,51 @@ export interface DeployedSpecialistView {
    *  agent's model is not runnable on the account (F20-4). Present ⇒ the run
    *  control warns BEFORE a run is spent. */
   modelUnavailable?: string;
-  /**
-   * UI-39: the loader has always shipped these (specialist-run.server.ts builds
-   * them from the deployment's real capability grants) and the client type
-   * simply didn't declare them — so "Assign delivering agent" offered agents
-   * with NO repo-write grant (the run starts, streams, and delivers nothing),
-   * and the reviewer menu gave no hint which reviewers actually gate acceptance.
-   */
+  /** The capability marks the selector rows and the ledger surface (UI-39):
+   *  delivery = can own branch/PR delivery; verdict = its verdict gates
+   *  acceptance once engaged; askHuman/browser inform the roster. */
   capabilities?: {
-    /** Holds a repo-write grant in `direct` mode — can own branch/PR delivery. */
     delivery: boolean;
-    /** Holds `report-validation-verdict` — its verdict gates acceptance. */
     verdict: boolean;
-    /** May raise ask-human question packets. */
     askHuman: boolean;
-    /** D8/R19-19: holds `use-browser` — its runs save screenshots/downloads into
-     *  the task's `attachments/`, so the attachments panel is meaningful even
-     *  before any file lands. */
     browser: boolean;
   };
 }
 
 /**
- * Execution profile panel + OwnerControl — 1:1 port of task.jsx §4.3/§4.4.
+ * Execution profile panel — dynamic-dispatch rework (2026-08-29).
  *
- * Deviations from the mock (documented in the phase report):
- *   - all identity comparisons are by user id (ruling 6), never name;
- *   - members come from the layout loader, not window.VIBERR.policy.members
- *     (project.md membership has no status field — every member is active);
- *   - the "operator active" head pill renders only when an operator is
- *     actually attached (mock showed it unconditionally; real runtime state
- *     drives it now);
- *   - Manage menu closes on Escape too (spec §4.4 port note).
+ * The static "Delivering agent" / "Reviewing agents" slot cells (assign menus,
+ * engage menus, per-row Run buttons) are GONE. What replaced them:
+ *
+ *   - the OPERATOR cell keeps its R21-9 shape (shows the backend, optional
+ *     steer, Run) and gains the baked-in schedule affordance;
+ *   - a RUN AN AGENT cell — an @-mention-style autocomplete over the deployed
+ *     roster + an optional prompt + the same run/schedule control. The
+ *     dispatched run always reports back tagging the dispatching human and
+ *     @operator (the completion contract), so the operator continues
+ *     coordination from the results;
+ *   - an ENGAGED AGENTS ledger — the honest record of who is attached
+ *     (delivers / gates acceptance / running), read-only except releasing a
+ *     supporting engagement;
+ *   - the HUMAN OWNER cell, unchanged.
+ *
+ * Scheduling is INSIDE the two run controls ("no additional button" — owner
+ * directive): a when-picker beside Run; a deferred pick turns the button into
+ * "Schedule", and pending entries list under the control with cancel.
  */
 
 export type OwnerAction = "take" | "assign" | "release";
 
 /**
- * UC-13 — what the engagements cell is actually holding. "Reviewing agents"
- * unless EVERY engaged agent is known to hold no verdict capability, in which
- * case they are supporting the work, not gating it.
- */
-export function reviewingAgentsLabel(
-  engaged: readonly { profileId: string }[],
-  deployed: readonly DeployedSpecialistView[],
-): "Reviewing agents" | "Supporting agents" {
-  if (engaged.length === 0) return "Reviewing agents";
-  const allSupporting = engaged.every((e) => {
-    const profile = deployed.find((s) => s.id === e.profileId);
-    return profile?.capabilities?.verdict === false;
-  });
-  return allSupporting ? "Supporting agents" : "Reviewing agents";
-}
-
-/**
- * The vocabulary the whole engagements cell speaks.
- *
- * UX19-4: UC-13 renamed the cell heading to "Supporting agents" when nothing
- * engaged holds a verdict grant, and stopped there — every control inside kept
- * saying "reviewer". The add button read "Engage reviewer", its panel was
- * labelled "Engage a reviewer", the release control "Release reviewer", and the
- * empty state flatly contradicted the heading: a cell headed "Supporting
- * agents" also said *"All deployed agents are already reviewing."* "Supporting
- * agents" is the only place in the product that uses that word, so the reader
- * had no way to map it back to any control on the page.
- *
- * One predicate, one vocabulary: the heading and the verbs are derived together
- * and passed down, so they cannot drift apart again.
- */
-export interface EngagementVocabulary {
-  heading: "Reviewing agents" | "Supporting agents";
-  /** The add button's label. */
-  add: string;
-  /** The add panel's aria-label. */
-  panel: string;
-  /** Empty state inside the add panel. */
-  allEngaged: string;
-  /** What the cell says instead of the add control on a closed task. */
-  closed: string;
-  /** The release (×) control's tooltip. */
-  release: string;
-  /** The release (×) control's aria-label, per engagement. */
-  releaseOf: (role: string) => string;
-}
-
-export function engagementVocabulary(
-  engaged: readonly { profileId: string }[],
-  deployed: readonly DeployedSpecialistView[],
-): EngagementVocabulary {
-  const heading = reviewingAgentsLabel(engaged, deployed);
-  return heading === "Supporting agents"
-    ? {
-        heading,
-        add: "Engage agent",
-        panel: "Engage an agent",
-        allEngaged: "All deployed agents are already engaged.",
-        closed: "Task closed. No new engagements.",
-        release: "Release agent",
-        releaseOf: (role) => `Release ${role} agent`,
-      }
-    : {
-        heading,
-        add: "Engage reviewer",
-        panel: "Engage a reviewer",
-        allEngaged: "All deployed agents are already reviewing.",
-        closed: "Task closed. No new reviewer engagements.",
-        release: "Release reviewer",
-        releaseOf: (role) => `Release ${role} reviewer`,
-      };
-}
-
-/**
- * UX19-12 — an engagement whose profile is no longer deployed.
- *
- * The name is the Agents live table's own wording (`agents-page.tsx:927`), used
- * verbatim so one state does not read two ways on two surfaces, and the note
- * states the consequence R15-7 (ruling 26) imposes on such a run: it may read
- * and validate, and it is withheld from delivering, commenting, asking or
- * recording evidence. It is rendered copy, not a `title`, because the control it
- * explains is DISABLED — the P14 ruling this file already applies to the closed
- * operator control (`:513-519`).
+ * UX19-12 — an engagement whose profile is no longer deployed. The name is the
+ * Agents live table's own wording, used verbatim so one state does not read two
+ * ways on two surfaces; the note states the consequence R15-7 (ruling 26)
+ * imposes on such a run.
  */
 const GHOST_NAME = "profile no longer here";
-const GHOST_DELIVERING_NOTE =
-  "Not deployed on this project any more. A run would start and produce no branch, PR, comment or verdict.";
-const GHOST_REVIEWING_NOTE =
-  "Not deployed on this project any more. A run would start and record no verdict, comment or evidence.";
-
-/**
- * UX19-18 — the keyboard contract for this panel's three popovers.
- *
- * "Manage" (ownership), "Assign delivering agent" and "Engage reviewer" all
- * declared `role="menu"` with `role="menuitem"` children and implemented none
- * of what those roles promise: no Arrow/Home/End traversal, and no focus
- * management, so activating an item (or Escape) unmounted the focused element
- * and dropped the keyboard user at `<body>` mid-workflow.
- *
- * The product has already ruled on this exact shape twice, in opposite but
- * equally acceptable directions: implement the contract (`ui/stage-menu.tsx`,
- * `project-settings/settings-page.tsx`) or DROP the roles (`shell/user-menu.tsx`,
- * UI-45). These three take UI-45's path for UI-45's reason — they are small
- * groups of buttons interleaved with group labels, separators and a disabled
- * empty-state line, and plain Tab order is a contract the code actually
- * honours. What the roles were papering over is fixed either way: focus moves
- * into the panel on open, and Escape or picking an item returns it to the
- * trigger (F10-25's rule, which `stage-menu.tsx:90-95` states).
- */
-function usePopoverFocus(open: boolean, setOpen: (open: boolean) => void) {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  // The shared dismiss hook still owns outside-press and document-level Escape.
-  // It deliberately does NOT reclaim focus: on an outside press the press
-  // itself decides where focus lands, and stealing it back to the trigger would
-  // fight the user.
-  const wrapRef = useDismiss<HTMLDivElement>(open, () => setOpen(false));
-
-  useEffect(() => {
-    if (open) panelRef.current?.focus();
-  }, [open]);
-
-  const closeAndReturnFocus = () => {
-    setOpen(false);
-    triggerRef.current?.focus();
-  };
-
-  // Escape from anywhere inside the popover (the trigger included — the handler
-  // sits on the wrapper both live in).
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (!open || event.key !== "Escape") return;
-    event.preventDefault();
-    closeAndReturnFocus();
-  };
-
-  return { wrapRef, triggerRef, panelRef, closeAndReturnFocus, onKeyDown };
-}
+const GHOST_NOTE =
+  "Not deployed on this project any more. Release it, or re-deploy the profile on the Agents page.";
 
 export interface TaskMemberView {
   userId: string;
@@ -226,9 +100,8 @@ function OwnerControl({
 
   if (!o) {
     // Only contributor+ may take ownership (Q5) — hide from viewers/non-members.
-    // F19-11: the eligibility sentence now lives in the cell's VALUE (it was
-    // the half that misdescribed the matrix), stated once for every role — so
-    // this control renders the affordance or nothing, never a second copy.
+    // F19-11: the eligibility sentence lives in the cell's VALUE, stated once
+    // for every role — this control renders the affordance or nothing.
     return canOwn ? (
       <button
         type="button"
@@ -244,240 +117,189 @@ function OwnerControl({
   }
 
   // OWNED: the cell shows the owner chip alone (owner request 2026-08-21) —
-  // the Manage popover (take-over / hand-off / release) is gone. Release stays
-  // one panel away on the Current-state Owner row (`own-x`, self or the
-  // release-any-ownership tier), and a hand-off is release + take. The chip
-  // itself is rendered by the cell beside this control.
+  // release stays one panel away on the Current-state Owner row.
   return null;
 }
 
-/**
- * Assign-specialist affordance — mirrors OwnerControl's menu (spec §4.4): a
- * button opening a menu that lists the project's deployed specialists by
- * name/role/backend-glyph; picking one submits the `assign-specialist` intent.
- * When the project has zero deployed specialists, a hint links to the Agents
- * page. Only rendered for admin|maintainer (the caller gates on canRunAgents).
- */
-function SpecialistControl({
-  projectSlug,
-  specialists,
-  busy,
-  closed = false,
-  onAssign,
+/** The when-picker baked into both run controls: run now, or schedule. */
+const RUN_DELAYS = [
+  { value: "now", label: "Now" },
+  { value: "5", label: "in 5 min" },
+  { value: "60", label: "in 1 hour" },
+  { value: "360", label: "in 6 hours" },
+  { value: "1440", label: "in 24 hours" },
+] as const;
+export type RunDelay = (typeof RUN_DELAYS)[number]["value"];
+
+function DelayPicker({
+  value,
+  disabled,
+  label,
+  onChange,
 }: {
-  projectSlug: string;
-  specialists: DeployedSpecialistView[];
-  busy: boolean;
-  /** G9/P14-WL-07: the task is at the terminal stage. */
-  closed?: boolean;
-  onAssign: (profileId: string) => void;
+  value: RunDelay;
+  disabled: boolean;
+  /** Accessible name — the two controls need distinct ones. */
+  label: string;
+  onChange: (value: RunDelay) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const { wrapRef, triggerRef, panelRef, closeAndReturnFocus, onKeyDown } =
-    usePopoverFocus(open, setOpen);
-
-  // P14-WL-07: G9 disabled the RUN buttons on a closed task but left the two
-  // engage menus fully live, so a Done+merged task still offered to assign a
-  // delivering agent — an engagement that lands and then has nothing to run.
-  if (closed) {
-    return (
-      <span className="sub">
-        Task closed. Reopen it from Current state to assign a delivering agent.
-      </span>
-    );
-  }
-
-  if (specialists.length === 0) {
-    return (
-      <span className="sub">
-        No agents deployed.{" "}
-        <Link to={`/projects/${projectSlug}/agents`}>Deploy one on the Agents page</Link>
-        .
-      </span>
-    );
-  }
-
   return (
-    <div className="own-wrap" ref={wrapRef} onKeyDown={onKeyDown}>
-      <button
-        type="button"
-        ref={triggerRef}
-        className={"own-btn" + (open ? " open" : "")}
-        disabled={busy}
-        onClick={() => setOpen(!open)}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-      >
-        Assign delivering agent
-        <Icon name="chevron" />
-      </button>
-      {open && (
-        <div
-          className="own-menu"
-          ref={panelRef}
-          tabIndex={-1}
-          aria-label="Assign a delivering agent"
-        >
-          <div className="own-lbl">Deployed agents</div>
-          {/* UI-39: an agent with no repo-write grant cannot deliver — its run
-              starts, streams, and produces no branch or PR. Say so on the chip
-              rather than silently offering a dead end. */}
-          {specialists.map((s) => {
-            const cannotDeliver = s.capabilities?.delivery === false;
-            return (
-              <button
-                type="button"
-                className="menu-item"
-                key={s.id}
-                title={
-                  cannotDeliver
-                    ? `${s.name} has no repo-write grant. It can analyse and comment, but it can't produce a branch or PR. Grant one on the Agents page.`
-                    : undefined
-                }
-                onClick={() => {
-                  closeAndReturnFocus();
-                  onAssign(s.id);
-                }}
-              >
-                <AgentGlyph backend={s.backend} />
-                {s.name}
-                <span className="own-role">
-                  {s.role}
-                  {cannotDeliver ? " · no repo write" : ""}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+    <select
+      className="run-when"
+      aria-label={label}
+      value={value}
+      disabled={disabled}
+      // SAFETY: the select's options are rendered from RUN_DELAYS alone, so
+      // the DOM can only hand back one of its values.
+      onChange={(e) => onChange(e.target.value as RunDelay)}
+    >
+      {RUN_DELAYS.map((d) => (
+        <option key={d.value} value={d.value}>
+          {d.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** Minutes a non-"now" delay stands for (the schedule intent's payload). */
+export function delayMinutes(delay: RunDelay): number | null {
+  return delay === "now" ? null : Number(delay);
+}
+
+/**
+ * Pending scheduled runs for ONE control, listed under it (D6: cancelling a
+ * queued run — possibly one another member scheduled — confirms first,
+ * naming when it was due).
+ */
+function PendingSchedules({
+  schedules,
+  agentNameOf,
+  canCancel,
+  busy,
+  onCancel,
+}: {
+  schedules: TaskSchedule[];
+  /** Resolves a run-agent entry's display name (null → operator entry). */
+  agentNameOf: (profileId: string) => string | undefined;
+  canCancel: boolean;
+  busy: boolean;
+  onCancel: (scheduleId: string) => void;
+}) {
+  const [confirmCancel, setConfirmCancel] = useState<TaskSchedule | null>(null);
+  if (schedules.length === 0) return null;
+  return (
+    <ul className="sched-list">
+      {schedules.map((s) => (
+        <li key={s.id} className="sched-row">
+          <div className="sched-when">
+            <Icon name="clock" />
+            <span>
+              <LocalDayDotTime iso={s.dueAt} />
+            </span>
+          </div>
+          <div className="sched-meta">
+            {/* R22: no fixed backend/autonomy — the run resolves the deployed
+                profile when it fires. */}
+            {s.action === "run-agent"
+              ? `${s.profileId ? (agentNameOf(s.profileId) ?? s.profileId) : "agent"} run`
+              : "operator re-run"}
+            {s.prompt ? ` · ${s.prompt}` : ""}
+            {s.createdByLabel ? ` · by ${s.createdByLabel}` : ""}
+          </div>
+          {canCancel ? (
+            <button
+              type="button"
+              className="btn ghost sched-cancel"
+              disabled={busy}
+              onClick={() => setConfirmCancel(s)}
+            >
+              Cancel
+            </button>
+          ) : null}
+        </li>
+      ))}
+      {confirmCancel && (
+        <ConfirmDialog
+          title="Cancel this scheduled run?"
+          body={
+            <>
+              The scheduled run due{" "}
+              <strong>
+                <LocalDayDotTime iso={confirmCancel.dueAt} />
+              </strong>
+              {confirmCancel.createdByLabel
+                ? ` (scheduled by ${confirmCancel.createdByLabel})`
+                : ""}{" "}
+              will not fire.
+            </>
+          }
+          confirmLabel="Cancel run"
+          cancelLabel="Keep it"
+          busy={busy}
+          onCancel={() => setConfirmCancel(null)}
+          onConfirm={() => {
+            onCancel(confirmCancel.id);
+            setConfirmCancel(null);
+          }}
+        />
       )}
-    </div>
+    </ul>
+  );
+}
+
+/** Single-line run-instruction input shared by both controls: Enter submits
+ *  (the search/chat convention), IME-guarded — an Enter that merely confirms a
+ *  multibyte candidate must not launch a billable run. `keyCode === 229`
+ *  covers WebKit/Safari, which fires compositionend BEFORE the confirming
+ *  keydown, so `isComposing` is already false. */
+function PromptInput({
+  value,
+  ariaLabel,
+  placeholder,
+  disabled,
+  maxLength,
+  onChange,
+  onSubmit,
+}: {
+  value: string;
+  ariaLabel: string;
+  placeholder: string;
+  disabled: boolean;
+  maxLength: number;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <input
+      type="text"
+      className="op-steer"
+      aria-label={ariaLabel}
+      placeholder={placeholder}
+      value={value}
+      maxLength={maxLength}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (
+          e.key === "Enter" &&
+          !e.nativeEvent.isComposing &&
+          e.nativeEvent.keyCode !== 229
+        ) {
+          onSubmit();
+        }
+      }}
+      disabled={disabled}
+    />
   );
 }
 
 /**
- * Assign-reviewer affordance — the reviewer counterpart of SpecialistControl.
- * Offers the deployed specialists NOT already engaged as reviewers on this
- * task; picking one submits `assign-reviewer`. When every deployed specialist
- * is already a reviewer the menu says so; when none are deployed it links to
- * the Agents page. Only rendered for admin|maintainer (caller gates).
- *
- * UX19-4: every string here comes from the cell's own `EngagementVocabulary`,
- * so the control never says "reviewer" under a heading that says "Supporting
- * agents" — one predicate decides for the whole cell.
- */
-function ReviewerControl({
-  projectSlug,
-  specialists,
-  hasAnyDeployed,
-  busy,
-  closed = false,
-  vocab,
-  onAssign,
-}: {
-  projectSlug: string;
-  /** Deployed specialists available to add (already-engaged ones filtered out). */
-  specialists: DeployedSpecialistView[];
-  /** Whether the project has any deployed specialist at all (empty-state copy). */
-  hasAnyDeployed: boolean;
-  busy: boolean;
-  /** G9/P14-WL-07: the task is at the terminal stage. */
-  closed?: boolean;
-  /** The vocabulary the whole engagements cell speaks (UX19-4). */
-  vocab: EngagementVocabulary;
-  onAssign: (profileId: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const { wrapRef, triggerRef, panelRef, closeAndReturnFocus, onKeyDown } =
-    usePopoverFocus(open, setOpen);
-
-  // P14-WL-07: same reason as SpecialistControl — a closed task must not offer
-  // to engage a reviewer whose Run button would then render disabled.
-  if (closed) {
-    return <span className="sub">{vocab.closed}</span>;
-  }
-
-  if (!hasAnyDeployed) {
-    return (
-      <span className="sub">
-        No agents deployed.{" "}
-        <Link to={`/projects/${projectSlug}/agents`}>Deploy one on the Agents page</Link>
-        .
-      </span>
-    );
-  }
-
-  return (
-    <div className="own-wrap" ref={wrapRef} onKeyDown={onKeyDown}>
-      <button
-        type="button"
-        ref={triggerRef}
-        className={"rev-add" + (open ? " open" : "")}
-        disabled={busy}
-        onClick={() => setOpen(!open)}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-      >
-        <Icon name="plus" />
-        {vocab.add}
-      </button>
-      {open && (
-        <div
-          className="own-menu"
-          ref={panelRef}
-          tabIndex={-1}
-          aria-label={vocab.panel}
-        >
-          <div className="own-lbl">Deployed agents</div>
-          {specialists.length === 0 ? (
-            <div className="menu-item" aria-disabled>
-              <span className="sub">{vocab.allEngaged}</span>
-            </div>
-          ) : (
-            // UI-39: badge the reviewers whose verdict actually GATES
-            // acceptance (`report-validation-verdict`, snapshotted at engage
-            // time) — the menu gave no way to tell them apart.
-            specialists.map((s) => (
-              <button
-                type="button"
-                className="menu-item"
-                key={s.id}
-                title={
-                  s.capabilities?.verdict
-                    ? `${s.name} reports validation verdicts. Engaging it makes its approval required before acceptance.`
-                    : s.capabilities
-                      ? `${s.name} has no verdict grant. It can review and comment, but its opinion does not gate acceptance.`
-                      : undefined
-                }
-                onClick={() => {
-                  closeAndReturnFocus();
-                  onAssign(s.id);
-                }}
-              >
-                <AgentGlyph backend={s.backend} />
-                {s.name}
-                <span className="own-role">
-                  {s.role}
-                  {s.capabilities?.verdict ? " · gates acceptance" : ""}
-                </span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Operator run control (owner request 2026-08-21): SHOWS the operator's
- * current backend and runs it — no per-run backend/autonomy pickers. Both are
- * configured on the deployed operator profile, and the run resolves the LIVE
- * profile (the same law the delivering-agent card follows), so a picker here
- * was a second place for the same decision. An optional steer rides along as
- * the human's directive: it is recorded on the timeline as an `@operator`
- * comment and becomes the run's instruction. Full autonomy — the state that
- * lets the run drive to Done — still announces itself (F20-9's mirror);
- * supervised is the quiet default. Server re-checks RBAC.
+ * Operator run control (R21-9): SHOWS the operator's current backend and runs
+ * it — no per-run backend/autonomy pickers. An optional steer rides along as
+ * the human's directive (recorded as an `@operator` comment). Scheduling is
+ * baked in: pick a delay and the same button schedules instead of running
+ * (R22: the fired run resolves the live deployed profile). Full autonomy
+ * still announces itself (F20-9's mirror); supervised is the quiet default.
  */
 function OperatorRunControl({
   busy,
@@ -486,16 +308,17 @@ function OperatorRunControl({
   defaultBackend,
   configuredAutonomy,
   backendAvailable,
+  schedules,
+  scheduleBusy,
   onRun,
+  onCancelSchedule,
 }: {
   busy: boolean;
   /** Task is closed (terminal stage) — controls render disabled (G9). */
   disabled?: boolean;
   /** F20-5 (R20-1): a non-structural reason the manual run is refused — an open
-   *  decision packet pauses coordination, so `runOperator` returns
-   *  `refused: "open-packet"` for a manual trigger and this button would be a
-   *  paid no-op. The reason is rendered copy (a `title` never opens on a
-   *  disabled control — the same P14 reason the closed state renders text). */
+   *  decision packet pauses coordination. Rendered copy (a `title` never opens
+   *  on a disabled control). */
   blockedReason?: string;
   /** The operator profile's configured backend — displayed, not picked; the
    *  run resolves the live profile (P11-76 fall-through). */
@@ -506,54 +329,46 @@ function OperatorRunControl({
   /** Which backends are configured (P11-41) — an unconfigured operator backend
    *  disables Run and says so, instead of failing fast after the click. */
   backendAvailable: { claude: boolean; codex: boolean };
-  onRun: (steer: string) => void;
+  /** Pending run-operator schedules, listed under the control. */
+  schedules: TaskSchedule[];
+  scheduleBusy: boolean;
+  onRun: (steer: string, delayMinutes: number | null) => void;
+  onCancelSchedule: (scheduleId: string) => void;
 }) {
   const [steer, setSteer] = useState("");
+  const [delay, setDelay] = useState<RunDelay>("now");
   const backendLabel = defaultBackend === "claude" ? "Claude" : "Codex";
   const backendMissing = !backendAvailable[defaultBackend];
   // F20-5: an open decision packet is refused server-side just like a closed
   // task is, so it joins `disabled` in switching the control off.
-  const off = busy || disabled || !!blockedReason || backendMissing;
+  const off = busy || !!disabled || !!blockedReason || backendMissing;
   const run = () => {
     if (off) return;
-    onRun(steer.trim());
+    onRun(steer.trim(), delayMinutes(delay));
     setSteer("");
+    setDelay("now");
   };
   return (
     <span className="op-run">
       {/* The backend this run resolves to — the profile's, stated not picked. */}
       <span className="op-backend">{backendLabel}</span>
-      <input
-        type="text"
-        className="op-steer"
-        aria-label="Steer this operator run (optional)"
-        placeholder="Optional: tell the operator what this run should focus on"
+      <PromptInput
         value={steer}
-        maxLength={2000}
-        onChange={(e) => setSteer(e.target.value)}
-        onKeyDown={(e) => {
-          // Single-line input: Enter submits (the search/chat convention; the
-          // multi-line composer needs ⌘/Ctrl+Enter only because Enter is a
-          // newline there). Guard IME composition — an Enter that merely
-          // confirms a multibyte candidate must not launch the billable run.
-          // `keyCode === 229` covers WebKit/Safari, which fires compositionend
-          // BEFORE the confirming keydown, so `isComposing` is already false.
-          if (
-            e.key === "Enter" &&
-            !e.nativeEvent.isComposing &&
-            e.nativeEvent.keyCode !== 229
-          ) {
-            run();
-          }
-        }}
+        ariaLabel="Steer this operator run (optional)"
+        placeholder="Optional: tell the operator what this run should focus on"
         disabled={off}
+        maxLength={2000}
+        onChange={setSteer}
+        onSubmit={run}
       />
-      {/* The operator coordinates ongoing work, so it stays runnable even while
-          a specialist run streams — only its own in-flight run disables it.
-          A closed (terminal-stage) task disables it too (G9).
-          Pass 30: routine starters are SECONDARY — the page's one solid
-          primary is the decision-stakes commit of the current state (Accept
-          completion / Confirm decision / Complete merge). */}
+      <DelayPicker
+        value={delay}
+        disabled={off}
+        label="When the operator run starts"
+        onChange={setDelay}
+      />
+      {/* Pass 30: routine starters are SECONDARY — the page's one solid
+          primary is the decision-stakes commit of the current state. */}
       <button
         type="button"
         className="btn sm"
@@ -563,11 +378,13 @@ function OperatorRunControl({
           blockedReason ??
           (disabled
             ? "Task is closed (terminal stage). Reopen it to run the operator"
-            : "Run the operator to coordinate this task")
+            : delay === "now"
+              ? "Run the operator to coordinate this task"
+              : "Schedule this operator run")
         }
       >
-        <Icon name="shield" />
-        {busy ? "Running…" : "Run operator"}
+        <Icon name={delay === "now" ? "shield" : "clock"} />
+        {busy ? "Running…" : delay === "now" ? "Run operator" : "Schedule"}
       </button>
       {backendMissing && (
         // P11-41's honesty without a picker: the profile's backend is not
@@ -589,23 +406,271 @@ function OperatorRunControl({
           itself.
         </span>
       )}
-      {/* P14 ruling: a `title` is unreachable on a DISABLED control (no hover
-          target for keyboard or touch), so the reason a control is dead has to
-          be rendered copy — the reviewer panel already says this for its own
-          closed state. F20-5's open-packet reason wins over the closed copy. */}
+      {/* P14 ruling: a `title` is unreachable on a DISABLED control, so the
+          reason a control is dead has to be rendered copy. F20-5's open-packet
+          reason wins over the closed copy. */}
       {blockedReason ? (
         <span className="sub">{blockedReason}</span>
       ) : disabled ? (
         // N20-17: the explicit Run-operator button is off on a closed task, but
-        // an @operator comment still starts a full operator run (the comment
-        // handler dispatches on the mention) — say so, or the two run paths read
-        // as silently inconsistent (one blocked, one open).
+        // an @operator comment still starts a full operator run — say so, or
+        // the two run paths read as silently inconsistent.
         <span className="sub">
           Task closed. Reopen it to run the operator. Mentioning{" "}
           <code>@operator</code> in a comment still runs it.
         </span>
       ) : null}
+      <PendingSchedules
+        schedules={schedules}
+        agentNameOf={() => undefined}
+        canCancel
+        busy={scheduleBusy}
+        onCancel={onCancelSchedule}
+      />
     </span>
+  );
+}
+
+/**
+ * The manual dispatch (owner directive 2026-08-29): pick ANY deployed agent
+ * from the @-style autocomplete, optionally tell it what to do, and run it —
+ * now or scheduled. Posture (delivering vs supporting) derives from the
+ * agent's own capability grants server-side; the run's report always tags the
+ * dispatching human and @operator, and its completion re-invokes the operator.
+ */
+function AgentRunControl({
+  agents,
+  activeProfileIds,
+  deliveringProfileId,
+  busy,
+  closed,
+  schedules,
+  scheduleBusy,
+  onRun,
+  onCancelSchedule,
+}: {
+  agents: DeployedSpecialistView[];
+  activeProfileIds: string[];
+  /** The current delivering engagement's profile id (null = none yet). */
+  deliveringProfileId: string | null;
+  busy: boolean;
+  /** G9/P14-WL-07: the task is at the terminal stage (or archived). */
+  closed: boolean;
+  /** Pending run-agent schedules, listed under the control. */
+  schedules: TaskSchedule[];
+  scheduleBusy: boolean;
+  onRun: (profileId: string, prompt: string, delayMinutes: number | null) => void;
+  onCancelSchedule: (scheduleId: string) => void;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState("");
+  const [delay, setDelay] = useState<RunDelay>("now");
+  const agentNameOf = (profileId: string) =>
+    agents.find((a) => a.id === profileId)?.name;
+
+  if (closed) {
+    // P14-WL-07: a closed task must not offer to start runs.
+    return <span className="sub">Task closed. Reopen it to run an agent.</span>;
+  }
+  if (agents.length === 0) {
+    return (
+      <span className="sub">
+        No agents deployed. Deploy one on the Agents page first.
+      </span>
+    );
+  }
+
+  const selected = agents.find((a) => a.id === selectedId) ?? null;
+  const selectedRunning =
+    !!selectedId && delay === "now" && activeProfileIds.includes(selectedId);
+  const off = busy || !selected || selectedRunning;
+  const run = () => {
+    if (off || !selected) return;
+    onRun(selected.id, prompt.trim(), delayMinutes(delay));
+    setPrompt("");
+    setDelay("now");
+  };
+  // What the dispatch will make of the pick — said BEFORE the run is spent.
+  const posture = !selected
+    ? null
+    : selected.capabilities?.delivery === false
+      ? selected.capabilities.verdict
+        ? "Runs as a reviewer — its verdict gates acceptance."
+        : "Runs as a supporting agent (no repo write)."
+      : deliveringProfileId === null || deliveringProfileId === selected.id
+        ? "Runs as the delivering agent — it owns the branch and PR."
+        : "Runs as a supporting agent — another agent owns delivery.";
+
+  return (
+    <span className="op-run agent-run">
+      <AgentSelect
+        agents={agents}
+        activeProfileIds={activeProfileIds}
+        selectedId={selectedId}
+        disabled={busy}
+        onSelect={setSelectedId}
+      />
+      <PromptInput
+        value={prompt}
+        ariaLabel="Tell the agent what this run should do (optional)"
+        placeholder="Optional: tell it what this run should do"
+        disabled={busy}
+        maxLength={4000}
+        onChange={setPrompt}
+        onSubmit={run}
+      />
+      <DelayPicker
+        value={delay}
+        disabled={busy}
+        label="When the agent run starts"
+        onChange={setDelay}
+      />
+      <button
+        type="button"
+        className="btn sm"
+        disabled={off}
+        onClick={run}
+        title={
+          !selected
+            ? "Choose an agent first"
+            : selectedRunning
+              ? "This agent already has a run in progress on this task"
+              : delay === "now"
+                ? `Run ${selected.name} on this task`
+                : `Schedule a ${selected.name} run`
+        }
+      >
+        <Icon name={delay === "now" ? "bolt" : "clock"} />
+        {delay === "now" ? "Run" : "Schedule"}
+      </button>
+      {posture && <span className="sub">{posture}</span>}
+      {selected?.modelUnavailable && (
+        // F20-4: availability warning BEFORE a run is spent. Informs, does not
+        // block (the mark may be stale; the human decides).
+        <p className="deny-note">
+          <Icon name="alert" />
+          <span>
+            <strong>
+              {selected.backend === "claude" ? "Claude" : "Codex"} reported this
+              model unavailable.
+            </strong>{" "}
+            Switch the profile&rsquo;s backend, or expect the run to fail.
+            Provider said: {selected.modelUnavailable}
+          </span>
+        </p>
+      )}
+      {/* The dispatch-completion contract, disclosed where the run starts. */}
+      <span className="sub xs dim">
+        The run reports back tagging you and the operator, which then continues
+        coordination.
+      </span>
+      <PendingSchedules
+        schedules={schedules}
+        agentNameOf={agentNameOf}
+        canCancel
+        busy={scheduleBusy}
+        onCancel={onCancelSchedule}
+      />
+    </span>
+  );
+}
+
+/**
+ * The engagement LEDGER — who is attached to this task and in what capacity.
+ * Read-only (runs start from the run-agent control; the operator manages its
+ * own dispatches) except for releasing a supporting engagement, which is the
+ * recovery for a stale or wrongly-summoned reviewer whose verdict would
+ * otherwise gate acceptance forever.
+ */
+function EngagedAgents({
+  task,
+  deployedById,
+  activeProfileIds,
+  canRunAgents,
+  releaseBusy,
+  onRelease,
+}: {
+  task: TaskSummary;
+  deployedById: Map<string, DeployedSpecialistView>;
+  activeProfileIds: string[];
+  canRunAgents: boolean;
+  releaseBusy: boolean;
+  onRelease: (profileId: string) => void;
+}) {
+  const sp = task.specialist;
+  const rows = [
+    ...(sp ? [{ agent: sp, delivers: true }] : []),
+    ...task.reviewers.map((r) => ({ agent: r, delivers: false })),
+  ];
+  if (rows.length === 0) {
+    return (
+      <span className="sub">
+        None yet. The operator picks who runs at each stage
+        {canRunAgents ? ", or run one yourself above" : ""}.
+      </span>
+    );
+  }
+  return (
+    <>
+      {rows.map(({ agent, delivers }) => {
+        const deployed = deployedById.get(agent.profileId);
+        const ghost = !deployed;
+        const running = activeProfileIds.includes(agent.profileId);
+        // F28-P2: `modelUnavailable` describes the LIVE deployment's model.
+        // When a retry PIN (F27-B1) runs this engagement on the OTHER backend,
+        // the flag describes a model this run won't use — suppress it.
+        const unavailable =
+          deployed && deployed.backend === agent.backend
+            ? deployed.modelUnavailable
+            : undefined;
+        return (
+          <div className="rev-agent" key={agent.profileId}>
+            <AgentGlyph backend={agent.backend} />
+            <span>
+              <div className="nm">{deployed ? deployed.name : GHOST_NAME}</div>
+              <div className="sub">
+                {agent.role} · {agent.backend === "claude" ? "Claude" : "Codex"}
+                {delivers ? " · delivers" : ""}
+                {/* UC-13/F21-6: "gates acceptance" is a claim about verdict
+                    authority — mark it only where it is true. */}
+                {!delivers && deployed?.capabilities?.verdict
+                  ? " · gates acceptance"
+                  : ""}
+                {running ? " · running…" : ""}
+              </div>
+              {/* UX19-12: the row that holds the engagement names the state. */}
+              {ghost && <div className="sub">{GHOST_NOTE}</div>}
+              {unavailable && (
+                <p className="deny-note">
+                  <Icon name="alert" />
+                  <span>
+                    <strong>
+                      {agent.backend === "claude" ? "Claude" : "Codex"} reported
+                      this model unavailable.
+                    </strong>{" "}
+                    Provider said: {unavailable}
+                  </span>
+                </p>
+              )}
+            </span>
+            {canRunAgents && !delivers && (
+              <span className="right">
+                <button
+                  type="button"
+                  className="rev-x"
+                  disabled={releaseBusy}
+                  aria-label={`Release ${agent.role} agent`}
+                  title="Release this agent from the task"
+                  onClick={() => onRelease(agent.profileId)}
+                >
+                  <Icon name="x" />
+                </button>
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -620,121 +685,75 @@ export function ExecutionProfile({
   operatorAutonomy,
   backendAvailable,
   canRunAgents,
-  deliveringActive,
-  activeReviewerIds,
+  activeAgentProfileIds,
   runBusy,
-  onAssignSpecialist,
-  onRunSpecialist,
-  reviewerBusy,
-  onAssignReviewer,
-  onRunReviewer,
-  onRemoveReviewer,
+  onRunAgent,
+  releaseBusy,
+  onReleaseAgent,
   operatorBusy,
   onRunOperator,
   operatorRunActive,
+  schedules,
+  scheduleBusy,
+  onCancelSchedule,
 }: {
   task: TaskSummary;
   meId: string;
   myRole: string | null;
   busy: boolean;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
-  /** Deployed specialists the assign menu offers (loader). */
+  /** Deployed specialists the run-agent selector offers (loader). */
   deployedSpecialists: DeployedSpecialistView[];
-  /** The operator's configured backend — the run picker's default (P11-76). */
+  /** The operator's configured backend — displayed, not picked (P11-76). */
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
   operatorAutonomy: "supervised" | "full";
   /** Which backends are configured — unavailable ones are disabled (P11-41). */
   backendAvailable: { claude: boolean; codex: boolean };
-  /** admin|maintainer — gates the assign/run affordances (server re-checks). */
+  /** admin|maintainer — gates the run/schedule affordances (server re-checks). */
   canRunAgents: boolean;
-  /** A DELIVERING run is active (queued/running) — disables the delivering Run
-   *  button (server single-flights delivering). F10-04. */
-  deliveringActive: boolean;
-  /** Profile ids of reviewing engagements with an active run — disables only
-   *  that reviewer's Run button; supporting runs are read-only and concurrent. */
-  activeReviewerIds: string[];
+  /** Profile ids of engagements with a live (queued/running) run. */
+  activeAgentProfileIds: string[];
   /** A LIVE operator run (queued/running) exists — the only state honest
    * enough for the "operator active" pill (F7-UI1: attachment ≠ activity). */
   operatorRunActive: boolean;
-  /** The assign/run fetcher is in flight. */
+  /** The run-agent fetcher is in flight. */
   runBusy: boolean;
-  onAssignSpecialist: (profileId: string) => void;
-  onRunSpecialist: () => void;
-  /** The reviewer assign/run/remove fetcher is in flight. */
-  reviewerBusy: boolean;
-  onAssignReviewer: (profileId: string) => void;
-  onRunReviewer: (profileId: string) => void;
-  onRemoveReviewer: (profileId: string) => void;
+  onRunAgent: (
+    profileId: string,
+    prompt: string,
+    delayMinutes: number | null,
+  ) => void;
+  /** The release-agent fetcher is in flight. */
+  releaseBusy: boolean;
+  onReleaseAgent: (profileId: string) => void;
   /** The operator-run fetcher is in flight. */
   operatorBusy: boolean;
-  /** Run the operator agent (profile-configured backend + autonomy); the
-   *  optional steer becomes the run's human directive. */
-  onRunOperator: (steer: string) => void;
+  /** Run (or schedule) the operator; the optional steer becomes the run's
+   *  human directive. */
+  onRunOperator: (steer: string, delayMinutes: number | null) => void;
+  /** PENDING scheduled runs on this task (both kinds; split per control). */
+  schedules: TaskSchedule[];
+  /** The cancel-schedule fetcher is in flight. */
+  scheduleBusy: boolean;
+  onCancelSchedule: (scheduleId: string) => void;
 }) {
-  // Deployed specialists not already engaged as reviewers — what "Add reviewer"
-  // offers. F10-13: also exclude the current DELIVERING profile. Engaging it as
-  // a reviewer is a server no-op that returned a misleading "is already a
-  // reviewer" toast; the deliverer is already engaged (as the deliverer).
-  const availableReviewers = deployedSpecialists.filter(
-    (s) =>
-      !task.reviewers.some((r) => r.profileId === s.id) &&
-      s.id !== task.specialist?.profileId,
-  );
-  // Resolve an agent's display NAME by profile id. The AgentRef stored on the
-  // task carries only profileId/backend/role (its `name` is the backend label),
-  // so the real name comes from the deployed profile.
-  //
-  // UX19-12: when the profile is NOT deployed any more this fell back to the
-  // engagement's `role`, which printed the row as "Implementation" over
-  // "Implementation · Codex" — undisclosed, not merely terse. The engagement had
-  // outlived its profile (deleted, or deployed on another project), and the run
-  // its still-live "Run" button would start takes the fully-withheld posture
-  // (R15-7 / ruling 26): it streams and produces no branch, PR, comment or
-  // verdict. The Agents live table already names this exact condition rather
-  // than printing the raw id (`agents-page.tsx:924-927`); the surface that
-  // OFFERS the action was the one still hiding it.
   const deployedById = new Map(deployedSpecialists.map((s) => [s.id, s]));
-  const agentNameOf = (profileId: string) => deployedById.get(profileId)?.name;
-  // UC-13: the cell was headed "Reviewing agents" whatever was engaged, so a
-  // task whose only engagements are SUPPORTING agents (no
-  // `report-validation-verdict` grant — they can read, validate and comment but
-  // their opinion gates nothing) read as if it had reviewers holding the
-  // acceptance gate. Label by what the engagements actually are, and only
-  // downgrade on positive evidence: an engaged profile whose capabilities are
-  // unknown here (no longer deployed, older loader payload) keeps the
-  // review framing rather than being silently demoted. UX19-4: the cell's
-  // controls take their words from the same call, so heading and verbs agree.
-  const vocab = engagementVocabulary(task.reviewers, deployedSpecialists);
-  const sp = task.specialist;
-  const spGhost = !!sp && !deployedById.has(sp.profileId);
-  // Owner ruling 2026-08-21: the delivering agent's model was shown unavailable
-  // on the account by a real run — surface it HERE, before a run is spent.
-  // F28-P2: `modelUnavailable` is for the LIVE deployment's model. When a retry
-  // PIN (F27-B1) runs the engagement on the OTHER backend, `sp.backend` (which
-  // is pin-aware) diverges from the deployment, so that flag describes a model
-  // this run won't use — suppress it rather than warn about the wrong model.
-  const spDep = sp ? deployedById.get(sp.profileId) : undefined;
-  const spUnavailable =
-    sp && spDep && spDep.backend === sp.backend
-      ? spDep.modelUnavailable
-      : undefined;
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
   // G9: a task at the terminal (Done) stage is closed — its runtime action
-  // buttons (Run operator / Run specialist / Run reviewer) are disabled so a
-  // closed task doesn't advertise live controls. F15-11: an ARCHIVED task is
-  // out of the flow too — it must not advertise them either.
+  // controls are disabled so a closed task doesn't advertise live controls.
+  // F15-11: an ARCHIVED task is out of the flow too.
   const closed =
     task.displayReadiness === "accepted" ||
     task.displayReadiness === "merged" ||
     task.archived;
   // F20-5 (R20-1): the server refuses a MANUAL operator run while a decision
   // packet is open — coordination is paused by the packet, so a run would burn
-  // several turns and take no action. Derived from the same `task.packet` the
-  // DecisionPacket card renders (one fact, no prop threaded through the
-  // section). A closed task keeps its own "reopen it" copy.
+  // several turns and take no action.
   const packetOpen = !!task.packet;
+  const operatorSchedules = schedules.filter((s) => s.action !== "run-agent");
+  const agentSchedules = schedules.filter((s) => s.action === "run-agent");
   return (
     <div className="panel">
       <div className="panel-head">
@@ -766,11 +785,14 @@ export function ExecutionProfile({
                 <Icon name="shield" />
               </span>
               <span>
-                {/* The cell's kicker already says OPERATOR — repeating the
-                    same word as the value was a label:label dump. The value
-                    slot promotes what the sub-line carried. */}
+                {/* The cell's kicker already says OPERATOR — the value slot
+                    promotes what the sub-line carried. */}
                 <div className="nm">Coordinator</div>
                 {task.operator && <div className="sub">{task.operator.sinceLabel}</div>}
+                <div className="sub xs dim">
+                  Decides which agent runs at each stage, from the stage the
+                  task is at and the one it came from.
+                </div>
               </span>
             </div>
             {canRunAgents && (
@@ -786,175 +808,48 @@ export function ExecutionProfile({
                 defaultBackend={operatorBackend}
                 configuredAutonomy={operatorAutonomy}
                 backendAvailable={backendAvailable}
+                schedules={operatorSchedules}
+                scheduleBusy={scheduleBusy}
                 onRun={onRunOperator}
+                onCancelSchedule={onCancelSchedule}
               />
             )}
           </div>
         </div>
         <div className="profile-cell">
-          <div className="lbl">Delivering agent</div>
-          <div className="val">
-            {sp ? (
-              <>
-                <AgentGlyph backend={sp.backend} />
-                <span>
-                  <div className="nm">
-                    {spGhost ? GHOST_NAME : agentNameOf(sp.profileId)}
-                  </div>
-                  <div className="sub">
-                    {sp.role} · {sp.backend === "claude" ? "Claude" : "Codex"}
-                  </div>
-                  {/* UX19-12: the row that offers the action names the state. */}
-                  {spGhost && <div className="sub">{GHOST_DELIVERING_NOTE}</div>}
-                  {spUnavailable && (
-                    // Availability warning BEFORE a run is spent: a real run
-                    // showed this model is not runnable on the account. Informs,
-                    // does not block (the mark may be stale; the human decides).
-                    <p className="deny-note">
-                      <Icon name="alert" />
-                      <span>
-                        <strong>
-                          {sp.backend === "claude" ? "Claude" : "Codex"} reported
-                          this model unavailable.
-                        </strong>{" "}
-                        Switch this profile's backend, or expect the run to fail.
-                        Provider said: {spUnavailable}
-                      </span>
-                    </p>
-                  )}
-                </span>
-                {canRunAgents && (
-                  <span className="right">
-                    <button
-                      type="button"
-                      className="btn sm"
-                      disabled={runBusy || deliveringActive || closed || spGhost}
-                      onClick={onRunSpecialist}
-                      title={
-                        spGhost
-                          ? GHOST_DELIVERING_NOTE
-                          : closed
-                            ? "Task is closed (terminal stage). No runs needed"
-                            : deliveringActive
-                              ? "A delivering run is already streaming for this task"
-                              : "Start an agent run for the delivering agent"
-                      }
-                    >
-                      <Icon name="bolt" />
-                      {deliveringActive ? "Running…" : "Run"}
-                    </button>
-                  </span>
-                )}
-              </>
-            ) : canRunAgents ? (
-              <div className="rev-row">
-                <span className="sub">
-                  None yet. Assign a deployed agent to deliver it
-                </span>
-                <SpecialistControl
-                  projectSlug={task.projectSlug}
-                  specialists={deployedSpecialists}
-                  busy={runBusy}
-                  closed={closed}
-                  onAssign={onAssignSpecialist}
-                />
-              </div>
+          <div className="lbl">Run an agent</div>
+          <div className="val op-val">
+            {canRunAgents ? (
+              <AgentRunControl
+                agents={deployedSpecialists}
+                activeProfileIds={activeAgentProfileIds}
+                deliveringProfileId={task.specialist?.profileId ?? null}
+                busy={runBusy}
+                closed={closed}
+                schedules={agentSchedules}
+                scheduleBusy={scheduleBusy}
+                onRun={onRunAgent}
+                onCancelSchedule={onCancelSchedule}
+              />
             ) : (
               <span className="sub">
-                None yet. The operator assigns one when execution starts
+                The operator dispatches agents as the task moves. Running one
+                by hand needs the run-agents tier.
               </span>
             )}
           </div>
         </div>
         <div className="profile-cell">
-          <div className="lbl">{vocab.heading}</div>
-          {/* Each reviewer renders as a row identical to the delivering agent
-              above (glyph · name / role·backend · Run), with a release (×). */}
+          <div className="lbl">Engaged agents</div>
           <div className="val revs">
-            {task.reviewers.length ? (
-              task.reviewers.map((c) => {
-                const running = activeReviewerIds.includes(c.profileId);
-                const ghost = !deployedById.has(c.profileId);
-                const cUnavailable = deployedById.get(c.profileId)?.modelUnavailable;
-                return (
-                  <div className="rev-agent" key={c.profileId}>
-                    <AgentGlyph backend={c.backend} />
-                    <span>
-                      <div className="nm">
-                        {ghost ? GHOST_NAME : agentNameOf(c.profileId)}
-                      </div>
-                      <div className="sub">
-                        {c.role} · {c.backend === "claude" ? "Claude" : "Codex"}
-                      </div>
-                      {/* UX19-12: same disclosure as the delivering row — and
-                          the release (×) beside it stays live, because letting
-                          go of a dead engagement is the recovery. */}
-                      {ghost && <div className="sub">{GHOST_REVIEWING_NOTE}</div>}
-                      {cUnavailable && (
-                        // Same pre-spend availability warning as the delivering
-                        // card: this reviewer's Run would fail on the recorded
-                        // provider refusal.
-                        <p className="deny-note">
-                          <Icon name="alert" />
-                          <span>
-                            <strong>
-                              {c.backend === "claude" ? "Claude" : "Codex"}{" "}
-                              reported this model unavailable.
-                            </strong>{" "}
-                            Provider said: {cUnavailable}
-                          </span>
-                        </p>
-                      )}
-                    </span>
-                    {canRunAgents && (
-                      <span className="right">
-                        <button
-                          type="button"
-                          className="btn sm"
-                          disabled={reviewerBusy || running || closed || ghost}
-                          onClick={() => onRunReviewer(c.profileId)}
-                          title={
-                            ghost
-                              ? GHOST_REVIEWING_NOTE
-                              : closed
-                                ? "Task is closed (terminal stage). No runs needed"
-                                : running
-                                  ? "A run for this reviewer is already streaming"
-                                  : "Start a run for this reviewer"
-                          }
-                        >
-                          <Icon name="bolt" />
-                          {running ? "Running…" : "Run"}
-                        </button>
-                        <button
-                          type="button"
-                          className="rev-x"
-                          disabled={reviewerBusy}
-                          aria-label={vocab.releaseOf(c.role)}
-                          title={vocab.release}
-                          onClick={() => onRemoveReviewer(c.profileId)}
-                        >
-                          <Icon name="x" />
-                        </button>
-                      </span>
-                    )}
-                  </div>
-                );
-              })
-            ) : (
-              <span className="sub">None engaged</span>
-            )}
-            {canRunAgents && (
-              <ReviewerControl
-                projectSlug={task.projectSlug}
-                specialists={availableReviewers}
-                hasAnyDeployed={deployedSpecialists.length > 0}
-                busy={reviewerBusy}
-                closed={closed}
-                vocab={vocab}
-                onAssign={onAssignReviewer}
-              />
-            )}
+            <EngagedAgents
+              task={task}
+              deployedById={deployedById}
+              activeProfileIds={activeAgentProfileIds}
+              canRunAgents={canRunAgents}
+              releaseBusy={releaseBusy}
+              onRelease={onReleaseAgent}
+            />
           </div>
         </div>
         <div className="profile-cell">
@@ -970,16 +865,8 @@ export function ExecutionProfile({
                   </span>
                 </span>
               )}
-              {/* F19-11: said "open to any project member" beside a Permissions
-               *  row reading "contributor+ to own" — a viewer read one line as
-               *  an invitation and the other as a refusal. Name the real tier. */}
+              {/* F19-11: name the real tier — `own-task` is contributor+. */}
               {!o && (
-                // F19-11: this read "open to any project member", which the
-                // RBAC matrix contradicts on the very next line of the same
-                // row — `own-task` is admin/maintainer/contributor (rbac.ts:65),
-                // and a viewer IS a project member. The sibling copy inside
-                // OwnerControl had it right, so the two disagreed in one cell.
-                // Ownership eligibility is stated here, once, for every role.
                 <span className="sub">
                   Unowned. Any contributor or above can take it
                 </span>

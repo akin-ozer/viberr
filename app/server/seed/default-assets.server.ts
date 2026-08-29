@@ -172,6 +172,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "cc78f1ebfe2088ba67176ce7d05a129fdc1606cfc35a7b4ad508d7447c77d611",
     "f2e7ad4f9164b6cccf22c43b6705b64c61136180866908b29ff2881687a40d71",
     "ffd61e7721ce8550571d22692bab521b4c60bafa1c3d81b536ba0ce1c58ee07c",
+    // dynamic-dispatch outgoing (2026-08-29): the assign/summon capability
+    // pair, replaced by `dispatch-agents`.
+    "d3c186ee40962eff069c577e026843e4ce3c97fed269b99384e5bdad2fd9e108",
   ],
   [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
     "2350a2f50e425868056d9866d885b70078b183e9934b925f1469ea0e7cc5f989",
@@ -184,6 +187,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "e64e110e43b851b7e8809973a7f060d95e35b4e723648749f1b57bf4528ea07a",
     // pass-21 outgoing (humanizer sweep).
     "0ad7af1782e6f525f11daa8b9e8533a555f34baeffc918ca91b51d0aadfcae4f",
+    // dynamic-dispatch outgoing (2026-08-29): the engage/prompt/run tool trio,
+    // replaced by the single `run_agent`.
+    "877c65d247e8c1be0852191469bdcb78910e2897baa6130e11b74a3e4c6f3e93",
   ],
   [path.join("skills", "developer-expertise", "SKILL.md")]: [
     "2cd21e2f0b11a3d35ca0188bf1d42af66f4149b5d7ad3bbb2162cdeb712d91fa",

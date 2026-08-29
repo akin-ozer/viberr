@@ -51,13 +51,11 @@ import {
   gate,
   operatorAcceptCompletion,
   operatorDeliverForReview,
-  operatorEngageAgent,
+  operatorDispatchAgent,
   operatorOpenPacket,
   operatorPostComment,
   operatorSetGoal,
   operatorFlagContextConflict,
-  operatorPromptAgentGeneric,
-  operatorRunAgent,
   operatorSnapshot,
   operatorTransitionStage,
   operatorResolvePacket,
@@ -1416,12 +1414,11 @@ const OPERATOR_PLAN_TOOLS = [
   // Draft the task GOAL when it is still the unspecified triage placeholder
   // (`text` = the drafted goal). Fills only an unspecified goal.
   "set_goal",
-  // Generic engagement actions (generic-agents phase 3): `delivers` selects
-  // the engagement shape (true = the delivering builder; false = supporting,
-  // e.g. verdict-capable review).
-  "engage_agent",
+  // Dynamic-dispatch rework (2026-08-29): ONE selection+run action — the plan
+  // mirror of the Claude toolkit's `run_agent` (engage-if-needed with
+  // capability-derived posture, optional `prompt` as the directive comment,
+  // optional `delivers: true` for an explicit delivery hand-off).
   "run_agent",
-  "prompt_agent",
   "transition_stage",
   // R15-2: delivery (push + review PR) is the operator's decision — the plan
   // mirror of the Claude `deliver_for_review` tool. `reason` carries the
@@ -1454,11 +1451,7 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   set_goal: ["append-typed-events"],
   open_packet: ["generate-packets"],
   resolve_packet: ["generate-packets"],
-  // `delivers` selects the engagement shape; either grant admits the tool and
-  // the per-call gate still governs the shape (mirrors the toolkit).
-  engage_agent: ["assign-primary-specialist", "summon-reviewers"],
-  run_agent: ["assign-primary-specialist", "summon-reviewers"],
-  prompt_agent: ["assign-primary-specialist", "summon-reviewers"],
+  run_agent: ["dispatch-agents"],
   transition_stage: ["stage-transitions"],
   // R15-2: absent-means-granted polarity — resolved via deliverGate below, not
   // the plain gate (the capability postdates live deployments).
@@ -1530,11 +1523,11 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             type: "string",
             enum: tools,
           },
-          profileId: { type: ["string", "null"], description: "For engage_/run_/prompt_ agent actions, else null." },
-          delivers: { type: ["boolean", "null"], description: "engage_agent/prompt_agent: true = the delivering builder (owns branch/PR, one per task); false = supporting (review). Else null." },
+          profileId: { type: ["string", "null"], description: "For run_agent: the deployed agent profile to select and run (pick by desc + capabilities from the snapshot); else null." },
+          delivers: { type: ["boolean", "null"], description: "run_agent: true = hand delivery to this profile (owns branch/PR, one per task); false = run as supporting (review). Null derives it from the profile's grants and the task's current deliverer." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
-          text: { type: ["string", "null"], description: "For post_comment and prompt_/open_packet: the comment text, agent prompt, or packet title; for flag_context_conflict: the one-or-two-sentence detail of what each side says; else null." },
+          text: { type: ["string", "null"], description: "For post_comment and open_packet: the comment text or packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; else null." },
           reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
           kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees; else null." },
           repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative; else null." },
@@ -2089,40 +2082,23 @@ async function executeCodexPlan(
           } else skippedMalformed(a.tool, "the packet title");
           break;
         }
-        case "engage_agent":
-          if (a.profileId && a.delivers !== null) {
-            const engage: Parameters<typeof operatorEngageAgent>[2] = {
-              ...base,
-              profileId: a.profileId,
-              delivers: a.delivers,
-            };
-            if (a.reason) engage.reason = a.reason;
-            record(a.tool, await operatorEngageAgent(db, ctx, engage, authority));
-          } else skippedMalformed(a.tool, "the agent to engage or whether it delivers");
-          break;
-        case "run_agent": {
-          // An omitted profileId/delivers is NOT a default: `operatorRunAgent`
-          // derives the delivering intent from the task when the plan is silent.
-          const run: Parameters<typeof operatorRunAgent>[2] = { ...base };
-          if (a.profileId) run.profileId = a.profileId;
-          if (a.delivers != null) run.delivers = a.delivers;
-          record(a.tool, await operatorRunAgent(db, ctx, run, authority));
-          break;
-        }
-        case "prompt_agent":
+        case "run_agent":
+          // The plan mirror of the toolkit's one dispatch tool: select + run,
+          // optional `text` as the directive, optional `delivers` hand-off.
           if (a.profileId) {
-            const prompt: Parameters<typeof operatorPromptAgentGeneric>[2] = {
+            const dispatch: Parameters<typeof operatorDispatchAgent>[2] = {
               ...base,
               profileId: a.profileId,
             };
-            if (a.text) prompt.directive = a.text;
-            if (a.delivers != null) prompt.delivers = a.delivers;
-            const prompted = await operatorPromptAgentGeneric(db, ctx, prompt, authority);
-            // R20-9: only a prompt that actually LANDED is a consultation — a
+            if (a.text) dispatch.prompt = a.text;
+            if (a.delivers != null) dispatch.delivers = a.delivers;
+            if (a.reason) dispatch.reason = a.reason;
+            const dispatched = await operatorDispatchAgent(db, ctx, dispatch, authority);
+            // R20-9: only a dispatch that actually LANDED is a consultation — a
             // denied or no-op one consulted nobody (noteConsultedProfile).
-            noteConsultedProfile(consultedProfileIds, a.profileId, prompted.outcome);
-            record(a.tool, prompted);
-          } else skippedMalformed(a.tool, "the agent to prompt");
+            noteConsultedProfile(consultedProfileIds, a.profileId, dispatched.outcome);
+            record(a.tool, dispatched);
+          } else skippedMalformed(a.tool, "the agent to run");
           break;
         case "transition_stage":
           if (a.toStageId) {
@@ -3178,7 +3154,7 @@ function operatorTurnDoctrine(
   if (trigger === "agent-reply") {
     return (
       "React to the report above. When the deliverer reports completed, committed work that is plausibly reviewable, deliver it with `deliver_for_review` (push + review PR — YOUR decision, see the stage rules) and move the task toward review; accept a clean review through `accept_completion`. " +
-      "If review requests changes, move back to the work stage and `prompt_agent` the delivering profile with the concrete findings. " +
+      "If review requests changes, move back to the work stage and `run_agent` the delivering profile with the concrete findings as its prompt. " +
       "Re-prompt the same profile only when its work is incomplete, never merely to repeat the report."
     );
   }
@@ -3252,8 +3228,8 @@ function operatorTurnDoctrine(
     return (
       `The review pull request ${prNo} was just opened for this task's delivered work — ` +
       "delivery is DONE, do not deliver again. Take the ONE next coordination step from the " +
-      "live snapshot: if no reviewer is engaged and the stage calls for review, engage a " +
-      "verdict-capable profile with `prompt_agent` (`delivers: false`); if a review has " +
+      "live snapshot: if no reviewer is engaged and the stage calls for review, `run_agent` a " +
+      "verdict-capable profile with a review prompt (`delivers: false`); if a review has " +
       "already passed, `accept_completion` per policy; if a stage move is needed to reach " +
       "review, `transition_stage`. If the reviewer's run is already IN FLIGHT (`liveRuns`), " +
       "do nothing and stop — you are re-invoked when it reports."
@@ -3291,13 +3267,17 @@ function operatorTurnDoctrine(
     moveContext +
     scope +
     triageQualityGate(snapshot) +
-    `You are at stage "${snapshot.stageName}". Do the ONE thing this stage calls for, from the live snapshot:\n` +
+    `You are at stage "${snapshot.stageName}"` +
+    (snapshot.previousStage
+      ? `, arrived from "${snapshot.previousStage.name}"`
+      : "") +
+    ". Choose which agent to run from what THIS stage needs and where the task just came from — arriving back from a later stage (review, QA) means rework for the profile that built it; arriving forward means the next kind of work (build → review). Do the ONE thing this stage calls for, from the live snapshot:\n" +
     "- Pre-work stage with an `auto` outbound boundary (e.g. Triage → Ready, Ready → In Progress): advance it with `transition_stage`. " +
     "Every transition re-invokes you at the new stage, so advancing one boundary and stopping is fine — you (or a queued follow-up) will pick the task up at the next stage and continue.\n" +
-    "- Work stage with no deliverer engaged yet: choose the delivering profile by description and capabilities and hand off with `prompt_agent` (`delivers: true`); supporting review uses `delivers: false`.\n" +
+    "- Work stage with no deliverer engaged yet: choose the delivering profile by description and capabilities and hand off with `run_agent` and a concrete prompt (its repo-write grant makes it the deliverer); a supporting review run passes `delivers: false`.\n" +
     "- Work stage where the deliverer's run is IN FLIGHT — `liveRuns` in the snapshot is the ONLY proof of that (`waiting` is a display flag and a directive comment on the timeline is not a running agent): do nothing and stop — you are re-invoked when it reports. Never duplicate a run that is already working.\n" +
     "- Work stage where the deliverer already reported and its report is still the LATEST word (no newer human steer, rework decision, or request-changes after it): do nothing and stop.\n" +
-    "- Work stage where a human steer, rework decision, or request-changes arrived AFTER the deliverer's last report (e.g. the task was sent back from review): the deliverer owes NEW work — `prompt_agent` the delivering profile with that steer, quoting it.\n" +
+    "- Work stage where a human steer, rework decision, or request-changes arrived AFTER the deliverer's last report (e.g. the task was sent back from review): the deliverer owes NEW work — `run_agent` the delivering profile with that steer as its prompt, quoting it.\n" +
     "- DELIVERY (push the branch + open the review PR) is YOUR decision, made with `deliver_for_review` — it is no longer a stage side-effect, and a stage named \"Review\" delivers nothing by itself. Deliver when the deliverer's work is committed and plausible for review. Weigh the REMAINING stages: a later stage (e.g. QA) need not gate delivery for this task — offer or perform early delivery when so. When unsure whether the branch should be pushed, `open_decision_packet` and ask. The tool result is honest: a `push_conflict` means the remote branch diverged (a history problem, never a credential problem) and NO PR was opened — open a decision packet naming the branch (resolve/force-push deliberately, or archive) instead of retrying blindly.\n" +
     "- A directive you sent earlier that never became a run is an UNDELIVERED hand-off — the timeline says so (\"did NOT start a run\"), or `liveRuns` is empty with no report after your prompt. Once the blocker is gone (e.g. the stage moved to one the profile works), re-send the prompt yourself; do not wait for a report that can never come.\n" +
     "Take exactly one such action and stop. NEVER end your turn leaving the task at a pre-work or `auto` stage with nothing done and no packet: either advance the boundary, hand off to a specialist, or `open_decision_packet` when a human must scope or unblock it. A pre-work stage that needs no human input must never be left waiting on a human."

@@ -476,6 +476,9 @@ export async function createTask(
     key,
     title,
     stage: stageId,
+    // No transition has happened yet — the previous stage is a fact only a
+    // real move writes.
+    previousStageId: null,
     readiness: "input_required",
     waiting: "human",
     ownerUserId: null,
@@ -1511,71 +1514,35 @@ export async function commentToAgent(
     resumeOutcomeKey = confinement.outcomeKey;
     triggered = "resumed";
   } else {
-    // 4b. No prior session for THIS agent — start a FRESH run, routed by how
-    //     the agent is engaged so a reviewer mention never clobbers the
-    //     primary specialist (the bug where `@reviewer` ran as / answered as
-    //     the dev):
-    //       · the primary — or the FIRST agent on a task with no primary yet —
-    //         is assigned as the primary specialist and run as primary;
-    //       · anyone else is engaged as a reviewer (idempotent) and run as a
-    //         reviewer on its own thread.
-    const hasPrimary =
-      !!existing && !!deliveringEngagement(existing.parsed.frontmatter);
-    if (target.isPrimary || !hasPrimary) {
-      const { assignSpecialist, startAgentRun } = await import(
-        "./specialist-run.server"
-      );
-      if (!hasPrimary) {
-        await assignSpecialist(
-          db,
-          { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: target.profileId },
-          actor,
-          ctx,
-        );
-      }
-      const started = await startAgentRun(
-        db,
-        {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          // P14-RT-02: a FRESH mention run gets the human's words and name, the
-          // same way the resumed path gets `specialistReplyDirective`. Without
-          // them the run received only the generic analyze prompt: live, the
-          // agent read the TASK GOAL as its instruction, called it a
-          // prompt-injection attempt, and answered nobody.
-          directive: input.text.trim(),
-          directiveFrom: commenterName,
-        },
-        actor,
-        ctx,
-      );
-      runId = started.runId;
-    } else {
-      const { assignReviewer, startAgentRun } = await import(
-        "./specialist-run.server"
-      );
-      // Engage as a reviewer if not already (idempotent), then run as reviewer.
-      await assignReviewer(
-        db,
-        { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: target.profileId },
-        actor,
-        ctx,
-      );
-      const started = await startAgentRun(
-        db,
-        {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          profileId: target.profileId,
-          // P14-RT-02: same as the primary branch above.
-          directive: input.text.trim(),
-          directiveFrom: commenterName,
-        },
-        actor,
-        ctx,
-      );
-      runId = started.runId;
-    }
+    // 4b. No prior session for THIS agent — start a FRESH run. The
+    //     dynamic-dispatch auto-engage (startAgentRun) routes the posture: an
+    //     already-engaged agent keeps its shape, and an unengaged one becomes
+    //     the deliverer only when the task has none AND the profile holds
+    //     repo-write — otherwise it engages as supporting on its own thread
+    //     (so a reviewer mention never clobbers the delivering specialist).
+    const { startAgentRun } = await import("./specialist-run.server");
+    const started = await startAgentRun(
+      db,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        profileId: target.profileId,
+        // P14-RT-02: a FRESH mention run gets the human's words and name, the
+        // same way the resumed path gets `specialistReplyDirective`. Without
+        // them the run received only the generic analyze prompt: live, the
+        // agent read the TASK GOAL as its instruction, called it a
+        // prompt-injection attempt, and answered nobody.
+        directive: input.text.trim(),
+        directiveFrom: commenterName,
+        // Dispatch-completion contract: an @mention IS a manual dispatch —
+        // the report tags the commenter + @operator and the completion
+        // re-invokes the operator.
+        triggeredByName: commenterName,
+      },
+      actor,
+      ctx,
+    );
+    runId = started.runId;
     triggered = "started";
     }
   } catch (error) {
@@ -1632,6 +1599,10 @@ export async function commentToAgent(
       // invocation. A reviewer answering it owes no verdict, so the no-verdict
       // note must not fire for it (see applyAgentCompletionEffects).
       fromHumanDirective: true,
+      // Dispatch-completion contract: an @mention is a manual dispatch — the
+      // report tags the commenter + @operator, and the completion always
+      // re-invokes the operator.
+      dispatchedByName: commenterName,
       // F-P11 (pass 25): `envelopeRequested` is intentionally left undefined here
       // — the confinement (which knows whether the resumed run got the envelope
       // schema) is scoped to the resume branch above, so this shared registration
@@ -2919,6 +2890,13 @@ export async function registerAgentCompletion(
      *  silently truncated to its `summary` field). Undefined → unknown (recovery),
      *  which keeps the legacy re-parse so a recovered envelope still resolves. */
     envelopeRequested?: boolean;
+    /** Dispatch-completion contract (2026-08-29): display name of the human
+     *  whose manual/scheduled dispatch started this run. Presence makes the
+     *  final report always tag them + @operator (appended when the model forgot)
+     *  and always re-invokes the operator. Closure-only, like
+     *  `fromHumanDirective`: a run recovered after a crash degrades to the
+     *  react heuristic with no cc line — the documented recovery loss class. */
+    dispatchedByName?: string;
     /** Present when started inside an operator react loop (continue the chain). */
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
   },
@@ -2989,6 +2967,8 @@ export async function applyAgentCompletionEffects(
      *  object is never silently truncated to its `summary`. Undefined (recovery)
      *  keeps the legacy re-parse so a recovered envelope still resolves. */
     envelopeRequested?: boolean;
+    /** Dispatch-completion contract (2026-08-29) — see registerAgentCompletion. */
+    dispatchedByName?: string;
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
   },
   finished: { id: string; state: string },
@@ -3111,6 +3091,26 @@ export async function applyAgentCompletionEffects(
     }
   }
   if (!replyText && outcome?.summary) replyText = outcome.summary;
+  // Dispatch-completion contract (2026-08-29), mechanical half: the report of a
+  // manually/schedule-dispatched run always tags the dispatching human (the tag
+  // is what notifies them — NEW-4) and @operator. The prompt asked for both in
+  // the model's own words; append only what is missing, BEFORE the reply is
+  // stored, so no-progress comparison, the operator's react input and the
+  // timeline all see one consistent text (R20-9's guarantee-over-guidance).
+  if (input.dispatchedByName && finished.state === "finished" && replyText) {
+    const name = input.dispatchedByName;
+    const firstWord = name.split(/\s+/)[0] ?? name;
+    const hasHumanTag =
+      replyText.includes(`@${name}`) || replyText.includes(`@${firstWord}`);
+    const hasOperatorTag = /@operator\b/i.test(replyText);
+    const missing = [
+      ...(hasHumanTag ? [] : [`@${name}`]),
+      ...(hasOperatorTag ? [] : ["@operator"]),
+    ];
+    if (missing.length > 0) {
+      replyText = `${replyText}\n\ncc ${missing.join(" ")}`;
+    }
+  }
   if (finished.state === "finished") {
     // Verdict: envelope first; a verdict-AUTHORIZED agent with no envelope falls
     // back to the prose classifier (G4). The regex NEVER runs without authority
@@ -3492,7 +3492,18 @@ export async function applyAgentCompletionEffects(
     prevReply,
     currentDepth,
   );
-  if (!shouldReact) {
+  // Dispatch-completion contract (2026-08-29): a manually/schedule-dispatched
+  // run's completion ALWAYS hands back to the operator — that is the "to let the
+  // operator run again" half of the owner's contract, so the react heuristic
+  // (new-progress check) is bypassed. The depth cap still binds (a runaway loop
+  // is a runaway loop whoever started it), and only THIS hop is forced: runs the
+  // reacting operator then dispatches itself carry no dispatchedByName, so the
+  // chain reverts to the heuristic one hop later.
+  const mustReact =
+    !!input.dispatchedByName &&
+    finished.state === "finished" &&
+    currentDepth < OPERATOR_REACT_DEPTH_CAP;
+  if (!shouldReact && !mustReact) {
     const noProgress =
       !!replyForCompare &&
       prevReply !== null &&
@@ -3622,15 +3633,17 @@ export async function operatorPromptAgent(
   input: {
     projectSlug: string;
     taskKey: string;
-    role: string;
-    backend: RealBackend;
     directive: string;
-    kind: "primary" | "reviewer";
+    /** The agent to dispatch; engage-if-needed lives in startAgentRun (the
+     *  dynamic-dispatch auto-engage), so the caller no longer pre-splits
+     *  primary/reviewer shapes. */
+    profileId: string;
+    /** Explicit delivering/supporting posture; absent → derived from the
+     *  profile's capability grants and the task's current deliverer. */
+    delivers?: boolean;
     /** The agent's @mention handle (e.g. its name), prepended to the prompt so
      *  the comment reads as directing the agent by name ("@dev implement …"). */
     handle: string;
-    /** Required for a reviewer run (identifies which reviewer to run). */
-    profileId?: string;
   },
   ctx: TaskMutationContext = {},
 ): Promise<{ runId: string }> {
@@ -3674,31 +3687,15 @@ export async function operatorPromptAgent(
   const { startAgentRun } = await import("./specialist-run.server");
   let runId: string;
   try {
-    if (input.kind === "reviewer") {
-      if (!input.profileId) {
-        throw AppError.validation("A reviewer profile id is required to run a reviewer.");
-      }
-      const started = await startAgentRun(
-        db,
-        {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          profileId: input.profileId,
-          directive,
-        },
-        OPERATOR_TASK_ACTOR,
-        opCtx,
-      );
-      runId = started.runId;
-    } else {
-      const started = await startAgentRun(
-        db,
-        { projectSlug: input.projectSlug, taskKey: input.taskKey, directive },
-        OPERATOR_TASK_ACTOR,
-        opCtx,
-      );
-      runId = started.runId;
-    }
+    const dispatch: Parameters<typeof startAgentRun>[1] = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      profileId: input.profileId,
+      directive,
+    };
+    if (input.delivers !== undefined) dispatch.delivers = input.delivers;
+    const started = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx);
+    runId = started.runId;
   } catch (error) {
     // The directive comment above is already on the timeline — a start that
     // REFUSES (stage eligibility, backend down, policy) must not leave it
@@ -4230,6 +4227,11 @@ export async function transitionStage(
     }
     moved = true;
     parsed.frontmatter.stage = input.toStageId;
+    // Durable previous-stage fact (dynamic-dispatch rework 2026-08-29): the
+    // operator's agent choice weighs where the task CAME from — a task back in
+    // the work stage from Review is rework, not a fresh build — and before this
+    // field the fact evaporated with the one-hop transition trigger.
+    parsed.frontmatter.previousStageId = fromStageId;
     if (input.toStageId === lastStageId) {
       parsed.frontmatter.waiting = "none";
     }
@@ -8067,41 +8069,21 @@ export async function applyRecommendation(
     : ctx;
 
   // Execute the recommended action through the governed mutation (RBAC inside).
-  if (rec.kind === "assign_specialist" && rec.profileId) {
-    const { assignSpecialist } = await import("./specialist-run.server");
-    await assignSpecialist(
-      db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
-      runActor,
-      runCtx,
-    );
-  } else if (rec.kind === "assign_reviewer" && rec.profileId) {
-    const { assignReviewer } = await import("./specialist-run.server");
-    await assignReviewer(
-      db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
-      runActor,
-      runCtx,
-    );
-  } else if (rec.kind === "run_specialist") {
-    // The operator recommended starting the delivering agent's run (it can't
-    // under `recommend` autonomy) — applying it starts the run (run-agents
-    // re-checked inside for a maintainer; owner-applied runs as coordination).
+  if (rec.kind === "run_agent" && rec.profileId) {
+    // The operator recommended dispatching an agent (it can't under `recommend`
+    // autonomy) — applying it runs exactly what the manual run-agent control
+    // would: engage-if-needed with capability-derived posture, the operator's
+    // recommended prompt as the directive, and the dispatch-completion contract
+    // reporting back to the applying human + the operator.
     const { startAgentRun } = await import("./specialist-run.server");
-    await startAgentRun(
-      db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey },
-      runActor,
-      runCtx,
-    );
-  } else if (rec.kind === "run_reviewer" && rec.profileId) {
-    const { startAgentRun } = await import("./specialist-run.server");
-    await startAgentRun(
-      db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
-      runActor,
-      runCtx,
-    );
+    const dispatch: Parameters<typeof startAgentRun>[1] = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      profileId: rec.profileId,
+      triggeredByName: actor.label,
+    };
+    if (rec.prompt?.trim()) dispatch.directive = rec.prompt.trim();
+    await startAgentRun(db, dispatch, runActor, runCtx);
   } else if (rec.kind === "transition" && rec.toStageId) {
     // Owner ruling 2026-07-26: the operator may recommend a move OFF the
     // declared graph (live case: Review → In Progress to re-engage the

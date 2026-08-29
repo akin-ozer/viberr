@@ -19,44 +19,33 @@ import { Pill } from "~/ui/pill";
 
 export interface RecommendationView {
   id: string;
+  // Dynamic-dispatch rework (2026-08-29): the four slot-shaped kinds collapsed
+  // into `run_agent` — the operator recommends running a chosen agent with a
+  // prompt; Apply dispatches it exactly as the manual run-agent control would.
   kind:
-    | "assign_specialist"
-    | "assign_reviewer"
-    | "run_specialist"
-    | "run_reviewer"
+    | "run_agent"
     | "transition"
     | "accept_completion"
     // R15-2: the operator recommends DELIVERY (push + review PR); applying it
     // performs the delivery under the human's authorization.
     | "delivery";
   profileId?: string;
+  /** run_agent — the directive the dispatched run will follow. */
+  prompt?: string;
   toStageId?: string;
   label: string;
   detail: string;
 }
 
 const KIND_ICON = {
-  assign_specialist: "branch",
-  assign_reviewer: "check",
-  run_specialist: "bolt",
-  run_reviewer: "bolt",
+  run_agent: "bolt",
   transition: "board",
   accept_completion: "check",
   delivery: "github",
 } as const satisfies Record<RecommendationView["kind"], IconName>;
 
 const KIND_LABEL = {
-  // UXA-6: this slot is "Delivering agent" everywhere else on THIS page — the
-  // execution profile's section header, the "Assign delivering agent" menu and
-  // its aria-label, and the GitHub panel's deliver button — so the same actor
-  // wore two names one viewport apart. The generic-agents vocabulary won.
-  assign_specialist: "Delivering agent",
-  assign_reviewer: "Reviewer",
-  // …and the row one line below said "Run specialist" for the SAME actor. The
-  // server already words this card "Start the delivering agent's run"
-  // (operator-actions.server.ts), so the chip was the last holdout.
-  run_specialist: "Run delivering agent",
-  run_reviewer: "Run reviewer",
+  run_agent: "Run agent",
   transition: "Stage",
   accept_completion: "Completion",
   delivery: "Delivery",

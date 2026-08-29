@@ -5,11 +5,9 @@ import type {
   TaskDetail,
 } from "~/server/projections/task-query.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
-import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
-import { LocalDayDotTime } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
 import {
   ExecutionProfile,
@@ -21,8 +19,9 @@ import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
 /**
  * The task-detail MAIN column sections, in their contracted order (spec §2):
- * hero → diagnostics → recommendations → scheduled actions → execution
- * profile. (The live-run strip, decision packet, agent logs and timeline are
+ * hero → diagnostics → recommendations → execution profile (scheduling lives
+ * INSIDE the execution profile's run controls since the dynamic-dispatch
+ * rework, 2026-08-29 — no separate scheduled-actions panel). (The live-run strip, decision packet, agent logs and timeline are
  * their own modules already.) Split out of `task-detail-page.tsx` (pass 16,
  * pure structural refactor — no behaviour or copy change).
  *
@@ -273,171 +272,9 @@ export function TaskHero({
 /* Task metadata (priority/labels/due date) now lives in its own side panel —
    TaskDetailsPanel in task-side-panels.tsx — beside Current state and Permissions. */
 
-/** O-3: pending scheduled operator re-runs + a form to schedule one. Scheduling
- *  and cancelling are `run-agents` (maintainer+); the server re-checks. Hidden
- *  entirely for viewers/contributors with nothing scheduled. */
-export function ScheduledActions({
-  schedules,
-  canRunAgents,
-  taskClosed,
-}: {
-  schedules: TaskSchedule[];
-  canRunAgents: boolean;
-  taskClosed: boolean;
-  // R22: no backend/autonomy props — the scheduled run resolves the LIVE
-  // deployed operator profile at fire time, so this form shows no picker.
-}) {
-  const csrf = useCsrfToken();
-  const fetcher = useFetcher<ActionResult>();
-  useActionFeedback(fetcher);
-  const busy = fetcher.state !== "idle";
-  const canSchedule = canRunAgents && !taskClosed;
-  // D6: cancelling a queued re-run (possibly one another member scheduled)
-  // removes a pending action — confirm it, naming when it was due.
-  const [confirmCancel, setConfirmCancel] = useState<TaskSchedule | null>(null);
-  // Nothing to show: no pending schedules AND the viewer can't create one.
-  if (schedules.length === 0 && !canSchedule) return null;
-
-  const submit = (fields: Record<string, string>) => {
-    if (busy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    for (const [k, v] of Object.entries(fields)) fd.set(k, v);
-    fetcher.submit(fd, { method: "post" });
-  };
-
-  return (
-    <section className="panel" data-testid="scheduled-actions">
-      {/* P13-D-38: the icon used to be nested inside the <h2>, the only one of
-          ~48 panel heads that did — `.panel-head` is a flex row whose `.6rem`
-          gap collapsed to a JSX space and baseline-aligned the SVG. Sibling
-          form, as everywhere else. */}
-      <div className="panel-head">
-        <Icon name="clock" />
-        <h2>Scheduled re-runs</h2>
-        {schedules.length > 0 ? (
-          <span className="right muted">{schedules.length} pending</span>
-        ) : null}
-      </div>
-
-      {schedules.length === 0 ? (
-        // D8: absent → why it matters → next action (P16), not a bare label.
-        <p className="empty flush">
-          {canSchedule
-            ? "No scheduled operator re-runs. Use the form below to have the operator revisit this task at a set time, handy when you're waiting on something external."
-            : "No scheduled operator re-runs. A re-run has the operator revisit this task at a set time; scheduling one needs the run-agents grant."}
-        </p>
-      ) : (
-        <ul className="sched-list">
-          {schedules.map((s) => (
-            <li key={s.id} className="sched-row">
-              <div className="sched-when">
-                <Icon name="clock" />
-                <span>
-                  <LocalDayDotTime iso={s.dueAt} />
-                </span>
-              </div>
-              <div className="sched-meta">
-                {/* R22: no fixed backend/autonomy — the run resolves the
-                    deployed operator profile when it fires. */}
-                operator re-run
-                {s.note ? ` · ${s.note}` : ""}
-                {s.createdByLabel ? ` · by ${s.createdByLabel}` : ""}
-              </div>
-              {/* P13-D-19: `btn btn-ghost` -> `btn ghost`. */}
-              {canRunAgents ? (
-                <button
-                  type="button"
-                  className="btn ghost sched-cancel"
-                  disabled={busy}
-                  // D6: opens a confirm instead of cancelling on the click.
-                  onClick={() => setConfirmCancel(s)}
-                >
-                  Cancel
-                </button>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {canSchedule ? (
-        <fetcher.Form
-          method="post"
-          className="sched-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const f = new FormData(e.currentTarget);
-            submit({
-              intent: "schedule-action",
-              delayMinutes: String(f.get("delayMinutes") ?? "60"),
-              note: String(f.get("note") ?? ""),
-            });
-          }}
-        >
-          {/* R22 (owner ruling 2026-08-21): no per-run backend / autonomy
-              pickers. Like the manual run control (R21-9), a scheduled re-run
-              resolves the operator profile that is DEPLOYED when it fires —
-              which, for an unattended run set hours ahead, is the level that
-              actually matters. */}
-          <div className="sched-controls">
-            <label className="flabel">
-              In
-              <select name="delayMinutes" defaultValue="60">
-                <option value="5">5 min</option>
-                <option value="60">1 hour</option>
-                <option value="360">6 hours</option>
-                <option value="1440">24 hours</option>
-              </select>
-            </label>
-            <p className="sched-note-inline">
-              Runs on the operator profile deployed when it fires.
-            </p>
-          </div>
-          <input
-            className="sched-note"
-            name="note"
-            type="text"
-            placeholder="Why re-run later? (optional)"
-            maxLength={140}
-          />
-          {/* Pass 30: a routine starter, not the page's primary commit. */}
-          <button type="submit" className="btn" disabled={busy}>
-            <Icon name="clock" /> Schedule operator re-run
-          </button>
-        </fetcher.Form>
-      ) : null}
-
-      {confirmCancel && (
-        <ConfirmDialog
-          title="Cancel this scheduled re-run?"
-          body={
-            <>
-              The operator re-run due{" "}
-              <strong>
-                <LocalDayDotTime iso={confirmCancel.dueAt} />
-              </strong>
-              {confirmCancel.createdByLabel
-                ? ` (scheduled by ${confirmCancel.createdByLabel})`
-                : ""}{" "}
-              will not fire. You can schedule another below.
-            </>
-          }
-          confirmLabel="Cancel re-run"
-          cancelLabel="Keep it"
-          busy={busy}
-          onCancel={() => setConfirmCancel(null)}
-          onConfirm={() => {
-            submit({ intent: "cancel-schedule", scheduleId: confirmCancel.id });
-            setConfirmCancel(null);
-          }}
-        />
-      )}
-    </section>
-  );
-}
-
-/** Execution profile plus the specialist / reviewer / operator mutations it drives. */
+/** Execution profile plus the run/schedule/release mutations it drives
+ * (dynamic-dispatch rework 2026-08-29: one run-agent intent replaced the
+ * assign/run specialist+reviewer quartet; scheduling rides the run controls). */
 export function ExecutionSection({
   task,
   meId,
@@ -449,9 +286,9 @@ export function ExecutionSection({
   operatorAutonomy,
   backendAvailable,
   canRunAgents,
-  deliveringActive,
-  activeReviewerIds,
+  activeAgentProfileIds,
   operatorRunActive,
+  schedules,
 }: {
   task: TaskDetail;
   meId: string;
@@ -464,83 +301,92 @@ export function ExecutionSection({
   operatorAutonomy: "supervised" | "full";
   backendAvailable: { claude: boolean; codex: boolean };
   canRunAgents: boolean;
-  /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
-  deliveringActive: boolean;
-  /** Reviewer profile ids with an active run — disables only that reviewer. */
-  activeReviewerIds: string[];
+  /** Profile ids of engagements with a live (queued/running) run. */
+  activeAgentProfileIds: string[];
   /** A live (queued/running) OPERATOR run exists (F7-UI1 pill honesty). */
   operatorRunActive: boolean;
+  /** PENDING scheduled runs (both kinds; the profile splits them per control). */
+  schedules: TaskSchedule[];
 }) {
   const csrf = useCsrfToken();
-  const specialistFetcher = useFetcher<ActionResult>();
-  const reviewerFetcher = useFetcher<ActionResult>();
+  const agentFetcher = useFetcher<ActionResult>();
   const operatorFetcher = useFetcher<ActionResult>();
-  useActionFeedback(specialistFetcher);
-  useActionFeedback(reviewerFetcher);
+  const releaseFetcher = useFetcher<ActionResult>();
+  const cancelFetcher = useFetcher<ActionResult>();
+  useActionFeedback(agentFetcher);
   useActionFeedback(operatorFetcher);
-  const specialistBusy = specialistFetcher.state !== "idle";
-  const reviewerBusy = reviewerFetcher.state !== "idle";
+  useActionFeedback(releaseFetcher);
+  useActionFeedback(cancelFetcher);
+  const agentBusy = agentFetcher.state !== "idle";
   const operatorBusy = operatorFetcher.state !== "idle";
+  const releaseBusy = releaseFetcher.state !== "idle";
+  const cancelBusy = cancelFetcher.state !== "idle";
 
-  // Assign a deployed specialist / start a specialist run — admin|maintainer
-  // (contracts §3.2); server re-checks RBAC. The ExecutionProfile only renders
-  // these affordances when canRunAgents.
-  const onAssignSpecialist = (profileId: string) => {
-    if (specialistBusy) return;
+  const submit = (
+    fetcher: ReturnType<typeof useFetcher<ActionResult>>,
+    fields: Record<string, string>,
+  ) => {
     const fd = new FormData();
     fd.set("_csrf", csrf);
-    fd.set("intent", "assign-specialist");
-    fd.set("profileId", profileId);
-    specialistFetcher.submit(fd, { method: "post" });
-  };
-  const onRunSpecialist = () => {
-    if (specialistBusy || deliveringActive) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "run-specialist");
-    specialistFetcher.submit(fd, { method: "post" });
+    for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+    fetcher.submit(fd, { method: "post" });
   };
 
-  // Reviewer engagement (admin|maintainer; server re-checks). Assign a deployed
-  // specialist as a reviewer, run a specific reviewer (gated on THAT reviewer's
-  // own active run — supporting runs are read-only and concurrent, F10-04), or
-  // release one.
-  const onAssignReviewer = (profileId: string) => {
-    if (reviewerBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "assign-reviewer");
-    fd.set("profileId", profileId);
-    reviewerFetcher.submit(fd, { method: "post" });
-  };
-  const onRunReviewer = (profileId: string) => {
-    if (reviewerBusy || activeReviewerIds.includes(profileId)) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "run-reviewer");
-    fd.set("profileId", profileId);
-    reviewerFetcher.submit(fd, { method: "post" });
-  };
-  const onRemoveReviewer = (profileId: string) => {
-    if (reviewerBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "remove-reviewer");
-    fd.set("profileId", profileId);
-    reviewerFetcher.submit(fd, { method: "post" });
+  // Run (or schedule) a chosen deployed agent — admin|maintainer (contracts
+  // §3.2); the server re-checks RBAC. A deferred delay routes the SAME
+  // payload through schedule-action; profileId is what selects the agent arm.
+  const onRunAgent = (
+    profileId: string,
+    prompt: string,
+    delayMinutes: number | null,
+  ) => {
+    if (agentBusy) return;
+    if (delayMinutes !== null) {
+      submit(agentFetcher, {
+        intent: "schedule-action",
+        delayMinutes: String(delayMinutes),
+        profileId,
+        prompt,
+      });
+      return;
+    }
+    submit(
+      agentFetcher,
+      prompt
+        ? { intent: "run-agent", profileId, prompt }
+        : { intent: "run-agent", profileId },
+    );
   };
 
-  // Run the operator agent (admin|maintainer; server re-checks). The run
-  // follows the deployed operator profile — backend and autonomy alike (owner
-  // request 2026-08-21: the card shows, it does not pick). An optional steer
-  // rides along as the human's directive, recorded as an @operator comment.
-  const onRunOperator = (steer: string) => {
+  // Release a supporting engagement (the ledger's ✕).
+  const onReleaseAgent = (profileId: string) => {
+    if (releaseBusy) return;
+    submit(releaseFetcher, { intent: "release-agent", profileId });
+  };
+
+  // Run (or schedule) the operator (admin|maintainer; server re-checks). The
+  // run follows the deployed operator profile — backend and autonomy alike
+  // (R21-9: the card shows, it does not pick). An optional steer rides along
+  // as the human's directive, recorded as an @operator comment.
+  const onRunOperator = (steer: string, delayMinutes: number | null) => {
     if (operatorBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "run-operator");
-    if (steer) fd.set("steer", steer);
-    operatorFetcher.submit(fd, { method: "post" });
+    if (delayMinutes !== null) {
+      submit(operatorFetcher, {
+        intent: "schedule-action",
+        delayMinutes: String(delayMinutes),
+        prompt: steer,
+      });
+      return;
+    }
+    submit(
+      operatorFetcher,
+      steer ? { intent: "run-operator", steer } : { intent: "run-operator" },
+    );
+  };
+
+  const onCancelSchedule = (scheduleId: string) => {
+    if (cancelBusy) return;
+    submit(cancelFetcher, { intent: "cancel-schedule", scheduleId });
   };
 
   return (
@@ -555,18 +401,17 @@ export function ExecutionSection({
       operatorAutonomy={operatorAutonomy}
       backendAvailable={backendAvailable}
       canRunAgents={canRunAgents}
-      deliveringActive={deliveringActive}
-      activeReviewerIds={activeReviewerIds}
+      activeAgentProfileIds={activeAgentProfileIds}
       operatorRunActive={operatorRunActive}
-      runBusy={specialistBusy}
-      onAssignSpecialist={onAssignSpecialist}
-      onRunSpecialist={onRunSpecialist}
-      reviewerBusy={reviewerBusy}
-      onAssignReviewer={onAssignReviewer}
-      onRunReviewer={onRunReviewer}
-      onRemoveReviewer={onRemoveReviewer}
+      runBusy={agentBusy}
+      onRunAgent={onRunAgent}
+      releaseBusy={releaseBusy}
+      onReleaseAgent={onReleaseAgent}
       operatorBusy={operatorBusy}
       onRunOperator={onRunOperator}
+      schedules={schedules}
+      scheduleBusy={cancelBusy}
+      onCancelSchedule={onCancelSchedule}
     />
   );
 }

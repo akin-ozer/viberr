@@ -49,7 +49,6 @@ import {
 import {
   DiagnosticsPanel,
   ExecutionSection,
-  ScheduledActions,
   TaskHero,
 } from "./task-main-sections";
 
@@ -111,8 +110,7 @@ export function TaskDetailPage({
   operatorBackend,
   operatorAutonomy,
   backendAvailable,
-  deliveringActive,
-  activeReviewerIds,
+  activeAgentProfileIds,
   runsVisible = true,
   timelineHasMore,
   timelineRemaining,
@@ -155,7 +153,7 @@ export function TaskDetailPage({
   attachmentsBase?: string | null;
   /** Per-task run projection (Phase 8). */
   runtime: RunView[];
-  /** Deployed specialists the assign menu offers (loader). */
+  /** Deployed specialists the run-agent selector offers (loader). */
   deployedSpecialists: DeployedSpecialistView[];
   /** The operator's configured backend — the run picker's default (P11-76). */
   operatorBackend: "claude" | "codex";
@@ -163,10 +161,8 @@ export function TaskDetailPage({
   operatorAutonomy: "supervised" | "full";
   /** P11-41: which backends are configured, for the run picker. */
   backendAvailable: { claude: boolean; codex: boolean };
-  /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
-  deliveringActive: boolean;
-  /** Reviewer profile ids with an active run — disables only that reviewer. */
-  activeReviewerIds: string[];
+  /** Profile ids of engagements with a live run (per-agent gating). */
+  activeAgentProfileIds: string[];
   /** UI-30: false → the viewer is not a project member, so `lines`/`raw`/`sid`
    *  were withheld by the loader and the console renders an honest gate notice
    *  instead of an empty panel. */
@@ -182,7 +178,8 @@ export function TaskDetailPage({
   mentionables: Mentionables;
   /** Pending operator recommendation cards (loader — from the task file). */
   recommendations: RecommendationView[];
-  /** Pending scheduled operator re-runs (O-3, loader — from the task file). */
+  /** Pending scheduled runs (O-3 generalized, loader — from the task file).
+   *  Rendered inside the execution profile's run controls. */
   schedules: TaskSchedule[];
   /** R14-3: the task's archive disposition (loader — from the task file, which
    *  is where it lives; the projection has no column for it). */
@@ -218,10 +215,6 @@ export function TaskDetailPage({
   const [releasing, setReleasing] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [ask, setAsk] = useState(0);
-  // C8: "Scheduled re-runs" now sits BELOW the Execution profile and its empty
-  // form is collapsed behind a one-line disclosure on the common (no-schedule)
-  // case — this opens it. A task that already has a schedule renders expanded.
-  const [scheduleOpen, setScheduleOpen] = useState(false);
   const csrf = useCsrfToken();
 
   // G7: the page body is overflow:hidden and `.detail` is the actual scroll
@@ -758,6 +751,9 @@ export function TaskDetailPage({
           onDismiss={onDismissRec}
         />
 
+        {/* Scheduling lives INSIDE the two run controls (dynamic-dispatch
+            rework — no separate scheduled-actions panel or disclosure button);
+            pending entries render under the control that scheduled them. */}
         <ExecutionSection
           task={task}
           meId={me.id}
@@ -769,34 +765,10 @@ export function TaskDetailPage({
           operatorAutonomy={operatorAutonomy}
           backendAvailable={backendAvailable}
           canRunAgents={canRunAgents}
-          deliveringActive={deliveringActive}
-          activeReviewerIds={activeReviewerIds}
+          activeAgentProfileIds={activeAgentProfileIds}
           operatorRunActive={operatorRunActive}
+          schedules={schedules}
         />
-
-        {/* C8: Scheduled re-runs used to sit directly under the goal, showing a
-            four-control form for nothing on the common case and pushing the
-            Execution profile (Run operator, delivering agent, reviewers, owner)
-            below the fold. It sits below Execution profile now, and its empty
-            form is collapsed behind a one-line disclosure — expanded only when a
-            schedule already exists (there is something to show) or the viewer
-            asks to add one. */}
-        {schedules.length > 0 || scheduleOpen ? (
-          <ScheduledActions
-            schedules={schedules}
-            canRunAgents={canRunAgents}
-            taskClosed={taskClosed}
-          />
-        ) : canRunAgents && !taskClosed ? (
-          <button
-            type="button"
-            className="btn ghost sm panel-act"
-            onClick={() => setScheduleOpen(true)}
-          >
-            <Icon name="clock" />
-            Schedule a re-run
-          </button>
-        ) : null}
 
         {runtime.length > 0 && runsVisible ? (
           <AgentLogsPanel

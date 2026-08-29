@@ -317,6 +317,7 @@ function fm(input: {
     key: input.key,
     title: input.title,
     stage: input.stage,
+    previousStageId: null,
     readiness: input.readiness,
     waiting: input.waiting,
     ownerUserId: input.owner,

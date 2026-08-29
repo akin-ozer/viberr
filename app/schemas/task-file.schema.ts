@@ -233,16 +233,15 @@ export type OperatorRef = z.infer<typeof operatorRefSchema>;
  * human accepts (applies) or dismisses. Distinct from packets (single decision):
  * a task can carry several pending recommendations at once. */
 export const RECOMMENDATION_KINDS = [
-  "assign_specialist",
-  "assign_reviewer",
   "transition",
-  // Under `recommend` autonomy the operator can't start runs itself, so it
-  // recommends STARTING the specialist / reviewer run — an actionable card a
-  // maintainer applies with one click (previously a dead-end comment with no
-  // apply affordance). profileId targets the reviewer to run; the primary
-  // specialist run needs none.
-  "run_specialist",
-  "run_reviewer",
+  // Dynamic-dispatch rework (2026-08-29): the four slot-shaped kinds
+  // (`assign_specialist` / `assign_reviewer` / `run_specialist` /
+  // `run_reviewer`) collapsed into ONE. Under `recommend` autonomy the operator
+  // can't dispatch runs itself, so it recommends RUNNING a chosen deployed
+  // agent with a directive — an actionable card a maintainer applies with one
+  // click. Applying it dispatches the agent exactly as the manual run-agent
+  // control would (engage-if-needed, posture from capability grants).
+  "run_agent",
   // A clean review → the operator recommends accepting completion, which moves
   // the task to Done (the review→done boundary). Rendered as an actionable card
   // symmetric with the other stage transitions; applying it (admin|maintainer)
@@ -259,11 +258,13 @@ export const recommendationSchema = z
   .object({
     id: z.string().min(1),
     kind: z.enum(RECOMMENDATION_KINDS),
-    /** assign_specialist / assign_reviewer — the deployed specialist to engage. */
+    /** run_agent — the deployed agent to dispatch. */
     profileId: z.string().optional(),
+    /** run_agent — the directive the operator wants the run to follow. */
+    prompt: z.string().optional(),
     /** transition — the target stage id. */
     toStageId: z.string().optional(),
-    /** Button label, e.g. "Assign Dev as primary specialist". */
+    /** Button label, e.g. "Run Developer". */
     label: z.string().min(1),
     /** The operator's reasoning for the recommendation (rendered under it). */
     detail: z.string().default(""),
@@ -272,13 +273,15 @@ export const recommendationSchema = z
 export type Recommendation = z.infer<typeof recommendationSchema>;
 
 /**
- * A governed SCHEDULED action on a task (O-3): a human schedules a future
- * operator re-run — e.g. "re-check this not-yet-Done task in 24h". Canonical in
- * the task file so it survives a projection rebuild; a server-side runner fires
- * due entries (server-side → backend-agnostic, works for Claude AND Codex, no
- * per-backend agent tool). Never fires on a terminal (Done) task.
+ * A governed SCHEDULED action on a task (O-3): a human schedules a future run
+ * — an operator re-run ("re-check this not-yet-Done task in 24h") or, since the
+ * dynamic-dispatch rework (2026-08-29), a specific agent's run with a prompt.
+ * Canonical in the task file so it survives a projection rebuild; a server-side
+ * runner fires due entries (server-side → backend-agnostic, works for Claude
+ * AND Codex, no per-backend agent tool). Never fires on a terminal (Done) task.
  */
-export const SCHEDULE_ACTION_TYPES = ["run-operator"] as const;
+export const SCHEDULE_ACTION_TYPES = ["run-operator", "run-agent"] as const;
+export type ScheduleAction = (typeof SCHEDULE_ACTION_TYPES)[number];
 
 // F10-16 lifecycle: pending → claimed → fired (success) | failed (terminal).
 // `claimed` reserves an occurrence before the detached operator enqueue so a
@@ -307,8 +310,14 @@ export const scheduleSchema = z
     // matters MORE than freezing whatever was configured hours earlier (it was
     // also the temporal twin of the #183 stale-backend-display bug). `.loose()`
     // ignores the `backend`/`autonomy` keys any pre-ruling entry still carries.
-    /** Human note shown on the scheduled-actions card. */
-    note: z.string().default(""),
+    /** `run-agent` only: the deployed agent to dispatch when the entry fires.
+     *  The profile ID is the pin (identity); backend/model/capabilities resolve
+     *  from the LIVE deployment at fire time, the same R22 rule as the operator
+     *  arm. Null for `run-operator`. */
+    profileId: z.string().nullable().default(null),
+    /** The run's instruction: the operator steer, or the dispatched agent's
+     *  directive. Rides into the fired run so it knows WHY it exists (B-WF3). */
+    prompt: z.string().default(""),
     /** Who scheduled it (userId) + a display label. */
     createdBy: z.string().min(1),
     createdByLabel: z.string().default(""),
@@ -575,6 +584,12 @@ const taskFrontmatterFields = {
   key: z.string().regex(/^[A-Za-z]+-\d+$/),
   title: z.string().min(1),
   stage: z.string().min(1),
+  /** The stage this task sat at BEFORE its most recent transition (null until
+   *  the first move). Durable, structural previous-stage knowledge for the
+   *  operator's agent choice (dynamic-dispatch rework 2026-08-29): before this
+   *  field the prior stage reached the operator only as one-hop transition
+   *  trigger context or timeline prose — gone by the next turn. */
+  previousStageId: z.string().nullable().default(null),
   readiness: z.enum(READINESS_VALUES),
   waiting: z.enum(WAITING_VALUES),
   ownerUserId: z.string().nullable(),
@@ -912,6 +927,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "key",
   "title",
   "stage",
+  "previousStageId",
   "readiness",
   "waiting",
   "ownerUserId",
@@ -958,9 +974,11 @@ export interface TolerantTaskFrontmatterResult {
   diagnostics: FileDiagnostic[];
 }
 
-/** What the tolerant parse reads out of a task.md: the canonical fields plus
- *  the two legacy engagement slots `parseEngagements` absorbs. */
-type ReadableFrontmatterKey = keyof TaskFrontmatter | "specialist" | "reviewers";
+/** What the tolerant parse reads out of a task.md. (The legacy `specialist` /
+ *  `reviewers` / `consultants` slot absorption was deleted in the
+ *  dynamic-dispatch rework, 2026-08-29 — preprod, no back-compat by owner
+ *  ruling. A file still carrying those keys keeps them as unknown keys.) */
+type ReadableFrontmatterKey = keyof TaskFrontmatter;
 
 /** Runs `schema` over `data[path]`; on failure records a diagnostic and returns
  * `fallback`. Absent (undefined) values only diagnose when `required`. */
@@ -1001,60 +1019,21 @@ function tolerant<T>(
 
 /**
  * Engagement parsing enforces one row per profile and at most one delivering
- * workspace owner.
- *
- * Legacy absorption (G1): a pre-engagements task.md carries `specialist`
- * (→ the delivering engagement) and `reviewers[]` / `consultants[]` (→ the
- * supporting engagements). Those keys are absorbed here and NOT preserved as
- * unknown — the next write emits `engagements` only. An explicit
- * `engagements:` key always wins; the legacy slots are read only in its
- * absence, so a file carrying both forms is never double-counted.
+ * workspace owner. (The legacy `specialist`/`reviewers`/`consultants` slot
+ * absorption lived here until the dynamic-dispatch rework, 2026-08-29 —
+ * deleted with the rest of the slot model, preprod no-back-compat.)
  */
 function parseEngagements(
   diagnostics: FileDiagnostic[],
   data: RawFrontmatter,
 ): Engagement[] {
-  let engagements: Engagement[];
-  if (data.engagements !== undefined) {
-    engagements = tolerant(
-      diagnostics,
-      data,
-      "engagements",
-      taskFrontmatterFields.engagements,
-      [],
-    );
-  } else {
-    // Legacy slots → engagements. Each ref is validated independently so one
-    // bad reviewer never drops the specialist (or vice versa).
-    engagements = [];
-    const specialist = tolerant(
-      diagnostics,
-      data,
-      "specialist",
-      agentRefSchema.nullable(),
-      null,
-    );
-    if (specialist)
-      engagements.push({ ...specialist, delivers: true, verdictCapable: false });
-    // `reviewers` is the current legacy name; `consultants` is the older alias
-    // it replaced, so a stale `consultants` never shadows a live `reviewers`.
-    const withReviewers: RawFrontmatter = {
-      ...data,
-      reviewers: data.reviewers ?? data.consultants,
-    };
-    const reviewers = tolerant(
-      diagnostics,
-      withReviewers,
-      "reviewers",
-      z.array(agentRefSchema),
-      [],
-    );
-    for (const reviewer of reviewers) {
-      // A migrated legacy reviewer is not verdict-capable until it carries an
-      // explicit report-validation-verdict:direct grant (F10-14).
-      engagements.push({ ...reviewer, delivers: false, verdictCapable: false });
-    }
-  }
+  const engagements: Engagement[] = tolerant(
+    diagnostics,
+    data,
+    "engagements",
+    taskFrontmatterFields.engagements,
+    [],
+  );
   // profileId-uniqueness invariant (defense-in-depth): a profile has at most
   // ONE engagement. A duplicate profileId corrupts run routing (startAgentRun
   // resolves by the FIRST match), so keep the first occurrence and drop the
@@ -1182,6 +1161,15 @@ export function parseTaskFrontmatter(
       { required: true },
     ),
     stage,
+    // previousStageId — absent on tasks that predate the dynamic-dispatch
+    // rework → null, silently (a missing optional scalar is not a diagnostic).
+    previousStageId: tolerant(
+      diagnostics,
+      data,
+      "previousStageId",
+      taskFrontmatterFields.previousStageId,
+      null,
+    ),
     readiness: tolerant(
       diagnostics,
       data,

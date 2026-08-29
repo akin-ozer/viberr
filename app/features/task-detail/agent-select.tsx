@@ -1,0 +1,221 @@
+import { useId, useState, type KeyboardEvent } from "react";
+import {
+  filterMentions,
+  splitHighlight,
+  type MentionSuggestion,
+} from "./mention-autocomplete";
+import type { DeployedSpecialistView } from "./execution-profile";
+import { AgentGlyph } from "~/ui/identity";
+
+/**
+ * The run-an-agent control's agent picker (dynamic-dispatch rework 2026-08-29):
+ * a type-to-filter dropdown over the project's DEPLOYED agents, deliberately
+ * the same interaction as the comment composer's @-mention menu (one product,
+ * one way to pick an agent) — same filtering/ranking logic (`filterMentions`),
+ * same listbox rows (`.rsel-menu`/`.rsel-item`), same match highlighting.
+ *
+ * Differences from the composer's menu, each deliberate:
+ *   - it opens on FOCUS with the full roster (a dedicated selector needs no
+ *     `@` sigil and no minimum query — the list IS the point);
+ *   - rows carry capability subs ("no repo write", "gates acceptance",
+ *     "model unavailable") because choosing an agent here commits a paid run,
+ *     so what the run can actually do belongs on the row (UI-39's lesson);
+ *   - picking fills the input with the agent's NAME and reports the selection
+ *     up; editing the text clears the selection until a row is picked again.
+ */
+
+/** The selector's row model: a mention suggestion plus run-relevant marks. */
+interface AgentOption extends MentionSuggestion {
+  id: string;
+  /** Cannot own delivery (no repo-write grant) — UI-39's dead-end warning. */
+  noRepoWrite: boolean;
+  /** Its verdict gates acceptance once engaged. */
+  gatesAcceptance: boolean;
+  /** F20-4: a real run marked this profile's model unavailable. */
+  modelUnavailable: boolean;
+  /** This profile has a live (queued/running) run on the task right now. */
+  running: boolean;
+}
+
+function toOptions(
+  agents: readonly DeployedSpecialistView[],
+  activeProfileIds: readonly string[],
+): AgentOption[] {
+  return agents.map((a) => ({
+    kind: "agent",
+    handle: a.id,
+    name: a.name,
+    sub: `${a.role} · ${a.backend === "claude" ? "Claude" : "Codex"}`,
+    backend: a.backend,
+    id: a.id,
+    noRepoWrite: a.capabilities?.delivery === false,
+    gatesAcceptance: a.capabilities?.verdict === true,
+    modelUnavailable: !!a.modelUnavailable,
+    running: activeProfileIds.includes(a.id),
+  }));
+}
+
+export function AgentSelect({
+  agents,
+  activeProfileIds,
+  selectedId,
+  disabled,
+  onSelect,
+}: {
+  agents: readonly DeployedSpecialistView[];
+  /** Profiles with a live run — marked on their rows. */
+  activeProfileIds: readonly string[];
+  /** The currently selected profile id (null = nothing picked). */
+  selectedId: string | null;
+  disabled?: boolean;
+  onSelect: (profileId: string | null) => void;
+}) {
+  const listId = useId();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+
+  const options = toOptions(agents, activeProfileIds);
+  const selected = options.find((o) => o.id === selectedId) ?? null;
+  // While a selection stands the input shows its name; typing replaces it with
+  // a live query. An empty query lists the whole roster (focus-open).
+  const value = open ? query : (selected?.name ?? query);
+  // A dedicated selector lists the WHOLE roster (the composer's 8-row cap is
+  // for an inline popover over prose); the menu itself scrolls.
+  const items = filterMentions(options, query, 50);
+  const activeIndex = Math.min(active, Math.max(items.length - 1, 0));
+  const activeId = items.length ? `${listId}-opt-${activeIndex}` : undefined;
+
+  const openWith = (q: string) => {
+    setQuery(q);
+    setActive(0);
+    setOpen(true);
+  };
+  const pick = (option: AgentOption) => {
+    onSelect(option.id);
+    setQuery("");
+    setOpen(false);
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (!open) {
+      // Reopen from a settled selection on any typing intent.
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        openWith("");
+      }
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!items.length) return;
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      setActive((activeIndex + delta + items.length) % items.length);
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      // IME guard, same as the composer: an Enter that confirms a multibyte
+      // candidate must not pick a row.
+      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
+        return;
+      }
+      const item = items[activeIndex];
+      if (item) {
+        if (event.key === "Enter") event.preventDefault();
+        pick(item);
+      }
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+      // Escape restores the settled selection's name (or empties).
+      setQuery("");
+    }
+  };
+
+  return (
+    <div className="agent-select">
+      <input
+        type="text"
+        className="op-steer agent-select-input"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-activedescendant={activeId}
+        aria-label="Choose an agent to run"
+        placeholder="Choose an agent…"
+        autoComplete="off"
+        spellCheck={false}
+        disabled={disabled}
+        value={value}
+        onFocus={() => openWith("")}
+        onBlur={() => {
+          setOpen(false);
+          setQuery("");
+        }}
+        onChange={(e) => {
+          // Typing invalidates the settled pick — the selection is a row pick,
+          // never free text (the id is what the dispatch submits).
+          if (selectedId) onSelect(null);
+          openWith(e.target.value);
+        }}
+        onKeyDown={onKeyDown}
+      />
+      {open && (
+        <div
+          className="rsel-menu mention-menu agent-select-menu"
+          id={listId}
+          role="listbox"
+          aria-label="Deployed agents"
+        >
+          {items.length === 0 ? (
+            <div className="rsel-item" aria-disabled>
+              <span className="ri-txt">
+                <span className="ri-sub">No deployed agent matches.</span>
+              </span>
+            </div>
+          ) : (
+            items.map((o, i) => {
+              const parts = splitHighlight(o.name, query);
+              const marks = [
+                ...(o.running ? ["running"] : []),
+                ...(o.noRepoWrite ? ["no repo write"] : []),
+                ...(o.gatesAcceptance ? ["gates acceptance"] : []),
+                ...(o.modelUnavailable ? ["model unavailable"] : []),
+              ];
+              return (
+                <button
+                  type="button"
+                  key={o.id}
+                  id={`${listId}-opt-${i}`}
+                  role="option"
+                  aria-selected={i === activeIndex}
+                  className={"rsel-item" + (i === activeIndex ? " on" : "")}
+                  // Keep focus in the input so blur doesn't beat the click.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => pick(o)}
+                >
+                  <AgentGlyph backend={o.backend === "codex" ? "codex" : "claude"} />
+                  <span className="ri-txt">
+                    <span className="ri-nm">
+                      {parts.match ? (
+                        <>
+                          {parts.before}
+                          <mark className="mention-match">{parts.match}</mark>
+                          {parts.after}
+                        </>
+                      ) : (
+                        o.name
+                      )}
+                    </span>
+                    <span className="ri-sub">
+                      {o.sub}
+                      {marks.length ? ` · ${marks.join(" · ")}` : ""}
+                    </span>
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

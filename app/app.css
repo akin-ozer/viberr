@@ -4953,3 +4953,22 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    and fails AA for normal text; --teal-dark clears it in both themes. */
 .tl-card .ev-row .ev-file { color: var(--teal-dark); text-decoration: underline; text-underline-offset: 2px; }
 .tl-card .ev-row .ev-file:hover { text-decoration-thickness: 2px; }
+
+/* ------------------------------------------------------------------ */
+/* Dynamic agent dispatch (2026-08-29): the execution profile's two run
+   controls — operator + run-an-agent — with scheduling baked into each
+   (the when-picker turns Run into Schedule; no separate schedule panel). */
+
+/* The agent picker anchors its own listbox; sized like the steer input so the
+   selector and the prompt share the control row's rhythm. */
+.agent-select { position: relative; flex: 1 1 160px; min-width: 0; }
+.agent-select-input { width: 100%; }
+/* A full roster can outgrow the popover — scroll inside it (the page must
+   never scroll horizontally; a menu never forces the page taller either). */
+.agent-select-menu { max-height: 320px; overflow-y: auto; }
+/* The run-an-agent control reuses .op-run's wrapping row. */
+.agent-run { row-gap: .375rem; }
+/* The baked-in when-picker: a size variant of the base select rule. */
+.run-when { flex: none; font-size: .8rem; padding: .25rem .375rem; }
+/* Pending scheduled runs listed under a control take the full control width. */
+.op-run .sched-list { flex-basis: 100%; margin: 0; }
