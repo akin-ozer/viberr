@@ -1823,8 +1823,13 @@ describe("the Engaged agents ledger marks authority per row", () => {
  * structurally unpickable, not merely disabled.
  */
 describe("UX19-12: a ghost engagement says so in the ledger and is unpickable in the selector", () => {
-  const GONE_NOTE =
+  // Hunt 2026-08-29: the recovery is PER POSTURE — the supporting note offers
+  // the release the row actually renders; the delivering note must not tell
+  // the human to use a control that row deliberately withholds.
+  const GONE_SUPPORTING_NOTE =
     "Not deployed on this project any more. Release it, or re-deploy the profile on the Agents page.";
+  const GONE_DELIVERING_NOTE =
+    "Not deployed on this project any more. Re-deploy the profile on the Agents page, or hand delivery to another agent.";
 
   it("supporting ghost row: names the state, and the release recovery stays live", () => {
     const { container, calls } = renderExec({
@@ -1835,7 +1840,7 @@ describe("UX19-12: a ghost engagement says so in the ledger and is unpickable in
     // Canary: restore a `?? role` name substitution and this reads "Code
     // review" — the role, printed twice.
     expect(row.querySelector(".nm")!.textContent).toBe("profile no longer here");
-    expect(row.textContent).toContain(GONE_NOTE);
+    expect(row.textContent).toContain(GONE_SUPPORTING_NOTE);
     // Letting go of a dead engagement is the recovery the note names.
     const release = row.querySelector<HTMLButtonElement>(".rev-x")!;
     expect(release.disabled).toBe(false);
@@ -1843,14 +1848,17 @@ describe("UX19-12: a ghost engagement says so in the ledger and is unpickable in
     expect(calls.releaseAgent).toEqual(["rev-9a"]);
   });
 
-  it("delivering ghost row: same disclosure, and no release (delivery owns the workspace)", () => {
+  it("delivering ghost row: its OWN recovery copy (no release control to point at), and no release", () => {
     const { container } = renderExec({
       task: { specialist: engagement("dev-2f1c", "Implementation", "codex") },
       deployedSpecialists: [deployedAgent("other", "Other agent", "Docs", false)],
     });
     const row = engagementsCell(container).querySelector(".rev-agent")!;
     expect(row.querySelector(".nm")!.textContent).toBe("profile no longer here");
-    expect(row.textContent).toContain(GONE_NOTE);
+    expect(row.textContent).toContain(GONE_DELIVERING_NOTE);
+    // Canary: collapse the two notes back into one and this row tells the
+    // human to "Release it" beside a deliberately-withheld ✕.
+    expect(row.textContent).not.toContain("Release it");
     expect(row.querySelector(".rev-x")).toBeNull();
   });
 
@@ -1902,14 +1910,21 @@ describe("the AgentSelect combobox keeps the keyboard promises it makes", () => 
     expect(menu).not.toBeNull();
     // No sigil, no minimum query — the full deployed roster IS the point.
     expect(menu.querySelectorAll('[role="option"]')).toHaveLength(2);
-    // The wired active option, not a decorative one (aria-activedescendant).
+    // Hunt 2026-08-29: a bare focus-open is UNARMED — no active option, no
+    // aria-activedescendant — so tabbing through the control can commit
+    // nothing. Arrowing arms row 0 and wires the descendant.
+    expect(menu.querySelector('[aria-selected="true"]')).toBeNull();
+    expect(input.getAttribute("aria-activedescendant")).toBeNull();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(input.getAttribute("aria-activedescendant")).toBe(
       menu.querySelector('[aria-selected="true"]')!.id,
     );
   });
 
-  it("ArrowDown moves the active option; Enter picks it, fills the input with the NAME and arms Run", () => {
+  it("ArrowDown arms then moves the active option; Enter picks it, fills the input with the NAME and arms Run", () => {
     const { container, input, calls } = open();
+    // First arrow ARMS row 0 (hunt 2026-08-29); the second moves to row 1.
+    fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
     // Picking closes the menu and settles the selection as the display name.

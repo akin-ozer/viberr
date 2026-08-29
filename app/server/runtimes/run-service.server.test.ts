@@ -127,10 +127,16 @@ describe("run-service lifecycle", () => {
   });
 
   it("F10-05: a second concurrent delivering run is rejected atomically (409)", async () => {
-    const script = instantScript([
-      { t: "1", ev: "init", tag: "system·init", text: "session" },
-    ]);
-    queueFakeRun(script);
+    // keepRunning — the first run must still be LIVE when the second insert
+    // lands, or the partial index has nothing to enforce. (Hunt 2026-08-29:
+    // without it the fake run finished on a microtask, and this test's 409 was
+    // really the THREAD-uniqueness index firing on a shared default thread —
+    // the column-discriminating translator exposed the rotten pin.)
+    queueFakeRun({
+      lines: [{ t: "1", ev: "init", tag: "system·init", text: "session" }],
+      sessionId: "sess-test",
+      keepRunning: true,
+    });
     const primary = {
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -139,6 +145,12 @@ describe("run-service lifecycle", () => {
       backend: "claude" as const,
       model: "claude-sonnet-4-5",
       prompt: "go",
+      // Real dispatches mint a distinct thread per run (`primary-…` suffixed),
+      // so the SINGLE-FLIGHT index is what a race actually hits — a shared
+      // default thread id would trip the thread-uniqueness index instead and
+      // test the wrong guard (hunt 2026-08-29: the translator now tells the
+      // two apart by the violated columns).
+      threadId: "primary-a",
       dataRoot: store.dataRoot,
     };
     // First delivering run — left in flight (NOT settled), so its row is still
@@ -149,18 +161,80 @@ describe("run-service lifecycle", () => {
     // A second delivering start for the SAME task must 409 (partial unique index
     // idx_agent_runs__one_delivering) — this is the atomic guard behind the
     // service's preflight check.
-    await expect(startTestRun(store.db, { ...primary, prompt: "go2" })).rejects.toMatchObject({
+    await expect(
+      startTestRun(store.db, { ...primary, prompt: "go2", threadId: "primary-b" }),
+    ).rejects.toMatchObject({
       status: 409,
     });
 
     // A reviewer (supporting) run for the same task is NOT constrained.
+    queueFakeRun(
+      instantScript([{ t: "1", ev: "init", tag: "system·init", text: "s2" }]),
+    );
     const reviewer = await startTestRun(store.db, {
       ...primary,
       role: "Reviewer",
       kind: "reviewer",
       prompt: "review",
+      threadId: "r0-a",
     });
     expect(reviewer.runId).toBeTruthy();
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: first.runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
+    await settle();
+  });
+
+  it("hunt 2026-08-29: a second concurrent SUPPORTING run of the same profile is rejected atomically (409)", async () => {
+    // P8 gave each supporting engagement one destructively re-cloned checkout,
+    // so two live runs of the same profile are exactly as unsafe as two
+    // delivering runs — the second clone rm-rfs the first run's working tree
+    // mid-run. The JS preflight in dispatchAgentRun has the identical
+    // check-then-await window F10-05 closed for primary; this pins its DB
+    // backstop (idx_agent_runs__one_live_per_support).
+    queueFakeRun({
+      lines: [{ t: "1", ev: "init", tag: "system·init", text: "session" }],
+      sessionId: "sess-test",
+      keepRunning: true,
+    });
+    const supporting = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Reviewer",
+      kind: "reviewer" as const,
+      backend: "claude" as const,
+      model: "claude-sonnet-4-5",
+      prompt: "review",
+      agentProfileId: "rev",
+      // Distinct threads per dispatch, as the real thread naming mints them —
+      // the SUPPORT single-flight index is the guard under test.
+      threadId: "r0-a",
+      dataRoot: store.dataRoot,
+    };
+    const first = await startTestRun(store.db, supporting);
+    expect(first.runId).toBeTruthy();
+    await expect(
+      startTestRun(store.db, { ...supporting, prompt: "review again", threadId: "r0-b" }),
+    ).rejects.toMatchObject({ status: 409 });
+    // A DIFFERENT supporting profile still runs concurrently — the profile id
+    // is in the index key, so per-agent isolation is exactly what survives.
+    queueFakeRun(
+      instantScript([{ t: "1", ev: "init", tag: "system·init", text: "s2" }]),
+    );
+    const other = await startTestRun(store.db, {
+      ...supporting,
+      agentProfileId: "qa",
+      prompt: "verify",
+      threadId: "r1-a",
+    });
+    expect(other.runId).toBeTruthy();
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: first.runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
     await settle();
   });
 

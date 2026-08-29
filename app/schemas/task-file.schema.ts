@@ -262,6 +262,12 @@ export const recommendationSchema = z
     profileId: z.string().optional(),
     /** run_agent — the directive the operator wants the run to follow. */
     prompt: z.string().optional(),
+    /** run_agent — the operator's EXPLICIT posture hint, persisted so Apply
+     *  dispatches what was recommended (hunt 2026-08-29: the recommend arm
+     *  announced "as a supporting agent" and then dropped the hint, so Apply
+     *  re-derived the posture and could install the opposite one). Absent =
+     *  no hint (Apply derives, exactly like a hint-less dispatch). */
+    delivers: z.boolean().optional(),
     /** transition — the target stage id. */
     toStageId: z.string().optional(),
     /** Button label, e.g. "Run Developer". */

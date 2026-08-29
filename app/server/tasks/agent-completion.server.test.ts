@@ -373,6 +373,45 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(reply?.text).toContain("cc @Arda Kaya @operator");
   });
 
+  it("dispatch-completion contract: a tag of a DIFFERENT person sharing the first name does NOT satisfy the contract (hunt 2026-08-29)", async () => {
+    // The old check was a raw substring on "@<firstWord>": a report tagging
+    // "@Arda Other" (someone else) satisfied it for dispatcher "Arda Test",
+    // while the fan-out ladder delivered that tag to the OTHER person — the
+    // one guaranteed ping vanished exactly when names collided. The check now
+    // asks the SAME ladder "would this text notify the dispatcher's userId?".
+    insertUser(store.db, {
+      id: "u_arda_other",
+      email: "arda.other@viberr.test",
+      name: "Arda Other",
+      role: "member",
+    });
+    writeReviewTask();
+    const runId = await finishedRunWith(
+      "@Arda Other done — @operator over to you. Verdict: approve.",
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        dispatchedByName: store.users.arda.name,
+        dispatchedByUserId: store.users.arda.id,
+      },
+      { id: runId, state: "finished" },
+    );
+    const reply = taskFile().parsed.timeline.find((e) => e.type === "comment");
+    // The dispatcher's own full-name tag is appended; @operator already stood.
+    expect(reply?.text).toContain(`cc @${store.users.arda.name}`);
+    expect(reply?.text).not.toContain("cc @operator");
+  });
+
   it("dispatch-completion contract: a report that already tags both gets NO cc line", async () => {
     writeReviewTask();
     const runId = await finishedRunWith(

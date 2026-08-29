@@ -66,8 +66,14 @@ export type OwnerAction = "take" | "assign" | "release";
  * imposes on such a run.
  */
 const GHOST_NAME = "profile no longer here";
-const GHOST_NOTE =
+/** Hunt 2026-08-29: one collapsed note told the DELIVERING row "Release it" —
+ *  a control that row deliberately withholds (the deliverer owns the
+ *  workspace/branch; the server refuses to release it). Per-posture recovery
+ *  copy, like the two notes the pre-rework panel carried. */
+const GHOST_SUPPORTING_NOTE =
   "Not deployed on this project any more. Release it, or re-deploy the profile on the Agents page.";
+const GHOST_DELIVERING_NOTE =
+  "Not deployed on this project any more. Re-deploy the profile on the Agents page, or hand delivery to another agent.";
 
 export interface TaskMemberView {
   userId: string;
@@ -341,9 +347,16 @@ function OperatorRunControl({
   const [delay, setDelay] = useState<RunDelay>("now");
   const backendLabel = defaultBackend === "claude" ? "Claude" : "Codex";
   const backendMissing = !backendAvailable[defaultBackend];
-  // F20-5: an open decision packet is refused server-side just like a closed
-  // task is, so it joins `disabled` in switching the control off.
-  const off = busy || !!disabled || !!blockedReason || backendMissing;
+  // Hunt 2026-08-29: two different kinds of "off". `busy`/`disabled` (closed
+  // task) kill the whole control; the open-packet refusal (F20-5) and an
+  // unconfigured backend (P11-41) refuse a run NOW — but scheduleTaskAction
+  // refuses neither (the packet resolves, the backend gets configured, and
+  // the fired run resolves the live profile anyway), so a picked delay keeps
+  // the button alive as "Schedule" instead of blocking the one action that
+  // still works.
+  const hardOff = busy || !!disabled;
+  const runNowBlocked = !!blockedReason || backendMissing;
+  const off = hardOff || (delay === "now" && runNowBlocked);
   const run = () => {
     if (off) return;
     onRun(steer.trim(), delayMinutes(delay));
@@ -358,14 +371,14 @@ function OperatorRunControl({
         value={steer}
         ariaLabel="Steer this operator run (optional)"
         placeholder="Optional: tell the operator what this run should focus on"
-        disabled={off}
+        disabled={hardOff}
         maxLength={2000}
         onChange={setSteer}
         onSubmit={run}
       />
       <DelayPicker
         value={delay}
-        disabled={off}
+        disabled={hardOff}
         label="When the operator run starts"
         onChange={setDelay}
       />
@@ -444,6 +457,7 @@ function AgentRunControl({
   agents,
   activeProfileIds,
   deliveringProfileId,
+  engagedSupportingIds,
   busy,
   closed,
   schedules,
@@ -455,6 +469,10 @@ function AgentRunControl({
   activeProfileIds: string[];
   /** The current delivering engagement's profile id (null = none yet). */
   deliveringProfileId: string | null;
+  /** Profiles already engaged as SUPPORTING — the dispatch keeps an existing
+   *  engagement's shape, so the posture line must too (hunt 2026-08-29: a
+   *  repo-write profile engaged supporting was promised delivery). */
+  engagedSupportingIds: string[];
   busy: boolean;
   /** G9/P14-WL-07: the task is at the terminal stage (or archived). */
   closed: boolean;
@@ -470,14 +488,37 @@ function AgentRunControl({
   const agentNameOf = (profileId: string) =>
     agents.find((a) => a.id === profileId)?.name;
 
+  // Hunt 2026-08-29: the early returns below used to swallow the pending
+  // schedule rows too — and the deleted Scheduled-re-runs panel was the only
+  // other surface that listed them, so an entry scheduled before the task
+  // closed (or before the roster emptied) became invisible AND uncancellable
+  // while the runner still counted it due. Whatever else the cell says, the
+  // pending entries render.
+  const pending = (
+    <PendingSchedules
+      schedules={schedules}
+      agentNameOf={agentNameOf}
+      canCancel
+      busy={scheduleBusy}
+      onCancel={onCancelSchedule}
+    />
+  );
   if (closed) {
     // P14-WL-07: a closed task must not offer to start runs.
-    return <span className="sub">Task closed. Reopen it to run an agent.</span>;
+    return (
+      <span className="op-run agent-run">
+        <span className="sub">Task closed. Reopen it to run an agent.</span>
+        {pending}
+      </span>
+    );
   }
   if (agents.length === 0) {
     return (
-      <span className="sub">
-        No agents deployed. Deploy one on the Agents page first.
+      <span className="op-run agent-run">
+        <span className="sub">
+          No agents deployed. Deploy one on the Agents page first.
+        </span>
+        {pending}
       </span>
     );
   }
@@ -493,15 +534,23 @@ function AgentRunControl({
     setDelay("now");
   };
   // What the dispatch will make of the pick — said BEFORE the run is spent.
+  // An EXISTING engagement keeps its shape server-side, so it decides first
+  // (hunt 2026-08-29); capability derivation covers only the unengaged case.
   const posture = !selected
     ? null
-    : selected.capabilities?.delivery === false
-      ? selected.capabilities.verdict
-        ? "Runs as a reviewer: its verdict gates acceptance."
-        : "Runs as a supporting agent (no repo write)."
-      : deliveringProfileId === null || deliveringProfileId === selected.id
-        ? "Runs as the delivering agent: it owns the branch and PR."
-        : "Runs as a supporting agent (another agent owns delivery).";
+    : selected.id === deliveringProfileId
+      ? "Runs as the delivering agent: it owns the branch and PR."
+      : engagedSupportingIds.includes(selected.id)
+        ? selected.capabilities?.verdict
+          ? "Runs as a reviewer (already engaged): its verdict gates acceptance."
+          : "Runs as a supporting agent (already engaged)."
+        : selected.capabilities?.delivery === false
+          ? selected.capabilities.verdict
+            ? "Runs as a reviewer: its verdict gates acceptance."
+            : "Runs as a supporting agent (no repo write)."
+          : deliveringProfileId === null
+            ? "Runs as the delivering agent: it owns the branch and PR."
+            : "Runs as a supporting agent (another agent owns delivery).";
 
   return (
     <span className="op-run agent-run">
@@ -566,13 +615,7 @@ function AgentRunControl({
         The run reports back tagging you and the operator, which then continues
         coordination.
       </span>
-      <PendingSchedules
-        schedules={schedules}
-        agentNameOf={agentNameOf}
-        canCancel
-        busy={scheduleBusy}
-        onCancel={onCancelSchedule}
-      />
+      {pending}
     </span>
   );
 }
@@ -640,8 +683,13 @@ function EngagedAgents({
                   : ""}
                 {running ? " · running…" : ""}
               </div>
-              {/* UX19-12: the row that holds the engagement names the state. */}
-              {ghost && <div className="sub">{GHOST_NOTE}</div>}
+              {/* UX19-12: the row that holds the engagement names the state —
+                  and its RECOVERY must be one the row actually offers. */}
+              {ghost && (
+                <div className="sub">
+                  {delivers ? GHOST_DELIVERING_NOTE : GHOST_SUPPORTING_NOTE}
+                </div>
+              )}
               {unavailable && (
                 <p className="deny-note">
                   <Icon name="alert" />
@@ -826,6 +874,7 @@ export function ExecutionProfile({
                 agents={deployedSpecialists}
                 activeProfileIds={activeAgentProfileIds}
                 deliveringProfileId={task.specialist?.profileId ?? null}
+                engagedSupportingIds={task.reviewers.map((r) => r.profileId)}
                 busy={runBusy}
                 closed={closed}
                 schedules={agentSchedules}

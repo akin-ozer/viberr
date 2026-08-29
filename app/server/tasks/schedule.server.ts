@@ -16,6 +16,7 @@ import {
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { getProject } from "~/server/projections/board-query.server";
+import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { CLONE_TIMEOUT_MS } from "~/server/tasks/git-clone-auth.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
@@ -341,6 +342,18 @@ export async function fireDueSchedules(
     if (!terminalCache.has(slug)) terminalCache.set(slug, terminalStageId(db, slug));
     return terminalCache.get(slug) ?? null;
   };
+  // Hunt 2026-08-29: the fire path runs under `operatorAuthorized`, which
+  // skips the route-layer requireRunAgents and with it the F17/R6-3
+  // ARCHIVED-PROJECT freeze — so a pending schedule kept engaging profiles and
+  // launching unattended runs on a project every interactive door refuses as
+  // read-only. Decide it here, beside the task-level mootness.
+  const projectArchivedCache = new Map<string, boolean>();
+  const projectArchivedFor = (slug: string): boolean => {
+    if (!projectArchivedCache.has(slug)) {
+      projectArchivedCache.set(slug, getProject(db, slug)?.archived === true);
+    }
+    return projectArchivedCache.get(slug) ?? false;
+  };
 
   /** A stale claim = claimed but its lease expired (the enqueuing tick crashed
    *  before finalizing). Re-driven so the action is never lost (F10-16). */
@@ -364,6 +377,8 @@ export async function fireDueSchedules(
     prompt: string;
     /** Who scheduled it — the dispatch-completion contract's triggerer. */
     createdByLabel: string;
+    /** The scheduler's user id (the cc-append verifies against it). */
+    createdBy: string;
   }[] = [];
 
   for (const row of rows) {
@@ -394,8 +409,27 @@ export async function fireDueSchedules(
     // Both dimensions are now decided from the same locked read, and that
     // belt-and-braces stays belt-and-braces.)
     const terminal = terminalFor(row.project_slug);
+    const projectFrozen = projectArchivedFor(row.project_slug);
 
     for (const s of due) {
+      // Hunt 2026-08-29: a run-agent occurrence whose profile ALREADY has a
+      // live run on the task would only bounce off the single-flight 409 at
+      // fire time — and each bounce writes a "starting" note and burns a
+      // bounded retry. Leave it pending this tick, silently; the next tick
+      // re-checks. (A race that slips past this is still caught at dispatch
+      // and deferred below, without spending a retry.)
+      if (s.action === "run-agent" && s.profileId) {
+        const liveSameProfile = listRunsForTaskRows(
+          db,
+          row.project_slug,
+          row.task_key,
+        ).some(
+          (r) =>
+            r.agent_profile_id === s.profileId &&
+            (r.state === "running" || r.state === "queued"),
+        );
+        if (liveSameProfile && !isStaleClaim(s)) continue;
+      }
       try {
         // CLAIM the occurrence in the FILE first (crash-safe). A moot Done task
         // is retired straight to `fired`; otherwise we reserve it as `claimed`
@@ -417,6 +451,7 @@ export async function fireDueSchedules(
             // between the SELECT and this locked read never rides a stale
             // snapshot into a real, unwatched operator turn.
             const mootNow =
+              projectFrozen ||
               parsed.frontmatter.archived === true ||
               (terminal !== null && parsed.frontmatter.stage === terminal);
             if (mootNow) {
@@ -428,9 +463,11 @@ export async function fireDueSchedules(
                   // Name the REAL reason — the audit row distinguishes
                   // `skipped-archived` from `skipped-done`, and the note a human
                   // reads must not tell an archived task it was "already Done".
-                  parsed.frontmatter.archived === true
-                    ? `**Scheduled action skipped:** ${row.task_key} has been archived — the scheduled run is moot.`
-                    : `**Scheduled action skipped:** ${row.task_key} is already Done — the scheduled run is moot.`,
+                  projectFrozen
+                    ? `**Scheduled action skipped:** the project has been archived (read-only) — the scheduled run is moot.`
+                    : parsed.frontmatter.archived === true
+                      ? `**Scheduled action skipped:** ${row.task_key} has been archived — the scheduled run is moot.`
+                      : `**Scheduled action skipped:** ${row.task_key} is already Done — the scheduled run is moot.`,
                 ),
               );
             } else {
@@ -467,7 +504,7 @@ export async function fireDueSchedules(
             // The outcome names what the FILE said at claim time, so the audit
             // row and the retirement can never disagree (F19-20).
             outcome: wasMoot
-              ? claimedFile.frontmatter.archived === true
+              ? projectFrozen || claimedFile.frontmatter.archived === true
                 ? "skipped-archived"
                 : "skipped-done"
               : "claimed",
@@ -484,6 +521,7 @@ export async function fireDueSchedules(
             profileId: s.profileId ?? null,
             prompt: s.prompt ?? "",
             createdByLabel: s.createdByLabel ?? "",
+            createdBy: s.createdBy ?? "",
           });
           fired += 1;
         }
@@ -513,8 +551,19 @@ export async function fireDueSchedules(
          *  explicit delivery ask). Terminal `failed` with the reason on the
          *  timeline — never a silent three-strike retry loop. */
         let refusedValidation: string | null = null;
+        /** Hunt 2026-08-29: a same-profile single-flight conflict at fire time
+         *  is a WAIT, not a strike — defer the occurrence back to pending with
+         *  no retry spent; the next tick's claim pre-check holds it until the
+         *  live run ends. */
+        let deferredConflict = false;
         try {
-          if (t.action === "run-agent" && t.profileId) {
+          if (t.action === "run-agent" && !t.profileId) {
+            // A run-agent entry with no profile (hand-edited file, or a
+            // pre-validation write) can never dispatch — terminal, visibly,
+            // rather than falling through to a surprise operator turn.
+            refusedValidation = "the entry names no agent to run";
+            ok = true;
+          } else if (t.action === "run-agent" && t.profileId) {
             // Dynamic-dispatch rework: the scheduled agent run. Resolves the
             // LIVE deployment at fire time (R22's rule — the profile ID is the
             // pin, nothing else). The scheduler is the dispatch-completion
@@ -530,6 +579,7 @@ export async function fireDueSchedules(
               if (t.createdByLabel) dispatch.directiveFrom = t.createdByLabel;
             }
             if (t.createdByLabel) dispatch.triggeredByName = t.createdByLabel;
+            if (t.createdBy) dispatch.triggeredByUserId = t.createdBy;
             await startAgentRun(
               db,
               dispatch,
@@ -566,6 +616,12 @@ export async function fireDueSchedules(
             refusedValidation =
               error.userMessage || "the dispatch was refused as invalid";
             ok = true; // terminal disposition, finalized below — not a retry
+          } else if (
+            t.action === "run-agent" &&
+            error instanceof AppError &&
+            error.status === 409
+          ) {
+            deferredConflict = true; // wait for the live run; no retry spent
           } else {
             logger.warn("scheduled run failed", {
               taskKey: t.taskKey,
@@ -585,6 +641,14 @@ export async function fireDueSchedules(
                 (x) => x.id === t.scheduleId,
               );
               if (!target || target.status !== "claimed") return;
+              if (deferredConflict) {
+                // Back to pending, retries untouched: the agent is simply
+                // still busy, and three 60s ticks must not spend the whole
+                // retry budget on an agent run that legitimately takes longer.
+                target.status = "pending";
+                target.claimedAt = null;
+                return;
+              }
               if (refusedValidation) {
                 // The dispatch can never succeed as scheduled (undeployed
                 // profile, ineligible stage) — terminal, with the reason where

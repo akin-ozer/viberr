@@ -30,8 +30,11 @@ export interface RecommendationView {
     // performs the delivery under the human's authorization.
     | "delivery";
   profileId?: string;
-  /** run_agent — the directive the dispatched run will follow. */
+  /** run_agent — the directive the dispatched run will follow (rendered on the
+   *  card: the human must see the instruction they are authorizing). */
   prompt?: string;
+  /** run_agent — the operator's explicit posture hint, when it gave one. */
+  delivers?: boolean;
   toStageId?: string;
   label: string;
   detail: string;
@@ -89,10 +92,28 @@ export function OperatorRecommendations({
                 <span className="op-rec-kind">
                   <Icon name={KIND_ICON[r.kind]} />
                   {KIND_LABEL[r.kind]}
+                  {/* Hunt 2026-08-29: an explicit posture hint rides the card
+                      and Apply installs it — say which one, or the human
+                      authorizes a shape they never saw. */}
+                  {r.kind === "run_agent" && r.delivers !== undefined
+                    ? r.delivers
+                      ? " · delivering"
+                      : " · supporting"
+                    : ""}
                 </span>
                 <span className="op-rec-title">{r.label}</span>
               </div>
               {r.detail && <div className="op-rec-detail">{r.detail}</div>}
+              {/* Hunt 2026-08-29: `prompt` is the DIRECTIVE Apply hands the
+                  run. It was never rendered, so whenever the operator supplied
+                  a separate `reason` the human approved an instruction they
+                  had not seen. Shown only when it adds information the detail
+                  line does not already carry verbatim. */}
+              {r.kind === "run_agent" && r.prompt && r.prompt !== r.detail && (
+                <div className="op-rec-prompt">
+                  Directive: &ldquo;{r.prompt}&rdquo;
+                </div>
+              )}
             </div>
             {/* Apply AND Dismiss are both maintainer-level (M1) — the server
                 enforces admin|maintainer for each, so hide them from lower

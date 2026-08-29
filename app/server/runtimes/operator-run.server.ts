@@ -48,6 +48,7 @@ import {
 } from "~/server/github/update-branch-operator.server";
 import {
   deliverGate,
+  dispatchGate,
   gate,
   operatorAcceptCompletion,
   operatorDeliverForReview,
@@ -1478,9 +1479,16 @@ export function operatorPlanToolsFor(
       ? deliverGate(authority) !== "deny"
       : toolName === "update_branch_from_base"
         ? updateBranchGate(authority) !== "deny"
-        : OPERATOR_PLAN_TOOL_CAPABILITIES[toolName].some(
-          (cap) => gate(authority, cap) !== "deny",
-        ),
+        : toolName === "run_agent"
+          ? // Dispatch-rework hunt (2026-08-29): `dispatch-agents` carries the
+            // absent-means-default polarity (pre-rework deployments store only
+            // the retired assign/summon ids) — the plain gate read it as deny
+            // and silently withheld dispatching from every existing project's
+            // Codex operator. Same resolver the Claude toolkit uses.
+            dispatchGate(authority) !== "deny"
+          : OPERATOR_PLAN_TOOL_CAPABILITIES[toolName].some(
+              (cap) => gate(authority, cap) !== "deny",
+            ),
   );
   // A structured-output `enum` may not be empty. An operator with NOTHING
   // granted is a misconfiguration rather than a run shape we can express, so

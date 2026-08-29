@@ -716,10 +716,20 @@ describe("ExecutionProfile — the AgentSelect combobox", () => {
     );
   });
 
-  it("keyboard: arrows move the active row, Enter picks it, the input takes the name", () => {
+  it("keyboard: arrows arm and move the active row, Enter picks it, the input takes the name", () => {
     const { container } = renderExec(execTask());
     const input = agentInput(container)!;
     fireEvent.focus(input);
+    // Hunt 2026-08-29: a focus-open starts UNARMED — no row highlighted, so a
+    // pass-through Tab (or reflexive Enter) can commit nothing.
+    expect(
+      agentOptions(container).some(
+        (o) => o.getAttribute("aria-selected") === "true",
+      ),
+    ).toBe(false);
+    // The first arrow ARMS row 0; the second moves to row 1.
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(agentOptions(container)[0]!.getAttribute("aria-selected")).toBe("true");
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(agentOptions(container)[1]!.getAttribute("aria-selected")).toBe("true");
     fireEvent.keyDown(input, { key: "Enter" });
@@ -727,6 +737,25 @@ describe("ExecutionProfile — the AgentSelect combobox", () => {
     expect(input.value).toBe("Reviewer");
     // The pick armed the run control.
     expect(agentRunBtn(container).disabled).toBe(false);
+  });
+
+  it("a bare Tab through the focus-opened menu commits NOTHING (hunt 2026-08-29)", () => {
+    // The menu opens on focus with the whole roster; row 0 used to start
+    // active, so tabbing THROUGH the control silently selected the
+    // first-deployed agent — typically the repo-write deliverer — and the next
+    // Enter in the prompt input dispatched a billable run nobody chose.
+    const { container } = renderExec(execTask());
+    const input = agentInput(container)!;
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "Tab" });
+    fireEvent.blur(input);
+    expect(input.value).toBe("");
+    expect(agentRunBtn(container).disabled).toBe(true);
+    // Enter on the fresh focus-open likewise picks nothing — it just closes.
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(agentMenu(container)).toBeNull();
+    expect(input.value).toBe("");
   });
 
   it("an Enter that only confirms an IME candidate does NOT pick a row", () => {
@@ -883,6 +912,76 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
     );
   });
 
+  it("hunt 2026-08-29: an ALREADY-ENGAGED supporting profile's posture says so — the server keeps its shape", () => {
+    // A repo-write profile engaged as SUPPORTING on a deliverer-less task used
+    // to be promised delivery ("it owns the branch and PR") while the dispatch
+    // honors the existing engagement and runs it read-only — producing no
+    // branch and no PR against the panel's own claim.
+    const { container } = renderExec(
+      execTask({
+        reviewers: [
+          {
+            kind: "agent",
+            profileId: "developer",
+            backend: "codex",
+            name: "Codex",
+            role: "Implementation",
+          },
+        ],
+      }),
+    );
+    pickAgent(container, "Developer");
+    expect(container.querySelector(".agent-run")!.textContent).toContain(
+      "Runs as a supporting agent (already engaged).",
+    );
+    cleanup();
+    // A verdict-capable engaged reviewer keeps the gating claim.
+    const second = renderExec(
+      execTask({
+        reviewers: [
+          {
+            kind: "agent",
+            profileId: "reviewer",
+            backend: "claude",
+            name: "Claude",
+            role: "Code review",
+          },
+        ],
+      }),
+    );
+    pickAgent(second.container, "Reviewer");
+    expect(second.container.querySelector(".agent-run")!.textContent).toContain(
+      "Runs as a reviewer (already engaged): its verdict gates acceptance.",
+    );
+  });
+
+  it("hunt 2026-08-29: pending agent schedules stay visible (and cancellable) on a CLOSED task and an EMPTY roster", () => {
+    // The closed/no-agents early returns used to swallow the schedule rows —
+    // and the deleted Scheduled-re-runs panel was the only other surface that
+    // listed them, so a pre-existing entry became invisible and uncancellable
+    // while the runner still counted it due.
+    const pending = [
+      schedule({ id: "sch-ag", action: "run-agent", profileId: "reviewer", prompt: "recheck" }),
+    ];
+    const closed = renderExec(
+      execTask({ displayReadiness: "accepted" }),
+      { schedules: pending },
+    );
+    expect(closed.container.textContent).toContain(
+      "Task closed. Reopen it to run an agent.",
+    );
+    expect(closed.container.querySelector(".agent-run .sched-list")).not.toBeNull();
+    expect(closed.container.querySelector(".agent-run")!.textContent).toContain(
+      "Reviewer run · recheck",
+    );
+    cleanup();
+    const bare = renderExec(execTask(), {
+      deployedSpecialists: [],
+      schedules: pending,
+    });
+    expect(bare.container.querySelector(".agent-run .sched-list")).not.toBeNull();
+  });
+
   it("zero deployed agents: the cell says so and points at the Agents page", () => {
     const { container } = renderExec(execTask(), { deployedSpecialists: [] });
     expect(container.textContent).toContain(
@@ -986,6 +1085,33 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(container.textContent).toContain(
       "Open decision. Resolve it before running the operator.",
     );
+  });
+
+  it("hunt 2026-08-29: the open-packet refusal blocks running NOW — scheduling stays alive (the packet resolves before it fires)", () => {
+    // F20-5 refuses a paid no-op RIGHT NOW; scheduleTaskAction refuses no such
+    // thing. The single `off` flag used to kill the picker and the button
+    // together, blocking the one action that still works.
+    const { container, onRunOperator } = renderExec(
+      execTask({ operator: attachedOperator, packet: packet142 }),
+    );
+    expect(operatorRunBtn(container).disabled).toBe(true);
+    fireEvent.change(operatorDelay(container), { target: { value: "60" } });
+    const run = operatorRunBtn(container);
+    expect(run.disabled).toBe(false);
+    expect(run.textContent).toContain("Schedule");
+    fireEvent.change(operatorSteer(container), { target: { value: "revisit" } });
+    fireEvent.click(run);
+    expect(onRunOperator).toHaveBeenCalledWith("revisit", 60);
+    // Same split for an unconfigured backend (P11-41): schedule-later stays
+    // alive — the fired run resolves the live profile anyway (R22).
+    cleanup();
+    const missing = renderExec(execTask({ operator: attachedOperator }), {
+      operatorBackend: "codex",
+      backendAvailable: { claude: true, codex: false },
+    });
+    expect(operatorRunBtn(missing.container).disabled).toBe(true);
+    fireEvent.change(operatorDelay(missing.container), { target: { value: "60" } });
+    expect(operatorRunBtn(missing.container).disabled).toBe(false);
   });
 
   it("a closed task disables the operator run and names the @operator comment path (N20-17)", () => {

@@ -190,6 +190,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // dynamic-dispatch outgoing (2026-08-29): the engage/prompt/run tool trio,
     // replaced by the single `run_agent`.
     "877c65d247e8c1be0852191469bdcb78910e2897baa6130e11b74a3e4c6f3e93",
+    // dispatch-hunt outgoing (2026-08-29): the Hand-off-truth line that claimed
+    // the server delivers on entering Review (contradicting R15-2), and a Tools
+    // list omitting deliver_for_review / update_branch_from_base.
+    "11715eaceefcc11c7cc408e66eb037ab324b637c26ee5792e6824763887ec0b7",
   ],
   [path.join("skills", "developer-expertise", "SKILL.md")]: [
     "2cd21e2f0b11a3d35ca0188bf1d42af66f4149b5d7ad3bbb2162cdeb712d91fa",

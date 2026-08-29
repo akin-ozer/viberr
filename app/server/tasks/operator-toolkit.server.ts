@@ -9,6 +9,7 @@ import {
 import type { TaskMutationContext } from "./task-actions.server";
 import {
   deliverGate,
+  dispatchGate,
   gate,
   operatorAcceptCompletion,
   operatorDeliverForReview,
@@ -531,7 +532,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   // Dynamic-dispatch rework (2026-08-29): ONE tool selects AND runs an agent —
   // the collapsed replacement for engage_agent / run_agent / prompt_agent.
   // Gated by `dispatch-agents` (the collapsed assign/summon pair).
-  if (gate(authority, "dispatch-agents") !== "deny") {
+  if (dispatchGate(authority) !== "deny") {
     add(
       tool(
         "run_agent",

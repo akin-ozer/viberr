@@ -206,6 +206,24 @@ describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant"
     ).toContain("Deliver the branch & open the review PR");
   });
 
+  it("hunt 2026-08-29: an ABSENT dispatch-agents grant renders at its runtime mode (direct), mirroring dispatchGate", () => {
+    // Pre-rework deployments store only the retired assign/summon ids; the
+    // runtime's dispatchGate resolves the absent grant to the catalog default
+    // and keeps dispatching. A surface rendering "off" over that live
+    // authority is the F15-20 drift class this file exists to prevent.
+    // Canary: make agents-query's absentMode fall through to "off" for
+    // dispatch-agents.
+    const view = effectiveProfileView(
+      operatorDeployment([
+        { capabilityId: "assign-primary-specialist", mode: "direct" },
+        { capabilityId: "summon-reviewers", mode: "direct" },
+      ]),
+      undefined,
+      absentDeliverReviewPrMode(false),
+    );
+    expect(view.actions.direct).toContain("Select & run agents");
+  });
+
   it("R15-9: on a human-gated project the SAME absent grant materializes as recommend", () => {
     // The whole point of R15-9: two projects with no stored grant must not
     // differ by creation date. A project whose pre-work advances are human-gated

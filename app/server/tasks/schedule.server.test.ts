@@ -415,6 +415,65 @@ describe("fireDueSchedules", () => {
     expect(audit[0]?.details).toMatchObject({ outcome: "skipped-archived" });
   });
 
+  it("hunt 2026-08-29: an ARCHIVED PROJECT never fires — the freeze the fire path's operatorAuthorized bypassed", async () => {
+    // The fire arm runs under `operatorAuthorized: true`, which skips
+    // requireRunAgents and with it the F17/R6-3 archived-project read-only
+    // freeze — so a pending schedule kept engaging profiles and launching
+    // unattended runs on a project every interactive door refuses. The claim
+    // now folds the project's own archived flag into mootness.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        schedules: [
+          rawSchedule({ id: "sch_frozen", action: "run-agent", profileId: "dev" }),
+        ],
+      }),
+    });
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      archived: true,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(0);
+    expect(res.skipped).toBe(1);
+    expect(schedules("VIB-1").find((s) => s.id === "sch_frozen")!.status).toBe("fired");
+    expect(startedRunSpecs()).toHaveLength(0);
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    // No engagement was written and the note names the PROJECT freeze.
+    expect(file.parsed.frontmatter.engagements).toHaveLength(0);
+    const note = file.parsed.timeline.find((e) =>
+      /Scheduled action skipped/.test(e.text ?? ""),
+    );
+    expect(note?.text).toContain("project has been archived");
+  });
+
+  it("hunt 2026-08-29: a run-agent entry with NO profileId is retired as failed — never a surprise operator turn", async () => {
+    // The fire arm used to select on `action === "run-agent" && profileId`, so
+    // a hand-edited entry with a null profile fell through to the OPERATOR arm
+    // under a claim note that announced an agent run.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        schedules: [
+          rawSchedule({ id: "sch_noprof", action: "run-agent", profileId: null }),
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await fireDueSchedules(store.db, dctx());
+    await waitForSchedule("VIB-1", "sch_noprof", "failed");
+    expect(startedRunSpecs()).toHaveLength(0);
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const note = file.parsed.timeline.find((e) =>
+      /Scheduled action failed/.test(e.text ?? ""),
+    );
+    expect(note?.text).toContain("names no agent to run");
+  });
+
   it("the claim lease outlives the slowest LEGITIMATE start (a clone), so a live drive is never re-driven", () => {
     // R19-1 put a repository clone inside `runOperator`, BEFORE the drive
     // starts: a healthy scheduled drive can now sit there for up to

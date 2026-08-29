@@ -1075,6 +1075,9 @@ export interface StartAgentRunInput {
    * is the guidance half.
    */
   triggeredByName?: string;
+  /** The dispatcher's user id — the completion contract's cc-append verifies
+   *  "already tagged?" against the mention resolution ladder with it. */
+  triggeredByUserId?: string;
 }
 
 export async function startAgentRun(
@@ -1189,6 +1192,21 @@ async function dispatchAgentRun(
     // Explicit delivery hand-off to an agent currently engaged as supporting:
     // route through assignSpecialist (single-deliverer invariant, hand-off
     // event, live-primary-run refusal) and re-read.
+    //
+    // Dispatch-rework hunt (2026-08-29): the repo-write guard below used to
+    // live only on the UNENGAGED branch above, so a verdict-only reviewer
+    // already engaged as supporting could be handed delivery — recreating the
+    // exact ships-nothing dead end ruling 98(a) closes. Same check, same
+    // remedy-naming refusal, on BOTH doors to `delivers: true`.
+    const handoffView = listDeployedSpecialists(input.projectSlug, ctx).find(
+      (s) => s.id === input.profileId,
+    );
+    if (handoffView && handoffView.capabilities?.delivery !== true) {
+      throw AppError.validation(
+        `${handoffView.name} holds no repo-write grant, so it cannot own delivery. ` +
+          `Run it as a supporting agent, or grant "Execute code or write to the repo" on the Agents page.`,
+      );
+    }
     await assignSpecialist(
       db,
       {
@@ -2000,6 +2018,9 @@ async function dispatchAgentRun(
   // re-invokes the operator, bypassing the react heuristic (still depth-capped).
   if (input.triggeredByName?.trim()) {
     completion.dispatchedByName = input.triggeredByName.trim();
+    if (input.triggeredByUserId) {
+      completion.dispatchedByUserId = input.triggeredByUserId;
+    }
   }
   // Only a run started INSIDE an operator react loop carries the loop state —
   // its absence is what tells the completion handler not to continue a chain.

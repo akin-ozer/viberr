@@ -290,13 +290,14 @@ describe("Codex structured operator completion", () => {
 
   it("F28-O1: a mid-plan abort is narrated even when append-typed-events is WITHHELD", async () => {
     // The operator can dispatch agents but CANNOT append typed events. Its
-    // plan's run_agent throws (an explicit delivery hand-off to a profile with
-    // no repo-write grant), which aborts the plan. Before F28-O1 the abort
-    // notice went through the GATED operatorPostComment, which returns
-    // denied/noop WITHOUT throwing when append-typed-events is off — so
-    // `.catch()` never fired and the abort was swallowed, leaving the task
-    // stalled with nothing on the timeline. The fix narrates the abort
-    // DIRECTLY, so it lands regardless of the gate.
+    // plan's run_agent throws mid-plan (a single-flight 409: the profile
+    // already has a live run — the hunt turned the old no-repo-write hand-off
+    // into an operator-level noop, which no longer throws), which aborts the
+    // plan. Before F28-O1 the abort notice went through the GATED
+    // operatorPostComment, which returns denied/noop WITHOUT throwing when
+    // append-typed-events is off — so `.catch()` never fired and the abort was
+    // swallowed, leaving the task stalled with nothing on the timeline. The
+    // fix narrates the abort DIRECTLY, so it lands regardless of the gate.
     const project = readProjectFile({
       projectSlug: store.slug,
       dataRoot: store.dataRoot,
@@ -320,8 +321,9 @@ describe("Codex structured operator completion", () => {
           },
         },
         {
-          // Deployed but WITHOUT a repo-write grant — the delivers:true
-          // dispatch below is the plan step that throws mid-plan.
+          // Deployed but WITHOUT a repo-write grant — the dispatch below runs
+          // it as supporting, and the pre-inserted LIVE run row makes the
+          // single-flight preflight throw a 409 mid-plan.
           profileId: "developer",
           capabilities: [],
           extras: [],
@@ -336,21 +338,37 @@ describe("Codex structured operator completion", () => {
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // The live run the plan step collides with (the throwing seam).
+    upsertRun(store.db, {
+      id: "run_live_dev",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "r0-live",
+      role: "Implementation",
+      kind: "reviewer",
+      backend: "codex",
+      model: defaultModelFor("codex"),
+      sdk: "codex",
+      sessionId: null,
+      agentName: "Dev",
+      agentProfileId: "developer",
+      state: "running",
+    });
 
     await start();
     adapter.finish(
       store,
       JSON.stringify({
-        reasoning: "Kick off the delivering run.",
+        reasoning: "Kick off the run.",
         actions: [
           {
             tool: "run_agent",
             profileId: "developer",
-            delivers: true,
+            delivers: null,
             toStageId: null,
             packetType: null,
             text: null,
-            reason: "Run the delivering agent.",
+            reason: "Run the agent.",
             packetOptions: null,
           },
         ],
@@ -971,15 +989,35 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // A misconfiguration rather than an expressible run shape — every action it
     // then proposes is refused VISIBLY by the executor rather than silently.
     // R15-2: `deliver-review-pr` must be EXPLICITLY off here — an absent grant
-    // means granted (the capability postdates live deployments).
+    // means granted (the capability postdates live deployments). Hunt
+    // 2026-08-29: `dispatch-agents` carries the SAME polarity now
+    // (dispatchGate), so all-denied must withhold it explicitly too — an
+    // absent dispatch grant legitimately keeps run_agent alive.
     // A4: the fallback must not re-advertise the one action with effects
     // outside Viberr (push a branch, open a PR) that this policy just withheld.
-    const tools = operatorPlanToolsFor(authority({ "deliver-review-pr": "off" }));
+    const tools = operatorPlanToolsFor(
+      authority({ "deliver-review-pr": "off", "dispatch-agents": "off" }),
+    );
     // Dynamic-dispatch rework: engage_agent + prompt_agent collapsed into ONE
     // run_agent, so the fallback list shrank from 10 to 8.
     expect(tools).toHaveLength(8);
     expect(tools).not.toContain("deliver_for_review");
     expect(tools).toContain("flag_context_conflict");
+  });
+
+  it("dispatchGate: an ABSENT dispatch-agents grant keeps run_agent — pre-rework deployments store only the retired ids (hunt 2026-08-29)", () => {
+    // The owner's live deployments carry `assign-primary-specialist` +
+    // `summon-reviewers` and no `dispatch-agents` row; the plain gate read
+    // absent as deny and silently made the whole rework inert on every
+    // existing project. The gate now resolves absent to the catalog default.
+    const tools = operatorPlanToolsFor(
+      authority({
+        "assign-primary-specialist": "direct",
+        "summon-reviewers": "direct",
+        "generate-packets": "direct",
+      }),
+    );
+    expect(tools).toContain("run_agent");
   });
 
   it("A4: an UNDEPLOYED operator is never offered delivery, whatever the board's preset", () => {

@@ -816,6 +816,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           taskKey,
           profileId,
           triggeredByName: dispatcherName,
+          triggeredByUserId: actor.userId,
           ...backendOverride(formData),
         };
         if (prompt) {
@@ -990,7 +991,20 @@ export async function action({ request, params }: Route.ActionArgs) {
           actor,
           "schedule a run",
         );
-        const minutes = Math.max(1, Math.round(Number(formData.get("delayMinutes")) || 0));
+        // Hunt 2026-08-29: both inputs were unclamped — a crafted delayMinutes
+        // (1e15) overflowed Date into a RangeError 500, and the prompt had no
+        // cap while its sibling run-agent arm enforces 4000. Same bounds, and
+        // a validation refusal instead of a crash. 28 days is the ceiling: a
+        // schedule further out than the retention story is a note, not a plan.
+        const rawMinutes = Number(formData.get("delayMinutes"));
+        if (!Number.isFinite(rawMinutes) || rawMinutes < 1 || rawMinutes > 40_320) {
+          throw AppError.validation("Schedule between 1 minute and 28 days out.");
+        }
+        const minutes = Math.round(rawMinutes);
+        const schedPrompt = String(formData.get("prompt") ?? "");
+        if (schedPrompt.length > 4000) {
+          throw AppError.validation("Keep the run prompt under 4000 characters.");
+        }
         const dueAt = new Date(Date.now() + minutes * 60_000).toISOString();
         const schedProfileId = String(formData.get("profileId") ?? "").trim();
         // R22: no backend/autonomy — the fired run resolves the LIVE deployed
@@ -1000,7 +1014,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           projectSlug,
           taskKey,
           dueAt,
-          prompt: String(formData.get("prompt") ?? ""),
+          prompt: schedPrompt,
         };
         if (schedProfileId) {
           schedInput.action = "run-agent";

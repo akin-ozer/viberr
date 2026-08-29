@@ -377,7 +377,14 @@ export function effectiveProfileView(
   const absentMode = (c: (typeof UNIFIED_CAP_CATALOG)[number]): CapabilityMode => {
     if (alwaysHuman.has(c.id)) return "human";
     if (grantKind === "operator") {
-      return c.id === "use-web-search-fetch" ? c.defaultMode : "off";
+      // `dispatch-agents` mirrors `dispatchGate`'s absent-means-catalog-default
+      // polarity (dispatch-rework hunt, 2026-08-29): pre-rework deployments
+      // store only the retired assign/summon ids, and the runtime keeps
+      // dispatching — the surface must not render "off" over a live authority
+      // (F15-20's drift class). Web egress keeps its own catalog default.
+      return c.id === "use-web-search-fetch" || c.id === "dispatch-agents"
+        ? c.defaultMode
+        : "off";
     }
     return GRANT_REQUIRED_CAPABILITY_IDS.has(c.id) ? "off" : c.defaultMode;
   };

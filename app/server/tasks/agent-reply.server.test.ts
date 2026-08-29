@@ -1022,11 +1022,15 @@ describe("commentToAgent", () => {
       { dataRoot: store.dataRoot },
     );
 
-    // The run did NOT start, and the call did NOT throw.
+    // The run did NOT start, and the call did NOT throw. (Hunt 2026-08-29:
+    // the mention path now refuses a live SAME-PROFILE run up front — before
+    // the resume/fresh split, closing the resume branch's single-flight bypass
+    // — so the reason is that guard's own copy, which also tells the commenter
+    // their comment still reaches the agent.)
     expect(result.triggered).toBeNull();
     expect(result.agent).toMatchObject({ profileId: "dev" });
     expect(result.runNotStarted).toContain(
-      "delivering agent run is already in progress",
+      "already has a run in progress on this task",
     );
     // The human's comment IS on the timeline (recorded before the start attempt).
     const file = readTaskFile({

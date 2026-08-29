@@ -170,8 +170,11 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
   const ALL_CAPS = [
     "append-typed-events",
     "generate-packets",
-    "assign-primary-specialist",
-    "summon-reviewers",
+    // Hunt 2026-08-29: the collapsed dispatch grant. It MUST be in the uniform
+    // map — `dispatchGate` resolves an ABSENT grant to the catalog default
+    // (pre-rework deployments store only the retired assign/summon pair), so
+    // an all-off policy that omits it would legitimately keep run_agent.
+    "dispatch-agents",
     "stage-transitions",
     "deliver-review-pr",
     "update-task-branch",

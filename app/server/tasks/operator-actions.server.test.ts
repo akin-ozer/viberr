@@ -583,16 +583,44 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
       { dataRoot: store.dataRoot },
     );
     // "reviewer" holds no repo-write grant — a delivering run for it would own
-    // a branch it can ship nothing to, so the dispatch refuses by grant.
-    await expect(
-      operatorDispatchAgent(
-        store.db,
-        { dataRoot: store.dataRoot },
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", delivers: true },
-        authority("full"),
-      ),
-    ).rejects.toThrow(/holds no repo-write grant/i);
+    // a branch it can ship nothing to. The hunt hardened this from a thrown
+    // dispatch error into an operator-level NOOP naming the remedy (R21-2's
+    // posture) — refused BEFORE any card, trace or engage can announce it.
+    const refused = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", delivers: true },
+      authority("full"),
+    );
+    expect(refused.outcome).toBe("noop");
+    expect(refused.message).toMatch(/holds no repo-write grant/i);
+    expect(refused.message).toMatch(/Agents surface/);
     // The deliverer was not reassigned.
+    expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
+  });
+
+  it("refuses `delivers: false` aimed at the CURRENT deliverer — a delivering run cannot be demoted per-dispatch", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const { assignSpecialist } = await import("./specialist-run.server");
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    // Hunt 2026-08-29: the dispatch keeps an engaged profile's shape, so this
+    // hint used to be silently dropped — the run went out kind "primary" while
+    // the message and the selection trace said "a supporting agent". Refusing
+    // the contradiction keeps every governed surface honest.
+    const refused = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", delivers: false },
+      authority("full"),
+    );
+    expect(refused.outcome).toBe("noop");
+    expect(refused.message).toMatch(/IS the delivering agent/);
     expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
   });
 
@@ -705,6 +733,119 @@ describe("operatorDispatchAgent — recommend is an APPLYABLE run_agent card", (
     ).toContain("reviewer");
     expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
     interruptRunningRuns("VIB-1");
+  });
+
+  it("a NEWER prompt for the same agent REPLACES the pending card — never silently dropped (hunt 2026-08-29)", async () => {
+    // The per-target dedupe predates `prompt` on run_agent cards: the second
+    // recommendation was discarded whole, so the operator narrated directive Y
+    // while Apply dispatched the stale X.
+    deployRoster([
+      { capabilityId: "dispatch-agents", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("review");
+    await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", prompt: "Check the API surface." },
+      authority("supervised"),
+    );
+    await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", prompt: "Check the migration instead." },
+      authority("supervised"),
+    );
+    const recs = task().frontmatter.recommendations;
+    expect(recs).toHaveLength(1);
+    expect(recs[0]!.prompt).toBe("Check the migration instead.");
+    // An IDENTICAL re-recommendation stays the quiet no-op it always was.
+    await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", prompt: "Check the migration instead." },
+      authority("supervised"),
+    );
+    expect(task().frontmatter.recommendations).toHaveLength(1);
+  });
+
+  it("an explicit `delivers: false` hint rides the card and Apply installs THAT posture (hunt 2026-08-29)", async () => {
+    // The reproduced failure: deliverer-less task, repo-write Dev, the operator
+    // recommends a SUPPORTING run — the card dropped the hint, so Apply
+    // re-derived and installed Dev as the DELIVERER, the opposite shape.
+    deployRoster([
+      { capabilityId: "dispatch-agents", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("impl");
+    const r = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        prompt: "Investigate the flake. Do not touch the branch.",
+        delivers: false,
+      },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("recommended");
+    expect(r.message).toContain("as a supporting agent");
+    const recs = task().frontmatter.recommendations;
+    expect(recs[0]!.delivers).toBe(false);
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: recs[0]!.id },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    // Dev engaged SUPPORTING — no delivering engagement was minted.
+    expect(deliveringEngagement(task().frontmatter)).toBeNull();
+    expect(
+      supportingEngagements(task().frontmatter).map((x) => x.profileId),
+    ).toContain("developer");
+    interruptRunningRuns("VIB-1");
+  });
+});
+
+describe("dispatchGate — absent means the catalog default (hunt 2026-08-29)", () => {
+  it("a pre-rework deployment storing only the retired assign/summon ids still dispatches", async () => {
+    // The owner's live stores deploy the operator with
+    // `assign-primary-specialist` + `summon-reviewers` and no `dispatch-agents`
+    // row; the plain gate read absent as off → deny, silently making the whole
+    // rework inert on every existing project (no run_agent tool, denied
+    // dispatches) while transitions and delivery survived.
+    deployRoster([
+      { capabilityId: "assign-primary-specialist", mode: "direct" },
+      { capabilityId: "summon-reviewers", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("review");
+    const r = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
+    interruptRunningRuns("VIB-1");
+  });
+
+  it("an EXPLICIT `dispatch-agents: off` still denies — absent-means-granted is not a bypass", async () => {
+    deployRoster([
+      { capabilityId: "dispatch-agents", mode: "off" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("review");
+    const r = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("denied");
   });
 });
 

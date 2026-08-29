@@ -898,6 +898,32 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
     expect(result.init.status).toBe(400);
     expect(result.data.error).toBe("Pick an agent to run.");
   });
+
+  it("hunt 2026-08-29: schedule-action clamps its inputs — a crafted delayMinutes is a 400, never a Date RangeError 500", async () => {
+    // 1e15 minutes overflowed Date into `Invalid time value` (an unhandled
+    // RangeError, a 500); the prompt had no cap while the sibling run-agent
+    // arm enforces 4000. Same bounds, honest refusals.
+    // SAFETY: both refusals throw AppError.validation in the route before any
+    // schedule write, answered through `appErrorResponse`.
+    const overflow = (await postIntent("VIB-168", ids.arda, {
+      intent: "schedule-action", delayMinutes: "1e15", prompt: "x",
+    })) as ActionRefusal;
+    expect(overflow.init.status).toBe(400);
+    expect(overflow.data.error).toBe("Schedule between 1 minute and 28 days out.");
+
+    // SAFETY: same refusal arm as above — the clamp throws before any write.
+    const nonsense = (await postIntent("VIB-168", ids.arda, {
+      intent: "schedule-action", delayMinutes: "abc", prompt: "x",
+    })) as ActionRefusal;
+    expect(nonsense.init.status).toBe(400);
+
+    // SAFETY: same refusal arm — the prompt clamp throws before any write.
+    const oversize = (await postIntent("VIB-168", ids.arda, {
+      intent: "schedule-action", delayMinutes: "60", prompt: "y".repeat(4001),
+    })) as ActionRefusal;
+    expect(oversize.init.status).toBe(400);
+    expect(oversize.data.error).toBe("Keep the run prompt under 4000 characters.");
+  });
 });
 
 /* ------------------------------------ acceptance affordance + task archive */

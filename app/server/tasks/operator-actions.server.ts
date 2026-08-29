@@ -501,6 +501,28 @@ export function deliverGate(authority: OperatorAuthority): Gate {
   return absentDeliverReviewPrMode(authority.humanGatedBeforeWork);
 }
 
+/**
+ * The `dispatch-agents` gate with ABSENT-means-granted polarity (dispatch-
+ * rework bug hunt, 2026-08-29). Ruling 98(b) collapsed the persisted
+ * `assign-primary-specialist` + `summon-reviewers` pair into this id, and the
+ * canon (capabilities.ts, ruling 98) promised that an absent grant resolves to
+ * the catalog default so existing operator deployments keep dispatching — but
+ * every consumer went through the plain `gate()`, whose absent arm is `off` →
+ * deny: on EVERY deployment persisted before the rework (which stores only the
+ * retired ids) the operator silently lost the ability to put any agent to
+ * work, while keeping transitions and delivery. Same shape as `deliverGate`:
+ * an explicit stored mode wins; absent resolves to the catalog default
+ * (`direct` — dispatch predates nothing governance-wise, it IS the old pair's
+ * default); an undeployed operator stays denied (A4).
+ */
+export function dispatchGate(authority: OperatorAuthority): Gate {
+  if (!authority.deployed) return "deny";
+  if (authority.policy.has("dispatch-agents")) {
+    return gate(authority, "dispatch-agents");
+  }
+  return "direct";
+}
+
 // ------------------------------------------------------------- helpers
 
 function taskRef(ctx: TaskMutationContext, projectSlug: string, taskKey: string) {
@@ -705,6 +727,7 @@ async function addRecommendation(
     kind: RecommendationKind;
     profileId?: string;
     prompt?: string;
+    delivers?: boolean;
     toStageId?: string;
     label: string;
   },
@@ -720,6 +743,7 @@ async function addRecommendation(
   // and the card renderer both read these keys' presence.
   if (rec.profileId) recommendation.profileId = rec.profileId;
   if (rec.prompt) recommendation.prompt = rec.prompt;
+  if (rec.delivers !== undefined) recommendation.delivers = rec.delivers;
   if (rec.toStageId) recommendation.toStageId = rec.toStageId;
   // Same disclosure the narration path carries (S5-G3): the reasoning is
   // operator prose and can tag a human, so an ambiguous handle must not vanish.
@@ -729,14 +753,36 @@ async function addRecommendation(
   );
   let wasNew = false;
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-    const dup = parsed.frontmatter.recommendations.some(
+    const existing = parsed.frontmatter.recommendations.find(
       (r) =>
         r.kind === rec.kind &&
         r.profileId === rec.profileId &&
         r.toStageId === rec.toStageId,
     );
-    if (!dup) {
+    if (!existing) {
       parsed.frontmatter.recommendations.push(recommendation);
+      wasNew = true;
+    } else if (
+      existing.prompt !== recommendation.prompt ||
+      existing.delivers !== recommendation.delivers ||
+      existing.label !== recommendation.label
+    ) {
+      // Hunt 2026-08-29: the per-target dedupe predates `prompt`/`delivers`
+      // on run_agent cards, so a NEWER directive for the same agent was
+      // silently discarded — the operator narrated Y while Apply dispatched
+      // the stale X. A changed directive REPLACES the pending card's content
+      // in place (same id, so nothing dangles) and counts as new — it is a
+      // fresh decision the supervisors should be pinged about. An identical
+      // re-recommendation stays the quiet no-op it always was.
+      existing.label = recommendation.label;
+      existing.detail = recommendation.detail;
+      if (recommendation.prompt !== undefined) existing.prompt = recommendation.prompt;
+      else delete existing.prompt;
+      if (recommendation.delivers !== undefined) {
+        existing.delivers = recommendation.delivers;
+      } else {
+        delete existing.delivers;
+      }
       wasNew = true;
     }
     parsed.frontmatter.waiting = "human";
@@ -2081,7 +2127,7 @@ export async function operatorDispatchAgent(
   },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
-  const g = gate(authority, "dispatch-agents");
+  const g = dispatchGate(authority);
   if (g === "deny") {
     return {
       outcome: "denied",
@@ -2096,6 +2142,39 @@ export async function operatorDispatchAgent(
     };
   }
   const prompt = input.prompt?.trim() || undefined;
+  // Hunt 2026-08-29: refuse the two CONTRADICTORY hints up front, before any
+  // card or trace can announce a posture the dispatch would not install.
+  // (1) `delivers: true` for a profile with no repo-write grant — the dispatch
+  // refuses it at both engage doors; filing a card for it would strand a
+  // maintainer's Apply on that refusal.
+  if (input.delivers === true && !agent.capabilities.delivery) {
+    return {
+      outcome: "noop",
+      message:
+        `${agent.name} holds no repo-write grant, so it cannot own delivery. ` +
+        `Run it as a supporting agent (omit \`delivers\`), or a human grants ` +
+        `"Execute code or write to the repo" on the project's Agents surface.`,
+    };
+  }
+  // (2) `delivers: false` aimed at the CURRENT deliverer — dispatchAgentRun
+  // deliberately keeps an engaged profile's shape (a delivering run cannot be
+  // demoted per-dispatch), so honoring the hint in the label/trace while the
+  // run went out `kind: "primary"` was a governed lie.
+  const currentDeliverer = ((): string | null => {
+    const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+    return file
+      ? (deliveringEngagement(file.parsed.frontmatter)?.profileId ?? null)
+      : null;
+  })();
+  if (input.delivers === false && currentDeliverer === input.profileId) {
+    return {
+      outcome: "noop",
+      message:
+        `${agent.name} IS the delivering agent on this task — its runs deliver. ` +
+        `Omit \`delivers\` to run it, or hand delivery to another repo-write ` +
+        `profile first (\`delivers: true\` on that profile).`,
+    };
+  }
   const delivers = resolveDeliversIntent(
     ctx,
     input.projectSlug,
@@ -2114,6 +2193,9 @@ export async function operatorDispatchAgent(
       label: `Run ${agent.name}`,
     };
     if (prompt) rec.prompt = prompt;
+    // Persist the EXPLICIT hint so Apply dispatches what this arm announced —
+    // the card used to drop it and Apply re-derived, sometimes the opposite.
+    if (input.delivers !== undefined) rec.delivers = input.delivers;
     await addRecommendation(
       db,
       ctx,

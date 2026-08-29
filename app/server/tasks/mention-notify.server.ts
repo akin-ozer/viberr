@@ -164,6 +164,22 @@ export function ambiguousMentionHandles(
 }
 
 /**
+ * Would `text`'s @handles actually notify `userId`? The dispatch-completion
+ * contract's cc-append asks this with the SAME ladder the fan-out uses (hunt
+ * 2026-08-29): its old raw first-name substring check was satisfied by a tag
+ * of a DIFFERENT person sharing the dispatcher's first name — a handle this
+ * ladder rules ambiguous and delivers to nobody — so the one notification the
+ * contract guarantees was silently lost. One resolver, one answer.
+ */
+export function mentionNotifiesUser(
+  db: DatabaseSync,
+  text: string,
+  userId: string,
+): boolean {
+  return resolveMentionTargets(enabledUsers(db), text).userIds.includes(userId);
+}
+
+/**
  * `text` with the non-delivery disclosure appended when one of its @handles is
  * ambiguous — the form MACHINE authors (agents, the operator) use.
  *

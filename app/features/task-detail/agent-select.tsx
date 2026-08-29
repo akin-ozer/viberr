@@ -1,4 +1,4 @@
-import { useId, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useState, type KeyboardEvent } from "react";
 import {
   filterMentions,
   splitHighlight,
@@ -73,7 +73,13 @@ export function AgentSelect({
   const listId = useId();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  // Hunt 2026-08-29: the menu opens on bare FOCUS, and `active` used to start
+  // at 0 — so a keyboard user who merely tabbed THROUGH the control had Tab
+  // (or a reflexive Enter) silently commit roster row 0, and the very next
+  // Enter in the prompt input dispatched a billable run nobody chose. A pick
+  // is intentional only after the user TYPED or ARROWED: until then `active`
+  // is -1 and Enter/Tab commit nothing.
+  const [active, setActive] = useState(-1);
 
   const options = toOptions(agents, activeProfileIds);
   const selected = options.find((o) => o.id === selectedId) ?? null;
@@ -83,12 +89,26 @@ export function AgentSelect({
   // A dedicated selector lists the WHOLE roster (the composer's 8-row cap is
   // for an inline popover over prose); the menu itself scrolls.
   const items = filterMentions(options, query, 50);
-  const activeIndex = Math.min(active, Math.max(items.length - 1, 0));
-  const activeId = items.length ? `${listId}-opt-${activeIndex}` : undefined;
+  const activeIndex = active < 0 ? -1 : Math.min(active, items.length - 1);
+  const activeId =
+    activeIndex >= 0 && items.length ? `${listId}-opt-${activeIndex}` : undefined;
 
-  const openWith = (q: string) => {
+  // The menu scrolls (max-height in app.css) but arrowing only moved an index —
+  // on a roster taller than the box the highlight walked out of view.
+  useEffect(() => {
+    if (!activeId) return;
+    // jsdom renders the tests and implements no scrollIntoView — the scroll is
+    // a browser-only nicety, never load-bearing, so its absence is swallowed.
+    try {
+      document.getElementById(activeId)?.scrollIntoView({ block: "nearest" });
+    } catch {
+      /* jsdom */
+    }
+  }, [activeId]);
+
+  const openWith = (q: string, armedActive: number) => {
     setQuery(q);
-    setActive(0);
+    setActive(armedActive);
     setOpen(true);
   };
   const pick = (option: AgentOption) => {
@@ -98,16 +118,22 @@ export function AgentSelect({
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (!open) {
-      // Reopen from a settled selection on any typing intent.
+      // Reopen from a settled selection on any typing intent — arrowing IS
+      // interaction, so the first row arms.
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        openWith("");
+        openWith("", 0);
       }
       return;
     }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       if (!items.length) return;
+      if (activeIndex < 0) {
+        // First arrow after a focus-open arms the list at its nearest end.
+        setActive(event.key === "ArrowDown" ? 0 : items.length - 1);
+        return;
+      }
       const delta = event.key === "ArrowDown" ? 1 : -1;
       setActive((activeIndex + delta + items.length) % items.length);
     } else if (event.key === "Enter" || event.key === "Tab") {
@@ -116,10 +142,15 @@ export function AgentSelect({
       if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
         return;
       }
-      const item = items[activeIndex];
+      // Only an ARMED row commits (typed query or arrow navigation set it) —
+      // a bare Tab passing through the control must never select an agent.
+      const item = activeIndex >= 0 ? items[activeIndex] : undefined;
       if (item) {
         if (event.key === "Enter") event.preventDefault();
         pick(item);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        setOpen(false);
       }
     } else if (event.key === "Escape") {
       event.preventDefault();
@@ -144,16 +175,17 @@ export function AgentSelect({
         spellCheck={false}
         disabled={disabled}
         value={value}
-        onFocus={() => openWith("")}
+        onFocus={() => openWith("", -1)}
         onBlur={() => {
           setOpen(false);
           setQuery("");
         }}
         onChange={(e) => {
           // Typing invalidates the settled pick — the selection is a row pick,
-          // never free text (the id is what the dispatch submits).
+          // never free text (the id is what the dispatch submits). It also
+          // ARMS the first match: Enter/Tab may now commit it.
           if (selectedId) onSelect(null);
-          openWith(e.target.value);
+          openWith(e.target.value, e.target.value ? 0 : -1);
         }}
         onKeyDown={onKeyDown}
       />

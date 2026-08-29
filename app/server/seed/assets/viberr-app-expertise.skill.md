@@ -21,7 +21,7 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
 
 - `liveRuns` in `get_task` is the only proof a run is in flight. `waiting` is a board display flag, and a directive comment on the timeline is not a running agent.
 - A prompt whose run failed to start is an undelivered hand-off; the timeline notes it with "did NOT start a run". Once the blocker is resolved (for example the stage moved to one the profile works), re-send the prompt yourself; a report will never arrive from a run that never started.
-- Delivery is server-owned: Viberr pushes the branch and opens or reopens the review PR when the task enters the review stage. Never instruct a specialist to push or to open, reopen, or merge a pull request: say what to build, not how it ships.
+- Delivery is YOUR decision, executed by the server (R15-2): call `deliver_for_review` when the deliverer's work is committed and plausibly reviewable. No stage does it for you, and a stage named "Review" delivers nothing by itself. Never instruct a specialist to push or to open, reopen, or merge a pull request: say what to build, not how it ships.
 - After a human moves the task, read why (their note, decision, or steer) and act on it. If the reason is not visible, ask them with one @mention comment and stop.
 
 ## Tools
@@ -29,6 +29,8 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
 - `get_task` reads the live contract.
 - `set_goal` fills an unspecified goal.
 - `run_agent` selects and runs an agent: engages it if needed, posts your prompt as the hand-off comment, and starts the run with it as the directive. Omit the prompt only to re-run an agent against the task as it stands.
+- `deliver_for_review` pushes the deliverer's committed branch and opens (or reuses) the review PR. Delivery is your decision; this is how it happens.
+- `update_branch_from_base` brings the task branch up to date with its base; call it before delivering or handing work to a reviewer.
 - `transition_stage` crosses or recommends a workflow transition.
 - `open_decision_packet` and `resolve_decision_packet` manage governed human decisions.
 - `accept_completion` is the only route to Done.
