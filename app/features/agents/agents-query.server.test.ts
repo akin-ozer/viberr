@@ -102,7 +102,7 @@ describe("capabilitiesToActionLabels — autonomy ceiling on accept-completion (
     const out = capabilitiesToActionLabels(
       [
         cap("completion-for-acceptance", "direct"),
-        cap("assign-primary-specialist", "direct"),
+        cap("dispatch-agents", "direct"),
       ],
       [],
       "supervised",
@@ -111,7 +111,7 @@ describe("capabilitiesToActionLabels — autonomy ceiling on accept-completion (
     expect(out.direct).not.toContain("Accept completion into Done");
     expect(out.recommend).toContain("Accept completion into Done");
     // The ceiling touches ONLY accept-completion — other grants are unaffected.
-    expect(out.direct).toContain("Assign the delivering agent");
+    expect(out.direct).toContain("Select & run agents");
   });
 
   it("a FULL-autonomy operator keeps it under ACTS DIRECTLY (the exception is live)", () => {
@@ -190,7 +190,7 @@ describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant"
   });
 
   const noGrant = [
-    cap("assign-primary-specialist", "direct"),
+    cap("dispatch-agents", "direct"),
     cap("stage-transitions", "recommend"),
   ];
 
@@ -229,7 +229,7 @@ describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant"
   it("never overrides an EXPLICIT mode — a strict project's recommend stays recommend", () => {
     const view = effectiveProfileView(
       operatorDeployment([
-        { capabilityId: "assign-primary-specialist", mode: "direct" },
+        { capabilityId: "dispatch-agents", mode: "direct" },
         { capabilityId: "deliver-review-pr", mode: "recommend" },
       ]),
       undefined,
@@ -287,7 +287,7 @@ describe("A-1/A-2 (pass 24): operator materialization matches the runtime gate",
     // `stage-transitions` absent ⇒ `gate()` = off; the pre-fix specialist polarity
     // showed its catalog `recommend`, and a save would have armed it.
     const view = effectiveProfileView(
-      operatorDeployment([cap("assign-primary-specialist", "direct")]),
+      operatorDeployment([cap("dispatch-agents", "direct")]),
       undefined,
       absentDeliverReviewPrMode(false),
     );

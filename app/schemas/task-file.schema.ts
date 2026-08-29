@@ -1334,10 +1334,11 @@ export function parseTaskFrontmatter(
 
   const unknown: RawFrontmatter = {};
   for (const [k, v] of Object.entries(data)) {
-    // Legacy engagement slots (`specialist`/`reviewers` and the older
-    // `consultants` alias) are absorbed into `engagements` above; don't
-    // preserve them as "unknown" or a rewrite would emit both forms.
-    if (k === "consultants" || k === "specialist" || k === "reviewers") continue;
+    // The legacy engagement slots (`specialist`/`reviewers`/`consultants`) are
+    // NOT excluded here any more: their absorption was deleted with the
+    // dynamic-dispatch rework (ruling 98), so they are ordinary unknown keys —
+    // preserved verbatim on round-trip, read by nothing. (The old exclusion
+    // existed only so an absorbed slot would not be emitted in both forms.)
     if (!TASK_FRONTMATTER_KEY_SET.has(k)) {
       unknown[k] = v;
     }

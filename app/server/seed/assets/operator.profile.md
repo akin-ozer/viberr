@@ -29,7 +29,7 @@ resources:
   # from SEED_AGENT_PROFILES, which also creates the backing KBs.
   kb: []
 capabilities:
-  # Dynamic-dispatch rework (2026-08-29): the collapsed assign/summon pair —
+  # Dynamic-dispatch rework (2026-08-29): the collapsed assign/summon pair,
   # one grant for selecting and running agents.
   - capabilityId: dispatch-agents
     mode: direct

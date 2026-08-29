@@ -963,7 +963,7 @@ describe("reconcileTask", () => {
         recommendations: [
           { id: "r-trans", kind: "transition", toStageId: "done", label: "Move VIB-301 to Done", detail: "" },
           { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "" },
-          { id: "r-assign", kind: "assign_specialist", profileId: "developer", label: "Assign Developer", detail: "" },
+          { id: "r-assign", kind: "run_agent", profileId: "developer", label: "Run Developer", detail: "" },
         ],
       }),
     });

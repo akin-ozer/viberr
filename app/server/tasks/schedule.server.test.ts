@@ -6,9 +6,11 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   installFakeRuntime,
@@ -127,7 +129,8 @@ function rawSchedule(over: Partial<TaskSchedule> = {}): TaskSchedule {
     id: "sch_test1",
     action: "run-operator",
     dueAt: new Date(Date.now() - 60_000).toISOString(), // already due
-    note: "re-check",
+    profileId: null,
+    prompt: "re-check",
     createdBy: "u_elif",
     createdByLabel: "Elif",
     createdAt: new Date(Date.now() - 120_000).toISOString(),
@@ -198,7 +201,7 @@ describe("scheduleTaskAction", () => {
 
     const s = await scheduleTaskAction(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", dueAt: new Date(Date.now() + 3_600_000).toISOString(), note: "check overnight" },
+      { projectSlug: store.slug, taskKey: "VIB-1", dueAt: new Date(Date.now() + 3_600_000).toISOString(), prompt: "check overnight" },
       actor(),
       dctx(),
     );
@@ -236,6 +239,80 @@ describe("scheduleTaskAction", () => {
     const stored = schedules("VIB-1")[0]!;
     expect(stored).not.toHaveProperty("autonomy");
     expect(stored).not.toHaveProperty("backend");
+  });
+
+  it("run-agent (dynamic dispatch): pins the DEPLOYED profile id + prompt; an undeployed id is refused at create time", async () => {
+    // Deploy `dev` so the picker has something real; the entry pins ONLY the
+    // profile identity (R22's rule: backend/model/capabilities resolve from the
+    // LIVE deployment at fire time — nothing else is stored).
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist", name: "dev", role: "developer",
+            backends: ["claude"], model: "sonnet", effort: "xhigh",
+          },
+        },
+      ],
+    });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const s = await scheduleTaskAction(
+      store.db,
+      {
+        projectSlug: store.slug, taskKey: "VIB-1",
+        dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+        action: "run-agent", profileId: "dev", prompt: "re-run the flaky suite",
+      },
+      actor(),
+      dctx(),
+    );
+    expect(s.status).toBe("pending");
+    const stored = schedules("VIB-1")[0]!;
+    expect(stored).toMatchObject({
+      action: "run-agent",
+      profileId: "dev",
+      prompt: "re-run the flaky suite",
+    });
+    // Still nothing but identity pinned (the R22 canary, agent arm).
+    expect(stored).not.toHaveProperty("backend");
+    expect(stored).not.toHaveProperty("autonomy");
+    // The timeline names the agent, not a generic re-run.
+    expect(timeline("VIB-1").some((e) => e.text.includes("a **dev** run"))).toBe(true);
+
+    // Create-time validation: a profile that is not deployed NOW cannot be
+    // scheduled (the picker must not schedule a phantom).
+    await expect(
+      scheduleTaskAction(
+        store.db,
+        {
+          projectSlug: store.slug, taskKey: "VIB-1",
+          dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+          action: "run-agent", profileId: "ghost",
+        },
+        actor(),
+        dctx(),
+      ),
+    ).rejects.toThrow(/"ghost" is not deployed/);
+    // …and the agent arm without a profile at all is refused too.
+    await expect(
+      scheduleTaskAction(
+        store.db,
+        {
+          projectSlug: store.slug, taskKey: "VIB-1",
+          dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+          action: "run-agent",
+        },
+        actor(),
+        dctx(),
+      ),
+    ).rejects.toThrow(/Pick which agent/);
   });
 
   it("rejects a past due time", async () => {
@@ -515,7 +592,7 @@ describe("fireDueSchedules", () => {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "impl",
         schedules: [
-          rawSchedule({ id: "sch_note", note: "re-check whether CI went green" }),
+          rawSchedule({ id: "sch_note", prompt: "re-check whether CI went green" }),
         ],
       }),
     });

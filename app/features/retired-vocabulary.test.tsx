@@ -130,15 +130,14 @@ describe("F19-12 residuals: the retired 'primary specialist' vocabulary", () => 
   });
 
   it("no operator-recommendation chip renders 'specialist' at all", () => {
-    // The chip labels are a Record keyed by recommendation kind, and the KINDS
-    // are still `assign_specialist` / `run_specialist` — internal ids nobody
-    // reads. Rendering EVERY kind is the completeness half: a new kind that
-    // reintroduces the word fails here, and so does a revert of either row.
+    // The chip labels are a Record keyed by recommendation kind. The dynamic-
+    // dispatch rework (2026-08-29) collapsed the four slot-shaped kinds
+    // (`assign_specialist` and friends) into one `run_agent`, so the retired
+    // noun lost the internal ids it used to ride in on — but rendering EVERY
+    // kind stays the completeness half: a new kind that reintroduces the word
+    // fails here, and so does a revert of any label row.
     const kinds: RecommendationView["kind"][] = [
-      "assign_specialist",
-      "assign_reviewer",
-      "run_specialist",
-      "run_reviewer",
+      "run_agent",
       "transition",
       "accept_completion",
       "delivery",
@@ -162,13 +161,12 @@ describe("F19-12 residuals: the retired 'primary specialist' vocabulary", () => 
     );
     // Non-vacuity: every card rendered, and the chips are really in the output.
     for (const r of recommendations) expect(html).toContain(r.label);
-    expect(html).toContain("Delivering agent"); // assign_specialist
-    expect(html).toContain("Run delivering agent"); // run_specialist
-    expect(html).toContain("Run reviewer");
+    expect(html).toContain("Run agent"); // run_agent
+    expect(html).toContain("Delivery"); // delivery
     expect(
       /specialist/i.test(html),
       `an operator-recommendation chip still renders "specialist" — the panel ` +
-        `calls this actor the delivering agent one row above`,
+        `calls this actor an agent everywhere else`,
     ).toBe(false);
   });
 });
@@ -250,7 +248,8 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
       icon: "shield",
       backends: ["claude"],
       actions: {
-        direct: ["Assign the delivering agent"],
+        // The seeded operator's post-rework grant wording (dispatch-agents).
+        direct: ["Select & run agents"],
         recommend: ["Stage transitions"],
         forbidden: ["Transition a task to Done"],
       },

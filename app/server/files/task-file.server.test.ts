@@ -15,6 +15,7 @@ const FULL: ParsedTaskFile = {
     key: "VIB-142",
     title: "Attach execution workspace to task runtime",
     stage: "review",
+    previousStageId: null,
     readiness: "input_required",
     waiting: "human",
     ownerUserId: "u_arda01",

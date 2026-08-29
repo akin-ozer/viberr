@@ -1270,6 +1270,58 @@ it is regenerated from the filesystem rather than restated here.
     `app/server/projections/board-query.server.ts`,
     `app/server/projections/task-query.server.ts`)
 
+98. **Dynamic agent dispatch (owner directive 2026-08-29): the static delivering/reviewer
+    slots are GONE — the operator decides which agent runs at each stage, humans dispatch
+    through ONE selector+prompt control, dispatched runs always report back to their
+    triggerer AND the operator, and scheduling lives inside the run controls.** Preprod,
+    explicitly no backwards compatibility. The pieces, and what each replaced:
+    **(a) Engagements are run-created, not human-assigned.** The `engagements[]` ledger
+    stays (verdict snapshots, KB union, per-engagement workspaces, single-flight and the
+    required-reviewer gate all key off it) but is written by the dispatch: running an
+    unengaged deployed profile engages it, delivering iff the task has no deliverer AND
+    the profile holds repo-write, supporting otherwise — a verdict-only profile dispatched
+    first can no longer become a deliverer that ships nothing (UI-39's dead-end class,
+    closed structurally). An explicit `delivers: true` is a delivery hand-off through the
+    existing assignSpecialist machinery. The assign/engage menus, the per-row Run buttons,
+    the `assign-specialist`/`run-specialist`/`assign-reviewer`/`run-reviewer` intents and
+    the legacy `specialist`/`reviewers`/`consultants` parse absorption are deleted;
+    releasing a supporting engagement survives as the ledger's ✕ (`release-agent`).
+    **(b) One dispatch verb everywhere.** The operator's `engage_agent`/`run_agent`/
+    `prompt_agent` trio collapsed into ONE `run_agent(profileId, prompt?, delivers?)` on
+    both backends; the `assign-primary-specialist`+`summon-reviewers` capability pair
+    collapsed into `dispatch-agents`; the four slot-shaped recommendation kinds collapsed
+    into `run_agent` (profileId + prompt on the card; Apply dispatches exactly what the
+    manual control would). The choice itself stays an LLM decision fenced by stage
+    eligibility, grants and the selection trace — and it now weighs the durable
+    **`previousStageId`** frontmatter fact (written on every transition; surfaced in the
+    snapshot and turn doctrine), so "back from Review" reads as rework rather than a
+    fresh build even across turns.
+    **(c) The dispatch-completion contract.** A manually- or schedule-dispatched run's
+    final report always tags the dispatching human (the tag is what notifies, NEW-4) and
+    `@operator`, and its completion ALWAYS re-invokes the operator (heuristic bypassed;
+    the react depth cap still binds, and only the dispatched hop is forced). Mechanical
+    in the completion pipeline with the prompt clause as guidance — R20-9's
+    guarantee-over-guidance shape; a crash-recovered completion degrades to the
+    heuristic, the same documented loss class as `fromHumanDirective`. The @mention
+    comment path is the same machinery and carries the same contract — mentioning any
+    deployed agent now auto-engages it instead of refusing "not engaged".
+    **(d) Scheduling is baked into the run controls.** No separate panel or button: each
+    run control carries a when-picker (now / 5m / 1h / 6h / 24h) that turns Run into
+    Schedule, and pending entries list under the control that scheduled them. Schedules
+    generalized to `run-operator | run-agent` — the agent arm pins ONLY the profile id
+    (identity is the scheduled decision; backend/model/capabilities resolve live at fire
+    time — ruling 94's R22 law unchanged), requires the profile deployed at create time,
+    and a fire-time validation refusal (undeployed, stage-ineligible) is a terminal
+    `failed` with the reason on the timeline, never a silent retry loop.
+    Extends rulings 21 (R15-2 — delivery stays the operator's decision), 67 (R19-A),
+    92 (R21-9 — both controls still show, never pick), 94 and 97; amends FR14 and FR39
+    in the PRD; supersedes FR14's static-slot reading and ruling 92's steer-only run
+    control. (`app/server/tasks/operator-actions.server.ts` `operatorDispatchAgent`;
+    `app/server/tasks/specialist-run.server.ts` auto-engage in `dispatchAgentRun`;
+    `app/server/tasks/task-actions.server.ts` completion contract + `previousStageId`;
+    `app/server/tasks/schedule.server.ts`; `app/features/task-detail/execution-profile.tsx`,
+    `agent-select.tsx`)
+
 *(UI-preference notes, 2026-08-21, pass 22 — owner decisions on presentation, recorded as
 preferences rather than law: **#180** the decision packet takes the questionnaire's
 density; **#182** the packet's minimal redesign — it reads as one quiet column; **#186**

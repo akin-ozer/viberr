@@ -189,8 +189,9 @@ function PendingSchedules({
   const [confirmCancel, setConfirmCancel] = useState<TaskSchedule | null>(null);
   if (schedules.length === 0) return null;
   return (
-    <ul className="sched-list">
-      {schedules.map((s) => (
+    <>
+      <ul className="sched-list">
+        {schedules.map((s) => (
         <li key={s.id} className="sched-row">
           <div className="sched-when">
             <Icon name="clock" />
@@ -218,7 +219,8 @@ function PendingSchedules({
             </button>
           ) : null}
         </li>
-      ))}
+        ))}
+      </ul>
       {confirmCancel && (
         <ConfirmDialog
           title="Cancel this scheduled run?"
@@ -244,7 +246,7 @@ function PendingSchedules({
           }}
         />
       )}
-    </ul>
+    </>
   );
 }
 
@@ -495,11 +497,11 @@ function AgentRunControl({
     ? null
     : selected.capabilities?.delivery === false
       ? selected.capabilities.verdict
-        ? "Runs as a reviewer — its verdict gates acceptance."
+        ? "Runs as a reviewer: its verdict gates acceptance."
         : "Runs as a supporting agent (no repo write)."
       : deliveringProfileId === null || deliveringProfileId === selected.id
-        ? "Runs as the delivering agent — it owns the branch and PR."
-        : "Runs as a supporting agent — another agent owns delivery.";
+        ? "Runs as the delivering agent: it owns the branch and PR."
+        : "Runs as a supporting agent (another agent owns delivery).";
 
   return (
     <span className="op-run agent-run">

@@ -807,16 +807,20 @@ export async function action({ request, params }: Route.ActionArgs) {
         if (prompt.length > 4000) {
           throw AppError.validation("Keep the run prompt under 4000 characters.");
         }
+        // The DISPLAY name, exactly as the @operator steer path resolves it —
+        // the run's report tags "@<name>", and only a known display name chips
+        // and notifies (R21-9's live catch: `actor.label` is the email).
+        const dispatcherName = userName(db, actor.userId);
         const dispatch: Parameters<typeof startAgentRun>[1] = {
           projectSlug,
           taskKey,
           profileId,
-          triggeredByName: actor.label,
+          triggeredByName: dispatcherName,
           ...backendOverride(formData),
         };
         if (prompt) {
           dispatch.directive = prompt;
-          dispatch.directiveFrom = actor.label;
+          dispatch.directiveFrom = dispatcherName;
         }
         const result = await startAgentRun(db, dispatch, actor);
         // R21-9's law, applied to the dispatch prompt: a directive that reaches
@@ -1002,7 +1006,12 @@ export async function action({ request, params }: Route.ActionArgs) {
           schedInput.action = "run-agent";
           schedInput.profileId = schedProfileId;
         }
-        const sched = await scheduleTaskAction(db, schedInput, actor);
+        // Display name for the same reason as run-agent above: the scheduler's
+        // label becomes the fired run's triggerer tag and the "by <name>" row.
+        const sched = await scheduleTaskAction(db, schedInput, {
+          userId: actor.userId,
+          label: userName(db, actor.userId),
+        });
         return {
           ok: true as const,
           intent,

@@ -21,7 +21,7 @@ import {
 } from "./mention-notify.server";
 import { postAgentComment } from "./agent-toolkit.server";
 import {
-  operatorAssignSpecialist,
+  operatorDispatchAgent,
   operatorPostComment,
   resolveOperatorAuthority,
 } from "./operator-actions.server";
@@ -297,9 +297,9 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
             profileId: "operator",
             capabilities: [
               { capabilityId: "append-typed-events", mode: "direct" },
-              // `recommend` is what routes operatorAssignSpecialist into
+              // `recommend` is what routes operatorDispatchAgent into
               // addRecommendation — the writer under test in that row.
-              { capabilityId: "assign-primary-specialist", mode: "recommend" },
+              { capabilityId: "dispatch-agents", mode: "recommend" },
             ],
             extras: [],
             definition: {
@@ -400,18 +400,17 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       name: "operatorPromptAgent (the operator's directive comment)",
       roster: false,
       write: async (store, tag) => {
-        // No specialist is deployed, so the RUN cannot start — but the directive
-        // COMMENT is written (and fanned out) before that, which is the writer
-        // under test. This is the P14-GV-06 shape verbatim.
+        // No specialist is deployed, so the RUN cannot start (the auto-engage
+        // refuses an undeployed profileId) — but the directive COMMENT is
+        // written (and fanned out) before the run is triggered, which is the
+        // writer under test. This is the P14-GV-06 shape verbatim.
         await operatorPromptAgent(
           store.db,
           {
             projectSlug: store.slug,
             taskKey: "VIB-1",
-            role: "developer",
-            backend: "claude",
             directive: `Implement the fix and coordinate with ${tag} on the copy.`,
-            kind: "primary",
+            profileId: "developer",
             handle: "dev",
           },
           { dataRoot: store.dataRoot },
@@ -443,14 +442,14 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       name: "addRecommendation (the operator's recommendation reasoning)",
       roster: true,
       write: async (store, tag) => {
-        const result = await operatorAssignSpecialist(
+        const result = await operatorDispatchAgent(
           store.db,
           { dataRoot: store.dataRoot },
           {
             projectSlug: store.slug,
             taskKey: "VIB-1",
             profileId: "developer",
-            reason: `${tag} I want the Dev on this — confirm and I'll engage.`,
+            reason: `${tag} I want the Dev on this — confirm and I'll start its run.`,
           },
           resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {
             autonomy: "supervised",

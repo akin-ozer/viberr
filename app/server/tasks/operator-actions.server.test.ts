@@ -42,19 +42,12 @@ import {
   deliverGate,
   gate,
   operatorAcceptCompletion,
-  operatorAssignReviewer,
-  operatorAssignSpecialist,
   operatorDeliverForReview,
-  operatorEngageAgent,
+  operatorDispatchAgent,
   operatorOpenPacket,
   operatorPostComment,
   operatorSetGoal,
   operatorResolvePacket,
-  operatorPromptReviewer,
-  operatorPromptSpecialist,
-  operatorRunAgent,
-  operatorRunReviewer,
-  operatorRunSpecialist,
   operatorSnapshot,
   operatorTransitionStage,
   operatorAutonomyFor,
@@ -103,14 +96,17 @@ function deployRoster(
         },
       },
       {
+        // Repo-write grant: the dynamic dispatch derives the DELIVERING posture
+        // from it (an unengaged repo-write profile on a deliverer-less task).
         profileId: "developer",
-        capabilities: [],
+        capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }],
         extras: [],
         definition: { kind: "specialist", name: "Dev", role: "Implementation", backends: ["claude"], model: "sonnet" },
       },
       {
+        // Verdict grant, no repo-write: dispatches as "a reviewer" (F21-6).
         profileId: "reviewer",
-        capabilities: [],
+        capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
         extras: [],
         definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet" },
       },
@@ -120,8 +116,7 @@ function deployRoster(
 }
 
 const DEFAULT_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
-  { capabilityId: "assign-primary-specialist", mode: "direct" },
-  { capabilityId: "summon-reviewers", mode: "direct" },
+  { capabilityId: "dispatch-agents", mode: "direct" },
   { capabilityId: "append-typed-events", mode: "direct" },
   { capabilityId: "stage-transitions", mode: "recommend" },
   { capabilityId: "completion-for-acceptance", mode: "recommend" },
@@ -173,7 +168,7 @@ describe("resolveOperatorAuthority", () => {
     expect(a.autonomy).toBe("full");
     expect(a.configuredAutonomy).toBe("full");
     expect(a.autonomyClampedFrom).toBeNull();
-    expect(a.policy.get("assign-primary-specialist")).toBe("direct");
+    expect(a.policy.get("dispatch-agents")).toBe("direct");
     expect(a.policy.get("stage-transitions")).toBe("recommend");
   });
 });
@@ -224,7 +219,7 @@ describe("R19-A — per-run autonomy is clamped to project policy", () => {
     // `stage-transitions` is deployed `recommend`. Before the clamp, a run
     // launched at "full" executed it directly with no human gate.
     expect(gate(authority("full"), "stage-transitions")).toBe("recommend");
-    expect(gate(authority("full"), "assign-primary-specialist")).toBe("direct");
+    expect(gate(authority("full"), "dispatch-agents")).toBe("direct");
     // The same project configured `full` DOES promote it — proving the clamp,
     // not the gate, is what changed.
     deployRoster(DEFAULT_POLICY, "full");
@@ -338,7 +333,7 @@ describe("gate", () => {
     deployRoster(DEFAULT_POLICY);
     const supervised = authority("supervised");
     const full = authority("full");
-    expect(gate(supervised, "assign-primary-specialist")).toBe("direct");
+    expect(gate(supervised, "dispatch-agents")).toBe("direct");
     expect(gate(supervised, "stage-transitions")).toBe("recommend");
     expect(gate(full, "stage-transitions")).toBe("direct"); // full promotes recommend
     expect(gate(supervised, "change-project-policy")).toBe("deny"); // absent → off → deny
@@ -418,24 +413,31 @@ describe("operatorSetGoal — draft the goal at the triage gate", () => {
   });
 });
 
-describe("operatorAssignSpecialist", () => {
-  it("direct mode assigns the primary specialist", async () => {
+describe("operatorDispatchAgent", () => {
+  it("direct mode AUTO-ENGAGES the profile (capability-derived posture) and starts its run", async () => {
+    // The pre-assignment ceremony is gone: a bare dispatch of an unengaged
+    // repo-write profile on a deliverer-less task engages it as the deliverer
+    // and starts the run in one step. The old "Engage it first" refusal no
+    // longer exists.
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const r = await operatorAssignSpecialist(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
       authority("supervised"),
     );
     expect(r.outcome).toBe("done");
+    expect(r.message).toBe("Started a Claude run for Dev (the delivering agent).");
     expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
+    expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "primary")).toBe(true);
+    interruptRunningRuns("VIB-1");
   });
 
-  it("recommend mode adds an actionable recommendation and does NOT assign", async () => {
-    deployRoster([{ capabilityId: "assign-primary-specialist", mode: "recommend" }, { capabilityId: "append-typed-events", mode: "direct" }]);
+  it("recommend mode adds ONE actionable run_agent card and does NOT engage or run", async () => {
+    deployRoster([{ capabilityId: "dispatch-agents", mode: "recommend" }, { capabilityId: "append-typed-events", mode: "direct" }]);
     seedTask("impl");
-    const r = await operatorAssignSpecialist(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", reason: "Dev fits impl." },
@@ -446,31 +448,37 @@ describe("operatorAssignSpecialist", () => {
     // A structured, ACTIONABLE recommendation is added to the task frontmatter…
     const recs = task().frontmatter.recommendations;
     expect(recs).toHaveLength(1);
-    expect(recs[0]!.kind).toBe("assign_specialist");
+    expect(recs[0]!.kind).toBe("run_agent");
     expect(recs[0]!.profileId).toBe("developer");
     expect(recs[0]!.detail).toBe("Dev fits impl.");
+    // …no run was started (it is only recommended)…
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
     // …and the operator's reasoning is also commented to the timeline.
     expect(task().timeline.some((e) => e.actor.kind === "operator" && e.type === "comment")).toBe(true);
   });
 
   it("F19-12: the rendered card and message use ENGAGEMENT vocabulary, never 'primary specialist'", async () => {
     // D9/Q17-5 retired the primary/consultant model for `engagements[]` with one
-    // `delivers: true`. The capability ID keeps its historical name; the copy
-    // this module renders must not.
+    // `delivers: true`. The capability ID history keeps its trace in the docs;
+    // the copy this module renders must not.
     deployRoster([
-      { capabilityId: "assign-primary-specialist", mode: "recommend" },
+      { capabilityId: "dispatch-agents", mode: "recommend" },
       { capabilityId: "append-typed-events", mode: "direct" },
     ]);
     seedTask("impl");
-    const r = await operatorAssignSpecialist(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
       authority("supervised"),
     );
-    expect(r.message).toBe("Recommended engaging Dev as the delivering agent.");
+    expect(r.message).toBe("Recommended running Dev as the delivering agent.");
     const rec = task().frontmatter.recommendations[0]!;
-    expect(rec.label).toBe("Engage Dev as the delivering agent");
+    expect(rec.label).toBe("Run Dev");
+    // With no reason and no prompt the card explains itself in stage terms.
+    expect(rec.detail).toBe(
+      "Dev fits what the current stage needs; a maintainer starts the run.",
+    );
     // The retired phrase appears nowhere the human reads: card, message, or the
     // operator comment the card's reasoning writes to the timeline.
     const rendered = [
@@ -482,7 +490,7 @@ describe("operatorAssignSpecialist", () => {
     expect(rendered).not.toMatch(/primary specialist/i);
   });
 
-  /** The routing trace `traceAgentSelection` records, as this test reads it. */
+  /** The routing trace `recordAgentSelectionTrace` records, as this test reads it. */
   type AgentSelectionTrace = {
     chosen: string;
     delivers: boolean;
@@ -493,7 +501,7 @@ describe("operatorAssignSpecialist", () => {
   it("F10-35: records a routing trace — candidates considered, chosen, reason", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    await operatorEngageAgent(
+    await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       {
@@ -509,9 +517,10 @@ describe("operatorAssignSpecialist", () => {
       action: "task.operator.agent_selected",
     })[0];
     expect(trace).toBeTruthy();
-    // SAFETY: `task.operator.agent_selected` has ONE writer (traceAgentSelection
-    // in operator-actions.server.ts), and it records exactly these four fields —
-    // `candidates` straight off the deployed-specialist map.
+    // SAFETY: `task.operator.agent_selected` has ONE writer
+    // (recordAgentSelectionTrace in operator-actions.server.ts), and it records
+    // exactly these four fields — `candidates` straight off the
+    // deployed-specialist map.
     const d = trace!.details as AgentSelectionTrace;
     expect(d.chosen).toBe("developer");
     expect(d.delivers).toBe(true);
@@ -525,24 +534,45 @@ describe("operatorAssignSpecialist", () => {
     expect(
       d.candidates.find((c) => c.profileId === "developer")?.eligibleForStage,
     ).toBe(true);
+    interruptRunningRuns("VIB-1");
+  });
+
+  it("an UNKNOWN profileId is a noop that points at the roster, not a crash", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const r = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "ghost" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toBe(
+      'No deployed agent "ghost" to run. Pick a profile from get_task\'s deployedSpecialists.',
+    );
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
   });
 
   it("off mode (don't recommend) is denied", async () => {
-    deployRoster([{ capabilityId: "assign-primary-specialist", mode: "off" }]);
+    deployRoster([{ capabilityId: "dispatch-agents", mode: "off" }]);
     seedTask("impl");
-    const r = await operatorAssignSpecialist(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
       authority("full"), // even full autonomy cannot override an `off` capability
     );
     expect(r.outcome).toBe("denied");
+    expect(r.message).toBe("Dispatching agents is not permitted for the operator here.");
     expect(deliveringEngagement(task().frontmatter)).toBeNull();
   });
 });
 
-describe("operatorRunAgent — delivering profileId guard (P11-22)", () => {
-  it("refuses a delivering run for a profileId that is NOT the current deliverer", async () => {
+describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)", () => {
+  // The old guard ("not the delivering agent" for any profileId ≠ deliverer) is
+  // gone with the slot ceremony: an explicit `delivers: true` is now a delivery
+  // HAND-OFF, vetted by the profile's own grants instead of the current slot.
+  it("refuses an explicit delivery hand-off to a profile with NO repo-write grant", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     const { assignSpecialist } = await import("./specialist-run.server");
@@ -552,17 +582,18 @@ describe("operatorRunAgent — delivering profileId guard (P11-22)", () => {
       { userId: store.users.arda.id, label: "Arda" },
       { dataRoot: store.dataRoot },
     );
-    // "reviewer" is not the deliverer ("developer" is) — a delivering run for it
-    // must be refused, not silently run as the developer.
-    const r = await operatorRunAgent(
-      store.db,
-      { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", delivers: true },
-      authority("full"),
-    );
-    // A STATE refusal (who currently delivers), not a withheld capability.
-    expect(r.outcome).toBe("noop");
-    expect(r.message).toContain("not the delivering agent");
+    // "reviewer" holds no repo-write grant — a delivering run for it would own
+    // a branch it can ship nothing to, so the dispatch refuses by grant.
+    await expect(
+      operatorDispatchAgent(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", delivers: true },
+        authority("full"),
+      ),
+    ).rejects.toThrow(/holds no repo-write grant/i);
+    // The deliverer was not reassigned.
+    expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
   });
 
   it("allows a delivering run when the profileId IS the current deliverer", async () => {
@@ -575,24 +606,25 @@ describe("operatorRunAgent — delivering profileId guard (P11-22)", () => {
       { userId: store.users.arda.id, label: "Arda" },
       { dataRoot: store.dataRoot },
     );
-    const r = await operatorRunAgent(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", delivers: true },
       authority("full"),
     );
     expect(r.outcome).not.toBe("denied");
+    interruptRunningRuns("VIB-1");
   });
 });
 
-describe("operatorRunSpecialist / operatorRunReviewer — recommend is an APPLYABLE card", () => {
-  it("run_specialist under recommend adds an actionable card (not a dead-end comment) that apply STARTS the run", async () => {
+describe("operatorDispatchAgent — recommend is an APPLYABLE run_agent card", () => {
+  it("run_agent under recommend adds an actionable card (not a dead-end comment) that apply STARTS the run", async () => {
     deployRoster([
-      { capabilityId: "assign-primary-specialist", mode: "recommend" },
+      { capabilityId: "dispatch-agents", mode: "recommend" },
       { capabilityId: "append-typed-events", mode: "direct" },
     ]);
     seedTask("impl");
-    // Assign the specialist directly first (assignment isn't what's recommended
+    // Engage the specialist directly first (engagement isn't what's recommended
     // here — starting its run is).
     const { assignSpecialist } = await import("./specialist-run.server");
     await assignSpecialist(
@@ -602,10 +634,10 @@ describe("operatorRunSpecialist / operatorRunReviewer — recommend is an APPLYA
       { dataRoot: store.dataRoot },
     );
 
-    const r = await operatorRunSpecialist(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1" },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
       authority("supervised"),
     );
     expect(r.outcome).toBe("recommended");
@@ -613,11 +645,11 @@ describe("operatorRunSpecialist / operatorRunReviewer — recommend is an APPLYA
     // "Awaiting a maintainer to confirm" comment with no button.
     const recs = task().frontmatter.recommendations;
     expect(recs).toHaveLength(1);
-    expect(recs[0]!.kind).toBe("run_specialist");
+    expect(recs[0]!.kind).toBe("run_agent");
     // No run started yet (it's only recommended).
     expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
 
-    // A maintainer applies the card → the specialist run actually starts.
+    // A maintainer applies the card → the agent run actually starts.
     await applyRecommendation(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", recId: recs[0]!.id },
@@ -626,33 +658,39 @@ describe("operatorRunSpecialist / operatorRunReviewer — recommend is an APPLYA
     );
     expect(task().frontmatter.recommendations).toHaveLength(0);
     expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
+    interruptRunningRuns("VIB-1");
   });
 
-  it("run_reviewer under recommend adds an applyable card carrying the reviewer profileId", async () => {
+  it("the card carries the operator's PROMPT, and apply runs it (auto-engaging the profile)", async () => {
     deployRoster([
-      { capabilityId: "summon-reviewers", mode: "recommend" },
+      { capabilityId: "dispatch-agents", mode: "recommend" },
       { capabilityId: "append-typed-events", mode: "direct" },
     ]);
     seedTask("review");
-    // Engage the reviewer first (starting its run is what's recommended).
-    const { assignReviewer } = await import("./specialist-run.server");
-    await assignReviewer(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
-      { userId: store.users.arda.id, label: "Arda" },
-      { dataRoot: store.dataRoot },
-    );
-    const r = await operatorRunReviewer(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "reviewer",
+        prompt: "Review the delivered branch against the acceptance criteria.",
+      },
       authority("supervised"),
     );
     expect(r.outcome).toBe("recommended");
     const recs = task().frontmatter.recommendations;
     expect(recs).toHaveLength(1);
-    expect(recs[0]!.kind).toBe("run_reviewer");
+    expect(recs[0]!.kind).toBe("run_agent");
     expect(recs[0]!.profileId).toBe("reviewer");
+    // The prompt rides the card so the applied dispatch runs exactly this…
+    expect(recs[0]!.prompt).toBe(
+      "Review the delivered branch against the acceptance criteria.",
+    );
+    // …and with no separate reason it doubles as the card's reasoning.
+    expect(recs[0]!.detail).toBe(
+      "Review the delivered branch against the acceptance criteria.",
+    );
     expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
 
     await applyRecommendation(
@@ -661,24 +699,58 @@ describe("operatorRunSpecialist / operatorRunReviewer — recommend is an APPLYA
       { userId: store.users.arda.id, label: "Arda" },
       { dataRoot: store.dataRoot },
     );
+    // The apply auto-engaged the (previously unengaged) reviewer and ran it.
+    expect(
+      supportingEngagements(task().frontmatter).map((x) => x.profileId),
+    ).toContain("reviewer");
     expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
+    interruptRunningRuns("VIB-1");
   });
 });
 
-describe("operatorAssignReviewer", () => {
-  it("direct mode engages a reviewer", async () => {
+describe("operatorDispatchAgent — supporting posture (delivers derivation)", () => {
+  it("a verdict-capable, non-repo-write profile auto-engages as SUPPORTING and runs as a reviewer", async () => {
+    // resolveDeliversIntent: no explicit hint, unengaged, and no repo-write
+    // grant → supporting, even though the task has no deliverer yet.
     deployRoster(DEFAULT_POLICY);
     seedTask("review");
-    const r = await operatorAssignReviewer(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
       authority("supervised"),
     );
     expect(r.outcome).toBe("done");
+    expect(r.message).toBe("Started a Claude run for Rev (a reviewer).");
     expect(
       supportingEngagements(task().frontmatter).map((x) => x.profileId),
     ).toContain("reviewer");
+    // Supporting, not delivering — the deliverer slot stays empty.
+    expect(deliveringEngagement(task().frontmatter)).toBeNull();
+    expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "reviewer")).toBe(true);
+    interruptRunningRuns("VIB-1");
+  });
+
+  it("an ENGAGED profile keeps its shape on a bare re-dispatch", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const { assignReviewer } = await import("./specialist-run.server");
+    await assignReviewer(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    const r = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(r.message).toBe("Started a Claude run for Rev (a reviewer).");
+    expect(deliveringEngagement(task().frontmatter)).toBeNull();
+    interruptRunningRuns("VIB-1");
   });
 });
 
@@ -692,84 +764,102 @@ function interruptRunningRuns(taskKey: string): void {
   }
 }
 
-describe("operatorPromptSpecialist", () => {
-  it("direct mode assigns the specialist, posts a task-related prompt comment, and starts its run", async () => {
+describe("operatorDispatchAgent — the prompt hand-off", () => {
+  it("direct + prompt engages the profile, posts the @-mention hand-off comment, and starts its run", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const r = await operatorPromptSpecialist(
-      store.db,
-      { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
-      authority("supervised"),
-    );
-    expect(r.outcome).toBe("done");
-    // The specialist is assigned…
-    expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
-    // …a routed-to-agent operator comment prompts it about the task…
-    const prompt = task().timeline.find(
-      (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
-    );
-    expect(prompt).toBeDefined();
-    expect(prompt!.text).toContain("Operator drive"); // the task title, so it's task-related
-    // …addressed to the agent by @mention ("@Dev …")…
-    expect(prompt!.text.startsWith("@Dev")).toBe(true);
-    // …and its run was triggered (the primary run row exists right after the await).
-    expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "primary")).toBe(true);
-    interruptRunningRuns("VIB-1");
-  });
-
-  it("respects a custom directive as the prompt text", async () => {
-    deployRoster(DEFAULT_POLICY);
-    seedTask("impl");
-    await operatorPromptSpecialist(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         profileId: "developer",
-        directive: "@Dev implement the auth guard first, then wire the tests.",
+        prompt: "implement the auth guard first, then wire the tests.",
       },
-      authority("full"),
+      authority("supervised"),
     );
+    expect(r.outcome).toBe("done");
+    expect(r.message).toBe("Prompted @Dev (the delivering agent) and started its run.");
+    // The specialist is engaged as the deliverer…
+    expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
+    // …a routed-to-agent operator comment carries the hand-off, addressed to
+    // the agent by @mention ("@Dev …")…
     const prompt = task().timeline.find(
       (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
     );
+    expect(prompt).toBeDefined();
     expect(prompt!.text).toBe("@Dev implement the auth guard first, then wire the tests.");
+    // …and its run was triggered (the primary run row exists right after the await).
+    expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "primary")).toBe(true);
+    interruptRunningRuns("VIB-1");
   });
 
-  it("recommend mode posts an assign card and does NOT run the specialist", async () => {
-    deployRoster([
-      { capabilityId: "assign-primary-specialist", mode: "recommend" },
-      { capabilityId: "append-typed-events", mode: "direct" },
-    ]);
+  it("direct WITHOUT a prompt starts a bare run and posts NO synthetic comment", async () => {
+    // A bare re-dispatch re-anchors the agent on task.md; a manufactured
+    // "@Dev …" comment would fake a hand-off nobody wrote.
+    deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const r = await operatorPromptSpecialist(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
       authority("supervised"),
     );
+    expect(r.outcome).toBe("done");
+    expect(
+      task().timeline.some(
+        (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
+      ),
+    ).toBe(false);
+    expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "primary")).toBe(true);
+    interruptRunningRuns("VIB-1");
+  });
+
+  it("recommend + prompt files the run_agent card and does NOT run the agent", async () => {
+    deployRoster([
+      { capabilityId: "dispatch-agents", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("impl");
+    const r = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        prompt: "implement the auth guard first.",
+      },
+      authority("supervised"),
+    );
     expect(r.outcome).toBe("recommended");
     expect(deliveringEngagement(task().frontmatter)).toBeNull();
-    expect(task().frontmatter.recommendations[0]?.kind).toBe("assign_specialist");
+    expect(task().frontmatter.recommendations[0]?.kind).toBe("run_agent");
+    expect(task().frontmatter.recommendations[0]?.prompt).toBe(
+      "implement the auth guard first.",
+    );
     // No run was triggered.
     await new Promise((res) => setTimeout(res, 40));
     expect(listRunsForTask(store.db, store.slug, "VIB-1").filter((x) => x.kind === "primary")).toHaveLength(0);
   });
-});
 
-describe("operatorPromptReviewer", () => {
-  it("direct mode engages the reviewer, posts a prompt comment, and starts its reviewer run", async () => {
+  it("prompting a supporting profile engages it, posts the hand-off, and starts its reviewer run", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("review");
-    const r = await operatorPromptReviewer(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "reviewer",
+        prompt: "review the delivered branch.",
+      },
       authority("supervised"),
     );
     expect(r.outcome).toBe("done");
+    expect(r.message).toBe("Prompted @Rev (a reviewer) and started its run.");
     expect(
       supportingEngagements(task().frontmatter).map((x) => x.profileId),
     ).toContain("reviewer");
@@ -1811,11 +1901,11 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
 describe("applyRecommendation / dismissRecommendation", () => {
   async function seedRecommendation() {
     deployRoster([
-      { capabilityId: "assign-primary-specialist", mode: "recommend" },
+      { capabilityId: "dispatch-agents", mode: "recommend" },
       { capabilityId: "append-typed-events", mode: "direct" },
     ]);
     seedTask("impl");
-    await operatorAssignSpecialist(
+    await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
@@ -1834,12 +1924,15 @@ describe("applyRecommendation / dismissRecommendation", () => {
       { dataRoot: store.dataRoot },
     );
     expect(res.label).toContain("Dev");
-    // The recommended assignment was performed…
+    // The recommended dispatch was performed — the run's auto-engage made Dev
+    // the deliverer and its run started…
     expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
+    expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
     // …and the recommendation card was cleared.
     expect(task().frontmatter.recommendations).toHaveLength(0);
     const audits = listAuditEvents(store.db, {}).map((a) => a.action);
     expect(audits).toContain("task.recommendation.applied");
+    interruptRunningRuns("VIB-1");
   });
 
   it("a stage transition clears stale transition recommendations", async () => {
@@ -1900,7 +1993,8 @@ describe("applyRecommendation / dismissRecommendation", () => {
       actor,
       { dataRoot: store.dataRoot },
     );
-    expect(deliveringEngagement(task().frontmatter)).toBeNull(); // NOT assigned
+    expect(deliveringEngagement(task().frontmatter)).toBeNull(); // NOT engaged
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0); // NOT run
     expect(task().frontmatter.recommendations).toHaveLength(0);
   });
 
@@ -1922,7 +2016,7 @@ describe("applyRecommendation / dismissRecommendation", () => {
       (n) => n.kind === "approval",
     ).length;
     // Re-issue the identical recommendation (idempotent card → no new ping).
-    await operatorAssignSpecialist(
+    await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
@@ -1977,7 +2071,7 @@ describe("applyRecommendation / dismissRecommendation", () => {
     await seedRecommendation();
     const pending = snapshot().recommendations!.pending;
     expect(pending).toHaveLength(1);
-    expect(pending[0]!.kind).toBe("assign_specialist");
+    expect(pending[0]!.kind).toBe("run_agent");
     expect(pending[0]!.profileId).toBe("developer");
     expect(pending[0]!.label).toContain("Dev");
     expect(snapshot().recommendations!.declined).toHaveLength(0);
@@ -1995,7 +2089,7 @@ describe("applyRecommendation / dismissRecommendation", () => {
     const recs = snapshot().recommendations!;
     expect(recs.pending).toHaveLength(0);
     expect(recs.declined).toHaveLength(1);
-    expect(recs.declined[0]!.kind).toBe("assign_specialist");
+    expect(recs.declined[0]!.kind).toBe("run_agent");
     expect(recs.declined[0]!.label).toBe(label);
     expect(recs.declined[0]!.at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
@@ -2750,14 +2844,15 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
 });
 
 /**
- * F21-6 — "Engaged … as a reviewer" was emitted for EVERY non-delivering
- * engagement. The schema already distinguishes them (`!delivers &&
- * verdictCapable` makes a required reviewer), and the execution profile renders
- * the rest under "SUPPORTING AGENTS". Live, the verdict-Off Web Verifier was
- * announced "as a reviewer" — a claim of acceptance-gating authority it does
- * not hold.
+ * F21-6 — "… as a reviewer" was emitted for EVERY non-delivering dispatch. The
+ * schema already distinguishes them (`!delivers && verdictCapable` makes a
+ * required reviewer), and the execution profile renders the rest under
+ * "SUPPORTING AGENTS". Live, the verdict-Off Web Verifier was announced "as a
+ * reviewer" — a claim of acceptance-gating authority it does not hold. The
+ * dispatch rework keeps the vocabulary: `operatorDispatchAgent`'s `as` word
+ * still branches on the verdict grant.
  */
-describe("supporting-engagement copy branches on verdict authority (F21-6)", () => {
+describe("supporting-dispatch copy branches on verdict authority (F21-6)", () => {
   function deployVerdictRoster(): void {
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
@@ -2805,32 +2900,34 @@ describe("supporting-engagement copy branches on verdict authority (F21-6)", () 
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
-  const engage = (profileId: string) =>
-    operatorAssignReviewer(
+  const dispatch = (profileId: string) =>
+    operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId },
       authority("supervised"),
     );
 
-  it("a verdict-capable profile is still engaged 'as a reviewer'", async () => {
+  it("a verdict-capable profile is still dispatched 'as a reviewer'", async () => {
     // Canary: hardcode "a reviewer" in `supportingRoleWord` and the next test
     // fails while this one passes — the pair is what pins the branch.
     deployVerdictRoster();
     seedTask("review");
-    const r = await engage("reviewer");
-    expect(r.message).toBe("Engaged Rev as a reviewer.");
+    const r = await dispatch("reviewer");
+    expect(r.message).toBe("Started a Claude run for Rev (a reviewer).");
+    interruptRunningRuns("VIB-1");
   });
 
-  it("a verdict-INCAPABLE profile is engaged 'as a supporting agent'", async () => {
+  it("a verdict-INCAPABLE profile is dispatched 'as a supporting agent'", async () => {
     deployVerdictRoster();
     seedTask("review");
-    const r = await engage("web-verifier");
-    expect(r.message).toBe("Engaged Web Verifier as a supporting agent.");
+    const r = await dispatch("web-verifier");
+    expect(r.message).toBe("Started a Claude run for Web Verifier (a supporting agent).");
     expect(r.message).not.toContain("reviewer");
+    interruptRunningRuns("VIB-1");
   });
 
-  it("the RECOMMENDATION card carries the same distinction", async () => {
+  it("the RECOMMENDATION message carries the same distinction", async () => {
     deployVerdictRoster();
     seedTask("review");
     const recommendOnly = resolveOperatorAuthority(
@@ -2838,31 +2935,36 @@ describe("supporting-engagement copy branches on verdict authority (F21-6)", () 
       store.slug,
       { autonomy: "supervised" },
     );
-    recommendOnly.policy.set("summon-reviewers", "recommend");
+    recommendOnly.policy.set("dispatch-agents", "recommend");
 
-    const r = await operatorAssignReviewer(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "web-verifier" },
       recommendOnly,
     );
     expect(r.outcome).toBe("recommended");
-    expect(r.message).toBe("Recommended engaging Web Verifier as a supporting agent.");
+    expect(r.message).toBe("Recommended running Web Verifier as a supporting agent.");
     const card = task().frontmatter.recommendations.at(-1)!;
-    expect(card.label).toBe("Engage Web Verifier as a supporting agent");
+    expect(card.label).toBe("Run Web Verifier");
   });
 
   it("prompting a verdict-incapable profile narrates it as supporting too", async () => {
     deployVerdictRoster();
     seedTask("review");
-    const r = await operatorPromptReviewer(
+    const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "web-verifier" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "web-verifier",
+        prompt: "verify the deployed page renders.",
+      },
       authority("supervised"),
     );
     expect(r.outcome).toBe("done");
-    expect(r.message).toBe("Prompted supporting agent @Web Verifier and started its run.");
+    expect(r.message).toBe("Prompted @Web Verifier (a supporting agent) and started its run.");
     interruptRunningRuns("VIB-1");
   });
 });
@@ -2873,8 +2975,8 @@ describe("supporting-engagement copy branches on verdict authority (F21-6)", () 
  * When the operator consults an agent and then brings the question to a human
  * itself, the timeline otherwise reads as if that agent never held the ask. A
  * rule the model must remember is a rule it will eventually forget, so the
- * toolkit remembers: a packet opened in the same run as a `prompt_agent` carries
- * the disclosure whether or not the model wrote one.
+ * toolkit remembers: a packet opened in the same run as a `run_agent` dispatch
+ * carries the disclosure whether or not the model wrote one.
  */
 describe("delegated-ask disclosure is mechanical, not just prose (R20-9)", () => {
   const PACKET_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
@@ -2918,7 +3020,7 @@ describe("delegated-ask disclosure is mechanical, not just prose (R20-9)", () =>
     seedTask("impl");
     const toolkit = await toolkitFor();
 
-    const prompt = toolkit.tools.find((t) => t.name === "prompt_agent")!;
+    const prompt = toolkit.tools.find((t) => t.name === "run_agent")!;
     await prompt.handler(
       { profileId: "developer", prompt: "Which storage backend does the repo use?", delivers: true },
       {},
@@ -2936,7 +3038,7 @@ describe("delegated-ask disclosure is mechanical, not just prose (R20-9)", () =>
     deployRoster(PACKET_POLICY);
     seedTask("impl");
     const toolkit = await toolkitFor();
-    const prompt = toolkit.tools.find((t) => t.name === "prompt_agent")!;
+    const prompt = toolkit.tools.find((t) => t.name === "run_agent")!;
     await prompt.handler({ profileId: "developer", prompt: "check the repo", delivers: true }, {});
     await openPacket(toolkit, undefined);
 

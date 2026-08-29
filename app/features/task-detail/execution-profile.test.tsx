@@ -82,18 +82,17 @@ function renderExec(props: Partial<ComponentProps<typeof ExecutionProfile>> = {}
         operatorAutonomy="supervised"
         backendAvailable={{ claude: true, codex: true }}
         canRunAgents
-        deliveringActive={false}
-        activeReviewerIds={[]}
+        activeAgentProfileIds={[]}
         operatorRunActive={false}
         runBusy={false}
-        onAssignSpecialist={() => {}}
-        onRunSpecialist={() => {}}
-        reviewerBusy={false}
-        onAssignReviewer={() => {}}
-        onRunReviewer={() => {}}
-        onRemoveReviewer={() => {}}
+        onRunAgent={() => {}}
+        releaseBusy={false}
+        onReleaseAgent={() => {}}
         operatorBusy={false}
         onRunOperator={() => {}}
+        schedules={[]}
+        scheduleBusy={false}
+        onCancelSchedule={() => {}}
         {...props}
       />
     </MemoryRouter>,
@@ -164,7 +163,11 @@ describe("OperatorRunControl steer input — Enter submits, IME-guarded", () => 
   function renderWithRunSpy() {
     const calls: string[] = [];
     const utils = renderExec({ onRunOperator: (s) => calls.push(s) });
-    const input = utils.container.querySelector<HTMLInputElement>(".op-steer")!;
+    // Both run controls carry an `.op-steer` input now (PromptInput is shared
+    // with the agent prompt) — the aria-label is the operator one's identity.
+    const input = utils.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Steer this operator run (optional)"]',
+    )!;
     return { calls, input };
   }
 
@@ -191,11 +194,13 @@ describe("OperatorRunControl steer input — Enter submits, IME-guarded", () => 
 });
 
 /**
- * F3 (owner ruling 2026-08-21): a real run can show the delivering agent's model
- * is not runnable on the account (model_availability). Surface it at the run
- * control — BEFORE another run is spent — not only as a run failure.
+ * F3 (owner ruling 2026-08-21) / F20-4: a real run can show an agent's model is
+ * not runnable on the account (model_availability). Surface it BEFORE another
+ * run is spent. The dispatch rework moved the warning to the two places a run
+ * now starts or shows: the run control (on the SELECTED agent) and the
+ * engaged-agents ledger rows (F28-P2-gated to the live deployment's backend).
  */
-describe("run control warns when the delivering agent's model is unavailable", () => {
+describe("model-unavailable warnings — run control + ledger rows", () => {
   const withDeveloper = (): TaskSummary => ({
     ...unownedTask(),
     specialist: {
@@ -211,7 +216,7 @@ describe("run control warns when the delivering agent's model is unavailable", (
       /reported this model unavailable/.test(n.textContent ?? ""),
     );
 
-  it("renders the provider's reason on the delivering-agent card", () => {
+  it("renders the provider's reason on the delivering engagement's ledger row", () => {
     const { container } = renderExec({
       task: withDeveloper(),
       deployedSpecialists: [
@@ -223,7 +228,9 @@ describe("run control warns when the delivering agent's model is unavailable", (
         },
       ],
     });
-    const note = unavailNote(container);
+    const note = [...container.querySelectorAll(".rev-agent .deny-note")].find(
+      (n) => /reported this model unavailable/.test(n.textContent ?? ""),
+    );
     expect(note).toBeTruthy();
     expect(note!.textContent).toContain("Codex reported this model unavailable");
     expect(note!.textContent).toContain("not supported when using Codex");
@@ -239,7 +246,36 @@ describe("run control warns when the delivering agent's model is unavailable", (
     expect(unavailNote(container)).toBeUndefined();
   });
 
-  it("warns on a REVIEWER row too, not only the delivering agent", () => {
+  it("the run control warns on the SELECTED agent, before Run is pressed", () => {
+    const { container } = renderExec({
+      deployedSpecialists: [
+        {
+          ...deployedFixture[0]!,
+          id: "developer",
+          backend: "codex",
+          modelUnavailable: "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
+        },
+      ],
+    });
+    const control = container.querySelector(".agent-run")!;
+    // Nothing selected yet → no warning to warn about.
+    expect(control.querySelector(".deny-note")).toBeNull();
+    fireEvent.focus(
+      container.querySelector('input[aria-label="Choose an agent to run"]')!,
+    );
+    fireEvent.click(
+      [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+        (o) => o.textContent?.includes("Developer"),
+      )!,
+    );
+    const note = control.querySelector(".deny-note")!;
+    expect(note.textContent).toContain("Codex reported this model unavailable");
+    // Informs, does not block: the provider's own sentence + the way out.
+    expect(note.textContent).toContain("Provider said:");
+    expect(note.textContent).toContain("not supported when using Codex");
+  });
+
+  it("warns on a supporting (reviewer) ledger row too, not only the delivering one", () => {
     const task: TaskSummary = {
       ...withDeveloper(),
       reviewers: [
@@ -266,7 +302,6 @@ describe("run control warns when the delivering agent's model is unavailable", (
         },
       ],
     });
-    // The reviewer's own run-spending control carries the same pre-spend warning.
     const revNote = [...container.querySelectorAll(".rev-agent .deny-note")].find(
       (n) => /reported this model unavailable/.test(n.textContent ?? ""),
     );

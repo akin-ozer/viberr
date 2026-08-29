@@ -432,9 +432,9 @@ export function AgentLogsPanel({
   sel: string | null;
   onSel: (id: string | null) => void;
   linesByThread: Record<string, StreamedLine[]>;
-  /** Retry the failed run's agent (delivering agent or reviewer) on the
-   *  other backend (D4). Receives the failed run so the caller can route the
-   *  right intent (run-specialist vs run-reviewer + profileId). */
+  /** Retry the failed run's agent on the other backend (D4). Receives the
+   *  failed run so the caller can dispatch it (run-agent + the run's own
+   *  profileId + the backend override). */
   onRetryBackend?: (backend: "claude" | "codex", run: RunView) => void;
   retrying?: boolean;
   /** UI-03/UI-30: the live tail stopped (403 / dropped stream). Rendered in the

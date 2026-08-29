@@ -19,7 +19,7 @@ import {
   observationLabel,
 } from "./decision-packet";
 import { GithubTrace, PolicyPanel } from "./task-side-panels";
-import { DiagnosticsPanel, ScheduledActions, TaskHero } from "./task-main-sections";
+import { DiagnosticsPanel, TaskHero } from "./task-main-sections";
 import type { DiagnosticRecord } from "~/server/projections/task-query.server";
 import { ReleaseConfirm } from "./release-confirm";
 import type { ActionResult } from "./task-detail-hooks";
@@ -586,20 +586,32 @@ describe("ReleaseConfirm", () => {
 /* -------------------------------------------------- ExecutionProfile */
 
 const deployedFixture: DeployedSpecialistView[] = [
-  { id: "developer", name: "Developer", role: "Implementation", backend: "codex", model: "codex-large" },
-  { id: "reviewer", name: "Reviewer", role: "Code review", backend: "claude", model: "claude-sonnet" },
+  {
+    id: "developer", name: "Developer", role: "Implementation", backend: "codex", model: "codex-large",
+    capabilities: { delivery: true, verdict: false, askHuman: false, browser: false },
+  },
+  {
+    id: "reviewer", name: "Reviewer", role: "Code review", backend: "claude", model: "claude-sonnet",
+    capabilities: { delivery: false, verdict: true, askHuman: false, browser: false },
+  },
 ];
 
 function execTask(patch: Partial<TaskSummary> = {}): TaskSummary {
   return { ...taskFixture("u-arda", "Arda Kaya"), ...patch };
 }
 
+/** Renders the rebuilt panel (dynamic-dispatch rework 2026-08-29): the operator
+ *  run control, the run-an-agent combobox + prompt, the engaged-agents ledger
+ *  and the owner cell — every mutation callback spied so a pin can assert the
+ *  exact submit. */
 function renderExec(
   task: TaskSummary,
   props: Partial<ComponentProps<typeof ExecutionProfile>> = {},
 ) {
-  const onAssign = vi.fn();
-  const onRun = vi.fn();
+  const onRunAgent = vi.fn();
+  const onReleaseAgent = vi.fn();
+  const onRunOperator = vi.fn();
+  const onCancelSchedule = vi.fn();
   const utils = render(
     <MemoryRouter>
       <ExecutionProfile
@@ -610,111 +622,286 @@ function renderExec(
         onOwner={() => {}}
         deployedSpecialists={deployedFixture}
         operatorBackend="claude"
-          operatorAutonomy="supervised"
+        operatorAutonomy="supervised"
         backendAvailable={{ claude: true, codex: true }}
         canRunAgents
-        deliveringActive={false}
-        activeReviewerIds={[]}
+        activeAgentProfileIds={[]}
         operatorRunActive={false}
         runBusy={false}
-        onAssignSpecialist={onAssign}
-        onRunSpecialist={onRun}
-        reviewerBusy={false}
-        onAssignReviewer={() => {}}
-        onRunReviewer={() => {}}
-        onRemoveReviewer={() => {}}
+        onRunAgent={onRunAgent}
+        releaseBusy={false}
+        onReleaseAgent={onReleaseAgent}
         operatorBusy={false}
-        onRunOperator={() => {}}
+        onRunOperator={onRunOperator}
+        schedules={[]}
+        scheduleBusy={false}
+        onCancelSchedule={onCancelSchedule}
         {...props}
       />
     </MemoryRouter>,
   );
-  return { ...utils, onAssign, onRun };
+  return { ...utils, onRunAgent, onReleaseAgent, onRunOperator, onCancelSchedule };
 }
 
-describe("ExecutionProfile — assign menu + run button", () => {
-  it("no specialist + admin: assign menu lists deployed specialists; picking submits", () => {
-    const { container, onAssign } = renderExec(execTask());
-    const btn = Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn")).find((b) =>
-      b.textContent?.includes("Assign delivering agent"),
-    )!;
-    expect(btn).toBeDefined();
-    fireEvent.click(btn);
-    const menu = container.querySelector('[aria-label="Assign a delivering agent"]')!;
-    const items = menu.querySelectorAll(".menu-item");
-    expect(items).toHaveLength(2);
-    expect(items[0]!.textContent).toContain("Developer");
-    expect(items[0]!.textContent).toContain("Implementation");
-    fireEvent.click(items[0]!);
-    expect(onAssign).toHaveBeenCalledWith("developer");
+/* Scoped selectors — both run controls share classes (`.op-run`, `.op-steer`),
+   so every query is addressed by aria-label or by the control's own span. */
+const agentInput = (container: HTMLElement) =>
+  container.querySelector<HTMLInputElement>(
+    'input[aria-label="Choose an agent to run"]',
+  );
+const agentMenu = (container: HTMLElement) =>
+  container.querySelector(".agent-select-menu");
+const agentOptions = (container: HTMLElement) =>
+  [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')];
+const agentPrompt = (container: HTMLElement) =>
+  container.querySelector<HTMLInputElement>(
+    'input[aria-label="Tell the agent what this run should do (optional)"]',
+  )!;
+const agentRunBtn = (container: HTMLElement) =>
+  container.querySelector<HTMLButtonElement>(".agent-run > button.btn")!;
+const agentDelay = (container: HTMLElement) =>
+  container.querySelector<HTMLSelectElement>(
+    'select[aria-label="When the agent run starts"]',
+  )!;
+const operatorSteer = (container: HTMLElement) =>
+  container.querySelector<HTMLInputElement>(
+    'input[aria-label="Steer this operator run (optional)"]',
+  )!;
+const operatorRunBtn = (container: HTMLElement) =>
+  container.querySelector<HTMLButtonElement>(
+    ".op-run:not(.agent-run) > button.btn",
+  )!;
+const operatorDelay = (container: HTMLElement) =>
+  container.querySelector<HTMLSelectElement>(
+    'select[aria-label="When the operator run starts"]',
+  )!;
+/** Picks an agent the way a pointer user does: open on focus, click the row. */
+function pickAgent(container: HTMLElement, name: string) {
+  fireEvent.focus(agentInput(container)!);
+  const row = agentOptions(container).find((o) => o.textContent?.includes(name))!;
+  expect(row).toBeDefined();
+  fireEvent.click(row);
+}
+
+// The "assign menu + run button" describe covered the DELETED slot controls
+// (assign/engage menus, per-row Run). Its replacement below pins the manual
+// dispatch that superseded them: the AgentSelect combobox + prompt + Run.
+describe("ExecutionProfile — the AgentSelect combobox", () => {
+  it("opens on FOCUS with the whole deployed roster (no sigil, no minimum query)", () => {
+    const { container } = renderExec(execTask());
+    expect(agentMenu(container)).toBeNull();
+    fireEvent.focus(agentInput(container)!);
+    const menu = agentMenu(container)!;
+    expect(menu.getAttribute("role")).toBe("listbox");
+    const rows = agentOptions(container);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.textContent).toContain("Developer");
+    expect(rows[0]!.textContent).toContain("Implementation · Codex");
+    expect(rows[1]!.textContent).toContain("Reviewer");
+    expect(rows[1]!.textContent).toContain("Code review · Claude");
   });
 
-  it("no deployed specialists: hint links to the Agents page", () => {
-    const { container } = renderExec(execTask(), { deployedSpecialists: [] });
-    const link = container.querySelector('a[href="/projects/viberr-core/agents"]');
-    expect(link).not.toBeNull();
-    // No "Assign delivering agent" trigger when there is nothing to assign (the
-    // owner "Manage" button is a separate .own-btn and may still be present).
-    const assignBtn = Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn")).find((b) =>
-      b.textContent?.includes("Assign delivering agent"),
+  it("type-to-filter narrows the roster and highlights the typed substring", () => {
+    const { container } = renderExec(execTask());
+    fireEvent.change(agentInput(container)!, { target: { value: "rev" } });
+    const rows = agentOptions(container);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain("Reviewer");
+    expect(rows[0]!.querySelector(".mention-match")!.textContent).toBe("Rev");
+    // A query nothing matches keeps the menu up and says so, listing no rows.
+    fireEvent.change(agentInput(container)!, { target: { value: "zzz" } });
+    expect(agentOptions(container)).toHaveLength(0);
+    expect(agentMenu(container)!.textContent).toContain(
+      "No deployed agent matches.",
     );
-    expect(assignBtn).toBeUndefined();
   });
 
-  it("specialist assigned: a primary Run button submits run-specialist", () => {
-    const task = execTask({
-      specialist: {
-        kind: "agent",
-        profileId: "developer",
-        backend: "codex",
-        name: "Codex",
-        role: "Implementation",
+  it("keyboard: arrows move the active row, Enter picks it, the input takes the name", () => {
+    const { container } = renderExec(execTask());
+    const input = agentInput(container)!;
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(agentOptions(container)[1]!.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(agentMenu(container)).toBeNull();
+    expect(input.value).toBe("Reviewer");
+    // The pick armed the run control.
+    expect(agentRunBtn(container).disabled).toBe(false);
+  });
+
+  it("an Enter that only confirms an IME candidate does NOT pick a row", () => {
+    const { container } = renderExec(execTask());
+    const input = agentInput(container)!;
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    // Menu still open, nothing picked — a multibyte commit is not a selection.
+    expect(agentMenu(container)).not.toBeNull();
+    expect(input.value).toBe("");
+  });
+
+  it("rows carry the capability marks — running / no repo write / gates acceptance / model unavailable", () => {
+    const marked: DeployedSpecialistView[] = [
+      deployedFixture[0]!,
+      {
+        ...deployedFixture[1]!,
+        modelUnavailable: "The requested model is not available on this account.",
       },
+    ];
+    const { container } = renderExec(execTask(), {
+      deployedSpecialists: marked,
+      activeAgentProfileIds: ["developer"],
     });
-    const { container, onRun } = renderExec(task);
-    // The primary specialist's Run button — not the operator "Run operator" one.
-    const runBtn = Array.from(container.querySelectorAll<HTMLButtonElement>("button.btn")).find(
-      (b) => b.textContent?.includes("Run") && !b.textContent?.includes("operator"),
-    )!;
-    expect(runBtn).toBeDefined();
-    expect(runBtn.disabled).toBe(false);
-    fireEvent.click(runBtn);
-    expect(onRun).toHaveBeenCalled();
+    fireEvent.focus(agentInput(container)!);
+    const rows = agentOptions(container);
+    expect(rows[0]!.textContent).toContain("Implementation · Codex · running");
+    expect(rows[1]!.textContent).toContain(
+      "Code review · Claude · no repo write · gates acceptance · model unavailable",
+    );
+    // The marks are claims about capability — the delivery-capable row wears none.
+    expect(rows[0]!.textContent).not.toContain("no repo write");
   });
 
-  it("delivering Run button is disabled while a delivering run is active", () => {
-    const task = execTask({
-      specialist: {
-        kind: "agent",
-        profileId: "developer",
-        backend: "codex",
-        name: "Codex",
-        role: "Implementation",
-      },
+  it("typing invalidates a settled pick — the id is what submits, never free text", () => {
+    const { container } = renderExec(execTask());
+    pickAgent(container, "Developer");
+    expect(agentInput(container)!.value).toBe("Developer");
+    fireEvent.change(agentInput(container)!, { target: { value: "Rev" } });
+    // Selection cleared until a row is picked again → Run disarms.
+    expect(agentRunBtn(container).disabled).toBe(true);
+  });
+});
+
+describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
+  it("Run submits onRunAgent(profileId, trimmed prompt, null) and clears the prompt", () => {
+    const { container, onRunAgent } = renderExec(execTask());
+    pickAgent(container, "Developer");
+    fireEvent.change(agentPrompt(container), {
+      target: { value: "  ship the fix  " },
     });
-    const { container } = renderExec(task, { deliveringActive: true });
-    const runBtn = Array.from(container.querySelectorAll<HTMLButtonElement>("button.btn")).find(
-      (b) => b.textContent?.includes("Running"),
-    )!;
-    expect(runBtn.disabled).toBe(true);
+    fireEvent.click(agentRunBtn(container));
+    expect(onRunAgent).toHaveBeenCalledWith("developer", "ship the fix", null);
+    expect(agentPrompt(container).value).toBe("");
   });
 
-  it("non-privileged role: no assign/run affordances (RBAC-gated)", () => {
+  it("Enter in the prompt input submits the same run (search/chat convention)", () => {
+    const { container, onRunAgent } = renderExec(execTask());
+    pickAgent(container, "Developer");
+    fireEvent.change(agentPrompt(container), { target: { value: "fix it" } });
+    fireEvent.keyDown(agentPrompt(container), { key: "Enter" });
+    expect(onRunAgent).toHaveBeenCalledWith("developer", "fix it", null);
+  });
+
+  it("Run is disabled until an agent is picked", () => {
+    const { container, onRunAgent } = renderExec(execTask());
+    const btn = agentRunBtn(container);
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toContain("Choose an agent first");
+    fireEvent.click(btn);
+    expect(onRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("a live run on the SELECTED profile disables Run-now, but scheduling stays open", () => {
+    const { container, onRunAgent } = renderExec(execTask(), {
+      activeAgentProfileIds: ["developer"],
+    });
+    pickAgent(container, "Developer");
+    expect(agentRunBtn(container).disabled).toBe(true);
+    expect(agentRunBtn(container).title).toContain("already has a run in progress");
+    // A deferred run is not a second concurrent run — the picker re-arms it.
+    fireEvent.change(agentDelay(container), { target: { value: "5" } });
+    expect(agentRunBtn(container).disabled).toBe(false);
+    fireEvent.click(agentRunBtn(container));
+    expect(onRunAgent).toHaveBeenCalledWith("developer", "", 5);
+  });
+
+  it("the DelayPicker turns Run into Schedule and submits delayMinutes", () => {
+    const { container, onRunAgent } = renderExec(execTask());
+    pickAgent(container, "Developer");
+    expect(agentRunBtn(container).textContent).toContain("Run");
+    fireEvent.change(agentDelay(container), { target: { value: "60" } });
+    expect(agentRunBtn(container).textContent).toContain("Schedule");
+    fireEvent.click(agentRunBtn(container));
+    expect(onRunAgent).toHaveBeenCalledWith("developer", "", 60);
+    // The control resets to run-now after the submit.
+    expect(agentRunBtn(container).textContent).toContain("Run");
+    expect(agentDelay(container).value).toBe("now");
+  });
+
+  it("names the posture the pick will take, BEFORE the run is spent", () => {
+    // Delivery-capable pick on a task with no deliverer → it becomes the deliverer.
+    const first = renderExec(execTask());
+    pickAgent(first.container, "Developer");
+    expect(first.container.querySelector(".agent-run")!.textContent).toContain(
+      "Runs as the delivering agent: it owns the branch and PR.",
+    );
+    cleanup();
+
+    // Verdict-capable, no repo write → reviewer, and the claim says what gates.
+    const second = renderExec(execTask());
+    pickAgent(second.container, "Reviewer");
+    expect(second.container.querySelector(".agent-run")!.textContent).toContain(
+      "Runs as a reviewer: its verdict gates acceptance.",
+    );
+    cleanup();
+
+    // Delivery-capable while ANOTHER agent owns delivery → supporting.
+    const third = renderExec(
+      execTask({
+        specialist: {
+          kind: "agent",
+          profileId: "other",
+          backend: "codex",
+          name: "Codex",
+          role: "Implementation",
+        },
+      }),
+    );
+    pickAgent(third.container, "Developer");
+    expect(third.container.querySelector(".agent-run")!.textContent).toContain(
+      "Runs as a supporting agent (another agent owns delivery).",
+    );
+    cleanup();
+
+    // No repo write AND no verdict → plain supporting.
+    const docs: DeployedSpecialistView = {
+      id: "docs", name: "Docs Writer", role: "Documentation", backend: "claude", model: "claude-sonnet",
+      capabilities: { delivery: false, verdict: false, askHuman: false, browser: false },
+    };
+    const fourth = renderExec(execTask(), {
+      deployedSpecialists: [...deployedFixture, docs],
+    });
+    pickAgent(fourth.container, "Docs Writer");
+    expect(fourth.container.querySelector(".agent-run")!.textContent).toContain(
+      "Runs as a supporting agent (no repo write).",
+    );
+  });
+
+  it("discloses the dispatch-completion contract where the run starts", () => {
+    const { container } = renderExec(execTask());
+    expect(container.querySelector(".agent-run")!.textContent).toContain(
+      "The run reports back tagging you and the operator",
+    );
+  });
+
+  it("zero deployed agents: the cell says so and points at the Agents page", () => {
+    const { container } = renderExec(execTask(), { deployedSpecialists: [] });
+    expect(container.textContent).toContain(
+      "No agents deployed. Deploy one on the Agents page first.",
+    );
+    expect(agentInput(container)).toBeNull();
+  });
+
+  it("non-privileged role: no run control — the read-only tier copy instead (RBAC-gated)", () => {
     const { container } = renderExec(execTask(), {
       myRole: "contributor",
       canRunAgents: false,
     });
-    const assignBtn = Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn")).find((b) =>
-      b.textContent?.includes("Assign delivering agent"),
+    expect(agentInput(container)).toBeNull();
+    expect(operatorRunBtn(container)).toBeNull();
+    expect(container.textContent).toContain(
+      "The operator dispatches agents as the task moves.",
     );
-    expect(assignBtn).toBeUndefined();
-    expect(
-      Array.from(container.querySelectorAll("button.btn")).some((b) =>
-        b.textContent?.includes("Run"),
-      ),
-    ).toBe(false);
-    // The read-only "None yet …" copy is shown instead.
-    expect(container.textContent).toContain("The operator assigns one");
+    expect(container.textContent).toContain("needs the run-agents tier");
   });
 });
 
@@ -752,13 +939,9 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
   // Owner request 2026-08-21: the run control SHOWS the profile's backend and
   // takes an optional steer — no per-run backend/autonomy pickers.
   it("shows the operator's backend as text and runs with the optional steer", () => {
-    const onRunOperator = vi.fn();
-    const { container } = renderExec(execTask({ operator: attachedOperator }), {
-      operatorBackend: "claude",
-      operatorAutonomy: "supervised" as const,
-      backendAvailable: { claude: true, codex: true },
-      onRunOperator,
-    });
+    const { container, onRunOperator } = renderExec(
+      execTask({ operator: attachedOperator }),
+    );
     // No pickers — the backend is stated, not chosen.
     expect(
       container.querySelector('select[aria-label="Operator backend"]'),
@@ -767,29 +950,70 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
       container.querySelector('select[aria-label="Operator autonomy"]'),
     ).toBeNull();
     expect(container.querySelector(".op-backend")!.textContent).toBe("Claude");
-    const steer = container.querySelector<HTMLInputElement>(".op-steer")!;
+    const steer = operatorSteer(container);
     fireEvent.change(steer, { target: { value: "  focus on the login page  " } });
-    const run = [...container.querySelectorAll("button")].find((b) =>
-      b.textContent!.includes("Run operator"),
-    )!;
-    fireEvent.click(run);
-    // Trimmed steer reaches the submit; the input clears for the next run.
-    expect(onRunOperator).toHaveBeenCalledWith("focus on the login page");
+    fireEvent.click(operatorRunBtn(container));
+    // Trimmed steer reaches the submit (delay "Now" rides as null); the input
+    // clears for the next run.
+    expect(onRunOperator).toHaveBeenCalledWith("focus on the login page", null);
     expect(steer.value).toBe("");
   });
 
+  it("the baked-in DelayPicker turns Run operator into Schedule and submits the minutes", () => {
+    const { container, onRunOperator } = renderExec(
+      execTask({ operator: attachedOperator }),
+    );
+    expect(operatorRunBtn(container).textContent).toContain("Run operator");
+    fireEvent.change(operatorDelay(container), { target: { value: "1440" } });
+    expect(operatorRunBtn(container).textContent).toContain("Schedule");
+    fireEvent.change(operatorSteer(container), { target: { value: "check back" } });
+    fireEvent.click(operatorRunBtn(container));
+    expect(onRunOperator).toHaveBeenCalledWith("check back", 1440);
+    // Reset for the next run: back to run-now.
+    expect(operatorDelay(container).value).toBe("now");
+    expect(operatorRunBtn(container).textContent).toContain("Run operator");
+  });
+
+  it("F20-5: an open decision packet disables the manual run, with the reason as rendered copy", () => {
+    const { container, onRunOperator } = renderExec(
+      execTask({ operator: attachedOperator, packet: packet142 }),
+    );
+    const run = operatorRunBtn(container);
+    expect(run.disabled).toBe(true);
+    fireEvent.click(run);
+    expect(onRunOperator).not.toHaveBeenCalled();
+    // A `title` never opens on a disabled control (P14) — the reason renders.
+    expect(container.textContent).toContain(
+      "Open decision. Resolve it before running the operator.",
+    );
+  });
+
+  it("a closed task disables the operator run and names the @operator comment path (N20-17)", () => {
+    const { container, onRunOperator } = renderExec(
+      execTask({ operator: attachedOperator, displayReadiness: "accepted" }),
+    );
+    const run = operatorRunBtn(container);
+    expect(run.disabled).toBe(true);
+    fireEvent.click(run);
+    expect(onRunOperator).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(
+      "Task closed. Reopen it to run the operator.",
+    );
+    // The two run paths must not read as silently inconsistent: an @operator
+    // comment still starts a full run on a closed task, and the copy says so.
+    expect(container.textContent).toContain("still runs it");
+  });
+
   it("P11-41 without a picker: an unconfigured operator backend disables Run and says so", () => {
-    const onRunOperator = vi.fn();
-    const { container } = renderExec(execTask({ operator: attachedOperator }), {
-      operatorBackend: "codex",
-      operatorAutonomy: "supervised" as const, // configured backend...
-      backendAvailable: { claude: true, codex: false }, // ...but NOT available
-      onRunOperator,
-    });
+    const { container, onRunOperator } = renderExec(
+      execTask({ operator: attachedOperator }),
+      {
+        operatorBackend: "codex",
+        backendAvailable: { claude: true, codex: false }, // configured, NOT available
+      },
+    );
     expect(container.querySelector(".op-backend")!.textContent).toBe("Codex");
-    const run = [...container.querySelectorAll("button")].find((b) =>
-      b.textContent!.includes("Run operator"),
-    )!;
+    const run = operatorRunBtn(container);
     expect(run.hasAttribute("disabled")).toBe(true);
     fireEvent.click(run);
     expect(onRunOperator).not.toHaveBeenCalled();
@@ -809,52 +1033,25 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
       "Full autonomy: this run can move the task and accept completion",
     );
   });
+
+  it("states the operator's dispatch mandate on the cell", () => {
+    // The rework's one-line contract: the operator decides who runs at each
+    // stage, reading the current stage AND the one the task arrived from.
+    const { container } = renderExec(execTask({ operator: attachedOperator }));
+    expect(container.textContent).toContain(
+      "Decides which agent runs at each stage",
+    );
+    expect(container.textContent).toContain("the one it came from");
+  });
 });
 
-describe("ExecutionProfile — reviewers", () => {
-  const reviewerTask = () =>
+// The "reviewers" describe covered the DELETED engage menu and per-reviewer Run
+// buttons. Its replacement pins the ENGAGED AGENTS ledger: the honest record of
+// who is attached (delivers / gates acceptance / running…), read-only except
+// releasing a supporting engagement.
+describe("ExecutionProfile — engaged agents ledger", () => {
+  const engagedTask = () =>
     execTask({
-      reviewers: [
-        { kind: "agent", profileId: "reviewer", backend: "claude", name: "Claude", role: "Code review" },
-      ],
-    });
-
-  it("labels the cell 'Reviewing agents' and renders a row with Run + remove", () => {
-    const onRunReviewer = vi.fn();
-    const onRemoveReviewer = vi.fn();
-    const { container } = renderExec(reviewerTask(), { onRunReviewer, onRemoveReviewer });
-    expect(container.textContent).toContain("Reviewing agents");
-    const chip = container.querySelector(".rev-agent")!;
-    expect(chip).not.toBeNull();
-    expect(chip.textContent).toContain("Code review");
-    fireEvent.click(chip.querySelector(".btn")!);
-    expect(onRunReviewer).toHaveBeenCalledWith("reviewer");
-    fireEvent.click(chip.querySelector(".rev-x")!);
-    expect(onRemoveReviewer).toHaveBeenCalledWith("reviewer");
-  });
-
-  it("'Engage reviewer' menu offers specialists not already engaged; picking submits", () => {
-    const onAssignReviewer = vi.fn();
-    // 'reviewer' is already engaged → only 'developer' remains available.
-    const { container } = renderExec(reviewerTask(), { onAssignReviewer });
-    const addBtn = Array.from(container.querySelectorAll<HTMLButtonElement>(".rev-add")).find((b) =>
-      b.textContent?.includes("Engage reviewer"),
-    )!;
-    expect(addBtn).toBeDefined();
-    fireEvent.click(addBtn);
-    const menu = container.querySelector('[aria-label="Engage a reviewer"]')!;
-    const items = menu.querySelectorAll(".menu-item");
-    expect(items).toHaveLength(1);
-    expect(items[0]!.textContent).toContain("Developer");
-    fireEvent.click(items[0]!);
-    expect(onAssignReviewer).toHaveBeenCalledWith("developer");
-  });
-
-  it("'Engage reviewer' menu excludes the DELIVERING agent (F10-13)", () => {
-    // F10-13: a reviewer must not review its own delivery — engaging the
-    // delivering profile as a reviewer was a server no-op that answered with a
-    // misleading "is already a reviewer" toast. The picker must not offer it.
-    const task = execTask({
       specialist: {
         kind: "agent",
         profileId: "developer",
@@ -862,104 +1059,108 @@ describe("ExecutionProfile — reviewers", () => {
         name: "Codex",
         role: "Implementation",
       },
-      reviewers: [],
+      reviewers: [
+        { kind: "agent", profileId: "reviewer", backend: "claude", name: "Claude", role: "Code review" },
+      ],
+    });
+
+  it("the delivering row is marked 'delivers' and offers no release", () => {
+    const { container } = renderExec(engagedTask());
+    const rows = [...container.querySelectorAll(".rev-agent")];
+    expect(rows).toHaveLength(2);
+    // The row shows the DEPLOYED profile's display name, not the runtime label.
+    expect(rows[0]!.querySelector(".nm")!.textContent).toBe("Developer");
+    expect(rows[0]!.textContent).toContain("Implementation · Codex · delivers");
+    // Delivery is not releasable from the ledger — no ✕ on the delivering row.
+    expect(rows[0]!.querySelector(".rev-x")).toBeNull();
+  });
+
+  it("a verdict-capable supporting row says 'gates acceptance'; its ✕ releases (UC-13/F21-6)", () => {
+    const { container, onReleaseAgent } = renderExec(engagedTask());
+    const row = [...container.querySelectorAll(".rev-agent")][1]!;
+    expect(row.textContent).toContain("Code review · Claude · gates acceptance");
+    // The claim is about verdict authority — the delivering row must not wear it.
+    expect(
+      [...container.querySelectorAll(".rev-agent")][0]!.textContent,
+    ).not.toContain("gates acceptance");
+    const x = row.querySelector<HTMLButtonElement>(".rev-x")!;
+    expect(x.getAttribute("aria-label")).toBe("Release Code review agent");
+    fireEvent.click(x);
+    expect(onReleaseAgent).toHaveBeenCalledWith("reviewer");
+  });
+
+  it("a live run marks its own row 'running…' and no other", () => {
+    const { container } = renderExec(engagedTask(), {
+      activeAgentProfileIds: ["reviewer"],
+    });
+    const rows = [...container.querySelectorAll(".rev-agent")];
+    expect(rows[1]!.textContent).toContain("running…");
+    expect(rows[0]!.textContent).not.toContain("running…");
+  });
+
+  it("an engagement whose profile left the roster ghosts, with the recovery note (UX19-12)", () => {
+    const task = execTask({
+      reviewers: [
+        { kind: "agent", profileId: "gone", backend: "claude", name: "Claude", role: "Code review" },
+      ],
     });
     const { container } = renderExec(task);
-    const addBtn = Array.from(container.querySelectorAll<HTMLButtonElement>(".rev-add")).find((b) =>
-      b.textContent?.includes("Engage reviewer"),
-    )!;
-    fireEvent.click(addBtn);
-    const menu = container.querySelector('[aria-label="Engage a reviewer"]')!;
-    const items = [...menu.querySelectorAll(".menu-item")].map((i) => i.textContent);
-    // 'developer' is delivering → only the other deployed agent is offered.
-    expect(items).toHaveLength(1);
-    expect(items[0]).toContain("Reviewer");
-    expect(items.join(" ")).not.toContain("Developer");
+    const row = container.querySelector(".rev-agent")!;
+    expect(row.querySelector(".nm")!.textContent).toBe("profile no longer here");
+    expect(row.textContent).toContain(
+      "Not deployed on this project any more. Release it, or re-deploy the profile on the Agents page.",
+    );
   });
 
-  it("a reviewer Run button is disabled only while THAT reviewer's run is active", () => {
-    // F10-04: per-engagement gating — this reviewer ("reviewer") has an active
-    // run, so its button reads Running/disabled.
-    const { container } = renderExec(reviewerTask(), {
-      activeReviewerIds: ["reviewer"],
-    });
-    const runBtn = container.querySelector<HTMLButtonElement>(
-      ".rev-agent .btn",
-    )!;
-    expect(runBtn.disabled).toBe(true);
-    expect(runBtn.textContent).toContain("Running");
+  it("empty ledger: the operator is the picker, and runners are told about the manual path", () => {
+    const priv = renderExec(execTask());
+    expect(priv.container.textContent).toContain(
+      "None yet. The operator picks who runs at each stage, or run one yourself above.",
+    );
+    cleanup();
+    // Without the run-agents tier the manual-path clause would advertise a
+    // control the panel does not render for this reader.
+    const ro = renderExec(execTask(), { myRole: "contributor", canRunAgents: false });
+    expect(ro.container.textContent).toContain(
+      "None yet. The operator picks who runs at each stage.",
+    );
+    expect(ro.container.textContent).not.toContain("run one yourself");
   });
 
-  it("a reviewer Run button stays enabled when a DIFFERENT run is active", () => {
-    // A delivering run (or another reviewer) being active must NOT disable this
-    // read-only reviewer's Run button (F10-04).
-    const { container } = renderExec(reviewerTask(), {
-      deliveringActive: true,
-      activeReviewerIds: ["some-other-reviewer"],
-    });
-    const runBtn = container.querySelector<HTMLButtonElement>(
-      ".rev-agent .btn",
-    )!;
-    expect(runBtn.disabled).toBe(false);
-    expect(runBtn.textContent).toContain("Run");
-  });
-
-  it("non-privileged role: chips render read-only (no Run/remove/Add)", () => {
-    const { container } = renderExec(reviewerTask(), {
+  it("non-privileged role: ledger rows render read-only (no release ✕)", () => {
+    const { container } = renderExec(engagedTask(), {
       myRole: "contributor",
       canRunAgents: false,
     });
-    expect(container.querySelector(".rev-agent")).not.toBeNull();
-    expect(container.querySelector(".rev-agent .btn")).toBeNull();
+    expect(container.querySelectorAll(".rev-agent")).toHaveLength(2);
     expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
-    expect(
-      Array.from(container.querySelectorAll(".rev-add")).some((b) =>
-        b.textContent?.includes("Engage reviewer"),
-      ),
-    ).toBe(false);
   });
 });
 
-// P14-WL-07: PST-1 was Done+merged and wore the "task closed" pill while the
-// panel still offered "Assign delivering agent" and "Engage reviewer" — G9
-// disabled the RUN buttons and stopped there, so a closed task could still take
-// an engagement that had nothing left to run.
-describe("ExecutionProfile — a closed task offers no new engagements (P14-WL-07)", () => {
-  const closedTask = () =>
-    execTask({ displayReadiness: "merged" });
+// P14-WL-07's invariant survives the rework re-shaped: a closed (merged/
+// accepted/archived) task must not advertise ways to start runs. The controls
+// it must withdraw are now the run-an-agent combobox and the operator Run.
+describe("ExecutionProfile — a closed task offers no run controls (P14-WL-07)", () => {
+  const closedTask = () => execTask({ displayReadiness: "merged" });
 
-  it("replaces the assign menu with the reason", () => {
+  it("replaces the run-an-agent control with the reason", () => {
     const { container, getByText } = renderExec(closedTask());
-    expect(
-      Array.from(container.querySelectorAll(".own-btn")).some((b) =>
-        b.textContent?.includes("Assign delivering agent"),
-      ),
-    ).toBe(false);
-    expect(getByText(/Task closed\. Reopen it from Current state/)).toBeTruthy();
+    expect(agentInput(container)).toBeNull();
+    expect(getByText("Task closed. Reopen it to run an agent.")).toBeTruthy();
   });
 
-  it("replaces the reviewer menu with the reason", () => {
-    const { container, getByText } = renderExec(closedTask());
-    expect(
-      Array.from(container.querySelectorAll(".rev-add")).some((b) =>
-        b.textContent?.includes("Engage reviewer"),
-      ),
-    ).toBe(false);
-    expect(getByText("Task closed. No new reviewer engagements.")).toBeTruthy();
+  it("an ARCHIVED task is out of the flow too (F15-11)", () => {
+    const { container, getByText } = renderExec(execTask({ archived: true }));
+    expect(agentInput(container)).toBeNull();
+    expect(getByText("Task closed. Reopen it to run an agent.")).toBeTruthy();
+    expect(container.textContent).toContain("task closed"); // the head pill
   });
 
-  it("still offers both on an OPEN task", () => {
+  it("still offers both run controls on an OPEN task", () => {
     const { container } = renderExec(execTask());
-    expect(
-      Array.from(container.querySelectorAll(".own-btn")).some((b) =>
-        b.textContent?.includes("Assign delivering agent"),
-      ),
-    ).toBe(true);
-    expect(
-      Array.from(container.querySelectorAll(".rev-add")).some((b) =>
-        b.textContent?.includes("Engage reviewer"),
-      ),
-    ).toBe(true);
+    expect(agentInput(container)).not.toBeNull();
+    expect(operatorRunBtn(container)).not.toBeNull();
+    expect(operatorRunBtn(container).disabled).toBe(false);
   });
 });
 
@@ -994,50 +1195,50 @@ describe("ExecutionProfile — owner cell (owner request 2026-08-21)", () => {
   });
 });
 
-/* ------------------------------------------- popover dismissal (shared hook) */
+/* ------------------------------------------- popover dismissal (AgentSelect) */
 
 /**
- * Pass 16: the three menus on this panel each carried their own copy of the
- * "Escape + outside mousedown closes me" effect, and none of them was covered —
- * so the behaviour could quietly diverge between them (it already had, app-wide:
- * `window` vs `document`, some popovers with no outside-close at all). They now
- * share `use-dismiss.ts`, and this asserts the shared contract on all three at
- * once so a future divergence is a test failure.
+ * Pass 16 asserted the shared dismiss contract on the panel's assign/engage
+ * menus; both menus are gone with the slot ceremony. The one popover left on
+ * the panel is the AgentSelect listbox, a focus-scoped combobox — its dismissal
+ * is Escape (restoring the settled selection) and blur, not the use-dismiss
+ * outside-press hook, so these pin THAT contract.
  */
-describe("ExecutionProfile — every menu dismisses the same way", () => {
-  // The owner "Manage" popover left this list when the owned cell became a
-  // plain chip (owner request 2026-08-21) — two popovers remain on the panel.
-  const menus: [label: string, trigger: string, panel: string][] = [
-    ["delivering agent", "Assign delivering agent", "Assign a delivering agent"],
-    ["reviewer", "Engage reviewer", "Engage a reviewer"],
-  ];
+describe("ExecutionProfile — the agent listbox dismisses cleanly", () => {
+  it("Escape closes the menu; a still-settled selection's name comes back", () => {
+    const { container } = renderExec(execTask());
+    pickAgent(container, "Developer");
+    const input = agentInput(container)!;
+    // Reopen from the settled pick: the query starts empty (full roster).
+    fireEvent.focus(input);
+    expect(agentMenu(container)).not.toBeNull();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(agentMenu(container)).toBeNull();
+    // No typing happened, so the pick still stands and the input shows it.
+    expect(input.value).toBe("Developer");
+    // Typing INVALIDATES the pick (the id is what submits), so an Escape after
+    // a query empties the input instead of resurrecting a cleared selection.
+    fireEvent.change(input, { target: { value: "rev" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(agentMenu(container)).toBeNull();
+    expect(input.value).toBe("");
+    expect(agentRunBtn(container).disabled).toBe(true);
+  });
 
-  for (const [name, trigger, panel] of menus) {
-    it(`${name} menu: Escape closes it`, () => {
-      const { container } = renderExec(execTask());
-      const btn = Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn, .rev-add")).find(
-        (b) => b.textContent?.includes(trigger),
-      )!;
-      expect(btn).toBeDefined();
-      fireEvent.click(btn);
-      expect(container.querySelector(`[aria-label="${panel}"]`)).not.toBeNull();
-      fireEvent.keyDown(document, { key: "Escape" });
-      expect(container.querySelector(`[aria-label="${panel}"]`)).toBeNull();
-    });
-
-    it(`${name} menu: a press outside closes it, a press inside does not`, () => {
-      const { container } = renderExec(execTask());
-      const btn = Array.from(container.querySelectorAll<HTMLButtonElement>(".own-btn, .rev-add")).find(
-        (b) => b.textContent?.includes(trigger),
-      )!;
-      fireEvent.click(btn);
-      const open = () => container.querySelector(`[aria-label="${panel}"]`);
-      fireEvent.mouseDown(open()!);
-      expect(open()).not.toBeNull();
-      fireEvent.mouseDown(document.body);
-      expect(open()).toBeNull();
-    });
-  }
+  it("blur closes the menu; a row's mousedown is prevented so blur can't beat the pick", () => {
+    const { container, onRunAgent } = renderExec(execTask());
+    const input = agentInput(container)!;
+    fireEvent.focus(input);
+    expect(agentMenu(container)).not.toBeNull();
+    // The option rows preventDefault their mousedown, keeping focus in the
+    // input, so the click that follows still lands on a live row.
+    const row = agentOptions(container)[0]!;
+    const mousedown = fireEvent.mouseDown(row);
+    expect(mousedown).toBe(false); // preventDefault() was called
+    fireEvent.blur(input);
+    expect(agentMenu(container)).toBeNull();
+    expect(onRunAgent).not.toHaveBeenCalled();
+  });
 });
 
 /* -------------------------------------------------- GithubTrace force-accept */
@@ -2218,7 +2419,8 @@ function schedule(patch: Partial<TaskSchedule> = {}): TaskSchedule {
     id: "sch-1",
     action: "run-operator",
     dueAt: new Date(Date.now() + 3_600_000).toISOString(),
-    note: "",
+    profileId: null,
+    prompt: "",
     createdBy: "u-arda",
     createdByLabel: "Arda Kaya",
     createdAt: new Date().toISOString(),
@@ -2230,48 +2432,85 @@ function schedule(patch: Partial<TaskSchedule> = {}): TaskSchedule {
   };
 }
 
-describe("ScheduledActions panel head (P13-D-38)", () => {
-  it("renders the icon as a SIBLING of the <h2>, not nested inside it", () => {
-    // `.panel-head` is a flex row with `gap: .6rem` and `.panel-head h2 {flex:1}`.
-    // Nesting collapsed the gap to a JSX space and baseline-aligned the SVG —
-    // this was the only one of ~48 panel heads that did it.
-    const { container } = renderWithRouter(
-      <ScheduledActions
-        schedules={[schedule()]}
-        canRunAgents
-        taskClosed={false}
-      />,
-    );
-    const head = container.querySelector(
-      '[data-testid="scheduled-actions"] .panel-head',
+// The standalone ScheduledActions panel (and its P13-D-38 head pin) is DELETED:
+// scheduling is baked into the two run controls, so pending entries render
+// INSIDE the execution profile, each under the control that would fire it.
+describe("pending schedules render inside the execution profile", () => {
+  const bothKinds = () => [
+    schedule({ id: "sch-op", prompt: "recheck the PR" }),
+    schedule({
+      id: "sch-ag",
+      action: "run-agent",
+      profileId: "developer",
+      prompt: "polish the diff",
+      createdByLabel: "Murat Yıldız",
+    }),
+  ];
+
+  it("splits the entries per control and names agent, prompt and scheduler", () => {
+    const { container } = renderExec(execTask(), { schedules: bothKinds() });
+    const opRow = container.querySelector(
+      ".op-run:not(.agent-run) .sched-list .sched-row",
     )!;
-    expect(head.querySelector("h2")!.querySelector("svg")).toBeNull();
-    expect(head.querySelector(":scope > svg.ico")).toBeTruthy();
-    expect(head.querySelector("h2")!.textContent!.trim()).toBe("Scheduled re-runs");
+    expect(opRow.textContent).toContain("operator re-run");
+    expect(opRow.textContent).toContain("recheck the PR");
+    expect(opRow.textContent).toContain("by Arda Kaya");
+    const agRow = container.querySelector(".agent-run .sched-list .sched-row")!;
+    // R22: the row pins the PROFILE (resolved to its live display name), never
+    // a backend/model frozen at schedule time.
+    expect(agRow.textContent).toContain("Developer run");
+    expect(agRow.textContent).toContain("polish the diff");
+    expect(agRow.textContent).toContain("by Murat Yıldız");
+    // Each list holds exactly its own kind.
+    expect(
+      container.querySelectorAll(".op-run:not(.agent-run) .sched-row"),
+    ).toHaveLength(1);
+    expect(container.querySelectorAll(".agent-run .sched-row")).toHaveLength(1);
+  });
+
+  it("Cancel asks first (D6 ConfirmDialog), then submits cancel-schedule", () => {
+    const { container, onCancelSchedule } = renderExec(execTask(), {
+      schedules: bothKinds(),
+    });
+    const cancelBtn = container.querySelector<HTMLButtonElement>(
+      ".agent-run .sched-cancel",
+    )!;
+    fireEvent.click(cancelBtn);
+    // Nothing cancelled yet — the confirm is up, naming the consequence.
+    expect(onCancelSchedule).not.toHaveBeenCalled();
+    const dialog = container.querySelector(
+      'dialog[aria-label="Cancel this scheduled run?"]',
+    )!;
+    expect(dialog).not.toBeNull();
+    expect(dialog.textContent).toContain("will not fire");
+    fireEvent.click(
+      [...dialog.querySelectorAll("button")].find((b) =>
+        b.textContent?.includes("Cancel run"),
+      )!,
+    );
+    expect(onCancelSchedule).toHaveBeenCalledWith("sch-ag");
   });
 });
 
 describe("undefined CTA / utility classes (P13-D-19)", () => {
   it("uses `btn primary` and `btn ghost`, never the undefined hyphenated forms", () => {
-    const { container } = renderWithRouter(
-      <ScheduledActions
-        schedules={[schedule()]}
-        canRunAgents
-        taskClosed={false}
-      />,
-    );
+    // Re-pointed at the execution profile (the ScheduledActions panel that
+    // carried the original defect is deleted; its buttons live here now).
+    const { container } = renderExec(execTask(), {
+      schedules: [schedule({ id: "sch-op", prompt: "recheck" })],
+    });
     const buttons = [...container.querySelectorAll("button")];
-    // `btn-primary` / `btn-ghost` exist in no stylesheet: both CTAs fell back
-    // to the plain grey `.btn`.
+    // `btn-primary` / `btn-ghost` exist in no stylesheet: a CTA wearing one
+    // falls back to the plain grey `.btn`.
     for (const b of buttons) {
       expect(b.className).not.toMatch(/\bbtn-(primary|ghost)\b/);
     }
-    const submit = buttons.find((b) => b.textContent?.includes("Schedule operator re-run"))!;
     // Pass 30: routine starters are secondary — the page's one solid primary
     // is the decision-stakes commit of the current state.
-    expect(submit.classList.contains("btn")).toBe(true);
-    expect(submit.classList.contains("primary")).toBe(false);
-    const cancel = buttons.find((b) => b.textContent?.trim() === "Cancel")!;
+    const run = operatorRunBtn(container);
+    expect(run.classList.contains("btn")).toBe(true);
+    expect(run.classList.contains("primary")).toBe(false);
+    const cancel = container.querySelector<HTMLButtonElement>(".sched-cancel")!;
     expect(cancel.classList.contains("ghost")).toBe(true);
   });
 

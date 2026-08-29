@@ -39,8 +39,9 @@ const PROFILES: PcapProfile[] = [
     backends: ["claude"],
     actions: {
       direct: [
-        "Assign the delivering agent",
-        "Summon reviewer specialists",
+        // Dynamic-dispatch rework (2026-08-29): the retired assign/summon slot
+        // labels collapsed into the one `dispatch-agents` label below.
+        "Select & run agents",
         "Generate decision & blocking packets",
         "Append typed important events",
         "Deliver the branch & open the review PR",
@@ -181,7 +182,9 @@ describe("AgentCapability", () => {
       />,
     );
     expect(getByText("2 profiles")).toBeTruthy();
-    expect(getByText("5 direct")).toBeTruthy();
+    // Both fixtures now count 4 governed direct labels (the operator's
+    // collapsed `dispatch-agents` grant took its slot pair down to one row).
+    expect(getAllByText("4 direct")).toHaveLength(2);
     expect(getAllByText("3 human")).toHaveLength(2); // operator + developer
     // Always-human list comes from the server invariant catalog (ruling 2).
     expect(getByText("Merge a pull request")).toBeTruthy();

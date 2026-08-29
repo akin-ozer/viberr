@@ -487,6 +487,14 @@ describe("transitionStage boundary enforcement", () => {
     );
     expect(task.stage).toBe("ready");
     expect(task.operator).toMatchObject({ assignedAtStageId: "ready" });
+    // Ruling 98: every real move records where the task CAME from — the
+    // durable previous-stage fact the operator's agent choice weighs.
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.previousStageId).toBe("triage");
   });
 
   it("auto boundary (ready→impl): any member incl. viewer; guests rejected", async () => {
@@ -1059,7 +1067,8 @@ describe("resolvePacket kind matrix", () => {
             id: "sch_arch1",
             action: "run-operator",
             dueAt: new Date(Date.now() + 3_600_000).toISOString(),
-            note: "re-check",
+            profileId: null,
+            prompt: "re-check",
             createdBy: store.users.arda.id,
             createdByLabel: "Arda",
             createdAt: new Date().toISOString(),

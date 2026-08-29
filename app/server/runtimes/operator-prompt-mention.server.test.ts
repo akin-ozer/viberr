@@ -20,6 +20,7 @@ const SNAPSHOT: OperatorTaskSnapshot = {
   dueDate: null,
   stage: "impl",
   stageName: "In Progress",
+  previousStage: null,
   readiness: "ready",
   waiting: "none",
   validation: "changed",

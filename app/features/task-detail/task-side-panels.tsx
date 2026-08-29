@@ -855,8 +855,8 @@ export function CurrentStatePanel({
       {task.quiet && (
         <p className="hint">
           No activity. Nothing has been recorded on this task since then, and no
-          run is in flight. It stays here until someone engages an agent or
-          schedules an operator re-run.
+          run is in flight. It stays here until someone runs an agent or the
+          operator, now or scheduled, from the Execution profile.
         </p>
       )}
       {/* P14-LV-06: the acceptance the review queue promises. It renders for a

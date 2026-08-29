@@ -29,11 +29,14 @@ describe("capability catalog", () => {
     }
   });
 
-  it("pruned ids (F11/R3) are gone from the catalog", () => {
+  it("pruned ids (F11/R3, dynamic-dispatch) are gone from the catalog", () => {
     const ids = new Set(CAP_CATALOG.map((c) => c.id));
-    for (const gone of ["edit-other-task-branch", "open-or-merge-pr", "compress-timelines", "owner-reassignment"]) {
+    // The last two retired in the dynamic-dispatch rework (2026-08-29),
+    // collapsed into the single `dispatch-agents` gate.
+    for (const gone of ["edit-other-task-branch", "open-or-merge-pr", "compress-timelines", "owner-reassignment", "assign-primary-specialist", "summon-reviewers"]) {
       expect(ids.has(gone), `${gone} should have been pruned`).toBe(false);
     }
+    expect(ids.has("dispatch-agents")).toBe(true);
   });
 });
 
@@ -70,9 +73,16 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
   });
 
   it("classifies operator-gate caps as both, and unknown/advisory caps as advisory", () => {
-    for (const id of ["assign-primary-specialist", "summon-reviewers", "generate-packets", "append-typed-events", "stage-transitions"]) {
+    // Dynamic-dispatch rework (2026-08-29): `dispatch-agents` is the ONE
+    // operator dispatch gate — the retired slot pair (`assign-primary-specialist`
+    // / `summon-reviewers`) collapsed into it below.
+    for (const id of ["dispatch-agents", "generate-packets", "append-typed-events", "stage-transitions"]) {
       expect(capabilityEnforcement(id), id).toBe("both");
     }
+    // The retired slot ids are unknown grants now — advisory, like any id the
+    // catalog no longer knows (an old project.md row simply stops binding).
+    expect(capabilityEnforcement("assign-primary-specialist")).toBe("advisory");
+    expect(capabilityEnforcement("summon-reviewers")).toBe("advisory");
     expect(capabilityEnforcement("post-quality-flags")).toBe("advisory");
     expect(capabilityEnforcement("no-such-capability")).toBe("advisory");
   });

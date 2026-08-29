@@ -8080,7 +8080,9 @@ export async function applyRecommendation(
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       profileId: rec.profileId,
-      triggeredByName: actor.label,
+      // Display name, not `actor.label` (the email) — the run's report tags
+      // the applying human, and only a display name notifies (R21-9).
+      triggeredByName: userName(db, actor.userId),
     };
     if (rec.prompt?.trim()) dispatch.directive = rec.prompt.trim();
     await startAgentRun(db, dispatch, runActor, runCtx);

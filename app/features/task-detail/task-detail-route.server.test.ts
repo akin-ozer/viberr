@@ -727,10 +727,10 @@ describe("transition action (manual stage move — admin|maintainer)", () => {
   });
 });
 
-/* ------------------------------------------ specialist assign + run intents */
+/* ---------------------------------------------- agent dispatch (run-agent) */
 
 describe("loader — deployed specialists", () => {
-  it("exposes the project's deployed specialists (developer) + runActive flag", async () => {
+  it("exposes the project's deployed specialists (developer) + the live-run profile set", async () => {
     const result = await runLoader("VIB-166", ids.arda);
     const ids2 = result.deployedSpecialists.map((s) => s.id);
     // The seed deploys operator + developer/reviewer; the
@@ -740,94 +740,23 @@ describe("loader — deployed specialists", () => {
     const dev = result.deployedSpecialists.find((s) => s.id === "developer")!;
     expect(dev).toMatchObject({ role: "Implementation" });
     expect(dev.backend === "codex" || dev.backend === "claude").toBe(true);
-    // F10-04: per-engagement run gating replaced the single `runActive` boolean.
-    expect(result.deliveringActive).toBe(false); // no delivering run on VIB-166
-    expect(result.activeReviewerIds).toEqual([]); // no reviewer run either
+    // Dynamic-dispatch rework: ONE per-profile live-run set replaced the
+    // deliveringActive/activeReviewerIds split — no live run on VIB-166 yet.
+    expect(result.activeAgentProfileIds).toEqual([]);
   });
 });
 
-describe("assign-specialist + run-specialist intents", () => {
-  it("assigns the developer specialist (admin) → frontmatter + agent event + toast", async () => {
-    // VIB-166 is a triage task with no specialist. The Developer's eligible
-    // stages are ready/impl (F1 now enforces this), so move it to Ready first —
-    // assigning a developer at Triage is correctly rejected.
+describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
+  it("dispatching the developer AUTO-ENGAGES it as the deliverer and starts the run (streaming toast)", async () => {
+    // VIB-166 is a triage task with NO engagements. The Developer's eligible
+    // stages are ready/impl (F1 still holds inside the auto-engage), so move it
+    // to Ready first — dispatching a developer at Triage is correctly rejected.
     await postIntent("VIB-166", ids.arda, { intent: "transition", to: "ready" });
-    // SAFETY: arda is a project admin and VIB-166 now sits at an eligible stage,
-    // so `assign-specialist` returns its success arm.
-    const result = (await postIntent("VIB-166", ids.arda, {
-      intent: "assign-specialist", profileId: "developer",
-    })) as { ok: true; toast: string };
-    expect(result.ok).toBe(true);
-    expect(result.toast).toBe("Deployed Developer as specialist");
-
-    const after = await runLoader("VIB-166", ids.arda);
-    expect(after.task.specialist).toMatchObject({
-      profileId: "developer",
-      role: "Implementation",
-    });
-    // Moving VIB-166 into the auto "ready" stage above auto-invokes the
-    // operator; with no workspace to advance (the read-only checkout fails
-    // fast under GIT_ALLOW_PROTOCOL=file) its stranded-resume chain hits the
-    // transition-chain cap and leaves a system stall note. That async note can
-    // sit ABOVE the assign event, so locate the deployment by type + copy
-    // rather than assuming it is the newest entry — the same reason the
-    // request_edit case finds its transition by type instead of position.
-    const deployed = after.task.timeline.find(
-      (e) => e.type === "agent" && e.text.includes("Deployed **Developer**"),
-    );
-    expect(deployed, "the assign event must be recorded as an agent event").toBeDefined();
-  });
-
-  it("reviewer + viewer are denied assign (admin|maintainer only)", async () => {
-    // SAFETY: assigning a specialist is admin|maintainer, so selin's attempt is
-    // denied through `appErrorResponse`.
-    const reviewer = (await postIntent("VIB-145", ids.selin, {
-      intent: "assign-specialist", profileId: "developer",
-    })) as ActionRefusal;
-    expect(reviewer.init.status).toBe(403);
-  });
-
-  it("rejects assigning a specialist to a stage outside its eligibility (F1)", async () => {
-    // VIB-168 is at Triage; the Developer profile is scoped to ready/impl.
-    // SAFETY: the F1 eligibility check therefore rejects inside the try, and the
-    // catch answers through `appErrorResponse`.
-    const result = (await postIntent("VIB-168", ids.arda, {
-      intent: "assign-specialist", profileId: "developer",
-    })) as ActionRefusal;
-    expect(result.init.status).toBe(400);
-    expect(result.data.error).toContain("not eligible");
-  });
-
-  it("assigning an unknown profile id is a validation error", async () => {
-    // SAFETY: no profile carries that id, so the lookup rejects inside the try.
-    const result = (await postIntent("VIB-145", ids.arda, {
-      intent: "assign-specialist", profileId: "does-not-exist",
-    })) as ActionRefusal;
-    expect(result.init.status).toBe(400);
-  });
-
-  it("run-specialist requires an assigned specialist", async () => {
-    // VIB-168 has no specialist assigned (VIB-148 gains one when the ownership
-    // test's real operator reaction assigns the Developer).
-    // SAFETY: `run-specialist` therefore rejects inside the try, and the catch
-    // answers through `appErrorResponse`.
-    const result = (await postIntent("VIB-168", ids.arda, {
-      intent: "run-specialist",
-    })) as ActionRefusal;
-    expect(result.init.status).toBe(400);
-    expect(result.data.error).toContain("Engage a delivering agent");
-  });
-
-  it("run-specialist starts a run for the assigned specialist (streaming toast)", async () => {
-    queueFakeRun({
-      lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
-      keepRunning: true,
-    }, "codex");
-    // VIB-166 now has the developer specialist assigned (from the earlier test).
-    // The earlier assign/transition auto-invoked the operator, which may have
-    // already started a primary run — F7-OP1 single-flight then (correctly)
-    // refuses a second concurrent run. Clear any in-flight primary first so this
-    // test verifies the human "Run" action on a task with no active run.
+    // Moving VIB-166 into the auto "ready" stage auto-invokes the operator,
+    // which may have already started a primary run — F7-OP1 single-flight then
+    // (correctly) refuses a second concurrent delivering run. Clear any
+    // in-flight primary first so this verifies the human dispatch on a task
+    // with no active run.
     const before = await runLoader("VIB-166", ids.arda);
     const { interruptRun: stopExisting } = await import(
       "~/server/runtimes/run-service.server"
@@ -841,19 +770,39 @@ describe("assign-specialist + run-specialist intents", () => {
         { userId: ids.arda, label: "arda@viberr.dev" },
       );
     }
-    // SAFETY: with the developer assigned and no primary run in flight, the human
-    // Run action returns the run arm and its streaming toast.
+    queueFakeRun({
+      lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
+      keepRunning: true,
+    }, "codex");
+    // SAFETY: arda is a project admin, the profile is deployed and the stage is
+    // eligible, so `run-agent` returns its success arm.
     const result = (await postIntent("VIB-166", ids.arda, {
-      intent: "run-specialist",
+      intent: "run-agent", profileId: "developer",
     })) as { ok: true; toast: string };
     expect(result.ok).toBe(true);
-    expect(result.toast).toContain("run started · streaming to agent logs");
+    // The verbatim toast contract: backend + display name + streaming pointer.
+    expect(result.toast).toBe(
+      "Codex run started for Developer · streaming to agent logs",
+    );
 
     const after = await runLoader("VIB-166", ids.arda);
-    // A primary run now exists on the task.
+    // Auto-engage: no deliverer stood + the profile holds repo-write, so the
+    // dispatch engaged it as the DELIVERING agent ("Engage it first" is gone).
+    expect(after.task.specialist).toMatchObject({
+      profileId: "developer",
+      role: "Implementation",
+    });
+    // …recorded with the same agent event an explicit engage always wrote. The
+    // operator auto-invoke above may post its own events, so locate it by
+    // type + copy rather than assuming position.
+    const deployed = after.task.timeline.find(
+      (e) => e.type === "agent" && e.text.includes("Deployed **Developer**"),
+    );
+    expect(deployed, "the auto-engage must be recorded as an agent event").toBeDefined();
+    // A primary run now exists, and the loader's live-run set names its profile.
     const primary = after.runtime.find((r) => r.kind === "primary");
     expect(primary).toBeDefined();
-    expect(after.task.timeline[0]!.text).toContain("run for the Implementation agent");
+    expect(after.activeAgentProfileIds).toContain("developer");
 
     // Stop the run's realistic-cadence timer so it does not outlive the suite
     // and write to the DB after afterAll() closes it (the sink guards this,
@@ -866,13 +815,88 @@ describe("assign-specialist + run-specialist intents", () => {
     );
   });
 
-  it("reviewer is denied run-specialist (admin|maintainer only)", async () => {
-    // SAFETY: running agents is admin|maintainer, so selin is denied through
-    // `appErrorResponse`.
+  it("a run-agent dispatch WITH a prompt records the human's own @Agent hand-off comment", async () => {
+    // R21-9's law applied to the dispatch prompt: a directive that reaches an
+    // agent off the record is invisible to supervision, so the route appends
+    // the dispatching human's own "@<Agent> <prompt>" comment after the start.
+    queueFakeRun({
+      lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
+      keepRunning: true,
+    }, "codex");
+    // SAFETY: the developer is engaged on VIB-166 (previous test) and no run is
+    // live (it was interrupted), so this returns the success arm again.
+    const result = (await postIntent("VIB-166", ids.arda, {
+      intent: "run-agent", profileId: "developer",
+      prompt: "Focus on the lint debt first",
+    })) as { ok: true; toast: string };
+    expect(result.toast).toBe(
+      "Codex run started for Developer · streaming to agent logs",
+    );
+
+    const after = await runLoader("VIB-166", ids.arda);
+    const handoff = after.task.timeline.find(
+      (e) =>
+        e.type === "comment" &&
+        e.actor.kind === "human" &&
+        e.text === "@Developer Focus on the lint debt first",
+    );
+    expect(handoff, "the prompt must land as the human's own comment").toBeDefined();
+    expect(handoff!.toAgent).toBe(true);
+
+    const primary = after.runtime.find(
+      (r) => r.kind === "primary" && (r.state === "running" || r.state === "idle"),
+    );
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(
+      app.db,
+      { projectSlug: "viberr-core", taskKey: "VIB-166", runId: primary!.serverRunId },
+      { userId: ids.arda, label: "arda@viberr.dev" },
+    );
+  });
+
+  it("a contributor is denied run-agent (admin|maintainer only)", async () => {
+    // SAFETY: dispatching agents is admin|maintainer, so selin's attempt is
+    // denied through `appErrorResponse`.
     const result = (await postIntent("VIB-166", ids.selin, {
-      intent: "run-specialist",
+      intent: "run-agent", profileId: "developer",
     })) as ActionRefusal;
     expect(result.init.status).toBe(403);
+  });
+
+  it("rejects a dispatch to a stage outside the profile's eligibility (F1)", async () => {
+    // VIB-168 is at Triage; the Developer profile is scoped to ready/impl. The
+    // auto-engage runs the same stage guard the explicit engage did.
+    // SAFETY: the F1 eligibility check rejects inside the try, and the catch
+    // answers through `appErrorResponse`.
+    const result = (await postIntent("VIB-168", ids.arda, {
+      intent: "run-agent", profileId: "developer",
+    })) as ActionRefusal;
+    expect(result.init.status).toBe(400);
+    expect(result.data.error).toContain("not eligible");
+  });
+
+  it("an UNDEPLOYED profile id is refused with the deploy-first pointer", async () => {
+    // The old "not engaged — engage it first" refusal no longer exists; the
+    // only identity gate left is deployment.
+    // SAFETY: no deployment carries that id, so the dispatch rejects inside the
+    // try.
+    const result = (await postIntent("VIB-145", ids.arda, {
+      intent: "run-agent", profileId: "does-not-exist",
+    })) as ActionRefusal;
+    expect(result.init.status).toBe(400);
+    expect(result.data.error).toBe(
+      '"does-not-exist" is not deployed on this project. Deploy it on the Agents page first.',
+    );
+  });
+
+  it("run-agent without a profileId is refused: pick an agent", async () => {
+    // SAFETY: the route validates the field before any dispatch, and the catch
+    // answers through `appErrorResponse`.
+    const result = (await postIntent("VIB-168", ids.arda, {
+      intent: "run-agent",
+    })) as ActionRefusal;
+    expect(result.init.status).toBe(400);
+    expect(result.data.error).toBe("Pick an agent to run.");
   });
 });
 
@@ -1178,40 +1202,71 @@ describe("acceptance disclosure (ruling 88) — the indirect HTTP doors", () => 
 });
 
 /**
- * F21-6 (route half) — "reviewer" is a claim about AUTHORITY.
- *
- * Acceptance waits for a REVIEWER's approval; it never waits on a supporting
- * agent. The engagement's timeline event learned that distinction with the tool
- * half, but the toast a human reads on the very same click still said "as a
- * reviewer" for every engagement — so the two surfaces answering one action made
- * opposite claims about who gates the task.
+ * F21-6 (route half, carried through the rework) — "reviewer" is a claim about
+ * AUTHORITY. Acceptance waits for a REVIEWER's approval; it never waits on a
+ * supporting agent. The engage toast that used to make this claim is gone with
+ * the assign-reviewer intent; what remains is the auto-engage's own timeline
+ * event, which still follows the verdict grant, not the control the human used.
+ * `release-agent` (remove-reviewer's successor) is pinned here too.
  *
  * Last in this file on purpose: the supporting arm edits the project's deployed
  * grants, which nothing after it should inherit.
  */
-describe("assign-reviewer toast — reviewer vs supporting agent", () => {
-  it("says 'as a reviewer' for a verdict-capable engagement", async () => {
-    // The seeded Reviewer profile holds "Report a validation verdict" directly.
+describe("run-agent auto-engage — reviewer vs supporting agent, and release-agent", () => {
+  /** Interrupt every live run the dispatch under test started. */
+  async function stopRuns(key: string) {
+    const { listRunsForTaskRows } = await import(
+      "~/server/runtimes/run-store.server"
+    );
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    for (const run of listRunsForTaskRows(app.db, "viberr-core", key)) {
+      if (run.state === "running" || run.state === "queued") {
+        try {
+          interruptRun(
+            app.db,
+            { projectSlug: "viberr-core", taskKey: key, runId: run.id },
+            { userId: ids.arda, label: "test" },
+          );
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  it("engages a verdict-capable profile 'as a reviewer' on its way into the run", async () => {
+    // The seeded Reviewer profile holds "Report a validation verdict" directly,
+    // and VIB-153 already has a deliverer — so the dispatch engages it as a
+    // supporting engagement whose verdict gates acceptance.
+    queueFakeRun({
+      lines: [{ t: "", ev: "text", tag: "assistant", text: "reviewing" }],
+      keepRunning: true,
+    }, "claude");
     // SAFETY: VIB-153 sits at Implementation (the Reviewer's eligible stages are
     // impl/review) and arda is a project admin, so this returns the success arm.
     const result = (await postIntent("VIB-153", ids.arda, {
-      intent: "assign-reviewer", profileId: "reviewer",
+      intent: "run-agent", profileId: "reviewer",
     })) as { ok: true; toast: string };
-    expect(result.toast).toBe("Engaged Reviewer as a reviewer");
-    // The timeline says exactly what the toast says — one action, one claim.
+    expect(result.toast).toBe(
+      "Claude run started for Reviewer · streaming to agent logs",
+    );
+    await stopRuns("VIB-153");
     const after = await runLoader("VIB-153", ids.arda);
+    // The engagement landed in the supporting roster, not the deliverer seat…
+    expect(after.task.specialist?.profileId).not.toBe("reviewer");
+    expect(after.task.reviewers.map((r) => r.profileId)).toContain("reviewer");
+    // …and the event makes the authority claim the grant supports.
     const engaged = after.task.timeline.find(
       (e) => e.type === "agent" && e.text.includes("Engaged **Reviewer**"),
     );
     expect(engaged?.text).toContain("as a reviewer.");
   });
 
-  it("says 'as a supporting agent' when the profile holds no verdict grant", async () => {
-    // Same profile, same click, one grant different — which is the whole point:
-    // the copy follows the authority, not the menu the human used.
-    // Canary: restore the unconditional `Engaged ${name} as a reviewer` and this
-    // fails while the timeline assertion below still passes — the exact split
-    // between the two surfaces that this closes.
+  it("engages 'as a supporting agent' when the verdict grant is off; release-agent lets it go", async () => {
+    // Same profile, same dispatch, one grant different — the copy follows the
+    // authority, not the control the human used.
+    // Canary: restore an unconditional `as a reviewer.` in assignReviewer's
+    // event and the first timeline assertion below fails.
     const { readProjectFile } = await import("~/server/files/project-writer.server");
     const { writeProject } = await import("../../../test-support/test-store");
     const { rebuildAll } = await import("~/server/projections/rebuilder.server");
@@ -1237,24 +1292,40 @@ describe("assign-reviewer toast — reviewer vs supporting agent", () => {
     );
     rebuildAll(app.db, { dataRoot: app.dataRoot, force: true });
 
+    queueFakeRun({
+      lines: [{ t: "", ev: "text", tag: "assistant", text: "supporting" }],
+      keepRunning: true,
+    }, "claude");
     // SAFETY: VIB-145 sits at Review (also an eligible Reviewer stage) with no
-    // engagement for this profile, so this returns the success arm.
+    // engagement for this profile, so the dispatch returns the success arm.
     const result = (await postIntent("VIB-145", ids.arda, {
-      intent: "assign-reviewer", profileId: "reviewer",
+      intent: "run-agent", profileId: "reviewer",
     })) as { ok: true; toast: string };
-    expect(result.toast).toBe("Engaged Reviewer as a supporting agent");
+    expect(result.toast).toBe(
+      "Claude run started for Reviewer · streaming to agent logs",
+    );
+    await stopRuns("VIB-145");
     const after = await runLoader("VIB-145", ids.arda);
     const engaged = after.task.timeline.find(
       (e) => e.type === "agent" && e.text.includes("Engaged **Reviewer**"),
     );
     expect(engaged?.text).toContain("as a supporting agent.");
 
-    // Idempotent re-engage answers with the SAME capacity — it reads the
-    // engagement's snapshot, which is what acceptance consults.
-    // SAFETY: an already-engaged profile is a no-op on the success arm.
-    const again = (await postIntent("VIB-145", ids.arda, {
-      intent: "assign-reviewer", profileId: "reviewer",
+    // release-agent (remove-reviewer's successor): lets the supporting
+    // engagement go, and says so honestly on the repeat.
+    // SAFETY: the engagement exists, so the first release returns the success
+    // arm; the second finds nothing engaged and reports that on the same arm.
+    const released = (await postIntent("VIB-145", ids.arda, {
+      intent: "release-agent", profileId: "reviewer",
     })) as { ok: true; toast: string };
-    expect(again.toast).toBe("Reviewer is already engaged as a supporting agent");
+    expect(released.toast).toBe("Agent released");
+    // SAFETY: same success arm as above — the action returns {ok, toast} for
+    // both the released and the already-released case; only the copy differs.
+    const again = (await postIntent("VIB-145", ids.arda, {
+      intent: "release-agent", profileId: "reviewer",
+    })) as { ok: true; toast: string };
+    expect(again.toast).toBe("That agent wasn't engaged");
+    const cleared = await runLoader("VIB-145", ids.arda);
+    expect(cleared.task.reviewers.map((r) => r.profileId)).not.toContain("reviewer");
   });
 });

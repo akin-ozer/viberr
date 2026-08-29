@@ -1052,10 +1052,8 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
         {
           projectSlug: store.slug,
           taskKey: "VIB-1",
-          role: "developer",
-          backend: "claude",
+          profileId: "developer",
           directive: `Implement the fix and coordinate with @${firstName} on the copy.`,
-          kind: "primary",
           handle: "dev",
         },
         { dataRoot: store.dataRoot },
@@ -1103,10 +1101,8 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
         {
           projectSlug: store.slug,
           taskKey: "VIB-1",
-          role: "developer",
-          backend: "claude",
+          profileId: "developer",
           directive: `Implement the fix and coordinate with @${firstName} on the copy.`,
-          kind: "primary",
           handle: "dev",
         },
         { dataRoot: store.dataRoot },

@@ -289,13 +289,14 @@ describe("Codex structured operator completion", () => {
   });
 
   it("F28-O1: a mid-plan abort is narrated even when append-typed-events is WITHHELD", async () => {
-    // The operator can start the delivering run but CANNOT append typed events.
-    // Its plan's run_agent throws (no delivering specialist is engaged), which
-    // aborts the plan. Before F28-O1 the abort notice went through the GATED
-    // operatorPostComment, which returns denied/noop WITHOUT throwing when
-    // append-typed-events is off — so `.catch()` never fired and the abort was
-    // swallowed, leaving the task stalled with nothing on the timeline. The fix
-    // narrates the abort DIRECTLY, so it lands regardless of the gate.
+    // The operator can dispatch agents but CANNOT append typed events. Its
+    // plan's run_agent throws (an explicit delivery hand-off to a profile with
+    // no repo-write grant), which aborts the plan. Before F28-O1 the abort
+    // notice went through the GATED operatorPostComment, which returns
+    // denied/noop WITHOUT throwing when append-typed-events is off — so
+    // `.catch()` never fired and the abort was swallowed, leaving the task
+    // stalled with nothing on the timeline. The fix narrates the abort
+    // DIRECTLY, so it lands regardless of the gate.
     const project = readProjectFile({
       projectSlug: store.slug,
       dataRoot: store.dataRoot,
@@ -307,7 +308,7 @@ describe("Codex structured operator completion", () => {
           profileId: "operator",
           capabilities: [
             { capabilityId: "append-typed-events", mode: "off" },
-            { capabilityId: "assign-primary-specialist", mode: "direct" },
+            { capabilityId: "dispatch-agents", mode: "direct" },
           ],
           extras: [],
           definition: {
@@ -316,6 +317,20 @@ describe("Codex structured operator completion", () => {
             backends: ["codex"],
             model: defaultModelFor("codex"),
             autonomy: "full",
+          },
+        },
+        {
+          // Deployed but WITHOUT a repo-write grant — the delivers:true
+          // dispatch below is the plan step that throws mid-plan.
+          profileId: "developer",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Dev",
+            role: "Implementation",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
           },
         },
       ],
@@ -330,7 +345,7 @@ describe("Codex structured operator completion", () => {
         actions: [
           {
             tool: "run_agent",
-            profileId: null,
+            profileId: "developer",
             delivers: true,
             toStageId: null,
             packetType: null,
@@ -753,11 +768,12 @@ describe("Codex structured operator completion", () => {
    * R20-9 / ruling 84 residual (band-3 follow-up) — the MECHANICAL
    * delegated-ask disclosure rode the CLAUDE toolkit's `open_decision_packet`
    * alone. The Codex plan executor is the other packet writer, and a plan whose
-   * actions are `prompt_agent` then `open_packet` — the exact shape the ruling
-   * is about — reached the human with nothing said about the consultation. Both
-   * writers now share one ledger + one writer (`operatorOpenPacketDisclosed`).
+   * actions are `run_agent` (with a prompt) then `open_packet` — the exact
+   * shape the ruling is about — reached the human with nothing said about the
+   * consultation. Both writers now share one ledger + one writer
+   * (`operatorOpenPacketDisclosed`).
    */
-  function deployWithDeveloper(promptMode: CapabilityMode): void {
+  function deployWithDeveloper(dispatchMode: CapabilityMode): void {
     const project = readProjectFile({
       projectSlug: store.slug,
       dataRoot: store.dataRoot,
@@ -769,7 +785,7 @@ describe("Codex structured operator completion", () => {
           profileId: "operator",
           capabilities: [
             ...OPERATOR_POLICY,
-            { capabilityId: "assign-primary-specialist", mode: promptMode },
+            { capabilityId: "dispatch-agents", mode: dispatchMode },
           ],
           extras: [],
           definition: {
@@ -782,7 +798,11 @@ describe("Codex structured operator completion", () => {
         },
         {
           profileId: "developer",
-          capabilities: [],
+          // Repo-write so the explicit delivers:true hand-off below engages it
+          // as the deliverer instead of refusing (no-repo-write validation).
+          capabilities: [
+            { capabilityId: "execute-code-or-write-repo", mode: "direct" },
+          ],
           extras: [],
           definition: {
             kind: "specialist",
@@ -802,7 +822,7 @@ describe("Codex structured operator completion", () => {
     reasoning: "",
     actions: [
       {
-        tool: "prompt_agent",
+        tool: "run_agent",
         profileId: "developer",
         delivers: true,
         toStageId: null,
@@ -861,7 +881,7 @@ describe("Codex structured operator completion", () => {
         e.text.includes("not carried out in full"),
       );
       expect(refusal).toBeDefined();
-      expect(refusal!.text).toContain("prompt_agent");
+      expect(refusal!.text).toContain("run_agent");
     });
   });
 
@@ -925,27 +945,26 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
         "append-typed-events": "direct",
         "generate-packets": "off",
         "stage-transitions": "off",
-        "assign-primary-specialist": "direct",
-        "summon-reviewers": "direct",
+        "dispatch-agents": "direct",
         "completion-for-acceptance": "human",
       }),
     );
     expect(tools).toContain("post_comment");
     expect(tools).toContain("set_goal");
-    expect(tools).toContain("engage_agent");
+    expect(tools).toContain("run_agent");
     expect(tools).not.toContain("open_packet");
     expect(tools).not.toContain("resolve_packet");
     expect(tools).not.toContain("transition_stage");
     expect(tools).not.toContain("accept_completion");
   });
 
-  it("either agent grant admits the engagement tools (mirrors the Claude toolkit)", () => {
+  it("the dispatch grant admits run_agent, even at recommend (mirrors the Claude toolkit)", () => {
+    // Dynamic-dispatch rework: engage_agent/prompt_agent collapsed into the ONE
+    // run_agent action, gated by the collapsed `dispatch-agents` capability.
     const tools = operatorPlanToolsFor(
-      authority({ "summon-reviewers": "recommend" }),
+      authority({ "dispatch-agents": "recommend" }),
     );
-    expect(tools).toEqual(
-      expect.arrayContaining(["engage_agent", "run_agent", "prompt_agent"]),
-    );
+    expect(tools).toContain("run_agent");
   });
 
   it("an all-denied operator falls back to the full list MINUS delivery (an enum may not be empty)", () => {
@@ -956,9 +975,9 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // A4: the fallback must not re-advertise the one action with effects
     // outside Viberr (push a branch, open a PR) that this policy just withheld.
     const tools = operatorPlanToolsFor(authority({ "deliver-review-pr": "off" }));
-    // F-P6 (pass 25): `flag_context_conflict` joined the plan tools (gated on
-    // append-typed-events, like set_goal), so the fallback list grew by one.
-    expect(tools).toHaveLength(10);
+    // Dynamic-dispatch rework: engage_agent + prompt_agent collapsed into ONE
+    // run_agent, so the fallback list shrank from 10 to 8.
+    expect(tools).toHaveLength(8);
     expect(tools).not.toContain("deliver_for_review");
     expect(tools).toContain("flag_context_conflict");
   });
@@ -1003,6 +1022,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       dueDate: null,
       stage: "review",
       stageName: "Review",
+      previousStage: null,
       readiness: "ready",
       waiting: "human",
       validation: "changed",
@@ -1170,6 +1190,7 @@ describe("stranded auto-stage resume", () => {
         dueDate: null,
         stage: "triage",
         stageName: "Triage",
+        previousStage: null,
         readiness: "input_required",
         waiting: "human",
         validation: "changed",
@@ -1365,6 +1386,7 @@ describe("transition trigger carries from → to and who moved it", () => {
     dueDate: null,
     stage: "impl",
     stageName: "In Progress",
+    previousStage: null,
     readiness: "ready",
     waiting: "agent",
     validation: "changed",
@@ -1453,6 +1475,7 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     dueDate: null,
     stage: "triage",
     stageName: "Triage",
+    previousStage: null,
     readiness: "ready",
     waiting: "human",
     validation: "changed",
