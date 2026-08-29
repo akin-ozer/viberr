@@ -516,6 +516,21 @@ CREATE UNIQUE INDEX idx_agent_runs__thread
 CREATE UNIQUE INDEX idx_agent_runs__one_delivering
   ON agent_runs (project_slug, task_key)
   WHERE kind = 'primary' AND state IN ('queued', 'running');
+-- Dispatch-rework bug hunt (2026-08-29): the SAME race, for supporting runs.
+-- P8 gave every supporting engagement one destructively re-cloned checkout
+-- (workspace/support/<profileId>/), so two overlapping runs of the SAME
+-- profile are exactly as unsafe as two delivering runs — the second clone
+-- rm -rf's the first run's working tree mid-run. The JS preflight in
+-- dispatchAgentRun has the identical check-then-await window F10-05 closed
+-- for primary, so it gets the identical backstop: one live run per supporting
+-- profile per task, enforced atomically here. DIFFERENT profiles still run
+-- concurrently (agent_profile_id is in the key); operator runs and terminal
+-- states are unconstrained. reserveRun/startRun translate the violation to a
+-- 409. (Existing data roots predate this line in the applied baseline, so
+-- boot also ensures it idempotently — see ensureSingleFlightIndexes.)
+CREATE UNIQUE INDEX idx_agent_runs__one_live_per_support
+  ON agent_runs (project_slug, task_key, agent_profile_id)
+  WHERE kind = 'reviewer' AND state IN ('queued', 'running');
 CREATE UNIQUE INDEX idx_run_log_lines__run_seq ON run_log_lines (run_id, seq);
 CREATE INDEX "session_userId_idx" on "session" ("userId");
 CREATE INDEX "account_userId_idx" on "account" ("userId");

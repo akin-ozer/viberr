@@ -129,14 +129,14 @@ export function detectMentionToken(
  * on handle/name rank above substring matches; group order (agents, reserved,
  * users) is the stable tie-breaker. Capped at `limit` (default 8).
  */
-export function filterMentions(
-  all: MentionSuggestion[],
+export function filterMentions<T extends MentionSuggestion>(
+  all: readonly T[],
   query: string,
   limit = 8,
-): MentionSuggestion[] {
+): T[] {
   const q = query.toLowerCase();
   if (!q) return all.slice(0, limit);
-  const scored: { s: MentionSuggestion; rank: number; order: number }[] = [];
+  const scored: { s: T; rank: number; order: number }[] = [];
   all.forEach((s, order) => {
     const handle = s.handle.toLowerCase();
     const name = s.name.toLowerCase();

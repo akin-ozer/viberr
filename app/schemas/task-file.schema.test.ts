@@ -452,49 +452,44 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     expect("repo" in result.frontmatter).toBe(false);
   });
 
-  it("absorbs legacy `specialist`/`reviewers` keys into engagements (G1 back-compat)", () => {
+  // Dynamic-dispatch rework (2026-08-29): the legacy `specialist`/`reviewers`/
+  // `consultants` slot absorption is DELETED (preprod, owner's no-back-compat
+  // ruling). The three absorption tests that lived here became the two pins
+  // below: engagements come ONLY from `engagements:`, and the legacy keys are
+  // ordinary unknown keys.
+  it("legacy `specialist`/`reviewers`/`consultants` slot keys are never read — engagements come only from `engagements:`", () => {
     const legacy = {
       ...preG1,
       specialist: { profileId: "developer", backend: "codex", role: "Developer" },
       reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+      consultants: [{ profileId: "old", backend: "codex", role: "Stale" }],
     };
     const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
+    // No diagnostic either: an absent `engagements` is an ordinary empty
+    // roster, not a parse problem — the legacy keys are simply not consulted.
     expect(result.diagnostics).toEqual([]);
-    expect(result.frontmatter.engagements).toEqual([
-      { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
-      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
-    ]);
-    // Legacy slots are absorbed, NOT preserved as unknown fields (so a
-    // rewrite emits only `engagements:`, never both forms).
-    expect(result.unknown).toEqual({});
+    expect(result.frontmatter.engagements).toEqual([]);
   });
 
-  it("reads the pre-rename `consultants` key as supporting engagements (back-compat)", () => {
+  it("legacy slot keys survive as UNKNOWN keys on round-trip (preserved verbatim, never resolved)", () => {
+    // The same contract `repo` pinned above (P13-D-5): a retired key keeps its
+    // line in task.md — the parser must not silently EAT it on the next
+    // rewrite. Round-trip preservation is exactly the `unknown` record.
+    // (This CAUGHT a rework bug: the unknown-key sweep still carried the
+    // pre-rework exclusion written for the deleted absorption, so the keys
+    // were silently dropped on the next write. The exclusion is gone now.)
     const legacy = {
       ...preG1,
-      consultants: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
-    };
-    const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
-    expect(result.diagnostics).toEqual([]);
-    expect(result.frontmatter.engagements).toEqual([
-      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
-    ]);
-    // The legacy alias is absorbed, NOT preserved as an unknown field (so a
-    // rewrite emits only `engagements:`, never both keys).
-    expect(result.unknown).toEqual({});
-  });
-
-  it("prefers `reviewers` over a stale `consultants` when both are present", () => {
-    const both = {
-      ...preG1,
+      specialist: { profileId: "developer", backend: "codex", role: "Developer" },
       reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
       consultants: [{ profileId: "old", backend: "codex", role: "Stale" }],
     };
-    const result = parseTaskFrontmatter(both, { fallbackKey: "VIB-142" });
-    expect(result.frontmatter.engagements).toEqual([
-      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
-    ]);
-    expect(result.unknown).toEqual({});
+    const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
+    expect(result.unknown).toEqual({
+      specialist: { profileId: "developer", backend: "codex", role: "Developer" },
+      reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+      consultants: [{ profileId: "old", backend: "codex", role: "Stale" }],
+    });
   });
 
   it("an explicit `engagements` key wins over leftover legacy slots (no double-count)", () => {
@@ -507,12 +502,11 @@ describe("parseTaskFrontmatter (tolerant)", () => {
       { fallbackKey: "VIB-142" },
     );
     expect(result.diagnostics).toEqual([]);
-    // Only the `engagements` rows survive — the legacy slots are neither
-    // appended nor preserved as unknown fields.
+    // Only the `engagements` rows are readable engagements — the legacy slots
+    // are never appended (they are unknown keys, pinned above).
     expect(result.frontmatter.engagements).toEqual([
       { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
     ]);
-    expect(result.unknown).toEqual({});
   });
 
   it("demotes every delivering engagement after the first (single-writer invariant)", () => {

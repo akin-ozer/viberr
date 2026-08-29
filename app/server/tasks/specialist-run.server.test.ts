@@ -937,7 +937,9 @@ describe("assignReviewer / removeReviewer", () => {
   });
 });
 
-describe("startReviewerRun", () => {
+// (Named for the retired `startReviewerRun` export until the dynamic-dispatch
+// rework; the supporting-posture dispatch now lives on `startAgentRun`.)
+describe("startAgentRun — supporting (reviewer) dispatch", () => {
   async function engage(): Promise<void> {
     await assignReviewer(
       store.db,
@@ -947,15 +949,65 @@ describe("startReviewerRun", () => {
     );
   }
 
-  it("errors when the profile is not an engaged reviewer", async () => {
+  it("dispatching an unengaged deployed profile AUTO-ENGAGES it and starts the run (dynamic dispatch)", async () => {
+    // The pre-assignment ceremony is gone (dynamic-dispatch rework 2026-08-29):
+    // the old refusal "not an engaged reviewer" no longer exists. `dev` holds no
+    // repo-write grant (capabilities: [] resolves fully withheld), so the
+    // dispatch engages it SUPPORTING via the assignReviewer machinery — the
+    // engagement row still anchors verdict snapshots / workspace / single-flight
+    // — and then starts its run on the reviewer thread.
+    const result = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.name).toBe("dev");
+    const fm = readTaskFile({
+      projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.engagements).toEqual([
+      // No verdict grant either, so it is a supporting agent, not a required
+      // reviewer (F21-6 vocabulary — the engage event says so too).
+      { profileId: "dev", backend: "claude", role: "developer", delivers: false, verdictCapable: false },
+    ]);
+    expect(deliveringEngagement(fm)).toBeNull();
+    const run = getRun(store.db, result.runId)!;
+    expect(run.kind).toBe("reviewer");
+    expect(run.agent_profile_id).toBe("dev");
+    // The engage rode the dispatch: assignReviewer's own audit fired.
+    expect(
+      listAuditEvents(store.db, { action: "task.reviewer.assigned" })[0]?.taskKey,
+    ).toBe("VIB-1");
+
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+      actor(store.users.arda),
+    );
+  });
+
+  it("still REFUSES an undeployed profileId (validation, not auto-engage)", async () => {
     await expect(
       startAgentRun(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "ghost" },
         actor(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toMatchObject({ status: 400 });
+    ).rejects.toThrow(/"ghost" is not deployed on this project/);
+  });
+
+  it("an omitted profileId on a task with no deliverer refuses with the pick-an-agent copy", async () => {
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/Pick an agent to run/);
   });
 
   it("creates a kind='reviewer' run on its own thread", async () => {
@@ -994,7 +1046,7 @@ describe("startReviewerRun", () => {
       { dataRoot: store.dataRoot },
     );
     // Let it stream, then finish it — the default reply hook (registered by
-    // startReviewerRun itself, not an operator/@mention) posts the reviewer's
+    // startAgentRun itself, not an operator/@mention) posts the reviewer's
     // reply as an agent-authored comment. This is the "reviewer didn't comment
     // after a run" fix: the UI "Run" button path now reports back.
     await waitForLines(result.runId, 2);

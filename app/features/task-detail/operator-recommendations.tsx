@@ -19,44 +19,36 @@ import { Pill } from "~/ui/pill";
 
 export interface RecommendationView {
   id: string;
+  // Dynamic-dispatch rework (2026-08-29): the four slot-shaped kinds collapsed
+  // into `run_agent` — the operator recommends running a chosen agent with a
+  // prompt; Apply dispatches it exactly as the manual run-agent control would.
   kind:
-    | "assign_specialist"
-    | "assign_reviewer"
-    | "run_specialist"
-    | "run_reviewer"
+    | "run_agent"
     | "transition"
     | "accept_completion"
     // R15-2: the operator recommends DELIVERY (push + review PR); applying it
     // performs the delivery under the human's authorization.
     | "delivery";
   profileId?: string;
+  /** run_agent — the directive the dispatched run will follow (rendered on the
+   *  card: the human must see the instruction they are authorizing). */
+  prompt?: string;
+  /** run_agent — the operator's explicit posture hint, when it gave one. */
+  delivers?: boolean;
   toStageId?: string;
   label: string;
   detail: string;
 }
 
 const KIND_ICON = {
-  assign_specialist: "branch",
-  assign_reviewer: "check",
-  run_specialist: "bolt",
-  run_reviewer: "bolt",
+  run_agent: "bolt",
   transition: "board",
   accept_completion: "check",
   delivery: "github",
 } as const satisfies Record<RecommendationView["kind"], IconName>;
 
 const KIND_LABEL = {
-  // UXA-6: this slot is "Delivering agent" everywhere else on THIS page — the
-  // execution profile's section header, the "Assign delivering agent" menu and
-  // its aria-label, and the GitHub panel's deliver button — so the same actor
-  // wore two names one viewport apart. The generic-agents vocabulary won.
-  assign_specialist: "Delivering agent",
-  assign_reviewer: "Reviewer",
-  // …and the row one line below said "Run specialist" for the SAME actor. The
-  // server already words this card "Start the delivering agent's run"
-  // (operator-actions.server.ts), so the chip was the last holdout.
-  run_specialist: "Run delivering agent",
-  run_reviewer: "Run reviewer",
+  run_agent: "Run agent",
   transition: "Stage",
   accept_completion: "Completion",
   delivery: "Delivery",
@@ -100,10 +92,28 @@ export function OperatorRecommendations({
                 <span className="op-rec-kind">
                   <Icon name={KIND_ICON[r.kind]} />
                   {KIND_LABEL[r.kind]}
+                  {/* Hunt 2026-08-29: an explicit posture hint rides the card
+                      and Apply installs it — say which one, or the human
+                      authorizes a shape they never saw. */}
+                  {r.kind === "run_agent" && r.delivers !== undefined
+                    ? r.delivers
+                      ? " · delivering"
+                      : " · supporting"
+                    : ""}
                 </span>
                 <span className="op-rec-title">{r.label}</span>
               </div>
               {r.detail && <div className="op-rec-detail">{r.detail}</div>}
+              {/* Hunt 2026-08-29: `prompt` is the DIRECTIVE Apply hands the
+                  run. It was never rendered, so whenever the operator supplied
+                  a separate `reason` the human approved an instruction they
+                  had not seen. Shown only when it adds information the detail
+                  line does not already carry verbatim. */}
+              {r.kind === "run_agent" && r.prompt && r.prompt !== r.detail && (
+                <div className="op-rec-prompt">
+                  Directive: &ldquo;{r.prompt}&rdquo;
+                </div>
+              )}
             </div>
             {/* Apply AND Dismiss are both maintainer-level (M1) — the server
                 enforces admin|maintainer for each, so hide them from lower

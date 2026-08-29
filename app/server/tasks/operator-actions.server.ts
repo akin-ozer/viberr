@@ -90,8 +90,6 @@ import {
   noChangeCompletionEvent,
 } from "./no-change-completion.server";
 import {
-  assignReviewer,
-  assignSpecialist,
   listDeployedSpecialists,
   projectBoard,
   specialistEligibleForStage,
@@ -503,6 +501,28 @@ export function deliverGate(authority: OperatorAuthority): Gate {
   return absentDeliverReviewPrMode(authority.humanGatedBeforeWork);
 }
 
+/**
+ * The `dispatch-agents` gate with ABSENT-means-granted polarity (dispatch-
+ * rework bug hunt, 2026-08-29). Ruling 98(b) collapsed the persisted
+ * `assign-primary-specialist` + `summon-reviewers` pair into this id, and the
+ * canon (capabilities.ts, ruling 98) promised that an absent grant resolves to
+ * the catalog default so existing operator deployments keep dispatching — but
+ * every consumer went through the plain `gate()`, whose absent arm is `off` →
+ * deny: on EVERY deployment persisted before the rework (which stores only the
+ * retired ids) the operator silently lost the ability to put any agent to
+ * work, while keeping transitions and delivery. Same shape as `deliverGate`:
+ * an explicit stored mode wins; absent resolves to the catalog default
+ * (`direct` — dispatch predates nothing governance-wise, it IS the old pair's
+ * default); an undeployed operator stays denied (A4).
+ */
+export function dispatchGate(authority: OperatorAuthority): Gate {
+  if (!authority.deployed) return "deny";
+  if (authority.policy.has("dispatch-agents")) {
+    return gate(authority, "dispatch-agents");
+  }
+  return "direct";
+}
+
 // ------------------------------------------------------------- helpers
 
 function taskRef(ctx: TaskMutationContext, projectSlug: string, taskKey: string) {
@@ -703,7 +723,14 @@ async function addRecommendation(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
-  rec: { kind: RecommendationKind; profileId?: string; toStageId?: string; label: string },
+  rec: {
+    kind: RecommendationKind;
+    profileId?: string;
+    prompt?: string;
+    delivers?: boolean;
+    toStageId?: string;
+    label: string;
+  },
   reasoning: string,
 ): Promise<void> {
   const recommendation: Recommendation = {
@@ -715,6 +742,8 @@ async function addRecommendation(
   // A recommendation carries only the targets its kind has — the dedupe below
   // and the card renderer both read these keys' presence.
   if (rec.profileId) recommendation.profileId = rec.profileId;
+  if (rec.prompt) recommendation.prompt = rec.prompt;
+  if (rec.delivers !== undefined) recommendation.delivers = rec.delivers;
   if (rec.toStageId) recommendation.toStageId = rec.toStageId;
   // Same disclosure the narration path carries (S5-G3): the reasoning is
   // operator prose and can tag a human, so an ambiguous handle must not vanish.
@@ -724,14 +753,36 @@ async function addRecommendation(
   );
   let wasNew = false;
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-    const dup = parsed.frontmatter.recommendations.some(
+    const existing = parsed.frontmatter.recommendations.find(
       (r) =>
         r.kind === rec.kind &&
         r.profileId === rec.profileId &&
         r.toStageId === rec.toStageId,
     );
-    if (!dup) {
+    if (!existing) {
       parsed.frontmatter.recommendations.push(recommendation);
+      wasNew = true;
+    } else if (
+      existing.prompt !== recommendation.prompt ||
+      existing.delivers !== recommendation.delivers ||
+      existing.label !== recommendation.label
+    ) {
+      // Hunt 2026-08-29: the per-target dedupe predates `prompt`/`delivers`
+      // on run_agent cards, so a NEWER directive for the same agent was
+      // silently discarded — the operator narrated Y while Apply dispatched
+      // the stale X. A changed directive REPLACES the pending card's content
+      // in place (same id, so nothing dangles) and counts as new — it is a
+      // fresh decision the supervisors should be pinged about. An identical
+      // re-recommendation stays the quiet no-op it always was.
+      existing.label = recommendation.label;
+      existing.detail = recommendation.detail;
+      if (recommendation.prompt !== undefined) existing.prompt = recommendation.prompt;
+      else delete existing.prompt;
+      if (recommendation.delivers !== undefined) {
+        existing.delivers = recommendation.delivers;
+      } else {
+        delete existing.delivers;
+      }
       wasNew = true;
     }
     parsed.frontmatter.waiting = "human";
@@ -1139,18 +1190,6 @@ export async function operatorResolvePacket(
   return { outcome: "done", message: `Withdrew the packet "${packet.title}".` };
 }
 
-/** Resolve a deployed specialist's display name for a recommendation label. */
-function specialistName(
-  ctx: TaskMutationContext,
-  projectSlug: string,
-  profileId: string,
-): string {
-  const found = listDeployedSpecialists(projectSlug, ctx).find(
-    (s) => s.id === profileId,
-  );
-  return found?.name ?? profileId;
-}
-
 // ------------------------------------------------- KB-vs-repository conflict
 
 /** R19-2 — the timeline title a context conflict always carries. */
@@ -1210,6 +1249,12 @@ export interface OperatorTaskSnapshot {
   dueDate: string | null;
   stage: string;
   stageName: string;
+  /** Dynamic-dispatch rework (2026-08-29): where the task CAME from — the
+   *  durable `previousStageId` frontmatter fact, named so the agent choice can
+   *  weigh it (a task back in the work stage from Review is rework for the
+   *  same builder; a fresh arrival wants a first hand-off). Null until the
+   *  task's first transition. */
+  previousStage: { id: string; name: string } | null;
   readiness: string;
   waiting: string;
   /** F27-O5: the DERIVED review outcome on the current revision — `healthy`
@@ -1583,6 +1628,9 @@ export function operatorSnapshot(
     dueDate: fm.dueDate,
     stage: fm.stage,
     stageName: stageName(fm.stage),
+    previousStage: fm.previousStageId
+      ? { id: fm.previousStageId, name: stageName(fm.previousStageId) }
+      : null,
     readiness: fm.readiness,
     waiting: fm.waiting,
     // F27-O5: the explicit derived review outcome, so review state does not have
@@ -1902,91 +1950,6 @@ export async function operatorSetGoal(
   return { outcome: "done", message: "Task goal drafted." };
 }
 
-/** The engagement request both assignment entry points take. */
-export interface OperatorAssignInput {
-  projectSlug: string;
-  taskKey: string;
-  profileId: string;
-  /** The operator's stated reason, when it gave one. */
-  reason?: string;
-}
-
-/**
- * Engage the DELIVERING agent (capability id `assign-primary-specialist`).
- *
- * F19-12: "primary specialist" is retired vocabulary — D9/Q17-5 replaced the
- * primary/consultant model with `engagements[]`, exactly one of which carries
- * `delivers: true`. The capability ID is machinery and keeps its historical
- * name; every string this module RENDERS (recommendation labels, tool messages
- * that reach the timeline) says "delivering agent".
- */
-export async function operatorAssignSpecialist(
-  db: DatabaseSync,
-  ctx: TaskMutationContext,
-  input: OperatorAssignInput,
-  authority: OperatorAuthority,
-): Promise<OperatorActionResult> {
-  const g = gate(authority, "assign-primary-specialist");
-  if (g === "deny") {
-    return {
-      outcome: "denied",
-      message: "Engaging the delivering agent is not permitted for the operator here.",
-    };
-  }
-  if (g === "recommend") {
-    const name = specialistName(ctx, input.projectSlug, input.profileId);
-    await addRecommendation(
-      db,
-      ctx,
-      input.projectSlug,
-      input.taskKey,
-      {
-        kind: "assign_specialist",
-        profileId: input.profileId,
-        label: `Engage ${name} as the delivering agent`,
-      },
-      input.reason ?? `${name} fits the current stage of work.`,
-    );
-    return { outcome: "recommended", message: `Recommended engaging ${name} as the delivering agent.` };
-  }
-  const result = await assignSpecialist(
-    db,
-    input,
-    OPERATOR_TASK_ACTOR,
-    opCtx(ctx),
-  );
-  return { outcome: "done", message: `Engaged ${result.name} as the delivering agent.` };
-}
-
-/** Start the delivering agent's run (capability id `assign-primary-specialist`). */
-export async function operatorRunSpecialist(
-  db: DatabaseSync,
-  ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string },
-  authority: OperatorAuthority,
-): Promise<OperatorActionResult> {
-  const g = gate(authority, "assign-primary-specialist");
-  if (g === "deny") {
-    return { outcome: "denied", message: "Running the delivering agent is not permitted for the operator here." };
-  }
-  if (g === "recommend") {
-    await addRecommendation(
-      db,
-      ctx,
-      input.projectSlug,
-      input.taskKey,
-      { kind: "run_specialist", label: "Start the delivering agent's run" },
-      "The delivering agent is ready to work this task; a maintainer starts the run.",
-    );
-    return { outcome: "recommended", message: "Recommended starting the delivering agent's run." };
-  }
-  const result = await startAgentRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
-  return {
-    outcome: "done",
-    message: `Started a ${result.backend === "claude" ? "Claude" : "Codex"} run for the ${result.role} agent.`,
-  };
-}
-
 /**
  * F21-6 — what a NON-delivering engagement is called.
  *
@@ -2011,80 +1974,7 @@ function supportingRoleWord(
     : "a supporting agent";
 }
 
-/** Engage a supporting agent — a reviewer when its verdict gates acceptance
- *  (governed by summon-reviewers). */
-export async function operatorAssignReviewer(
-  db: DatabaseSync,
-  ctx: TaskMutationContext,
-  input: OperatorAssignInput,
-  authority: OperatorAuthority,
-): Promise<OperatorActionResult> {
-  const g = gate(authority, "summon-reviewers");
-  if (g === "deny") {
-    return { outcome: "denied", message: "Summoning reviewers is not permitted for the operator here." };
-  }
-  const as = supportingRoleWord(ctx, input.projectSlug, input.profileId);
-  if (g === "recommend") {
-    const name = specialistName(ctx, input.projectSlug, input.profileId);
-    await addRecommendation(
-      db,
-      ctx,
-      input.projectSlug,
-      input.taskKey,
-      {
-        kind: "assign_reviewer",
-        profileId: input.profileId,
-        label: `Engage ${name} as ${as}`,
-      },
-      input.reason ??
-        (as === "a reviewer"
-          ? `${name} should review the work at this stage.`
-          : `${name} should support the work at this stage.`),
-    );
-    return { outcome: "recommended", message: `Recommended engaging ${name} as ${as}.` };
-  }
-  const result = await assignReviewer(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
-  return {
-    outcome: "done",
-    message: result.alreadyEngaged
-      ? `${result.name} is already engaged as ${as}.`
-      : `Engaged ${result.name} as ${as}.`,
-  };
-}
-
-/** Start a reviewer's run (governed by summon-reviewers). */
-export async function operatorRunReviewer(
-  db: DatabaseSync,
-  ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; profileId: string },
-  authority: OperatorAuthority,
-): Promise<OperatorActionResult> {
-  const g = gate(authority, "summon-reviewers");
-  if (g === "deny") {
-    return { outcome: "denied", message: "Running a reviewer is not permitted for the operator here." };
-  }
-  if (g === "recommend") {
-    const name = specialistName(ctx, input.projectSlug, input.profileId);
-    await addRecommendation(
-      db,
-      ctx,
-      input.projectSlug,
-      input.taskKey,
-      { kind: "run_reviewer", profileId: input.profileId, label: `Start ${name}'s review run` },
-      // F21-6: the run itself is still the "review run" (the reviewer-kind run),
-      // but how the profile is ENGAGED depends on whether its verdict gates.
-      `${name} is engaged as ${supportingRoleWord(ctx, input.projectSlug, input.profileId)}; a maintainer starts the review run.`,
-    );
-    return { outcome: "recommended", message: `Recommended starting ${name}'s review run.` };
-  }
-  const result = await startAgentRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
-  return {
-    outcome: "done",
-    message: `Started a ${result.backend === "claude" ? "Claude" : "Codex"} run for the ${result.role} reviewer.`,
-  };
-}
-
-// --------------------------------------------------- prompt (engage + trigger)
+// --------------------------------------------------- dispatch helpers
 
 /** Resolve a deployed specialist's role + backend for a prompt/run. */
 function deployedAgent(
@@ -2122,199 +2012,6 @@ async function ensureTaskBranchBestEffort(
     // Non-fatal: coordination proceeds without a branch when GitHub is absent.
   }
 }
-
-interface TaskContext {
-  title: string;
-  goal: string;
-  stageName: string;
-}
-
-/** Title / goal / current stage name for building a default prompt directive. */
-function taskContext(
-  ctx: TaskMutationContext,
-  projectSlug: string,
-  taskKey: string,
-): TaskContext {
-  const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
-  const project = readProjectFile({
-    projectSlug,
-    dataRoot: ctx.dataRoot,
-  });
-  const title = file?.parsed.frontmatter.title ?? taskKey;
-  const goal = file?.parsed.goal ?? "";
-  const stageId = file?.parsed.frontmatter.stage ?? "";
-  const stageName =
-    project?.parsed.frontmatter.stages.find((s) => s.id === stageId)?.name ?? stageId;
-  return { title, goal, stageName };
-}
-
-/** The prompt request both directive entry points take. */
-export interface OperatorPromptInput {
-  projectSlug: string;
-  taskKey: string;
-  profileId: string;
-  /** The "@handle …" instruction; a default is built when absent. */
-  directive?: string;
-  /** The operator's stated reason, when it gave one. */
-  reason?: string;
-}
-
-/** Engage and prompt the stage's DELIVERING agent, or recommend the handoff. */
-export async function operatorPromptSpecialist(
-  db: DatabaseSync,
-  ctx: TaskMutationContext,
-  input: OperatorPromptInput,
-  authority: OperatorAuthority,
-): Promise<OperatorActionResult> {
-  const g = gate(authority, "assign-primary-specialist");
-  if (g === "deny") {
-    return {
-      outcome: "denied",
-      message: "Prompting the delivering agent is not permitted for the operator here.",
-    };
-  }
-  const agent = deployedAgent(ctx, input.projectSlug, input.profileId);
-  if (!agent) {
-    return { outcome: "noop", message: `No deployed specialist "${input.profileId}" to prompt.` };
-  }
-
-  if (g === "recommend") {
-    await addRecommendation(
-      db,
-      ctx,
-      input.projectSlug,
-      input.taskKey,
-      {
-        kind: "assign_specialist",
-        profileId: input.profileId,
-        label: `Engage ${agent.name} as the delivering agent`,
-      },
-      input.reason ?? input.directive ?? `${agent.name} fits the current stage of work.`,
-    );
-    return { outcome: "recommended", message: `Recommended engaging ${agent.name} as the delivering agent.` };
-  }
-
-  // direct: make it the delivering engagement if it isn't already, then prompt + run.
-  const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
-  const currentPrimary = file
-    ? (deliveringEngagement(file.parsed.frontmatter)?.profileId ?? null)
-    : null;
-  if (currentPrimary !== input.profileId) {
-    await assignSpecialist(
-      db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: input.profileId },
-      OPERATOR_TASK_ACTOR,
-      opCtx(ctx),
-    );
-  }
-  // Delivery spine (FR31): the developer is about to work, so ensure the
-  // task-key branch exists on GitHub. Best-effort — degrades cleanly (no throw)
-  // when the repo/PAT isn't configured, and writes the branch name into task.md
-  // so the PR/commit/branch chain stays traceable to this task.
-  await ensureTaskBranchBestEffort(db, ctx, input.projectSlug, input.taskKey);
-  const c = taskContext(ctx, input.projectSlug, input.taskKey);
-  const directive =
-    (input.directive ?? "").trim() ||
-    `implement "${c.title}" (now in ${c.stageName}). ` +
-      `Goal: ${c.goal} Please pick it up and do the stage work, then report back.`;
-  await operatorPromptAgent(
-    db,
-    {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      role: agent.role,
-      backend: agent.backend,
-      handle: agent.name,
-      directive,
-      kind: "primary",
-    },
-    ctx,
-  );
-  return { outcome: "done", message: `Prompted @${agent.name} and started its run.` };
-}
-
-/**
- * Engage + PROMPT a reviewer for the current stage (governed by
- * `summon-reviewers`). Direct → engage the reviewer (idempotent), post an
- * operator prompt comment, and start its reviewer run with that prompt as its
- * turn directive. Recommend → post an "engage reviewer" recommendation card and
- * stop. Used when a task reaches the review stage.
- */
-export async function operatorPromptReviewer(
-  db: DatabaseSync,
-  ctx: TaskMutationContext,
-  input: OperatorPromptInput,
-  authority: OperatorAuthority,
-): Promise<OperatorActionResult> {
-  const g = gate(authority, "summon-reviewers");
-  if (g === "deny") {
-    return {
-      outcome: "denied",
-      message: "Prompting a reviewer is not permitted for the operator here.",
-    };
-  }
-  const agent = deployedAgent(ctx, input.projectSlug, input.profileId);
-  if (!agent) {
-    return { outcome: "noop", message: `No deployed specialist "${input.profileId}" to engage as a supporting agent.` };
-  }
-  // F21-6: "reviewer" only when its verdict actually gates acceptance.
-  const as = agent.capabilities.verdict ? "a reviewer" : "a supporting agent";
-
-  if (g === "recommend") {
-    await addRecommendation(
-      db,
-      ctx,
-      input.projectSlug,
-      input.taskKey,
-      {
-        kind: "assign_reviewer",
-        profileId: input.profileId,
-        label: `Engage ${agent.name} as ${as}`,
-      },
-      input.reason ??
-        input.directive ??
-        (as === "a reviewer"
-          ? `${agent.name} should review the work at this stage.`
-          : `${agent.name} should support the work at this stage.`),
-    );
-    return { outcome: "recommended", message: `Recommended engaging ${agent.name} as ${as}.` };
-  }
-
-  // direct: engage (idempotent) then prompt + run.
-  await assignReviewer(
-    db,
-    { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: input.profileId },
-    OPERATOR_TASK_ACTOR,
-    opCtx(ctx),
-  );
-  const c = taskContext(ctx, input.projectSlug, input.taskKey);
-  const directive =
-    (input.directive ?? "").trim() ||
-    `please review the work on "${c.title}" against the goal: ${c.goal} ` +
-      `Flag correctness, security, and gaps, then report back.`;
-  await operatorPromptAgent(
-    db,
-    {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      role: agent.role,
-      backend: agent.backend,
-      handle: agent.name,
-      directive,
-      kind: "reviewer",
-      profileId: input.profileId,
-    },
-    ctx,
-  );
-  return {
-    outcome: "done",
-    // F21-6: "reviewer" is a claim about verdict authority, not a synonym for
-    // "not the deliverer".
-    message: `Prompted ${as === "a reviewer" ? "reviewer" : "supporting agent"} @${agent.name} and started its run.`,
-  };
-}
-
-/** Move the task to an allowed next stage (governed by stage-transitions). */
 
 // ------------------------------------------------- generic agent dispatch
 
@@ -2369,37 +2066,19 @@ function recordAgentSelectionTrace(
   }
 }
 
-export async function operatorEngageAgent(
-  db: DatabaseSync,
-  ctx: TaskMutationContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    profileId: string;
-    delivers: boolean;
-    reason?: string;
-  },
-  authority: OperatorAuthority,
-): Promise<OperatorActionResult> {
-  const { profileId, projectSlug, taskKey } = input;
-  const assignment: OperatorAssignInput = { projectSlug, taskKey, profileId };
-  // The reason is the operator's own words; an empty one must not reach the
-  // engagement as a blank rationale.
-  if (input.reason) assignment.reason = input.reason;
-  recordAgentSelectionTrace(db, ctx, input);
-  return input.delivers
-    ? operatorAssignSpecialist(db, ctx, assignment, authority)
-    : operatorAssignReviewer(db, ctx, assignment, authority);
-}
-
-/** Resolve whether `profileId` names the task's delivering engagement (or the
- * intended one): explicit hint wins; an engaged profile keeps its shape; an
- * unengaged profile delivers iff the task has no deliverer yet. */
+/**
+ * The dynamic-dispatch rule this module and `startAgentRun`'s auto-engage
+ * agree on (the trace below must record what the dispatch will actually do):
+ * explicit hint wins; an engaged profile keeps its shape; an unengaged profile
+ * delivers iff the task has no deliverer yet AND the profile holds a
+ * repo-write grant — a verdict-only reviewer dispatched first on a fresh task
+ * engages as supporting, never as a deliverer that can ship nothing.
+ */
 function resolveDeliversIntent(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
-  profileId: string | undefined,
+  agent: DeployedSpecialistView,
   hint: boolean | undefined,
 ): boolean {
   if (hint !== undefined) return hint;
@@ -2409,111 +2088,173 @@ function resolveDeliversIntent(
     dataRoot: ctx.dataRoot,
   });
   const fm = file?.parsed.frontmatter;
-  if (!fm) return !profileId;
+  if (!fm) return false;
   const delivering = deliveringEngagement(fm);
-  if (!profileId) return true;
-  if (delivering?.profileId === profileId) return true;
-  if (fm.engagements.some((e) => e.profileId === profileId)) return false;
-  return delivering === null;
+  if (delivering?.profileId === agent.id) return true;
+  if (fm.engagements.some((e) => e.profileId === agent.id)) return false;
+  return delivering === null && agent.capabilities.delivery;
 }
 
-export async function operatorRunAgent(
-  db: DatabaseSync,
-  ctx: TaskMutationContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    profileId?: string;
-    delivers?: boolean;
-  },
-  authority: OperatorAuthority,
-): Promise<OperatorActionResult> {
-  const delivers = resolveDeliversIntent(
-    ctx,
-    input.projectSlug,
-    input.taskKey,
-    input.profileId,
-    input.delivers,
-  );
-  const base = { projectSlug: input.projectSlug, taskKey: input.taskKey };
-  if (delivers) {
-    // P11-22: a delivering run always runs the CURRENT deliverer
-    // (operatorRunSpecialist ignores profileId). If the plan names a specific
-    // profileId that is NOT the current deliverer, DON'T silently run the wrong
-    // agent — refuse and point the operator at engage_agent to change who
-    // delivers (the single-deliverer invariant means only one can).
-    if (input.profileId) {
-      const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
-      const current = file
-        ? deliveringEngagement(file.parsed.frontmatter)?.profileId ?? null
-        : null;
-      if (current && current !== input.profileId) {
-        return {
-          outcome: "noop",
-          message:
-            `"${input.profileId}" is not the delivering agent ("${current}" is). ` +
-            "Engage it as the deliverer first if you want it to deliver; a delivering run always runs the current deliverer.",
-        };
-      }
-    }
-    return operatorRunSpecialist(db, ctx, base, authority);
-  }
-  if (!input.profileId) {
-    return {
-      outcome: "noop",
-      message: "A profileId is required to run a supporting agent.",
-    };
-  }
-  return operatorRunReviewer(
-    db,
-    ctx,
-    { ...base, profileId: input.profileId },
-    authority,
-  );
-}
-
-export async function operatorPromptAgentGeneric(
+/**
+ * Dynamic-dispatch rework (2026-08-29): the ONE operator action for putting an
+ * agent to work — the collapsed replacement for engage_agent / run_agent /
+ * prompt_agent and the specialist/reviewer function pairs behind them. Gated by
+ * `dispatch-agents` (the collapsed assign/summon pair):
+ *
+ *   direct    → engage-if-needed (capability-derived posture, inside
+ *               `startAgentRun`), post the prompt as an operator comment when
+ *               one is given, and start the run with it as the directive. A
+ *               bare dispatch (no prompt) starts the run with no synthetic
+ *               comment — the agent re-anchors on task.md.
+ *   recommend → ONE `run_agent` card carrying the profile + prompt, which a
+ *               human applies (the applied dispatch then runs exactly this).
+ *   deny      → refused out loud (R19-6).
+ */
+export async function operatorDispatchAgent(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
     taskKey: string;
     profileId: string;
-    directive?: string;
+    /** The run's directive; absent → a bare re-run with no hand-off comment. */
+    prompt?: string;
+    /** Explicit posture — `true` is a delivery hand-off (reassigns the
+     *  delivering engagement); absent → derived (see resolveDeliversIntent). */
     delivers?: boolean;
+    /** The operator's stated reason, when it gave one. */
     reason?: string;
   },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
+  const g = dispatchGate(authority);
+  if (g === "deny") {
+    return {
+      outcome: "denied",
+      message: "Dispatching agents is not permitted for the operator here.",
+    };
+  }
+  const agent = deployedAgent(ctx, input.projectSlug, input.profileId);
+  if (!agent) {
+    return {
+      outcome: "noop",
+      message: `No deployed agent "${input.profileId}" to run. Pick a profile from get_task's deployedSpecialists.`,
+    };
+  }
+  const prompt = input.prompt?.trim() || undefined;
+  // Hunt 2026-08-29: refuse the two CONTRADICTORY hints up front, before any
+  // card or trace can announce a posture the dispatch would not install.
+  // (1) `delivers: true` for a profile with no repo-write grant — the dispatch
+  // refuses it at both engage doors; filing a card for it would strand a
+  // maintainer's Apply on that refusal.
+  if (input.delivers === true && !agent.capabilities.delivery) {
+    return {
+      outcome: "noop",
+      message:
+        `${agent.name} holds no repo-write grant, so it cannot own delivery. ` +
+        `Run it as a supporting agent (omit \`delivers\`), or a human grants ` +
+        `"Execute code or write to the repo" on the project's Agents surface.`,
+    };
+  }
+  // (2) `delivers: false` aimed at the CURRENT deliverer — dispatchAgentRun
+  // deliberately keeps an engaged profile's shape (a delivering run cannot be
+  // demoted per-dispatch), so honoring the hint in the label/trace while the
+  // run went out `kind: "primary"` was a governed lie.
+  const currentDeliverer = ((): string | null => {
+    const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+    return file
+      ? (deliveringEngagement(file.parsed.frontmatter)?.profileId ?? null)
+      : null;
+  })();
+  if (input.delivers === false && currentDeliverer === input.profileId) {
+    return {
+      outcome: "noop",
+      message:
+        `${agent.name} IS the delivering agent on this task — its runs deliver. ` +
+        `Omit \`delivers\` to run it, or hand delivery to another repo-write ` +
+        `profile first (\`delivers: true\` on that profile).`,
+    };
+  }
   const delivers = resolveDeliversIntent(
     ctx,
     input.projectSlug,
     input.taskKey,
-    input.profileId,
+    agent,
     input.delivers,
   );
+  const as = delivers
+    ? "the delivering agent"
+    : supportingRoleWord(ctx, input.projectSlug, input.profileId);
+
+  if (g === "recommend") {
+    const rec: Parameters<typeof addRecommendation>[4] = {
+      kind: "run_agent",
+      profileId: input.profileId,
+      label: `Run ${agent.name}`,
+    };
+    if (prompt) rec.prompt = prompt;
+    // Persist the EXPLICIT hint so Apply dispatches what this arm announced —
+    // the card used to drop it and Apply re-derived, sometimes the opposite.
+    if (input.delivers !== undefined) rec.delivers = input.delivers;
+    await addRecommendation(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      rec,
+      input.reason ??
+        prompt ??
+        `${agent.name} fits what the current stage needs; a maintainer starts the run.`,
+    );
+    return {
+      outcome: "recommended",
+      message: `Recommended running ${agent.name} as ${as}.`,
+    };
+  }
+
+  // direct
   const selection: AgentSelection = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     profileId: input.profileId,
     delivers,
   };
-  // The reason is the operator's own words; an empty one is no rationale.
   if (input.reason) selection.reason = input.reason;
-  // F10-35: prompt_agent is also a routing decision — record its selection trace.
   recordAgentSelectionTrace(db, ctx, selection);
-  const prompt: OperatorPromptInput = {
+  if (delivers) {
+    // Delivery spine (FR31): the agent is about to own the branch — ensure the
+    // task-key branch exists on GitHub. Best-effort, degrades cleanly.
+    await ensureTaskBranchBestEffort(db, ctx, input.projectSlug, input.taskKey);
+  }
+  if (prompt) {
+    const promptInput: Parameters<typeof operatorPromptAgent>[1] = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      profileId: input.profileId,
+      handle: agent.name,
+      directive: prompt,
+    };
+    // Thread only the EXPLICIT hint: the auto-engage derives the posture with
+    // the same rule as the trace above, and an explicit `true` is what asks
+    // assignSpecialist for a delivery hand-off.
+    if (input.delivers !== undefined) promptInput.delivers = input.delivers;
+    await operatorPromptAgent(db, promptInput, ctx);
+    return {
+      outcome: "done",
+      message: `Prompted @${agent.name} (${as}) and started its run.`,
+    };
+  }
+  const dispatch: Parameters<typeof startAgentRun>[1] = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     profileId: input.profileId,
   };
-  // Both are optional by contract: an absent directive is what makes the
-  // callee build its default one, and an absent reason is no rationale.
-  if (input.directive) prompt.directive = input.directive;
-  if (input.reason) prompt.reason = input.reason;
-  return delivers
-    ? operatorPromptSpecialist(db, ctx, prompt, authority)
-    : operatorPromptReviewer(db, ctx, prompt, authority);
+  if (input.delivers !== undefined) dispatch.delivers = input.delivers;
+  const result = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx(ctx));
+  return {
+    outcome: "done",
+    message: `Started a ${result.backend === "claude" ? "Claude" : "Codex"} run for ${agent.name} (${as}).`,
+  };
 }
 
 /** The delivery audit row's details. */

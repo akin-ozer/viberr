@@ -1215,7 +1215,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
       recommendations: [
         {
           id: "rec_run",
-          kind: "run_specialist",
+          kind: "run_agent",
           label: "Run the specialist",
           detail: "leftover offer",
           profileId: "developer",

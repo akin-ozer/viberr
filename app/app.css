@@ -1567,6 +1567,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .op-rec-kind svg { width: 12px; height: 12px; }
 .op-rec-title { font-family: var(--font-display); font-weight: 600; font-size: .92rem; color: var(--fg); }
 .op-rec-detail { margin-top: .25rem; font-size: .86rem; color: var(--muted); line-height: 1.45; }
+/* Hunt 2026-08-29: the run_agent card's DIRECTIVE — the instruction Apply
+   hands the dispatched run. Quoted and set off from the reasoning above it. */
+.op-rec-prompt { margin-top: .25rem; font-size: .86rem; color: var(--fg); line-height: 1.45; font-style: italic; }
 .op-rec-actions { display: inline-flex; align-items: center; gap: .375rem; flex: none; }
 
 /* operator cell stacks its identity row above the run control (like Reviewers),
@@ -4961,3 +4964,22 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    and fails AA for normal text; --teal-dark clears it in both themes. */
 .tl-card .ev-row .ev-file { color: var(--teal-dark); text-decoration: underline; text-underline-offset: 2px; }
 .tl-card .ev-row .ev-file:hover { text-decoration-thickness: 2px; }
+
+/* ------------------------------------------------------------------ */
+/* Dynamic agent dispatch (2026-08-29): the execution profile's two run
+   controls — operator + run-an-agent — with scheduling baked into each
+   (the when-picker turns Run into Schedule; no separate schedule panel). */
+
+/* The agent picker anchors its own listbox; sized like the steer input so the
+   selector and the prompt share the control row's rhythm. */
+.agent-select { position: relative; flex: 1 1 160px; min-width: 0; }
+.agent-select-input { width: 100%; }
+/* A full roster can outgrow the popover — scroll inside it (the page must
+   never scroll horizontally; a menu never forces the page taller either). */
+.agent-select-menu { max-height: 320px; overflow-y: auto; }
+/* The run-an-agent control reuses .op-run's wrapping row. */
+.agent-run { row-gap: .375rem; }
+/* The baked-in when-picker: a size variant of the base select rule. */
+.run-when { flex: none; font-size: .8rem; padding: .25rem .375rem; }
+/* Pending scheduled runs listed under a control take the full control width. */
+.op-run .sched-list { flex-basis: 100%; margin: 0; }

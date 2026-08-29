@@ -116,13 +116,10 @@ export function useRunControls({
           if (runBusy) return;
           const fd = new FormData();
           fd.set("_csrf", csrf);
-          fd.set(
-            "intent",
-            run.kind === "reviewer" ? "run-reviewer" : "run-specialist",
-          );
-          if (run.kind === "reviewer") {
-            fd.set("profileId", run.profileId);
-          }
+          // Dynamic-dispatch rework: one run-agent intent for every agent kind
+          // — the failed run's own profileId identifies who retries.
+          fd.set("intent", "run-agent");
+          fd.set("profileId", run.profileId);
           fd.set("backend", backend);
           runFetcher.submit(fd, { method: "post" });
         }

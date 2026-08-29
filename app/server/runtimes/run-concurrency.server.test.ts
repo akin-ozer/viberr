@@ -56,7 +56,10 @@ async function settle(): Promise<void> {
 
 /** A reviewer run that streams a line then STAYS running (handle live) until it
  *  is interrupted — the way to hold a concurrency slot open in a test. Distinct
- *  thread ids so several coexist on one task (reviewers stream concurrently). */
+ *  thread ids AND distinct profile ids so several coexist on one task: only
+ *  DIFFERENT supporting profiles stream concurrently — same-profile overlap is
+ *  the double-run idx_agent_runs__one_live_per_support forbids atomically
+ *  (hunt 2026-08-29), which is not what this file exercises. */
 async function startHeldRun(threadId: string): Promise<string> {
   queueFakeRun({
     lines: [{ t: "1", ev: "text", tag: "assistant", text: "working" }],
@@ -70,7 +73,7 @@ async function startHeldRun(threadId: string): Promise<string> {
     kind: "reviewer",
     backend: "claude",
     model: "claude-sonnet-4-5",
-    agentProfileId: "reviewer",
+    agentProfileId: `reviewer-${threadId}`,
     prompt: "review VIB-1",
     dataRoot: store.dataRoot,
   });
@@ -185,9 +188,11 @@ describe("run concurrency cap", () => {
  * path instead.
  */
 describe("run concurrency cap — reserved (specialist) runs", () => {
-  // Reviewer kind: several may coexist on one task (unlike the single delivering
-  // `primary`), so the ONLY thing that can decline a second reservation here is
-  // the cap — which is exactly what these tests isolate.
+  // Reviewer kind, DISTINCT profiles: several supporting profiles may coexist
+  // on one task (same-profile overlap is atomically refused since hunt
+  // 2026-08-29 — idx_agent_runs__one_live_per_support), so the ONLY thing that
+  // can decline a reservation here is the cap — which is exactly what these
+  // tests isolate.
   let n = 0;
   function reserve(phase = "Preparing workspace") {
     n += 1;
@@ -199,7 +204,7 @@ describe("run concurrency cap — reserved (specialist) runs", () => {
       kind: "reviewer",
       backend: "claude",
       model: "claude-sonnet-4-5",
-      agentProfileId: "reviewer",
+      agentProfileId: `reviewer-res-${n}`,
       phase,
     });
   }

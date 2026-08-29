@@ -119,6 +119,7 @@ export function baseTaskFrontmatter(
     title: `Task ${key}`,
     schedules: [],
     stage: "triage",
+    previousStageId: null,
     readiness: "input_required",
     waiting: "human",
     ownerUserId: null,

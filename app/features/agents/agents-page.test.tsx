@@ -35,15 +35,15 @@ import { TRANSITION_TO_DONE_EXCEPTION } from "~/features/policy/policy-data";
 afterEach(cleanup);
 
 /**
- * F19-12 — the capability LABEL is rendered copy (capability matrix, profile
- * detail panel, policy page); the capability ID is a persisted key and stays
- * `assign-primary-specialist` deliberately. Read the label from the REAL
- * catalog so this fixture can never drift from what the app renders, and pin
- * the string itself inside the matrix test below: reverting
- * `app/shared/capabilities.ts` to the retired "Assign the primary specialist"
- * turns that assertion red.
+ * F19-12 lineage, re-anchored by the dynamic-dispatch rework (ruling 98): the
+ * capability LABEL is rendered copy (capability matrix, profile detail panel,
+ * policy page), and the id is the persisted key — now `dispatch-agents`, the
+ * collapsed assign/summon pair. Read the label from the REAL catalog so this
+ * fixture can never drift from what the app renders, and pin the string
+ * itself inside the matrix test below: reverting `app/shared/capabilities.ts`
+ * to the retired slot vocabulary turns that assertion red.
  */
-const ASSIGN_DELIVERER_LABEL = capabilityById("assign-primary-specialist")!.label;
+const DISPATCH_AGENTS_LABEL = capabilityById("dispatch-agents")!.label;
 
 /** Curated-ish catalogs the stub's /resources/model-catalog loader returns. */
 const CLAUDE_CATALOG: ModelCatalog = {
@@ -763,7 +763,7 @@ describe("CapabilityMatrixModal", () => {
         name: "Operator",
         icon: "shield",
         actions: {
-          direct: [ASSIGN_DELIVERER_LABEL],
+          direct: [DISPATCH_AGENTS_LABEL],
           recommend: [],
           forbidden: ["Change project policy"],
         },
@@ -790,10 +790,10 @@ describe("CapabilityMatrixModal", () => {
     // Off-catalog actions (operator coordination + the pruned advisory review
     // caps a seed profile still carries) land in "Other actions".
     expect(getByText("Other actions")).toBeTruthy();
-    // F19-12: the exact rendered label, pinned against the shipped vocabulary
-    // ("Assign delivering agent" / "Delivering agent" in execution-profile.tsx).
-    expect(ASSIGN_DELIVERER_LABEL).toBe("Assign the delivering agent");
-    expect(getByText(ASSIGN_DELIVERER_LABEL)).toBeTruthy();
+    // Ruling 98: the exact rendered label, pinned against the shipped
+    // vocabulary (the one dispatch verb).
+    expect(DISPATCH_AGENTS_LABEL).toBe("Select & run agents");
+    expect(getByText(DISPATCH_AGENTS_LABEL)).toBeTruthy();
     expect(container.textContent).not.toMatch(/primary specialist/i);
     // Cell modes render as mx-cell classes with accessible titles.
     expect(container.querySelectorAll(".mx-cell.human").length).toBeGreaterThan(0);

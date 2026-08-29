@@ -133,26 +133,31 @@ Unknown `## Sections` are preserved verbatim.
 key: VIB-142
 title: Attach execution workspace to task runtime
 stage: review                     # id into the project's stage list
+previousStageId: impl             # where the task CAME from (null until the
+                                  # first transition) — the operator's agent
+                                  # choice weighs it (ruling 98)
 readiness: input_required         # canonical 4-value enum ONLY (ruling 1):
                                   # ready | input_required |
                                   # inconsistency_risk_detected | blocked
 waiting: human                    # human | agent | none (secondary signal)
 ownerUserId: u_abc123             # ONE human owner; null when unowned
-engagements:                      # ONE uniform list of engaged agents (G1).
-  - profileId: developer          # At most one entry has delivers: true — that
-    backend: codex                # is the workspace/branch/PR owner.
-    role: Developer               # display snapshot, taken at engage time
-    delivers: true
-    verdictCapable: false
-  - profileId: reviewer           # a supporting engagement; verdictCapable is
-    backend: claude               # snapshotted from an EXPLICIT
-    role: Review & validation     # report-validation-verdict:direct grant, and
-    delivers: false               # makes this a REQUIRED reviewer
-    verdictCapable: true
+engagements:                      # ONE uniform list of engaged agents (G1),
+  - profileId: developer          # written by the DISPATCH since ruling 98 —
+    backend: codex                # running an unengaged deployed profile
+    role: Developer               # engages it (delivering iff no deliverer AND
+    delivers: true                # repo-write; supporting otherwise). At most
+    verdictCapable: false         # one entry has delivers: true — the
+  - profileId: reviewer           # workspace/branch/PR owner. verdictCapable
+    backend: claude               # is snapshotted from an EXPLICIT
+    role: Review & validation     # report-validation-verdict:direct grant and
+    delivers: false               # makes a supporting engagement a REQUIRED
+    verdictCapable: true          # reviewer.
 operator:                         # null in triage (ruling 16: store stage id;
   assignedAtStageId: triage       # UI renders "stage <1-based index>")
 recommendations: []               # pending operator recommendation cards
-schedules: []                     # pending/fired scheduled operator re-runs (O-3)
+schedules: []                     # pending/fired scheduled runs (O-3, ruling 98:
+                                  # run-operator | run-agent; the agent arm pins
+                                  # profileId + prompt, nothing else)
 urgent: true                      # optional; absent ≡ false
 validation: changed               # healthy | changed | failing | none | bypassed
                                   # (`bypassed` = a human force-accepted past the
@@ -252,17 +257,12 @@ evidence:
 Notes:
 
 - **`engagements` replaced `specialist:` / `reviewers:` / `consultants:`** in the
-  generic-agents pass (2026-07-19). There is now one uniform list; the delivering
-  engagement is the entry with `delivers: true`, not a separate slot. The parser still
-  absorbs the legacy keys — a file carrying `specialist:` + `consultants:` migrates on the
-  next write, and the legacy keys are dropped rather than preserved as unknown fields. An
-  explicit `engagements:` always wins over them.
-  **Watch the migration cost:** a legacy entry migrates with `verdictCapable: false`,
-  because verdict capability is a snapshot of an explicit
-  `report-validation-verdict: direct` grant, and the legacy shape never carried one. A
-  hand-written `consultants:` reviewer therefore comes across as a supporting engagement
-  that is *not* a required reviewer — acceptance will not wait for it, silently. Write
-  `engagements` directly if you mean a required reviewer.
+  generic-agents pass (2026-07-19), and the legacy-key ABSORPTION was deleted in the
+  dynamic-dispatch rework (ruling 98, 2026-08-29 — preprod, no back-compat by owner
+  ruling). A file still carrying those keys parses with whatever `engagements:` says
+  (or none) and keeps the legacy keys verbatim as unknown fields; nothing reads them.
+  Engagements are created by the dispatch itself — write `engagements` directly only
+  when hand-authoring a required reviewer (`delivers: false, verdictCapable: true`).
 - `validation`, `workRevision` and `verdicts` are a set. `validation` is a derived cache
   recomputed from the other two plus the required-reviewer set on every write; do not
   hand-edit it as a source of truth. A verdict names the `revisionId` it judged, so a new

@@ -222,14 +222,15 @@ describe("loader", () => {
     expect(operator.kind).toBe("operator");
     expect(operator.spanAll).toBe(true);
     expect(operator.model).toBe("orchestration runtime");
-    // Operator action-bucket sizes: the 4 granted coordination caps + R15-2's
-    // materialized `deliver-review-pr`, A1's materialized `use-web-search-fetch`,
-    // AND pass-24 A-1's materialized `update-task-branch` — the seeded operator
-    // omits both grants but the runtime keeps web egress ON (absent⇒kept) and
-    // updateBranchGate resolves an absent branch-update through the delivery gate
-    // (here `direct`, an auto-advance project). => 7 direct / 2 recommend / 3
-    // forbidden. Every governance-derived grant is now shown at its runtime mode.
-    expect(operator.actions.direct).toHaveLength(7);
+    // Operator action-bucket sizes: the 4 seeded direct grants (dynamic-dispatch
+    // rework — `dispatch-agents` + the two coordination caps + R15-2's delivery)
+    // + A1's materialized `use-web-search-fetch` AND pass-24 A-1's materialized
+    // `update-task-branch` — the seeded operator omits both grants but the
+    // runtime keeps web egress ON (absent⇒kept) and updateBranchGate resolves an
+    // absent branch-update through the delivery gate (here `direct`, an
+    // auto-advance project). => 6 direct / 2 recommend / 3 forbidden. Every
+    // governance-derived grant is shown at its runtime mode.
+    expect(operator.actions.direct).toHaveLength(6);
     expect(operator.actions.recommend).toHaveLength(2);
     expect(operator.actions.forbidden).toHaveLength(3);
     // A1: the operator's absent web-egress renders Allowed (matches the runtime).
@@ -237,11 +238,12 @@ describe("loader", () => {
     // A-1 (pass 24): the absent branch-update grant renders at the delivery-gate
     // mode (Allowed on this auto project), not omitted, not a flat catalog direct.
     expect(operator.actions.direct).toContain("Bring the task branch up to date");
-    // F19-12: the rendered label is the shipped vocabulary ("delivering agent",
-    // per execution-profile.tsx); the capability ID stays `assign-primary-specialist`
-    // because it is a persisted key. Reverting app/shared/capabilities.ts fails this.
-    expect(operator.actions.direct).toContain("Assign the delivering agent");
+    // Dynamic-dispatch rework (2026-08-29): the retired assign/summon slot pair
+    // collapsed into ONE `dispatch-agents` grant, labelled "Select & run agents".
+    // Neither retired vocabulary may resurface in the rendered bucket.
+    expect(operator.actions.direct).toContain("Select & run agents");
     expect(operator.actions.direct.join(" ")).not.toMatch(/primary specialist/i);
+    expect(operator.actions.direct.join(" ")).not.toMatch(/summon|delivering agent/i);
     expect(operator.actions.direct).toContain("Deliver the branch & open the review PR");
     expect(operator.actions.direct).not.toContain("Compress long-running timelines");
 
@@ -253,10 +255,10 @@ describe("loader", () => {
     // still pass while the operator held no runtime authority at all. Pin the
     // resolution, not just the rendered string.
     expect(
-      operator.capabilities.find((c) => c.capabilityId === "assign-primary-specialist")?.mode,
+      operator.capabilities.find((c) => c.capabilityId === "dispatch-agents")?.mode,
     ).toBe("direct");
-    expect(operator.extras.map((e) => e.label)).not.toContain("Assign the delivering agent");
-    expect(operator.extras.map((e) => e.label).join(" ")).not.toMatch(/primary specialist/i);
+    expect(operator.extras.map((e) => e.label)).not.toContain("Select & run agents");
+    expect(operator.extras.map((e) => e.label).join(" ")).not.toMatch(/primary specialist|summon/i);
 
     // The Reviewer's push restriction is now a REAL enforced grant (D4): it uses
     // the exact catalog label "Commit & push to the branch" so it maps to the
@@ -879,7 +881,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         stages: ["triage", "ready", "impl", "review", "done"],
         definition: "Updated operator definition.",
         autonomy: "full",
-        caps: { "assign-primary-specialist": "recommend", "stage-transitions": "direct" },
+        caps: { "dispatch-agents": "recommend", "stage-transitions": "direct" },
         resources: { skills: ["viberr-app-expertise"], mcps: ["viberr"], kb: ["architecture-notes"] },
       }),
     }));
@@ -895,10 +897,10 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     expect(operator.autonomy).toBe("full");
     expect(operator.spanAll).toBe(true); // preserved
     expect(operator.desc).toBe("Updated operator definition.");
-    // Operator RBAC modes are editable (assign → recommend, transitions → direct).
+    // Operator RBAC modes are editable (dispatch → recommend, transitions → direct).
     const modeOf = (id: string) =>
       operator.capabilities.find((c) => c.capabilityId === id)?.mode;
-    expect(modeOf("assign-primary-specialist")).toBe("recommend");
+    expect(modeOf("dispatch-agents")).toBe("recommend");
     expect(modeOf("stage-transitions")).toBe("direct");
   });
 

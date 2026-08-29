@@ -346,6 +346,141 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     ).toBe(true);
   });
 
+  it("dispatch-completion contract: the stored report gains the missing @tags (ruling 98)", async () => {
+    // A manually-dispatched run whose model forgot both tags: the pipeline
+    // appends them BEFORE the reply is stored, so the timeline comment (and
+    // the mention fan-out reading it) always reaches the dispatching human
+    // and the operator — R20-9's guarantee-over-guidance shape.
+    writeReviewTask();
+    const runId = await finishedRunWith("Verdict: approve — the diff is fine.");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        dispatchedByName: "Arda Kaya",
+      },
+      { id: runId, state: "finished" },
+    );
+    const reply = taskFile().parsed.timeline.find((e) => e.type === "comment");
+    expect(reply?.text).toContain("cc @Arda Kaya @operator");
+  });
+
+  it("dispatch-completion contract: a tag of a DIFFERENT person sharing the first name does NOT satisfy the contract (hunt 2026-08-29)", async () => {
+    // The old check was a raw substring on "@<firstWord>": a report tagging
+    // "@Arda Other" (someone else) satisfied it for dispatcher "Arda Test",
+    // while the fan-out ladder delivered that tag to the OTHER person — the
+    // one guaranteed ping vanished exactly when names collided. The check now
+    // asks the SAME ladder "would this text notify the dispatcher's userId?".
+    insertUser(store.db, {
+      id: "u_arda_other",
+      email: "arda.other@viberr.test",
+      name: "Arda Other",
+      role: "member",
+    });
+    writeReviewTask();
+    const runId = await finishedRunWith(
+      "@Arda Other done — @operator over to you. Verdict: approve.",
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        dispatchedByName: store.users.arda.name,
+        dispatchedByUserId: store.users.arda.id,
+      },
+      { id: runId, state: "finished" },
+    );
+    const reply = taskFile().parsed.timeline.find((e) => e.type === "comment");
+    // The dispatcher's own full-name tag is appended; @operator already stood.
+    expect(reply?.text).toContain(`cc @${store.users.arda.name}`);
+    expect(reply?.text).not.toContain("cc @operator");
+  });
+
+  it("dispatch-completion contract: a report that already tags both gets NO cc line", async () => {
+    writeReviewTask();
+    const runId = await finishedRunWith(
+      "@Arda Kaya done — @operator over to you. Verdict: approve.",
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        dispatchedByName: "Arda Kaya",
+      },
+      { id: runId, state: "finished" },
+    );
+    const reply = taskFile().parsed.timeline.find((e) => e.type === "comment");
+    expect(reply?.text).not.toContain("cc @");
+  });
+
+  it("dispatch-completion contract: a verbatim repeat still hands back to the operator — no no-progress skip, no stuck packet (ruling 98)", async () => {
+    // The owner's "to let the operator run again" half: a dispatched run's
+    // completion bypasses the new-progress heuristic. Observable as the
+    // ABSENCE of both skip artifacts (the no-progress log and the stuck-loop
+    // packet); with no operator deployed the react then settles harmlessly.
+    writeReviewTask();
+    const effects = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      backend: "claude" as const,
+      profileId: "reviewer",
+      role: "Reviewer",
+      delivers: false,
+      workdir: null,
+      agentHandle: "reviewer",
+      dispatchedByName: "Arda Kaya",
+    };
+    const reply = "The diff is unchanged since my last pass.";
+    const first = await finishedRunWith(reply);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      effects,
+      { id: first, state: "finished" },
+    );
+    // spyOn an already-spied method returns the SAME mock with the previous
+    // test's calls still recorded — clear it so only THIS apply is judged.
+    const noProgressLog = vi.spyOn(logger, "info");
+    noProgressLog.mockClear();
+    const second = await finishedRunWith(reply);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      effects,
+      { id: second, state: "finished" },
+    );
+    expect(
+      noProgressLog.mock.calls.some(([msg]) =>
+        String(msg).includes("agent made no progress"),
+      ),
+    ).toBe(false);
+    expect(taskFile().parsed.packet).toBeNull();
+  });
+
   it("records a required reviewer's verdict from the ENGAGEMENT snapshot even if its LIVE grant was removed (adversarial-review: no stuck task)", async () => {
     // The required-reviewer set (acceptanceBlockedReason) uses the engage-time
     // `verdictCapable` snapshot. If verdict RECORDING used the live grant

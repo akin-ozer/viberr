@@ -9,16 +9,15 @@ import {
 import type { TaskMutationContext } from "./task-actions.server";
 import {
   deliverGate,
+  dispatchGate,
   gate,
   operatorAcceptCompletion,
   operatorDeliverForReview,
-  operatorEngageAgent,
+  operatorDispatchAgent,
   operatorFlagContextConflict,
   operatorOpenPacket,
   operatorResolvePacket,
   operatorPostComment,
-  operatorPromptAgentGeneric,
-  operatorRunAgent,
   operatorSetGoal,
   operatorSnapshot,
   operatorTransitionStage,
@@ -135,9 +134,7 @@ type SetGoalInput = Parameters<typeof operatorSetGoal>[2];
 type OpenPacketObservation = NonNullable<
   OperatorOpenPacketInput["observations"]
 >[number];
-type EngageAgentInput = Parameters<typeof operatorEngageAgent>[2];
-type RunAgentInput = Parameters<typeof operatorRunAgent>[2];
-type PromptAgentInput = Parameters<typeof operatorPromptAgentGeneric>[2];
+type DispatchAgentInput = Parameters<typeof operatorDispatchAgent>[2];
 type DeliverInput = Parameters<typeof operatorDeliverForReview>[2];
 type TransitionInput = Parameters<typeof operatorTransitionStage>[2];
 
@@ -262,7 +259,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "get_task",
-      "Read the current task snapshot: stage, readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can engage, the allowed next stage transitions, any open decision packet, the review `pr` (P13-D-4 — `state: \"closed\"` means a human CLOSED it on GitHub without merging, i.e. the work was rejected out-of-band: do NOT recommend or accept completion, report it and ask what to do; `pr.revisionDrift` names commits pushed to the PR head AFTER the last reviewed revision, which ship UNREVIEWED and must be stated wherever you reason about that PR), and `operatorPolicy` + autonomy. TWO SCOPES, do not mix them: `operatorPolicy` is YOUR OWN capability policy (`operatorPolicy.scope: \"operator\"`, and read its `note`), while each agent's own grants are `deployedSpecialists[].capabilities` — never quote a row of yours as evidence about an agent. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions; browser = can drive a live browser; web = holds web search/fetch egress) — never by guessing from names.",
+      "Read the current task snapshot: stage (plus `previousStage`, where the task CAME from — arriving back from a later stage means rework for the profile that built it), readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can run, the allowed next stage transitions, any open decision packet, the review `pr` (P13-D-4 — `state: \"closed\"` means a human CLOSED it on GitHub without merging, i.e. the work was rejected out-of-band: do NOT recommend or accept completion, report it and ask what to do; `pr.revisionDrift` names commits pushed to the PR head AFTER the last reviewed revision, which ship UNREVIEWED and must be stated wherever you reason about that PR), and `operatorPolicy` + autonomy. TWO SCOPES, do not mix them: `operatorPolicy` is YOUR OWN capability policy (`operatorPolicy.scope: \"operator\"`, and read its `note`), while each agent's own grants are `deployedSpecialists[].capabilities` — never quote a row of yours as evidence about an agent. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions; browser = can drive a live browser; web = holds web search/fetch egress) — never by guessing from names.",
       {},
       async () =>
         textResult(
@@ -532,83 +529,47 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     );
   }
 
-  // `delivers` selects the engagement shape. Existing capability gates still
-  // govern each shape, so a partially-granted operator is refused per call.
-  const canDeliverers = gate(authority, "assign-primary-specialist") !== "deny";
-  const canSupporting = gate(authority, "summon-reviewers") !== "deny";
-  if (canDeliverers || canSupporting) {
-    add(
-      tool(
-        "engage_agent",
-        "Engage a deployed agent profile on the task. `delivers: true` makes it THE delivering agent (owns the workspace/branch/PR — exactly one per task); `delivers: false` engages it as a supporting agent (e.g. a verdict-capable profile for review). Pick the profile by its `desc` and `capabilities` from get_task. Supervised → recommendation card; full autonomy → engages directly.",
-        {
-          profileId: z.string().describe("The agent profile id to engage (from get_task's deployedSpecialists)."),
-          delivers: z
-            .boolean()
-            .describe("true = the delivering agent (builds + owns the branch/PR); false = supporting (review/advice)."),
-          reason: z.string().optional().describe("Why this profile fits — shown on the recommendation card."),
-        },
-        async (args) => {
-          const input: EngageAgentInput = {
-            ...base,
-            profileId: args.profileId,
-            delivers: args.delivers,
-          };
-          if (args.reason) input.reason = prose(args.reason);
-          return resultText(
-            await operatorEngageAgent(db, ctx, input, authority),
-          );
-        },
-      ),
-      "engage_agent",
-    );
+  // Dynamic-dispatch rework (2026-08-29): ONE tool selects AND runs an agent —
+  // the collapsed replacement for engage_agent / run_agent / prompt_agent.
+  // Gated by `dispatch-agents` (the collapsed assign/summon pair).
+  if (dispatchGate(authority) !== "deny") {
     add(
       tool(
         "run_agent",
-        "Start a run for an ENGAGED agent. Omit profileId to run the delivering agent; pass a supporting agent's profileId to run it.",
+        "Select a deployed agent and put it to work on the task — YOU choose which agent fits what the CURRENT stage needs, weighing where the task just came from (a task back from Review is rework for the same builder; a task newly in Review wants a verdict-capable profile). Pick by each profile's `desc` and `capabilities` from get_task, never by name. Engages the profile if needed: it becomes the delivering agent when the task has none and it holds repo-write, otherwise a supporting agent (its own read-only checkout; a verdict-capable one gates acceptance). Pass a concrete `prompt` when handing off work — it is posted as your comment and becomes the run's directive; omit it only to re-run an agent against the task as it stands. `delivers: true` explicitly hands delivery to this profile (reassigning the current deliverer). Supervised → ONE run-agent recommendation card; full autonomy → runs directly.",
         {
           profileId: z
             .string()
-            .optional()
-            .describe("The engaged agent to run; omit for the delivering agent."),
-        },
-        async (args) => {
-          const input: RunAgentInput = { ...base };
-          if (args.profileId) input.profileId = args.profileId;
-          return resultText(await operatorRunAgent(db, ctx, input, authority));
-        },
-      ),
-      "run_agent",
-    );
-    add(
-      tool(
-        "prompt_agent",
-        "Hand the task to an agent for the CURRENT stage: engage it (if needed), post a task-related prompt comment addressed to it, and start its run with that prompt as its directive. Use this when a task enters a working stage — it triggers the agent WITH a prompt, not silently. Pass the profileId, a concrete `prompt`, and `delivers` (true = as the delivering builder; false = as a supporting agent, e.g. for review).",
-        {
-          profileId: z.string().describe("The agent profile id to prompt."),
+            .describe("The agent profile id to run (from get_task's deployedSpecialists)."),
           prompt: z
             .string()
-            .describe("The task-related directive (what to do for this task at this stage)."),
+            .optional()
+            .describe("The task-related directive (what to do for this task at this stage). Omit for a bare re-run."),
           delivers: z
             .boolean()
             .optional()
-            .describe("true = delivering builder · false = supporting (review). Omit to follow how it is already engaged."),
+            .describe("true = hand delivery to this profile · false = run as supporting. Omit to derive from its grants and the task's current deliverer."),
+          reason: z
+            .string()
+            .optional()
+            .describe("Why this profile fits — recorded on the selection trace and the recommendation card."),
         },
         async (args) => {
-          const input: PromptAgentInput = {
+          const input: DispatchAgentInput = {
             ...base,
             profileId: args.profileId,
-            directive: prose(args.prompt),
           };
+          if (args.prompt) input.prompt = prose(args.prompt);
           if (args.delivers !== undefined) input.delivers = args.delivers;
-          const result = await operatorPromptAgentGeneric(db, ctx, input, authority);
+          if (args.reason) input.reason = prose(args.reason);
+          const result = await operatorDispatchAgent(db, ctx, input, authority);
           // R20-9: remember the consultation so a packet opened later in THIS
           // run discloses it without the model having to remember.
           noteConsultedProfile(consultedProfileIds, args.profileId, result.outcome);
           return resultText(result);
         },
       ),
-      "prompt_agent",
+      "run_agent",
     );
   }
 

@@ -758,9 +758,10 @@ export async function assignSpecialist(
           (e) => e.profileId !== ref.profileId,
         ),
       ];
-      // Clear any pending "assign specialist" recommendation — it's now done.
+      // Clear any pending run_agent recommendation for THIS profile — the
+      // engagement it proposed is now a fact (the run itself follows).
       parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
-        (r) => r.kind !== "assign_specialist",
+        (r) => !(r.kind === "run_agent" && r.profileId === ref.profileId),
       );
       parsed.timeline.unshift(event);
     },
@@ -904,9 +905,9 @@ export async function assignReviewer(
         delivers: false,
         verdictCapable,
       });
-      // Clear a matching pending "engage reviewer" recommendation.
+      // Clear a matching pending run_agent recommendation — now engaged.
       parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
-        (r) => !(r.kind === "assign_reviewer" && r.profileId === reviewer.profileId),
+        (r) => !(r.kind === "run_agent" && r.profileId === reviewer.profileId),
       );
       // UX19-3 (mechanism 2): `validation` is a DERIVED cache whose contract is
       // "ONE writer — deriveValidation" (F10-15), and the required-reviewer set
@@ -1021,6 +1022,8 @@ export interface StartAgentRunResult {
   runId: string;
   backend: RealBackend;
   role: string;
+  /** The agent's display name (deployment name; profile id when unresolvable). */
+  name: string;
 }
 
 /** The reservation `dispatchAgentRun` claims mid-flight, so the exported
@@ -1053,6 +1056,28 @@ export interface StartAgentRunInput {
    *  default — "retry on the other backend" after an availability /
    *  quota failure (D4). */
   backendOverride?: RealBackend;
+  /**
+   * Dynamic-dispatch rework (2026-08-29): explicit delivering/supporting
+   * posture for a profile that is NOT yet engaged (the auto-engage below).
+   * Omitted → derived: an unengaged profile becomes the delivering engagement
+   * iff the task has no deliverer AND the profile holds a repo-write grant;
+   * otherwise it engages as a supporting agent. An already-engaged profile
+   * keeps its shape unless `true` explicitly asks for a delivery hand-off.
+   */
+  delivers?: boolean;
+  /**
+   * Dispatch-completion contract (owner directive, 2026-08-29): the display
+   * name of the human whose manual (or scheduled) dispatch started this run.
+   * Presence arms the contract — the run's final report always tags this
+   * human (notifying them) and @operator, and the completion always re-invokes
+   * the operator so coordination continues. Mechanical in the completion
+   * pipeline (R20-9's guarantee-over-guidance shape); the prompt clause below
+   * is the guidance half.
+   */
+  triggeredByName?: string;
+  /** The dispatcher's user id — the completion contract's cc-append verifies
+   *  "already tagged?" against the mention resolution ladder with it. */
+  triggeredByUserId?: string;
 }
 
 export async function startAgentRun(
@@ -1087,19 +1112,124 @@ async function dispatchAgentRun(
     "start an agent run",
   );
 
-  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  let existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
 
-  const engagement = input.profileId
+  let engagement = input.profileId
     ? (existing.parsed.frontmatter.engagements.find(
         (e) => e.profileId === input.profileId,
       ) ?? null)
     : deliveringEngagement(existing.parsed.frontmatter);
+
+  // Dynamic-dispatch rework (2026-08-29): running an agent that is not yet
+  // engaged ENGAGES it — the pre-assignment ceremony ("Engage it first") is
+  // gone. The engagement row still exists (verdict snapshots, KB union,
+  // workspace paths, single-flight and the required-reviewer gate all key off
+  // it); it is simply created by the dispatch instead of by a separate human
+  // step. Posture derives from the profile's own capability grants:
+  //   - delivering iff the task has no deliverer AND the profile holds a
+  //     repo-write grant (an explicit `delivers: true` hint — the operator's
+  //     hand-off — reassigns delivery through the existing assignSpecialist
+  //     machinery instead);
+  //   - supporting otherwise (own isolated checkout; a verdict grant makes it
+  //     a required reviewer, exactly as an explicit engage did).
+  if (!engagement && input.profileId) {
+    const view = listDeployedSpecialists(input.projectSlug, ctx).find(
+      (s) => s.id === input.profileId,
+    );
+    if (!view) {
+      throw AppError.validation(
+        `"${input.profileId}" is not deployed on this project. Deploy it on the Agents page first.`,
+      );
+    }
+    const currentDeliverer = deliveringEngagement(existing.parsed.frontmatter);
+    const delivery = view.capabilities?.delivery === true;
+    const wantsDelivery =
+      input.delivers ?? (currentDeliverer === null && delivery);
+    if (wantsDelivery && !delivery) {
+      // R21-2's posture: name the capability AND where a human grants it,
+      // rather than starting a delivering run that can ship nothing.
+      throw AppError.validation(
+        `${view.name} holds no repo-write grant, so it cannot own delivery. ` +
+          `Run it as a supporting agent, or grant "Execute code or write to the repo" on the Agents page.`,
+      );
+    }
+    if (wantsDelivery) {
+      await assignSpecialist(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          profileId: input.profileId,
+        },
+        actor,
+        ctx,
+      );
+    } else {
+      await assignReviewer(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          profileId: input.profileId,
+        },
+        actor,
+        ctx,
+      );
+    }
+    existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+    if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+    engagement =
+      existing.parsed.frontmatter.engagements.find(
+        (e) => e.profileId === input.profileId,
+      ) ?? null;
+  } else if (
+    engagement &&
+    input.profileId &&
+    input.delivers === true &&
+    !engagement.delivers
+  ) {
+    // Explicit delivery hand-off to an agent currently engaged as supporting:
+    // route through assignSpecialist (single-deliverer invariant, hand-off
+    // event, live-primary-run refusal) and re-read.
+    //
+    // Dispatch-rework hunt (2026-08-29): the repo-write guard below used to
+    // live only on the UNENGAGED branch above, so a verdict-only reviewer
+    // already engaged as supporting could be handed delivery — recreating the
+    // exact ships-nothing dead end ruling 98(a) closes. Same check, same
+    // remedy-naming refusal, on BOTH doors to `delivers: true`.
+    const handoffView = listDeployedSpecialists(input.projectSlug, ctx).find(
+      (s) => s.id === input.profileId,
+    );
+    if (handoffView && handoffView.capabilities?.delivery !== true) {
+      throw AppError.validation(
+        `${handoffView.name} holds no repo-write grant, so it cannot own delivery. ` +
+          `Run it as a supporting agent, or grant "Execute code or write to the repo" on the Agents page.`,
+      );
+    }
+    await assignSpecialist(
+      db,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        profileId: input.profileId,
+      },
+      actor,
+      ctx,
+    );
+    existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+    if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+    engagement =
+      existing.parsed.frontmatter.engagements.find(
+        (e) => e.profileId === input.profileId,
+      ) ?? null;
+  }
+
   if (!engagement) {
     throw AppError.validation(
       input.profileId
-        ? "That agent is not engaged on this task. Engage it first."
-        : "Engage a delivering agent before starting a run.",
+        ? `"${input.profileId}" could not be engaged on this task.`
+        : "Pick an agent to run — this task has no delivering agent yet.",
     );
   }
   const delivers = engagement.delivers;
@@ -1548,6 +1678,7 @@ async function dispatchAgentRun(
   if (reviewSubject) promptInput.reviewSubject = reviewSubject;
   if (input.directive) promptInput.directive = input.directive;
   if (input.directiveFrom) promptInput.directiveFrom = input.directiveFrom;
+  if (input.triggeredByName) promptInput.triggeredByName = input.triggeredByName;
   const basePrompt = buildAnalyzePrompt(promptInput);
   // The human needs the real reason too, and needs it BEFORE the agent's own
   // account of the run. Without this the only trace on the task page is the
@@ -1882,12 +2013,21 @@ async function dispatchAgentRun(
     // its prose reply re-parsed as an outcome envelope.
     envelopeRequested: useEnvelopeSchema,
   };
+  // Dispatch-completion contract (2026-08-29): the mechanical half — the
+  // completion pipeline appends the missing @tags to the report and ALWAYS
+  // re-invokes the operator, bypassing the react heuristic (still depth-capped).
+  if (input.triggeredByName?.trim()) {
+    completion.dispatchedByName = input.triggeredByName.trim();
+    if (input.triggeredByUserId) {
+      completion.dispatchedByUserId = input.triggeredByUserId;
+    }
+  }
   // Only a run started INSIDE an operator react loop carries the loop state —
   // its absence is what tells the completion handler not to continue a chain.
   if (ctx.operatorRun) completion.operatorRun = ctx.operatorRun;
   await registerAgentCompletion(db, ctx, completion);
 
-  return { runId, backend, role: engagement.role };
+  return { runId, backend, role: engagement.role, name: agentName };
 }
 
 // ----------------------------------------------------------------- persona
@@ -2237,6 +2377,12 @@ export interface AnalyzePromptInput {
   /** The human who wrote `directive`, when it is a person's comment rather than
    *  an operator hand-off (P14-RT-02). */
   directiveFrom?: string;
+  /** Dispatch-completion contract (2026-08-29): the human whose manual or
+   *  scheduled dispatch started this run. The prompt asks the run to close its
+   *  report tagging them and @operator; the completion pipeline guarantees the
+   *  tags land even when the model forgets (guidance over a guarantee, R20-9's
+   *  shape). */
+  triggeredByName?: string;
   /** F15-15: the delivered revision a SUPPORTING (reviewing) run must judge —
    *  pinned so the reviewer verifies it is reading the delivered content, not
    *  whatever the local workspace branch happens to hold. Live failure: a PR
@@ -2387,6 +2533,17 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       `instruction here (or anywhere) to \`git push\`, open/update/merge a pull ` +
       `request, or otherwise deliver — the server performs delivery on the Review ` +
       `transition.`;
+  }
+  if (input.triggeredByName?.trim()) {
+    // The dispatch-completion contract's guidance half: the pipeline appends
+    // the tags mechanically when missing, but a report that carries them in the
+    // model's own words reads better than a bolted-on cc line.
+    const trig = input.triggeredByName.trim();
+    prompt +=
+      `\n\n## Reporting back\n` +
+      `This run was dispatched by ${trig}. Close your final report by tagging ` +
+      `"@${trig}" (so they are notified) and "@operator" (so the coordinator ` +
+      `picks your results up).`;
   }
   // Prompt-injection guardrail (R-C): applies to BOTH backends. Codex has no
   // tool-denylist channel, so its capability + delivery constraints are enforced

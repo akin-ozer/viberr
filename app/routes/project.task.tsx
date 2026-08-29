@@ -11,6 +11,7 @@ import {
   appErrorResponse,
   requireFormAction,
 } from "~/server/auth/form-action.server";
+import { AppError } from "~/server/errors/app-error.server";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
@@ -51,8 +52,6 @@ import {
   listTaskAttachments,
 } from "~/server/files/task-attachments.server";
 import {
-  assignReviewer,
-  assignSpecialist,
   listDeployedSpecialists,
   removeReviewer,
   startAgentRun,
@@ -110,8 +109,8 @@ import { Icon } from "~/ui/icon";
  * caller shows identical strings):
  *   comment · resolve-packet · owner-take · owner-assign · owner-release ·
  *   transition · accept-completion · archive-task · restore-task ·
- *   run-interrupt · assign-specialist · run-specialist ·
- *   assign-reviewer · run-reviewer · remove-reviewer
+ *   run-interrupt · run-agent · release-agent · run-operator ·
+ *   schedule-action · cancel-schedule
  */
 
 export async function loader({ request, params }: Route.LoaderArgs) {
@@ -218,16 +217,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   });
   // F10-04: per-engagement run gating. The server single-flights only the
   // DELIVERING run; supporting/reviewing runs are read-only and may run
-  // concurrently. So the delivering Run button disables only on an active
-  // delivering run, and each reviewer's Run button disables only on ITS OWN
-  // active run — not on any run anywhere (the old `runActive` boolean disabled
-  // every button whenever a single run was live, contradicting the server).
+  // concurrently. The run-agent control mirrors this: it warns/disables per
+  // profile, from the live run set.
   const activeRuns = runtime.filter(
     (r) => r.lifecycle === "running" || r.lifecycle === "queued",
   );
-  const deliveringActive = activeRuns.some((r) => r.kind === "primary" && !r.op);
-  const activeReviewerIds = activeRuns.flatMap((r) =>
-    r.kind === "reviewer" && r.profileId ? [r.profileId] : [],
+  const activeAgentProfileIds = activeRuns.flatMap((r) =>
+    !r.op && r.profileId ? [r.profileId] : [],
   );
 
   // @-mention autocomplete directory for the comment composer: deployed
@@ -329,8 +325,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       claude: isBackendAvailable("claude"),
       codex: isBackendAvailable("codex"),
     },
-    deliveringActive,
-    activeReviewerIds,
+    activeAgentProfileIds,
     /** UI-30: false → the console content above was withheld (non-member). */
     runsVisible,
     mentionables,
@@ -797,78 +792,63 @@ export async function action({ request, params }: Route.ActionArgs) {
               : "That run already finished · nothing to interrupt",
         };
       }
-      case "assign-specialist": {
-        // Deploy a project specialist as the task's primary (contracts §3.2
-        // "Open agent runtime sessions" — admin|maintainer, enforced server-side).
-        const result = await assignSpecialist(
-          db,
-          { projectSlug, taskKey, profileId: String(formData.get("profileId") ?? "") },
-          actor,
-        );
+      case "run-agent": {
+        // Dynamic-dispatch rework (2026-08-29): the ONE manual dispatch —
+        // replaces assign-specialist / run-specialist / assign-reviewer /
+        // run-reviewer. Pick any deployed agent (the @-style selector), give it
+        // an optional prompt, and run it. Engage-if-needed with
+        // capability-derived posture lives in startAgentRun; the optional
+        // `backend` is the D4 retry-on-other-backend override. The dispatching
+        // human is the completion contract's triggerer: the run's report tags
+        // them + @operator, and the completion re-invokes the operator.
+        const profileId = String(formData.get("profileId") ?? "");
+        if (!profileId) throw AppError.validation("Pick an agent to run.");
+        const prompt = String(formData.get("prompt") ?? "").trim();
+        if (prompt.length > 4000) {
+          throw AppError.validation("Keep the run prompt under 4000 characters.");
+        }
+        // The DISPLAY name, exactly as the @operator steer path resolves it —
+        // the run's report tags "@<name>", and only a known display name chips
+        // and notifies (R21-9's live catch: `actor.label` is the email).
+        const dispatcherName = userName(db, actor.userId);
+        const dispatch: Parameters<typeof startAgentRun>[1] = {
+          projectSlug,
+          taskKey,
+          profileId,
+          triggeredByName: dispatcherName,
+          triggeredByUserId: actor.userId,
+          ...backendOverride(formData),
+        };
+        if (prompt) {
+          dispatch.directive = prompt;
+          dispatch.directiveFrom = dispatcherName;
+        }
+        const result = await startAgentRun(db, dispatch, actor);
+        // R21-9's law, applied to the dispatch prompt: a directive that reaches
+        // an agent off the record is invisible to supervision — record it as the
+        // human's own timeline comment addressed to the agent. After the start,
+        // so a refused dispatch leaves no orphaned hand-off comment.
+        if (prompt) {
+          await appendComment(
+            db,
+            {
+              projectSlug,
+              taskKey,
+              text: `@${result.name} ${prompt}`,
+              forceToAgent: true,
+            },
+            actor,
+          );
+        }
         return {
           ok: true as const,
           intent,
-          toast: `Deployed ${result.name} as specialist`,
+          toast: `${result.backend === "claude" ? "Claude" : "Codex"} run started for ${result.name} · streaming to agent logs`,
         };
       }
-      case "run-specialist": {
-        // Start a provider run for the assigned specialist. An optional
-        // `backend` forces the run onto the other engine — the
-        // "retry on the other backend" affordance after an availability/quota
-        // failure (D4).
-        const result = await startAgentRun(
-          db,
-          { projectSlug, taskKey, ...backendOverride(formData) },
-          actor,
-        );
-        return {
-          ok: true as const,
-          intent,
-          toast: `${result.backend === "claude" ? "Claude" : "Codex"} run started · streaming to agent logs`,
-        };
-      }
-      case "assign-reviewer": {
-        // Engage a deployed specialist as a reviewer (admin|maintainer).
-        const result = await assignReviewer(
-          db,
-          { projectSlug, taskKey, profileId: String(formData.get("profileId") ?? "") },
-          actor,
-        );
-        // F21-6: "reviewer" is a claim about AUTHORITY — acceptance waits for a
-        // reviewer's approval. This toast made that claim for every supporting
-        // engagement, including a profile with verdict=Off that no gate will ever
-        // wait on, while the timeline event (fixed with the tool half) said
-        // "supporting agent" about the very same click. One fact, one word.
-        const capacity = result.verdictCapable ? "a reviewer" : "a supporting agent";
-        return {
-          ok: true as const,
-          intent,
-          toast: result.alreadyEngaged
-            ? `${result.name} is already engaged as ${capacity}`
-            : `Engaged ${result.name} as ${capacity}`,
-        };
-      }
-      case "run-reviewer": {
-        // Start a run for a specific engaged reviewer (optional `backend`
-        // override for the retry-on-other-backend affordance — D4).
-        const result = await startAgentRun(
-          db,
-          {
-            projectSlug,
-            taskKey,
-            profileId: String(formData.get("profileId") ?? ""),
-            ...backendOverride(formData),
-          },
-          actor,
-        );
-        return {
-          ok: true as const,
-          intent,
-          toast: `${result.backend === "claude" ? "Claude" : "Codex"} reviewer run started · streaming to agent logs`,
-        };
-      }
-      case "remove-reviewer": {
-        // Release a reviewer from the task.
+      case "release-agent": {
+        // Release a supporting engagement from the task (the delivering
+        // engagement is not releasable — it owns the workspace/branch).
         const result = await removeReviewer(
           db,
           { projectSlug, taskKey, profileId: String(formData.get("profileId") ?? "") },
@@ -877,7 +857,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast: result.removed ? "Reviewer released" : "That reviewer wasn't engaged",
+          toast: result.removed ? "Agent released" : "That agent wasn't engaged",
         };
       }
       case "apply-recommendation": {
@@ -1001,32 +981,57 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "schedule-action": {
-        // Schedule a future operator re-run (O-3). Triggering agent work later
-        // is still `run-agents` (maintainer+); the server-side runner fires it.
+        // Schedule a future run (O-3, generalized by the dynamic-dispatch
+        // rework): the operator, or a chosen agent with a prompt — the same two
+        // run controls, deferred. Triggering agent work later is still
+        // `run-agents` (maintainer+); the server-side runner fires it.
         requireRunAgents(
           db,
           runAgentsAuthority(db, projectSlug),
           actor,
-          "schedule an operator re-run",
+          "schedule a run",
         );
-        const minutes = Math.max(1, Math.round(Number(formData.get("delayMinutes")) || 0));
+        // Hunt 2026-08-29: both inputs were unclamped — a crafted delayMinutes
+        // (1e15) overflowed Date into a RangeError 500, and the prompt had no
+        // cap while its sibling run-agent arm enforces 4000. Same bounds, and
+        // a validation refusal instead of a crash. 28 days is the ceiling: a
+        // schedule further out than the retention story is a note, not a plan.
+        const rawMinutes = Number(formData.get("delayMinutes"));
+        if (!Number.isFinite(rawMinutes) || rawMinutes < 1 || rawMinutes > 40_320) {
+          throw AppError.validation("Schedule between 1 minute and 28 days out.");
+        }
+        const minutes = Math.round(rawMinutes);
+        const schedPrompt = String(formData.get("prompt") ?? "");
+        if (schedPrompt.length > 4000) {
+          throw AppError.validation("Keep the run prompt under 4000 characters.");
+        }
         const dueAt = new Date(Date.now() + minutes * 60_000).toISOString();
+        const schedProfileId = String(formData.get("profileId") ?? "").trim();
         // R22: no backend/autonomy — the fired run resolves the LIVE deployed
-        // operator profile (parity with R21-9's manual run control).
-        const sched = await scheduleTaskAction(
-          db,
-          {
-            projectSlug,
-            taskKey,
-            dueAt,
-            note: String(formData.get("note") ?? ""),
-          },
-          actor,
-        );
+        // profile (parity with R21-9's manual run control). A profileId is what
+        // selects the agent arm; without one the operator re-runs.
+        const schedInput: Parameters<typeof scheduleTaskAction>[1] = {
+          projectSlug,
+          taskKey,
+          dueAt,
+          prompt: schedPrompt,
+        };
+        if (schedProfileId) {
+          schedInput.action = "run-agent";
+          schedInput.profileId = schedProfileId;
+        }
+        // Display name for the same reason as run-agent above: the scheduler's
+        // label becomes the fired run's triggerer tag and the "by <name>" row.
+        const sched = await scheduleTaskAction(db, schedInput, {
+          userId: actor.userId,
+          label: userName(db, actor.userId),
+        });
         return {
           ok: true as const,
           intent,
-          toast: `Scheduled · operator re-run in ${minutes} min`,
+          toast: schedProfileId
+            ? `Scheduled · agent run in ${minutes} min`
+            : `Scheduled · operator re-run in ${minutes} min`,
           scheduleId: sched.id,
         };
       }
@@ -1035,7 +1040,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           db,
           runAgentsAuthority(db, projectSlug),
           actor,
-          "cancel a scheduled operator re-run",
+          "cancel a scheduled run",
         );
         const result = await cancelScheduledAction(
           db,
@@ -1102,8 +1107,7 @@ export default function TaskDetailRoute({
       operatorBackend={loaderData.operatorBackend}
       operatorAutonomy={loaderData.operatorAutonomy}
       backendAvailable={loaderData.backendAvailable}
-      deliveringActive={loaderData.deliveringActive}
-      activeReviewerIds={loaderData.activeReviewerIds}
+      activeAgentProfileIds={loaderData.activeAgentProfileIds}
       runsVisible={loaderData.runsVisible}
       timelineHasMore={loaderData.timelineHasMore}
       timelineRemaining={loaderData.timelineRemaining}

@@ -91,6 +91,7 @@ export function getDb(): DatabaseSync {
     const dbPath = getProjectionDbPath();
     db = openDatabase(dbPath);
     const result = runMigrations(db);
+    ensureSingleFlightIndexes(db);
     logger.info("sqlite ready", {
       dbPath,
       migrationsApplied: result.applied,
@@ -99,6 +100,30 @@ export function getDb(): DatabaseSync {
     cache[DB_CACHE_KEY] = db;
   }
   return db;
+}
+
+/**
+ * Idempotent backstop for single-flight indexes added to the baseline AFTER a
+ * data root already applied it (migrations stay squashed into 0001 pre-prod by
+ * ruling, so an existing root never re-runs the file). `IF NOT EXISTS` makes
+ * this free on every boot; the one way it can fail is a root that ALREADY
+ * holds duplicate live rows for one supporting profile — the exact corruption
+ * the index exists to prevent — and that failure is warned, not fatal: the
+ * rows finish or are interrupted, and the next boot creates the index.
+ */
+export function ensureSingleFlightIndexes(db: DatabaseSync): void {
+  try {
+    db.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs__one_live_per_support
+         ON agent_runs (project_slug, task_key, agent_profile_id)
+         WHERE kind = 'reviewer' AND state IN ('queued', 'running')`,
+    );
+  } catch (error) {
+    logger.warn(
+      "single-flight index for supporting runs could not be ensured — duplicate live rows may exist; it will be retried next boot",
+      { err: error instanceof Error ? error : new Error(String(error)) },
+    );
+  }
 }
 
 /** Closes and forgets the cached handle (tests / graceful shutdown). Clears the

@@ -403,6 +403,49 @@ export function assertRunReservationLive(db: DatabaseSync, runId: string): void 
  * reservation that cannot be written degrades to today's behavior (no strip),
  * which must not be able to block a run from starting.
  */
+/**
+ * Translate a SQLITE_CONSTRAINT_UNIQUE from the two single-flight partial
+ * indexes (`idx_agent_runs__one_delivering`, F10-05, and
+ * `idx_agent_runs__one_live_per_support`, dispatch-rework hunt 2026-08-29)
+ * into the 409 the JS preflights already speak — or null when the error is
+ * something else. ONE translator for both write paths (reserveRun + startRun),
+ * so a race that slips past a preflight during its awaits is refused
+ * atomically with the same message either way.
+ */
+function singleFlightConflict(
+  kind: ReserveRunInput["kind"],
+  sqlite: { errcode: number; message: string } | null,
+): AppError | null {
+  if (!sqlite || sqlite.errcode !== 2067) return null;
+  // Three unique indexes share errcode 2067 on this table; only the two
+  // single-flight ones speak 409. Discriminate on the violated columns the
+  // message names — mapping a thread-id collision (a caller bug) to "a run is
+  // already in progress" would send someone hunting a run that isn't there.
+  const message = sqlite.message;
+  if (
+    kind === "primary" &&
+    message.includes("agent_runs.task_key") &&
+    !message.includes("agent_runs.thread_id") &&
+    !message.includes("agent_runs.agent_profile_id")
+  ) {
+    return new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage:
+        "A delivering agent run is already in progress on this task. Wait for it to finish or interrupt it before starting another.",
+    });
+  }
+  if (kind === "reviewer" && message.includes("agent_runs.agent_profile_id")) {
+    return new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage:
+        "This agent already has a run in progress on this task — wait for it to finish or interrupt it before starting another.",
+    });
+  }
+  return null;
+}
+
 export function reserveRun(
   db: DatabaseSync,
   input: ReserveRunInput,
@@ -440,6 +483,14 @@ export function reserveRun(
       startedAt,
     });
   } catch (error) {
+    // A single-flight constraint violation is not a display degradation — it
+    // is the OTHER dispatch winning the race. Refuse loudly here (the caller's
+    // preflight was blind during its awaits) instead of degrading to an
+    // unreserved start that would pay for a clone and then 409 anyway — or,
+    // before the supporting index existed, silently double-run.
+    const parsed = sqliteErrorSchema.safeParse(error);
+    const conflict = singleFlightConflict(input.kind, parsed.success ? parsed.data : null);
+    if (conflict) throw conflict;
     logger.warn("run reservation could not be written — preparing invisibly", {
       taskKey: input.taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
@@ -618,7 +669,7 @@ type RunStartedAudit = {
  * unique-violation branch off anything the driver did not actually report —
  * anything that fails this parse is rethrown untouched.
  */
-const sqliteErrorSchema = z.object({ errcode: z.number() });
+const sqliteErrorSchema = z.object({ errcode: z.number(), message: z.string() });
 
 /** F21-13: the `meta` tag on the run's model-substitution disclosure line.
  *  A durable classified tag (no column, no migration), like `run·line_lost`. */
@@ -711,19 +762,9 @@ export async function startRun(
   try {
     upsertRun(db, runRow);
   } catch (err) {
-    const sqliteError = sqliteErrorSchema.safeParse(err);
-    if (
-      input.kind === "primary" &&
-      sqliteError.success &&
-      sqliteError.data.errcode === 2067 // SQLITE_CONSTRAINT_UNIQUE
-    ) {
-      throw new AppError({
-        code: ERROR_CODES.CONFLICT,
-        status: 409,
-        userMessage:
-          "A delivering agent run is already in progress on this task. Wait for it to finish or interrupt it before starting another.",
-      });
-    }
+    const parsed = sqliteErrorSchema.safeParse(err);
+    const conflict = singleFlightConflict(input.kind, parsed.success ? parsed.data : null);
+    if (conflict) throw conflict;
     throw err;
   }
 

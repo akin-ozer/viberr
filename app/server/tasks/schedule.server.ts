@@ -16,12 +16,14 @@ import {
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { getProject } from "~/server/projections/board-query.server";
+import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { CLONE_TIMEOUT_MS } from "~/server/tasks/git-clone-auth.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import type { TaskMutationContext } from "./task-actions.server";
 import {
   scheduleSchema,
+  type ScheduleAction,
   type TaskFileEvent,
   type TaskSchedule,
 } from "~/schemas/task-file.schema";
@@ -112,11 +114,17 @@ export interface ScheduleInput {
   taskKey: string;
   /** ISO timestamp the action becomes due (must be in the future). */
   dueAt: string;
-  note?: string;
+  /** What fires: an operator re-run (default) or a specific agent's run. */
+  action?: ScheduleAction;
+  /** `run-agent` only: the deployed agent to dispatch at fire time. */
+  profileId?: string;
+  /** The run's instruction — the operator steer or the agent's directive. */
+  prompt?: string;
 }
 
 /**
- * Schedule an operator re-run on a task. RBAC is enforced by the caller
+ * Schedule a future run on a task — the operator, or a chosen deployed agent
+ * (dynamic-dispatch rework 2026-08-29). RBAC is enforced by the caller
  * (`run-agents`, maintainer+ — scheduling triggers agent work). Rejects a
  * past `dueAt` and a task that is already in its terminal stage.
  */
@@ -129,6 +137,26 @@ export async function scheduleTaskAction(
   const dueMs = Date.parse(input.dueAt);
   if (!Number.isFinite(dueMs)) throw AppError.validation("Invalid schedule time.");
   if (dueMs <= Date.now()) throw AppError.validation("Schedule a time in the future.");
+  const action: ScheduleAction = input.action ?? "run-operator";
+  let agentName: string | null = null;
+  if (action === "run-agent") {
+    if (!input.profileId) {
+      throw AppError.validation("Pick which agent the scheduled run should start.");
+    }
+    // The profile must be deployed NOW so the picker can't schedule a phantom;
+    // the fire-time dispatch re-resolves the LIVE deployment (R22's rule) and
+    // skips visibly if it was undeployed in the meantime.
+    const { listDeployedSpecialists } = await import("./specialist-run.server");
+    const view = listDeployedSpecialists(input.projectSlug, ctx).find(
+      (s) => s.id === input.profileId,
+    );
+    if (!view) {
+      throw AppError.validation(
+        `"${input.profileId}" is not deployed on this project.`,
+      );
+    }
+    agentName = view.name;
+  }
 
   const ref = taskFileRef(ctx, input.projectSlug, input.taskKey);
   const existing = readTaskFile(ref);
@@ -139,14 +167,15 @@ export async function scheduleTaskAction(
   }
 
   // R22: the entry pins no backend/autonomy — the fired run resolves the LIVE
-  // deployed operator profile (`runOperator` fills both from the deployment when
-  // omitted). No SCHEDULE-time clamp is needed because nothing is stored to
-  // clamp; the run resolves and clamps against whatever is deployed at fire time.
+  // deployed profile (operator or agent) at fire time. The agent arm pins only
+  // the profile ID: identity is the decision being scheduled; backend, model
+  // and capabilities follow whatever is deployed when it fires.
   const schedule: TaskSchedule = {
     id: newId("sch"),
-    action: "run-operator",
+    action,
     dueAt: new Date(dueMs).toISOString(),
-    note: input.note?.trim() ? input.note.trim() : "",
+    profileId: action === "run-agent" ? (input.profileId ?? null) : null,
+    prompt: input.prompt?.trim() ? input.prompt.trim() : "",
     createdBy: actor.userId ?? "system",
     createdByLabel: actor.label,
     createdAt: new Date().toISOString(),
@@ -156,12 +185,16 @@ export async function scheduleTaskAction(
     retries: 0,
   };
 
+  const what =
+    action === "run-agent"
+      ? `a **${agentName}** run`
+      : "an operator re-run";
   await updateTaskFile(ref, (parsed) => {
     parsed.frontmatter.schedules.push(schedule);
     parsed.timeline.unshift(
       scheduleEvent(
         { kind: "human", userId: actor.userId ?? "system", nameHint: actor.label },
-        `**Scheduled:** an operator re-run for **${input.taskKey}** at ${schedule.dueAt}${schedule.note ? ` — ${schedule.note}` : ""}. It runs on the operator profile deployed when it fires.`,
+        `**Scheduled:** ${what} for **${input.taskKey}** at ${schedule.dueAt}${schedule.prompt ? ` — ${schedule.prompt}` : ""}. It runs on the profile deployed when it fires.`,
       ),
     );
   });
@@ -173,7 +206,12 @@ export async function scheduleTaskAction(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: { scheduleId: schedule.id, dueAt: schedule.dueAt },
+    details: {
+      scheduleId: schedule.id,
+      dueAt: schedule.dueAt,
+      action,
+      profileId: schedule.profileId,
+    },
   });
   return schedule;
 }
@@ -197,7 +235,7 @@ export async function cancelScheduledAction(
     parsed.timeline.unshift(
       scheduleEvent(
         { kind: "human", userId: actor.userId ?? "system", nameHint: actor.label },
-        `**Schedule cancelled:** the pending operator re-run for ${input.taskKey} was cancelled.`,
+        `**Schedule cancelled:** the pending scheduled run for ${input.taskKey} was cancelled.`,
       ),
     );
   });
@@ -304,6 +342,18 @@ export async function fireDueSchedules(
     if (!terminalCache.has(slug)) terminalCache.set(slug, terminalStageId(db, slug));
     return terminalCache.get(slug) ?? null;
   };
+  // Hunt 2026-08-29: the fire path runs under `operatorAuthorized`, which
+  // skips the route-layer requireRunAgents and with it the F17/R6-3
+  // ARCHIVED-PROJECT freeze — so a pending schedule kept engaging profiles and
+  // launching unattended runs on a project every interactive door refuses as
+  // read-only. Decide it here, beside the task-level mootness.
+  const projectArchivedCache = new Map<string, boolean>();
+  const projectArchivedFor = (slug: string): boolean => {
+    if (!projectArchivedCache.has(slug)) {
+      projectArchivedCache.set(slug, getProject(db, slug)?.archived === true);
+    }
+    return projectArchivedCache.get(slug) ?? false;
+  };
 
   /** A stale claim = claimed but its lease expired (the enqueuing tick crashed
    *  before finalizing). Re-driven so the action is never lost (F10-16). */
@@ -319,9 +369,16 @@ export async function fireDueSchedules(
     projectSlug: string;
     taskKey: string;
     scheduleId: string;
-    /** The scheduler's stated reason — the operator's turn instruction quotes
-     *  it, so a scheduled re-run knows WHY it exists (B-WF3). */
-    note: string;
+    action: ScheduleAction;
+    /** `run-agent`: the pinned profile identity (live-resolved at fire time). */
+    profileId: string | null;
+    /** The scheduler's instruction — the operator turn quotes it (B-WF3); an
+     *  agent run takes it as its directive. */
+    prompt: string;
+    /** Who scheduled it — the dispatch-completion contract's triggerer. */
+    createdByLabel: string;
+    /** The scheduler's user id (the cc-append verifies against it). */
+    createdBy: string;
   }[] = [];
 
   for (const row of rows) {
@@ -352,8 +409,27 @@ export async function fireDueSchedules(
     // Both dimensions are now decided from the same locked read, and that
     // belt-and-braces stays belt-and-braces.)
     const terminal = terminalFor(row.project_slug);
+    const projectFrozen = projectArchivedFor(row.project_slug);
 
     for (const s of due) {
+      // Hunt 2026-08-29: a run-agent occurrence whose profile ALREADY has a
+      // live run on the task would only bounce off the single-flight 409 at
+      // fire time — and each bounce writes a "starting" note and burns a
+      // bounded retry. Leave it pending this tick, silently; the next tick
+      // re-checks. (A race that slips past this is still caught at dispatch
+      // and deferred below, without spending a retry.)
+      if (s.action === "run-agent" && s.profileId) {
+        const liveSameProfile = listRunsForTaskRows(
+          db,
+          row.project_slug,
+          row.task_key,
+        ).some(
+          (r) =>
+            r.agent_profile_id === s.profileId &&
+            (r.state === "running" || r.state === "queued"),
+        );
+        if (liveSameProfile && !isStaleClaim(s)) continue;
+      }
       try {
         // CLAIM the occurrence in the FILE first (crash-safe). A moot Done task
         // is retired straight to `fired`; otherwise we reserve it as `claimed`
@@ -375,6 +451,7 @@ export async function fireDueSchedules(
             // between the SELECT and this locked read never rides a stale
             // snapshot into a real, unwatched operator turn.
             const mootNow =
+              projectFrozen ||
               parsed.frontmatter.archived === true ||
               (terminal !== null && parsed.frontmatter.stage === terminal);
             if (mootNow) {
@@ -386,9 +463,11 @@ export async function fireDueSchedules(
                   // Name the REAL reason — the audit row distinguishes
                   // `skipped-archived` from `skipped-done`, and the note a human
                   // reads must not tell an archived task it was "already Done".
-                  parsed.frontmatter.archived === true
-                    ? `**Scheduled action skipped:** ${row.task_key} has been archived — the scheduled operator re-run is moot.`
-                    : `**Scheduled action skipped:** ${row.task_key} is already Done — the scheduled operator re-run is moot.`,
+                  projectFrozen
+                    ? `**Scheduled action skipped:** the project has been archived (read-only) — the scheduled run is moot.`
+                    : parsed.frontmatter.archived === true
+                      ? `**Scheduled action skipped:** ${row.task_key} has been archived — the scheduled run is moot.`
+                      : `**Scheduled action skipped:** ${row.task_key} is already Done — the scheduled run is moot.`,
                 ),
               );
             } else {
@@ -397,7 +476,7 @@ export async function fireDueSchedules(
               parsed.timeline.unshift(
                 scheduleEvent(
                   { kind: "system", systemId: "schedule-runner" },
-                  `**Scheduled action starting:** ${staleClaim ? "recovering a stalled claim and re-" : ""}running the scheduled operator re-run for ${row.task_key}${s.note ? ` — ${s.note}` : ""}.`,
+                  `**Scheduled action starting:** ${staleClaim ? "recovering a stalled claim and re-" : ""}running the scheduled ${s.action === "run-agent" ? "agent run" : "operator re-run"} for ${row.task_key}${s.prompt ? ` — ${s.prompt}` : ""}.`,
                 ),
               );
             }
@@ -425,7 +504,7 @@ export async function fireDueSchedules(
             // The outcome names what the FILE said at claim time, so the audit
             // row and the retirement can never disagree (F19-20).
             outcome: wasMoot
-              ? claimedFile.frontmatter.archived === true
+              ? projectFrozen || claimedFile.frontmatter.archived === true
                 ? "skipped-archived"
                 : "skipped-done"
               : "claimed",
@@ -438,7 +517,11 @@ export async function fireDueSchedules(
             projectSlug: row.project_slug,
             taskKey: row.task_key,
             scheduleId: s.id,
-            note: s.note ?? "",
+            action: s.action,
+            profileId: s.profileId ?? null,
+            prompt: s.prompt ?? "",
+            createdByLabel: s.createdByLabel ?? "",
+            createdBy: s.createdBy ?? "",
           });
           fired += 1;
         }
@@ -455,6 +538,7 @@ export async function fireDueSchedules(
   if (toRun.length > 0) {
     void (async () => {
       const { runOperator } = await import("~/server/runtimes/operator-run.server");
+      const { startAgentRun } = await import("./specialist-run.server");
       for (const t of toRun) {
         let ok = false;
         /** F19-20: the run was refused at FIRE time (the task reached its
@@ -462,30 +546,89 @@ export async function fireDueSchedules(
          *  nothing to retry — but the timeline already announced the start, so
          *  the retirement has to say what actually happened. */
         let refusedTerminal = false;
+        /** run-agent only: the dispatch refused for a reason a retry can never
+         *  cure (profile undeployed, stage-ineligible, no repo-write for an
+         *  explicit delivery ask). Terminal `failed` with the reason on the
+         *  timeline — never a silent three-strike retry loop. */
+        let refusedValidation: string | null = null;
+        /** Hunt 2026-08-29: a same-profile single-flight conflict at fire time
+         *  is a WAIT, not a strike — defer the occurrence back to pending with
+         *  no retry spent; the next tick's claim pre-check holds it until the
+         *  live run ends. */
+        let deferredConflict = false;
         try {
-          const runInput: RunOperatorInput = {
-            projectSlug: t.projectSlug,
-            taskKey: t.taskKey,
-            // R22: no pinned backend/autonomy — `runOperator` resolves the LIVE
-            // deployed operator profile at fire time (see resolveOperatorAuthority).
-            // B-WF3: a scheduled re-run is not a human pressing "Run operator".
-            // It used to arrive as a bare `manual` trigger, so the reason the
-            // human scheduled it never reached the turn — the operator re-read
-            // the task with no idea what it was asked to re-check.
-            trigger: "scheduled",
-            dataRoot: ctx.dataRoot,
-          };
-          // Only a real note rides along; an empty one would present itself to
-          // the turn instruction as a stated reason.
-          if (t.note) runInput.scheduleNote = t.note;
-          const result = await runOperator(db, runInput);
-          refusedTerminal = result.refused === "terminal-stage";
-          ok = true;
+          if (t.action === "run-agent" && !t.profileId) {
+            // A run-agent entry with no profile (hand-edited file, or a
+            // pre-validation write) can never dispatch — terminal, visibly,
+            // rather than falling through to a surprise operator turn.
+            refusedValidation = "the entry names no agent to run";
+            ok = true;
+          } else if (t.action === "run-agent" && t.profileId) {
+            // Dynamic-dispatch rework: the scheduled agent run. Resolves the
+            // LIVE deployment at fire time (R22's rule — the profile ID is the
+            // pin, nothing else). The scheduler is the dispatch-completion
+            // contract's triggerer: the run's report tags them + @operator and
+            // the completion re-invokes the operator.
+            const dispatch: Parameters<typeof startAgentRun>[1] = {
+              projectSlug: t.projectSlug,
+              taskKey: t.taskKey,
+              profileId: t.profileId,
+            };
+            if (t.prompt) {
+              dispatch.directive = t.prompt;
+              if (t.createdByLabel) dispatch.directiveFrom = t.createdByLabel;
+            }
+            if (t.createdByLabel) dispatch.triggeredByName = t.createdByLabel;
+            if (t.createdBy) dispatch.triggeredByUserId = t.createdBy;
+            await startAgentRun(
+              db,
+              dispatch,
+              { userId: "system", label: "schedule runner" },
+              { dataRoot: ctx.dataRoot, operatorAuthorized: true },
+            );
+            ok = true;
+          } else {
+            const runInput: RunOperatorInput = {
+              projectSlug: t.projectSlug,
+              taskKey: t.taskKey,
+              // R22: no pinned backend/autonomy — `runOperator` resolves the LIVE
+              // deployed operator profile at fire time (see resolveOperatorAuthority).
+              // B-WF3: a scheduled re-run is not a human pressing "Run operator".
+              // It used to arrive as a bare `manual` trigger, so the reason the
+              // human scheduled it never reached the turn — the operator re-read
+              // the task with no idea what it was asked to re-check.
+              trigger: "scheduled",
+              dataRoot: ctx.dataRoot,
+            };
+            // Only a real note rides along; an empty one would present itself to
+            // the turn instruction as a stated reason.
+            if (t.prompt) runInput.scheduleNote = t.prompt;
+            const result = await runOperator(db, runInput);
+            refusedTerminal = result.refused === "terminal-stage";
+            ok = true;
+          }
         } catch (error) {
-          logger.warn("scheduled operator re-run failed", {
-            taskKey: t.taskKey,
-            err: error instanceof Error ? error : new Error(String(error)),
-          });
+          if (
+            t.action === "run-agent" &&
+            error instanceof AppError &&
+            error.status === 400
+          ) {
+            refusedValidation =
+              error.userMessage || "the dispatch was refused as invalid";
+            ok = true; // terminal disposition, finalized below — not a retry
+          } else if (
+            t.action === "run-agent" &&
+            error instanceof AppError &&
+            error.status === 409
+          ) {
+            deferredConflict = true; // wait for the live run; no retry spent
+          } else {
+            logger.warn("scheduled run failed", {
+              taskKey: t.taskKey,
+              action: t.action,
+              err: error instanceof Error ? error : new Error(String(error)),
+            });
+          }
         }
         // Finalize the claimed occurrence — never leave it stuck in `claimed`.
         // Success → fired. Failure → bounded retry (back to pending) or terminal
@@ -498,6 +641,29 @@ export async function fireDueSchedules(
                 (x) => x.id === t.scheduleId,
               );
               if (!target || target.status !== "claimed") return;
+              if (deferredConflict) {
+                // Back to pending, retries untouched: the agent is simply
+                // still busy, and three 60s ticks must not spend the whole
+                // retry budget on an agent run that legitimately takes longer.
+                target.status = "pending";
+                target.claimedAt = null;
+                return;
+              }
+              if (refusedValidation) {
+                // The dispatch can never succeed as scheduled (undeployed
+                // profile, ineligible stage) — terminal, with the reason where
+                // a human reads it.
+                target.status = "failed";
+                target.firedAt = new Date().toISOString();
+                target.claimedAt = null;
+                parsed.timeline.unshift(
+                  scheduleEvent(
+                    { kind: "system", systemId: "schedule-runner" },
+                    `**Scheduled action failed:** the scheduled agent run for ${t.taskKey} was refused: ${refusedValidation}`,
+                  ),
+                );
+                return;
+              }
               if (ok) {
                 target.status = "fired";
                 target.firedAt = new Date().toISOString();
@@ -509,7 +675,7 @@ export async function fireDueSchedules(
                   parsed.timeline.unshift(
                     scheduleEvent(
                       { kind: "system", systemId: "schedule-runner" },
-                      `**Scheduled action skipped:** ${t.taskKey} reached Done before its scheduled operator re-run started — no run was started.`,
+                      `**Scheduled action skipped:** ${t.taskKey} reached Done before its scheduled run started — no run was started.`,
                     ),
                   );
                 }
@@ -524,7 +690,7 @@ export async function fireDueSchedules(
                 parsed.timeline.unshift(
                   scheduleEvent(
                     { kind: "system", systemId: "schedule-runner" },
-                    `**Scheduled action failed:** the scheduled operator re-run for ${t.taskKey} did not complete after ${retries} attempts.`,
+                    `**Scheduled action failed:** the scheduled run for ${t.taskKey} did not complete after ${retries} attempts.`,
                   ),
                 );
               } else {
