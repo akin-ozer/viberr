@@ -246,3 +246,170 @@ describe("conversation access", () => {
     }
   });
 });
+
+/**
+ * A queued-start failure kills the lease and the whole FIFO with it. Those
+ * messages are ALREADY in the transcript and no other scheduler will ever reach
+ * them, so without a note they read back as questions the controller ignored —
+ * and boot recovery cannot see them either, since the newest message is now the
+ * controller's own note rather than a user's.
+ */
+describe("a failed queued start accounts for the messages behind it", () => {
+  it("names how many follow-ups were dropped", async () => {
+    const { createConversation, appendMessage, listMessages } = await import(
+      "./controller-conversations.server"
+    );
+    const { settleTurnForTests } = await import("./controller-run.server");
+    const { configureRunServiceForTests } = await import(
+      "~/server/runtimes/run-service.server"
+    );
+    const { installFakeRuntime } = await import(
+      "../../../test-support/fake-runtime"
+    );
+    // The queued start must FAIL — that is the path under test. Any adapter
+    // that refuses to start stands in for the real causes (an MCP mount that
+    // fails pre-flight, a full data volume).
+    const throwingAdapter = (backend: "claude" | "codex") => ({
+      backend,
+      start(): never {
+        throw new Error("the queued turn could not start");
+      },
+    });
+    configureRunServiceForTests({
+      claude: throwingAdapter("claude"),
+      codex: throwingAdapter("codex"),
+    });
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: null,
+    });
+    for (const text of ["A", "B", "C", "D"]) {
+      appendMessage(app.db, {
+        conversationId: conversation.id,
+        author: "user",
+        userId: ownerId,
+        text,
+      });
+    }
+
+    // A lease whose current turn is settling with B, C, D still queued.
+    const leaseKey = Symbol.for("viberr.controllerLease");
+    // SAFETY: the module creates this Map on first use and only ever stores
+    // lease entries in it; the test seeds one entry and deletes it after.
+    const host = globalThis as {
+      [leaseKey]?: Map<
+        string,
+        { runId: string | null; queue: { messageId: string; text: string }[] }
+      >;
+    };
+    const map = host[leaseKey] ?? new Map();
+    host[leaseKey] = map;
+    map.set(conversation.id, {
+      runId: "run_busy",
+      queue: [
+        { messageId: "m_b", text: "B" },
+        { messageId: "m_c", text: "C" },
+        { messageId: "m_d", text: "D" },
+      ],
+    });
+
+    try {
+      await settleTurnForTests(app.db, conversation.id, {
+        conversationId: conversation.id,
+        text: "A",
+        user: {
+          id: ownerId,
+          email: "selin@viberr.dev",
+          name: "Selin Aksoy",
+          orgRole: "member",
+        },
+        dataRoot: app.dataRoot,
+      });
+      const texts = listMessages(app.db, conversation.id).map((m) => m.text);
+      // B was shifted off and attempted; C and D are the ones abandoned.
+      expect(texts.some((t) => t.includes("dropped the 2 messages"))).toBe(true);
+    } finally {
+      map.delete(conversation.id);
+      installFakeRuntime(); // restore the shared adapters for later files
+    }
+  });
+});
+
+/**
+ * Ruling 99(d): a turn a restart orphans gets an honest "interrupted" note.
+ *
+ * Message ORDER cannot see the common case. A turn taken off the FIFO always
+ * has the PREVIOUS turn's reply sitting after its own user message, because
+ * `settleTurn` appends that reply BEFORE it shifts the queue — so "the newest
+ * message is the user's" misses every queued turn a restart killed, and the
+ * message sat unanswered forever with no note anywhere.
+ */
+describe("boot recovery", () => {
+  // One row per TURN, so each needs its own thread id: `agent_runs` is unique
+  // on (project_slug, task_key, thread_id).
+  const controllerRun = (
+    id: string,
+    conversationId: string,
+    state: "finished" | "error",
+  ) => ({
+    id,
+    projectSlug: "",
+    taskKey: conversationId,
+    threadId: `controller-${id}`,
+    role: "Controller",
+    kind: "controller" as const,
+    backend: "claude" as const,
+    model: "claude-sonnet",
+    sdk: "Claude Agent SDK",
+    agentProfileId: "controller",
+    state,
+  });
+
+  it("a queued turn whose run died after an earlier reply landed still gets a restart note", async () => {
+    const { createConversation, appendMessage, listMessages } = await import(
+      "./controller-conversations.server"
+    );
+    const { upsertRun } = await import("~/server/runtimes/run-store.server");
+    const { recoverControllerConversations } = await import("./controller-run.server");
+
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: null,
+    });
+    // The FIFO transcript: two questions, then the FIRST turn's reply.
+    appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "user",
+      userId: ownerId,
+      text: "First question.",
+    });
+    appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "user",
+      userId: ownerId,
+      text: "Second question, sent while you were busy.",
+    });
+    upsertRun(app.db, controllerRun("run_ctrl_a", conversation.id, "finished"));
+    appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "controller",
+      runId: "run_ctrl_a",
+      text: "Answer to the first.",
+    });
+    // The queued turn's run, as boot's orphan finalizer leaves it.
+    upsertRun(app.db, controllerRun("run_ctrl_b", conversation.id, "error"));
+
+    expect(recoverControllerConversations(app.db)).toBeGreaterThan(0);
+
+    const messages = listMessages(app.db, conversation.id);
+    const last = messages[messages.length - 1]!;
+    expect(last.author).toBe("controller");
+    expect(last.text).toContain("interrupted by a server restart");
+    // The note settles that run, so a second boot does not write another.
+    const before = messages.length;
+    recoverControllerConversations(app.db);
+    expect(listMessages(app.db, conversation.id)).toHaveLength(before);
+  });
+});

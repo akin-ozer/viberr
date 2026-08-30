@@ -1793,7 +1793,25 @@ type PreparedReply =
   | { status: "dropped" }
   | { status: "event"; event: TaskFileEvent; duplicate: boolean };
 
-/** True when one of `candidates` (trimmed) matches a comment THIS agent posted
+/** `text` without the dispatch-completion `cc @…` bookkeeping lines (ruling 98).
+ *
+ *  The pipeline appends that line to the reply BEFORE the reply is compared to
+ *  anything, and its content varies with the DISPATCH SOURCE rather than with
+ *  what the agent said. Every agent-text-vs-agent-text comparison therefore has
+ *  to run on this form, or the bookkeeping decides the answer: a dispatched
+ *  run's report never equals the mid-run comment it repeats verbatim, and two
+ *  identical reports compare unequal purely because one was dispatched. */
+function stripCcLine(text: string | null): string | null {
+  return text === null
+    ? null
+    : text
+        .split("\n")
+        .filter((line) => !/^cc @/.test(line))
+        .join("\n")
+        .trim();
+}
+
+/** True when one of `candidates` (cc-stripped) matches a comment THIS agent posted
  *  DURING this run — the mid-run `post_comment` its final report is repeating.
  *
  *  Bounded to `occurredAt >= the run's start`: a byte-identical reply from a
@@ -1819,12 +1837,12 @@ function duplicatesOwnCommentThisRun(
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   if (!file?.parsed) return false;
   const mine = encodeActorRef(actorRef);
-  const wanted = new Set(candidates.map((c) => c.trim()));
+  const wanted = new Set(candidates.map((c) => stripCcLine(c)));
   for (const ev of file.parsed.timeline) {
     if (ev.type !== "comment") continue;
     if (ev.occurredAt < startedAt) continue; // only THIS run's own comments
     if (encodeActorRef(ev.actor) !== mine) continue;
-    if (wanted.has(ev.text.trim())) return true;
+    if (wanted.has(stripCcLine(ev.text))) return true;
   }
   return false;
 }
@@ -3585,14 +3603,6 @@ export async function applyAgentCompletionEffects(
   // was dispatched and one was not — a looping agent then bought an extra
   // operator react per source change. Strip the appended line from BOTH sides
   // of the comparison; it is bookkeeping, not progress.
-  const stripCcLine = (text: string | null): string | null =>
-    text === null
-      ? null
-      : text
-          .split("\n")
-          .filter((line) => !/^cc @/.test(line))
-          .join("\n")
-          .trim();
   const shouldReact = operatorShouldReactToReply(
     finished.state,
     stripCcLine(replyForCompare),

@@ -41,6 +41,16 @@ const recoverStrandedOperatorPlans = vi.fn(async () => {
   calls.push("plan-recovery:end");
   return { recovered: 0, stale: 0 };
 });
+/** The re-invokes boot's orphan sweep LAUNCHED — still cloning a task
+ *  workspace when the chain reaches its reclaim. Reassigned per test. */
+let orphanReinvokes: Promise<void> = Promise.resolve();
+const finalizeOrphanedRuns = vi.fn(() => {
+  calls.push("orphan-finalize");
+  return { finalized: 0, reinvoked: 0, capped: 0, reinvokes: orphanReinvokes };
+});
+/** Runs queued or running when the chain reaches its reclaim. Zero by default;
+ *  a test that wants the guard to bite returns one. */
+const activeRunCount = vi.fn(() => 0);
 const reclaimTerminalTaskWorkspaces = vi.fn(() => {
   calls.push("reclaim");
   return { removed: 0, bytes: 0 };
@@ -48,8 +58,10 @@ const reclaimTerminalTaskWorkspaces = vi.fn(() => {
 /** Injected through `reconcileRestartedWork`'s deps seam, so the chain's ORDER
  *  is observable without touching a live store. */
 const reconcileDeps = {
+  finalizeOrphanedRuns,
   recoverUnreactedAgentRuns,
   recoverStrandedOperatorPlans,
+  activeRunCount,
   reclaimTerminalTaskWorkspaces,
 };
 
@@ -86,7 +98,12 @@ const db = {} as DatabaseSync;
 
 beforeEach(() => {
   calls.length = 0;
+  // A pending re-invoke promise left by one test must not steer the next.
+  orphanReinvokes = Promise.resolve();
+  finalizeOrphanedRuns.mockClear();
   recoverUnreactedAgentRuns.mockClear();
+  activeRunCount.mockClear();
+  activeRunCount.mockReturnValue(0);
   recoverStrandedOperatorPlans.mockClear();
   reclaimTerminalTaskWorkspaces.mockClear();
   runMaintenancePass.mockClear();
@@ -205,12 +222,45 @@ describe("reconcileRestartedWork (P14-RT-09)", () => {
     await reconcileRestartedWork(db, reconcileDeps);
 
     expect(calls).toEqual([
+      "orphan-finalize",
       "reply-recovery:start",
       "reply-recovery:end",
       "plan-recovery:start",
       "plan-recovery:end",
       "reclaim",
     ]);
+  });
+
+  it("reclaims only after the orphan sweep's own re-invokes have finished", async () => {
+    // A re-invoked operator drive is still cloning `<taskDir>/workspace/<repo>`
+    // — the directory the reclaim would rmSync out from under it. The sweep
+    // launches those drives detached, so only a joined handle can order this.
+    orphanReinvokes = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        calls.push("reinvoke:end");
+        resolve();
+      }, 20);
+    });
+
+    await reconcileRestartedWork(db, reconcileDeps);
+
+    // Both must be present AND in this order: an absent "reinvoke:end" would
+    // pass a bare index comparison at -1, which is exactly the broken state.
+    expect(calls).toContain("reinvoke:end");
+    expect(calls).toContain("reclaim");
+    expect(calls.indexOf("reinvoke:end")).toBeLessThan(calls.indexOf("reclaim"));
+  });
+
+  it("skips the reclaim while a run is in flight", async () => {
+    // A completion recovered by step 1 re-invoked the operator, so that drive
+    // holds a working tree: this boot's "nothing is running" moment never came.
+    // Skipping costs disk until the next scheduled pass; reclaiming costs a run.
+    activeRunCount.mockReturnValue(1);
+
+    await reconcileRestartedWork(db, reconcileDeps);
+
+    expect(reclaimTerminalTaskWorkspaces).not.toHaveBeenCalled();
+    expect(calls).not.toContain("reclaim");
   });
 
   it("a failing recovery pass never stops the rest of the chain", async () => {

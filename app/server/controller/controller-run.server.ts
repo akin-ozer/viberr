@@ -330,6 +330,16 @@ async function startTurnRun(
   return runId;
 }
 
+/** Test seam: settling is only reachable from a live run's completion
+ *  callback, and the FIFO's abandonment path needs a queued-start failure. */
+export function settleTurnForTests(
+  db: DatabaseSync,
+  conversationId: string,
+  input: ControllerTurnInput,
+): Promise<void> {
+  return settleTurn(db, conversationId, "run_test", "finished", input);
+}
+
 /** Record the reply, release the lease, fire the next queued message. */
 async function settleTurn(
   db: DatabaseSync,
@@ -386,10 +396,18 @@ async function settleTurn(
       conversationId,
       err: error instanceof Error ? error : new Error(String(error)),
     });
+    // The lease dies here and the FIFO dies with it. Every message still in it
+    // is ALREADY in the transcript and has no other scheduler that will ever
+    // reach it, so one note has to speak for all of them — otherwise those
+    // messages read back as questions the controller simply ignored.
+    const dropped = entry.queue.length;
     appendMessage(db, {
       conversationId,
       author: "controller",
-      text: "I could not start the queued turn. Say it again to retry.",
+      text:
+        dropped === 0
+          ? "I could not start the queued turn. Say it again to retry."
+          : `I could not start the queued turn, and I dropped the ${dropped} message${dropped === 1 ? "" : "s"} you sent after it. Say them again to retry.`,
     });
     map.delete(conversationId);
   }
@@ -435,6 +453,53 @@ export function canReadControllerRunLog(
  * gets an honest note instead of eternal silence.
  */
 export function recoverControllerConversations(db: DatabaseSync): number {
+  const note =
+    "This turn was interrupted by a server restart before I could answer. Say it again and I will pick it up.";
+  let recovered = 0;
+
+  // TWO arms, because message ORDER cannot see the common case. A turn taken
+  // off the FIFO always has the PREVIOUS turn's reply sitting after its own
+  // user message, so "the newest message is the user's" misses every queued
+  // turn a restart killed. The RUN identifies those: `settleTurn` is the only
+  // writer of a run-linked controller message, so a terminal controller run
+  // with no message carrying its id is exactly a turn whose settle never ran.
+  //
+  // SAFETY: `agent_runs.id` and `.task_key` are both declared NOT NULL TEXT
+  // (0001_baseline). A controller run's `task_key` is its conversation id
+  // (ruling 99), and the EXISTS clause proves that conversation is real.
+  const orphanedTurns = db
+    .prepare(
+      `SELECT r.id AS run_id, r.task_key AS conversation_id
+         FROM agent_runs r
+        WHERE r.kind = 'controller'
+          AND r.project_slug = ''
+          AND r.state IN ('error', 'interrupted')
+          AND EXISTS (SELECT 1 FROM controller_conversations c
+                       WHERE c.id = r.task_key)
+          AND NOT EXISTS (SELECT 1 FROM controller_messages m
+                           WHERE m.conversation_id = r.task_key
+                             AND m.run_id = r.id)
+        ORDER BY r.created_at ASC`,
+    )
+    .all() as { run_id: string; conversation_id: string }[];
+  for (const row of orphanedTurns) {
+    if (leases().has(row.conversation_id)) continue; // a live turn owns it
+    appendMessage(db, {
+      conversationId: row.conversation_id,
+      author: "controller",
+      // The note IS this turn's settlement, so it carries the run id — that is
+      // what stops the next boot writing a second one for the same run.
+      runId: row.run_id,
+      text: note,
+    });
+    recovered += 1;
+  }
+
+  // Second arm: a message whose run NEVER started (the start threw before the
+  // row existed, or the process died between the message write and the run).
+  // Nothing links those but message order. Read AFTER the notes above landed,
+  // so a conversation the run arm just answered no longer ends in a user
+  // message and cannot be noted twice.
   // SAFETY: the statement selects the single `id` column, the TEXT PRIMARY KEY
   // (NOT NULL) of `controller_conversations`.
   const rows = db
@@ -449,18 +514,18 @@ export function recoverControllerConversations(db: DatabaseSync): number {
         )`,
     )
     .all() as { id: string }[];
-  let recovered = 0;
   for (const row of rows) {
     if (leases().has(row.id)) continue; // a live turn is really working it
     appendMessage(db, {
       conversationId: row.id,
       author: "controller",
-      text: "This turn was interrupted by a server restart before I could answer. Say it again and I will pick it up.",
+      text: note,
     });
     recovered += 1;
   }
+
   if (recovered > 0) {
-    logger.info("recovered interrupted controller conversations", { recovered });
+    logger.info("recovered interrupted controller turns", { recovered });
   }
   return recovered;
 }

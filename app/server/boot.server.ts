@@ -37,6 +37,9 @@ import {
   type DiskStatus,
 } from "./ops/disk-space.server";
 import {
+  // The periodic pass's own reclaim guard, reused rather than re-derived: two
+  // callers of the same destructive reclaim must ask the same question.
+  activeRunCount,
   runMaintenancePass,
   startMaintenanceScheduler,
 } from "./ops/maintenance.server";
@@ -368,10 +371,12 @@ export function startStoreMaintenance(
   deps.startMaintenanceScheduler(db);
 }
 
-/** The three steps of the boot reconcile chain, in the order they must run. */
+/** The steps of the boot reconcile chain, in the order they must run. */
 interface ReconcileRestartedWorkDeps {
+  finalizeOrphanedRuns: typeof finalizeOrphanedRuns;
   recoverUnreactedAgentRuns: typeof recoverUnreactedAgentRuns;
   recoverStrandedOperatorPlans: typeof recoverStrandedOperatorPlans;
+  activeRunCount: typeof activeRunCount;
   reclaimTerminalTaskWorkspaces: typeof reclaimTerminalTaskWorkspaces;
 }
 
@@ -380,6 +385,11 @@ interface ReconcileRestartedWorkDeps {
  * then the disk it frees reclaimed. Every step is idempotent and self-catching:
  * one failure never stops the next, and none of them blocks boot.
  *
+ *  0. orphaned runs (F7-BOOT1) — a run row left `running`/`queued` has no live
+ *     process in a fresh boot. Each is finalized to `error`
+ *     (interrupted-by-restart) and its task's operator re-invoked. It leads the
+ *     chain so step 1 reads clean terminal states, and its re-invokes are JOINED
+ *     before step 3: those drives clone the very workspaces the reclaim deletes.
  *  1. agent replies (NFR17, B9) — a specialist/reviewer run that finished before
  *     its in-process reply callback fired left the task at waiting=agent with no
  *     error. Post the reply + re-invoke the operator.
@@ -401,11 +411,24 @@ interface ReconcileRestartedWorkDeps {
 export async function reconcileRestartedWork(
   db: DatabaseSync,
   deps: ReconcileRestartedWorkDeps = {
+    finalizeOrphanedRuns,
     recoverUnreactedAgentRuns,
     recoverStrandedOperatorPlans,
+    activeRunCount,
     reclaimTerminalTaskWorkspaces,
   },
 ): Promise<void> {
+  // The operator drives this sweep launches clone `<taskDir>/workspace/<repo>`,
+  // which is exactly what step 3 deletes — so the chain keeps the handle and
+  // joins it there. `reinvokes` never rejects, so the await needs no catch.
+  let orphanReinvokes: Promise<void> = Promise.resolve();
+  try {
+    orphanReinvokes = deps.finalizeOrphanedRuns(db).reinvokes;
+  } catch (error) {
+    logger.error("orphaned-run finalize failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
   try {
     await deps.recoverUnreactedAgentRuns(db);
   } catch (error) {
@@ -420,13 +443,28 @@ export async function reconcileRestartedWork(
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
+  await orphanReinvokes;
   try {
-    const reclaimed = deps.reclaimTerminalTaskWorkspaces(db);
-    if (reclaimed.removed > 0) {
-      logger.info("reclaimed finished task workspaces", {
-        workspaces: reclaimed.removed,
-        mb: Math.round((reclaimed.bytes / (1024 * 1024)) * 10) / 10,
+    // The reclaim's precondition is that NO run of this process holds a working
+    // tree: it rmSyncs `<taskDir>/workspace` for every terminal-stage task, and
+    // an operator drive re-invoked by the steps above clones exactly that path.
+    // Sequencing alone cannot establish it — a recovered completion LAUNCHES a
+    // run and returns — so boot asks the same question the periodic pass asks
+    // before it reclaims. Skipping costs disk until the next scheduled pass;
+    // reclaiming over a live tree costs a run.
+    const active = deps.activeRunCount(db);
+    if (active > 0) {
+      logger.info("skipped the boot workspace reclaim: runs are in flight", {
+        activeRuns: active,
       });
+    } else {
+      const reclaimed = deps.reclaimTerminalTaskWorkspaces(db);
+      if (reclaimed.removed > 0) {
+        logger.info("reclaimed finished task workspaces", {
+          workspaces: reclaimed.removed,
+          mb: Math.round((reclaimed.bytes / (1024 * 1024)) * 10) / 10,
+        });
+      }
     }
   } catch (error) {
     logger.error("task workspace reclamation failed", {
@@ -608,18 +646,6 @@ export async function bootServer(): Promise<void> {
   // so "on change" is real instead of a decorative cadence label.
   startKbWatcher();
 
-  // Finalize non-terminal runs at boot: a run left `running`/`queued` has no
-  // live process in this fresh boot. Orphans become `error`
-  // (interrupted-by-restart) and their tasks are re-coordinated. Runs BEFORE
-  // the reply recovery below so a just-finalized run is a clean terminal state.
-  try {
-    finalizeOrphanedRuns(db);
-  } catch (error) {
-    logger.error("orphaned-run finalize failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
-  }
-
   // F10-29 + gaps 15/20: bounded retention/compaction of the high-volume
   // log/audit/notification tables AND the raw run transcripts / provider session
   // homes on disk, so a long-lived deployment doesn't grow without limit —
@@ -627,8 +653,10 @@ export async function bootServer(): Promise<void> {
   // Best-effort; canonical task files (source of truth) untouched.
   startStoreMaintenance(db);
 
-  // Fire-and-forget: the chain awaits its own runs internally and must never
-  // hold up the server coming online.
+  // Fire-and-forget: the chain finalizes restart-orphaned runs, recovers what a
+  // restart stranded, joins the re-invokes it launched and only then reclaims
+  // disk — all awaited internally, and it must never hold up the server coming
+  // online.
   void reconcileRestartedWork(db);
 
   // Start the server-side schedule runner (O-3): fire due scheduled operator

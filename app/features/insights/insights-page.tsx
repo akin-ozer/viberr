@@ -75,7 +75,18 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
         <>
           <div className="stat-grid">
             <StatCard label="Total runs" value={fmtCount(totals.runs)} icon="cpu" />
-            <StatCard label="Total cost" value={fmtCost(totals.cost)} icon="bolt" />
+            <StatCard
+              label="Total cost"
+              value={fmtCost(totals.cost)}
+              icon="bolt"
+              // Only Claude runs report a cost, so a silent headline reads as
+              // the whole instance's spend when it covers a subset of the runs.
+              {...(totals.costedRuns < totals.runs
+                ? {
+                    sub: `${fmtCount(totals.runs - totals.costedRuns)} of ${fmtCount(totals.runs)} runs reported no cost`,
+                  }
+                : {})}
+            />
             <StatCard
               label="Output tokens"
               value={fmtTokens(totals.outputTokens)}
@@ -193,7 +204,7 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         label="Long timelines"
         value={fmtCount(g.longTimelines)}
         icon="memory"
-        sub="tasks past the compression threshold"
+        sub="tasks past their project's compression threshold"
       />
       </div>
     </section>
@@ -349,7 +360,16 @@ function BreakdownCard({ title, rows }: { title: string; rows: CountRow[] }) {
                 {/* Fixed right-aligned slots: the counts and costs of a
                     breakdown must line up vertically to be comparable. */}
                 <span className="bar-num">{fmtCount(r.runs)}</span>
-                <span className="bar-cost">{fmtCost(r.cost)}</span>
+                {/* The same honesty rule `BackendQuotaPanel` uses for an
+                    absent utilization: a group whose runs never reported a cost
+                    is UNKNOWN, not free. Only the Claude result envelope
+                    carries one, so "$0.00" on a Codex group was a claim the
+                    data cannot support. `.bar-cost` is already the
+                    de-emphasized column, so the absent state never reads at
+                    value weight. */}
+                <span className="bar-cost">
+                  {r.cost == null ? "not reported" : fmtCost(r.cost)}
+                </span>
               </span>
             </li>
           ))}
