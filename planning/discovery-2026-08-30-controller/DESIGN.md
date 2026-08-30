@@ -164,3 +164,43 @@ project reads), terminal-move refusal, controller singleton guards, goal lifecyc
 advance), conversation round-trip + queueing, seed idempotency. Live: converse as admin
 and as a low-tier member on :5174, build a customized project through the controller,
 define and run a chained goal end to end, screenshot every surface.
+
+## Live validation record (2026-08-30, hermetic :5174)
+
+Data root: `./data` re-baselined onto the new schema with users/PATs preserved
+(one-off copy script; the documented wipe recipe loses sealed credentials).
+Claude backend real via the host OAuth token. Everything below is a real run.
+
+- **Instance conversation (admin)**: asked for an instance overview; the
+  controller read all three boards through its tools (36 turns) and answered
+  with grounded facts: VIB-1 acceptance-ready with its PR mergeable, VQP-4's
+  blocked packet, VQP-5 stalled at triage, the pending invite.
+- **Customized project in one request**: "Release Ops" (ROPS) on
+  akin-ozer/viberr — five custom stages (Shipped terminal, locked human),
+  Plan→Execute forced to approval, qa-contrib seeded maintainer — landed as one
+  project.md write, verified byte-level. Same turn: reset qa-contrib's
+  password; the one-time temp password was relayed and worked at the real
+  login, forcing the reset gate.
+- **Chained goal end to end**: goal-1 (2 links) defined conversationally on
+  the project surface; ROPS-1 created immediately with `goalRef` and the chain
+  context in its Goal; ROPS-1's own operator started unprompted. Admin
+  force-accept (full ceremony: skipped stages + gate bypass enumerated) closed
+  ROPS-1 → the chain advanced on its own: link 2 marked ROPS-2, task created
+  under the creator's authority, `controller` notification delivered. The
+  Goals panel showed done/active links; the MAINTAINER paused the chain from
+  it (redirect arm, live).
+- **Custom governance honored by operators**: ROPS-2's operator triaged from
+  the repo checkout, crossed Intake→Plan (auto) itself, then STOPPED at the
+  Plan→Execute approval boundary with a recommendation — exactly the boundary
+  the controller was asked to tighten. No branch was pushed; GitHub untouched.
+- **No-escalation, live**: as qa-contrib (org member), one message asked for
+  the user list (org-gated), the viberr board (not a member), and a task on
+  release-ops (maintainer). The reply: refusal with the reason and a pointer,
+  the not-found posture with no existence oracle, and ROPS-3 created. Audit:
+  `controller.authority.denied` for the probe, `goal.created` for the chain,
+  the D2 override rows for admin reads.
+- **Zero server errors** across the whole session.
+
+Gates: typecheck clean · lint zero-delta vs main (25 pre-existing local
+version-drift errors untouched) · vitest 4595 green (43 new controller/goal
+tests) · production build clean · e2e (production-image stack) exit 0.
