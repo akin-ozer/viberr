@@ -41,6 +41,14 @@ export type ProjectionEvent =
       projectSlug: string;
       taskKey: string | null;
       occurredAt: string;
+    }
+  /** Ruling 99: a chained goal's projection changed (created, link advanced,
+   * redirected, reconciled). Project-routed; the goals panel revalidates. */
+  | {
+      type: "goal.updated";
+      projectSlug: string;
+      goalId: string;
+      occurredAt: string;
     };
 
 const EMITTER_KEY = Symbol.for("viberr.projectionEvents");

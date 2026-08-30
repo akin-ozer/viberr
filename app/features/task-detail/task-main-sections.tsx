@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useFetcher } from "react-router";
+import { Link, useFetcher } from "react-router";
 import type {
   DiagnosticRecord,
   TaskDetail,
@@ -190,6 +190,18 @@ export function TaskHero({
             withdrawn on every terminal task, not just archived ones — see the
             `terminal` note above. */}
         {!terminal && <ValidationPill value={task.validation} />}
+        {/* Ruling 99: this task is one link of a goal chain — the chip names
+            the chain and links to the project Controller surface, where the
+            whole chain is read and redirected. */}
+        {task.goalRef && (
+          <Link
+            className="pill agent sm hero-goal-chip"
+            to={`/projects/${task.projectSlug}/controller`}
+          >
+            <Icon name="flag" />
+            {task.goalRef.goalId} · link {task.goalRef.linkIndex}
+          </Link>
+        )}
         <span className="hero-file">
           <Icon name="file" />
           <span>{task.filePath}</span>

@@ -8,6 +8,7 @@ export interface WorkspaceNavItem {
   id:
     | "board"
     | "review"
+    | "controller"
     | "agents"
     | "policy"
     | "github"
@@ -20,6 +21,8 @@ export interface WorkspaceNavItem {
 export const WORKSPACE_NAV: readonly WorkspaceNavItem[] = [
   { id: "board", label: "Board", icon: "board" },
   { id: "review", label: "Review queue", icon: "inbox" },
+  // Ruling 99: the instance controller, addressed inside this project.
+  { id: "controller", label: "Controller", icon: "cpu" },
   { id: "agents", label: "Agents", icon: "agents" },
   { id: "policy", label: "Policy", icon: "shield" },
   { id: "github", label: "GitHub", icon: "github" },

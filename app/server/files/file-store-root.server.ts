@@ -92,6 +92,21 @@ export function taskAttachmentsDir(
   return path.join(taskDir(slug, key, dataRoot), "attachments");
 }
 
+/** Ruling 99: a project's chained-goal files live beside its tasks. */
+export function goalsDir(slug: string, dataRoot?: string): string {
+  return path.join(projectDir(slug, dataRoot), "goals");
+}
+
+/** One goal file. The id arrives from routes and tool calls, so it passes the
+ *  same traversal guard every other store segment does. */
+export function goalFilePath(
+  slug: string,
+  goalId: string,
+  dataRoot?: string,
+): string {
+  return `${resolveStoreSegment(goalsDir(slug, dataRoot), goalId)}.md`;
+}
+
 export function agentProfilesDir(dataRoot?: string): string {
   return path.join(getDataRoot(dataRoot), "agents", "profiles");
 }

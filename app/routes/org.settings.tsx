@@ -51,6 +51,10 @@ import {
 } from "~/server/audit/audit-export.server";
 import { putObjectToS3 } from "~/server/audit/s3-put.server";
 import { listRecentAuditEvents } from "~/server/audit/audit-browse.server";
+import {
+  resolveControllerConfig,
+  saveControllerConfig,
+} from "~/server/controller/controller-profile.server";
 import { oauthCallbackUrl } from "~/shared/auth/auth-paths";
 import {
   testOAuthCredentials,
@@ -118,6 +122,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     // to READ org/instance-scoped events (sign-ins, PAT changes, user admin) in
     // the app; the project Activity page is project-scoped and the export is a file.
     auditEvents: listRecentAuditEvents(getDb()),
+    // Ruling 99: the controller configuration the admin tab edits.
+    controllerConfig: resolveControllerConfig(),
   };
 }
 
@@ -415,6 +421,27 @@ export async function action({ request }: Route.ActionArgs) {
       }
 
       // ------------------------------------------------- agent resources
+      case "controller-save": {
+        // Ruling 99: only org admins modify the controller itself (this whole
+        // action is admin-gated above).
+        const splitNames = (raw: string) =>
+          raw
+            .split("\n")
+            .map((n) => n.trim())
+            .filter(Boolean);
+        saveControllerConfig(
+          db,
+          {
+            model: field("model"),
+            definition: field("definition"),
+            skills: splitNames(field("skills")),
+            kb: splitNames(field("kb")),
+            mcps: splitNames(field("mcps")),
+          },
+          actor,
+        );
+        return ok("Controller updated. Changes apply from its next turn");
+      }
       case "kb-save": {
         const result = await saveKnowledgeBase(
           db,
@@ -692,6 +719,7 @@ export default function OrgSettings({ loaderData }: Route.ComponentProps) {
       runConcurrency={loaderData.runConcurrency}
       s3Audit={loaderData.s3Audit}
       auditEvents={loaderData.auditEvents}
+      controllerConfig={loaderData.controllerConfig}
     />
   );
 }

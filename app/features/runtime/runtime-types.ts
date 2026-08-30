@@ -21,7 +21,7 @@ export type RunState =
 
 export type RunBackend = "claude" | "codex";
 
-export type RunKind = "operator" | "primary" | "reviewer";
+export type RunKind = "operator" | "primary" | "reviewer" | "controller";
 
 /**
  * A value that survived JSON transport. The provider payloads this module

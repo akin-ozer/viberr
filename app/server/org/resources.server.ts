@@ -1292,7 +1292,10 @@ export function isReservedMcpName(name: string): boolean {
     name === "viberr_agent" ||
     name === "viberr-agent" ||
     name === "viberr_browser" ||
-    name === "viberr-browser"
+    name === "viberr-browser" ||
+    // Ruling 99: the controller's in-process toolkit.
+    name === "viberr_controller" ||
+    name === "viberr-controller"
   );
 }
 

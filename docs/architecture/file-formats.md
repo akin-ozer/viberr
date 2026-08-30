@@ -17,6 +17,7 @@ ${VIBERR_DATA_ROOT}/
                                              not watched, not projected. 11-16 MB per
                                              task; reclaimed at boot once the task
                                              reaches its terminal stage
+  projects/<slug>/goals/<id>.md           ← chained-goal truth (ruling 99)
   agents/profiles/<id>.md                 ← org-level agent profile templates
   runtimes/claude-home/ runtimes/codex-home/
                                           ← NDJSON run logs + SDK session homes
@@ -337,6 +338,42 @@ Notes:
 - Malformed entries are skipped with a warning diagnostic (readiness floors
   at `input_required`) — the task itself is never dropped.
 
+## 2b. `projects/<slug>/goals/<goal-id>.md` (chained goals — ruling 99)
+
+Frontmatter + `## Description` (the outcome, prose) + `## Timeline` (history
+bullets, newest first: `- <UTC ISO> · <text>`).
+
+```markdown
+---
+id: goal-1
+title: Ship the billing revamp
+status: active                    # active | paused | attention | completed | cancelled
+createdBy: u_abc123               # the authority chain advancement re-proves
+createdByLabel: arda@viberr.dev
+onFailure: pause                  # pause (default) | continue
+links:
+  - index: 1                      # 1-based chain position
+    title: Extract billing interfaces
+    goal: Deliverable + done signal (becomes the created task's ## Goal)
+    taskKey: VIB-12               # null until the chain reaches this link
+    status: done                  # pending | active | done | failed | skipped
+    note: null                    # failure reason / redirect note
+createdAt: 2026-08-30T10:00:00.000Z
+updatedAt: 2026-08-30T12:00:00.000Z
+---
+```
+
+Notes:
+
+- The chain file owns the ordered list; each member task carries the tolerant
+  back-reference `goalRef: {goalId, linkIndex}` in its own frontmatter (the
+  project→task shape: project.md owns stages, task.md carries `stage`).
+- Link statuses are the advance engine's claims; `goal_projections` re-derives
+  each linked task's real state from task rows on rebuild, so an out-of-band
+  task move cannot leave the chain lying.
+- Goal files are app-written and never deleted by the product; terminal chains
+  stay readable. `goals/*.md` is watched and projected like every canonical file.
+
 ## 3. Actor references (contracts §3.1)
 
 | Actor | File encoding | Render shape |
@@ -344,6 +381,7 @@ Notes:
 | Human | `user:<userId>` or `user:<userId> (Display Name)` | `{ kind:"human", userId, name, initials, tone, guest? }` — resolved from the users table at projection time; the parenthetical is a snapshot fallback for deleted users; `guest` derives from project membership |
 | Agent | `agent:<backend>/<role-slug>` e.g. `agent:codex/developer` | `{ kind:"agent", backend, name:"Codex"\|"Claude Code", role }` |
 | Operator | `operator` | `{ kind:"agent", name:"Operator" }` (NO backend, NO role) |
+| Controller | `controller` | `{ kind:"agent", name:"Controller" }` (ruling 99 — instance machinery, same backend-less shape) |
 | System | `system:<id>` e.g. `system:policy-engine` | `{ kind:"system", name:"Policy engine" }` |
 
 ## 4. `agents/profiles/<id>.md` (org templates)
@@ -351,7 +389,7 @@ Notes:
 ```markdown
 ---
 id: developer
-kind: specialist                  # operator | specialist
+kind: specialist                  # operator | specialist | controller (ruling 99)
 name: Developer
 role: Implementation
 desc: Implements the change on the task branch and reports what it did.

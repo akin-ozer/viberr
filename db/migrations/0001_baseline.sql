@@ -161,6 +161,12 @@ CREATE TABLE task_projections (
   event_count INTEGER NOT NULL DEFAULT 0,
   comment_count INTEGER NOT NULL DEFAULT 0,
   diagnostic_count INTEGER NOT NULL DEFAULT 0,
+  -- Chained-goal back-reference (ruling 99): the goal this task is one link of,
+  -- and its 1-based link position, from task.md `goalRef`. NULL for the vast
+  -- majority of tasks. Projected so the board card chip and the goal-advance
+  -- hook resolve the goal without reading task files on a loader path.
+  goal_id TEXT,
+  goal_link_index INTEGER,
   created_at TEXT,
   updated_at TEXT,
   source_path TEXT NOT NULL,
@@ -176,7 +182,7 @@ CREATE TABLE task_events (
   position INTEGER NOT NULL,
   occurred_at TEXT NOT NULL,
   type TEXT NOT NULL,
-  actor_kind TEXT NOT NULL CHECK (actor_kind IN ('human', 'agent', 'operator', 'system')),
+  actor_kind TEXT NOT NULL CHECK (actor_kind IN ('human', 'agent', 'operator', 'controller', 'system')),
   -- user id / "codex/developer" / "operator" / system id.
   actor_ref TEXT NOT NULL,
   -- Denormalized render-shape snapshot (survives member removal).
@@ -188,6 +194,34 @@ CREATE TABLE task_events (
   -- Names of files the event's run saved into the task's attachments/ dir
   -- (JSON array). The directory stays the truth; these attribute producers.
   attachments_json TEXT
+);
+-- Chained-goal projections (ruling 99): derived rows over the canonical
+-- `projects/<slug>/goals/<id>.md` files, rebuilt by the same rebuilder that
+-- owns task/project rows. Link statuses here are the RECONCILED view (the
+-- goal file's stored status is a claim; the rebuilder derives each linked
+-- task's real state from task_projections).
+CREATE TABLE goal_projections (
+  project_slug TEXT NOT NULL,
+  goal_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN
+    ('active', 'paused', 'attention', 'completed', 'cancelled')),
+  created_by TEXT NOT NULL,
+  created_by_label TEXT NOT NULL,
+  on_failure TEXT NOT NULL CHECK (on_failure IN ('pause', 'continue')),
+  links_json TEXT NOT NULL DEFAULT '[]',
+  description TEXT NOT NULL DEFAULT '',
+  -- 1-based index of the link currently being worked (first non-terminal
+  -- link), NULL when every link is settled.
+  current_index INTEGER,
+  links_total INTEGER NOT NULL DEFAULT 0,
+  links_done INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT,
+  updated_at TEXT,
+  source_path TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  parsed_at TEXT NOT NULL,
+  PRIMARY KEY (project_slug, goal_id)
 );
 CREATE TABLE diagnostics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,7 +247,9 @@ CREATE TABLE provenance (
 CREATE TABLE notifications (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('packet', 'approval', 'mention', 'quality', 'policy')),
+  -- 'controller' (ruling 99): a controller conversation reply or a chained-goal
+  -- progress note addressed to the conversation owner / goal creator.
+  kind TEXT NOT NULL CHECK (kind IN ('packet', 'approval', 'mention', 'quality', 'policy', 'controller')),
   -- packet kind only: input | blocked (card tint + pill).
   ptype TEXT CHECK (ptype IN ('input', 'blocked')),
   title TEXT,
@@ -378,6 +414,43 @@ CREATE TABLE org_skills (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+-- ---------------------------------------------------------------------------
+-- Controller conversations (ruling 99). App-owned collaboration state, the
+-- same family as notifications/sessions/audit (file-formats §5) — nothing
+-- hand-edits a transcript, so it does not ride the file-canonical machinery.
+-- The deep working record (tool calls, token usage) lives on the conversation
+-- turns' agent_runs rows + raw NDJSON, exactly like every other run.
+CREATE TABLE controller_conversations (
+  id TEXT PRIMARY KEY,
+  -- The asking user — the ONLY authority every action in this conversation is
+  -- evaluated against, and (with org admins) the only reader.
+  user_id TEXT NOT NULL,
+  user_label TEXT NOT NULL,
+  -- NULL = instance scope; a slug binds the conversation to that project's
+  -- board context (the project-role axis).
+  project_slug TEXT,
+  title TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_message_at TEXT
+);
+CREATE INDEX idx_controller_conversations__user
+  ON controller_conversations (user_id, last_message_at DESC);
+CREATE TABLE controller_messages (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL
+    REFERENCES controller_conversations (id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  author TEXT NOT NULL CHECK (author IN ('user', 'controller')),
+  -- The human author's id for 'user' rows; NULL on controller rows.
+  user_id TEXT,
+  text TEXT NOT NULL,
+  -- The agent_runs row that produced a controller reply (its console is the
+  -- deep record); NULL on user rows and on refusal notes written run-less.
+  run_id TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (conversation_id, seq)
+);
 CREATE TABLE "agent_runs" (
   id TEXT PRIMARY KEY,
   task_key TEXT NOT NULL,
@@ -394,7 +467,11 @@ CREATE TABLE "agent_runs" (
   -- "Primary specialist"/"Reviewer" literals in the shadow-kind cleanup.
   -- idx_agent_runs__one_delivering below is keyed on this, and reads correctly
   -- BECAUSE 'primary' means delivering.
-  kind TEXT NOT NULL CHECK (kind IN ('operator', 'primary', 'reviewer')),
+  -- 'controller' (ruling 99): a controller conversation turn. Its rows carry
+  -- project_slug = '' (instance machinery — never a member-visible task scope)
+  -- and task_key = the conversation id, so every task-scoped query, which
+  -- filters by real (project_slug, task_key) equality, never matches them.
+  kind TEXT NOT NULL CHECK (kind IN ('operator', 'primary', 'reviewer', 'controller')),
   backend TEXT NOT NULL CHECK (backend IN ('claude', 'codex')),
   model TEXT NOT NULL,
   session_id TEXT,

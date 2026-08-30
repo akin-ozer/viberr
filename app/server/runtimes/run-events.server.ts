@@ -16,6 +16,12 @@ export function publishRunLogAppended(input: {
   threadId: string;
   seq: number;
 }): void {
+  // Ruling 99: a controller conversation turn carries no task scope
+  // (project_slug = ""), and its live surface is owner-only — the controller
+  // module publishes its own user-routed `controller.updated` references and
+  // the conversation page tails the log endpoint directly. Publishing here
+  // would fail the wire schema's non-empty slug and route to nobody.
+  if (input.projectSlug === "") return;
   publishSseEvent(
     {
       type: "run.log-appended",
@@ -40,6 +46,8 @@ export function publishRunStateChanged(input: {
   threadId: string;
   state: RunState;
 }): void {
+  // Ruling 99: see publishRunLogAppended — controller turns route owner-only.
+  if (input.projectSlug === "") return;
   publishSseEvent(
     {
       type: "run.state-changed",

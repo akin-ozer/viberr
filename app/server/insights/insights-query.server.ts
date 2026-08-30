@@ -418,7 +418,13 @@ export function getInsightsSummary(
           )
           .all(...params),
       )
-      .map((r) => ({ label: r.label ?? "unknown", runs: r.runs, cost: r.cost ?? 0 }));
+      // Ruling 99: controller turns carry project_slug "" (instance scope) —
+      // label them honestly instead of rendering a blank bar.
+      .map((r) => ({
+        label: r.label === "" ? "controller (instance)" : (r.label ?? "unknown"),
+        runs: r.runs,
+        cost: r.cost ?? 0,
+      }));
 
   const duration = durationSchema.parse(
     db

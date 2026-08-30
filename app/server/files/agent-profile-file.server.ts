@@ -27,7 +27,10 @@ import {
 export const agentProfileFrontmatterSchema = z
   .object({
     id: z.string().min(1),
-    kind: z.enum(["operator", "specialist"]),
+    // "controller" is the instance-level conversational agent (one per
+    // instance, ruling 99). It is machinery like the operator: never deployed
+    // into a project's `agents:` list, resolved by kind from the template file.
+    kind: z.enum(["operator", "specialist", "controller"]),
     name: z.string().min(1),
     role: z.string().min(1),
     /** Short scannable description (one paragraph) — what the OPERATOR reads

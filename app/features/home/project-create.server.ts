@@ -23,7 +23,10 @@ import {
   DEFAULT_GUARDRAILS,
   GOVERNED_TEMPLATE,
 } from "~/shared/workflow/templates";
+import { defaultTransitionBy } from "~/shared/workflow/transitions";
 import { defaultAgentDeployments } from "~/server/seed/agent-catalog.server";
+import { findUserByEmail } from "~/server/auth/user-store.server";
+import type { ProjectRole, StageDef } from "~/schemas/project-file.schema";
 import { slugifyProjectName } from "./project-name";
 
 export type PolicyPreset = "strict" | "balanced" | "auto";
@@ -221,6 +224,27 @@ export interface CreateProjectInput {
   /** Repo name under the owner (already slugified by the modal). */
   repoName: string;
   policy: "strict" | "balanced" | "auto";
+  /** Ruling 99: the whole custom shape in one request (the controller's
+   *  create-project path; the New-project modal never sets it). Everything
+   *  here composes BEFORE the single project.md write, so a refused shape
+   *  creates nothing. */
+  custom?: CustomProjectBlueprint;
+}
+
+/** The optional custom blueprint a controller-driven creation carries. */
+export interface CustomProjectBlueprint {
+  /** Project description prose (defaults to the preset blurb). */
+  description?: string;
+  /** Ordered stage list, entry FIRST, terminal LAST (2..8 stages). Replaces
+   *  the Standard template's stages; ids are minted from the names. */
+  stages?: { name: string; color?: string }[];
+  /** Boundary overrides by stage NAME pair (adjacent chain edges only). The
+   *  edge into the terminal stage stays human and locked, whatever is asked. */
+  boundaries?: { from: string; to: string; boundary: "auto" | "approval" | "human" }[];
+  /** Additional members by email — every email must already be a Viberr user
+   *  (the controller creates users first, org-admin gated). The creator is
+   *  always seeded admin, whatever this lists. */
+  members?: { email: string; role: "admin" | "maintainer" | "contributor" | "viewer" }[];
 }
 
 export interface CreateProjectResult {
@@ -306,7 +330,13 @@ async function createProjectImpl(
   // could never match, so no specialist was assignable. Custom boards are
   // edited in project settings, after creation, where the stage grants can be
   // adjusted alongside them.
+  //
+  // Ruling 99: the controller's create-project path may carry the WHOLE custom
+  // shape (stages, boundaries, members, description) in one request. The shape
+  // is validated and composed here, before the single project.md write, so a
+  // refused shape creates nothing. The template stays the default.
   const template = GOVERNED_TEMPLATE;
+  const blueprint = resolveProjectBlueprint(db, input.custom, actor.userId);
   const repo = `${owner}/${repoName}`;
 
   // Resolve the selected connection so we can (a) fetch the repo's real
@@ -344,15 +374,19 @@ async function createProjectImpl(
     }
   }
 
-  // Synthesized description — verbatim mock mapping (home spec §5.10).
+  // Synthesized description — verbatim mock mapping (home spec §5.10), unless
+  // the custom shape brought its own prose.
   const desc =
+    blueprint?.description ??
     "Standard 5-stage workflow · " +
-    (input.policy === "strict"
-      ? "strict human-gate policy."
-      : input.policy === "auto"
-        ? "agents act within policy."
-        : "balanced agent policy.");
+      (input.policy === "strict"
+        ? "strict human-gate policy."
+        : input.policy === "auto"
+          ? "agents act within policy."
+          : "balanced agent policy.");
 
+  const stages = blueprint?.stages ?? template.stages;
+  const baseWorkflow = blueprint?.workflow ?? template.workflow;
   const frontmatter: ProjectFrontmatter = {
     name,
     slug,
@@ -360,16 +394,22 @@ async function createProjectImpl(
     defaultBranch,
     taskPrefix: key,
     nextTaskNumber: 1,
-    stages: template.stages,
+    stages,
     // The policy preset shapes REAL governance (not just the description):
     // strict human-gates the pre-work boundaries; auto runs the operator at
-    // full autonomy. See presetWorkflow / presetAgents.
-    workflow: presetWorkflow(
-      input.policy,
-      template.workflow,
-      template.stages[template.stages.length - 1]?.id,
+    // full autonomy. See presetWorkflow / presetAgents. A custom shape's
+    // explicit boundary choices are applied AFTER the preset, so they win —
+    // except the edge into the terminal stage, which stays human and locked
+    // whatever anyone asks (resolveProjectBlueprint enforces it).
+    workflow: applyBoundaryOverrides(
+      presetWorkflow(input.policy, baseWorkflow, stages[stages.length - 1]?.id),
+      blueprint?.boundaryOverrides ?? [],
+      stages,
     ),
-    members: [{ userId: actor.userId, role: "admin" }],
+    members: [
+      { userId: actor.userId, role: "admin" },
+      ...(blueprint?.members ?? []).filter((m) => m.userId !== actor.userId),
+    ],
     // Preinstall the default agent roster — the operator plus the base
     // specialists it can assign — so every project can run governed agent work.
     agents: presetAgents(input.policy, defaultAgentDeployments()),
@@ -410,7 +450,15 @@ async function createProjectImpl(
     subjectKind: "project",
     subjectId: slug,
     projectSlug: slug,
-    details: { name, key, repo: frontmatter.repo, template: template.id, policy: input.policy },
+    details: {
+      name,
+      key,
+      repo: frontmatter.repo,
+      template: blueprint?.stages ? "custom" : template.id,
+      policy: input.policy,
+      customStages: blueprint?.stages?.length ?? 0,
+      customMembers: blueprint?.members.length ?? 0,
+    },
   });
 
   return {
@@ -420,4 +468,160 @@ async function createProjectImpl(
     storePath: `${getDataRoot(ctx.dataRoot)}/projects/${slug}`,
     repoWarning,
   };
+}
+
+// ------------------------------------------------- custom shape (ruling 99)
+
+/** The composed, validated custom blueprint ready for the frontmatter write. */
+interface ResolvedBlueprint {
+  description?: string;
+  stages?: StageDef[];
+  workflow?: WorkflowBoundary[];
+  boundaryOverrides: { fromId: string; toId: string; boundary: "auto" | "approval" | "human" }[];
+  members: { userId: string; role: ProjectRole }[];
+}
+
+const CUSTOM_STAGE_MIN = 2;
+const CUSTOM_STAGE_MAX = 8;
+/** Rotating palette for custom stages that name no color — the same family the
+ *  Standard template paints with (existing tokens/hexes only). */
+const CUSTOM_STAGE_COLORS = [
+  "#a5a8b5",
+  "#187574",
+  "#7b61ff",
+  "#5b76fe",
+  "#b3691b",
+  "#8a5bc0",
+  "#2f7fb9",
+];
+const DONE_STAGE_COLOR = "#00b473";
+
+/**
+ * Validate + compose the custom blueprint (controller create path). Everything
+ * throws `AppError.validation` with the offending item named, BEFORE any
+ * write. The terminal edge is forced `human` + locked whatever was asked —
+ * the same invariant `realignChainToStages` recomputes on every stage edit.
+ */
+function resolveProjectBlueprint(
+  db: DatabaseSync,
+  custom: CustomProjectBlueprint | undefined,
+  creatorUserId: string,
+): ResolvedBlueprint | null {
+  if (!custom) return null;
+  const out: ResolvedBlueprint = { boundaryOverrides: [], members: [] };
+  if (custom.description?.trim()) out.description = custom.description.trim();
+
+  let stages: StageDef[] | null = null;
+  if (custom.stages && custom.stages.length > 0) {
+    const names = custom.stages.map((s) => s.name.trim()).filter(Boolean);
+    if (names.length !== custom.stages.length) {
+      throw AppError.validation("Every custom stage needs a name.");
+    }
+    if (names.length < CUSTOM_STAGE_MIN || names.length > CUSTOM_STAGE_MAX) {
+      throw AppError.validation(
+        `A custom board carries ${CUSTOM_STAGE_MIN} to ${CUSTOM_STAGE_MAX} stages (got ${names.length}).`,
+      );
+    }
+    const seen = new Set<string>();
+    stages = custom.stages.map((s, i) => {
+      const name = s.name.trim();
+      let id = slugifyProjectName(name) || `stage-${i + 1}`;
+      while (seen.has(id)) id = `${id}-${i + 1}`;
+      seen.add(id);
+      const isTerminal = i === custom.stages!.length - 1;
+      return {
+        id,
+        name,
+        color:
+          s.color?.trim() ||
+          (isTerminal
+            ? DONE_STAGE_COLOR
+            : CUSTOM_STAGE_COLORS[i % CUSTOM_STAGE_COLORS.length]!),
+      };
+    });
+    out.stages = stages;
+    // The default chain over a custom list mirrors the Standard template's
+    // structure: every pre-work edge auto, the edge into the stage before
+    // terminal approval, the edge into terminal human + locked.
+    const chain: WorkflowBoundary[] = [];
+    for (let i = 0; i < stages.length - 1; i += 1) {
+      const to = stages[i + 1]!;
+      const intoTerminal = i + 1 === stages.length - 1;
+      const intoReview = i + 1 === stages.length - 2;
+      const boundary = intoTerminal ? "human" : intoReview ? "approval" : "auto";
+      chain.push({
+        from: stages[i]!.id,
+        to: to.id,
+        boundary,
+        by: defaultTransitionBy(boundary),
+        locked: intoTerminal,
+      });
+    }
+    out.workflow = chain;
+  }
+
+  if (custom.boundaries && custom.boundaries.length > 0) {
+    const list = stages ?? GOVERNED_TEMPLATE.stages;
+    const byName = new Map(list.map((s) => [s.name.toLowerCase(), s.id]));
+    const byId = new Map(list.map((s) => [s.id, s.id]));
+    const resolve = (name: string): string => {
+      const id = byName.get(name.trim().toLowerCase()) ?? byId.get(name.trim());
+      if (!id) {
+        throw AppError.validation(`No stage named "${name}" in the custom board.`);
+      }
+      return id;
+    };
+    const terminalId = list[list.length - 1]?.id;
+    for (const b of custom.boundaries) {
+      const fromId = resolve(b.from);
+      const toId = resolve(b.to);
+      if (toId === terminalId && b.boundary !== "human") {
+        throw AppError.validation(
+          "The move into the final stage is decided by a human. That boundary cannot be loosened.",
+        );
+      }
+      out.boundaryOverrides.push({ fromId, toId, boundary: b.boundary });
+    }
+  }
+
+  if (custom.members && custom.members.length > 0) {
+    const seen = new Set<string>();
+    for (const m of custom.members) {
+      const user = findUserByEmail(db, m.email.trim().toLowerCase());
+      if (!user) {
+        throw AppError.validation(
+          `No Viberr user with the email ${m.email}. Create the user first, then create the project.`,
+        );
+      }
+      if (user.id === creatorUserId || seen.has(user.id)) continue;
+      seen.add(user.id);
+      out.members.push({ userId: user.id, role: m.role });
+    }
+  }
+  return out;
+}
+
+/** Apply explicit boundary choices over the (preset-shaped) chain. Only
+ *  declared adjacent edges can match — an override naming a non-edge pair is
+ *  refused so a silent no-op cannot read as applied. */
+function applyBoundaryOverrides(
+  workflow: WorkflowBoundary[],
+  overrides: ResolvedBlueprint["boundaryOverrides"],
+  stages: readonly StageDef[],
+): WorkflowBoundary[] {
+  if (overrides.length === 0) return workflow;
+  const out = workflow.map((w) => ({ ...w }));
+  for (const o of overrides) {
+    const edge = out.find((w) => w.from === o.fromId && w.to === o.toId);
+    if (!edge) {
+      const name = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
+      throw AppError.validation(
+        `There is no workflow edge from "${name(o.fromId)}" to "${name(o.toId)}": boundaries exist between adjacent stages only.`,
+      );
+    }
+    if (edge.locked) continue; // terminal edge: human, locked, non-negotiable
+    edge.boundary = o.boundary;
+    edge.by = defaultTransitionBy(o.boundary);
+  }
+  return out;
 }

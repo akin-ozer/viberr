@@ -40,7 +40,7 @@ import { getRun } from "~/server/runtimes/run-store.server";
  * lines: [{ seq, occurredAt, raw, display }] } }`.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const url = new URL(request.url);
   const runId = url.searchParams.get("runId");
   if (!runId) {
@@ -68,8 +68,23 @@ export async function loader({ request }: Route.LoaderArgs) {
       { status: 404 },
     );
   }
-  // Membership gate for the run's project (throws a 403 Response for non-members).
-  await requireProjectMember(request, run.project_slug, "view raw run logs");
+  // Ruling 99: a controller conversation turn has no project scope — its log
+  // is readable by the conversation's OWNER (and org admins), never by
+  // project membership.
+  if (run.kind === "controller") {
+    const { canReadControllerRunLog } = await import(
+      "~/server/controller/controller-run.server"
+    );
+    if (!canReadControllerRunLog(db, run, { id: user.id })) {
+      return Response.json(
+        { error: { code: "not_found", message: `Run ${runId} not found.` } },
+        { status: 404 },
+      );
+    }
+  } else {
+    // Membership gate for the run's project (throws a 403 Response for non-members).
+    await requireProjectMember(request, run.project_slug, "view raw run logs");
+  }
 
   // Backward mode is selected by the PRESENCE of `before`/`limit`, so an
   // absent param must leave its key off entirely rather than carry undefined.

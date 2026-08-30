@@ -35,6 +35,13 @@ export const SSE_EVENT_NAMES = [
   // without a loader round-trip. Both scoped to the task.
   "run.log-appended",
   "run.state-changed",
+  // Ruling 99 — controller conversation activity (message appended, turn
+  // started/settled). Routed to the conversation OWNER's user-scoped
+  // connections only; reference-only, the page revalidates its own loader.
+  "controller.updated",
+  // Ruling 99 — a chained goal changed (created, link advanced, redirected).
+  // Project-routed like task.updated; the goals panel revalidates.
+  "goal.updated",
   "stream.open",
   "stream.resync",
 ] as const;
@@ -133,6 +140,22 @@ export const sseEventSchema = z.discriminatedUnion("type", [
       threadId: z.string().min(1),
       state: z.enum(["queued", "running", "finished", "error", "interrupted"]),
     }),
+  }),
+  z.object({
+    type: z.literal("controller.updated"),
+    entityId,
+    occurredAt,
+    // Compact reference only — the conversation surface revalidates.
+    data: z.object({
+      conversationId: z.string().min(1),
+      userId: z.string().min(1),
+    }),
+  }),
+  z.object({
+    type: z.literal("goal.updated"),
+    entityId,
+    occurredAt,
+    data: z.object({ projectSlug: slug, goalId: z.string().min(1) }),
   }),
   z.object({
     type: z.literal("stream.open"),

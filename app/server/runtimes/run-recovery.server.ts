@@ -85,6 +85,10 @@ export function finalizeOrphanedRuns(db: DatabaseSync): OrphanFinalization {
       finishedAt: now,
       interruptedBy: "restart",
     });
+    // Ruling 99: a controller conversation turn carries no task — there is no
+    // operator to re-invoke for it. Its own recovery (an honest "interrupted
+    // by a restart" note on the conversation) lives in controller-run.
+    if (run.kind === "controller") continue;
     realTasks.set(`${run.project_slug}/${run.task_key}`, {
       projectSlug: run.project_slug,
       taskKey: run.task_key,

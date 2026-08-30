@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import {
   acceptanceBlockedReason,
@@ -17,11 +18,17 @@ import { verdictGateReason } from "~/server/github/pr-human-approval.server";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import {
   getDataRoot,
+  goalFilePath,
   projectFilePath,
   projectsDir,
   storeRelativePath,
   taskFilePath,
 } from "~/server/files/file-store-root.server";
+import { currentLinkIndex } from "~/schemas/goal-file.schema";
+import {
+  listGoalIds,
+  parseGoalFileContent,
+} from "~/server/files/goal-writer.server";
 import { recordProvenance } from "~/server/provenance/provenance-recorder.server";
 import { parseProjectFileContent } from "~/server/files/project-file.server";
 import { parseTaskFileContent } from "~/server/files/task-file.server";
@@ -70,9 +77,10 @@ export type RebuildAction =
 
 export interface RebuildFileResult {
   action: RebuildAction;
-  kind: "project" | "task" | "other";
+  kind: "project" | "task" | "goal" | "other";
   projectSlug?: string;
   taskKey?: string;
+  goalId?: string;
 }
 
 export interface RescanSummary {
@@ -521,9 +529,10 @@ export function rebuildTaskFile(
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
         work_revision_sha, goal, packet_json, recommendation_count,
         schedules_json, event_count, comment_count,
+        goal_id, goal_link_index,
         diagnostic_count, created_at, updated_at, board_rank, source_path,
         content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
@@ -548,6 +557,8 @@ export function rebuildTaskFile(
        schedules_json = excluded.schedules_json,
        event_count = excluded.event_count,
        comment_count = excluded.comment_count,
+       goal_id = excluded.goal_id,
+       goal_link_index = excluded.goal_link_index,
        diagnostic_count = excluded.diagnostic_count,
        created_at = excluded.created_at, updated_at = excluded.updated_at,
        board_rank = excluded.board_rank,
@@ -600,6 +611,10 @@ export function rebuildTaskFile(
     JSON.stringify(fm.schedules),
     parsed.timeline.length,
     commentCount,
+    // Ruling 99: the chained-goal back-reference, for the board chip and the
+    // goal-advance hook.
+    fm.goalRef?.goalId ?? null,
+    fm.goalRef?.linkIndex ?? null,
     allDiagnostics.length,
     fm.createdAt,
     fm.updatedAt,
@@ -634,7 +649,9 @@ export function rebuildTaskFile(
           ? "system"
           : event.actor.kind === "operator"
             ? "operator"
-            : "agent";
+            : event.actor.kind === "controller"
+              ? "controller"
+              : "agent";
     const actorRef =
       event.actor.kind === "human"
         ? event.actor.userId
@@ -644,7 +661,9 @@ export function rebuildTaskFile(
             ? event.actor.systemId
             : event.actor.kind === "unknown"
               ? event.actor.raw
-              : "operator";
+              : event.actor.kind === "controller"
+                ? "controller"
+                : "operator";
     insertEvent.run(
       slug,
       fm.key,
@@ -698,10 +717,194 @@ export function rebuildTaskFile(
   return { action: "projected", kind: "task", projectSlug: slug, taskKey: fm.key };
 }
 
+// ---------------------------------------------------------------- goals
+
+/**
+ * Ruling 99: project one chained-goal file into `goal_projections`.
+ *
+ * Link statuses are RECONCILED here, not copied: for every link that names a
+ * task, the link's effective status derives from the task's projected row
+ * (terminal stage → done; archived → failed), with the stored value keeping
+ * `skipped` and covering tasks the projection cannot see. The goal-advance
+ * machinery writes the canonical statuses; this keeps the READ honest when a
+ * task moved out-of-band between advances.
+ */
+export function rebuildGoalFile(
+  db: DatabaseSync,
+  slug: string,
+  goalId: string,
+  options: RebuildOptions = {},
+): RebuildFileResult {
+  const absPath = goalFilePath(slug, goalId, options.dataRoot);
+  const sourcePath = storeRelativePath(absPath, options.dataRoot);
+
+  if (!existsSync(absPath)) {
+    const existed = db
+      .prepare(
+        `SELECT goal_id FROM goal_projections WHERE project_slug = ? AND goal_id = ?`,
+      )
+      .get(slug, goalId);
+    if (!existed) return { action: "ignored", kind: "goal" };
+    db.prepare(
+      `DELETE FROM goal_projections WHERE project_slug = ? AND goal_id = ?`,
+    ).run(slug, goalId);
+    recordProvenance(db, {
+      sourcePath,
+      contentHash: null,
+      action: "removed",
+      details: { kind: "goal", projectSlug: slug, goalId },
+    });
+    emitProjectionEvent({
+      type: "goal.updated",
+      projectSlug: slug,
+      goalId,
+      occurredAt: nowIso(),
+    });
+    return { action: "removed", kind: "goal", projectSlug: slug, goalId };
+  }
+
+  const content = readFileSync(absPath, "utf8");
+  const contentHash = sha256(content);
+  if (!options.force) {
+    // SAFETY: `content_hash` is a single NOT NULL column on `goal_projections`;
+    // an absent row yields undefined.
+    const row = db
+      .prepare(
+        `SELECT content_hash FROM goal_projections WHERE project_slug = ? AND goal_id = ?`,
+      )
+      .get(slug, goalId) as { content_hash: string } | undefined;
+    if (row && row.content_hash === contentHash) {
+      return { action: "unchanged", kind: "goal", projectSlug: slug, goalId };
+    }
+  }
+
+  const parsed = parseGoalFileContent(content);
+  if (!parsed) {
+    // Goal files are app-written; an unparseable one is recorded, and any
+    // existing row is left standing (visible-but-stale beats vanished).
+    recordProvenance(db, {
+      sourcePath,
+      contentHash,
+      action: "error",
+      details: { kind: "goal", message: "goal file could not be parsed" },
+    });
+    return { action: "error", kind: "goal", projectSlug: slug, goalId };
+  }
+  const fm = parsed.frontmatter;
+
+  // Reconcile link statuses against the live task rows.
+  const stages = projectStagesForGoals(db, slug);
+  const links = fm.links.map((link) => {
+    if (!link.taskKey) return link;
+    // SAFETY: the SELECT names exactly `stage` (TEXT NOT NULL) and `archived`
+    // (INTEGER NOT NULL DEFAULT 0) on `task_projections`.
+    const task = db
+      .prepare(
+        `SELECT stage, archived FROM task_projections
+         WHERE project_slug = ? AND task_key = ?`,
+      )
+      .get(slug, link.taskKey) as { stage: string; archived: number } | undefined;
+    if (!task) return link;
+    if (link.status === "skipped") return link;
+    if (task.archived) return { ...link, status: "failed" as const };
+    if (stages && isTerminalStage(task.stage, stages)) {
+      return { ...link, status: "done" as const };
+    }
+    if (link.status === "done") {
+      // The task LEFT the terminal stage since the advance recorded done —
+      // surface the truth; the reconciler run will requeue it.
+      return { ...link, status: "active" as const };
+    }
+    return link;
+  });
+
+  const done = links.filter(
+    (l) => l.status === "done" || l.status === "skipped",
+  ).length;
+  db.prepare(
+    `INSERT INTO goal_projections
+       (project_slug, goal_id, title, status, created_by, created_by_label,
+        on_failure, links_json, description, current_index, links_total,
+        links_done, created_at, updated_at, source_path, content_hash, parsed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(project_slug, goal_id) DO UPDATE SET
+       title = excluded.title, status = excluded.status,
+       created_by = excluded.created_by,
+       created_by_label = excluded.created_by_label,
+       on_failure = excluded.on_failure, links_json = excluded.links_json,
+       description = excluded.description,
+       current_index = excluded.current_index,
+       links_total = excluded.links_total, links_done = excluded.links_done,
+       created_at = excluded.created_at, updated_at = excluded.updated_at,
+       source_path = excluded.source_path, content_hash = excluded.content_hash,
+       parsed_at = excluded.parsed_at`,
+  ).run(
+    slug,
+    fm.id,
+    fm.title,
+    fm.status,
+    fm.createdBy,
+    fm.createdByLabel,
+    fm.onFailure,
+    JSON.stringify(links),
+    parsed.description,
+    currentLinkIndex(links),
+    links.length,
+    done,
+    fm.createdAt,
+    fm.updatedAt,
+    sourcePath,
+    contentHash,
+    nowIso(),
+  );
+  recordProvenance(db, {
+    sourcePath,
+    contentHash,
+    action: "projected",
+    details: { kind: "goal", projectSlug: slug, goalId: fm.id },
+  });
+  emitProjectionEvent({
+    type: "goal.updated",
+    projectSlug: slug,
+    goalId: fm.id,
+    occurredAt: nowIso(),
+  });
+  return { action: "projected", kind: "goal", projectSlug: slug, goalId: fm.id };
+}
+
+/** Decodes the `projects.stages_json` column for the goal reconciler: entries
+ *  without a string `id` (and non-array payloads) read as empty, mirroring how
+ *  `deployedProfileIdsSchema` tolerates a malformed projection column. */
+const goalStageEntriesSchema = z
+  .array(z.object({ id: z.string() }).nullable().catch(null))
+  .catch([]);
+
+/** The project's stage list for terminal-stage checks; null when the project
+ *  row is missing or its stages column does not decode. */
+function projectStagesForGoals(
+  db: DatabaseSync,
+  slug: string,
+): { id: string }[] | null {
+  // SAFETY: `stages_json` is a single NOT NULL column on `projects` (DEFAULT
+  // '[]'); an absent row yields undefined.
+  const row = db
+    .prepare(`SELECT stages_json FROM projects WHERE slug = ?`)
+    .get(slug) as { stages_json: string } | undefined;
+  if (!row) return null;
+  try {
+    const entries = goalStageEntriesSchema.parse(JSON.parse(row.stages_json));
+    const ids = entries.flatMap((s) => (s === null ? [] : [{ id: s.id }]));
+    return ids.length ? ids : null;
+  } catch {
+    return null;
+  }
+}
+
 // ------------------------------------------------------------ path router
 
 const TASK_PATH_RE = /^projects\/([^/]+)\/tasks\/([^/]+)\/task\.md$/;
 const PROJECT_PATH_RE = /^projects\/([^/]+)\/project\.md$/;
+const GOAL_PATH_RE = /^projects\/([^/]+)\/goals\/([^/]+)\.md$/;
 
 /**
  * Single-file incremental rebuild for any absolute path under the data
@@ -721,6 +924,10 @@ export function rebuildPath(
     const projectMatch = PROJECT_PATH_RE.exec(rel);
     if (projectMatch) {
       return rebuildProjectFile(db, projectMatch[1]!, options);
+    }
+    const goalMatch = GOAL_PATH_RE.exec(rel);
+    if (goalMatch) {
+      return rebuildGoalFile(db, goalMatch[1]!, goalMatch[2]!, options);
     }
     return { action: "ignored", kind: "other" };
   } catch (error) {
@@ -792,6 +999,25 @@ export function rebuildProject(
     track(rebuildPath(db, taskFilePath(slug, key, options.dataRoot), taskOptions));
   }
 
+  // Ruling 99: goals — AFTER the tasks, so link reconciliation reads fresh
+  // task rows. Force alongside a changed project row for the same baked-in
+  // reference reason tasks are forced.
+  const seenGoals = new Set<string>();
+  for (const goalId of listGoalIds(slug, options.dataRoot)) {
+    seenGoals.add(goalId);
+    track(rebuildGoalFile(db, slug, goalId, taskOptions));
+  }
+  // SAFETY: `goal_id` is a single NOT NULL column (half the `goal_projections`
+  // primary key).
+  const goalRows = db
+    .prepare(`SELECT goal_id FROM goal_projections WHERE project_slug = ?`)
+    .all(slug) as { goal_id: string }[];
+  for (const row of goalRows) {
+    if (!seenGoals.has(row.goal_id)) {
+      track(rebuildGoalFile(db, slug, row.goal_id, options));
+    }
+  }
+
   // Prune ONLY this project's task rows whose backing files are gone.
   // SAFETY: `task_key` is a single NOT NULL column (half the primary key).
   const taskRows = db
@@ -850,6 +1076,7 @@ export function rebuildAll(
 
   const seenProjects = new Set<string>();
   const seenTasks = new Set<string>();
+  const seenGoals = new Set<string>();
 
   const slugs = existsSync(projRoot)
     ? readdirSync(projRoot, { withFileTypes: true }).flatMap((e) =>
@@ -891,6 +1118,12 @@ export function rebuildAll(
         rebuildPath(db, taskFilePath(slug, key, options.dataRoot), taskOptions),
       );
     }
+    // Ruling 99: goals, after this project's tasks (link reconciliation reads
+    // the fresh task rows).
+    for (const goalId of listGoalIds(slug, options.dataRoot)) {
+      seenGoals.add(`${slug}\u0000${goalId}`);
+      track(rebuildGoalFile(db, slug, goalId, taskOptions));
+    }
   }
 
   // Prune rows whose backing files are gone.
@@ -911,6 +1144,15 @@ export function rebuildAll(
   for (const row of taskRows) {
     if (!seenTasks.has(`${row.project_slug}\u0000${row.task_key}`)) {
       track(rebuildTaskFile(db, row.project_slug, row.task_key, options));
+    }
+  }
+  // SAFETY: the two selected columns are the `goal_projections` primary key.
+  const goalRows = db
+    .prepare(`SELECT project_slug, goal_id FROM goal_projections`)
+    .all() as { project_slug: string; goal_id: string }[];
+  for (const row of goalRows) {
+    if (!seenGoals.has(`${row.project_slug}\u0000${row.goal_id}`)) {
+      track(rebuildGoalFile(db, row.project_slug, row.goal_id, options));
     }
   }
 

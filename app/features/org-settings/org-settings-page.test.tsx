@@ -18,6 +18,18 @@ import type {
 import { ResourcesPanel } from "./resources-panel";
 import { UsersPanel } from "./users-panel";
 
+/** Ruling 99: minimal controller config for page renders. */
+const CONTROLLER_CONFIG = {
+  name: "Controller",
+  model: "",
+  skills: ["controller-guide"],
+  kb: [],
+  mcps: [],
+  definition: "doctrine",
+  profilePresent: true,
+};
+
+
 /**
  * jsdom smokes for the three org-settings tabs: mock markup/copy fidelity,
  * client-side guard toasts, dialog open/confirm flows, and the intents the
@@ -1023,7 +1035,8 @@ describe("resources tab badge counts resources, not resources+templates", () => 
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
-        auditEvents={[]}
+        controllerConfig={CONTROLLER_CONFIG}
+      auditEvents={[]}
       />,
     );
     // 1 KB + 2 MCP + 1 skill = 4. It used to add the 2 agent templates and
@@ -1076,7 +1089,8 @@ describe("C9: instance storage line", () => {
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
-        auditEvents={[]}
+        controllerConfig={CONTROLLER_CONFIG}
+      auditEvents={[]}
       />,
     );
     // Free-of-total with the usage percent, the low flag, and the cleanup cadence.
@@ -1103,7 +1117,8 @@ describe("C9: instance storage line", () => {
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
-        auditEvents={[]}
+        controllerConfig={CONTROLLER_CONFIG}
+      auditEvents={[]}
       />,
     );
     expect(getByText(/automatic cleanup is not scheduled/)).toBeTruthy();
@@ -1134,7 +1149,8 @@ describe("run concurrency control", () => {
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 2, live: 2, queued: 1 }}
         s3Audit={null}
-        auditEvents={[]}
+        controllerConfig={CONTROLLER_CONFIG}
+      auditEvents={[]}
       />,
     );
     expect(getByText(/capped at 2/)).toBeTruthy();
@@ -1149,7 +1165,8 @@ describe("run concurrency control", () => {
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
-        auditEvents={[]}
+        controllerConfig={CONTROLLER_CONFIG}
+      auditEvents={[]}
       />,
     );
     // The lead reads "…· unlimited · 0 runs live" — distinct from the "0 =
@@ -1167,7 +1184,8 @@ describe("run concurrency control", () => {
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
-        auditEvents={[
+        controllerConfig={CONTROLLER_CONFIG}
+      auditEvents={[
           {
             id: "a1",
             occurredAt: "2026-08-22T10:00:00.000Z",
@@ -1206,7 +1224,8 @@ describe("run concurrency control", () => {
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
-        auditEvents={[]}
+        controllerConfig={CONTROLLER_CONFIG}
+      auditEvents={[]}
       />,
     );
     const input = getByLabelText(/Maximum concurrent agent runs/);
@@ -1246,7 +1265,8 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
-        auditEvents={[]}
+        controllerConfig={CONTROLLER_CONFIG}
+      auditEvents={[]}
       />,
     );
     const h1s = container.querySelectorAll("h1");

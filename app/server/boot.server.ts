@@ -49,6 +49,8 @@ import {
 import { seedDefaultAgentAssets } from "./seed/default-assets.server";
 import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
 import { startScheduleRunner } from "./tasks/schedule.server";
+import { startGoalRunner } from "./tasks/goal-actions.server";
+import { recoverControllerConversations } from "./controller/controller-run.server";
 import { reclaimTerminalTaskWorkspaces } from "./tasks/workspace-retention.server";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
@@ -640,6 +642,19 @@ export async function bootServer(): Promise<void> {
   // surfaces automatically instead of only when a maintainer clicks the manual
   // "Update status" button. Idempotent start; the timer is unref'd.
   startGithubReconcilePoller(db);
+
+  // Ruling 99: goal chains — catch up once at boot (a link that completed
+  // while the process was down still advances its chain), then reconcile on a
+  // one-minute interval; and give any conversation whose turn a restart
+  // orphaned an honest "interrupted" note instead of eternal silence.
+  startGoalRunner(db);
+  try {
+    recoverControllerConversations(db);
+  } catch (error) {
+    logger.warn("controller conversation recovery failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 
   logBootIntegrity(db);
 

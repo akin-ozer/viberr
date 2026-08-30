@@ -143,6 +143,18 @@ export function translateProjectionEvent(
         },
       ];
     }
+    case "goal.updated":
+      return [
+        {
+          event: {
+            type: "goal.updated",
+            entityId: `${e.projectSlug}/${e.goalId}`,
+            occurredAt: e.occurredAt,
+            data: { projectSlug: e.projectSlug, goalId: e.goalId },
+          },
+          route: { projectSlug: e.projectSlug },
+        },
+      ];
   }
 }
 

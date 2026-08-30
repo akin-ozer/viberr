@@ -19,6 +19,8 @@ export const NOTIF_PREF_CATEGORIES = [
   "mentions",
   "policy",
   "quality",
+  // Ruling 99: controller replies and chained-goal progress notes.
+  "controller",
 ] as const;
 
 export type NotifPrefCategory = (typeof NOTIF_PREF_CATEGORIES)[number];
@@ -40,6 +42,7 @@ function defaultNotifPrefs() {
     mentions: { app: true },
     policy: { app: true },
     quality: { app: true },
+    controller: { app: true },
   } satisfies NotifPrefs;
 }
 
@@ -59,6 +62,7 @@ const KIND_TO_CATEGORY = {
   mention: "mentions",
   policy: "policy",
   quality: "quality",
+  controller: "controller",
 } satisfies Record<NotificationKind, NotifPrefCategory>;
 
 export function notifCategoryForKind(kind: NotificationKind): NotifPrefCategory {
@@ -95,6 +99,11 @@ export const PROFILE_NTF: {
     id: "quality",
     n: "Quality flags",
     d: "Specialist flags on tasks where you own review or acceptance.",
+  },
+  {
+    id: "controller",
+    n: "Controller updates",
+    d: "Replies from the controller and progress on goal chains you defined.",
   },
 ];
 
@@ -133,6 +142,9 @@ const storedNotifPrefsSchema = z.object({
   mentions: storedChannelPrefsSchema,
   policy: storedChannelPrefsSchema,
   quality: storedChannelPrefsSchema,
+  // Ruling 99: absent on prefs stored before the controller shipped — the
+  // per-field catch reads it as ON, the opt-out default every category has.
+  controller: storedChannelPrefsSchema,
 });
 
 /** Tolerant merge of a stored (possibly partial/malformed) pref value over

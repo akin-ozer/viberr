@@ -42,6 +42,7 @@ const FULL: ParsedTaskFile = {
       commits: [{ sha: "a91f7c2", msg: "[VIB-142] add repo attach policy gate" }],
       changed: { files: 9, add: 412, del: 87 },
     },
+    goalRef: null,
     createdAt: "2026-07-03T06:00:00.000Z",
     updatedAt: "2026-07-04T06:58:00.000Z",
     boardRank: null,

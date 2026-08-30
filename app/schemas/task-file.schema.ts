@@ -661,6 +661,20 @@ const taskFrontmatterFields = {
   // TaskSummary. The "accepted · gate bypassed" display arm is C-VOCAB's.
   acceptance: z.enum(["forced"]).nullable().optional(),
   github: githubCacheSchema.nullable(),
+  /** Chained-goal back-reference (ruling 99): this task is one LINK of a goal
+   *  chain. The chain itself is canonical in
+   *  `projects/<slug>/goals/<goalId>.md`; this points back at it, the same
+   *  project→task shape as `stage` (project.md owns the stage list, the task
+   *  carries its position). Null for every task outside a chain. Written by
+   *  goal-actions at link-task creation; never hand-set expecting the chain to
+   *  adopt the task — the goal file's own `links[].taskKey` is what binds. */
+  goalRef: z
+    .object({
+      goalId: z.string().min(1),
+      linkIndex: z.number().int().min(1),
+    })
+    .nullable()
+    .default(null),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
   /** Board position within a stage — a sparse rank for drag-to-reorder. Null
@@ -956,6 +970,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "noChanges",
   "acceptance",
   "github",
+  "goalRef",
   "createdAt",
   "updatedAt",
   "boardRank",
@@ -1315,6 +1330,14 @@ export function parseTaskFrontmatter(
       taskFrontmatterFields.github,
       null,
     ),
+    // Ruling 99: absent means "not part of a goal chain" — never a diagnostic.
+    goalRef: tolerant(
+      diagnostics,
+      data,
+      "goalRef",
+      taskFrontmatterFields.goalRef,
+      null,
+    ),
     createdAt: tolerant(
       diagnostics,
       data,
@@ -1385,6 +1408,10 @@ export type FileActorRef =
       roleHint: string | null;
     }
   | { kind: "operator" }
+  // Ruling 99: the instance controller writing on a task thread (briefing an
+  // agent, publishing chain progress). Encoded as the bare word `controller`,
+  // the same shape as `operator`.
+  | { kind: "controller" }
   | { kind: "system"; systemId: string }
   | { kind: "unknown"; raw: string };
 

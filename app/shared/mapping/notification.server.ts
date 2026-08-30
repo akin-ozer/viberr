@@ -20,6 +20,9 @@ export const NOTIFICATION_KINDS = [
   "mention",
   "quality",
   "policy",
+  // Ruling 99: a controller conversation reply, or chained-goal progress
+  // addressed to the goal's creator.
+  "controller",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
