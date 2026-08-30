@@ -281,6 +281,40 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     );
   });
 
+  /**
+   * The WRITE tools must hold the same posture as the reads. `createTask` and
+   * `createGoal` gate themselves on `create-task`, whose refusal names the
+   * project and the role — so a non-member probing a slug they should not know
+   * exists got a different sentence for a real project than for an invented
+   * one. That difference is the existence oracle R15-4 closes.
+   */
+  it("create_task and create_goal keep the not-visible posture for a non-member", async () => {
+    const probes: { tool: string; args: Record<string, JsonValue> }[] = [
+      { tool: "create_task", args: { title: "Should not land", goal: "Nor this." } },
+      {
+        tool: "create_goal",
+        args: {
+          title: "Should not land",
+          links: [{ title: "One", goal: "Nor this." }],
+        },
+      },
+    ];
+    for (const { tool, args } of probes) {
+      const real = await call(ids.nonMember, tool, args);
+      const invented = await call(
+        ids.nonMember,
+        tool,
+        { ...args, projectSlug: "no-such-project" },
+        null,
+      );
+      expect(real).toContain(`No project "${SLUG}" is visible to you`);
+      expect(invented).toContain('No project "no-such-project" is visible to you');
+      expect(real.replace(SLUG, "X")).toBe(
+        invented.replace("no-such-project", "X"),
+      );
+    }
+  });
+
   it("a VIEWER reads the project, its tasks and one task", async () => {
     const project = await call(ids.viewer, "get_project");
     expect(project).toContain('"slug"');

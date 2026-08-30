@@ -1044,17 +1044,53 @@ function tolerant<T>(
  * absorption lived here until the dynamic-dispatch rework, 2026-08-29 —
  * deleted with the rest of the slot model, preprod no-back-compat.)
  */
+/** Validate the `engagements` list one row at a time, keeping the good ones. */
+function parseEngagementRows(
+  diagnostics: FileDiagnostic[],
+  data: RawFrontmatter,
+): Engagement[] {
+  const value = data.engagements;
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    diagnostics.push(
+      diagWarning(
+        "frontmatter.invalid_field",
+        "Frontmatter field `engagements` is not a list — using an empty list.",
+        "engagements",
+      ),
+    );
+    return [];
+  }
+  const element = taskFrontmatterFields.engagements.element;
+  const out: Engagement[] = [];
+  value.forEach((entry, i) => {
+    const parsed = element.safeParse(entry);
+    if (parsed.success) {
+      out.push(parsed.data);
+      return;
+    }
+    diagnostics.push(
+      diagWarning(
+        "frontmatter.invalid_field",
+        `Frontmatter \`engagements[${i}]\` is invalid (${parsed.error.issues[0]?.message ?? "unparseable"}) — dropping this entry, keeping the rest.`,
+        `engagements[${i}]`,
+      ),
+    );
+  });
+  return out;
+}
+
 function parseEngagements(
   diagnostics: FileDiagnostic[],
   data: RawFrontmatter,
 ): Engagement[] {
-  const engagements: Engagement[] = tolerant(
-    diagnostics,
-    data,
-    "engagements",
-    taskFrontmatterFields.engagements,
-    [],
-  );
+  // Per-ENTRY, the way project.md's lists have parsed since F18. On the
+  // whole-array path a single unparseable row emptied the entire roster — the
+  // `delivers: true` branch owner and every required reviewer with it — and
+  // the diagnostic is only a warning, so the file is still writable and the
+  // next `updateTaskFile` serialized `engagements: []` back over the rows that
+  // had been fine. One bad row now drops only itself.
+  const engagements: Engagement[] = parseEngagementRows(diagnostics, data);
   // profileId-uniqueness invariant (defense-in-depth): a profile has at most
   // ONE engagement. A duplicate profileId corrupts run routing (startAgentRun
   // resolves by the FIRST match), so keep the first occurrence and drop the

@@ -978,6 +978,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           labels?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
+          // Visibility BEFORE the action gate. `createTask` refuses a
+          // non-member by naming the project and the role they lack, which
+          // reads differently from the refusal an invented slug gets — exactly
+          // the existence oracle R15-4 closes, and the posture every read tool
+          // here already holds.
+          requireVisible(slug, "create tasks");
           const taskInput: CreateTaskInput = {
             projectSlug: slug,
             title: args.title,
@@ -1545,6 +1551,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           links: { title: string; goal: string }[];
         }) => {
           const slug = slugOf(args.projectSlug);
+          // Same reason as `create_task`: the action gate below would refuse a
+          // non-member in words that confirm the project exists.
+          requireVisible(slug, "define goals");
           const goalInput: CreateGoalInput = {
             projectSlug: slug,
             title: args.title,

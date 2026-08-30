@@ -431,7 +431,12 @@ export function parseProjectFrontmatter(
       projectCredentialPolicySchema,
       null,
     ),
-    guardrails: tolerant(diagnostics, data, "guardrails", guardrailsSchema, []),
+    // Per-entry too, for the same F18 reason as the four above: on the
+    // whole-array path one bad row emptied the WHOLE list, which reads to
+    // every consumer as "nothing configured" — every anti-noise guardrail off,
+    // and an explicitly disabled `delete-branch-after-merge` flipped back to
+    // its ON default. The next project write then persisted the empty list.
+    guardrails: tolerantArray(diagnostics, data, "guardrails", guardrailsSchema),
   };
 
   if (frontmatter.stages.length === 0) {

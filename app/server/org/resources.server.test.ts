@@ -1494,3 +1494,62 @@ describe("knowledge-base doc counts", () => {
     expect(reindexed.toast).toContain("2 non-text files skipped");
   });
 });
+
+/**
+ * A registered stdio MCP command is third-party code an admin named, and it is
+ * spawned by the app itself. Without an explicit `env` Node hands the child
+ * this process's WHOLE environment — including the key that decrypts every
+ * stored PAT and MCP credential, the session-signing secret and the provider
+ * keys — while the agent runtimes filter exactly those (F10-02). The child's
+ * stderr is then persisted into `org_mcp_servers.last_error`, so a server that
+ * prints its environment while crashing parks those values in the database.
+ */
+describe("mcpSpawnEnv (third-party command isolation)", () => {
+  const SECRETS = {
+    VIBERR_SECRET_ENCRYPTION_KEY: "the-key-that-opens-every-credential",
+    BETTER_AUTH_SECRET: "session-signing-secret",
+    ANTHROPIC_API_KEY: "sk-provider-key",
+    GITHUB_OAUTH_CLIENT_SECRET: "oauth-client-secret",
+    DATABASE_URL: "postgres://user:pw@host/db",
+  };
+
+  it("withholds credential-shaped variables and passes ordinary ones through", async () => {
+    const { mcpSpawnEnv } = await import("./resources.server");
+    const saved: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(SECRETS)) {
+      saved[k] = process.env[k];
+      process.env[k] = v;
+    }
+    const savedPath = process.env.PATH;
+    process.env.PATH ??= "/usr/bin";
+    try {
+      const env = mcpSpawnEnv(null);
+      for (const key of Object.keys(SECRETS)) {
+        expect(env[key], `${key} must not reach a third-party command`).toBeUndefined();
+      }
+      // Not a lockout: an MCP command still needs an ordinary environment.
+      expect(env.PATH).toBeTruthy();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      if (savedPath === undefined) delete process.env.PATH;
+      else process.env.PATH = savedPath;
+    }
+  });
+
+  it("passes the ONE secret the child is meant to hold, and nothing else", async () => {
+    const { mcpSpawnEnv } = await import("./resources.server");
+    const saved = process.env.VIBERR_SECRET_ENCRYPTION_KEY;
+    process.env.VIBERR_SECRET_ENCRYPTION_KEY = "must-not-travel";
+    try {
+      const env = mcpSpawnEnv("mcp-token-value");
+      expect(env.MCP_CREDENTIAL).toBe("mcp-token-value");
+      expect(env.VIBERR_SECRET_ENCRYPTION_KEY).toBeUndefined();
+    } finally {
+      if (saved === undefined) delete process.env.VIBERR_SECRET_ENCRYPTION_KEY;
+      else process.env.VIBERR_SECRET_ENCRYPTION_KEY = saved;
+    }
+  });
+});

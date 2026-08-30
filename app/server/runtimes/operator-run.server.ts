@@ -643,7 +643,7 @@ export function operatorLeftTaskStranded(
  * FINISHED cleanly resumes — an errored drive must not loop. Returns true
  * when a resume was fired (the caller then skips the waiting flip).
  */
-async function maybeResumeStrandedOperator(
+export async function maybeResumeStrandedOperator(
   db: DatabaseSync,
   ref: {
     projectSlug: string;
@@ -673,20 +673,27 @@ async function maybeResumeStrandedOperator(
     );
     return false;
   }
-  // SAFETY: both arms SELECT one column, `agent_runs.state`, which the baseline
-  // schema declares TEXT NOT NULL — so a returned row is exactly
+  // A ref with no run id belongs to a drive that never produced a row —
+  // `startRun` threw, and the lease was released with the token's `runId`
+  // still null. Falling back to "the newest operator run for this task" judged
+  // THIS drive by a PREVIOUS one, which is usually `finished`, so the guard
+  // above ("only a run that FINISHED cleanly resumes") passed and the backstop
+  // fired an unwatched resume chain for a drive that never ran. Same posture
+  // as an unknown starting stage: a ref that cannot name its own drive does
+  // not get to judge it.
+  if (!ref.runId) {
+    logger.warn(
+      "stranded-operator backstop skipped — this drive produced no run row to judge",
+      { projectSlug: ref.projectSlug, taskKey: ref.taskKey },
+    );
+    return false;
+  }
+  // SAFETY: the statement SELECTs one column, `agent_runs.state`, which the
+  // baseline schema declares TEXT NOT NULL — so a returned row is exactly
   // `{ state: string }`, and no matching row at all is `undefined`.
-  const stateRow = ref.runId
-    ? (db.prepare(`SELECT state FROM agent_runs WHERE id = ?`).get(ref.runId) as
-        | { state: string }
-        | undefined)
-    : (db
-        .prepare(
-          `SELECT state FROM agent_runs
-           WHERE project_slug = ? AND task_key = ? AND kind = 'operator'
-           ORDER BY rowid DESC LIMIT 1`,
-        )
-        .get(ref.projectSlug, ref.taskKey) as { state: string } | undefined);
+  const stateRow = db
+    .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
+    .get(ref.runId) as { state: string } | undefined;
   if (stateRow?.state !== "finished") return false;
 
   const { readProjectFile } = await import("~/server/files/project-writer.server");

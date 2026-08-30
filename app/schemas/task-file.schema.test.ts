@@ -752,3 +752,55 @@ describe("sanitizeEventAttachmentNames (P21)", () => {
     expect(sanitizeEventAttachmentNames(["x".repeat(201)])).toBeNull();
   });
 });
+
+/**
+ * The engagement roster is the task's delivery contract: the `delivers: true`
+ * row owns the workspace and branch, and the verdict-capable rows are the
+ * required reviewers acceptance is gated on. Parsing the list as a WHOLE meant
+ * one unparseable row emptied all of it — and since the diagnostic is only a
+ * warning the file stays writable, so the next `updateTaskFile` serialized
+ * `engagements: []` back over the rows that had been fine.
+ */
+describe("parseTaskFrontmatter — per-entry engagement tolerance", () => {
+  it("keeps valid engagements and drops only the malformed row", () => {
+    const { frontmatter, diagnostics } = parseTaskFrontmatter(
+      {
+        key: "VIB-1",
+        engagements: [
+          {
+            profileId: "developer",
+            backend: "codex",
+            role: "Developer",
+            delivers: true,
+          },
+          // Malformed: `Claude` is not one of the backend options.
+          { profileId: "reviewer", backend: "Claude", role: "Reviewer" },
+          {
+            profileId: "qa",
+            backend: "claude",
+            role: "QA",
+            verdictCapable: true,
+          },
+        ],
+      },
+      { fallbackKey: "VIB-1" },
+    );
+
+    expect(frontmatter.engagements.map((e) => e.profileId)).toEqual([
+      "developer",
+      "qa",
+    ]);
+    // The branch owner survives one bad neighbour.
+    expect(frontmatter.engagements.some((e) => e.delivers)).toBe(true);
+    expect(diagnostics.some((d) => d.path === "engagements[1]")).toBe(true);
+  });
+
+  it("a non-list `engagements` still degrades to empty rather than throwing", () => {
+    const { frontmatter, diagnostics } = parseTaskFrontmatter(
+      { key: "VIB-1", engagements: "not-a-list" },
+      { fallbackKey: "VIB-1" },
+    );
+    expect(frontmatter.engagements).toEqual([]);
+    expect(diagnostics.some((d) => d.path === "engagements")).toBe(true);
+  });
+});

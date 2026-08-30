@@ -375,15 +375,20 @@ async function createProjectImpl(
   }
 
   // Synthesized description — verbatim mock mapping (home spec §5.10), unless
-  // the custom shape brought its own prose.
-  const desc =
-    blueprint?.description ??
-    "Standard 5-stage workflow · " +
-      (input.policy === "strict"
-        ? "strict human-gate policy."
-        : input.policy === "auto"
-          ? "agents act within policy."
-          : "balanced agent policy.");
+  // the custom shape brought its own prose. The board-shape half has to follow
+  // the stages actually written below: a custom list described as the
+  // "Standard 5-stage workflow" is a stored, projected and rendered claim
+  // about a board that does not exist.
+  const policyPhrase =
+    input.policy === "strict"
+      ? "strict human-gate policy."
+      : input.policy === "auto"
+        ? "agents act within policy."
+        : "balanced agent policy.";
+  const boardPhrase = blueprint?.stages?.length
+    ? `Custom ${blueprint.stages.length}-stage workflow · `
+    : "Standard 5-stage workflow · ";
+  const desc = blueprint?.description ?? boardPhrase + policyPhrase;
 
   const stages = blueprint?.stages ?? template.stages;
   const baseWorkflow = blueprint?.workflow ?? template.workflow;

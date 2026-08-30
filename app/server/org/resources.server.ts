@@ -852,6 +852,30 @@ export interface McpProbeOptions {
   spawnImpl?: McpSpawn;
 }
 
+/**
+ * The environment a registered stdio MCP command runs with.
+ *
+ * An MCP command is THIRD-PARTY code an admin named, so it gets the same
+ * secret-filtered environment the agent runtimes get (F10-02). Inheriting
+ * `process.env` — which is what an absent `env` means, and what the
+ * credentialed branch used to spread — handed every registered stdio server
+ * the secret-encryption key that opens every stored PAT and MCP credential,
+ * the session-signing secret and the provider keys. That is strictly more than
+ * the run's own mount receives, and the child's stderr is persisted into
+ * `last_error`, so a server that prints its environment while crashing parks
+ * those values in the database.
+ *
+ * `MCP_CREDENTIAL` is the ONE secret a child is meant to hold (P13-KM-05), and
+ * `withDetail` scrubs it out of persisted stderr by value.
+ */
+export function mcpSpawnEnv(
+  token: string | null | undefined,
+): Record<string, string> {
+  const env = filteredSpawnEnv();
+  if (token) env.MCP_CREDENTIAL = token;
+  return env;
+}
+
 const defaultSpawn: McpSpawn = (command, args, token) => {
   const options: SpawnOptions = {
     // stderr was "ignore" — discarded by the OS, so the one thing that
@@ -863,18 +887,7 @@ const defaultSpawn: McpSpawn = (command, args, token) => {
     // so a boot accumulated defunct chromium/crashpad zombies under pid 1.
     detached: true,
   };
-  // An MCP command is THIRD-PARTY code an admin named, so it gets the same
-  // secret-filtered environment the agent runtimes get (F10-02). Inheriting
-  // `process.env` — which is what an absent `env` means, and what the
-  // credentialed branch used to spread — handed every registered stdio server
-  // the secret-encryption key that opens every stored PAT and MCP credential,
-  // the session-signing secret and the provider keys. That is strictly more
-  // than the run's own mount receives, and the child's stderr is persisted
-  // into `last_error`, so a server that prints its environment while crashing
-  // parks those values in the database.
-  options.env = token
-    ? { ...filteredSpawnEnv(), MCP_CREDENTIAL: token }
-    : filteredSpawnEnv();
+  options.env = mcpSpawnEnv(token);
   return spawn(command, args, options);
 };
 

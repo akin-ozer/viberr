@@ -262,8 +262,20 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                         ? reading.status.replace(/^allowed_/, "").replaceAll("_", " ")
                         : null,
                       reading.isUsingOverage ? "overage" : null,
+                      // Hydration-gated for the same reason the `title` above
+                      // is: `toLocaleDateString` renders in the SERVER's
+                      // timezone during SSR and the viewer's on the client, and
+                      // React never patches a text mismatch — it re-renders the
+                      // whole page. The ungated form is the timezone-neutral
+                      // ISO day, so the first paint is honest either way.
                       reading.resetsAt != null
-                        ? `resets ${new Date(reading.resetsAt * 1000).toLocaleDateString()}`
+                        ? `resets ${
+                            hydrated
+                              ? new Date(reading.resetsAt * 1000).toLocaleDateString()
+                              : new Date(reading.resetsAt * 1000)
+                                  .toISOString()
+                                  .slice(0, 10)
+                          }`
                         : null,
                     ]
                       .filter(Boolean)
