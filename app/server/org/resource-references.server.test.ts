@@ -7,6 +7,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import {
   countProjectDeploymentGrants,
+  countTemplateGrants,
   updateResourceReferences,
 } from "./resource-references.server";
 
@@ -217,5 +218,90 @@ describe("countProjectDeploymentGrants — the read-only twin", () => {
     expect(
       countProjectDeploymentGrants("mcps", "vm-memory", store.dataRoot),
     ).toBe(1);
+  });
+});
+
+/**
+ * The delete-confirm's template count came from `listGlobalAgentProfiles`,
+ * which is the specialist CRUD list and drops `controller.md` / `operator.md` —
+ * while the delete's own `rewriteTemplates` strips the grant out of EVERY
+ * profile file. So the three resources the shipped store attaches to those two
+ * templates read as "Nothing grants it" immediately before the delete removed
+ * their grants.
+ */
+describe("countTemplateGrants — the read-only twin of rewriteTemplates", () => {
+  const yamlList = (key: string, items: string[]): string[] =>
+    items.length === 0
+      ? [`  ${key}: []`]
+      : [`  ${key}:`, ...items.map((i) => `    - ${i}`)];
+
+  function writeProfile(
+    dataRoot: string,
+    id: string,
+    kind: string,
+    resources: { skills?: string[]; kb?: string[]; mcps?: string[] },
+  ): void {
+    const dir = path.join(dataRoot, "agents", "profiles");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, `${id}.md`),
+      [
+        "---",
+        `id: ${id}`,
+        `name: ${id}`,
+        `kind: ${kind}`,
+        "backends:",
+        "  - claude",
+        "role: Test",
+        "stages: []",
+        "resources:",
+        ...yamlList("skills", resources.skills ?? []),
+        ...yamlList("kb", resources.kb ?? []),
+        ...yamlList("mcps", resources.mcps ?? []),
+        "capabilities: []",
+        "extras: []",
+        "---",
+        "",
+        "A profile.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+  }
+
+  it("counts a grant held only by a template the specialist list hides", () => {
+    const store = setupTestStore(ctx);
+    // The shipped shape: a resource attached to the CONTROLLER template alone.
+    writeProfile(store.dataRoot, "controller", "controller", {
+      kb: ["controller-handbook"],
+      skills: ["controller-guide"],
+    });
+    writeProfile(store.dataRoot, "operator", "operator", {
+      skills: ["viberr-app-expertise"],
+    });
+    writeProfile(store.dataRoot, "developer", "specialist", { skills: [] });
+
+    expect(
+      countTemplateGrants("kb", "controller-handbook", store.dataRoot),
+    ).toBe(1);
+    expect(
+      countTemplateGrants("skills", "controller-guide", store.dataRoot),
+    ).toBe(1);
+    expect(
+      countTemplateGrants("skills", "viberr-app-expertise", store.dataRoot),
+    ).toBe(1);
+    // A resource nothing grants still counts zero.
+    expect(countTemplateGrants("kb", "nothing-grants-this", store.dataRoot)).toBe(0);
+  });
+
+  it("counts every template that grants the slug, and skips an unreadable one", () => {
+    const store = setupTestStore(ctx);
+    writeProfile(store.dataRoot, "controller", "controller", { mcps: ["shared"] });
+    writeProfile(store.dataRoot, "developer", "specialist", { mcps: ["shared"] });
+    const dir = path.join(store.dataRoot, "agents", "profiles");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "broken.md"), "not a profile at all", "utf8");
+
+    expect(countTemplateGrants("mcps", "shared", store.dataRoot)).toBe(2);
   });
 });

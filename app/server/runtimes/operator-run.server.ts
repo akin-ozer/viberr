@@ -357,16 +357,19 @@ function leaseKeyFor(projectSlug: string, taskKey: string): string {
 /** One task's queued triggers (see the lease doc above for the coalescing
  *  rule). */
 interface PendingTriggers {
-  /** The newest queued MACHINE trigger, or null. */
+  /** The newest queued newest-wins MACHINE trigger, or null. Never a
+   *  `scheduled` one — those go in `carried`. */
   latest: RunOperatorInput | null;
-  /** Queued human `@operator …` triggers, oldest first. */
-  humanComments: RunOperatorInput[];
+  /** Queued triggers carrying a reason that exists NOWHERE else in the run's
+   *  input: human `@operator …` comments and `scheduled` re-checks. Oldest
+   *  first. */
+  carried: RunOperatorInput[];
 }
 
-/** Bound on queued human triggers per task. Beyond this the OLDEST are
- *  dropped: the newest questions are the ones still awaiting an answer, and
- *  every dropped one still sits on the timeline the next drive reads. */
-const MAX_PENDING_HUMAN_TRIGGERS = 8;
+/** Bound on queued reason-carrying triggers per task. Beyond this the OLDEST
+ *  are dropped: the newest are the ones still awaiting an answer, and every
+ *  dropped one still sits on the timeline the next drive reads. */
+const MAX_PENDING_CARRIED_TRIGGERS = 8;
 
 /**
  * Queue a trigger that arrived while the lease was held.
@@ -384,27 +387,37 @@ function queueOperatorTrigger(
   input: RunOperatorInput,
 ): RunOperatorInput[] {
   const state = leaseState();
-  const queue = state.pending.get(key) ?? { latest: null, humanComments: [] };
+  const queue = state.pending.get(key) ?? { latest: null, carried: [] };
   const dropped: RunOperatorInput[] = [];
-  if (input.humanComment?.trim()) {
-    const previous = queue.humanComments[queue.humanComments.length - 1];
+  // A `scheduled` re-check carries a note the human wrote for THIS occurrence,
+  // and the schedule runner stamps that occurrence `fired` the moment the
+  // trigger is queued — so an overwritten one is a run FR39 promised, recorded
+  // as delivered, that never happens. Like a human question, it is kept in
+  // arrival order rather than replaced by the next machine trigger.
+  const comment = input.humanComment?.trim();
+  if (comment || input.trigger === "scheduled") {
+    const previous = queue.carried[queue.carried.length - 1];
     const by = input.humanCommentBy?.trim();
-    if (by && previous && previous.humanCommentBy?.trim() === by) {
-      queue.humanComments[queue.humanComments.length - 1] = {
+    // Merging is a HUMAN-comment rule (one person typing three messages costs
+    // one turn). A scheduled re-check has its own occurrence and its own note,
+    // so it is never folded into a neighbour.
+    if (comment && by && previous && previous.humanCommentBy?.trim() === by) {
+      queue.carried[queue.carried.length - 1] = {
         ...input,
-        humanComment: `${previous.humanComment?.trim()}\n\n${input.humanComment.trim()}`,
+        humanComment: `${previous.humanComment?.trim()}\n\n${comment}`,
       };
       state.pending.set(key, queue);
       return dropped;
     }
-    queue.humanComments.push(input);
-    while (queue.humanComments.length > MAX_PENDING_HUMAN_TRIGGERS) {
-      const drop = queue.humanComments.shift();
+    queue.carried.push(input);
+    while (queue.carried.length > MAX_PENDING_CARRIED_TRIGGERS) {
+      const drop = queue.carried.shift();
       if (drop) dropped.push(drop);
-      logger.warn("dropping the oldest queued @operator comment — queue is full", {
+      logger.warn("dropping the oldest queued reason-carrying trigger — queue is full", {
         key,
+        trigger: drop?.trigger ?? "manual",
         by: drop?.humanCommentBy ?? "unknown",
-        cap: MAX_PENDING_HUMAN_TRIGGERS,
+        cap: MAX_PENDING_CARRIED_TRIGGERS,
       });
     }
   } else {
@@ -473,13 +486,13 @@ function takePendingTrigger(key: string): RunOperatorInput | null {
   const queue = state.pending.get(key);
   if (!queue) return null;
   let next: RunOperatorInput | null = null;
-  if (queue.humanComments.length > 0) {
-    next = queue.humanComments.shift() ?? null;
+  if (queue.carried.length > 0) {
+    next = queue.carried.shift() ?? null;
   } else if (queue.latest) {
     next = queue.latest;
     queue.latest = null;
   }
-  if (queue.humanComments.length === 0 && !queue.latest) state.pending.delete(key);
+  if (queue.carried.length === 0 && !queue.latest) state.pending.delete(key);
   return next;
 }
 
@@ -513,7 +526,7 @@ function releaseOperatorLease(
   logger.info("operator lease released — firing the queued trigger", {
     key,
     trigger: queued.trigger ?? "manual",
-    queuedHumanComments: leaseState().pending.get(key)?.humanComments.length ?? 0,
+    queuedCarriedTriggers: leaseState().pending.get(key)?.carried.length ?? 0,
   });
   void runOperator(db, queued).catch((error) =>
     noteQueuedTriggerFireFailed(
@@ -542,7 +555,7 @@ function drainPendingAfterInFlight(db: DatabaseSync, key: string): void {
   logger.info("cross-boot in-flight finished — firing the queued trigger", {
     key,
     trigger: queued.trigger ?? "manual",
-    queuedHumanComments: state.pending.get(key)?.humanComments.length ?? 0,
+    queuedCarriedTriggers: state.pending.get(key)?.carried.length ?? 0,
   });
   void runOperator(db, queued).catch((error) =>
     noteQueuedTriggerFireFailed(

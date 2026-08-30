@@ -28,6 +28,7 @@ function notification(i: number): NotificationView {
     projectSlug: "viberr-core",
     projectName: "Viberr Core",
     taskKey: "VIB-142",
+    href: "/projects/viberr-core/tasks/VIB-142",
     occurredAt: new Date().toISOString(),
     unread: false,
   };

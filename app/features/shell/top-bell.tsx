@@ -105,11 +105,10 @@ export function TopBell({
   const openItem = (n: NotificationView) => {
     if (n.unread) markRead([n.id]);
     setOpen(false);
-    // F18-1: an orphan's project is gone — navigating there 404s on a
-    // shell-less error page. The click only clears it (mark-read above).
-    if (!n.targetMissing && n.projectSlug && n.taskKey) {
-      navigate(`/projects/${n.projectSlug}/tasks/${n.taskKey}`);
-    }
+    // B-FD6: `href` is the destination `listNotifications` resolved (null for
+    // an org-wide row, and for an F18-1 orphan whose project would 404) — the
+    // rule lives there, not in each surface. The click still clears the row.
+    if (n.href) navigate(n.href);
   };
 
   return (

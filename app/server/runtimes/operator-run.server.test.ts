@@ -1821,6 +1821,48 @@ describe("pending trigger queue", () => {
       .all()
       .map((row) => ({ id: String(row.id) }));
 
+  it("FR39: a queued scheduled re-check survives a later machine trigger", async () => {
+    // CANARY: route `scheduled` back into the newest-wins `latest` slot — the
+    // transition below overwrites it and the re-check never happens.
+    //
+    // The schedule runner stamps the occurrence `fired` the moment this
+    // trigger is queued, so an overwritten one is a run FR39 promised, recorded
+    // in the file, the audit row and the timeline as delivered, that never ran.
+    // Its note exists nowhere else in the run's input — the same reason a human
+    // question is queued rather than replaced.
+    await drive({ trigger: "manual" });
+    expect(adapter3.pending).not.toBeNull();
+
+    await drive({
+      trigger: "scheduled",
+      scheduleNote: "re-check the flaky test before we ship",
+    });
+    await drive({
+      trigger: "transition",
+      transitionFromName: "Ready",
+      transitionToName: "In Progress",
+    });
+
+    adapter3.finish(store3, emptyPlan, "finished");
+
+    // The SCHEDULED trigger fires first, its note intact.
+    await eventually(() => {
+      expect(operatorRuns()).toHaveLength(2);
+      expect(adapter3.pending?.spec.prompt).toContain(
+        "re-check the flaky test before we ship",
+      );
+    });
+
+    // …and the machine trigger is still queued behind it.
+    adapter3.finish(store3, emptyPlan, "finished");
+    await eventually(() => {
+      expect(operatorRuns()).toHaveLength(3);
+      expect(adapter3.pending?.spec.prompt).toContain(
+        'moved this task from "Ready" to "In Progress"',
+      );
+    });
+  });
+
   it("B-OP2: a queued @operator question survives a later machine trigger", async () => {
     await drive({ trigger: "manual" });
     expect(adapter3.pending).not.toBeNull();

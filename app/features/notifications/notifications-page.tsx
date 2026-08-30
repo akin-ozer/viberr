@@ -35,7 +35,11 @@ import {
 function keybtnLabel(n: NotificationPageItem): string {
   // F18-1: an orphan has nowhere to open — say so instead of a live-looking link.
   if (n.targetMissing) return "project no longer exists";
-  return (n.projectName ? n.projectName + " · " : "") + (n.taskKey ?? "");
+  // Named after where it GOES. Concatenating an absent task key produced
+  // "Viberr Core · " — a trailing separator on a control whose destination is
+  // the project board, not a task.
+  if (!n.taskKey) return n.projectName ?? "";
+  return (n.projectName ? n.projectName + " · " : "") + n.taskKey;
 }
 
 function NtfNeedsYou({
@@ -198,17 +202,22 @@ function NtfStream({
                   </strong>
                   <span className="act-sep">·</span>
                   <RichText text={n.text} mentions={false} />{" "}
-                  <button
-                    type="button"
-                    className="keybtn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRead(n.id);
-                      onOpen(n);
-                    }}
-                  >
-                    {keybtnLabel(n)}
-                  </button>
+                  {/* B-FD6: rendered only when the row HAS a destination.
+                      An org-wide row has none, and this was a focusable
+                      control whose onOpen was a no-op. */}
+                  {n.href !== null && (
+                    <button
+                      type="button"
+                      className="keybtn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRead(n.id);
+                        onOpen(n);
+                      }}
+                    >
+                      {keybtnLabel(n)}
+                    </button>
+                  )}
                 </span>
                 {n.unread && (
                   <button

@@ -19,6 +19,12 @@ export interface NotificationView {
   taskKey: string | null;
   occurredAt: string;
   unread: boolean;
+  /** B-FD6: the destination `listNotifications` already resolved for this row —
+   *  a task page, a project board, or null when the row concerns no live
+   *  surface (org-wide rows, and F18-1 orphans whose project is gone). Every
+   *  surface navigates to THIS; re-deriving it per surface as
+   *  `projectSlug && taskKey` is what made project-scoped rows dead clicks. */
+  href: string | null;
   /** F18-1: the project this row named no longer exists — render it as a
    *  non-navigable orphan (clicking it would 404) with a "no longer exists"
    *  note, instead of a live-looking link. */
@@ -51,8 +57,18 @@ export function NotificationItem({
       // F18-1: an orphan (its project was deleted) has nowhere to open — the
       // click only marks it read. `aria-disabled` (not `disabled`) keeps it
       // focusable so a keyboard user can still dismiss it.
-      aria-disabled={n.targetMissing || undefined}
-      title={n.targetMissing ? "The project this refers to no longer exists" : undefined}
+      // A row with no destination is not a live control either: an org-wide
+      // row has no page to open, and it used to render as a normal button that
+      // navigated nowhere. `aria-disabled` (not `disabled`) keeps it focusable
+      // so a keyboard user can still dismiss it.
+      aria-disabled={n.href === null || undefined}
+      title={
+        n.targetMissing
+          ? "The project this refers to no longer exists"
+          : n.href === null
+            ? "This one has no page to open"
+            : undefined
+      }
     >
       <span className={"pev-ico " + m.cls}>
         <Icon name={m.icon} />

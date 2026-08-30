@@ -1,4 +1,3 @@
-import { useRef } from "react";
 import { useLocation, useNavigate, useFetcher } from "react-router";
 import { z } from "zod";
 import type { Route } from "./+types/notifications";
@@ -69,17 +68,19 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
   const { notifications, unread, truncated, limit, decisionCount } = loaderData;
   const navigate = useNavigate();
   const location = useLocation();
-  const fetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const readFetcher = useFetcher<{ ok: boolean; error?: string }>();
+  // R14-3: mark-all-read owns its own fetcher. Sharing one with the row read
+  // meant a row click ABORTED an in-flight mark-all, and React Router drops an
+  // aborted submission's result — so the row's own success then spoke for the
+  // mark-all, and the mark-all's failure branch was unreachable.
+  const readAllFetcher = useFetcher<{ ok: boolean; error?: string }>();
   const csrf = useCsrfToken();
   const push = useToast();
 
-  // Mark-all-read toast fires on the server RESULT, not on submit. This
-  // fetcher also handles single-row reads, so a `wantAllRead` flag scopes the
-  // toast; a failed POST reports the failure, not a false success (P11-40).
-  const wantAllRead = useRef(false);
-  useFetcherResult(fetcher, (data) => {
-    if (!wantAllRead.current) return;
-    wantAllRead.current = false;
+  // Mark-all-read toast fires on the server RESULT, not on submit: a failed
+  // POST reports the failure, not a false success (P11-40). The result can only
+  // be a mark-all's now, so no submit-time flag has to scope it.
+  useFetcherResult(readAllFetcher, (data) => {
     push(
       data.ok
         ? "All notifications marked read"
@@ -107,23 +108,22 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
     fd.set("_csrf", csrf);
     fd.set("intent", "read");
     fd.append("id", id);
-    fetcher.submit(fd, { method: "post", action: "/notifications/read" });
+    readFetcher.submit(fd, { method: "post", action: "/notifications/read" });
   };
 
   const markAllRead = () => {
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "read-all");
-    wantAllRead.current = true;
-    fetcher.submit(fd, { method: "post", action: "/notifications/read" });
+    readAllFetcher.submit(fd, { method: "post", action: "/notifications/read" });
   };
 
   const openItem = (n: NotificationPageItem) => {
-    // F18-1: an orphan's project was deleted — navigating there lands on a
-    // shell-less 404. Do not navigate; the row already carries the note.
-    if (!n.targetMissing && n.projectSlug && n.taskKey) {
-      navigate(`/projects/${n.projectSlug}/tasks/${n.taskKey}`);
-    }
+    // B-FD6: the destination is resolved ONCE in `listNotifications` (null when
+    // the row concerns no live surface, an F18-1 orphan whose project is gone
+    // included). Re-deriving it here as `projectSlug && taskKey` is what made
+    // project-scoped rows render as live controls that navigate nowhere.
+    if (n.href) navigate(n.href);
   };
 
   return (

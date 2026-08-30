@@ -69,6 +69,7 @@ export function ResourcesPanel({
   // tests that render the panel directly need not build the map — an absent map
   // means "no project grants counted", i.e. the delete tail counts templates only.
   projectGrants = { kbs: {}, mcps: {}, skills: {} },
+  templateGrants = { kbs: {}, mcps: {}, skills: {} },
   stages,
 }: {
   kbs: KbView[];
@@ -76,6 +77,13 @@ export function ResourcesPanel({
   skills: SkillView[];
   gagents: GagentView[];
   projectGrants?: {
+    kbs: Record<string, number>;
+    mcps: Record<string, number>;
+    skills: Record<string, number>;
+  };
+  /** How many ORG TEMPLATES grant each resource, counted server-side over the
+   *  profile FILES. Same optionality rule as `projectGrants` above. */
+  templateGrants?: {
     kbs: Record<string, number>;
     mcps: Record<string, number>;
     skills: Record<string, number>;
@@ -148,8 +156,13 @@ export function ResourcesPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [warming]);
 
+  // Counted server-side over the profile FILES, not from `gagents`: that list
+  // is the specialist CRUD list and excludes the controller and operator
+  // templates, while the delete rewrites EVERY profile file. Deriving it here
+  // told an admin "Nothing grants it" about the three resources the shipped
+  // store attaches to those two templates, right before the delete took them.
   const usedBy = (key: "skills" | "mcps" | "kbs", slug: string) =>
-    gagents.filter((a) => a[key].includes(slug)).length;
+    templateGrants[key][slug] ?? 0;
   // A2: how many PROJECT DEPLOYMENTS grant it (computed server-side by walking
   // every project.md — `org-view.server.getOrgSettingsView`). The delete drops
   // those grants too, so the confirm must disclose them, not just the templates.

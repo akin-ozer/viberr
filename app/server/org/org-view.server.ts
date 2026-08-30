@@ -33,7 +33,10 @@ import {
   type OrgSeedContext,
   type SkillView,
 } from "./resources.server";
-import { countProjectDeploymentGrants } from "./resource-references.server";
+import {
+  countProjectDeploymentGrants,
+  countTemplateGrants,
+} from "./resource-references.server";
 
 /**
  * The /org/settings loader payload — all slices at once (they're small,
@@ -57,6 +60,19 @@ export interface OrgSettingsView {
    * delete silently dropped that project grant. This lets the dialog say so.
    */
   projectGrants: {
+    kbs: Record<string, number>;
+    mcps: Record<string, number>;
+    skills: Record<string, number>;
+  };
+  /**
+   * How many ORG TEMPLATES grant each resource, on the same keys. Counted over
+   * the profile FILES because `gagents` is the specialist CRUD list (the
+   * controller and operator templates are never in it) while the delete
+   * rewrites every profile file — a panel deriving this from `gagents` told an
+   * admin "Nothing grants it" about the controller's and operator's own
+   * resources, right before the delete stripped those grants.
+   */
+  templateGrants: {
     kbs: Record<string, number>;
     mcps: Record<string, number>;
     skills: Record<string, number>;
@@ -152,11 +168,15 @@ export function getOrgSettingsView(
   // A2: count project-deployment grants for each resource, keyed by the slug the
   // delete-confirm passes (KB by `dir`; MCP/skill by `name`). The `ResourceKind`
   // the deployment stores is `kb` (singular) / `mcps` / `skills`.
-  const countGrants = (slugs: string[], kind: "kb" | "mcps" | "skills") =>
+  const countGrants = (
+    slugs: string[],
+    kind: "kb" | "mcps" | "skills",
+    count: typeof countProjectDeploymentGrants,
+  ): Record<string, number> =>
     Object.fromEntries(
-      slugs.map((slug) => [
+      slugs.map((slug): [string, number] => [
         slug,
-        countProjectDeploymentGrants(kind, slug, ctx.dataRoot),
+        count(kind, slug, ctx.dataRoot),
       ]),
     );
   return {
@@ -168,9 +188,14 @@ export function getOrgSettingsView(
     skills,
     gagents: listGlobalAgentProfiles(db, ctx),
     projectGrants: {
-      kbs: countGrants(kbs.map((k) => k.dir), "kb"),
-      mcps: countGrants(mcps.map((m) => m.name), "mcps"),
-      skills: countGrants(skills.map((s) => s.name), "skills"),
+      kbs: countGrants(kbs.map((k) => k.dir), "kb", countProjectDeploymentGrants),
+      mcps: countGrants(mcps.map((m) => m.name), "mcps", countProjectDeploymentGrants),
+      skills: countGrants(skills.map((s) => s.name), "skills", countProjectDeploymentGrants),
+    },
+    templateGrants: {
+      kbs: countGrants(kbs.map((k) => k.dir), "kb", countTemplateGrants),
+      mcps: countGrants(mcps.map((m) => m.name), "mcps", countTemplateGrants),
+      skills: countGrants(skills.map((s) => s.name), "skills", countTemplateGrants),
     },
     stages: GOVERNED_TEMPLATE.stages,
     // R19-16: what the app can ACTUALLY grant now (app row overriding env),
