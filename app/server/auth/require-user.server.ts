@@ -120,9 +120,16 @@ export async function authenticate(
 /** Sanitizes a post-login redirect target: same-app absolute paths only. */
 export function safeReturnTo(value: string | null | undefined): string | null {
   if (!value) return null;
-  if (!value.startsWith("/")) return null;
-  if (value.startsWith("//") || value.startsWith("/\\")) return null;
-  return value;
+  // Judge the string the BROWSER will resolve, not the one we were handed.
+  // URL parsing removes tab, newline and carriage return before resolving, so
+  // "/<tab>/evil.example" arrives here looking like a local path (it starts
+  // with a single "/") and reaches the browser as "//evil.example" — a
+  // protocol-relative URL pointing off-site. Strip them first, then check, and
+  // return the stripped form so what we hand back is what we validated.
+  const resolved = value.replace(/[\t\n\r]/g, "");
+  if (!resolved.startsWith("/")) return null;
+  if (resolved.startsWith("//") || resolved.startsWith("/\\")) return null;
+  return resolved;
 }
 
 function loginRedirect(request: Request): Response {

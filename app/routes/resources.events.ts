@@ -1,5 +1,6 @@
 import type { Route } from "./+types/resources.events";
 import { authenticate } from "~/server/auth/require-user.server";
+import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { getDb } from "~/server/db/sqlite.server";
 import {
   connectSseClient,
@@ -109,12 +110,20 @@ export async function loader({ request }: Route.LoaderArgs) {
   //     authenticated user could name a foreign scope and stream its live events
   //     (R2: parseSseScope validated syntax, never membership).
   //   - `user` scope (their own targeted events) always passes.
-  let effectiveScopes: SseScope[];
-  if (ctx.user.role === "admin") {
-    effectiveScopes = scopes;
-  } else {
+  /**
+   * The scopes this user is allowed RIGHT NOW.
+   *
+   * Re-resolved rather than captured: the org role and the membership set are
+   * both read live, because this same function is handed to the broker as the
+   * connection's `reauthorize` hook. An SSE stream stays open indefinitely, so
+   * deciding this once at connect time meant a member removed from a project
+   * (or an admin demoted) kept receiving that project's events for as long as
+   * the tab lived.
+   */
+  const resolveScopes = (): SseScope[] => {
+    if (isOrgAdmin(getDb(), ctx.user.id)) return scopes;
     const memberOf = new Set(memberProjectSlugs(ctx.user.id));
-    effectiveScopes = scopes.flatMap((s): SseScope[] => {
+    return scopes.flatMap((s): SseScope[] => {
       if (s.kind === "projects") {
         return [...memberOf].map((slug) => ({ kind: "project", slug }));
       }
@@ -123,19 +132,21 @@ export async function loader({ request }: Route.LoaderArgs) {
       }
       return [s]; // user scope
     });
-    // A non-member who named ONLY foreign project/task scopes gets nothing to
-    // subscribe to — deny explicitly rather than open an empty stream.
-    if (effectiveScopes.length === 0) {
-      return Response.json(
-        {
-          error: {
-            code: "forbidden",
-            message: "You are not a member of the requested project scope(s).",
-          },
+  };
+
+  const effectiveScopes = resolveScopes();
+  // A non-member who named ONLY foreign project/task scopes gets nothing to
+  // subscribe to — deny explicitly rather than open an empty stream.
+  if (effectiveScopes.length === 0) {
+    return Response.json(
+      {
+        error: {
+          code: "forbidden",
+          message: "You are not a member of the requested project scope(s).",
         },
-        { status: 403 },
-      );
-    }
+      },
+      { status: 403 },
+    );
   }
 
   const lastRaw = request.headers.get("last-event-id");
@@ -159,6 +170,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         scopes: effectiveScopes,
         lastEventId,
         write,
+        reauthorize: resolveScopes,
         onClose: () => {
           try {
             controller.close();

@@ -76,6 +76,46 @@ describe("archived project is read-only (R6-3)", () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 
+  /**
+   * The task-OWNER exception (R6-2/R14-2) lets a contributor decide about
+   * their own task without the maintainer tier. It short-circuits ahead of
+   * `requireAction`, which is the single chokepoint enforcing the archive
+   * freeze — so the exception was also skipping the freeze. Owning a task on a
+   * frozen board is not a licence to close it: acceptance attempts a real
+   * merge, and packet resolution starts an operator run.
+   */
+  it("refuses acceptance by the task OWNER on an archived project (409)", async () => {
+    await updateProjectFile(
+      { projectSlug: store.slug, dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.archived = true;
+      },
+    );
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.ownerUserId = store.users.selin.id;
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const stages = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter.stages;
+    const terminal = stages[stages.length - 1]!.id;
+
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: terminal, manual: true },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
   it("refuses editing the goal on an archived project (409)", async () => {
     await archive();
     await expect(

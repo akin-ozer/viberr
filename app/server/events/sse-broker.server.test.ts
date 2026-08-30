@@ -364,6 +364,52 @@ describe("heartbeat", () => {
     vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS * 3);
     expect(conn.writes.length).toBe(count);
   });
+
+  /**
+   * Subscription authority is decided when the stream opens, and an SSE
+   * stream never ends on its own. Without a re-check, a member removed from a
+   * project (or an admin demoted) keeps receiving that project's live events
+   * for as long as the tab stays open.
+   */
+  it("re-authorizes scopes on each beat and drops a connection that lost them all", () => {
+    vi.useFakeTimers();
+    let allowed: SseScope[] = [
+      { kind: "project", slug: "alpha" },
+      { kind: "project", slug: "beta" },
+    ];
+    const writes: string[] = [];
+    const lifecycle = { closed: false };
+    const handle = connectSseClient({
+      userId: "u1",
+      scopes: allowed,
+      lastEventId: null,
+      write: (chunk) => writes.push(chunk),
+      onClose: () => {
+        lifecycle.closed = true;
+      },
+      reauthorize: () => allowed,
+    });
+
+    publishSseEvent(rebuiltEvent(), { projectSlug: "beta" });
+    const afterFirst = writes.length;
+    expect(afterFirst).toBeGreaterThan(0);
+
+    // Removed from beta, still a member of alpha.
+    allowed = [{ kind: "project", slug: "alpha" }];
+    vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+    const afterBeat = writes.length;
+    publishSseEvent(rebuiltEvent(), { projectSlug: "beta" });
+    expect(writes.length).toBe(afterBeat); // beta no longer reaches them
+    publishSseEvent(rebuiltEvent(), { projectSlug: "alpha" });
+    expect(writes.length).toBeGreaterThan(afterBeat); // alpha still does
+
+    // Removed from everything: the stream closes rather than idling on with
+    // scopes its user no longer holds.
+    allowed = [];
+    vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+    expect(lifecycle.closed).toBe(true);
+    handle.close();
+  });
 });
 
 describe("drop-and-close on failed write", () => {

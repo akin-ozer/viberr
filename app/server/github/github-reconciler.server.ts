@@ -15,6 +15,7 @@ import {
   patchTaskFrontmatter,
   readTaskFile,
   resolveTaskFilePath,
+  updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { storeRelativePath } from "~/server/files/file-store-root.server";
 import {
@@ -636,13 +637,37 @@ async function reconcileTaskUnlocked(
             (r.kind === "accept_completion" && closedButActive),
         )
       : [];
-    if (supersededRecs.length > 0) {
-      const supersededIds = new Set(supersededRecs.map((r) => r.id));
-      patch.recommendations = fm.recommendations.filter(
-        (r) => !supersededIds.has(r.id),
-      );
-    }
-    await patchTaskFrontmatter(ref, patch);
+    const supersededIds = new Set(supersededRecs.map((r) => r.id));
+    // Everything above was decided from a snapshot taken BEFORE several awaited
+    // GitHub round trips, and this is a blind whole-key assign. Another writer
+    // can land in that window — an acceptance stamping `pr.state: "accepted"`
+    // (merge pending), or a merge stamping `"merged"` — and a plain patch would
+    // overwrite it with the "review" this pass set out with. The `accepted`
+    // case never recovers: only an acceptance writes it, and the task is
+    // already in Done, so "Complete merge" would refuse forever.
+    //
+    // So re-apply the same two decisions against the file as it is NOW, under
+    // the lock: the local lifecycle state wins over a stale remote `review`,
+    // and the superseded-recommendation filter runs on the live list.
+    await updateTaskFile(ref, (parsed) => {
+      const applied: Partial<TaskFrontmatter> = { ...patch };
+      const current = parsed.frontmatter.pr;
+      if (
+        applied.pr &&
+        current &&
+        current.number === applied.pr.number &&
+        applied.pr.state === "review" &&
+        (current.state === "accepted" || current.state === "merged")
+      ) {
+        applied.pr = { ...applied.pr, state: current.state };
+      }
+      if (supersededIds.size > 0) {
+        applied.recommendations = parsed.frontmatter.recommendations.filter(
+          (r) => !supersededIds.has(r.id),
+        );
+      }
+      Object.assign(parsed.frontmatter, applied);
+    });
     if (unownedPrIsNew && collisionNote) {
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),

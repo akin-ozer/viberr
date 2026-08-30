@@ -30,6 +30,7 @@ import {
   RUN_INPUTS_TAG,
   type RunInputs,
 } from "~/features/runtime/runtime-types";
+import { resolveDeliveryPermissions } from "./specialist-tool-policy";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
 import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -164,6 +165,55 @@ describe("listDeployedSpecialists", () => {
       role: "developer",
       backend: "claude",
     });
+  });
+
+  /**
+   * XS-4 again, on the SELECTION side. The headline
+   * `execute-code-or-write-repo` gates every delivery step, and
+   * `repairDeliveryGrants` deliberately preserves "headline off, scoped grant
+   * on" (B-AG1) — so that state is really savable. Advertising it as
+   * delivery-capable sends the operator (and any human picking from the run
+   * control) to an agent whose write tools are all denied.
+   */
+  it("does not advertise delivery when the headline repo-write grant is withheld", () => {
+    const file = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    const fm = file.parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [
+            { capabilityId: "execute-code-or-write-repo", mode: "off" },
+            { capabilityId: "commit-push-branch", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            effort: "xhigh",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const listed = listDeployedSpecialists(store.slug, { dataRoot: store.dataRoot });
+    expect(listed).toHaveLength(1);
+    // What the picker is told must be what the runtime will actually allow.
+    const runtime = resolveDeliveryPermissions([
+      { capabilityId: "execute-code-or-write-repo", mode: "off" },
+      { capabilityId: "commit-push-branch", mode: "direct" },
+    ]);
+    expect(runtime.canCommitPush).toBe(false);
+    expect(listed[0]!.capabilities.delivery).toBe(false);
   });
 
   it("surfaces a model-availability mark so the run control can warn (F3)", () => {

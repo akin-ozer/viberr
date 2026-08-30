@@ -138,4 +138,65 @@ describe("conversation access", () => {
       setBackendAvailability("claude", true);
     }
   });
+
+  /**
+   * A turn that lands while the controller is busy is queued, but the queue is
+   * bounded. The overflow message is still WRITTEN to the transcript before
+   * the bound is checked (the record is not a scheduling decision), so without
+   * a reply beside it the thread reads back as a question the controller
+   * ignored. Every other refusal path says so in the transcript; this one must
+   * too.
+   */
+  it("a message refused for a full queue says so in the transcript", async () => {
+    const { createConversation, listMessages } = await import(
+      "./controller-conversations.server"
+    );
+    const { runControllerTurn } = await import("./controller-run.server");
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: null,
+    });
+
+    // Occupy the conversation's lease with a full queue. The lease lives in a
+    // process registry under a documented symbol; seeding it is how a busy
+    // controller is reproduced without a live model run.
+    const leaseKey = Symbol.for("viberr.controllerLease");
+    // SAFETY: the module creates this Map on first use and only ever stores
+    // lease entries in it; the test seeds one entry and deletes it after.
+    const host = globalThis as {
+      [leaseKey]?: Map<string, { runId: string | null; queue: unknown[] }>;
+    };
+    const map = host[leaseKey] ?? new Map();
+    host[leaseKey] = map;
+    map.set(conversation.id, {
+      runId: "run_busy",
+      queue: Array.from({ length: 8 }, (_, i) => ({
+        messageId: `m_${i}`,
+        text: "queued",
+      })),
+    });
+
+    try {
+      const result = await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "One more thing.",
+        user: {
+          id: ownerId,
+          email: "selin@viberr.dev",
+          name: "Selin Aksoy",
+          orgRole: "member",
+        },
+        dataRoot: app.dataRoot,
+      });
+      expect(result.state).toBe("refused");
+      const messages = listMessages(app.db, conversation.id);
+      expect(messages).toHaveLength(2);
+      expect(messages[0]!.text).toBe("One more thing.");
+      expect(messages[1]!.author).toBe("controller");
+      expect(messages[1]!.text).toContain("queue for this conversation is full");
+    } finally {
+      map.delete(conversation.id);
+    }
+  });
 });

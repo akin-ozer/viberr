@@ -123,6 +123,41 @@ describe("startMcpWarmup (R19-18)", () => {
     expect(row.lastError).toBeTruthy();
   });
 
+  /**
+   * A warm-up runs for up to 15 minutes, and an admin can re-point the row at
+   * a different command while it does. A verdict keyed on the row id alone
+   * then lands the OLD command's health — `up`, its tool count, even
+   * `first_success_at` — on the NEW one, so the panel shows a green server
+   * nobody has ever successfully started.
+   */
+  it("a warm-up whose row was re-pointed does not stamp the old command's verdict", async () => {
+    const db = dbCtx.makeDb();
+    const saved = await saveMcpServer(
+      db,
+      { name: "moving-stdio", transport: "stdio", target: "uvx original", cred: "" },
+      ACTOR,
+      { spawnImpl: installerSpawn(60), timeoutMs: 5, capMs: 5000 },
+    );
+    expect(saved.mcp.warmingSince).not.toBeNull();
+
+    // The admin re-points the row while that install is still running. Write
+    // the target directly: this is about the warm-up's verdict, not about
+    // whatever probe a save runs.
+    db.prepare(`UPDATE org_mcp_servers SET target = ?, up = NULL, tools_count = NULL WHERE id = ?`).run(
+      "uvx replacement",
+      saved.mcp.id,
+    );
+
+    await settle();
+    const row = listMcpServers(db).find((m) => m.name === "moving-stdio")!;
+    expect(row.target).toBe("uvx replacement");
+    // The old command's success did not become the new command's.
+    expect(row.up).not.toBe(true);
+    expect(row.tools).toBeNull();
+    // …and the row is not left claiming to install forever.
+    expect(row.warmingSince).toBeNull();
+  });
+
   it("a restart never leaves a row claiming to install with nothing running", async () => {
     const db = dbCtx.makeDb();
     await saveMcpServer(

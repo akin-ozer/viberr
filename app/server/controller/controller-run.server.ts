@@ -160,11 +160,18 @@ export async function runControllerTurn(
   const held = map.get(conversation.id);
   if (held) {
     if (held.queue.length >= MAX_QUEUED_MESSAGES) {
-      return {
-        state: "refused",
-        reason:
-          "The controller is still answering and its queue for this conversation is full. Wait for the current reply.",
-      };
+      const note =
+        "The controller is still answering and its queue for this conversation is full. Wait for the current reply.";
+      // The message above is already in the transcript and will never be
+      // answered. Say so IN the transcript: every other refusal path does, and
+      // a user message that reads back with no reply beside it is unreadable
+      // history (a toast is gone by the time anyone re-opens the thread).
+      appendMessage(db, {
+        conversationId: conversation.id,
+        author: "controller",
+        text: `I could not take that on: ${note} Say it again once I have replied.`,
+      });
+      return { state: "refused", reason: note };
     }
     held.queue.push({ messageId: message.id, text });
     return { state: "queued", messageId: message.id };

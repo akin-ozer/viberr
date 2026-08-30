@@ -323,6 +323,12 @@ function requireAcceptCompletion(
   ownerUserId: string | null | undefined,
   what: string,
 ): void {
+  // The freeze comes FIRST. The owner exception is about role — a contributor
+  // owner decides about their own task — and it short-circuits past
+  // `requireAction`, the one chokepoint that enforces R6-3. Owning a task on
+  // an archived board is not a licence to close it: acceptance attempts a real
+  // merge on a project the product calls read-only.
+  requireProjectMutable(project, what);
   if (ownerException(project, actor, ownerUserId)) return;
   requireAction(db, project, actor, "accept-completion", what);
 }
@@ -347,6 +353,10 @@ function requireDecisionAuthority(
   ownerUserId: string | null | undefined,
   what: string,
 ): void {
+  // Same reason as `requireAcceptCompletion`: the owner short-circuit skips
+  // `requireAction` and with it the archive freeze, and resolving a packet
+  // starts an operator run on a board that is supposed to be read-only.
+  requireProjectMutable(project, what);
   if (ownerException(project, actor, ownerUserId)) return;
   requireAction(db, project, actor, "resolve-packet", what);
 }

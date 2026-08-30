@@ -98,6 +98,33 @@ describe("/login loader", () => {
     expect(evil.returnTo).toBeNull();
   });
 
+  /**
+   * URL parsing REMOVES tab, newline and carriage return before resolving, so
+   * "/<tab>/evil.example" is delivered to the browser as "//evil.example" — a
+   * protocol-relative URL pointing off-site. A prefix check run on the raw
+   * string sees a leading "/" followed by a tab and waves it through, so the
+   * guard has to judge the string the browser will actually resolve.
+   */
+  it("drops a returnTo that only LOOKS relative until the URL parser strips it", async () => {
+    for (const raw of [
+      "/\t/evil.example/x",
+      "/\n/evil.example/x",
+      "/\r/evil.example/x",
+      "/\t\\evil.example/x",
+    ]) {
+      const res = await loginLoader(
+        `/login?returnTo=${encodeURIComponent(raw)}`,
+      );
+      expect(res.returnTo).toBeNull();
+    }
+    // A tab inside an otherwise ordinary path is still not an escape hatch:
+    // whatever survives must be a single-slash local path.
+    const inner = await loginLoader(
+      `/login?returnTo=${encodeURIComponent("/projects/\tviberr-core/board")}`,
+    );
+    expect(inner.returnTo).toBe("/projects/viberr-core/board");
+  });
+
   it("an authenticated visitor is redirected away (to returnTo when given)", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     const res = await caught(() =>

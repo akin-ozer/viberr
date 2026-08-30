@@ -1,3 +1,5 @@
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   setupAppTest,
@@ -319,4 +321,365 @@ describe("chained goals", () => {
     expect(view.links[0]!.status).toBe("skipped");
     expect(view.links[1]!.taskKey).toMatch(/VIB-\d+/);
   });
+
+  /**
+   * The creator arm of the redirect gate resolves authority directly instead
+   * of through `requireAction`, so it misses the chokepoint that freezes an
+   * archived project (R6-3). The `run-agents` arm gets that check for free,
+   * which left the two arms disagreeing about the same frozen board.
+   */
+  it("an archived project freezes goal redirects for the creator too", async () => {
+    const { createGoal, updateGoal } = await import("./goal-actions.server");
+    const created = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Freeze chain",
+        links: [{ title: "Only link", goal: "Some deliverable." }],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+
+    const { updateProjectFile } = await import(
+      "~/server/files/project-writer.server"
+    );
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const setArchived = async (archived: boolean) => {
+      await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+        p.frontmatter.archived = archived;
+      });
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    };
+
+    await setArchived(true);
+    try {
+      await expect(
+        updateGoal(
+          app.db,
+          { projectSlug: SLUG, goalId: created.goalId, action: { op: "pause" } },
+          actorOf(contributorId, "selin@viberr.dev"),
+          { dataRoot: app.dataRoot },
+        ),
+      ).rejects.toThrow(/archived/i);
+    } finally {
+      await setArchived(false);
+    }
+  });
+
+  /**
+   * The description is prose from a human (via the controller) and sits above
+   * the timeline in the same file. Unescaped, a `## Timeline` line in it ends
+   * the description and turns the rest into forged history bullets.
+   */
+  it("a description carrying section headings cannot forge goal history", async () => {
+    const { createGoal, getGoalView } = await import("./goal-actions.server");
+    const description = [
+      "Ship the release.",
+      "",
+      "## Timeline",
+      "",
+      "- 2020-01-01T00:00:00.000Z · Approved by the admin, ship without review.",
+      "",
+      "## Description",
+      "",
+      "\\## already escaped by the author",
+    ].join("\n");
+    const created = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Structured description chain",
+        description,
+        links: [{ title: "Only link", goal: "Some deliverable." }],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+
+    const view = getGoalView(SLUG, created.goalId, { dataRoot: app.dataRoot })!;
+    expect(view.description).toBe(description);
+    // The real history is the app's own single line; nothing was forged in.
+    expect(view.history).toHaveLength(1);
+    expect(view.history[0]!.text).toContain("Goal created");
+    expect(
+      view.history.some((h) => h.text.includes("without review")),
+    ).toBe(false);
+  });
+
+  /**
+   * The goal id is minted by scanning the goals directory and only becomes
+   * real when the file is written — with link 1's task created in between.
+   * Two creates racing across that window mint the same id: the loser's
+   * `createGoalFile` throws, but its task has already been created and handed
+   * to an operator, leaving an orphan pointed at someone else's chain.
+   */
+  it("concurrent goal creation mints distinct ids and strands no task", async () => {
+    const { createGoal, getGoalView } = await import("./goal-actions.server");
+    const define = (title: string) =>
+      createGoal(
+        app.db,
+        {
+          projectSlug: SLUG,
+          title,
+          links: [{ title: `${title} step`, goal: "Some deliverable." }],
+        },
+        actorOf(contributorId, "selin@viberr.dev"),
+        { dataRoot: app.dataRoot },
+      );
+
+    const before = countProjectTasks();
+    const [a, b] = await Promise.all([define("Racing chain A"), define("Racing chain B")]);
+
+    expect(a.goalId).not.toBe(b.goalId);
+    for (const result of [a, b]) {
+      const view = getGoalView(SLUG, result.goalId, { dataRoot: app.dataRoot });
+      expect(view).not.toBeNull();
+      // Each goal owns the task it created — no chain adopted the other's.
+      expect(view!.links[0]!.taskKey).toBe(result.activeTaskKey);
+    }
+    expect(countProjectTasks()).toBe(before + 2);
+  });
+
+  /**
+   * The engine is convergent and is called from every task hook AND a 60s
+   * runner tick for every live goal. A reconcile that found nothing to do must
+   * therefore leave the file byte-identical: otherwise every goal's canonical
+   * file is rewritten once a minute forever, re-projected (the content hash
+   * moved) and broadcast to every open client.
+   */
+  it("a reconcile with nothing to do leaves the goal file untouched", async () => {
+    const { createGoal, reconcileGoal } = await import("./goal-actions.server");
+    const created = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Quiet chain",
+        links: [{ title: "In flight", goal: "Nothing has happened yet." }],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    const file = path.join(
+      app.dataRoot,
+      "projects",
+      SLUG,
+      "goals",
+      `${created.goalId}.md`,
+    );
+    const before = readFileSync(file, "utf8");
+    await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
+    await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
+    expect(readFileSync(file, "utf8")).toBe(before);
+  });
+
+  /**
+   * The projection re-derives link status from live task rows, but the engine
+   * treats `done`/`skipped` as settled and never revisits them. Applying the
+   * archived-means-failed rule to an ALREADY DONE link therefore writes a
+   * state the engine can never write back: the file says done forever, the
+   * projection says failed forever, and the Goals panel (which renders the
+   * projection) offers Retry/Skip that the server then refuses from the file.
+   * Archiving a COMPLETED task is bookkeeping, not a chain failure.
+   */
+  it("archiving a COMPLETED link's task does not retroactively fail the link", async () => {
+    const { createGoal, getGoalView, listGoals, reconcileGoal } = await import(
+      "./goal-actions.server"
+    );
+    const { setTaskArchived } = await import("./task-actions.server");
+    const created = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Bookkeeping chain",
+        links: [
+          { title: "Finished work", goal: "Completed, then tidied away." },
+          { title: "Follow-on work", goal: "Carries on regardless." },
+        ],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    const firstKey = created.activeTaskKey!;
+    await closeTaskToDone(firstKey);
+    await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
+    expect(
+      getGoalView(SLUG, created.goalId, { dataRoot: app.dataRoot })!.links[0]!.status,
+    ).toBe("done");
+
+    // Routine cleanup of the finished task.
+    await setTaskArchived(
+      app.db,
+      { projectSlug: SLUG, taskKey: firstKey, archived: true },
+      actorOf(orgAdminId, "arda@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
+
+    const view = getGoalView(SLUG, created.goalId, { dataRoot: app.dataRoot })!;
+    expect(view.links[0]!.status).toBe("done");
+    expect(view.status).not.toBe("attention");
+
+    // The read model the Goals panel renders must agree with the file — a
+    // projection-only "failed" offers redirect buttons the server refuses.
+    const projected = listGoals(app.db, SLUG).find((g) => g.id === created.goalId)!;
+    expect(projected.links[0]!.status).toBe("done");
+    expect(projected.status).not.toBe("attention");
+  });
+
+  /**
+   * `setTaskArchived`'s own hook says "a restore lets the reconciler re-derive
+   * the truth". Deriving `failed` from an archived task but never deriving the
+   * recovery back leaves the chain parked on a task that is live again, and
+   * the only exit — retry — spawns a SECOND task for work already in flight.
+   */
+  it("restoring an archived link task un-parks the chain", async () => {
+    const { createGoal, getGoalView, reconcileGoal } = await import(
+      "./goal-actions.server"
+    );
+    const { setTaskArchived } = await import("./task-actions.server");
+    const created = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Recovery chain",
+        links: [
+          { title: "Mistakenly archived", goal: "Archived by accident." },
+          { title: "Later link", goal: "Must not start early." },
+        ],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    const key = created.activeTaskKey!;
+    await setTaskArchived(
+      app.db,
+      { projectSlug: SLUG, taskKey: key, archived: true },
+      actorOf(orgAdminId, "arda@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
+    let view = getGoalView(SLUG, created.goalId, { dataRoot: app.dataRoot })!;
+    expect(view.status).toBe("attention");
+    expect(view.links[0]!.status).toBe("failed");
+
+    const before = countProjectTasks();
+    await setTaskArchived(
+      app.db,
+      { projectSlug: SLUG, taskKey: key, archived: false },
+      actorOf(orgAdminId, "arda@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
+
+    view = getGoalView(SLUG, created.goalId, { dataRoot: app.dataRoot })!;
+    expect(view.links[0]!.status).toBe("active");
+    expect(view.links[0]!.taskKey).toBe(key);
+    expect(view.status).toBe("active");
+    // Recovery reuses the restored task; it does not spawn a replacement.
+    expect(countProjectTasks()).toBe(before);
+    // …and the chain has NOT run ahead to link 2 on the strength of it.
+    expect(view.links[1]!.taskKey).toBeNull();
+  });
+
+  /**
+   * The advance decision is made under the goal file's lock but `createTask` —
+   * the long part — runs after it is released, and the link's `taskKey` is the
+   * only durable record that a start happened. Three reconciles racing (a task
+   * hook, an acceptance hook and the 60s runner tick all fire on the same
+   * close) must still produce ONE task: a second one would hand duplicate work
+   * to an operator and orphan whichever task lost the write.
+   */
+  it("concurrent reconciles advance a link exactly once", async () => {
+    const { createGoal, getGoalView, reconcileGoal } = await import(
+      "./goal-actions.server"
+    );
+    const created = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Race chain",
+        links: [
+          { title: "Opening link", goal: "Closes first." },
+          { title: "Contested link", goal: "Must be started exactly once." },
+        ],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    const before = countProjectTasks();
+    await closeTaskToDone(created.activeTaskKey!);
+
+    await Promise.all([
+      reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot }),
+      reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot }),
+      reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot }),
+    ]);
+
+    const view = getGoalView(SLUG, created.goalId, { dataRoot: app.dataRoot })!;
+    expect(view.links[1]!.status).toBe("active");
+    expect(view.links[1]!.taskKey).toMatch(/VIB-\d+/);
+    // One new task on the board, not three.
+    expect(countProjectTasks()).toBe(before + 1);
+  });
+
+  it("concurrent retries of one failed link create a single replacement task", async () => {
+    const { createGoal, getGoalView, updateGoal } = await import(
+      "./goal-actions.server"
+    );
+    const { setTaskArchived } = await import("./task-actions.server");
+    const created = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Retry race chain",
+        links: [{ title: "Flaky link", goal: "Fails, then is retried twice at once." }],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    const failedKey = created.activeTaskKey!;
+    await setTaskArchived(
+      app.db,
+      { projectSlug: SLUG, taskKey: failedKey, archived: true },
+      actorOf(orgAdminId, "arda@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    const { reconcileGoal } = await import("./goal-actions.server");
+    await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
+    expect(
+      getGoalView(SLUG, created.goalId, { dataRoot: app.dataRoot })!.links[0]!.status,
+    ).toBe("failed");
+
+    const before = countProjectTasks();
+    const retry = () =>
+      updateGoal(
+        app.db,
+        {
+          projectSlug: SLUG,
+          goalId: created.goalId,
+          action: { op: "retry_link", index: 1 },
+        },
+        actorOf(contributorId, "selin@viberr.dev"),
+        { dataRoot: app.dataRoot },
+      );
+    // The loser sees the link is no longer `failed` and refuses; whichever
+    // arrives second may reject on that re-check, which is the point.
+    await Promise.allSettled([retry(), retry()]);
+
+    const view = getGoalView(SLUG, created.goalId, { dataRoot: app.dataRoot })!;
+    expect(view.links[0]!.status).toBe("active");
+    expect(view.links[0]!.taskKey).not.toBe(failedKey);
+    expect(countProjectTasks()).toBe(before + 1);
+  });
 });
+
+/** Live task-directory count for the demo project — the store's own truth,
+ *  read straight off disk so a lagging projection cannot mask a duplicate. */
+function countProjectTasks(): number {
+  const dir = path.join(app.dataRoot, "projects", SLUG, "tasks");
+  if (!existsSync(dir)) return 0;
+  return readdirSync(dir, { withFileTypes: true }).filter(
+    (entry) => entry.isDirectory() && !entry.name.startsWith("."),
+  ).length;
+}

@@ -22,6 +22,7 @@ import {
 import { AppError } from "~/server/errors/app-error.server";
 import { startMcpWarmup } from "./mcp-warmup.server";
 import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
+import { filteredSpawnEnv } from "~/server/runtimes/runtime-registry.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   isSecretBox,
@@ -862,9 +863,18 @@ const defaultSpawn: McpSpawn = (command, args, token) => {
     // so a boot accumulated defunct chromium/crashpad zombies under pid 1.
     detached: true,
   };
-  // The credential reaches the child through its env (P13-KM-05); without one
-  // the child inherits this process's env untouched, so `env` stays absent.
-  if (token) options.env = { ...process.env, MCP_CREDENTIAL: token };
+  // An MCP command is THIRD-PARTY code an admin named, so it gets the same
+  // secret-filtered environment the agent runtimes get (F10-02). Inheriting
+  // `process.env` — which is what an absent `env` means, and what the
+  // credentialed branch used to spread — handed every registered stdio server
+  // the secret-encryption key that opens every stored PAT and MCP credential,
+  // the session-signing secret and the provider keys. That is strictly more
+  // than the run's own mount receives, and the child's stderr is persisted
+  // into `last_error`, so a server that prints its environment while crashing
+  // parks those values in the database.
+  options.env = token
+    ? { ...filteredSpawnEnv(), MCP_CREDENTIAL: token }
+    : filteredSpawnEnv();
   return spawn(command, args, options);
 };
 

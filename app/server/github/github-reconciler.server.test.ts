@@ -18,7 +18,7 @@ import { checksPill } from "~/features/github/github-pills";
 import { mapPrChecks } from "~/shared/mapping/task.server";
 import { updateUserFields } from "~/server/auth/user-store.server";
 import { readPrHumanApproval } from "./pr-human-approval.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import {
   countOpenPolicyViolations,
@@ -780,6 +780,68 @@ describe("reconcileTask", () => {
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
     expect(fm.pr?.state).toBe("accepted"); // still open on GitHub → stays accepted
+  });
+
+  /**
+   * The same D3/S2 guard, but for an acceptance that lands DURING the pass.
+   * A reconcile decides its whole `pr` cache from a snapshot taken before
+   * several awaited GitHub round trips and then writes that key wholesale, so
+   * an acceptance stamping "accepted" in that window was overwritten with the
+   * "review" the pass set out with — and nothing ever writes "accepted" again,
+   * because only an acceptance does and the task is already in Done. "Complete
+   * merge" then refuses forever.
+   */
+  it("does not clobber an acceptance that lands mid-pass", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-302", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 318, state: "review", title: "Attach execution workspace" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler03" },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+
+    // The acceptance lands on the FIRST GitHub round trip — i.e. after the
+    // pass has taken its snapshot and before it writes.
+    const inner = fakeGithubFetch(happyRoutes()).fetchImpl;
+    let accepted = false;
+    const fetchImpl: typeof inner = async (input, init) => {
+      if (!accepted) {
+        accepted = true;
+        await updateTaskFile(
+          { projectSlug: store.slug, taskKey: "VIB-302", dataRoot: store.dataRoot },
+          (parsed) => {
+            parsed.frontmatter.pr = { ...parsed.frontmatter.pr!, state: "accepted" };
+            parsed.frontmatter.stage = "done";
+          },
+        );
+      }
+      return inner(input, init);
+    };
+
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-302" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl },
+    );
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-302",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr?.state).toBe("accepted");
   });
 
   it("advances 'accepted' → 'merged' once GitHub reports the PR merged", async () => {

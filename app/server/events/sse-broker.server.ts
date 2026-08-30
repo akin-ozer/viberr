@@ -126,6 +126,7 @@ interface SseConnection {
   write: (chunk: string) => void;
   heartbeat: ReturnType<typeof setInterval> | null;
   onClose: (() => void) | undefined;
+  reauthorize: (() => SseScope[]) | undefined;
   closed: boolean;
 }
 
@@ -225,6 +226,36 @@ function safeWrite(state: BrokerState, conn: SseConnection, chunk: string): void
   }
 }
 
+/**
+ * Narrow a live connection to the scopes its user still holds.
+ * Returns false when the connection was dropped for holding none.
+ */
+function applyReauthorization(
+  state: BrokerState,
+  conn: SseConnection,
+): boolean {
+  if (!conn.reauthorize) return true;
+  let next: SseScope[];
+  try {
+    next = conn.reauthorize();
+  } catch (error) {
+    // A check that could not run must not WIDEN access, and must not tear down
+    // a healthy stream over a transient read either: keep what the connection
+    // already had and try again on the next beat.
+    logger.warn("sse scope re-authorization failed", {
+      connectionId: conn.id,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return true;
+  }
+  if (next.length === 0) {
+    dropConnection(state, conn);
+    return false;
+  }
+  conn.scopes = next;
+  return true;
+}
+
 export interface ConnectSseInput {
   userId: string;
   scopes: SseScope[];
@@ -234,6 +265,17 @@ export interface ConnectSseInput {
   write: (chunk: string) => void;
   /** Called exactly once when the broker drops/closes the connection. */
   onClose?: () => void;
+  /**
+   * Re-resolve the scopes this connection is still allowed, called on every
+   * heartbeat.
+   *
+   * Authorization is otherwise decided once, at connect time, and these
+   * streams are open-ended: a member removed from a project (or an admin
+   * demoted) would keep receiving that project's live events for as long as
+   * the tab stays open. Returning an empty list closes the connection — the
+   * client's own backoff then re-opens and meets the ordinary 403.
+   */
+  reauthorize?: () => SseScope[];
 }
 
 export interface SseConnectionHandle {
@@ -256,6 +298,7 @@ export function connectSseClient(input: ConnectSseInput): SseConnectionHandle {
     write: input.write,
     heartbeat: null,
     onClose: input.onClose,
+    reauthorize: input.reauthorize,
     closed: false,
   };
   state.connections.set(conn.id, conn);
@@ -301,6 +344,7 @@ export function connectSseClient(input: ConnectSseInput): SseConnectionHandle {
 
   if (!conn.closed) {
     conn.heartbeat = setInterval(() => {
+      if (!applyReauthorization(state, conn)) return;
       safeWrite(state, conn, HEARTBEAT_CHUNK);
     }, HEARTBEAT_INTERVAL_MS);
     // Never keep the process alive just for heartbeats.
