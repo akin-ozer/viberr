@@ -35,6 +35,9 @@ export type ActorRender =
     }
   | { kind: "agent"; backend: "codex" | "claude"; name: string; role: string }
   | { kind: "agent"; name: "Operator" }
+  // Ruling 99: the instance controller — same backend-less shape as the
+  // operator (it is machinery, not a deployed profile).
+  | { kind: "agent"; name: "Controller" }
   | { kind: "system"; name: string };
 
 /** The human variant, named so it can be built in steps (the `guest` marker is
@@ -109,6 +112,8 @@ export function createActorResolver(
     switch (ref.kind) {
       case "operator":
         return { kind: "agent", name: "Operator" };
+      case "controller":
+        return { kind: "agent", name: "Controller" };
       case "agent":
         return {
           kind: "agent",

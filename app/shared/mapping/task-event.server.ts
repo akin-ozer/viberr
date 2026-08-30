@@ -16,7 +16,7 @@ export type TaskEventRow = {
   position: number;
   occurred_at: string;
   type: string;
-  actor_kind: "human" | "agent" | "operator" | "system";
+  actor_kind: "human" | "agent" | "operator" | "controller" | "system";
   actor_ref: string;
   actor_json: string;
   title: string | null;

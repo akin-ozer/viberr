@@ -5,7 +5,7 @@ import { watch, type FSWatcher } from "chokidar";
 import { z } from "zod";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
-import { rebuildPath, rebuildTaskFile } from "~/server/projections/rebuilder.server";
+import { rebuildGoalFile, rebuildPath, rebuildTaskFile } from "~/server/projections/rebuilder.server";
 import { getDataRoot, projectFilePath, projectsDir, taskFilePath } from "./file-store-root.server";
 
 /**
@@ -36,6 +36,7 @@ export const WATCH_DEBOUNCE_MS = 250;
  *  `task_projections.task_key` is TEXT NOT NULL, `projects.slug` is its
  *  TEXT primary key. */
 const taskKeyRowSchema = z.object({ task_key: z.string() });
+const goalIdRowSchema = z.object({ goal_id: z.string() });
 const projectSlugRowSchema = z.object({ slug: z.string() });
 
 /** Node hangs its errno off `code`; a watcher error without one is not a
@@ -218,6 +219,20 @@ export function startFileWatcher(
       }
       const slug = segments[0]!;
       if (segments.length === 1) return reconcileProject(slug);
+      if (segments[1] === "goals" && segments.length === 2) {
+        // Ruling 99: the goals dir vanished — prune its projected rows.
+        const goals = z.array(goalIdRowSchema).parse(
+          db
+            .prepare(
+              `SELECT goal_id FROM goal_projections WHERE project_slug = ?`,
+            )
+            .all(slug),
+        );
+        for (const g of goals) {
+          rebuildGoalFile(db, slug, g.goal_id, { dataRoot: root });
+        }
+        return;
+      }
       if (segments[1] !== "tasks") return; // non-store subtree
       if (segments.length === 2) return reconcileProject(slug);
       if (segments.length === 3) {
@@ -243,7 +258,12 @@ export function startFileWatcher(
   const onFile = (eventPath: string) => {
     const absPath = path.resolve(watchedDir, eventPath);
     const base = path.basename(absPath);
-    if (base === "project.md" || base === "task.md") {
+    // Ruling 99: `<slug>/goals/<id>.md` is the third canonical file kind.
+    const isGoalFile =
+      base.endsWith(".md") &&
+      path.basename(path.dirname(absPath)) === "goals" &&
+      path.dirname(path.dirname(path.dirname(absPath))) === watchedDir;
+    if (base === "project.md" || base === "task.md" || isGoalFile) {
       schedule(fileTimers, absPath, rebuildFile);
     }
   };

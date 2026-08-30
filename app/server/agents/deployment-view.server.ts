@@ -60,6 +60,10 @@ export function readTemplate(
   });
   if (!parsed) return null;
   const fm = parsed.frontmatter;
+  // Ruling 99: the controller is instance machinery, never a deployable
+  // template — a deployment row naming it resolves as if no template existed,
+  // so the two-kind deployment world stays closed.
+  if (fm.kind === "controller") return null;
   return {
     kind: fm.kind,
     name: fm.name,

@@ -564,6 +564,8 @@ const DEFAULT_THREAD = {
   operator: "op",
   primary: "primary",
   reviewer: "r0",
+  // Ruling 99: controller conversation turns (task_key = the conversation id).
+  controller: "controller",
 } satisfies Record<RunKind, string>;
 
 /**
@@ -1007,8 +1009,16 @@ function recordSessionMissing(db: DatabaseSync, run: AgentRunRow): void {
  * The follow-up prompt alone assumes a conversation the agent no longer has, so
  * it is prefixed with what happened and where the truth lives.
  */
-function continuityResetPreamble(backend: RealBackend): string {
+function continuityResetPreamble(backend: RealBackend, kind?: string): string {
   const label = backend === "claude" ? "Claude" : "Codex";
+  // Ruling 99: a controller turn has no task.md — its anchors are the recent
+  // conversation digest its turn prompt carries and the live tool reads.
+  if (kind === "controller") {
+    return [
+      `[continuity notice] Your previous ${label} session for this conversation is gone — the provider transcript no longer exists, so none of the earlier exchange is in your context.`,
+      `The recent-conversation digest in the prompt below and your tools are your anchors. Say so if the request depends on context you can no longer see.`,
+    ].join(" ");
+  }
   return [
     `[continuity notice] Your previous ${label} session for this task is gone — the provider transcript no longer exists, so none of that conversation is in your context.`,
     `Re-anchor on the canonical task file (\`task.md\` in your working directory) and the repository state before you act. Treat the request below as a fresh instruction, and say so if it depends on context you can no longer see.`,
@@ -1029,6 +1039,10 @@ async function noteContinuityReset(
   run: AgentRunRow,
   dataRoot?: string,
 ): Promise<void> {
+  // Ruling 99: a controller conversation has no task file to note on — its
+  // per-turn digest is the recovery, and the run row's session_missing stamp
+  // remains the durable record.
+  if (run.kind === "controller") return;
   const ref: TaskFileRef = {
     projectSlug: run.project_slug,
     taskKey: run.task_key,
@@ -1233,7 +1247,7 @@ export async function resumeRun(
       model: input.model ?? prev.model,
       agentName: input.agentName ?? prev.agent_name,
       agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
-      prompt: `${continuityResetPreamble(backend)}\n\n${input.prompt}`,
+      prompt: `${continuityResetPreamble(backend, prev.kind)}\n\n${input.prompt}`,
       // The whole point: no resumeSessionId. A fresh provider session.
       resumeSessionId: null,
     };

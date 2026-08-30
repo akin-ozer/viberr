@@ -48,6 +48,9 @@ const operatorDefinitionMd = readAsset("operator.definition.md");
 const developerDefinitionMd = readAsset("developer.definition.md");
 const reviewerDefinitionMd = readAsset("reviewer.definition.md");
 const operatorProfileMd = readAsset("operator.profile.md");
+const controllerSkillMd = readAsset("controller-guide.skill.md");
+const controllerDefinitionMd = readAsset("controller.definition.md");
+const controllerProfileMd = readAsset("controller.profile.md");
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { serializeAgentProfile } from "~/server/files/agent-profile-file.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
@@ -89,20 +92,68 @@ const DEFAULT_SPECIALIST_IDS: ReadonlySet<string> = new Set(["developer", "revie
 
 /** Static prose assets bundled from `assets/` (skills + definitions + operator
  *  profile template). */
+/** The controller's own knowledge base (ruling 99): what THIS instance is and
+ *  how its pieces fit, told to the controller model. Admins edit it freely in
+ *  the KB browser; an edited copy is never clobbered (same manifest contract
+ *  as every shipped asset). */
+const CONTROLLER_HANDBOOK_MD = `# Controller handbook
+
+## What this instance is
+
+Viberr manages AI software delivery. Projects are boards of tasks; each task is a
+markdown file that carries its own state, timeline, decisions and evidence. Agents
+do the execution work; humans keep flow, review and acceptance. Every active task
+has its own operator agent that coordinates specialists through the workflow.
+
+## The pieces you manage
+
+- Users hold an org role (admin or member) and, per project, a project role
+  (admin, maintainer, contributor, viewer). Org admins pass project gates
+  through an audited override.
+- Projects carry stages, workflow boundaries (auto, approval, human), members,
+  deployed agents and a GitHub repository. The move into the final stage is
+  always a human decision.
+- Knowledge bases, skills and MCP connections are org resources granted to
+  agent profiles. Deleting and renaming them is done by admins in Org settings.
+- Goal chains decompose one outcome into an ordered chain of tasks; the server
+  creates each next task as the previous link completes.
+
+## House rules for you
+
+- The asking person's own permissions are the ceiling; the server enforces them
+  on every tool call, and a refusal is the correct answer to relay.
+- Ground every claim in a tool read from the same turn.
+- Never fabricate progress: task stages, run states and chain links come from
+  reads, not from optimism.
+`;
+
+
 const STATIC_ASSETS: { rel: string; content: string }[] = [
   // Skills — one operating manual per agent role.
   { rel: path.join("skills", "viberr-app-expertise", "SKILL.md"), content: viberrSkillMd },
   { rel: path.join("skills", "developer-expertise", "SKILL.md"), content: developerSkillMd },
   { rel: path.join("skills", "reviewer-expertise", "SKILL.md"), content: reviewerSkillMd },
-  // Definitions — only the OPERATOR keeps a dedicated definition file (system
-  // profile). Specialist personas now live in their profile-template BODY
-  // (F10-30), so developer/reviewer definition files are no longer seeded.
+  { rel: path.join("skills", "controller-guide", "SKILL.md"), content: controllerSkillMd },
+  // Definitions — the OPERATOR and the CONTROLLER keep dedicated definition
+  // files (system profiles). Specialist personas live in their profile-template
+  // BODY (F10-30), so developer/reviewer definition files are no longer seeded.
   { rel: path.join("agents", "definitions", "operator.md"), content: operatorDefinitionMd },
+  { rel: path.join("agents", "definitions", "controller.md"), content: controllerDefinitionMd },
   // The operator PROFILE template — so an operator deployment resolves (kind,
   // backends, capabilities) in a store that was never demo-seeded, which is what
   // makes the operator preinstalled everywhere.
   { rel: path.join("agents", "profiles", "operator.md"), content: operatorProfileMd },
+  // Ruling 99: the CONTROLLER — one per instance, ships through the boot
+  // backfill alone (never via SEED_AGENT_PROFILES: that array feeds project
+  // deployments, and the controller is not deployable). Its own KB ships as a
+  // static doc below, so the profile's kb grant never dangles in a bare store.
+  { rel: path.join("agents", "profiles", "controller.md"), content: controllerProfileMd },
+  {
+    rel: path.join("kb", "controller-handbook", "handbook.md"),
+    content: CONTROLLER_HANDBOOK_MD,
+  },
 ];
+
 
 // ------------------------------------------- shipped-version refresh (B-OP1)
 

@@ -81,6 +81,8 @@ export function encodeActorRef(ref: FileActorRef): string {
     }
     case "operator":
       return "operator";
+    case "controller":
+      return "controller";
     case "system":
       return `system:${ref.systemId}`;
     case "unknown":
@@ -94,6 +96,8 @@ export function encodeActorRef(ref: FileActorRef): string {
 export function decodeActorRef(raw: string): FileActorRef {
   const text = raw.trim();
   if (text === "operator") return { kind: "operator" };
+  // Ruling 99: the instance controller, encoded like the operator's bare word.
+  if (text === "controller") return { kind: "controller" };
 
   const human = HUMAN_RE.exec(text);
   if (human) {

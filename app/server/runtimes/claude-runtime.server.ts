@@ -742,7 +742,10 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         //    Replacing it (the old behavior) stripped the scaffolding and made a
         //    coding agent run on persona prose alone.
         if (spec.systemPrompt) {
-          if (spec.kind === "operator") {
+          // The controller (ruling 99) is coordination machinery like the
+          // operator: its persona REPLACES the coding harness, and it works
+          // only through its in-process toolkit.
+          if (spec.kind === "operator" || spec.kind === "controller") {
             options.systemPrompt = spec.systemPrompt;
           } else {
             options.systemPrompt = {
@@ -775,7 +778,12 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           ...BASE_DENIED_BUILTINS.filter(
             (tool) => tool !== "Skill" || nativeSkills.length === 0,
           ),
-          ...(spec.kind === "operator" ? OPERATOR_READ_ONLY_DENIED_TOOLS : []),
+          // The controller shares the operator's no-write posture and goes
+          // further (no filesystem reads either); its extra denies arrive via
+          // spec.disallowedTools from buildControllerRun.
+          ...(spec.kind === "operator" || spec.kind === "controller"
+            ? OPERATOR_READ_ONLY_DENIED_TOOLS
+            : []),
           // Supporting/reviewing runs are read-only for the repo (F10-12).
           ...(spec.kind === "reviewer" ? SUPPORTING_DENIED_BUILTINS : []),
           ...(spec.disallowedTools ?? []),

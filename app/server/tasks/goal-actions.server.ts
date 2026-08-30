@@ -1,0 +1,883 @@
+import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
+import {
+  allLinksSettled,
+  currentLinkIndex,
+  type GoalFrontmatter,
+  type GoalLink,
+  type ParsedGoalFile,
+} from "~/schemas/goal-file.schema";
+import { recordAudit } from "~/server/audit/audit-recorder.server";
+import {
+  resolveProjectAuthority,
+  type AuthorityProject,
+} from "~/server/auth/project-authority.server";
+import { AppError } from "~/server/errors/app-error.server";
+import {
+  allocateGoalId,
+  createGoalFile,
+  readGoalFile,
+  updateGoalFile,
+} from "~/server/files/goal-writer.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
+import { logger } from "~/server/logging/logger.server";
+import { createNotification } from "~/server/projections/notifications.server";
+import { rebuildGoalFile } from "~/server/projections/rebuilder.server";
+import { isTerminalStage } from "~/shared/workflow/stage-roles";
+import { rolesForAction } from "~/shared/rbac";
+import {
+  createTask,
+  loadProjectContext,
+  requireAction,
+  type ProjectContext,
+} from "./task-actions.server";
+import type { TaskActor, TaskMutationContext } from "./task-mutation.server";
+
+/**
+ * Chained goals (ruling 99): the lifecycle engine.
+ *
+ * A goal is an ordered chain of tasks inside one project. The controller (or
+ * any authorized member, through it) DEFINES the chain; the server ADVANCES
+ * it: when a link's task closes to Done, the next link's task is created and
+ * that task's own operator picks it up (`createTask`'s existing auto-invoke).
+ * The controller sits above operators and never replaces them.
+ *
+ * AUTHORITY MODEL
+ * - Creating a goal requires the asking user's own `create-task` in the
+ *   project — a chain is a promise of future task creation, so the promise is
+ *   gated where its effect is.
+ * - Advancing happens with NOBODY present, so it runs under the goal
+ *   CREATOR's recorded identity and RE-PROVES their live `create-task` at
+ *   every advance (FR39's precedent: unattended action stays visible,
+ *   cancellable, audited). Lost authority pauses the chain (`attention`)
+ *   instead of escalating.
+ * - Redirecting (pause/resume/skip/retry/edit/cancel) requires the creator
+ *   themselves or a member holding `run-agents` (chain steering is agent
+ *   steering).
+ *
+ * IDEMPOTENCY: every mutation is a locked read-modify-write of the goal file
+ * with status re-checks inside the lock, and `reconcileGoal` is convergent —
+ * hooks and the periodic runner both just say "look at this goal now".
+ * There is NO delete anywhere: completed and cancelled chains stay readable.
+ */
+
+export const GOAL_MAX_LINKS = 20;
+
+export interface GoalLinkInput {
+  title: string;
+  goal: string;
+}
+
+export interface CreateGoalInput {
+  projectSlug: string;
+  title: string;
+  description?: string;
+  onFailure?: "pause" | "continue";
+  links: GoalLinkInput[];
+}
+
+export interface GoalActionResult {
+  goalId: string;
+  status: GoalFrontmatter["status"];
+  /** The task key the chain currently rides on, when one exists. */
+  activeTaskKey: string | null;
+  message: string;
+}
+
+function goalRef(ctx: TaskMutationContext, projectSlug: string, goalId: string) {
+  return { projectSlug, goalId, dataRoot: ctx.dataRoot };
+}
+
+function activeTaskKeyOf(links: readonly GoalLink[]): string | null {
+  const index = currentLinkIndex(links);
+  if (index === null) return null;
+  return links.find((l) => l.index === index)?.taskKey ?? null;
+}
+
+/** The chain context block prepended to every link task's goal text, so the
+ *  task stands alone AND names the chain it serves. */
+function linkGoalText(
+  goal: GoalFrontmatter,
+  link: GoalLink,
+  previous: GoalLink | null,
+): string {
+  const head =
+    `Part of goal ${goal.id} (${goal.title}), link ${link.index} of ${goal.links.length}.` +
+    (previous?.taskKey
+      ? ` The previous link was carried by ${previous.taskKey} (${previous.status}).`
+      : "");
+  return `${head}\n\n${link.goal.trim() || link.title}`;
+}
+
+// ------------------------------------------------------------------ create
+
+export async function createGoal(
+  db: DatabaseSync,
+  input: CreateGoalInput,
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<GoalActionResult> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  // A chain is future task creation — gate it where its effect is.
+  requireAction(db, project, actor, "create-task", "define a goal chain");
+
+  const title = input.title.trim();
+  if (title.length < 3) {
+    throw AppError.validation("Give the goal a title of at least 3 characters.");
+  }
+  const links = input.links
+    .map((l, i) => ({
+      index: i + 1,
+      title: l.title.trim(),
+      goal: l.goal.trim(),
+      taskKey: null as string | null,
+      status: "pending" as GoalLink["status"],
+      note: null as string | null,
+    }))
+    .filter((l) => l.title.length > 0);
+  if (links.length < 1) {
+    throw AppError.validation("A goal chain needs at least one link.");
+  }
+  if (links.length > GOAL_MAX_LINKS) {
+    throw AppError.validation(
+      `A goal chain carries at most ${GOAL_MAX_LINKS} links.`,
+    );
+  }
+
+  const goalId = await allocateGoalId(input.projectSlug, ctx.dataRoot);
+  const now = new Date().toISOString();
+  const frontmatter: GoalFrontmatter = {
+    id: goalId,
+    title,
+    status: "active",
+    createdBy: actor.userId,
+    createdByLabel: actor.label,
+    onFailure: input.onFailure ?? "pause",
+    links,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  // Link 1's task is created FIRST (under the asking user's own authority —
+  // requireAction inside createTask), so a refusal there leaves no orphan
+  // goal file behind.
+  const first = links[0]!;
+  const created = await createTask(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      title: first.title,
+      goal: linkGoalText(frontmatter, first, null),
+      goalRef: { goalId, linkIndex: 1 },
+    },
+    actor,
+    ctx,
+  );
+  first.taskKey = created.key;
+  first.status = "active";
+
+  await createGoalFile(goalRef(ctx, input.projectSlug, goalId), {
+    frontmatter,
+    description: input.description?.trim() ?? "",
+  });
+  rebuildGoalFile(db, input.projectSlug, goalId, { dataRoot: ctx.dataRoot });
+
+  recordAudit(db, {
+    action: "goal.created",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "goal",
+    subjectId: goalId,
+    projectSlug: input.projectSlug,
+    details: { title, links: links.length, firstTask: created.key },
+  });
+  return {
+    goalId,
+    status: "active",
+    activeTaskKey: created.key,
+    message: `Goal ${goalId} created with ${links.length} link${links.length === 1 ? "" : "s"}; link 1 is ${created.key}.`,
+  };
+}
+
+// ------------------------------------------------------------------ update
+
+export type UpdateGoalOp =
+  | { op: "pause" }
+  | { op: "resume" }
+  | { op: "cancel"; reason?: string }
+  | { op: "skip_link"; index: number; reason?: string }
+  | { op: "retry_link"; index: number }
+  | { op: "edit_link"; index: number; title?: string; goal?: string }
+  | { op: "add_link"; title: string; goal: string }
+  | { op: "remove_pending_link"; index: number };
+
+export interface UpdateGoalInput {
+  projectSlug: string;
+  goalId: string;
+  action: UpdateGoalOp;
+}
+
+/** Creator-or-steering-tier gate for redirecting a chain. */
+function requireGoalAuthority(
+  db: DatabaseSync,
+  project: ProjectContext,
+  actor: TaskActor,
+  createdBy: string,
+  what: string,
+): void {
+  if (actor.userId === createdBy) {
+    // The creator redirects their own chain; membership is still required.
+    const decision = resolveProjectAuthority(db, project, actor, "any-member", {
+      action: "any-member",
+      what,
+    });
+    if (decision.allowed) return;
+    throw AppError.forbidden(`Only project members can ${what}.`);
+  }
+  requireAction(db, project, actor, "run-agents", what);
+}
+
+export async function updateGoal(
+  db: DatabaseSync,
+  input: UpdateGoalInput,
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<GoalActionResult> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  const existing = readGoalFile(goalRef(ctx, input.projectSlug, input.goalId));
+  if (!existing) throw AppError.notFound(`Goal ${input.goalId} not found.`);
+  requireGoalAuthority(
+    db,
+    project,
+    actor,
+    existing.parsed.frontmatter.createdBy,
+    "redirect a goal chain",
+  );
+
+  const op = input.action;
+  let message = "";
+  let retryLinkIndex: number | null = null;
+  let advanceAfter = false;
+
+  const parsed = await updateGoalFile(
+    goalRef(ctx, input.projectSlug, input.goalId),
+    (goal) => {
+      const fm = goal.frontmatter;
+      const terminal = fm.status === "completed" || fm.status === "cancelled";
+      const by = actor.label;
+      switch (op.op) {
+        case "pause": {
+          if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
+          if (fm.status === "paused") {
+            message = `Goal ${fm.id} is already paused.`;
+            return;
+          }
+          fm.status = "paused";
+          message = `Goal ${fm.id} paused.`;
+          return `Paused by ${by}.`;
+        }
+        case "resume": {
+          if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
+          if (fm.status === "active") {
+            message = `Goal ${fm.id} is already active.`;
+            return;
+          }
+          fm.status = "active";
+          advanceAfter = true;
+          message = `Goal ${fm.id} resumed.`;
+          return `Resumed by ${by}.`;
+        }
+        case "cancel": {
+          if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
+          fm.status = "cancelled";
+          message = `Goal ${fm.id} cancelled. Its record stays readable.`;
+          return `Cancelled by ${by}${op.reason ? `: ${op.reason}` : ""}.`;
+        }
+        case "skip_link": {
+          if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
+          const link = fm.links.find((l) => l.index === op.index);
+          if (!link) throw AppError.validation(`No link ${op.index}.`);
+          if (link.status === "done" || link.status === "skipped") {
+            throw AppError.conflict(`Link ${op.index} is already ${link.status}.`);
+          }
+          if (link.status === "active" && link.taskKey) {
+            throw AppError.conflict(
+              `Link ${op.index} is being worked by ${link.taskKey}. Archive or finish that task first, or retry the link after it fails.`,
+            );
+          }
+          link.status = "skipped";
+          link.note = op.reason?.trim() || link.note;
+          if (fm.status === "attention") fm.status = "active";
+          advanceAfter = true;
+          message = `Link ${op.index} skipped.`;
+          return `Link ${op.index} (${link.title}) skipped by ${by}${op.reason ? `: ${op.reason}` : ""}.`;
+        }
+        case "retry_link": {
+          if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
+          const link = fm.links.find((l) => l.index === op.index);
+          if (!link) throw AppError.validation(`No link ${op.index}.`);
+          if (link.status !== "failed") {
+            throw AppError.conflict(
+              `Only a failed link can be retried; link ${op.index} is ${link.status}.`,
+            );
+          }
+          retryLinkIndex = op.index;
+          if (fm.status === "attention") fm.status = "active";
+          message = `Link ${op.index} queued for retry.`;
+          return `Link ${op.index} (${link.title}) retried by ${by}.`;
+        }
+        case "edit_link": {
+          if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
+          const link = fm.links.find((l) => l.index === op.index);
+          if (!link) throw AppError.validation(`No link ${op.index}.`);
+          if (link.status !== "pending" && link.status !== "failed") {
+            throw AppError.conflict(
+              `Only a pending or failed link can be edited; link ${op.index} is ${link.status}.`,
+            );
+          }
+          if (op.title?.trim()) link.title = op.title.trim();
+          if (op.goal?.trim()) link.goal = op.goal.trim();
+          message = `Link ${op.index} updated.`;
+          return `Link ${op.index} edited by ${by}.`;
+        }
+        case "add_link": {
+          if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
+          if (fm.links.length >= GOAL_MAX_LINKS) {
+            throw AppError.validation(
+              `A goal chain carries at most ${GOAL_MAX_LINKS} links.`,
+            );
+          }
+          const title = op.title.trim();
+          if (!title) throw AppError.validation("Give the link a title.");
+          fm.links.push({
+            index: fm.links.length + 1,
+            title,
+            goal: op.goal.trim(),
+            taskKey: null,
+            status: "pending",
+            note: null,
+          });
+          advanceAfter = true;
+          message = `Link ${fm.links.length} added.`;
+          return `Link ${fm.links.length} (${title}) added by ${by}.`;
+        }
+        case "remove_pending_link": {
+          if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
+          const link = fm.links.find((l) => l.index === op.index);
+          if (!link) throw AppError.validation(`No link ${op.index}.`);
+          if (link.status !== "pending" || link.taskKey) {
+            throw AppError.conflict(
+              "Only a pending link with no task can be removed from the chain.",
+            );
+          }
+          fm.links = fm.links
+            .filter((l) => l.index !== op.index)
+            .map((l, i) => ({ ...l, index: i + 1 }));
+          message = `Link removed; the chain now has ${fm.links.length} link${fm.links.length === 1 ? "" : "s"}.`;
+          return `Pending link ${op.index} (${link.title}) removed by ${by}.`;
+        }
+      }
+    },
+  );
+  rebuildGoalFile(db, input.projectSlug, input.goalId, { dataRoot: ctx.dataRoot });
+  recordAudit(db, {
+    action: "goal.updated",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "goal",
+    subjectId: input.goalId,
+    projectSlug: input.projectSlug,
+    details: { op: op.op, message },
+  });
+
+  // A retry creates the fresh link task under the PRESENT caller's authority.
+  if (retryLinkIndex !== null) {
+    await startLinkTask(db, input.projectSlug, input.goalId, retryLinkIndex, actor, ctx);
+  } else if (advanceAfter) {
+    await reconcileGoal(db, input.projectSlug, input.goalId, ctx);
+  }
+  const after = readGoalFile(goalRef(ctx, input.projectSlug, input.goalId));
+  const fm = after?.parsed.frontmatter ?? parsed.frontmatter;
+  return {
+    goalId: input.goalId,
+    status: fm.status,
+    activeTaskKey: activeTaskKeyOf(fm.links),
+    message,
+  };
+}
+
+// ----------------------------------------------------------------- advance
+
+/** Notify the goal's creator (kind `controller`) — chain progress reaches the
+ *  human who defined it even when nobody is watching the board. */
+function notifyCreator(
+  db: DatabaseSync,
+  fm: GoalFrontmatter,
+  projectSlug: string,
+  text: string,
+  taskKey?: string | null,
+): void {
+  try {
+    createNotification(db, {
+      userId: fm.createdBy,
+      kind: "controller",
+      title: `${fm.id} · ${fm.title}`,
+      text,
+      projectSlug,
+      taskKey: taskKey ?? null,
+      from: { kind: "agent", name: "Controller" },
+    });
+  } catch (error) {
+    logger.warn("goal creator notification failed", {
+      goalId: fm.id,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/** Re-prove the goal creator's live `create-task` (silent — an unattended
+ *  advance probing a lost authority is a pause, not an attempt to exceed). */
+function creatorMayCreateTasks(
+  db: DatabaseSync,
+  project: AuthorityProject,
+  fm: GoalFrontmatter,
+): boolean {
+  return resolveProjectAuthority(
+    db,
+    project,
+    { userId: fm.createdBy, label: fm.createdByLabel || fm.createdBy },
+    rolesForAction("create-task"),
+    { action: "create-task", what: "advance a goal chain", silentDeny: true },
+  ).allowed;
+}
+
+/**
+ * Create the task for one link (advance target or retry) and mark it active.
+ * The actor is whoever's authority the creation runs under.
+ */
+async function startLinkTask(
+  db: DatabaseSync,
+  projectSlug: string,
+  goalId: string,
+  linkIndex: number,
+  actor: TaskActor,
+  ctx: TaskMutationContext,
+): Promise<string | null> {
+  const ref = goalRef(ctx, projectSlug, goalId);
+  const current = readGoalFile(ref);
+  if (!current) return null;
+  const fm = current.parsed.frontmatter;
+  const link = fm.links.find((l) => l.index === linkIndex);
+  if (!link) return null;
+  const previous =
+    fm.links.filter((l) => l.index < linkIndex).sort((a, b) => b.index - a.index)[0] ??
+    null;
+  const created = await createTask(
+    db,
+    {
+      projectSlug,
+      title: link.title,
+      goal: linkGoalText(fm, link, previous),
+      goalRef: { goalId, linkIndex },
+    },
+    actor,
+    ctx,
+  );
+  await updateGoalFile(ref, (goal) => {
+    const target = goal.frontmatter.links.find((l) => l.index === linkIndex);
+    if (!target) return;
+    target.taskKey = created.key;
+    target.status = "active";
+    target.note = null;
+    return `Link ${linkIndex} (${target.title}) started as ${created.key}.`;
+  });
+  rebuildGoalFile(db, projectSlug, goalId, { dataRoot: ctx.dataRoot });
+  notifyCreator(
+    db,
+    fm,
+    projectSlug,
+    `Link ${linkIndex} started as ${created.key}.`,
+    created.key,
+  );
+  return created.key;
+}
+
+/**
+ * THE convergent advance engine. Reads the goal, derives every linked task's
+ * real state, records completions/failures, and creates the next link's task
+ * when the chain is active and its current link is settled. Hooks and the
+ * periodic runner both just call this; every write happens under the goal
+ * file's own lock with status re-checks, so concurrent calls converge.
+ */
+export async function reconcileGoal(
+  db: DatabaseSync,
+  projectSlug: string,
+  goalId: string,
+  ctx: TaskMutationContext = {},
+): Promise<void> {
+  const ref = goalRef(ctx, projectSlug, goalId);
+  const snapshot = readGoalFile(ref);
+  if (!snapshot) return;
+  if (
+    snapshot.parsed.frontmatter.status === "completed" ||
+    snapshot.parsed.frontmatter.status === "cancelled"
+  ) {
+    return;
+  }
+
+  const project = loadProjectContext(ctx, projectSlug);
+  const taskState = (taskKey: string): "done" | "failed" | "open" | "gone" => {
+    // The canonical FILE is the truth an advance acts on (a projection can lag).
+    const task = readTaskFile({ projectSlug, taskKey, dataRoot: ctx.dataRoot });
+    if (!task) return "gone";
+    const fm = task.parsed.frontmatter;
+    if (fm.archived) return "failed";
+    if (isTerminalStage(fm.stage, project.stages)) return "done";
+    return "open";
+  };
+
+  let completedNow = false;
+  let attentionNow: string | null = null;
+  let failedLink: { index: number; title: string; taskKey: string } | null = null;
+  let startIndex: number | null = null;
+
+  await updateGoalFile(ref, (goal) => {
+    const fm = goal.frontmatter;
+    if (fm.status === "completed" || fm.status === "cancelled") return;
+    const history: string[] = [];
+
+    for (const link of fm.links) {
+      if (!link.taskKey) continue;
+      if (link.status === "done" || link.status === "skipped") continue;
+      const state = taskState(link.taskKey);
+      if (state === "done") {
+        link.status = "done";
+        history.push(`Link ${link.index} (${link.title}) completed by ${link.taskKey}.`);
+      } else if ((state === "failed" || state === "gone") && link.status !== "failed") {
+        link.status = "failed";
+        link.note =
+          state === "gone"
+            ? `Task ${link.taskKey} is missing from the store.`
+            : `Task ${link.taskKey} was archived.`;
+        failedLink = { index: link.index, title: link.title, taskKey: link.taskKey };
+        history.push(`Link ${link.index} (${link.title}) failed: ${link.note}`);
+      }
+    }
+
+    // A failure parks the chain unless the goal rides through failures.
+    const anyFailedOpen = fm.links.some((l) => l.status === "failed");
+    if (anyFailedOpen && fm.onFailure === "pause" && fm.status === "active") {
+      fm.status = "attention";
+      attentionNow =
+        failedLink !== null
+          ? `Link ${(failedLink as { index: number }).index} failed. The chain is paused for your decision: retry it, skip it, or cancel the goal.`
+          : "A link failed. The chain is paused for your decision.";
+      history.push("Chain paused (attention): a link failed.");
+    }
+
+    if (allLinksSettled(fm.links) && fm.status !== "attention") {
+      fm.status = "completed";
+      completedNow = true;
+      history.push("Every link is settled. Goal completed.");
+    } else if (fm.status === "active") {
+      const index = currentLinkIndex(fm.links);
+      const link = index === null ? null : fm.links.find((l) => l.index === index);
+      // `failed` with onFailure=continue: move past it.
+      if (link && link.status === "failed" && fm.onFailure === "continue") {
+        link.status = "skipped";
+        link.note = `${link.note ?? "Failed."} Chain continues past it (onFailure: continue).`;
+        history.push(`Link ${link.index} failed and was skipped (onFailure: continue).`);
+        const nextIndex = currentLinkIndex(fm.links);
+        if (nextIndex === null) {
+          if (fm.links.length > 0) {
+            fm.status = "completed";
+            completedNow = true;
+            history.push("Every link is settled. Goal completed.");
+          }
+        } else {
+          const next = fm.links.find((l) => l.index === nextIndex);
+          if (next && !next.taskKey) startIndex = nextIndex;
+        }
+      } else if (link && !link.taskKey && link.status === "pending") {
+        // The chain is ON this link and no task carries it (fresh advance, or
+        // a crash between goal write and task creation) — start it.
+        startIndex = link.index;
+      }
+    }
+
+    return history.length ? history.join(" ") : undefined;
+  });
+
+  if (attentionNow) {
+    const fm = readGoalFile(ref)?.parsed.frontmatter;
+    if (fm) notifyCreator(db, fm, projectSlug, attentionNow);
+  }
+  if (completedNow) {
+    const fm = readGoalFile(ref)?.parsed.frontmatter;
+    if (fm) notifyCreator(db, fm, projectSlug, "Goal completed: every link is settled.");
+    recordAudit(db, {
+      action: "goal.completed",
+      actor: { userId: null, label: "goal-runner" },
+      subjectKind: "goal",
+      subjectId: goalId,
+      projectSlug,
+    });
+  }
+
+  if (startIndex !== null) {
+    const fm = readGoalFile(ref)?.parsed.frontmatter;
+    if (!fm) return;
+    // Unattended creation: re-prove the CREATOR's live authority first.
+    if (!creatorMayCreateTasks(db, project, fm)) {
+      await updateGoalFile(ref, (goal) => {
+        if (goal.frontmatter.status !== "active") return;
+        goal.frontmatter.status = "attention";
+        return `Chain paused (attention): ${fm.createdByLabel || fm.createdBy} no longer holds task creation in this project, so the next link could not start.`;
+      });
+      notifyCreator(
+        db,
+        fm,
+        projectSlug,
+        "The chain could not advance: you no longer hold task creation in this project. Ask a project admin to restore it, then resume the goal.",
+      );
+      rebuildGoalFile(db, projectSlug, goalId, { dataRoot: ctx.dataRoot });
+      return;
+    }
+    try {
+      await startLinkTask(
+        db,
+        projectSlug,
+        goalId,
+        startIndex,
+        {
+          userId: fm.createdBy,
+          label: `${fm.createdByLabel || fm.createdBy} · goal chain`,
+        },
+        ctx,
+      );
+    } catch (error) {
+      logger.error("goal link task creation failed", {
+        goalId,
+        linkIndex: startIndex,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateGoalFile(ref, (goal) => {
+        if (goal.frontmatter.status !== "active") return;
+        goal.frontmatter.status = "attention";
+        return `Chain paused (attention): creating the next link's task failed (${error instanceof Error ? error.message : "unknown error"}).`;
+      });
+      const after = readGoalFile(ref)?.parsed.frontmatter;
+      if (after) {
+        notifyCreator(
+          db,
+          after,
+          projectSlug,
+          "The chain could not advance: creating the next link's task failed. Resume the goal to retry.",
+        );
+      }
+    }
+  }
+  rebuildGoalFile(db, projectSlug, goalId, { dataRoot: ctx.dataRoot });
+}
+
+/**
+ * Hook: a task changed in a way that can move its chain (reached Done, was
+ * archived, restored). Fire-and-forget from the task write paths — the engine
+ * converges, so a spurious call is a cheap no-op.
+ */
+export function maybeReconcileGoalForTask(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): void {
+  try {
+    const task = readTaskFile({ projectSlug, taskKey, dataRoot: ctx.dataRoot });
+    const goalId = task?.parsed.frontmatter.goalRef?.goalId;
+    if (!goalId) return;
+    void reconcileGoal(db, projectSlug, goalId, ctx).catch((error) => {
+      logger.error("goal reconcile failed", {
+        projectSlug,
+        goalId,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    });
+  } catch (error) {
+    logger.warn("goal reconcile hook failed", {
+      projectSlug,
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+const activeGoalRowSchema = z.object({
+  project_slug: z.string(),
+  goal_id: z.string(),
+});
+
+/**
+ * Periodic + boot catch-up: reconcile every non-terminal goal, so a link that
+ * completed while the process was down (or through a hand edit the hooks never
+ * saw) still advances its chain. Cheap: a projection query, then per-goal
+ * file reads only for the few live chains.
+ */
+export async function reconcileAllGoals(
+  db: DatabaseSync,
+  ctx: TaskMutationContext = {},
+): Promise<number> {
+  const rows = z.array(activeGoalRowSchema).parse(
+    db
+      .prepare(
+        `SELECT project_slug, goal_id FROM goal_projections
+         WHERE status IN ('active', 'attention')`,
+      )
+      .all(),
+  );
+  for (const row of rows) {
+    try {
+      await reconcileGoal(db, row.project_slug, row.goal_id, ctx);
+    } catch (error) {
+      logger.error("goal reconcile failed", {
+        projectSlug: row.project_slug,
+        goalId: row.goal_id,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  return rows.length;
+}
+
+// ------------------------------------------------------------------ runner
+
+const GOAL_TICK_MS = 60_000;
+const GOAL_RUNNER_KEY = Symbol.for("viberr.goalRunner");
+
+interface GoalRunnerHost {
+  [GOAL_RUNNER_KEY]?: { timer: ReturnType<typeof setInterval> };
+}
+
+/** Boot: catch up once, then reconcile on a non-overlapping interval.
+ *  Idempotent; the timer is unref'd so it never blocks exit. */
+export function startGoalRunner(db: DatabaseSync): void {
+  // SAFETY: registry symbol under a viberr-namespaced name; only this function
+  // writes the slot.
+  const host = globalThis as GoalRunnerHost;
+  if (host[GOAL_RUNNER_KEY]) return;
+  let running = false;
+  const tick = () => {
+    if (running) return;
+    running = true;
+    void reconcileAllGoals(db)
+      .catch((error) => {
+        logger.error("goal runner tick failed", {
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      })
+      .finally(() => {
+        running = false;
+      });
+  };
+  const timer = setInterval(tick, GOAL_TICK_MS);
+  timer.unref();
+  host[GOAL_RUNNER_KEY] = { timer };
+  tick();
+}
+
+// -------------------------------------------------------------------- views
+
+export interface GoalView {
+  id: string;
+  title: string;
+  status: GoalFrontmatter["status"];
+  createdBy: string;
+  createdByLabel: string;
+  onFailure: "pause" | "continue";
+  description: string;
+  links: GoalLink[];
+  currentIndex: number | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  history: { occurredAt: string; text: string }[];
+}
+
+/** Read one goal straight from its canonical file (detail view). */
+export function getGoalView(
+  projectSlug: string,
+  goalId: string,
+  ctx: TaskMutationContext = {},
+): GoalView | null {
+  const read = readGoalFile(goalRef(ctx, projectSlug, goalId));
+  if (!read) return null;
+  return toGoalView(read.parsed);
+}
+
+export function toGoalView(parsed: ParsedGoalFile): GoalView {
+  const fm = parsed.frontmatter;
+  return {
+    id: fm.id,
+    title: fm.title,
+    status: fm.status,
+    createdBy: fm.createdBy,
+    createdByLabel: fm.createdByLabel,
+    onFailure: fm.onFailure,
+    description: parsed.description,
+    links: fm.links,
+    currentIndex: currentLinkIndex(fm.links),
+    createdAt: fm.createdAt,
+    updatedAt: fm.updatedAt,
+    history: parsed.timeline,
+  };
+}
+
+const goalProjectionRowSchema = z.object({
+  goal_id: z.string(),
+  title: z.string(),
+  status: z.enum(["active", "paused", "attention", "completed", "cancelled"]),
+  created_by: z.string(),
+  created_by_label: z.string(),
+  on_failure: z.enum(["pause", "continue"]),
+  links_json: z.string(),
+  description: z.string(),
+  current_index: z.number().nullable(),
+  created_at: z.string().nullable(),
+  updated_at: z.string().nullable(),
+});
+
+/** List a project's goals from the projection (board panel read model). */
+export function listGoals(db: DatabaseSync, projectSlug: string): GoalView[] {
+  const rows = db
+    .prepare(
+      `SELECT goal_id, title, status, created_by, created_by_label, on_failure,
+              links_json, description, current_index, created_at, updated_at
+       FROM goal_projections WHERE project_slug = ?
+       ORDER BY created_at DESC`,
+    )
+    .all(projectSlug);
+  return rows.flatMap((raw) => {
+    const parsed = goalProjectionRowSchema.safeParse(raw);
+    if (!parsed.success) return [];
+    const r = parsed.data;
+    let links: GoalLink[] = [];
+    try {
+      const decoded: unknown = JSON.parse(r.links_json);
+      if (Array.isArray(decoded)) links = decoded as GoalLink[];
+    } catch {
+      links = [];
+    }
+    return [
+      {
+        id: r.goal_id,
+        title: r.title,
+        status: r.status,
+        createdBy: r.created_by,
+        createdByLabel: r.created_by_label,
+        onFailure: r.on_failure,
+        description: r.description,
+        links,
+        currentIndex: r.current_index,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+        history: [],
+      },
+    ];
+  });
+}

@@ -427,6 +427,8 @@ export interface CreateTaskInput {
   priority?: TaskPriority;
   labels?: string[];
   dueDate?: string | null;
+  /** Ruling 99: set only by goal-actions when this task is a chain link. */
+  goalRef?: { goalId: string; linkIndex: number } | null;
 }
 
 /**
@@ -508,6 +510,7 @@ export async function createTask(
     branch: null,
     pr: null,
     github: null,
+    goalRef: input.goalRef ?? null,
     createdAt: now,
     updatedAt: now,
     boardRank: null,
@@ -4453,6 +4456,14 @@ export async function transitionStage(
     }
   }
 
+  // Ruling 99: a stage move can settle a goal-chain link (into the terminal
+  // stage, or back out of it). Fire-and-forget — the engine converges and a
+  // task outside any chain is a cheap projection read.
+  void (async () => {
+    const { maybeReconcileGoalForTask } = await import("./goal-actions.server");
+    maybeReconcileGoalForTask(db, ctx, input.projectSlug, input.taskKey);
+  })().catch(() => {});
+
   // R15-2 (owner ruling 2026-07-28): delivery (push + review PR) is an OPERATOR
   // decision, never a stage side-effect — the transitionStage auto-delivery hook
   // is deleted. Safety net (a): entering the structural review-ROLE stage with
@@ -5678,6 +5689,14 @@ export async function setTaskArchived(
           }
         : { stage: existing.parsed.frontmatter.stage },
   });
+
+  // Ruling 99: archiving a goal-chain link fails it (the chain pauses or
+  // rides past, per the goal's own policy); a restore lets the reconciler
+  // re-derive the truth. Fire-and-forget; the engine converges.
+  void (async () => {
+    const { maybeReconcileGoalForTask } = await import("./goal-actions.server");
+    maybeReconcileGoalForTask(db, ctx, input.projectSlug, input.taskKey);
+  })().catch(() => {});
 
   return {
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
@@ -7546,6 +7565,15 @@ export async function applyAcceptanceWrite(
     accepted = true;
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  // Ruling 99: an acceptance that closed a goal-chain link advances its chain
+  // (the next link's task is created under the goal creator's re-proven
+  // authority). Fire-and-forget; the engine converges.
+  if (accepted) {
+    void (async () => {
+      const { maybeReconcileGoalForTask } = await import("./goal-actions.server");
+      maybeReconcileGoalForTask(db, ctx, input.projectSlug, input.taskKey);
+    })().catch(() => {});
+  }
   // U3: `false` means a concurrent acceptance had already closed this task —
   // the caller's audit row and follow-up effects belong to THAT write, not to
   // this one.

@@ -15,6 +15,8 @@ function row(patch: Partial<TaskProjectionRow> = {}): TaskProjectionRow {
   return {
     project_slug: "viberr-core",
     task_key: "VIB-1",
+    goal_id: null,
+    goal_link_index: null,
     title: "A task",
     stage: "review",
     readiness: "ready",
