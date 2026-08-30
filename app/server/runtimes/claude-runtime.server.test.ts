@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
 import {
   createClaudeAdapter,
+  INTERRUPT_GRACE_MS,
   resolveClaudeEffort,
   resolveClaudeModel,
   type ClaudeQuery,
@@ -521,6 +522,41 @@ describe("claude adapter (SDK, injected fake query)", () => {
     await drain();
     expect(wasInterrupted()).toBe(true);
     expect(exit).toMatchObject({ outcome: "interrupted" });
+  });
+
+  /**
+   * `interrupt()` is a cooperative control request, and a CLI wedged mid
+   * tool-call never answers it — while the same call disarms the idle guard,
+   * whose own callback also returns early once `interrupted` is set. Without a
+   * deadline of its own the run has NO watchdog left: the row sits `running`
+   * with no process and no handle until the next restart's orphan sweep, and
+   * the Stop the human pressed looks like it did nothing.
+   */
+  it("settles a run whose interrupt the CLI never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      // A stream that yields nothing and never ends: the wedged case.
+      const wedged: ClaudeQuery = Object.assign(
+        (async function* () {
+          await new Promise(() => {});
+        })(),
+        { interrupt: async () => new Promise<void>(() => {}) },
+      );
+      const adapter = createClaudeAdapter({ queryFn: () => wedged });
+      let exit: RunExit | null = null;
+      const handle = adapter.start(SPEC, {
+        onLine: () => {},
+        onExit: (e) => (exit = e),
+      });
+
+      handle.interrupt();
+      expect(exit).toBeNull(); // nothing settles it on its own
+
+      await vi.advanceTimersByTimeAsync(INTERRUPT_GRACE_MS + 1_000);
+      expect(exit).toMatchObject({ outcome: "interrupted" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

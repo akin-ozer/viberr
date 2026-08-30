@@ -95,6 +95,52 @@ describe("conversation access", () => {
     expect(listMessages(app.db, conversation.id)).toHaveLength(1);
   });
 
+  /**
+   * The refusal is raised straight inside two route LOADERS, and the root
+   * boundary only understands a thrown Response — an AppError reaches it as an
+   * unhandled throw, so the deliberate 404 rendered as the generic
+   * "Something went wrong" page at HTTP 500 instead of "Conversation not
+   * found."
+   */
+  it("an unreadable conversation refuses with a 404 RESPONSE, not a bare error", async () => {
+    const { createConversation } = await import(
+      "./controller-conversations.server"
+    );
+    const { getControllerSurface } = await import(
+      "~/features/controller/controller-query.server"
+    );
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: null,
+    });
+
+    let thrown: { init?: { status?: number } } | null = null;
+    try {
+      getControllerSurface(
+        app.db,
+        { id: otherMemberId, email: "murat@viberr.dev" },
+        {
+          projectSlug: null,
+          conversationId: conversation.id,
+          all: false,
+          dataRoot: app.dataRoot,
+        },
+      );
+    } catch (error) {
+      // SAFETY: the only throw on this path is React Router's `data()`, whose
+      // value carries the response init this assertion reads.
+      thrown = error as { init?: { status?: number } };
+    }
+    expect(thrown).not.toBeNull();
+
+    // React Router's `data()` throw specifically — the shape every other
+    // loader refusal produces and the only one the root boundary can read. An
+    // `AppError` also carries a `status`, so asserting on that alone would let
+    // the very regression this pins slip straight through.
+    expect(thrown!.init?.status).toBe(404);
+  });
+
   it("a turn with no Claude credential refuses honestly IN the transcript", async () => {
     const { createConversation, listMessages } = await import(
       "./controller-conversations.server"

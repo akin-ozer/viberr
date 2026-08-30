@@ -346,6 +346,34 @@ describe("reorderStages", () => {
     expectChainCoversStages(store);
   });
 
+  /**
+   * The guard checked the LENGTH of the order and that every id is known — but
+   * not that the ids are distinct. A payload repeating one id therefore
+   * necessarily omits another: the board gains a duplicated column and
+   * silently LOSES one, taking `removeStage`'s "move its tasks out first"
+   * guard with it and stranding every task sitting in the dropped stage in a
+   * column the project no longer defines.
+   */
+  it("refuses an order that repeats a stage id (and so drops another)", async () => {
+    const store = setup();
+    const before = stageIdsOf(store);
+
+    await expect(
+      reorderStages(
+        store.db,
+        {
+          projectSlug: store.slug,
+          // Right length, every id known — and `review` quietly gone.
+          orderedIds: ["triage", "ready", "impl", "impl", "done"],
+        },
+        admin(store),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(stageIdsOf(store)).toEqual(before);
+  });
+
   it("a stage added after a reorder is still spliced in (the chain never desynced)", async () => {
     const store = setup();
     await reorderStages(

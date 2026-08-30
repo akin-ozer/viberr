@@ -606,6 +606,8 @@ export async function reconcileGoal(
     const fm = goal.frontmatter;
     if (fm.status === "completed" || fm.status === "cancelled") return;
     const history: string[] = [];
+    /** A link this pass moved OUT of `failed` — the one park it may lift. */
+    let recoveredLink = false;
 
     for (const link of fm.links) {
       if (!link.taskKey) continue;
@@ -644,6 +646,7 @@ export async function reconcileGoal(
         // work, and its only exit (retry) would spawn a second task for it.
         link.status = "active";
         link.note = null;
+        recoveredLink = true;
         history.push(
           `Link ${link.index} (${link.title}) recovered: ${link.taskKey} is on the board again.`,
         );
@@ -660,12 +663,16 @@ export async function reconcileGoal(
           : "A link failed. The chain is paused for your decision.";
       history.push("Chain paused (attention): a link failed.");
     }
-    // …and un-parks when the cause is gone. `attention` is the MACHINE's park,
-    // so it lifts on its own once nothing is failed; `paused` is a human's and
-    // is never lifted here.
-    if (!anyFailedOpen && fm.status === "attention") {
+    // …and un-parks when THIS pass saw the failure undone. `attention` is the
+    // machine's own park (`paused` is a human's and is never lifted here), but
+    // it is set for more than a failed link: losing the creator's authority
+    // parks a chain too. Lifting on the mere ABSENCE of a failed link would
+    // flip those chains attention -> active -> attention on every runner tick,
+    // re-notifying the creator each time — so lift only the park whose cause
+    // this pass watched disappear.
+    if (recoveredLink && !anyFailedOpen && fm.status === "attention") {
       fm.status = "active";
-      history.push("Chain resumed: no link is failed any more.");
+      history.push("Chain resumed: the failed link is live again.");
     }
 
     if (allLinksSettled(fm.links) && fm.status !== "attention") {

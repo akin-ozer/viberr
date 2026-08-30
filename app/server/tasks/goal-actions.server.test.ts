@@ -528,6 +528,68 @@ describe("chained goals", () => {
   });
 
   /**
+   * A chain can be parked for reasons that are NOT a failed link — the
+   * creator losing `create-task` is the main one. Lifting `attention` on the
+   * mere absence of a failed link would flip such a chain
+   * attention -> active -> attention on every 60s runner tick, minting a
+   * notification and two history bullets each pass, forever.
+   */
+  it("a chain parked for lost authority stays parked and does not re-notify", async () => {
+    const { createGoal, getGoalView, reconcileGoal } = await import(
+      "./goal-actions.server"
+    );
+    const created = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Authority chain",
+        links: [
+          { title: "First", goal: "Completes fine." },
+          { title: "Second", goal: "Needs the creator's authority to start." },
+        ],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    await closeTaskToDone(created.activeTaskKey!);
+
+    // Demote the creator below create-task before the chain can advance.
+    const { updateProjectFile } = await import(
+      "~/server/files/project-writer.server"
+    );
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const setCreatorRole = async (role: "viewer" | "contributor") => {
+      await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+        const member = p.frontmatter.members.find((m) => m.userId === contributorId);
+        if (member) member.role = role;
+      });
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    };
+    await setCreatorRole("viewer");
+    try {
+      await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
+      expect(
+        getGoalView(SLUG, created.goalId, { dataRoot: app.dataRoot })!.status,
+      ).toBe("attention");
+      const notifiedOnce = controllerNotifications();
+      const historyOnce = getGoalView(SLUG, created.goalId, {
+        dataRoot: app.dataRoot,
+      })!.history.length;
+
+      // Two more runner ticks change nothing: the cause is still there.
+      await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
+      await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
+
+      const view = getGoalView(SLUG, created.goalId, { dataRoot: app.dataRoot })!;
+      expect(view.status).toBe("attention");
+      expect(view.history.length).toBe(historyOnce);
+      expect(controllerNotifications()).toBe(notifiedOnce);
+    } finally {
+      await setCreatorRole("contributor");
+    }
+  });
+
+  /**
    * `setTaskArchived`'s own hook says "a restore lets the reconciler re-derive
    * the truth". Deriving `failed` from an archived task but never deriving the
    * recovery back leaves the chain parked on a task that is live again, and
@@ -673,6 +735,20 @@ describe("chained goals", () => {
     expect(countProjectTasks()).toBe(before + 1);
   });
 });
+
+/** Controller notifications delivered to the chain creator so far. */
+function controllerNotifications(): number {
+  // SAFETY: the statement selects a single COUNT(*) aliased `n`, which an
+  // aggregate always yields as one NOT NULL integer row.
+  // SAFETY: the statement selects a single COUNT(*) aliased `n`, which an
+  // aggregate always yields as one NOT NULL integer row.
+  const row = app.db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND kind = 'controller'`,
+    )
+    .get(contributorId) as { n: number };
+  return row.n;
+}
 
 /** Live task-directory count for the demo project — the store's own truth,
  *  read straight off disk so a lagging projection cannot mask a duplicate. */

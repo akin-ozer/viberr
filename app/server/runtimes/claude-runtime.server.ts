@@ -177,6 +177,16 @@ export function claudeIdleTimeoutMs(): number {
 }
 
 /**
+ * How long a stop is given to take effect before the adapter settles the run
+ * itself. `interrupt()` is a cooperative control request to the CLI; a wedged
+ * one never answers, and it also disarms the idle guard, so without this the
+ * run has no watchdog left at all. Short, because a human is watching a Stop
+ * they just pressed — and settling early is safe: `settle` is idempotent, so a
+ * late-arriving real exit is a no-op.
+ */
+export const INTERRUPT_GRACE_MS = 20_000;
+
+/**
  * Built-in tools an operator run may never use: it coordinates the task and
  * writes only through its governance MCP tools — it never edits files, runs
  * shell commands, or spawns sub-agents that could. Denied tools are removed
@@ -570,6 +580,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       // for this long it is hung, and nothing else would ever settle it.
       const idleMs = claudeIdleTimeoutMs();
       let idleTimer: ReturnType<typeof setTimeout> | null = null;
+      /** Deadline for a cooperative interrupt a wedged CLI never answers. */
+      let interruptTimer: ReturnType<typeof setTimeout> | null = null;
       const disarmIdle = () => {
         if (idleTimer) {
           clearTimeout(idleTimer);
@@ -626,6 +638,10 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         if (settled) return;
         settled = true;
         disarmIdle();
+        if (interruptTimer) {
+          clearTimeout(interruptTimer);
+          interruptTimer = null;
+        }
         cb.onExit({ outcome, effectiveBackend: "claude", sessionId });
       };
 
@@ -932,7 +948,23 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         interrupt() {
           if (interrupted || settled) return;
           interrupted = true;
+          // Disarming the idle guard here used to leave the run with NO
+          // watchdog: `interrupt()` is a cooperative control request, a wedged
+          // CLI never answers it, and the idle timer's own callback returns
+          // early once `interrupted` is set. The row then sat `running` with no
+          // process and no handle until the next restart's orphan sweep — the
+          // Stop a human pressed appeared to do nothing. Replace the idle
+          // window with a shorter one that settles the run itself.
           disarmIdle();
+          interruptTimer = setTimeout(() => {
+            if (settled) return;
+            logger.warn("claude run did not stop after an interrupt — settling it", {
+              runId: spec.runId,
+              graceMs: INTERRUPT_GRACE_MS,
+            });
+            settle("interrupted");
+          }, INTERRUPT_GRACE_MS);
+          interruptTimer.unref?.();
           void queryHandle?.interrupt().catch(() => {
             // The generator may already have completed.
           });
