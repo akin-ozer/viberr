@@ -178,6 +178,62 @@ describe("NotificationsPage", () => {
     expect(unread.getAttribute("aria-pressed")).toBe("true");
   });
 
+  /**
+   * `title` is NULL for every kind but packet/approval, so concatenating it
+   * into the control's accessible name announced `Mark "null" read`. There is
+   * no other accessible name for the button, so that string WAS the
+   * notification's identity to a screen reader.
+   */
+  it("the per-row Mark read control never announces a null subject", () => {
+    const { container } = renderPage();
+    const labels = [...container.querySelectorAll("button[aria-label]")].map(
+      (b) => b.getAttribute("aria-label") ?? "",
+    );
+    const markRead = labels.filter((l) => l.startsWith("Mark "));
+    expect(markRead.length).toBeGreaterThan(0);
+    for (const label of markRead) expect(label).not.toContain("null");
+    // The title-less mention row is named by its text, the same fallback the
+    // row body uses.
+    expect(markRead.some((l) => l.includes("can you take it?"))).toBe(true);
+  });
+
+  /**
+   * The day label carries no year, so bucketing on a SET of labels merged rows
+   * a year apart under one "Mar 30" header and drew the old row inside the
+   * recent block. Nothing distinguished them: the row's own stamp is time-only.
+   */
+  it("same-day rows from different YEARS get their own sections, in order", () => {
+    const sameDayDifferentYears: NotificationPageItem[] = [
+      {
+        ...ITEMS[2]!,
+        id: "n-recent",
+        text: "recent row",
+        occurredAt: "2026-03-30T10:00:00.000Z",
+        unread: false,
+        waitingOnYou: false,
+      },
+      {
+        ...ITEMS[2]!,
+        id: "n-year-old",
+        text: "a year older",
+        occurredAt: "2025-03-30T10:00:00.000Z",
+        unread: false,
+        waitingOnYou: false,
+      },
+    ];
+    const { container } = renderPage(sameDayDifferentYears, 0, 0);
+    const headers = [...container.querySelectorAll(".act-day")].map(
+      (d) => d.textContent ?? "",
+    );
+    // Two sections, not one merged bucket — even though both read "Mar 30".
+    expect(headers).toHaveLength(2);
+    const rows = container.querySelectorAll(".ntf-ev");
+    expect(rows).toHaveLength(2);
+    // Newest first: the year-old row is at the BOTTOM, not interleaved.
+    expect(rows[0]!.textContent).toContain("recent row");
+    expect(rows[1]!.textContent).toContain("a year older");
+  });
+
   it("all-caught-up subtitle hides the Mark all read button", () => {
     const read = ITEMS.map((n) => ({ ...n, unread: false }));
     const { getByText, queryByText } = renderPage(read, 0);

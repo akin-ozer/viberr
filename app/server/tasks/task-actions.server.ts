@@ -5849,6 +5849,11 @@ export async function resolvePacket(
    *  `accept_completion` arm — the shared write below re-reads the stage under
    *  the lock and skips itself when the task is already there. */
   let acceptsInto: string | null = null;
+  /** OBS-11: the empty branch this resolution closes over. Decided by the
+   *  `accept_completion` arm from the PRE-acceptance frontmatter, but acted on
+   *  only after the write lands, so the decision has to outlive that arm's
+   *  block scope. Every other arm leaves it `none`. */
+  let branchDisposition: EmptyBranchDisposition = { kind: "none" };
 
   switch (option.kind) {
     case "accept_completion": {
@@ -6002,6 +6007,25 @@ export async function resolvePacket(
             toAgent: false,
             evidence: null,
           };
+      // OBS-11 / OBS-13: a packet is a writer to Done like the Accept button,
+      // so the empty branch is disposed of here too. Without it the same
+      // branch's fate depended on which door the human used, and a branch the
+      // acceptance itself proved carries nothing sat on GitHub forever with no
+      // timeline sentence saying so. Decided from the PRE-acceptance
+      // frontmatter so the completion event can state the branch's fate; the
+      // deletion runs after the write, below.
+      branchDisposition = emptyBranchDisposition(
+        db,
+        existing.parsed.frontmatter,
+        noChange,
+        input.projectSlug,
+      );
+      // The branch sentence rides on the no-change event only: the merge path's
+      // copy is about a pull request, and a task WITH a PR never reaches a
+      // `branch_empty` verification (the same rule acceptCompletion follows).
+      if (noChange.applies) {
+        event.text += emptyBranchNote(branchDisposition, input.taskKey);
+      }
       mutate = (fm) => {
         // In-lock re-check (B-WF1): the generic resolution write below holds the
         // file lock — this is the last word before Done is recorded. A2: the
@@ -6022,6 +6046,12 @@ export async function resolvePacket(
         // R20-2 (F20-6): a server-proved no-change acceptance repairs the flag so
         // the durable record matches the outcome. Set before deriveValidation.
         if (noChange.applies && noChange.autoDetected) fm.noChanges = true;
+        // Ruling 98: EVERY stage write records where the task came from. This
+        // arm writes the terminal stage itself rather than going through
+        // `applyAcceptanceWrite`, which owns the field — without this the Done
+        // task's `previousStageId` still names the stage before review, and the
+        // next operator turn is told it arrived from there.
+        if (fm.stage !== doneStageId) fm.previousStageId = fm.stage;
         fm.stage = doneStageId;
         fm.readiness = "ready";
         fm.waiting = "none";
@@ -6357,6 +6387,15 @@ export async function resolvePacket(
         resolvedOption,
       );
     }
+  }
+
+  // OBS-11: the same cleanup the Accept button runs, on the acceptance door
+  // that skipped it. Skipped when the write itself was skipped (U3): a racing
+  // acceptance owns the branch as well as the completion record, so running it
+  // here too would delete the branch twice for one close. Every non-acceptance
+  // arm leaves the disposition `none`, which the helper returns on immediately.
+  if (!alreadyAccepted) {
+    await cleanUpEmptyTaskBranch(db, ctx, input, branchDisposition, actor);
   }
 
   // archive_task: the decision IS the archive — run the real R14-3 contract
@@ -7845,13 +7884,32 @@ async function acceptCompletion(
     details: { to: doneStageId, boundary: "human", via: "accept_completion" },
   });
 
-  // OBS-11: the empty branch goes, once the task is genuinely Done. AFTER the
-  // write on purpose — a deletion in front of a refusal (a verdict that landed
-  // mid-flight, a head that moved) would have removed a branch from a task that
-  // stayed open. Best-effort: a failed cleanup never un-accepts a completion,
-  // and `deleteTaskRemoteBranch` writes its own `github` timeline event and
-  // audit row on success, keeps its own refusals (never the default branch,
-  // never a branch with an open PR), and never throws.
+  await cleanUpEmptyTaskBranch(db, ctx, input, branchDisposition, actor);
+  return true;
+}
+
+/**
+ * OBS-11: the empty branch goes, once the task is genuinely Done.
+ *
+ * Lives here rather than inside one acceptance path because a no-change task
+ * can be closed through the Accept button OR through an operator decision
+ * packet, and a cleanup only one door runs makes the same branch's fate depend
+ * on which button the human pressed.
+ *
+ * Called AFTER the write on purpose: a deletion in front of a refusal (a
+ * verdict that landed mid-flight, a head that moved) would have removed a
+ * branch from a task that stayed open. Best-effort — a failed cleanup never
+ * un-accepts a completion, and `deleteTaskRemoteBranch` writes its own `github`
+ * timeline event and audit row on success, keeps its own refusals (never the
+ * default branch, never a branch with an open PR), and never throws.
+ */
+async function cleanUpEmptyTaskBranch(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  input: { projectSlug: string; taskKey: string },
+  branchDisposition: EmptyBranchDisposition,
+  actor: TaskActor,
+): Promise<void> {
   if (branchDisposition.kind === "delete" && actor.userId) {
     try {
       const { deleteTaskRemoteBranch } = await import(
@@ -7927,7 +7985,6 @@ async function acceptCompletion(
       }
     }
   }
-  return true;
 }
 
 /**

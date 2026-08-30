@@ -32,13 +32,29 @@ interface Bucket {
   updatedAt: number;
 }
 
-const MAX_TRACKED_KEYS = 10_000;
+/**
+ * Hard cap on tracked keys, held by EVICTION.
+ *
+ * The login path is unauthenticated and every distinct `email|ip` mints a
+ * bucket, so the map is attacker-sized. A scan cannot hold the cap on its own:
+ * a bucket is prunable only once it has fully refilled, so under sustained
+ * traffic nothing is ever eligible and the map grows without bound.
+ */
+export const MAX_TRACKED_KEYS = 10_000;
+
+/**
+ * A prune is O(size). Once the map sits at the cap the pruning branch is on the
+ * path of EVERY new key, so an unthrottled scan turns the login throttle into
+ * the quadratic amplifier it exists to prevent.
+ */
+const PRUNE_MIN_INTERVAL_MS = 1_000;
 
 export class TokenBucketLimiter {
   private readonly capacity: number;
   private readonly refillIntervalMs: number;
   private readonly now: () => number;
   private readonly buckets = new Map<string, Bucket>();
+  private lastPrunedAt = Number.NEGATIVE_INFINITY;
 
   constructor(options: TokenBucketOptions) {
     this.capacity = options.capacity;
@@ -51,7 +67,7 @@ export class TokenBucketLimiter {
     const now = this.now();
     let bucket = this.buckets.get(key);
     if (!bucket) {
-      if (this.buckets.size >= MAX_TRACKED_KEYS) this.prune();
+      this.makeRoom(now);
       bucket = { tokens: this.capacity, updatedAt: now };
       this.buckets.set(key, bucket);
     } else {
@@ -65,6 +81,28 @@ export class TokenBucketLimiter {
     if (bucket.tokens < 1) return false;
     bucket.tokens -= 1;
     return true;
+  }
+
+  /**
+   * Holds the map under {@link MAX_TRACKED_KEYS} before a new key is inserted.
+   *
+   * Map iteration is insertion order, so the front is the oldest key: dropping
+   * it forgives at most one throttled caller, and flushing a SPECIFIC key costs
+   * an attacker MAX_TRACKED_KEYS fresh attempts that this same limiter meters.
+   * That is a far better failure than a map an unauthenticated caller grows
+   * without bound.
+   */
+  private makeRoom(now: number): void {
+    if (this.buckets.size < MAX_TRACKED_KEYS) return;
+    if (now - this.lastPrunedAt >= PRUNE_MIN_INTERVAL_MS) {
+      this.lastPrunedAt = now;
+      this.prune();
+    }
+    while (this.buckets.size >= MAX_TRACKED_KEYS) {
+      const oldest = this.buckets.keys().next().value;
+      if (oldest === undefined) break;
+      this.buckets.delete(oldest);
+    }
   }
 
   /** Clears a key (e.g. after a successful login). */

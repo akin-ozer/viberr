@@ -747,8 +747,17 @@ export async function assignSpecialist(
       // appears twice (a duplicate profileId corrupts run routing — the
       // engagements.find in startAgentRun returns the first match, so a later
       // review run would resolve to the delivers:true entry and run as primary).
+      // Promotion REPLACES the row, so anything durable already recorded on it
+      // has to be carried across. `pinnedBackend` is the one that matters:
+      // F27-B1 says a retry-on-the-other-backend pin STICKS, and rebuilding the
+      // row from the bare `ref` silently reverted the next run to the very
+      // backend the pin existed to escape.
+      const existing = parsed.frontmatter.engagements.find(
+        (e) => e.profileId === ref.profileId,
+      );
       parsed.frontmatter.engagements = [
         {
+          ...existing,
           ...ref,
           delivers: true,
           // F10-15: snapshot verdict authority. A deliverer is excluded from the
@@ -764,6 +773,12 @@ export async function assignSpecialist(
       parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
         (r) => !(r.kind === "run_agent" && r.profileId === ref.profileId),
       );
+      // `engagements` is an input to `requiredReviewers`, so a hand-off that
+      // drops the approving reviewer changes what `validation` derives to. This
+      // is the roster writer that was not re-deriving the cache, leaving the
+      // canonical file asserting a review state that no longer follows from it
+      // (the same UX19-3 line `assignReviewer` and `removeReviewer` carry).
+      parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
       parsed.timeline.unshift(event);
     },
   );

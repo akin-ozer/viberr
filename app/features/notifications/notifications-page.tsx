@@ -8,8 +8,10 @@ import {
   formatClockUTC,
   formatDayBucket,
   formatDayBucketUTC,
+  localDayKey,
+  utcDayKey,
 } from "~/shared/dates/format";
-import { ntfMeta, ntfPill } from "./notification-meta";
+import { ntfMeta, ntfPill, plainText } from "./notification-meta";
 import {
   needsYouTime,
   splitNotifications,
@@ -148,18 +150,29 @@ function NtfStream({
   const now = new Date();
   const dayOf = (iso: string) =>
     local ? formatDayBucket(iso, now) : formatDayBucketUTC(iso);
-  const days = [...new Set(items.map((n) => dayOf(n.occurredAt)))];
+  // Walk the newest-first list ONCE, opening a new section whenever the
+  // ABSOLUTE day changes. Bucketing on a Set of LABELS merged rows a year apart
+  // under one "Mar 30" header (the label carries no year) and drew the year-old
+  // row inside the recent block, with nothing to tell them apart: the row's own
+  // stamp is time-only. The label is still what the reader sees.
+  const keyOf = (iso: string) => (local ? localDayKey(iso) : utcDayKey(iso));
+  const sections: { key: string; day: string; rows: NotificationPageItem[] }[] = [];
+  for (const item of items) {
+    const key = keyOf(item.occurredAt);
+    const last = sections[sections.length - 1];
+    if (last && last.key === key) last.rows.push(item);
+    else sections.push({ key, day: dayOf(item.occurredAt), rows: [item] });
+  }
   return (
     <div className="panel">
       <div className="panel-head">
         <Icon name="bell" />
         <h2>Everything else</h2>
       </div>
-      {days.map((day) => (
-        <div key={day}>
-          <div className="act-day">{day}</div>
-          {items.flatMap((n) => {
-            if (dayOf(n.occurredAt) !== day) return [];
+      {sections.map((section) => (
+        <div key={section.key}>
+          <div className="act-day">{section.day}</div>
+          {section.rows.flatMap((n) => {
             const m = ntfMeta(n);
             return (
               // UI-54: every stream row used to be `role="button" tabIndex={0}`
@@ -201,7 +214,10 @@ function NtfStream({
                   <button
                     type="button"
                     className="keybtn"
-                    aria-label={"Mark “" + n.title + "” read"}
+                    // `title` is NULL for every kind but packet/approval, so
+                    // concatenating it announced `Mark “null” read` — the row
+                    // body's own fallback is the notification's identity.
+                    aria-label={"Mark “" + (n.title || plainText(n.text)) + "” read"}
                     onClick={(e) => {
                       e.stopPropagation();
                       onRead(n.id);

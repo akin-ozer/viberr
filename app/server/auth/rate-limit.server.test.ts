@@ -1,5 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { clientIpOf, TokenBucketLimiter } from "./rate-limit.server";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  clientIpOf,
+  MAX_TRACKED_KEYS,
+  TokenBucketLimiter,
+} from "./rate-limit.server";
 
 describe("TokenBucketLimiter", () => {
   it("allows exactly `capacity` immediate attempts, then blocks", () => {
@@ -60,6 +64,35 @@ describe("TokenBucketLimiter", () => {
     expect(limiter.tryConsume("k")).toBe(false);
     limiter.reset("k");
     expect(limiter.tryConsume("k")).toBe(true);
+  });
+
+  /**
+   * The login path is unauthenticated, so an attacker varying the `email` half
+   * of the key mints a bucket per attempt. A prune frees only FULLY REFILLED
+   * buckets, so under sustained traffic nothing is ever eligible: the cap held
+   * nothing, and every later insert paid a full O(n) scan — the throttle
+   * becoming the amplifier.
+   */
+  it("bounds the tracked-key map and does not rescan on every new key", () => {
+    const now = 0;
+    const limiter = new TokenBucketLimiter({
+      capacity: 1,
+      refillIntervalMs: 60_000,
+      now: () => now,
+    });
+    const prune = vi.spyOn(limiter, "prune");
+
+    // The clock never advances, so no bucket ever refills and none is prunable.
+    for (let i = 0; i < MAX_TRACKED_KEYS + 50; i += 1) {
+      limiter.tryConsume(`k${i}`);
+    }
+
+    // The oldest key was evicted, so it is forgiven rather than tracked
+    // forever: a fresh bucket answers true where a retained (spent) one
+    // answered false.
+    expect(limiter.tryConsume("k0")).toBe(true);
+    // And the O(n) scan is time-limited, not once per insert.
+    expect(prune.mock.calls.length).toBeLessThanOrEqual(1);
   });
 });
 

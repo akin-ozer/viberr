@@ -110,7 +110,7 @@ function diskNameFromId(id: string): string | null {
  * other store path refuses to follow a link out of the store (P14-RV-02);
  * `lstatSync` does not dereference, so a linked entry is simply not a resource.
  */
-function subDirNames(root: string): string[] {
+export function subDirNames(root: string): string[] {
   try {
     if (!existsSync(root)) return [];
     return readdirSync(root, { withFileTypes: true }).flatMap((entry) =>

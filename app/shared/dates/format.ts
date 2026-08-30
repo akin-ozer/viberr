@@ -71,6 +71,30 @@ export function formatDayBucket(iso: string, now: Date = new Date()): string {
   return shortDay.format(d);
 }
 
+/**
+ * The absolute calendar day as `YYYY-MM-DD`, for GROUPING — never displayed.
+ *
+ * `formatDayBucket`'s label carries no year, so two rows a year apart both read
+ * "Mar 30". Grouping on that label merges them into one section and interleaves
+ * them, and the rows' own stamps are time-only, so nothing tells the reader
+ * they are a year apart. Group on this; show the bucket.
+ */
+export function localDayKey(iso: string): string {
+  const d = toDate(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
+/** {@link localDayKey} in UTC — the basis the hydration first pass groups on,
+ *  matching `formatDayBucketUTC`. */
+export function utcDayKey(iso: string): string {
+  const d = toDate(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
 /** "Jul 3, 2027"; null for missing or invalid values. */
 export function formatCalendarDate(iso: string | null): string | null {
   if (!iso) return null;

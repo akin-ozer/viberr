@@ -686,7 +686,7 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
    * Seeded with its delivered revision and the reviewer's approval on it, since
    * the verdict-time mint deliberately skips a task that already has a branch.
    */
-  function seedEmptyBranchTask(): void {
+  function seedEmptyBranchTask(packet: TaskPacket | null = null): void {
     const headSha = "d".repeat(40);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -719,6 +719,9 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
         validation: "healthy",
       }),
       goal: "Fix the flake; it turned out to already be fixed.",
+      // Seeded in the SAME up-front write: a later raw write landing within the
+      // stale-read window is repaired away as a stale view of the writer's cache.
+      packet,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
@@ -762,6 +765,34 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
       "/repos/akin-ozer/viberr/git/refs/heads/vib-1",
     ]);
     // `deleteTaskRemoteBranch` writes its own honest record of the deletion.
+    expect(
+      task().timeline.some((e) => e.text.includes("Deleted branch `vib-1` from GitHub.")),
+    ).toBe(true);
+  });
+
+  it("OBS-11: the packet path deletes the same empty branch the Accept button does", async () => {
+    // CANARY: drop the `cleanUpEmptyTaskBranch` call from resolvePacket — no
+    // DELETE is sent and the branch this acceptance closed over lives on.
+    //
+    // A no-change task can be closed through the Accept button OR through an
+    // operator decision packet. Only the first ran the cleanup, so the same
+    // branch's fate depended on which door the human used.
+    deployAgents();
+    seedEmptyBranchTask(ACCEPT_PACKET);
+    remote({ aheadBy: 0 });
+    const deletes = captureDeletes();
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      arda(),
+      dataCtx(),
+    );
+
+    expect(task().frontmatter.stage).toBe("done");
+    expect(deletes.paths).toEqual([
+      "/repos/akin-ozer/viberr/git/refs/heads/vib-1",
+    ]);
     expect(
       task().timeline.some((e) => e.text.includes("Deleted branch `vib-1` from GitHub.")),
     ).toBe(true);

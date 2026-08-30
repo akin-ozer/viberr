@@ -464,6 +464,35 @@ describe("engagement uniqueness (adversarial-review)", () => {
     expect(supportingEngagements(fm).some((e) => e.profileId === "style")).toBe(false);
   });
 
+  it("F27-B1: promoting a supporting engagement carries its backend pin", async () => {
+    // A `retry_other_backend` resolution records `pinnedBackend` on the
+    // engagement and F27-B1 says that pin STICKS. Promotion REPLACES the row,
+    // so rebuilding it from the bare profile ref silently reverted the next run
+    // to the profile's own backend — the one the retry existed to escape, with
+    // no record a pin was ever in force.
+    deploySecond("style");
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        const supporting = parsed.frontmatter.engagements.find(
+          (e) => e.profileId === "style",
+        );
+        if (supporting) supporting.pinnedBackend = "codex";
+      },
+    );
+
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    const promoted = deliveringEngagement(fm)!;
+    expect(promoted.profileId).toBe("style");
+    expect(promoted.pinnedBackend).toBe("codex");
+  });
+
   it("engaging the current deliverer as a reviewer is a no-op (no duplicate)", async () => {
     await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
     const res = await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
@@ -935,6 +964,24 @@ describe("assignReviewer / removeReviewer", () => {
       );
       const fm = readFm();
       expect(supportingEngagements(fm)).toEqual([]);
+      expect(fm.validation).toBe("changed");
+    });
+
+    it("assignSpecialist disarms a healthy cache when a hand-off drops the approving reviewer", async () => {
+      // The third roster writer. `engagements` feeds `requiredReviewers`, so
+      // promoting `critic` to deliverer removes it from the required set (a
+      // deliverer never reviews its own work) and drops `dev` entirely — the
+      // approval on rev-1 no longer gates anything, so `healthy` no longer
+      // derives. Only this writer was not re-deriving the cache.
+      expect(readFm().validation).toBe("healthy"); // honest before the change
+      await assignSpecialist(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const fm = readFm();
+      expect(fm.engagements.some((e) => e.profileId === "critic" && e.delivers)).toBe(true);
       expect(fm.validation).toBe("changed");
     });
 
