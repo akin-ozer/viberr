@@ -11,6 +11,10 @@ import { ResourcesPanel } from "./resources-panel";
 import { SsoPanel } from "./sso-panel";
 import { useOrgAction } from "./use-org-action";
 import { UsersPanel } from "./users-panel";
+import {
+  ControllerAdminPanel,
+  type ControllerConfigView,
+} from "./controller-admin-panel";
 
 /**
  * /org/settings page shell (org-settings spec §4.0, markup 1:1): back
@@ -19,7 +23,12 @@ import { UsersPanel } from "./users-panel";
  * this shape); default "connections". Admin-only (route-enforced).
  */
 
-export type OrgSettingsTab = "connections" | "users" | "sso" | "resources";
+export type OrgSettingsTab =
+  | "connections"
+  | "users"
+  | "sso"
+  | "resources"
+  | "controller";
 
 const SETTINGS_TABS: { id: OrgSettingsTab; label: string; icon: IconName }[] = [
   { id: "connections", label: "GitHub connections", icon: "github" },
@@ -28,10 +37,16 @@ const SETTINGS_TABS: { id: OrgSettingsTab; label: string; icon: IconName }[] = [
   // in, this decides HOW they can.
   { id: "sso", label: "Sign-in & SSO", icon: "lock" },
   { id: "resources", label: "Agent resources", icon: "memory" },
+  // Ruling 99: only org admins modify the controller itself (profile,
+  // resources, prompt) — this is that surface.
+  { id: "controller", label: "Controller", icon: "cpu" },
 ];
 
 function resolveOrgTab(raw: string | null): OrgSettingsTab {
-  return raw === "users" || raw === "resources" || raw === "sso"
+  return raw === "users" ||
+    raw === "resources" ||
+    raw === "sso" ||
+    raw === "controller"
     ? raw
     : "connections";
 }
@@ -53,6 +68,7 @@ export function OrgSettingsPage({
   runConcurrency,
   s3Audit,
   auditEvents,
+  controllerConfig,
 }: {
   view: OrgSettingsView;
   meId: string;
@@ -63,6 +79,8 @@ export function OrgSettingsPage({
   s3Audit: S3AuditConfigView | null;
   /** PG26-A: recent audit events for the in-app browse panel. */
   auditEvents: AuditBrowseRow[];
+  /** Ruling 99: the live controller configuration this admin surface edits. */
+  controllerConfig: ControllerConfigView;
 }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -81,6 +99,8 @@ export function OrgSettingsPage({
     // opposite of the card underneath.
     sso: view.authProviders.filter((p) => p.active).length,
     resources: resourceCount,
+    // One controller per instance, definitionally.
+    controller: 1,
   } satisfies Record<OrgSettingsTab, number>;
   const countHint = {
     connections: countLabel(view.connections.length, "GitHub connection"),
@@ -98,6 +118,7 @@ export function OrgSettingsPage({
       countLabel(view.skills.length, "skill"),
     ].join(" · ") +
       `, plus ${countLabel(view.gagents.length, "agent profile")}`,
+    controller: "the instance controller",
   } satisfies Record<OrgSettingsTab, string>;
 
   return (
@@ -161,6 +182,14 @@ export function OrgSettingsPage({
               gagents={view.gagents}
               projectGrants={view.projectGrants}
               stages={view.stages}
+            />
+          )}
+          {tab === "controller" && (
+            <ControllerAdminPanel
+              config={controllerConfig}
+              kbs={view.kbs.map((k) => k.dir)}
+              skills={view.skills.map((k) => k.name)}
+              mcps={view.mcps.map((m) => m.name)}
             />
           )}
         </div>

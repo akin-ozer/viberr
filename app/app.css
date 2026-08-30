@@ -4663,6 +4663,10 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .gh-table, .live-wrap { overflow-x: auto; }
   .gh-table .live-head, .gh-table .live-row { min-width: 34rem; }
   .live-wrap .live-head, .live-wrap .live-row { min-width: 42rem; }
+  /* Ruling 99: the controller's side column joins the 2-up collapse. */
+  .ctl-layout { grid-template-columns: minmax(0, 1fr); }
+  .ctl-transcript { max-height: none; }
+  .ctladm-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ============================================================
@@ -4983,3 +4987,240 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .run-when { flex: none; font-size: .8rem; padding: .25rem .375rem; }
 /* Pending scheduled runs listed under a control take the full control width. */
 .op-run .sched-list { flex-basis: 100%; margin: 0; }
+
+/* ============================= Ruling 99 controller =============================
+   The controller surfaces (/controller + /projects/:slug/controller): the
+   conversation transcript, its composer, the conversation list, and the Goals
+   panel. Existing tokens/scales only; wide content scrolls inside its own
+   containers. */
+.ctl-wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.4rem 1.6rem 2.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 100dvh;
+}
+.ctl-head {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+}
+.ctl-head h1 {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  margin: 0;
+}
+.ctl-head-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-box);
+  background: var(--agent-soft);
+  color: var(--agent-dark);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.ctl-head .pill { margin-left: auto; }
+.ctl-home { margin-left: auto; }
+.ctl-head .pill + .ctl-home { margin-left: .6rem; }
+.ctl-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 1rem;
+  align-items: start;
+  flex: 1;
+}
+.ctl-main {
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+  min-width: 0;
+}
+.ctl-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+.ctl-transcript {
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+  max-height: calc(100dvh - 320px);
+  overflow-y: auto;
+}
+.ctl-msgs {
+  display: flex;
+  flex-direction: column;
+  gap: .7rem;
+}
+.ctl-msg {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  padding: .65rem .85rem;
+  max-width: 92%;
+}
+.ctl-msg.from-user {
+  align-self: flex-end;
+  background: var(--tint-well);
+}
+.ctl-msg.from-controller {
+  align-self: flex-start;
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--agent), transparent 72%);
+}
+.ctl-msg header {
+  display: flex;
+  align-items: baseline;
+  gap: .6rem;
+  margin-bottom: .3rem;
+  font-size: .74rem;
+  color: var(--muted);
+}
+.ctl-msg-who {
+  font-weight: 600;
+  color: var(--fg);
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+.ctl-msg-who svg { width: 14px; height: 14px; color: var(--agent-dark); }
+.ctl-msg .md-body { font-size: .92rem; }
+.ctl-working {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  color: var(--muted);
+  font-size: .86rem;
+  padding: .3rem .2rem;
+}
+.ctl-composer {
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: .6rem .7rem .5rem;
+}
+.ctl-composer textarea {
+  width: 100%;
+  border: 0;
+  outline: none;
+  resize: vertical;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: .92rem;
+  min-height: 64px;
+}
+.ctl-composer textarea::placeholder { color: var(--placeholder); }
+.ctl-composer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .8rem;
+  margin-top: .3rem;
+}
+.ctl-convs .ctl-all-toggle { margin: 0 0 .5rem; }
+.ctl-conv-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.ctl-conv {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  padding: .45rem .6rem;
+  border-radius: var(--radius-box);
+  text-decoration: none;
+  color: var(--fg);
+  border: 1px solid transparent;
+}
+.ctl-conv:hover { background: var(--tint-hover); }
+.ctl-conv.on {
+  background: var(--tint-well);
+  border-color: var(--hairline);
+}
+.ctl-conv-title {
+  font-size: .86rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ctl-goals { display: flex; flex-direction: column; gap: .7rem; }
+.ctl-goal {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-box);
+  padding: .6rem .7rem;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+.ctl-goal header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+  font-size: .92rem;
+}
+.ctl-goal-id { color: var(--muted); font-size: .8rem; }
+.ctl-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+.ctl-links li {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+  font-size: .86rem;
+  padding: .25rem .4rem;
+  border-radius: var(--radius-small);
+}
+.ctl-links li.on { background: var(--tint-well); }
+.ctl-link-title { min-width: 0; }
+.ctl-link-task { color: var(--blue-pressed); text-decoration: none; font-size: .8rem; }
+.ctl-link-task:hover { text-decoration: underline; }
+.ctl-link-acts { display: inline-flex; gap: .3rem; margin-left: auto; }
+.ctl-link-note { flex-basis: 100%; }
+.ctl-goal-acts { display: flex; gap: .5rem; }
+
+/* The org-settings Controller tab (admin config of the controller itself). */
+.ctladm { display: flex; flex-direction: column; gap: .9rem; }
+.ctladm-warn { color: var(--coral-dark); background: var(--coral-light); border-radius: var(--radius-small); padding: .4rem .6rem; margin: 0; }
+.ctladm-field { display: flex; flex-direction: column; gap: .3rem; font-size: .86rem; font-weight: 600; }
+.ctladm-field input,
+.ctladm-field textarea {
+  font: inherit;
+  font-weight: 400;
+  font-size: .92rem;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-button);
+  padding: .45rem .6rem;
+}
+.ctladm-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .9rem;
+}
+.ctladm-grants h3 { margin: 0 0 .2rem; font-size: .92rem; }
+.ctladm-grants ul { list-style: none; margin: .3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; }
+.ctladm-grants label { display: inline-flex; align-items: center; gap: .45rem; font-size: .86rem; }
+.ctladm-foot { display: flex; align-items: center; justify-content: space-between; gap: .8rem; }
+
+/* The task hero's goal-chain chip: a pill that is also a link. */
+.hero-goal-chip { text-decoration: none; }
+.hero-goal-chip:hover { text-decoration: underline; }

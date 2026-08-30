@@ -40,8 +40,21 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (!run) {
     return new Response("Run not found.", { status: 404 });
   }
-  // Membership gate for the run's project (throws a 403 Response for non-members).
-  await requireProjectMember(request, run.project_slug, "export the provider session");
+  // Ruling 99: a controller turn has no project scope — its session export is
+  // gated on conversation ownership (or org-admin supervision), same as its log.
+  if (run.kind === "controller") {
+    const { requireUser } = await import("~/server/auth/require-user.server");
+    const user = await requireUser(request);
+    const { canReadControllerRunLog } = await import(
+      "~/server/controller/controller-run.server"
+    );
+    if (!canReadControllerRunLog(db, run, { id: user.id })) {
+      return new Response("Run not found.", { status: 404 });
+    }
+  } else {
+    // Membership gate for the run's project (throws a 403 Response for non-members).
+    await requireProjectMember(request, run.project_slug, "export the provider session");
+  }
   if (!run.session_id) {
     return new Response(
       "This run never opened an exportable provider session.",

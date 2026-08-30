@@ -12,7 +12,10 @@ import {
   recordAudit,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
-import { queryAuditEventsForExport } from "~/server/audit/audit-export.server";
+import {
+  queryAuditEventsForExport,
+  type AuditExportFilters,
+} from "~/server/audit/audit-export.server";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import {
@@ -44,6 +47,7 @@ import { getGithubViewData } from "~/features/github/github-query.server";
 import {
   createProject,
   type CreateProjectInput,
+  type CustomProjectBlueprint,
 } from "~/features/home/project-create.server";
 import { listHomeProjectsForUser } from "~/features/home/home-query.server";
 import {
@@ -79,6 +83,7 @@ import {
   getGoalView,
   listGoals,
   updateGoal,
+  type CreateGoalInput,
   type UpdateGoalOp,
 } from "~/server/tasks/goal-actions.server";
 import {
@@ -87,7 +92,10 @@ import {
   setOwner,
   transitionStage,
   userName,
+  type CreateTaskInput,
 } from "~/server/tasks/task-actions.server";
+import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
+import type { StartAgentRunInput } from "~/server/tasks/specialist-run.server";
 import { canRunAgents } from "~/server/auth/project-authority.server";
 import { listUsers } from "~/server/auth/user-store.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
@@ -150,7 +158,9 @@ function notVisible(slug: string): string {
   return `[denied] No project "${slug}" is visible to you.`;
 }
 
-const NOT_VISIBLE = Symbol("project-not-visible");
+/** Thrown wherever a project read must answer the uniform not-visible
+ *  sentence; `run` relays its message verbatim. */
+class ProjectNotVisibleError extends Error {}
 
 /** Build the toolkit for one controller turn. */
 export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerToolkit {
@@ -188,7 +198,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         allowArchived: true,
       });
     } catch {
-      throw Object.assign(new Error(notVisible(slug)), { [NOT_VISIBLE]: true });
+      throw new ProjectNotVisibleError(notVisible(slug));
     }
   }
 
@@ -214,7 +224,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const denied = error.status === 403 || error.status === 401;
           return textResult(`[${denied ? "denied" : "error"}] ${error.userMessage}`);
         }
-        if (error instanceof Error && (error as unknown as Record<PropertyKey, unknown>)[NOT_VISIBLE]) {
+        if (error instanceof ProjectNotVisibleError) {
           return textResult(error.message);
         }
         logger.error("controller tool failed", {
@@ -235,7 +245,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     };
   }
 
-  const json = (value: unknown) => JSON.stringify(value, null, 1);
+  const json = <T>(value: T) => JSON.stringify(value, null, 1);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: SdkMcpToolDefinition<any>[] = [];
@@ -696,13 +706,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           limit?: number;
         }) => {
           requireOrgAdmin("inspect the audit log");
-          const rows = queryAuditEventsForExport(db, {
-            ...(args.projectSlug ? { projectSlug: args.projectSlug } : {}),
-            ...(args.action ? { action: args.action } : {}),
-            ...(args.actorUserId ? { actorUserId: args.actorUserId } : {}),
-            ...(args.since ? { since: args.since } : {}),
-            ...(args.until ? { until: args.until } : {}),
-          });
+          const filters: AuditExportFilters = {};
+          if (args.projectSlug) filters.projectSlug = args.projectSlug;
+          if (args.action) filters.action = args.action;
+          if (args.actorUserId) filters.actorUserId = args.actorUserId;
+          if (args.since) filters.since = args.since;
+          if (args.until) filters.until = args.until;
+          const rows = queryAuditEventsForExport(db, filters);
           const limit = args.limit ?? 50;
           return json({
             total: rows.length,
@@ -802,12 +812,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             policy: args.policy,
           };
           if (args.description || args.stages || args.boundaries || args.members) {
-            input.custom = {
-              ...(args.description ? { description: args.description } : {}),
-              ...(args.stages ? { stages: args.stages } : {}),
-              ...(args.boundaries ? { boundaries: args.boundaries } : {}),
-              ...(args.members ? { members: args.members } : {}),
-            };
+            const custom: CustomProjectBlueprint = {};
+            if (args.description) custom.description = args.description;
+            if (args.stages) custom.stages = args.stages;
+            if (args.boundaries) custom.boundaries = args.boundaries;
+            if (args.members) custom.members = args.members;
+            input.custom = custom;
           }
           const created = await createProject(db, input, actor, { dataRoot });
           return (
@@ -833,7 +843,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         requireVisible(slug, "read this project");
         const project = getProject(db, slug);
         const file = readProjectFile({ projectSlug: slug, dataRoot });
-        if (!project || !file) throw Object.assign(new Error(notVisible(slug)), { [NOT_VISIBLE]: true });
+        if (!project || !file) throw new ProjectNotVisibleError(notVisible(slug));
         const tasks = listProjectTasks(db, slug, { dataRoot });
         const users = new Map(listUsers(db).map((u) => [u.id, u]));
         const counts = new Map<string, number>();
@@ -892,10 +902,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       runWith((args: { projectSlug?: string; stageId?: string; includeArchived?: boolean }) => {
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "read this project's tasks");
-        const rows = listProjectTasks(db, slug, {
+        const listOpts: NonNullable<Parameters<typeof listProjectTasks>[2]> = {
           dataRoot,
-          ...(args.includeArchived ? { includeArchived: true } : {}),
-        }).filter((t) => !args.stageId || t.stage === args.stageId);
+        };
+        if (args.includeArchived) listOpts.includeArchived = true;
+        const rows = listProjectTasks(db, slug, listOpts).filter(
+          (t) => !args.stageId || t.stage === args.stageId,
+        );
         return json(
           rows.map((t) => ({
             key: t.key,
@@ -963,18 +976,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           labels?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
-          const created = await createTask(
-            db,
-            {
-              projectSlug: slug,
-              title: args.title,
-              ...(args.goal ? { goal: prose(args.goal) } : {}),
-              ...(args.priority ? { priority: args.priority } : {}),
-              ...(args.labels ? { labels: args.labels } : {}),
-            },
-            actor,
-            { dataRoot },
-          );
+          const taskInput: CreateTaskInput = {
+            projectSlug: slug,
+            title: args.title,
+          };
+          if (args.goal) taskInput.goal = prose(args.goal);
+          if (args.priority) taskInput.priority = args.priority;
+          if (args.labels) taskInput.labels = args.labels;
+          const created = await createTask(db, taskInput, actor, { dataRoot });
           return `[done] ${created.key} created in ${created.stageName}: ${created.task.title}.`;
         },
       ),
@@ -995,7 +1004,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "move tasks");
         const project = getProject(db, slug);
-        if (!project) throw Object.assign(new Error(notVisible(slug)), { [NOT_VISIBLE]: true });
+        if (!project) throw new ProjectNotVisibleError(notVisible(slug));
         const terminal = project.stages[project.stages.length - 1];
         if (terminal && args.toStageId === terminal.id) {
           return (
@@ -1009,17 +1018,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const onGraph = project.workflow.some(
           (w) => w.from === summary.stage && w.to === args.toStageId,
         );
-        const moved = await transitionStage(
-          db,
-          {
-            projectSlug: slug,
-            taskKey: args.taskKey,
-            toStageId: args.toStageId,
-            ...(onGraph ? {} : { manual: true }),
-          },
-          actor,
-          { dataRoot },
-        );
+        const move: Parameters<typeof transitionStage>[1] = {
+          projectSlug: slug,
+          taskKey: args.taskKey,
+          toStageId: args.toStageId,
+        };
+        if (!onGraph) move.manual = true;
+        const moved = await transitionStage(db, move, actor, { dataRoot });
         return `[done] ${args.taskKey} is now in stage ${moved.stage}.`;
       }),
     ),
@@ -1111,7 +1116,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "run agents");
           const file = readProjectFile({ projectSlug: slug, dataRoot });
-          if (!file) throw Object.assign(new Error(notVisible(slug)), { [NOT_VISIBLE]: true });
+          if (!file) throw new ProjectNotVisibleError(notVisible(slug));
           const authority = {
             slug,
             memberRoles: new Map(
@@ -1127,16 +1132,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             const { runOperator } = await import(
               "~/server/runtimes/operator-run.server"
             );
-            const result = await runOperator(db, {
+            const operatorInput: RunOperatorInput = {
               projectSlug: slug,
               taskKey: args.taskKey,
               trigger: "manual",
-              ...(args.prompt
-                ? { humanComment: prose(args.prompt), humanCommentBy: display }
-                : {}),
               actor: auditActor,
-              ...(dataRoot ? { dataRoot } : {}),
-            });
+            };
+            if (args.prompt) {
+              operatorInput.humanComment = prose(args.prompt);
+              operatorInput.humanCommentBy = display;
+            }
+            if (dataRoot) operatorInput.dataRoot = dataRoot;
+            const result = await runOperator(db, operatorInput);
             if (result.refused === "open-packet") {
               return "[denied] The operator is not run while a decision packet is open. Answer the packet first.";
             }
@@ -1151,19 +1158,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const { startAgentRun } = await import(
             "~/server/tasks/specialist-run.server"
           );
-          const started = await startAgentRun(
-            db,
-            {
-              projectSlug: slug,
-              taskKey: args.taskKey,
-              profileId: args.agent.trim(),
-              ...(args.prompt ? { directive: prose(args.prompt), directiveFrom: display } : {}),
-              triggeredByName: display,
-              triggeredByUserId: user.id,
-            },
-            actor,
-            { dataRoot },
-          );
+          const runInput: StartAgentRunInput = {
+            projectSlug: slug,
+            taskKey: args.taskKey,
+            profileId: args.agent.trim(),
+            triggeredByName: display,
+            triggeredByUserId: user.id,
+          };
+          if (args.prompt) {
+            runInput.directive = prose(args.prompt);
+            runInput.directiveFrom = display;
+          }
+          const started = await startAgentRun(db, runInput, actor, { dataRoot });
           return `[done] ${started.name} run started on ${args.taskKey} (${started.backend}).`;
         },
       ),
@@ -1180,7 +1186,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "read this project's GitHub state");
         const data = await getGithubViewData(db, slug);
-        if (!data) throw Object.assign(new Error(notVisible(slug)), { [NOT_VISIBLE]: true });
+        if (!data) throw new ProjectNotVisibleError(notVisible(slug));
         return json({
           repo: data.project.repo,
           defaultBranch: data.project.defaultBranch,
@@ -1221,7 +1227,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "read this project");
           const project = getProject(db, slug);
-          if (!project) throw Object.assign(new Error(notVisible(slug)), { [NOT_VISIBLE]: true });
+          if (!project) throw new ProjectNotVisibleError(notVisible(slug));
           const result = await updateProjectIdentity(
             db,
             {
@@ -1451,7 +1457,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const caps: Record<string, string> = {};
           for (const grant of deployment.capabilities) caps[grant.capabilityId] = grant.mode;
           for (const patch of args.capabilities ?? []) caps[patch.capabilityId] = patch.mode;
-          const form: SubmittedProfileForm = {
+          const baseForm = {
             name: view.name,
             role: view.role,
             backend: args.backend ?? (view.backends[0] === "codex" ? "codex" : "claude"),
@@ -1461,11 +1467,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             model: args.model ?? view.model,
             effort: view.effort,
             caps,
-            ...(view.kind === "operator"
-              ? { autonomy: args.autonomy ?? view.autonomy }
-              : {}),
             resources: view.resources,
           };
+          // The downstream form schema reads autonomy as optional, so an
+          // undefined value and an absent key parse identically.
+          let form: SubmittedProfileForm = baseForm;
+          if (view.kind === "operator") {
+            const autonomy = args.autonomy ?? view.autonomy;
+            if (autonomy) form = { ...baseForm, autonomy };
+          }
           const result = await updateAgentProfile(
             db,
             { projectSlug: slug, profileId: args.profileId, form },
@@ -1518,18 +1528,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           links: { title: string; goal: string }[];
         }) => {
           const slug = slugOf(args.projectSlug);
-          const result = await createGoal(
-            db,
-            {
-              projectSlug: slug,
-              title: args.title,
-              ...(args.description ? { description: prose(args.description) } : {}),
-              ...(args.onFailure ? { onFailure: args.onFailure } : {}),
-              links: args.links.map((l) => ({ title: l.title, goal: prose(l.goal) })),
-            },
-            actor,
-            { dataRoot },
-          );
+          const goalInput: CreateGoalInput = {
+            projectSlug: slug,
+            title: args.title,
+            links: args.links.map((l) => ({ title: l.title, goal: prose(l.goal) })),
+          };
+          if (args.description) goalInput.description = prose(args.description);
+          if (args.onFailure) goalInput.onFailure = args.onFailure;
+          const result = await createGoal(db, goalInput, actor, { dataRoot });
           return `[done] ${result.message}`;
         },
       ),
@@ -1636,26 +1642,28 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               action = { op: "resume" };
               break;
             case "cancel":
-              action = { op: "cancel", ...(args.reason ? { reason: args.reason } : {}) };
+              action = args.reason
+                ? { op: "cancel", reason: args.reason }
+                : { op: "cancel" };
               break;
             case "skip_link":
-              action = {
-                op: "skip_link",
-                index: args.index!,
-                ...(args.reason ? { reason: args.reason } : {}),
-              };
+              action = args.reason
+                ? { op: "skip_link", index: args.index!, reason: args.reason }
+                : { op: "skip_link", index: args.index! };
               break;
             case "retry_link":
               action = { op: "retry_link", index: args.index! };
               break;
-            case "edit_link":
-              action = {
+            case "edit_link": {
+              const edit: Extract<UpdateGoalOp, { op: "edit_link" }> = {
                 op: "edit_link",
                 index: args.index!,
-                ...(args.title ? { title: args.title } : {}),
-                ...(args.goal ? { goal: prose(args.goal) } : {}),
               };
+              if (args.title) edit.title = args.title;
+              if (args.goal) edit.goal = prose(args.goal);
+              action = edit;
               break;
+            }
             case "add_link":
               if (!args.title) throw AppError.validation("add_link needs a title.");
               action = { op: "add_link", title: args.title, goal: prose(args.goal ?? "") };

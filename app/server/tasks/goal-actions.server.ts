@@ -126,14 +126,16 @@ export async function createGoal(
     throw AppError.validation("Give the goal a title of at least 3 characters.");
   }
   const links = input.links
-    .map((l, i) => ({
-      index: i + 1,
-      title: l.title.trim(),
-      goal: l.goal.trim(),
-      taskKey: null as string | null,
-      status: "pending" as GoalLink["status"],
-      note: null as string | null,
-    }))
+    .map(
+      (l, i): GoalLink => ({
+        index: i + 1,
+        title: l.title.trim(),
+        goal: l.goal.trim(),
+        taskKey: null,
+        status: "pending",
+        note: null,
+      }),
+    )
     .filter((l) => l.title.length > 0);
   if (links.length < 1) {
     throw AppError.validation("A goal chain needs at least one link.");
@@ -568,7 +570,7 @@ export async function reconcileGoal(
       fm.status = "attention";
       attentionNow =
         failedLink !== null
-          ? `Link ${(failedLink as { index: number }).index} failed. The chain is paused for your decision: retry it, skip it, or cancel the goal.`
+          ? `Link ${failedLink.index} failed. The chain is paused for your decision: retry it, skip it, or cancel the goal.`
           : "A link failed. The chain is paused for your decision.";
       history.push("Chain paused (attention): a link failed.");
     }
@@ -859,7 +861,13 @@ export function listGoals(db: DatabaseSync, projectSlug: string): GoalView[] {
     let links: GoalLink[] = [];
     try {
       const decoded: unknown = JSON.parse(r.links_json);
-      if (Array.isArray(decoded)) links = decoded as GoalLink[];
+      if (Array.isArray(decoded)) {
+        // SAFETY: `links_json` has ONE writer — `rebuildGoalFile` stores
+        // `JSON.stringify` of the goal file's schema-parsed `GoalLink[]` (with
+        // a '[]' column default). Array.isArray guards the shape class; a
+        // hand-edited row can only mis-shape this read model's display.
+        links = decoded as GoalLink[];
+      }
     } catch {
       links = [];
     }

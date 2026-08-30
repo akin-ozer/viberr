@@ -1,0 +1,509 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  setupAppTest,
+  type AppTestContext,
+} from "../../../test-support/test-app";
+import { listAuditEvents } from "../../../test-support/audit-log";
+import type { JsonValue } from "~/features/runtime/runtime-types";
+
+/**
+ * Ruling 99 — the controller's permission matrix, driven arm by arm.
+ *
+ * The contract under test: the controller holds NO authority of its own.
+ * Every tool call runs under the ASKING USER's live permissions — org role for
+ * instance tools, the project RBAC matrix for board tools — and a lower tier
+ * is REFUSED (out loud, with the reason) exactly where a higher tier is
+ * granted. The always-human decisions have no tool at all, nothing deletes,
+ * and the members-only 404 posture holds (a non-member cannot learn that a
+ * project exists).
+ *
+ * Fixture roles on viberr-core (demo seed): elif = project admin (org member),
+ * arda = project admin + ORG admin, murat = maintainer, selin = contributor,
+ * deniz = org member and a member of NOTHING. A viewer and an org-admin
+ * non-member are added in setup.
+ */
+
+let app: AppTestContext;
+const SLUG = "viberr-core";
+
+interface Actors {
+  orgAdmin: string; // arda — org admin + project admin
+  projectAdmin: string; // elif
+  maintainer: string; // murat
+  contributor: string; // selin
+  nonMember: string; // deniz
+  viewer: string; // added in setup
+  orgAdminOutsider: string; // org admin, member of nothing
+}
+let ids: Actors;
+
+beforeAll(async () => {
+  app = await setupAppTest();
+  const { runDemoSeed } = await import("../../../test-support/demo-seed");
+  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  const { seedDefaultAgentAssets } = await import(
+    "~/server/seed/default-assets.server"
+  );
+  seedDefaultAgentAssets(app.dataRoot);
+  const { findUserByEmail, insertUser } = await import(
+    "~/server/auth/user-store.server"
+  );
+  const viewer = insertUser(app.db, {
+    id: "u_ctl_viewer",
+    email: "viewer@viberr.test",
+    name: "View Only",
+    role: "member",
+  });
+  const outsider = insertUser(app.db, {
+    id: "u_ctl_orgadmin",
+    email: "org-admin-outsider@viberr.test",
+    name: "Org Admin Outsider",
+    role: "admin",
+  });
+  const { updateProjectFile } = await import(
+    "~/server/files/project-writer.server"
+  );
+  await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+    p.frontmatter.members.push({ userId: viewer.id, role: "viewer" });
+  });
+  const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+  rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+  ids = {
+    orgAdmin: findUserByEmail(app.db, "arda@viberr.dev")!.id,
+    projectAdmin: findUserByEmail(app.db, "elif@viberr.dev")!.id,
+    maintainer: findUserByEmail(app.db, "murat@viberr.dev")!.id,
+    contributor: findUserByEmail(app.db, "selin@viberr.dev")!.id,
+    nonMember: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
+    viewer: viewer.id,
+    orgAdminOutsider: outsider.id,
+  };
+});
+afterAll(() => app.cleanup());
+
+/** Build the toolkit AS one user and call one tool; returns the text reply. */
+async function call(
+  userId: string,
+  toolName: string,
+  args: Record<string, JsonValue> = {},
+  projectSlug: string | null = SLUG,
+): Promise<string> {
+  const { buildControllerToolkit } = await import("./controller-toolkit.server");
+  const { findUserById } = await import("~/server/auth/user-store.server");
+  const user = findUserById(app.db, userId)!;
+  const toolkit = buildControllerToolkit({
+    db: app.db,
+    ctx: { dataRoot: app.dataRoot },
+    user: { id: user.id, email: user.email, name: user.name },
+    projectSlug,
+  });
+  const tool = toolkit.tools.find((t) => t.name === toolName);
+  expect(tool, `tool ${toolName} must exist`).toBeTruthy();
+  // SAFETY: every toolkit handler is wrapped by `run`, which always returns
+  // the `textResult` shape: { content: [{ type: "text", text }] }.
+  const result = (await tool!.handler(args, {})) as {
+    content: { text: string }[];
+  };
+  return result.content[0]!.text;
+}
+
+// ------------------------------------------------------------ tool surface
+
+describe("the tool surface itself encodes the invariants", () => {
+  it("has NO tool for the always-human decisions and NO delete anywhere", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
+      projectSlug: SLUG,
+    });
+    const names = toolkit.tools.map((t) => t.name);
+    for (const banned of [
+      "merge",
+      "accept",
+      "force",
+      "resolve_packet",
+      "delete",
+    ]) {
+      expect(
+        names.filter((n) => n.includes(banned)),
+        `no tool may carry "${banned}"`,
+      ).toEqual([]);
+    }
+    // The whole surface is enumerated so a new tool is a deliberate decision.
+    expect(names.length).toBeGreaterThanOrEqual(25);
+  });
+});
+
+// -------------------------------------------------------- instance scope
+
+describe("instance scope: org-role gate on every management tool", () => {
+  const adminOnly: { tool: string; args?: Record<string, JsonValue> }[] = [
+    { tool: "list_users" },
+    { tool: "list_knowledge_bases" },
+    { tool: "list_skills" },
+    { tool: "list_mcp_servers" },
+    { tool: "list_global_agents" },
+    { tool: "inspect_audit_log" },
+    { tool: "inspect_run_analytics" },
+    {
+      tool: "create_user",
+      args: { name: "X", email: "x@viberr.test", role: "member" },
+    },
+    { tool: "update_user", args: { userId: "whoever" } },
+    { tool: "set_user_org_role", args: { userId: "whoever", role: "member" } },
+    { tool: "save_knowledge_base", args: { name: "denied-probe" } },
+    {
+      tool: "save_skill",
+      args: { name: "denied-probe", summary: "denied probe" },
+    },
+    {
+      tool: "save_mcp_server",
+      args: { name: "denied-probe", transport: "HTTP", target: "https://x.test" },
+    },
+    { tool: "test_mcp_server", args: { id: "whatever" } },
+    {
+      tool: "save_global_agent",
+      args: {
+        name: "Denied Probe",
+        backend: "claude",
+        summary: "denied probe",
+        stages: ["impl"],
+      },
+    },
+  ];
+
+  for (const probe of adminOnly) {
+    it(`${probe.tool}: an org MEMBER is refused with the reason; an org ADMIN passes the gate`, async () => {
+      const denied = await call(ids.contributor, probe.tool, probe.args ?? {});
+      expect(denied).toContain("[denied]");
+      expect(denied).toContain("org admin");
+      const granted = await call(ids.orgAdmin, probe.tool, probe.args ?? {});
+      // The admin may still hit a VALIDATION on probe args ("No such user") —
+      // what must never appear is the org-role refusal.
+      expect(granted).not.toContain("Only org admins");
+    });
+  }
+
+  it("a refused instance attempt leaves an audit row (P13-D-8 parity)", async () => {
+    await call(ids.viewer, "list_users");
+    const rows = listAuditEvents(app.db, {
+      action: "controller.authority.denied",
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some((r) => r.actorUserId === ids.viewer)).toBe(true);
+  });
+
+  it("user administration works end to end for an org admin, and the temp password is relayed once", async () => {
+    const created = await call(ids.orgAdmin, "create_user", {
+      name: "Made By Controller",
+      email: "made-by-controller@viberr.test",
+      role: "member",
+    });
+    expect(created).toContain("[done]");
+    expect(created).toContain("Temporary password");
+    const listed = await call(ids.orgAdmin, "list_users");
+    expect(listed).toContain("made-by-controller@viberr.test");
+    const { findUserByEmail } = await import("~/server/auth/user-store.server");
+    const madeId = findUserByEmail(app.db, "made-by-controller@viberr.test")!.id;
+    const promoted = await call(ids.orgAdmin, "set_user_org_role", {
+      userId: madeId,
+      role: "admin",
+    });
+    expect(promoted).toContain("org admin");
+    const disabled = await call(ids.orgAdmin, "update_user", {
+      userId: madeId,
+      access: "disable",
+    });
+    expect(disabled).toContain("account disabled");
+  });
+
+  it("resource management works for an org admin: KB with a document, skill, MCP without a credential", async () => {
+    const kb = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "Controller Made KB",
+      doc: { path: "notes.md", content: "# Notes\n\nMade by the controller." },
+    });
+    expect(kb).toContain("[done]");
+    expect(kb).toContain("notes.md");
+    const skill = await call(ids.orgAdmin, "save_skill", {
+      name: "controller-made-skill",
+      summary: "A probe skill the matrix test writes.",
+      body: "# Skill\n\nBody.",
+    });
+    expect(skill).toContain("[done]");
+    const mcp = await call(ids.orgAdmin, "save_mcp_server", {
+      name: "probe-server",
+      transport: "HTTP",
+      target: "https://mcp.example.test/v1",
+    });
+    expect(mcp).toContain("[done]");
+    // Secrets never travel through chat — the reply says where they go.
+    expect(mcp).toContain("Org settings");
+    const agents = await call(ids.orgAdmin, "save_global_agent", {
+      name: "Docs Writer Probe",
+      backend: "claude",
+      summary: "Writes docs. Never touches app code.",
+      stages: ["impl"],
+    });
+    expect(agents).toContain("[done]");
+  });
+
+  it("create_project is open to a plain org member (FR5 parity): the gate passed and only the GitHub-connection validation refused", async () => {
+    const reply = await call(ids.contributor, "create_project", {
+      name: "Member Made",
+      key: "MM",
+      owner: "nobody",
+      repoName: "nothing",
+      policy: "balanced",
+    });
+    // No org-role refusal — the failure is the connection requirement.
+    expect(reply).not.toContain("org admin");
+    expect(reply).toContain("GitHub");
+  });
+});
+
+// --------------------------------------------------------- project scope
+
+describe("project scope: the asking user's project role decides, arm by arm", () => {
+  it("reads are members-only with the unknown-slug posture: a NON-member gets the same sentence a missing project gets", async () => {
+    const nonMember = await call(ids.nonMember, "get_project");
+    expect(nonMember).toContain(`No project "${SLUG}" is visible to you`);
+    const missing = await call(
+      ids.nonMember,
+      "get_project",
+      { projectSlug: "no-such-project" },
+      null,
+    );
+    expect(missing).toContain('No project "no-such-project" is visible to you');
+    // Byte-identical apart from the slug — no existence oracle.
+    expect(nonMember.replace(SLUG, "X")).toBe(
+      missing.replace("no-such-project", "X"),
+    );
+  });
+
+  it("a VIEWER reads the project, its tasks and one task", async () => {
+    const project = await call(ids.viewer, "get_project");
+    expect(project).toContain('"slug"');
+    const tasks = await call(ids.viewer, "list_tasks");
+    expect(tasks).toContain("VIB-142");
+    const task = await call(ids.viewer, "get_task", { taskKey: "VIB-142" });
+    expect(task).toContain("newestEvents");
+  });
+
+  it("an ORG-ADMIN non-member passes reads through the audited override", async () => {
+    const reply = await call(ids.orgAdminOutsider, "get_project");
+    expect(reply).toContain('"slug"');
+    const rows = listAuditEvents(app.db, {
+      action: "project.org_admin.override",
+    });
+    expect(rows.some((r) => r.actorUserId === ids.orgAdminOutsider)).toBe(true);
+  });
+
+  it("create_task: a viewer is refused with their role named; a contributor creates", async () => {
+    const denied = await call(ids.viewer, "create_task", { title: "Nope" });
+    expect(denied).toContain("[denied]");
+    expect(denied).toContain("viewer");
+    const done = await call(ids.contributor, "create_task", {
+      title: "Made by the controller matrix test",
+      goal: "Prove the create arm. Done when this task exists.",
+    });
+    expect(done).toContain("[done]");
+    expect(done).toMatch(/VIB-\d+/);
+  });
+
+  it("move_task: an off-graph move needs the transition tier (maintainer+), and the terminal stage is refused for EVERYONE with the ceremony pointer", async () => {
+    // VIB-142 sits in review; review→impl is off-graph (backward) → manual.
+    const denied = await call(ids.contributor, "move_task", {
+      taskKey: "VIB-142",
+      toStageId: "impl",
+    });
+    expect(denied).toContain("[denied]");
+    const moved = await call(ids.maintainer, "move_task", {
+      taskKey: "VIB-142",
+      toStageId: "impl",
+    });
+    expect(moved).toContain("[done]");
+    // Restore for later arms.
+    const restored = await call(ids.maintainer, "move_task", {
+      taskKey: "VIB-142",
+      toStageId: "review",
+    });
+    expect(restored).toContain("[done]");
+    // Done is not reachable here, even for the project admin.
+    const terminal = await call(ids.projectAdmin, "move_task", {
+      taskKey: "VIB-142",
+      toStageId: "done",
+    });
+    expect(terminal).toContain("[denied]");
+    expect(terminal).toContain("task page");
+  });
+
+  it("comment_on_task: any member may publish; the comment lands as the controller with the asker disclosed", async () => {
+    const reply = await call(ids.viewer, "comment_on_task", {
+      taskKey: "VIB-142",
+      text: "Status note published through the controller.",
+    });
+    expect(reply).toContain("[done]");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const file = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      dataRoot: app.dataRoot,
+    })!;
+    const top = file.parsed.timeline[0]!;
+    expect(top.actor).toEqual({ kind: "controller" });
+    expect(top.text).toContain("Status note published");
+    expect(top.text).toContain("Posted by the controller for");
+    const denied = await call(ids.nonMember, "comment_on_task", {
+      taskKey: "VIB-142",
+      text: "Should not land.",
+    });
+    expect(denied).toContain("is visible to you");
+  });
+
+  it("set_task_owner: a viewer is refused; a contributor takes an unowned seat", async () => {
+    // A fresh, UNOWNED task: VIB-142 ships owned, and taking an occupied seat
+    // is a different (acceptance-tier) authority than self-assigning.
+    const created = await call(ids.contributor, "create_task", {
+      title: "Ownership arm probe",
+    });
+    const key = /VIB-\d+/.exec(created)![0];
+    const denied = await call(ids.viewer, "set_task_owner", {
+      taskKey: key,
+      owner: "me",
+    });
+    expect(denied).toContain("[denied]");
+    const done = await call(ids.contributor, "set_task_owner", {
+      taskKey: key,
+      owner: "me",
+    });
+    expect(done).toContain("[done]");
+  });
+
+  it("run_agent_on_task: a contributor is refused; a maintainer reaches the runtime", async () => {
+    const denied = await call(ids.contributor, "run_agent_on_task", {
+      taskKey: "VIB-142",
+      agent: "operator",
+      prompt: "Check in on this task.",
+    });
+    expect(denied).toContain("[denied]");
+    expect(denied).toContain("maintainer");
+    const reply = await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: "VIB-142",
+      agent: "operator",
+      prompt: "Check in on this task.",
+    });
+    // The fake runtime answers; what matters is the RBAC gate passed and the
+    // reply reports the real outcome, never a permission refusal.
+    expect(reply).not.toContain("maintainer role");
+    expect(reply).toMatch(/\[(done|denied|error)\]/);
+  });
+
+  it("project settings, stages, boundaries, members, deployments: MAINTAINER refused, project ADMIN granted", async () => {
+    const arms: { tool: string; args: Record<string, JsonValue> }[] = [
+      {
+        tool: "update_project_settings",
+        args: { description: "Managed through the controller." },
+      },
+      {
+        tool: "update_stages",
+        args: { op: "rename", stageId: "impl", name: "In Progress" },
+      },
+      {
+        tool: "set_transition_boundary",
+        args: { from: "triage", to: "ready", boundary: "approval" },
+      },
+      {
+        tool: "invite_member",
+        args: { name: "Invited Probe", email: "invited-probe@viberr.test" },
+      },
+      { tool: "deploy_agent", args: { profileId: "no-such-template" } },
+      {
+        tool: "update_agent_deployment",
+        args: {
+          profileId: "developer",
+          capabilities: [{ capabilityId: "comment-on-task", mode: "off" }],
+        },
+      },
+    ];
+    for (const arm of arms) {
+      const denied = await call(ids.maintainer, arm.tool, arm.args);
+      expect(denied, `${arm.tool} must refuse a maintainer`).toContain("[denied]");
+    }
+    for (const arm of arms) {
+      const reply = await call(ids.projectAdmin, arm.tool, arm.args);
+      // Admin passes the GATE; a probe arg may still hit validation (the bogus
+      // deploy id), which proves gate passage just as well.
+      expect(
+        reply,
+        `${arm.tool} must not role-refuse the project admin`,
+      ).not.toContain("Only project admins");
+      expect(reply).not.toContain("cannot");
+    }
+    // set_member_role rides on the invite above.
+    const roleDenied = await call(ids.maintainer, "set_member_role", {
+      email: "invited-probe@viberr.test",
+      role: "viewer",
+    });
+    expect(roleDenied).toContain("[denied]");
+    const roleSet = await call(ids.projectAdmin, "set_member_role", {
+      email: "invited-probe@viberr.test",
+      role: "viewer",
+    });
+    expect(roleSet).toContain("[done]");
+  });
+
+  it("the terminal boundary cannot be loosened, even by the project admin", async () => {
+    const reply = await call(ids.projectAdmin, "set_transition_boundary", {
+      from: "review",
+      to: "done",
+      boundary: "auto",
+    });
+    expect(reply).toContain("[denied]");
+  });
+
+  it("goals: a viewer cannot define a chain; a contributor can; redirecting needs the creator or a maintainer", async () => {
+    const denied = await call(ids.viewer, "create_goal", {
+      title: "Viewer chain",
+      links: [{ title: "One", goal: "Do one thing. Done when it exists." }],
+    });
+    expect(denied).toContain("[denied]");
+
+    const created = await call(ids.contributor, "create_goal", {
+      title: "Matrix probe chain",
+      description: "Two links, advanced by the server.",
+      links: [
+        { title: "First link", goal: "Do the first thing. Done when done." },
+        { title: "Second link", goal: "Do the second thing. Done when done." },
+      ],
+    });
+    expect(created).toContain("[done]");
+    expect(created).toContain("goal-1");
+
+    const listed = await call(ids.viewer, "list_goals");
+    expect(listed).toContain("Matrix probe chain");
+    const goal = await call(ids.viewer, "get_goal", { goalId: "goal-1" });
+    expect(goal).toContain("First link");
+
+    // The invited member is a plain viewer now and NOT the creator: refused.
+    const { findUserByEmail } = await import("~/server/auth/user-store.server");
+    const invited = findUserByEmail(app.db, "invited-probe@viberr.test")!.id;
+    const redirectDenied = await call(invited, "update_goal", {
+      goalId: "goal-1",
+      op: "pause",
+    });
+    expect(redirectDenied).toContain("[denied]");
+
+    // The creator pauses their own chain; a maintainer resumes it.
+    const paused = await call(ids.contributor, "update_goal", {
+      goalId: "goal-1",
+      op: "pause",
+    });
+    expect(paused).toContain("[done]");
+    const resumed = await call(ids.maintainer, "update_goal", {
+      goalId: "goal-1",
+      op: "resume",
+    });
+    expect(resumed).toContain("[done]");
+  });
+});

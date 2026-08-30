@@ -121,6 +121,13 @@ const ACTION_ROUTES: GatedRoute[] = [
     path: `/projects/${SLUG}/settings`,
     params: { slug: SLUG },
   },
+  // Ruling 99: the project controller surface.
+  {
+    name: "controller",
+    mod: "project.controller",
+    path: `/projects/${SLUG}/controller`,
+    params: { slug: SLUG },
+  },
 ];
 
 /** The argument set React Router hands a project-scoped action. */
@@ -142,6 +149,7 @@ type ProjectActionAnswer = Awaited<
   | ReturnType<typeof import("~/routes/project.agents").action>
   | ReturnType<typeof import("~/routes/project.github").action>
   | ReturnType<typeof import("~/routes/project.settings").action>
+  | ReturnType<typeof import("~/routes/project.controller").action>
 >;
 
 interface ProjectActionModule {
@@ -349,6 +357,7 @@ describe("every project-scoped route carries a membership gate", () => {
     "project.activity.tsx",
     "project.agents.tsx",
     "project.board.tsx",
+    "project.controller.tsx",
     "project.github.tsx",
     "project.policy.tsx",
     "project.review.tsx",

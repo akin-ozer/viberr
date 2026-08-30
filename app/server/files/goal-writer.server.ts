@@ -14,6 +14,7 @@ import {
   serializeFrontmatterFile,
   splitFrontmatter,
   yamlMappingSchema,
+  type YamlMapping,
 } from "./frontmatter.server";
 
 /**
@@ -68,7 +69,7 @@ export function parseGoalFileContent(content: string): ParsedGoalFile | null {
 }
 
 export function serializeGoalFile(parsed: ParsedGoalFile): string {
-  const known: Record<string, unknown> = {};
+  const known: YamlMapping = {};
   for (const key of GOAL_FRONTMATTER_KEYS) known[key] = parsed.frontmatter[key];
   const timeline = parsed.timeline
     .map((entry) => `- ${entry.occurredAt} · ${flattenHistoryText(entry.text)}`)

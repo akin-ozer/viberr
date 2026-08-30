@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import {
   recordAudit,
   type AuditActor,
@@ -16,7 +17,10 @@ import {
   agentProfileFilePath,
   agentProfilesDir,
 } from "~/server/files/file-store-root.server";
-import { splitFrontmatter } from "~/server/files/frontmatter.server";
+import {
+  splitFrontmatter,
+  yamlMappingSchema,
+} from "~/server/files/frontmatter.server";
 
 /**
  * The controller's own configuration (ruling 99): ONE instance-level profile,
@@ -101,17 +105,22 @@ function readControllerProfile(dataRoot?: string): ParsedProfile | null {
   return parsed;
 }
 
+/** The profile schema does not model `effort`; decode the round-tripped
+ *  frontmatter key at this boundary (absent or non-string reads as ""). */
+const looseEffortSchema = z
+  .object({ effort: z.string().catch("") })
+  .catch({ effort: "" });
+
 /** Resolve the live controller configuration (profile + doctrine). Tolerant:
  *  a missing/invalid template degrades to defaults rather than downing the
  *  surface — the settings panel discloses `profilePresent: false`. */
 export function resolveControllerConfig(dataRoot?: string): ControllerConfig {
   const parsed = readControllerProfile(dataRoot);
   const fm = parsed?.frontmatter;
-  const loose = fm as (AgentProfileFrontmatter & { effort?: unknown }) | undefined;
   return {
     name: fm?.name || "Controller",
     model: fm?.model && fm.model !== "orchestration runtime" ? fm.model : "",
-    effort: typeof loose?.effort === "string" ? loose.effort : "",
+    effort: looseEffortSchema.parse(fm).effort,
     skills: fm?.resources.skills ?? ["controller-guide"],
     kb: fm?.resources.kb ?? [],
     mcps: fm?.resources.mcps ?? [],
@@ -170,7 +179,7 @@ export function saveControllerConfig(
     const { data } = splitFrontmatter(current);
     // Preserve the shipped frontmatter head; the admin edits the BODY.
     const head =
-      current && typeof data === "object" && data !== null
+      current && yamlMappingSchema.safeParse(data).success
         ? current.slice(0, current.indexOf("\n---\n") + 5)
         : `---\nid: ${CONTROLLER_PROFILE_ID}\nname: Controller\nbackend: claude\n---\n`;
     writeFileAtomic(file, `${head}\n${definition}\n`);

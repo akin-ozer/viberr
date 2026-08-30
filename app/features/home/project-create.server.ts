@@ -228,11 +228,11 @@ export interface CreateProjectInput {
    *  create-project path; the New-project modal never sets it). Everything
    *  here composes BEFORE the single project.md write, so a refused shape
    *  creates nothing. */
-  custom?: CustomProjectShape;
+  custom?: CustomProjectBlueprint;
 }
 
-/** The optional custom shape a controller-driven creation carries. */
-export interface CustomProjectShape {
+/** The optional custom blueprint a controller-driven creation carries. */
+export interface CustomProjectBlueprint {
   /** Project description prose (defaults to the preset blurb). */
   description?: string;
   /** Ordered stage list, entry FIRST, terminal LAST (2..8 stages). Replaces
@@ -336,7 +336,7 @@ async function createProjectImpl(
   // is validated and composed here, before the single project.md write, so a
   // refused shape creates nothing. The template stays the default.
   const template = GOVERNED_TEMPLATE;
-  const shape = resolveCustomShape(db, input.custom, actor.userId);
+  const blueprint = resolveProjectBlueprint(db, input.custom, actor.userId);
   const repo = `${owner}/${repoName}`;
 
   // Resolve the selected connection so we can (a) fetch the repo's real
@@ -377,7 +377,7 @@ async function createProjectImpl(
   // Synthesized description — verbatim mock mapping (home spec §5.10), unless
   // the custom shape brought its own prose.
   const desc =
-    shape?.description ??
+    blueprint?.description ??
     "Standard 5-stage workflow · " +
       (input.policy === "strict"
         ? "strict human-gate policy."
@@ -385,8 +385,8 @@ async function createProjectImpl(
           ? "agents act within policy."
           : "balanced agent policy.");
 
-  const stages = shape?.stages ?? template.stages;
-  const baseWorkflow = shape?.workflow ?? template.workflow;
+  const stages = blueprint?.stages ?? template.stages;
+  const baseWorkflow = blueprint?.workflow ?? template.workflow;
   const frontmatter: ProjectFrontmatter = {
     name,
     slug,
@@ -400,15 +400,15 @@ async function createProjectImpl(
     // full autonomy. See presetWorkflow / presetAgents. A custom shape's
     // explicit boundary choices are applied AFTER the preset, so they win —
     // except the edge into the terminal stage, which stays human and locked
-    // whatever anyone asks (resolveCustomShape enforces it).
+    // whatever anyone asks (resolveProjectBlueprint enforces it).
     workflow: applyBoundaryOverrides(
       presetWorkflow(input.policy, baseWorkflow, stages[stages.length - 1]?.id),
-      shape?.boundaryOverrides ?? [],
+      blueprint?.boundaryOverrides ?? [],
       stages,
     ),
     members: [
       { userId: actor.userId, role: "admin" },
-      ...(shape?.members ?? []).filter((m) => m.userId !== actor.userId),
+      ...(blueprint?.members ?? []).filter((m) => m.userId !== actor.userId),
     ],
     // Preinstall the default agent roster — the operator plus the base
     // specialists it can assign — so every project can run governed agent work.
@@ -454,10 +454,10 @@ async function createProjectImpl(
       name,
       key,
       repo: frontmatter.repo,
-      template: shape?.stages ? "custom" : template.id,
+      template: blueprint?.stages ? "custom" : template.id,
       policy: input.policy,
-      customStages: shape?.stages?.length ?? 0,
-      customMembers: shape?.members.length ?? 0,
+      customStages: blueprint?.stages?.length ?? 0,
+      customMembers: blueprint?.members.length ?? 0,
     },
   });
 
@@ -472,8 +472,8 @@ async function createProjectImpl(
 
 // ------------------------------------------------- custom shape (ruling 99)
 
-/** The composed, validated custom shape ready for the frontmatter write. */
-interface ResolvedCustomShape {
+/** The composed, validated custom blueprint ready for the frontmatter write. */
+interface ResolvedBlueprint {
   description?: string;
   stages?: StageDef[];
   workflow?: WorkflowBoundary[];
@@ -497,18 +497,18 @@ const CUSTOM_STAGE_COLORS = [
 const DONE_STAGE_COLOR = "#00b473";
 
 /**
- * Validate + compose the custom shape (controller create path). Everything
+ * Validate + compose the custom blueprint (controller create path). Everything
  * throws `AppError.validation` with the offending item named, BEFORE any
  * write. The terminal edge is forced `human` + locked whatever was asked —
  * the same invariant `realignChainToStages` recomputes on every stage edit.
  */
-function resolveCustomShape(
+function resolveProjectBlueprint(
   db: DatabaseSync,
-  custom: CustomProjectShape | undefined,
+  custom: CustomProjectBlueprint | undefined,
   creatorUserId: string,
-): ResolvedCustomShape | null {
+): ResolvedBlueprint | null {
   if (!custom) return null;
-  const out: ResolvedCustomShape = { boundaryOverrides: [], members: [] };
+  const out: ResolvedBlueprint = { boundaryOverrides: [], members: [] };
   if (custom.description?.trim()) out.description = custom.description.trim();
 
   let stages: StageDef[] | null = null;
@@ -606,7 +606,7 @@ function resolveCustomShape(
  *  refused so a silent no-op cannot read as applied. */
 function applyBoundaryOverrides(
   workflow: WorkflowBoundary[],
-  overrides: ResolvedCustomShape["boundaryOverrides"],
+  overrides: ResolvedBlueprint["boundaryOverrides"],
   stages: readonly StageDef[],
 ): WorkflowBoundary[] {
   if (overrides.length === 0) return workflow;
@@ -616,7 +616,7 @@ function applyBoundaryOverrides(
     if (!edge) {
       const name = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
       throw AppError.validation(
-        `There is no workflow edge from "${name(o.fromId)}" to "${name(o.toId)}" — boundaries exist between adjacent stages only.`,
+        `There is no workflow edge from "${name(o.fromId)}" to "${name(o.toId)}": boundaries exist between adjacent stages only.`,
       );
     }
     if (edge.locked) continue; // terminal edge: human, locked, non-negotiable

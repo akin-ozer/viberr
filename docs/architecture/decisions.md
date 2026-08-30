@@ -1322,6 +1322,88 @@ it is regenerated from the filesystem rather than restated here.
     `app/server/tasks/schedule.server.ts`; `app/features/task-detail/execution-profile.tsx`,
     `agent-select.tsx`)
 
+99. **The CONTROLLER (owner directive 2026-08-30): one instance-level conversational
+    agent, machinery like the operator but above it, whose every action runs under the
+    ASKING USER's own authority — and chained goals as a first-class product concept.**
+    Preprod, explicitly no backwards compatibility. The pieces:
+    **(a) Identity.** A third profile kind, `kind: controller`, exactly one per instance:
+    `agents/profiles/controller.md` + its doctrine at `agents/definitions/controller.md`,
+    its own skill (`controller-guide`), its own knowledge base (`kb/controller-handbook`),
+    and org-registry MCP grants through `resources.mcps` — all shipped by the boot
+    backfill (`seedDefaultAgentAssets`), never via `SEED_AGENT_PROFILES` (that array
+    feeds project deployments, and the controller is not deployable; `readTemplate`
+    resolves a controller-kind template as absent so the two-kind deployment world stays
+    closed). ONLY org admins modify the controller itself — the org-settings Controller
+    tab (model, resource grants, instructions); the gagents CRUD panel never lists or
+    edits it. It carries NO capability matrix: its runtime authority is the asking
+    user's, so a stored grant row would be a toggle with no effect (the P14-KM-14 class).
+    **(b) Authority.** Talking to it is separate from configuring it: every signed-in
+    user converses (`/controller`, and `/projects/:slug/controller` inside a project),
+    and every TOOL CALL resolves the asking user's LIVE authority — org role for
+    instance tools (users, KBs, skills, MCP connections, global agent templates, audit,
+    run analytics: org admin, the /org/settings parity; project creation: any signed-in
+    user, the FR5 parity, creator seeded admin), the project-role matrix for board tools
+    (the SAME `assertProjectAction`/`requireAction` guards humans use, so the D2
+    org-admin override, denial audit rows and R15-4's members-only 404 posture apply
+    identically — a probe cannot learn a project exists). The authority actor is
+    `{userId: asker, label: "<email> · via controller"}`: guards bind to the human, the
+    audit trail discloses the instrument. Refusals are OUT LOUD: a denied tool answers
+    `[denied] <the guard's own sentence>` and the doctrine requires relaying it; an
+    instance-scope denial writes `controller.authority.denied` (P13-D-8 parity).
+    **(c) Always-human stays human.** The toolkit has NO tool for merge, acceptance,
+    force-accept, packet resolution, or a move into the terminal stage — the move tool
+    refuses a Done target and points at the task page, because ruling 88's disclosure
+    ceremony is the load-bearing thing chat cannot impersonate. Policy edits ARE offered
+    (gated on the asker's `edit-policy`): the ALWAYS_HUMAN `change-project-policy` entry
+    bounds AGENT-initiated change, and the controller never initiates — it executes an
+    explicit human directive, the same authorization a settings form click carries. No
+    tool deletes anything, in either scope. Secrets never travel through chat
+    (`save_mcp_server` takes no credential; the one exception is relaying a just-minted
+    single-use temp password, which `pwreset_required` bounds).
+    **(d) Conversations.** App-owned SQLite (`controller_conversations` /
+    `controller_messages` — the notifications/sessions family; file-formats §5), owned by
+    the asking user, readable by that user and org admins (a transcript is scoped to
+    what ITS user was entitled to hear — project members do not read each other's).
+    Each user message is one RUN through the existing machinery (`agent_runs.kind =
+    'controller'`, `project_slug = ''`, `task_key = <conversation id>` — a scope no
+    task query matches): NDJSON, redaction, token accounting, run-log console (owner-or-
+    admin gated at the route) and boot orphan finalization all inherited. Turns resume
+    the provider session with a per-turn recent-exchange digest as the re-anchor (the
+    controller has no task.md); single-flight per conversation with a FIFO of queued
+    messages; a restart-orphaned turn gets an honest "interrupted" note at boot.
+    Enforcement is CLAUDE-ONLY by the same security decision as `read-github-api`: the
+    toolkit is in-process, so DB handles and sealed credentials never cross a process
+    boundary, and Codex's single-shot plan executor cannot serve a conversation that
+    must read mid-turn. An unavailable Claude backend refuses honestly in-transcript.
+    **(e) Chained goals.** A goal decomposes ONE outcome into an ordered chain of tasks
+    inside a project — canonical at `projects/<slug>/goals/<goal-id>.md` (frontmatter:
+    status `active|paused|attention|completed|cancelled`, `onFailure: pause|continue`,
+    `links[{index,title,goal,taskKey,status,note}]`, `createdBy`; body: description +
+    history bullets), projected to `goal_projections` with link statuses RECONCILED
+    against live task rows, back-referenced from each task's `goalRef` frontmatter (the
+    project→task shape: the chain file owns the list, the task carries its position).
+    Tasks are created LAZILY: link 1 with the goal, each next link when the previous
+    completes — by the convergent `reconcileGoal` engine (hooked into transition,
+    acceptance and archive writes, plus a one-minute runner for out-of-band edits),
+    creating under the goal CREATOR's re-proven live `create-task` (FR39's precedent:
+    unattended action stays visible, cancellable, audited; lost authority parks the
+    chain in `attention` instead of escalating). A link's task failing (archived) pauses
+    the chain (`attention`) or rides past it per `onFailure`; humans redirect — retry,
+    skip, edit pending links, add, pause/resume, cancel — through the controller or the
+    Goals panel on the project Controller surface (gate: the creator, or `run-agents`).
+    Nothing deletes a goal; terminal chains stay readable. Every link's task gets its
+    own operator through `createTask`'s existing auto-invoke — the controller sits above
+    operators (brief, trigger, steer via `run_agent_on_task`/`comment_on_task`, the
+    dispatch-completion contract of ruling 98 riding along) and never duplicates them.
+    **(f) FR11 amended.** "Agents cannot create tasks" bars agents INVENTING tasks; the
+    controller creates them as the instrument of an authorized asking user, and chain
+    advancement creates them under the recorded creator's re-proven authority.
+    (`app/server/controller/*`, `app/server/tasks/goal-actions.server.ts`,
+    `app/server/files/goal-writer.server.ts`, `app/schemas/goal-file.schema.ts`,
+    `app/features/controller/*`, `app/routes/controller.tsx`,
+    `app/routes/project.controller.tsx`; the custom project shape in
+    `app/features/home/project-create.server.ts` `CustomProjectShape`)
+
 *(UI-preference notes, 2026-08-21, pass 22 — owner decisions on presentation, recorded as
 preferences rather than law: **#180** the decision packet takes the questionnaire's
 density; **#182** the packet's minimal redesign — it reads as one quiet column; **#186**
@@ -1336,10 +1418,11 @@ the quieter packet or the bare owner cell as drift.)*
 /                                       → home (project list)
 /projects                               → home (bare /projects is not a 404 — N5)
 /projects/:slug                         → redirect to board
-/projects/:slug/board  /review  /agents  /policy  /github  /activity  /settings
+/projects/:slug/board  /review  /controller  /agents  /policy  /github  /activity  /settings
 /projects/:slug/tasks/:key
 /projects/:slug/tasks/:key/attachments/:file   (R19-19 — member-only, raw bytes)
-/org/settings                           (org admin, tabbed)
+/org/settings                           (org admin, tabbed — incl. the Controller tab)
+/controller                             (ruling 99 — every signed-in user)
 /profile   /notifications   /notifications/read   /prefs/theme
 /resources/events  (SSE)   /resources/health   /resources/run-log
 /resources/search   /resources/session-export   /resources/model-catalog

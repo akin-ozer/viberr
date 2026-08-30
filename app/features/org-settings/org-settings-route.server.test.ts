@@ -110,12 +110,14 @@ describe("RBAC", () => {
     expect(data.view.connections).toHaveLength(0);
     expect(data.view.users.length).toBeGreaterThanOrEqual(5);
     expect(data.view.domains).toHaveLength(1);
-    expect(data.view.kbs).toHaveLength(3);
+    // 3 seeded KBs + the controller handbook (ruling 99).
+    expect(data.view.kbs).toHaveLength(4);
     expect(data.view.mcps).toHaveLength(0);
     // Disk is truth (finding #7): the 4 org-managed skill rows PLUS the 3
-    // shipped *-expertise skill folders that have no row — all listed. (Tester
-    // was merged into the Reviewer, so tester-expertise no longer ships.)
-    expect(data.view.skills).toHaveLength(7);
+    // shipped *-expertise skill folders and the controller-guide (ruling 99)
+    // that have no row — all listed. (Tester was merged into the Reviewer, so
+    // tester-expertise no longer ships.)
+    expect(data.view.skills).toHaveLength(8);
     const skillNames = data.view.skills.map((s) => s.name);
     expect(skillNames).toContain("developer-expertise");
     expect(skillNames).toContain("reviewer-expertise");

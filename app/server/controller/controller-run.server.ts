@@ -19,10 +19,12 @@ import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import {
   isBackendAvailable,
 } from "~/server/runtimes/runtime-registry.server";
+import type { RunMcpServers } from "~/server/runtimes/adapter.server";
 import {
   registerRunCompletion,
   resumeRun,
   startRun,
+  type ResumeRunInput,
   type StartRunInput,
 } from "~/server/runtimes/run-service.server";
 import { resolveRunModel } from "~/server/runtimes/model-catalog.server";
@@ -217,7 +219,7 @@ async function startTurnRun(
     user: { id: input.user.id, email: input.user.email, name: input.user.name },
     projectSlug: conversation.projectSlug,
   });
-  const mcpServers: Record<string, unknown> = {
+  const mcpServers: RunMcpServers = {
     ...toolkit.mcpServers,
     ...orgServers,
   };
@@ -244,47 +246,50 @@ async function startTurnRun(
   const workdir = controllerScratchDir(dataRoot);
   const prompt = buildTurnPrompt(db, conversation, text);
 
-  const base = {
-    role: "Controller",
-    kind: "controller" as const,
-    backend: "claude" as const,
-    model: resolveRunModel("claude", config.model),
-    agentName: config.name,
-    agentProfileId: CONTROLLER_PROFILE_ID,
-    autonomous: true,
-    systemPrompt,
-    mcpServers: mcpServers as StartRunInput["mcpServers"],
-    allowedTools,
-    disallowedTools,
-    workdir,
-    actor: { userId: input.user.id, label: `${input.user.email} · via controller` },
-    ...(config.effort ? { effort: config.effort } : {}),
-    ...(dataRoot ? { dataRoot } : {}),
+  const actor = {
+    userId: input.user.id,
+    label: `${input.user.email} · via controller`,
   };
 
   let runId: string;
   if (prior?.session_id) {
-    const resumed = await resumeRun(db, {
+    const resumeInput: ResumeRunInput = {
       runId: prior.id,
       prompt,
       autonomous: true,
       systemPrompt,
-      mcpServers: base.mcpServers,
+      mcpServers,
       allowedTools,
       disallowedTools,
       workdir,
-      actor: base.actor,
-      ...(config.effort ? { effort: config.effort } : {}),
-      ...(dataRoot ? { dataRoot } : {}),
-    });
+      actor,
+    };
+    if (config.effort) resumeInput.effort = config.effort;
+    if (dataRoot) resumeInput.dataRoot = dataRoot;
+    const resumed = await resumeRun(db, resumeInput);
     runId = resumed.runId;
   } else {
-    const started = await startRun(db, {
-      ...base,
+    const startInput: StartRunInput = {
+      role: "Controller",
+      kind: "controller",
+      backend: "claude",
+      model: resolveRunModel("claude", config.model),
+      agentName: config.name,
+      agentProfileId: CONTROLLER_PROFILE_ID,
+      autonomous: true,
+      systemPrompt,
+      mcpServers,
+      allowedTools,
+      disallowedTools,
+      workdir,
+      actor,
       projectSlug: "",
       taskKey: conversation.id,
       prompt,
-    });
+    };
+    if (config.effort) startInput.effort = config.effort;
+    if (dataRoot) startInput.dataRoot = dataRoot;
+    const started = await startRun(db, startInput);
     runId = started.runId;
   }
 
@@ -384,10 +389,15 @@ async function settleTurn(
 }
 
 /** Live turn state for the conversation surface. */
+export interface ConversationTurnState {
+  working: boolean;
+  runId: string | null;
+}
+
 export function conversationTurnState(
   db: DatabaseSync,
   conversationId: string,
-): { working: boolean; runId: string | null } {
+): ConversationTurnState {
   const entry = leases().get(conversationId);
   if (!entry?.runId) return { working: false, runId: null };
   const run = getRun(db, entry.runId);
@@ -418,6 +428,8 @@ export function canReadControllerRunLog(
  * gets an honest note instead of eternal silence.
  */
 export function recoverControllerConversations(db: DatabaseSync): number {
+  // SAFETY: the statement selects the single `id` column, the TEXT PRIMARY KEY
+  // (NOT NULL) of `controller_conversations`.
   const rows = db
     .prepare(
       `SELECT c.id FROM controller_conversations c

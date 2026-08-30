@@ -235,6 +235,10 @@ export function HomeHero({
             List
           </button>
         </div>
+        <Link to="/controller" className="btn">
+          <Icon name="cpu" />
+          Controller
+        </Link>
         <button type="button" className="btn primary" onClick={onNew}>
           <Icon name="plus" />
           New project

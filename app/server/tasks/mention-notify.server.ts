@@ -44,7 +44,8 @@ import { extractMentions } from "~/ui/mention-spans";
 export const MENTION_RE = /@([A-Za-z][\w-]*)/g;
 
 /** Handles that route to agents, never to a person named e.g. "Claude". */
-export const RESERVED_HANDLES = new Set(["agent", "operator", "codex", "claude"]);
+// "controller" (ruling 99): the instance controller's handle never maps to a human.
+export const RESERVED_HANDLES = new Set(["agent", "operator", "codex", "claude", "controller"]);
 
 /** Cap the quoted comment inside the notification text — an agent reply can be
  *  a full report; the inbox row needs the gist, the timeline has the rest. */

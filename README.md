@@ -9,6 +9,11 @@ contract between humans, agents, and GitHub execution — each task carries stat
 context, timeline, decisions, and evidence in one readable markdown file. A dedicated
 operator agent manages each active task, specialist agent threads do the stage work, and
 humans govern through policy, comments, decisions, and explicit acceptance of completion.
+Above the per-task operators sits one instance-wide CONTROLLER: a conversational agent
+(`/controller`, and per project) that answers questions and performs governed actions
+strictly within each asking user's own permission level, and that defines and advances
+chained goals (one outcome decomposed into an ordered chain of tasks the server carries
+forward as each link completes).
 
 What makes it different: Viberr is agent-native in both action and responsibility. In
 Jira-like tools humans are the default workers and AI helps at the edges; in Viberr agents
@@ -189,15 +194,16 @@ holding the single-writer lock on this data root (one app process per data root,
 ```
 app/
   routes/          # thin route modules (loaders/actions), one per surface
-  features/        # per-surface UI: activity, agents, board, github, home,
-                   # kb-browser, live-updates, notifications, org-settings,
-                   # policy, profile, project-settings, review, runtime, shell,
-                   # task-detail
+  features/        # per-surface UI: activity, agents, board, controller,
+                   # github, home, kb-browser, live-updates, notifications,
+                   # org-settings, policy, profile, project-settings, review,
+                   # runtime, shell, task-detail
   ui/              # reusable primitives (icon, pill, toast, rich-text, dialog hooks…)
   lib/             # better-auth server instance + its Viberr bridge
-  server/          # server-only: audit, auth, config, db, errors, events, files,
-                   # github, interpretation, logging, org, prefs, projections,
-                   # runtimes, secrets, seed, tasks, theme + boot.server.ts
+  server/          # server-only: audit, auth, config, controller, db, errors,
+                   # events, files, github, interpretation, logging, org, prefs,
+                   # projections, runtimes, secrets, seed, tasks, theme
+                   # + boot.server.ts
   schemas/         # shared Zod schemas (task file, project file, SSE events…)
   shared/          # cross-surface helpers (auth, capabilities, dates, docs,
                    # freshness, ids, mapping, rbac, text, workflow)
@@ -207,7 +213,8 @@ scripts/           # seed / seed-demo / rescan (tsx)
 e2e/               # playwright specs
 test-support/      # app/db/store/runtime/github fakes for vitest
 data/              # runtime data root (gitignored): projects/<slug>/tasks/<KEY>/task.md,
-                   # agents/profiles/, runtimes/, kb/, skills/, state/projection.sqlite
+                   # projects/<slug>/goals/<id>.md, agents/profiles/, runtimes/,
+                   # kb/, skills/, state/projection.sqlite
 ```
 
 There is no `features/auth` — sign-in lives in `app/routes/login.tsx` plus

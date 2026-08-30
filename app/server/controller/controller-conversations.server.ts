@@ -45,55 +45,55 @@ export interface ControllerMessage {
   createdAt: string;
 }
 
-const conversationRowSchema = z.object({
-  id: z.string(),
-  user_id: z.string(),
-  user_label: z.string(),
-  project_slug: z.string().nullable(),
-  title: z.string(),
-  created_at: z.string(),
-  updated_at: z.string(),
-  last_message_at: z.string().nullable(),
-});
+/** Parses one `controller_conversations` row at the DB boundary. */
+const conversationRowSchema = z
+  .object({
+    id: z.string(),
+    user_id: z.string(),
+    user_label: z.string(),
+    project_slug: z.string().nullable(),
+    title: z.string(),
+    created_at: z.string(),
+    updated_at: z.string(),
+    last_message_at: z.string().nullable(),
+  })
+  .transform(
+    (r): ControllerConversation => ({
+      id: r.id,
+      userId: r.user_id,
+      userLabel: r.user_label,
+      projectSlug: r.project_slug,
+      title: r.title,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      lastMessageAt: r.last_message_at,
+    }),
+  );
 
-const messageRowSchema = z.object({
-  id: z.string(),
-  conversation_id: z.string(),
-  seq: z.number(),
-  author: z.enum(["user", "controller"]),
-  user_id: z.string().nullable(),
-  text: z.string(),
-  run_id: z.string().nullable(),
-  created_at: z.string(),
-});
-
-function toConversation(row: unknown): ControllerConversation {
-  const r = conversationRowSchema.parse(row);
-  return {
-    id: r.id,
-    userId: r.user_id,
-    userLabel: r.user_label,
-    projectSlug: r.project_slug,
-    title: r.title,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-    lastMessageAt: r.last_message_at,
-  };
-}
-
-function toMessage(row: unknown): ControllerMessage {
-  const r = messageRowSchema.parse(row);
-  return {
-    id: r.id,
-    conversationId: r.conversation_id,
-    seq: r.seq,
-    author: r.author,
-    userId: r.user_id,
-    text: r.text,
-    runId: r.run_id,
-    createdAt: r.created_at,
-  };
-}
+/** Parses one `controller_messages` row at the DB boundary. */
+const messageRowSchema = z
+  .object({
+    id: z.string(),
+    conversation_id: z.string(),
+    seq: z.number(),
+    author: z.enum(["user", "controller"]),
+    user_id: z.string().nullable(),
+    text: z.string(),
+    run_id: z.string().nullable(),
+    created_at: z.string(),
+  })
+  .transform(
+    (r): ControllerMessage => ({
+      id: r.id,
+      conversationId: r.conversation_id,
+      seq: r.seq,
+      author: r.author,
+      userId: r.user_id,
+      text: r.text,
+      runId: r.run_id,
+      createdAt: r.created_at,
+    }),
+  );
 
 /** Reader/actor identity every access check runs against. */
 export interface ConversationActor {
@@ -121,7 +121,7 @@ export function getConversation(
   const row = db
     .prepare(`SELECT * FROM controller_conversations WHERE id = ?`)
     .get(id);
-  return row ? toConversation(row) : null;
+  return row ? conversationRowSchema.parse(row) : null;
 }
 
 /** The conversation, with access enforced (404-shape for the invisible). */
@@ -195,7 +195,7 @@ export function listConversations(
        LIMIT ${limit}`,
     )
     .all(...params);
-  return rows.map(toConversation);
+  return rows.map((row) => conversationRowSchema.parse(row));
 }
 
 export function listMessages(
@@ -207,7 +207,7 @@ export function listMessages(
       `SELECT * FROM controller_messages WHERE conversation_id = ? ORDER BY seq ASC`,
     )
     .all(conversationId);
-  return rows.map(toMessage);
+  return rows.map((row) => messageRowSchema.parse(row));
 }
 
 /** The newest N messages in chronological order (prompt-context slice). */
@@ -222,7 +222,7 @@ export function recentMessages(
        ORDER BY seq DESC LIMIT ?`,
     )
     .all(conversationId, limit);
-  return rows.map(toMessage).reverse();
+  return rows.map((row) => messageRowSchema.parse(row)).reverse();
 }
 
 export interface AppendMessageInput {
@@ -282,8 +282,8 @@ export function appendMessage(
      WHERE id = ?`,
   ).run(now, now, title, input.conversationId);
   publishConversationUpdated(conversation.id, conversation.userId);
-  // SAFETY: inserted above under this id.
-  return toMessage(
+  // The row was inserted above under this id.
+  return messageRowSchema.parse(
     db.prepare(`SELECT * FROM controller_messages WHERE id = ?`).get(id),
   );
 }

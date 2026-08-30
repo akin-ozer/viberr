@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import {
   acceptanceBlockedReason,
@@ -765,6 +766,8 @@ export function rebuildGoalFile(
   const content = readFileSync(absPath, "utf8");
   const contentHash = sha256(content);
   if (!options.force) {
+    // SAFETY: `content_hash` is a single NOT NULL column on `goal_projections`;
+    // an absent row yields undefined.
     const row = db
       .prepare(
         `SELECT content_hash FROM goal_projections WHERE project_slug = ? AND goal_id = ?`,
@@ -793,6 +796,8 @@ export function rebuildGoalFile(
   const stages = projectStagesForGoals(db, slug);
   const links = fm.links.map((link) => {
     if (!link.taskKey) return link;
+    // SAFETY: the SELECT names exactly `stage` (TEXT NOT NULL) and `archived`
+    // (INTEGER NOT NULL DEFAULT 0) on `task_projections`.
     const task = db
       .prepare(
         `SELECT stage, archived FROM task_projections
@@ -867,24 +872,28 @@ export function rebuildGoalFile(
   return { action: "projected", kind: "goal", projectSlug: slug, goalId: fm.id };
 }
 
+/** Decodes the `projects.stages_json` column for the goal reconciler: entries
+ *  without a string `id` (and non-array payloads) read as empty, mirroring how
+ *  `deployedProfileIdsSchema` tolerates a malformed projection column. */
+const goalStageEntriesSchema = z
+  .array(z.object({ id: z.string() }).nullable().catch(null))
+  .catch([]);
+
 /** The project's stage list for terminal-stage checks; null when the project
  *  row is missing or its stages column does not decode. */
 function projectStagesForGoals(
   db: DatabaseSync,
   slug: string,
 ): { id: string }[] | null {
+  // SAFETY: `stages_json` is a single NOT NULL column on `projects` (DEFAULT
+  // '[]'); an absent row yields undefined.
   const row = db
     .prepare(`SELECT stages_json FROM projects WHERE slug = ?`)
     .get(slug) as { stages_json: string } | undefined;
   if (!row) return null;
   try {
-    const raw: unknown = JSON.parse(row.stages_json);
-    if (!Array.isArray(raw)) return null;
-    const ids = raw.flatMap((s) =>
-      s && typeof s === "object" && typeof (s as { id?: unknown }).id === "string"
-        ? [{ id: (s as { id: string }).id }]
-        : [],
-    );
+    const entries = goalStageEntriesSchema.parse(JSON.parse(row.stages_json));
+    const ids = entries.flatMap((s) => (s === null ? [] : [{ id: s.id }]));
     return ids.length ? ids : null;
   } catch {
     return null;
@@ -998,6 +1007,8 @@ export function rebuildProject(
     seenGoals.add(goalId);
     track(rebuildGoalFile(db, slug, goalId, taskOptions));
   }
+  // SAFETY: `goal_id` is a single NOT NULL column (half the `goal_projections`
+  // primary key).
   const goalRows = db
     .prepare(`SELECT goal_id FROM goal_projections WHERE project_slug = ?`)
     .all(slug) as { goal_id: string }[];

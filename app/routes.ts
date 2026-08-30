@@ -21,6 +21,10 @@ export default [
   layout("routes/palette-shell.tsx", [
     // The real tabbed org-settings surface (org profile, members, resources).
     route("org/settings", "routes/org.settings.tsx"),
+    // Ruling 99: the instance controller — every signed-in user converses;
+    // what it answers and applies is gated per tool call on that user's own
+    // authority.
+    route("controller", "routes/controller.tsx"),
     // Audit-log download (CSV/JSON) — org-admin gated file response.
     route("org/settings/audit-export", "routes/org.settings.audit-export.ts"),
     // Instance-wide agent-run analytics (org-admin).
@@ -63,6 +67,7 @@ export default [
     index("routes/project._index.tsx"),
     route("board", "routes/project.board.tsx"),
     route("review", "routes/project.review.tsx"),
+    route("controller", "routes/project.controller.tsx"),
     route("agents", "routes/project.agents.tsx"),
     route("policy", "routes/project.policy.tsx"),
     route("github", "routes/project.github.tsx"),
