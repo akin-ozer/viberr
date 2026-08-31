@@ -21,6 +21,17 @@ export type RunState =
 
 export type RunBackend = "claude" | "codex";
 
+/**
+ * F31-C7 — `kind` is a DELIVERY axis, not a role taxonomy, and the names
+ * mislead if read as roles: `primary` = the run of the engagement that
+ * `delivers: true` (owns workspace/branch/PR); `reviewer` = ANY supporting,
+ * non-delivering specialist run — a Developer dispatched `delivers: false`
+ * is stored as `reviewer`. Two partial unique indexes on `agent_runs`
+ * (single-flight per task) depend on exactly this reading, and the CHECK in
+ * 0001_baseline.sql mirrors these members. Renaming the members means a
+ * baseline-schema change; until then, read `role`/`agent_profile_id` for
+ * "who", and this field only for "does the run own delivery".
+ */
 export type RunKind = "operator" | "primary" | "reviewer" | "controller";
 
 /**

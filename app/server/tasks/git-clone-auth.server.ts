@@ -2,6 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { getEnv } from "~/server/config/env.server";
 import {
   gitErrorText,
   redactGitOutput,
@@ -196,11 +197,18 @@ export function createGitHubClonePlan(input: {
  * is generous and configurable; it exists to stop a hung clone, not to rule on
  * how big a repository is allowed to be.
  */
-export const CLONE_TIMEOUT_MS = (() => {
-  const raw = process.env.VIBERR_GIT_CLONE_TIMEOUT_MS;
+export function cloneTimeoutMs(): number {
+  // C3 (pass 31): through the validated schema, like every other tuning knob.
+  // The coercion + fallback stay here (the schema keeps these as raw strings).
+  // Read LAZILY like its C3 siblings (claudeIdleTimeoutMs et al.) — a
+  // module-scope getEnv() call would throw at import time on an invalid env
+  // (this module sits on the clone/delivery path) and would freeze the value
+  // against `resetEnvCacheForTests`, making this the one knob tests could not
+  // reach.
+  const raw = getEnv().VIBERR_GIT_CLONE_TIMEOUT_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 900_000;
-})();
+}
 
 export interface CloneFailureLogDetails {
   reason: "git_unavailable" | "clone_failed" | "clone_terminated";
@@ -241,7 +249,7 @@ export function cloneFailureSentence(
       return `git is not installed on the Viberr server, so the workspace checkout could not be created. ${cred}`;
     case "clone_terminated":
       return (
-        `The workspace checkout was cancelled after ${Math.round((opts.timeoutMs ?? CLONE_TIMEOUT_MS) / 1000)}s — ` +
+        `The workspace checkout was cancelled after ${Math.round((opts.timeoutMs ?? cloneTimeoutMs()) / 1000)}s — ` +
         `the clone ran past its time limit rather than failing. ${cred}`
       );
     default:

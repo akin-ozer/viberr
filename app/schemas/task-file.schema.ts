@@ -3,6 +3,7 @@ import {
   diagError,
   diagInfo,
   diagWarning,
+  tolerantRowsOf,
   type FileDiagnostic,
 } from "./file-diagnostics";
 
@@ -151,6 +152,15 @@ export const PACKET_OPTION_KINDS = [
   // deletion stays ruling 17's archive-packet path). Resolution enforces
   // `approve-transition` (it destroys commits).
   "discard_branch",
+  // pass31 F31-6: the remedy for a task-key BRANCH COLLISION — the remote holds
+  // an unrelated branch (usually with an unowned PR) under this task's branch
+  // name, so the delivery push conflicts. Confirming closes the recorded
+  // unowned PR (when one exists), deletes the stale REMOTE branch, and
+  // re-delivers this task's local work so its real review PR opens. The LOCAL
+  // delivery is kept — this is the exact opposite of `discard_branch`, which
+  // is why authoring refuses to offer discard on a delivered/occupied branch.
+  // Resolution enforces `approve-transition` (it deletes a remote ref).
+  "resolve_remote_collision",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -596,6 +606,18 @@ const taskFrontmatterFields = {
    *  field the prior stage reached the operator only as one-hop transition
    *  trigger context or timeline prose — gone by the next turn. */
   previousStageId: z.string().nullable().default(null),
+  /** V18 (F31-11): a DURABLE deliberate-hold marker. Set to the current stage
+   *  when a stranded-resume nudge ends stranded again (the operator held an
+   *  `auto` stage twice in a row on purpose); while it names the task's
+   *  current stage, the settle-time stranded backstop stays quiet instead of
+   *  paying a nudge and duplicating the hold note on every external trigger.
+   *  Cleared by any stage transition, packet resolution, or goal edit — each
+   *  is a human re-litigating the task's direction. A manual operator drive
+   *  deliberately does NOT clear it: the drive itself is the re-litigation,
+   *  and clearing would re-arm the nudge-then-duplicate-note cycle the marker
+   *  exists to end (the operator can still advance, which clears it via the
+   *  transition). */
+  heldAtStage: z.string().nullable().default(null),
   readiness: z.enum(READINESS_VALUES),
   waiting: z.enum(WAITING_VALUES),
   ownerUserId: z.string().nullable(),
@@ -948,6 +970,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "title",
   "stage",
   "previousStageId",
+  "heldAtStage",
   "readiness",
   "waiting",
   "ownerUserId",
@@ -1066,22 +1089,17 @@ function tolerantRows<T>(
     );
     return [];
   }
-  const out: T[] = [];
-  value.forEach((entry, i) => {
-    const parsed = element.safeParse(entry);
-    if (parsed.success) {
-      out.push(parsed.data);
-      return;
-    }
-    diagnostics.push(
-      diagWarning(
-        "frontmatter.invalid_field",
-        `Frontmatter \`${path}[${i}]\` is invalid (${parsed.error.issues[0]?.message ?? "unparseable"}) — dropping this entry, keeping the rest.`,
-        `${path}[${i}]`,
-      ),
-    );
-  });
-  return out;
+  return tolerantRowsOf(
+    diagnostics,
+    value,
+    element,
+    "frontmatter.invalid_field",
+    (i) => ({
+      subject: `Frontmatter \`${path}[${i}]\``,
+      noun: "entry",
+      path: `${path}[${i}]`,
+    }),
+  );
 }
 
 /**
@@ -1248,6 +1266,15 @@ export function parseTaskFrontmatter(
       data,
       "previousStageId",
       taskFrontmatterFields.previousStageId,
+      null,
+    ),
+    // heldAtStage — absent on tasks that predate the durable-hold marker
+    // (V18) → null, silently, same posture as previousStageId.
+    heldAtStage: tolerant(
+      diagnostics,
+      data,
+      "heldAtStage",
+      taskFrontmatterFields.heldAtStage,
       null,
     ),
     readiness: tolerant(

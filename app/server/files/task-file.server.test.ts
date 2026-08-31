@@ -16,6 +16,7 @@ const FULL: ParsedTaskFile = {
     title: "Attach execution workspace to task runtime",
     stage: "review",
     previousStageId: null,
+    heldAtStage: null,
     readiness: "input_required",
     waiting: "human",
     ownerUserId: "u_arda01",
@@ -60,7 +61,7 @@ const FULL: ParsedTaskFile = {
       { k: "Flag", v: "PAT scope missing pull_request:write", code: false },
     ],
     options: [
-      { kind: "accept_completion", t: "Accept completion", d: "Mark task done and merge the review PR. Human-authorized.", rec: true, accept: true },
+      { kind: "accept_completion", t: "Accept completion", d: "Mark task done and merge the review PR. Human-authorized.", rec: true },
       { kind: "request_edit", t: "Request one edit", d: "Ask the developer to widen PAT scope.", rec: false, ev: "**Decision:** request one edit." },
       { kind: "block_on_policy", t: "Block on policy", d: "Hold until policy updates.", rec: false },
       // The pr-diverged recovery option: archive + discard the remote branch.
@@ -166,6 +167,31 @@ describe("task.md round-trip", () => {
       profileId: "reviewer",
       roleHint: "Review & validation",
     });
+  });
+});
+
+describe("packet option tolerance (F31-C5)", () => {
+  it("one malformed option drops only itself — the packet (and the human's decision) survives", () => {
+    // The whole-array shape of the durable-loss class: `options` used to be a
+    // plain z.array, so ONE bad row voided the ENTIRE packet ("packet
+    // ignored"), the task read `waiting: human` with no card to answer, and
+    // the next write serialized the open decision away for good.
+    // Canary: revert the per-row filter in parsePacketSection and the packet
+    // below parses to null.
+    const text = serializeTaskFile(FULL).replace(
+      "options:",
+      'options:\n  - kind: 42\n    t: ""',
+    );
+    const { parsed, diagnostics } = parseTaskFileContent(text, {
+      fallbackKey: "VIB-142",
+    });
+    expect(parsed.packet, "the packet must survive one bad option").not.toBeNull();
+    expect(parsed.packet!.options.length).toBe(FULL.packet!.options.length);
+    expect(
+      diagnostics.some((d) => d.code === "packet.invalid_option"),
+    ).toBe(true);
+    // Nothing else was harmed by the salvage.
+    expect(parsed.packet!.title).toBe(FULL.packet!.title);
   });
 });
 

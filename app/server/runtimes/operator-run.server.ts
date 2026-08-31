@@ -15,7 +15,7 @@ import {
 } from "~/server/files/project-writer.server";
 import { getPatToken, getProjectCredential } from "~/server/secrets/pat-store.server";
 import {
-  CLONE_TIMEOUT_MS,
+  cloneTimeoutMs,
   cloneFailureLogDetails,
   cloneFailureSentence,
 } from "~/server/tasks/git-clone-auth.server";
@@ -183,6 +183,16 @@ export interface RunOperatorInput {
    *  OPERATOR_TRANSITION_CHAIN_CAP in task-actions). Omitted by every human /
    *  agent-reply trigger, which is what resets the chain. */
   transitionDepth?: number;
+  /** True when THIS drive was fired by the stranded-coordination resume
+   *  (`maybeResumeStrandedOperator`). Exactly one nudge per settle: a drive
+   *  that was itself a stranded resume and still ends stranded is a
+   *  DELIBERATE HOLD — the settle records the hold and stops instead of
+   *  resuming again. Without this, a goal that directs holding an `auto`
+   *  stage ("do nothing yet") looped paid operator drives back-to-back until
+   *  the chain cap, and every later trigger re-armed a fresh burst (F31-11:
+   *  fourteen drives on a no-op task). The turn instruction also reads it, so
+   *  the nudged drive is told to either advance or RECORD the hold. */
+  strandedResume?: boolean;
   /** transition trigger — what just moved (display names) and who moved it.
    *  `transitionByHuman` null = the operator's own move (continue the flow);
    *  a name = a human decided it, and the turn instruction tells the operator
@@ -299,6 +309,10 @@ interface OperatorLeaseEntry {
    *  follow-up (it is fire-and-forget async, so at settle time it may not
    *  have reached the queue yet; resuming here would double-drive). */
   stageAtStart: string | null;
+  /** True when this drive WAS the stranded resume's one nudge — its settle
+   *  must record a deliberate hold instead of nudging again (see
+   *  RunOperatorInput.strandedResume). */
+  strandedResume: boolean;
 }
 
 /**
@@ -421,7 +435,21 @@ function queueOperatorTrigger(
       });
     }
   } else {
+    // Newest-wins for machine triggers, but two accounting fields must SURVIVE
+    // the overwrite (V13): `strandedResume` marks the one paid nudge per
+    // settle — losing it to a later trigger un-marks the eventual drive, so a
+    // second stranding re-arms another nudge instead of recording the hold —
+    // and `transitionDepth` bounds the transition chain, so the deeper count
+    // wins or the cap resets mid-chain.
+    const prior = queue.latest;
     queue.latest = input;
+    if (prior?.strandedResume && input.strandedResume !== true) {
+      queue.latest = { ...input, strandedResume: true };
+    }
+    const priorDepth = prior?.transitionDepth ?? 0;
+    if (priorDepth > (input.transitionDepth ?? 0)) {
+      queue.latest = { ...queue.latest, transitionDepth: priorDepth };
+    }
   }
   state.pending.set(key, queue);
   // C2 (pass 23): the caller surfaces these on the timeline — the module's own
@@ -673,6 +701,7 @@ export async function maybeResumeStrandedOperator(
     runId?: string | null;
     transitionDepth?: number;
     stageAtStart?: string | null;
+    strandedResume?: boolean;
   },
 ): Promise<boolean> {
   // Only a ref that knows the drive's STARTING stage resumes — the live lease
@@ -745,6 +774,72 @@ export async function maybeResumeStrandedOperator(
   );
   if (!stranded) return false;
 
+  // V18: a DURABLE hold already stands for this exact stage — recorded by an
+  // earlier settle (below) and not yet re-litigated by a human (transitions,
+  // packet resolutions and goal edits all clear it).
+  // Without this read, the marker's whole point is lost: every external
+  // trigger (a schedule firing hourly, an @operator aside) started an unmarked
+  // drive, the backstop paid ONE fresh nudge, and the second stranding
+  // appended a byte-identical hold note — two drives and a duplicate note per
+  // trigger, forever. Quiet is correct here: the hold is already on the
+  // timeline.
+  if (
+    file.parsed.frontmatter.heldAtStage !== null &&
+    file.parsed.frontmatter.heldAtStage === file.parsed.frontmatter.stage
+  ) {
+    logger.info("stranded-operator resume withheld — a recorded hold stands for this stage", {
+      taskKey: ref.taskKey,
+      stage: file.parsed.frontmatter.stage,
+    });
+    return false;
+  }
+
+  // One nudge per settle (F31-11). THIS drive already was the stranded
+  // resume's nudge, its turn instruction said "advance or RECORD the hold" —
+  // and it ended stranded anyway. That is a deliberate hold, not an
+  // interrupted chain: record it once — durably, via `heldAtStage`, so later
+  // external triggers find it above instead of re-arming a nudge — and settle
+  // to human instead of looping paid drives until the chain cap (which only
+  // pauses the burst — the next trigger re-armed it, fourteen drives on one
+  // no-op task).
+  if (ref.strandedResume) {
+    const { updateTaskFile, resolveTaskFilePath } = await import(
+      "~/server/files/task-writer.server"
+    );
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    await updateTaskFile(
+      { projectSlug: ref.projectSlug, taskKey: ref.taskKey, dataRoot: ref.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.heldAtStage = parsed.frontmatter.stage;
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text:
+            "**Note:** this stage auto-advances, but the operator held it twice in a row without advancing, dispatching, or opening a packet — treating that as a deliberate hold. " +
+            "Coordination is paused here: run the operator manually when the hold should end, adjust the goal, or loosen the boundary in Policy → Workflow rules.",
+          toAgent: false,
+          evidence: null,
+        });
+      },
+    );
+    rebuildPath(
+      db,
+      resolveTaskFilePath({
+        projectSlug: ref.projectSlug,
+        taskKey: ref.taskKey,
+        dataRoot: ref.dataRoot,
+      }),
+      { dataRoot: ref.dataRoot },
+    );
+    logger.info("stranded-operator resume withheld — the nudged drive held the stage again", {
+      taskKey: ref.taskKey,
+      stage: file.parsed.frontmatter.stage,
+    });
+    return false;
+  }
+
   const { OPERATOR_TRANSITION_CHAIN_CAP } = await import(
     "~/server/tasks/task-actions.server"
   );
@@ -807,6 +902,7 @@ export async function maybeResumeStrandedOperator(
     taskKey: ref.taskKey,
     trigger: "transition",
     transitionDepth: depth,
+    strandedResume: true,
     dataRoot: ref.dataRoot,
   }).catch((error) => {
     logger.error("stranded-operator resume failed", {
@@ -831,6 +927,7 @@ function settleWaitingAfterOperator(
     runId?: string | null;
     transitionDepth?: number;
     stageAtStart?: string | null;
+    strandedResume?: boolean;
   },
 ): void {
   void (async () => {
@@ -1120,7 +1217,7 @@ export async function ensureOperatorRepoCheckout(
       kind: "unavailable",
       repo,
       sentence:
-        cloneFailureSentence(details, { hadCredential, timeoutMs: CLONE_TIMEOUT_MS }) +
+        cloneFailureSentence(details, { hadCredential, timeoutMs: cloneTimeoutMs() }) +
         (stderrExcerpt ? ` The checkout reported: ${stderrExcerpt}` : ""),
     };
   }
@@ -1331,6 +1428,7 @@ export async function runOperator(
     dataRoot: input.dataRoot,
     transitionDepth: input.transitionDepth ?? 0,
     stageAtStart: readStageAtStart(taskFileRef(input), "drive"),
+    strandedResume: input.strandedResume === true,
   };
   lease.held.set(leaseKey, leaseToken);
 
@@ -1803,6 +1901,7 @@ async function startCodexOperatorRun(
     transitionContextOf(input),
     input.scheduleNote,
     input.resolvedOption,
+    input.strandedResume,
   );
   const orgMcpServers = mcp.servers;
 
@@ -1944,6 +2043,9 @@ export async function executeStrandedCodexPlan(
     // to do. The stage is what makes "this drive did not move the task"
     // decidable; reading it here costs one file read.
     stageAtStart: readStageAtStart(recoveryRef, "stranded-plan-recovery"),
+    // A cross-boot recovery is never itself the stranded resume's nudge — the
+    // one-nudge accounting starts fresh after a restart, like the chain depth.
+    strandedResume: false,
   };
   lease.held.set(leaseKey, leaseToken);
   try {
@@ -2441,6 +2543,7 @@ async function startRealOperatorRun(
     transitionContextOf(input),
     input.scheduleNote,
     input.resolvedOption,
+    input.strandedResume,
   );
 
   const spec: StartRunInput = {
@@ -3085,7 +3188,12 @@ const CAPABILITY_GAP_REMEDY_INSTRUCTION =
   "Agents surface (Agents → the profile → its capability matrix), and a re-run picks it up with no change to this task. " +
   "Carry it as an observed fact (e.g. k: \"Capability gap\", v: \"no deployed agent holds `browser`\") and offer it as an " +
   "option a human can act on, alongside any workaround you propose — a packet that offers only workarounds hides the fix. " +
-  "You never change that configuration yourself; you point at it. ";
+  "You never change that configuration yourself; you point at it. " +
+  "The same honesty applies to NAMED RESOURCES (F31-3): when the goal cites a knowledge base, skill or MCP server by name, " +
+  "check `orgResources` in the snapshot before claiming it does not exist. A name there that no `deployedSpecialists[].resources` " +
+  "carries means it EXISTS at the instance level but is granted to nothing on this project — say exactly that (\"exists, not " +
+  "granted here\"), and offer granting it from the project's Agents surface as an option. Only a name absent from `orgResources` " +
+  "too may be described as not existing. ";
 
 /**
  * The TRIAGE QUALITY GATE block (F15-14). Live failure: the goal "The
@@ -3158,6 +3266,7 @@ function operatorTurnDoctrine(
   transition?: TransitionContext,
   scheduleNote?: string,
   resolvedOption?: { kind: string; title: string; note?: string },
+  strandedResume?: boolean,
 ): string {
   if (humanComment?.trim()) {
     const by = humanCommentBy?.trim();
@@ -3298,7 +3407,16 @@ function operatorTurnDoctrine(
     ? "The goal is unspecified. First use `set_goal` to add concrete scope and acceptance criteria, or request genuinely missing scope with one decision packet. " +
       "Drafting the goal is SETUP, not this turn's action — after `set_goal`, continue with the stage rule below in the SAME run; nothing re-invokes you for your own `set_goal`. "
     : "";
+  // F31-11: the stranded-resume nudge is one paid drive, and it is the LAST
+  // automatic one — say so, and give the deliberate-hold case a recordable
+  // exit (a packet flips the stranded predicate durably, so the settle stops
+  // re-judging the stage as abandoned).
+  const resumeContext = strandedResume
+    ? "You are re-invoked ONCE because your previous run ended with this auto-advance stage idle: nothing pending, nothing dispatched, no packet. This is the only automatic nudge — nothing re-invokes you again for the same idle stage. " +
+      "Either take the advancing action now (transition, dispatch, or deliver per the stage rule below), or, if the goal or a human directive tells you to HOLD this stage, record the hold so it is a decision instead of a stall: `open_decision_packet` asking the human to confirm the hold (offer options to resume, adjust the goal, or keep holding). Do not end this turn with the stage idle and nothing recorded. "
+    : "";
   return (
+    resumeContext +
     scheduleContext +
     moveContext +
     scope +
@@ -3314,7 +3432,7 @@ function operatorTurnDoctrine(
     "- Work stage where the deliverer's run is IN FLIGHT — `liveRuns` in the snapshot is the ONLY proof of that (`waiting` is a display flag and a directive comment on the timeline is not a running agent): do nothing and stop — you are re-invoked when it reports. Never duplicate a run that is already working.\n" +
     "- Work stage where the deliverer already reported and its report is still the LATEST word (no newer human steer, rework decision, or request-changes after it): do nothing and stop.\n" +
     "- Work stage where a human steer, rework decision, or request-changes arrived AFTER the deliverer's last report (e.g. the task was sent back from review): the deliverer owes NEW work — `run_agent` the delivering profile with that steer as its prompt, quoting it.\n" +
-    "- DELIVERY (push the branch + open the review PR) is YOUR decision, made with `deliver_for_review` — it is no longer a stage side-effect, and a stage named \"Review\" delivers nothing by itself. Deliver when the deliverer's work is committed and plausible for review. Weigh the REMAINING stages: a later stage (e.g. QA) need not gate delivery for this task — offer or perform early delivery when so. When unsure whether the branch should be pushed, `open_decision_packet` and ask. The tool result is honest: a `push_conflict` means the remote branch diverged (a history problem, never a credential problem) and NO PR was opened — open a decision packet naming the branch (resolve/force-push deliberately, or archive) instead of retrying blindly.\n" +
+    "- DELIVERY (push the branch + open the review PR) is YOUR decision, made with `deliver_for_review` — it is no longer a stage side-effect, and a stage named \"Review\" delivers nothing by itself. Deliver when the deliverer's work is committed and plausible for review. Weigh the REMAINING stages: a later stage (e.g. QA) need not gate delivery for this task — offer or perform early delivery when so. When unsure whether the branch should be pushed, `open_decision_packet` and ask. The tool result is honest: a `push_conflict` means the remote branch diverged (a history problem, never a credential problem) and NO PR was opened — open a decision packet naming the branch, offering `resolve_remote_collision` (clear the stale remote branch and its recorded squatting PR, then re-deliver) or `archive_task`, instead of retrying blindly. Never offer `discard_branch` for a push conflict: it destroys the task's LOCAL commits and its authoring is refused while delivered work stands.\n" +
     "- A directive you sent earlier that never became a run is an UNDELIVERED hand-off — the timeline says so (\"did NOT start a run\"), or `liveRuns` is empty with no report after your prompt. Once the blocker is gone (e.g. the stage moved to one the profile works), re-send the prompt yourself; do not wait for a report that can never come.\n" +
     "Take exactly one such action and stop. NEVER end your turn leaving the task at a pre-work or `auto` stage with nothing done and no packet: either advance the boundary, hand off to a specialist, or `open_decision_packet` when a human must scope or unblock it. A pre-work stage that needs no human input must never be left waiting on a human."
   );
@@ -3346,6 +3464,7 @@ export function buildCodexOperatorPrompt(
   transition?: TransitionContext,
   scheduleNote?: string,
   resolvedOption?: { kind: string; title: string; note?: string },
+  strandedResume?: boolean,
 ): string {
   return (
     "# Task snapshot\n\n```json\n" +
@@ -3362,8 +3481,9 @@ export function buildCodexOperatorPrompt(
       transition,
       scheduleNote,
       resolvedOption,
+      strandedResume,
     ) +
-    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes. Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
+    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes; `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
   );
@@ -3379,6 +3499,7 @@ export function buildOperatorTurnPrompt(
   transition?: TransitionContext,
   scheduleNote?: string,
   resolvedOption?: { kind: string; title: string; note?: string },
+  strandedResume?: boolean,
 ): string {
   return (
     `You are operating ${snapshot.key}, "${snapshot.title}", at stage "${snapshot.stageName}".\n` +
@@ -3393,6 +3514,7 @@ export function buildOperatorTurnPrompt(
       transition,
       scheduleNote,
       resolvedOption,
+      strandedResume,
     )
   );
 }

@@ -318,6 +318,7 @@ function fm(input: {
     title: input.title,
     stage: input.stage,
     previousStageId: null,
+    heldAtStage: null,
     goalRef: null,
     readiness: input.readiness,
     waiting: input.waiting,

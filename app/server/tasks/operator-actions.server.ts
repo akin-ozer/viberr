@@ -97,6 +97,11 @@ import {
   type DeployedSpecialistView,
 } from "./specialist-run.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
+import {
+  listKnowledgeBaseNames,
+  listMcpServerNames,
+  listSkillNames,
+} from "~/server/org/resources.server";
 
 /** Capability-gated task mutations used only by the in-process operator toolkit. */
 
@@ -174,6 +179,11 @@ export interface OperatorActionResult {
    */
   outcome: "done" | "recommended" | "denied" | "noop";
   message: string;
+  /** Users the action's own watcher notification actually REACHED (routing
+   *  prefs applied per recipient). Set by the packet writer so a caller that
+   *  owes a fallback notice about the same event (T13) can dedupe per
+   *  recipient instead of assuming the packet row reached everyone. */
+  notifiedUserIds?: string[];
 }
 
 // ------------------------------------------------------------- authority
@@ -442,6 +452,44 @@ export function resolveOperatorAuthority(
   };
 }
 
+/**
+ * F31-C2 — the ONE absent-polarity table. Four capabilities postdate live
+ * operator deployments, and their canon resolves an ABSENT grant to a derived
+ * default rather than "off" (each dedicated gate below documents why). That
+ * split was a standing trap: every consumer that reached for the plain
+ * `gate()` silently re-broke one of them — three separate call sites were
+ * individually corrected for `dispatch-agents` alone, and a fourth added
+ * later would have re-broken dispatching on every pre-rework project. The
+ * table lives inside `gate()` itself, so any consumer may now resolve any
+ * capability through it and get the same answer the dedicated gate gives.
+ * Returns null for the ordinary absent-means-off family.
+ */
+function absentPolarityGate(
+  authority: OperatorAuthority,
+  capabilityId: string,
+): Gate | null {
+  switch (capabilityId) {
+    case "deliver-review-pr":
+      // R15-9: derived from the project's governance, not a constant — and
+      // deliberately NOT promoted by full autonomy (only an explicit stored
+      // mode rides the promotion in the mode arm below).
+      return absentDeliverReviewPrMode(authority.humanGatedBeforeWork);
+    case "dispatch-agents":
+      // Ruling 98(b): dispatch IS the old assign/summon pair's default.
+      return "direct";
+    case "update-task-branch":
+      // Bringing the branch up to date is delivery's sibling — absent
+      // follows whatever delivery resolves to (update-branch-operator).
+      return deliverGate(authority);
+    case "use-web-search-fetch":
+      // Catalog default `direct` — absent means granted; only an explicit
+      // off/human withholds (operatorWebWithheld).
+      return "direct";
+    default:
+      return null;
+  }
+}
+
 /** Resolve one capability to direct / recommend / deny for this authority. */
 export function gate(authority: OperatorAuthority, capabilityId: string): Gate {
   // A4: no operator deployed ⇒ no operator authority, full stop. The
@@ -450,6 +498,12 @@ export function gate(authority: OperatorAuthority, capabilityId: string): Gate {
   // both gates answer from — a future default in that branch cannot quietly
   // hand a project that deployed no operator a working capability.
   if (!authority.deployed) return "deny";
+  if (!authority.policy.has(capabilityId)) {
+    // F31-C2: the absent-means-derived family resolves here for EVERY
+    // consumer, not only the callers that knew to use a dedicated gate.
+    const absent = absentPolarityGate(authority, capabilityId);
+    if (absent !== null) return absent;
+  }
   const mode = authority.policy.get(capabilityId) ?? "off";
   if (mode === "direct") return "direct";
   if (mode === "recommend") {
@@ -498,6 +552,10 @@ export function deliverGate(authority: OperatorAuthority): Gate {
   // its own. Derive the same answer the preset would have given instead, so the
   // rule is "what does this project's governance say", not "when was it made".
   // Shared with the policy surface so the two can never disagree (F15-20).
+  // F31-C2: `gate()` now answers the absent case identically through
+  // `absentPolarityGate`; this explicit arm stays because `absentPolarityGate`
+  // calls THIS function for `update-task-branch` (avoiding the loop), and as
+  // the documented front for delivery-specific reasoning.
   return absentDeliverReviewPrMode(authority.humanGatedBeforeWork);
 }
 
@@ -516,11 +574,9 @@ export function deliverGate(authority: OperatorAuthority): Gate {
  * default); an undeployed operator stays denied (A4).
  */
 export function dispatchGate(authority: OperatorAuthority): Gate {
-  if (!authority.deployed) return "deny";
-  if (authority.policy.has("dispatch-agents")) {
-    return gate(authority, "dispatch-agents");
-  }
-  return "direct";
+  // F31-C2: the plain gate() carries the same absent polarity now; this
+  // front remains as the named, documented resolver.
+  return gate(authority, "dispatch-agents");
 }
 
 // ------------------------------------------------------------- helpers
@@ -962,6 +1018,32 @@ export async function operatorOpenPacket(
   if (!existing) {
     return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
   }
+  // F31-6: option/semantics coherence, checked where the option is AUTHORED.
+  // `discard_branch` deletes the LOCAL, never-pushed branch and destroys its
+  // commits — offered on a task that has a delivered revision, or whose branch
+  // name is occupied on GitHub (a tracked PR or a recorded unowned one), the
+  // human's confirm ceremony would truthfully promise the opposite of the
+  // option's text (live-caught: an operator authored "delete the conflicting
+  // REMOTE branch and push this task's commit fresh" onto a discard_branch
+  // option — confirming it would have destroyed the delivery it promised to
+  // push). Refuse the authoring and name the verb that fits.
+  if (rawOptions.some((o) => o.kind === "discard_branch")) {
+    const fm = existing.parsed.frontmatter;
+    const hasDeliveredWork = fm.workRevision !== null;
+    const branchNameOccupied =
+      fm.pr !== null || (fm.github?.unownedPr ?? null) !== null;
+    if (hasDeliveredWork || branchNameOccupied) {
+      return {
+        outcome: "noop",
+        message:
+          "discard_branch only fits a LOCAL, never-pushed branch with no delivered revision — " +
+          (hasDeliveredWork
+            ? `${input.taskKey} has a delivered revision, so discarding would destroy it. `
+            : "the branch name is occupied on GitHub, so the local/remote framing would mislead. ") +
+          "For a task-key branch collision (an unrelated remote branch or unowned PR under this task's branch name), offer resolve_remote_collision — the human's confirm closes the unowned PR, deletes the stale remote branch, and re-delivers this task's local work. To abandon the work entirely, offer archive_task with deleteBranch.",
+      };
+    }
+  }
   // B3: one open decision at a time, the same refusal every sibling packet
   // writer makes (`openStuckLoopPacket`, `openAgentQuestionPacket`). This
   // writer alone assigned `parsed.packet` unconditionally, so a second packet
@@ -1078,7 +1160,7 @@ export async function operatorOpenPacket(
     taskKey: input.taskKey,
     details: { type: input.packetType },
   });
-  notifyTaskWatchers(
+  const notifiedUserIds = notifyTaskWatchers(
     db,
     {
       projectSlug: input.projectSlug,
@@ -1095,6 +1177,7 @@ export async function operatorOpenPacket(
   );
   return {
     outcome: "done",
+    notifiedUserIds,
     message: `Opened a ${input.packetType === "blocked" ? "blocking" : "decision"} packet with ${options.length} option(s).`,
   };
 }
@@ -1378,6 +1461,16 @@ export interface OperatorTaskSnapshot {
   /** The task's delivery branch (null before any delivery). Lets recovery
    *  packets name the branch a `deleteBranch` archive option would remove. */
   branch: string | null;
+  /** V19: an unrelated PR squatting this task's branch name (R15-15 collision,
+   *  recorded by the reconciler as `github.unownedPr`). The operator was
+   *  structurally blind to the collision at the exact moment it must author a
+   *  `resolve_remote_collision` packet — the Collision card row and the
+   *  refusal notes rendered it for humans only, so the model had to guess from
+   *  timeline prose. Null when no collision is recorded.
+   *
+   *  Optional only so hand-built test fixtures need not restate it; the real
+   *  producer (`operatorSnapshot`) always sets it. */
+  unownedPr?: number | null;
   /** R19-1: the project's repository ("owner/name"), or null when none is
    *  attached. The coordinator used to be blind to it — it could not even NAME
    *  the repository it operates on, which is part of how it came to call its own
@@ -1431,6 +1524,18 @@ export interface OperatorTaskSnapshot {
     /** capabilityId → mode the OPERATOR holds (the RBAC its own tools honor). */
     capabilities: Record<string, string>;
   };
+  /**
+   * F31-3 — the INSTANCE resource catalog, names only. Every other field here
+   * is project-scoped, so a goal citing a knowledge base that existed at the
+   * org level but was granted to no deployed profile read as "does not exist"
+   * in a live packet headline. These lists answer the EXISTENCE half: a name
+   * here but under no `deployedSpecialists[].resources` means "exists, not
+   * granted on this project" — the remedy is granting it from the project's
+   * Agents surface, never re-creating it. Names only, bounded by the org
+   * catalog's own size; optional so hand-built fixtures need not restate it
+   * (`operatorSnapshot` always sets it).
+   */
+  orgResources?: { kbs: string[]; skills: string[]; mcps: string[] };
 }
 
 /** [1] Hard bound on `snapshot.recommendations`: the whole snapshot is
@@ -1590,6 +1695,7 @@ export function operatorSnapshot(
   if (!project) throw AppError.notFound(`Project ${projectSlug} not found.`);
 
   const fm = file.parsed.frontmatter;
+  const orgCtx: { dataRoot?: string } = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
   const stages = project.parsed.frontmatter.stages;
   const workflow = project.parsed.frontmatter.workflow;
   const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
@@ -1739,6 +1845,9 @@ export function operatorSnapshot(
     // option with `deleteBranch: true` would delete instead of gesturing at
     // "the branch".
     branch: fm.branch ?? null,
+    // V19: the recorded branch-name collision, so the operator can author
+    // `resolve_remote_collision` from a fact instead of timeline prose.
+    unownedPr: fm.github?.unownedPr ?? null,
     // R19-1: name the repository the read-only view reads.
     repo: project.parsed.frontmatter.repo ?? null,
     // R19-8: the "nothing to deliver" shape, stated outright.
@@ -1764,6 +1873,15 @@ export function operatorSnapshot(
       scope: "operator",
       note: OPERATOR_POLICY_SCOPE_NOTE,
       capabilities: Object.fromEntries(authority.policy),
+    },
+    // F31-3: instance catalog names, so "does not exist" claims are checkable.
+    // Names-only readers (V12): the snapshot backs `get_task`, the operator's
+    // most-called tool — the full view builders walk every KB/skill store
+    // directory and read every SKILL.md body, all discarded for `.name`.
+    orgResources: {
+      kbs: listKnowledgeBaseNames(db, orgCtx),
+      skills: listSkillNames(db, orgCtx),
+      mcps: listMcpServerNames(db),
     },
   };
 }
@@ -2365,8 +2483,12 @@ export async function operatorDeliverForReview(
         message:
           `Delivery push CONFLICTED: ${outcome.message}. No PR was opened. This is a ` +
           `branch-history conflict on \`${outcome.branch}\`, not a credential problem. ` +
-          `Open a decision packet so a human resolves the remote branch (delete/rename ` +
-          `or deliberate force-push) or archives the task.`,
+          `Open a decision packet with a \`resolve_remote_collision\` option — its ` +
+          `ceremony closes the squatting PR (when one is recorded), deletes the stale ` +
+          `remote branch, and re-delivers this task's local work — or an ` +
+          `\`archive_task\` option to abandon the task. Do NOT author ` +
+          `\`discard_branch\` here: it destroys this task's LOCAL commits and is ` +
+          `refused while delivered work stands on the branch.`,
       };
     case "grant_withheld":
     case "push_failed":

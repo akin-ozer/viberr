@@ -44,7 +44,7 @@ describe("withActionWatchdog", () => {
     // unhandled rejection; read the settled reason back afterwards.
     const settled = raced.then(
       () => undefined,
-      (reason: unknown) => reason,
+      (cause: unknown) => cause,
     );
 
     await vi.advanceTimersByTimeAsync(budget);
@@ -86,7 +86,7 @@ describe("withActionWatchdog", () => {
     );
     const settled = raced.then(
       () => undefined,
-      (reason: unknown) => reason,
+      (cause: unknown) => cause,
     );
 
     // One tick short of the default budget: still pending.

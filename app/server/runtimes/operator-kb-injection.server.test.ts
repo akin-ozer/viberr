@@ -259,6 +259,46 @@ describe("buildOperatorSystemPrompt — shared skill budget (C2)", () => {
   });
 });
 
+/**
+ * T5 (pass 31) — the KB twin of C2. `kb-injection.server.test.ts` proves
+ * `readKbBodies` spends ONE budget across the grant list and hands back the
+ * omission marker; nothing proved the OPERATOR prompt then carries it. The
+ * budget is hardcoded inside `buildOperatorSystemPrompt`, so this assembly is
+ * the only layer where "each KB re-armed the cap" or "the marker was filtered
+ * out of the emitted sections" is observable.
+ */
+describe("buildOperatorSystemPrompt — shared KB budget (F9 / P14-KM-05)", () => {
+  const writeKb = (dataRoot: string, name: string, body: string): void => {
+    const dir = path.join(dataRoot, "kb", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "doc.md"), body, "utf8");
+  };
+
+  it("a second knowledge base cannot re-arm the budget the first one spent", () => {
+    // Canary: drop the running `budget -= injection.body.length` in
+    // `readKbBodies` and KB-MARKER-SECOND arrives while both markers vanish.
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-kbbudget-"));
+    writeKb(dataRoot, "big-kb", "B".repeat(30_000));
+    writeKb(dataRoot, "second-kb", `KB-MARKER-SECOND ${"S".repeat(5_000)}`);
+
+    const prompt = buildOperatorSystemPrompt(
+      authorityWith(["big-kb", "second-kb"]),
+      dataRoot,
+    );
+
+    // The first KB spends the shared budget and says it was clipped…
+    expect(prompt).toContain("knowledge base truncated");
+    // …and the second contributes NO content — only the honest marker.
+    expect(prompt).not.toContain("KB-MARKER-SECOND");
+    expect(prompt).toContain("knowledge base omitted entirely");
+    // C1 rides along: what was dropped is named, with the reason.
+    expect(prompt).toContain("**second-kb**");
+    expect(prompt).toContain("did not fit the shared");
+    // The whole prompt stays near one budget, not two.
+    expect(prompt.length).toBeLessThan(48_000);
+  });
+});
+
 describe("buildOperatorSystemPrompt — persona + invariants (P11-21 / R-A / R-C)", () => {
   const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-"));
 

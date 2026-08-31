@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PrCacheState } from "./pr-linker.server";
 import {
   decidePrAdoption,
-  type PrAdoptionDecision,
+  type PrAdoptionRefusal,
 } from "./pr-adoption.server";
 
 /**
@@ -177,24 +177,34 @@ describe("decidePrAdoption refusal-arm precedence", () => {
     expect(decision).toEqual({ adopt: false, refusal: "no_revision" });
   });
 
-  it("emits exactly one refusal string per non-adopting arm (no leaked adopt:true)", () => {
-    const cases: { state: PrCacheState; head: string | null; rev: string | null }[] = [
-      { state: "merged", head: REVISION, rev: REVISION },
-      { state: "closed", head: REVISION, rev: REVISION },
-      { state: "review", head: REVISION, rev: null },
-      { state: "review", head: null, rev: REVISION },
-      { state: "review", head: "deadbeef", rev: REVISION },
+  it("emits the NAMED refusal of its own arm (no leaked adopt:true, no shared reason)", () => {
+    // F17-L4: `merged` and `closed` are separate reasons — a single `not_open`
+    // would let the two most different delivery hazards share one sentence.
+    const cases: {
+      state: PrCacheState;
+      head: string | null;
+      rev: string | null;
+      refusal: PrAdoptionRefusal;
+    }[] = [
+      { state: "merged", head: REVISION, rev: REVISION, refusal: "merged" },
+      { state: "closed", head: REVISION, rev: REVISION, refusal: "closed" },
+      { state: "review", head: REVISION, rev: null, refusal: "no_revision" },
+      { state: "review", head: null, rev: REVISION, refusal: "head_unknown" },
+      {
+        state: "review",
+        head: "deadbeef",
+        rev: REVISION,
+        refusal: "head_mismatch",
+      },
     ];
     for (const c of cases) {
-      const decision: PrAdoptionDecision = decidePrAdoption({
-        state: c.state,
-        prHeadSha: c.head,
-        revisionHeadSha: c.rev,
-      });
-      expect(decision.adopt).toBe(false);
-      if (!decision.adopt) {
-        expect(typeof decision.refusal).toBe("string");
-      }
+      expect(
+        decidePrAdoption({
+          state: c.state,
+          prHeadSha: c.head,
+          revisionHeadSha: c.rev,
+        }),
+      ).toEqual({ adopt: false, refusal: c.refusal });
     }
   });
 });

@@ -112,7 +112,9 @@ export function prAdoptionRefusalNote(input: {
     `**Branch name collision:** GitHub already has PR #${input.prNumber} on branch ` +
     `\`${input.branch}\`, but it is NOT ${input.taskKey}'s review PR: ${refusalCause(input)}. ` +
     `Viberr will not track it as one. This happens when a task key is reused (a new data ` +
-    `root restarts keys at 1) while the old branch still exists on GitHub. Delete or rename ` +
-    `the remote branch \`${input.branch}\`, or give this task a different branch, before delivering.`
+    `root restarts keys at 1) while the old branch still exists on GitHub. Resolve it with ` +
+    `a \`resolve_remote_collision\` decision (closes the unrelated PR, deletes the stale ` +
+    `remote branch \`${input.branch}\`, and re-delivers this task's work), or give this ` +
+    `task a different branch, before delivering.`
   );
 }

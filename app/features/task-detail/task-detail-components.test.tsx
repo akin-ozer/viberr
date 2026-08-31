@@ -57,7 +57,7 @@ const packet142: PacketRender = {
     { k: "Validation", v: "unit + integration green", code: false },
   ],
   options: [
-    { kind: "accept_completion", t: "Accept completion", d: "Mark task done.", rec: true, accept: true },
+    { kind: "accept_completion", t: "Accept completion", d: "Mark task done.", rec: true },
     { kind: "request_edit", t: "Request one edit", d: "Ask the developer.", rec: false },
     { kind: "block_on_policy", t: "Block on policy", d: "Hold until policy updates.", rec: false },
   ],
@@ -464,6 +464,7 @@ function taskFixture(ownerId: string, ownerName: string): TaskSummary {
     prReview: null,
     commits: [],
     changed: null,
+    unownedPr: null,
     goal: "Bound the timeline payload and add a Show-older affordance.",
     packet: null,
     eventCount: 0,
@@ -1407,6 +1408,43 @@ function traceAcceptance(
   };
 }
 
+describe("GithubTrace — branch collision framing (F31-1)", () => {
+  it("names the unowned PR as a collision instead of leaving the branch to read as this task's", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({ unownedPr: 232 })}
+          acceptance={traceAcceptance()}
+        />
+      </MemoryRouter>,
+    );
+    const row = Array.from(container.querySelectorAll(".kv-row")).find((r) =>
+      r.textContent?.includes("Collision"),
+    )!;
+    expect(row).toBeDefined();
+    expect(row.textContent).toContain("#232");
+    expect(row.textContent).toContain("not this task");
+  });
+
+  it("renders no collision row when nothing squats on the branch", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({ unownedPr: null })}
+          acceptance={traceAcceptance()}
+        />
+      </MemoryRouter>,
+    );
+    expect(
+      Array.from(container.querySelectorAll(".kv-row")).some((r) =>
+        r.textContent?.includes("Collision"),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("GithubTrace — admin force-accept (DG-2)", () => {
   it("renders the Force-accept button when blocked AND onForceAccept is provided", () => {
     // C1: the block REASON no longer renders here — it has one owner, the
@@ -2322,7 +2360,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canEditGoal
         canArchive
         canDiscardBranch
-        archiveDisclosure={{ taskKey: "VIB-1", branch: "vib-1", pendingRecommendations: 0 }}
+        archiveDisclosure={{ taskKey: "VIB-1", branch: "vib-1", pendingRecommendations: 0, unownedPr: null }}
         onResolveCustom={() => {}} onResolve={onResolve}
         onAsk={() => {}}
       />,
@@ -2338,6 +2376,55 @@ describe("DecisionPacket — pass-20 governance", () => {
     fireEvent.click(
       Array.from(dialog.querySelectorAll("button")).find((b) =>
         b.textContent?.includes("Discard vib-1"),
+      )!,
+    );
+    expect(onResolve).toHaveBeenCalledWith(0, "");
+  });
+
+  it("F31-6: a resolve_remote_collision option asks first, names the deletes/keeps split, then resolves by index", () => {
+    const onResolve = vi.fn();
+    const { container } = render(
+      <DecisionPacket
+        packet={withOptions([
+          {
+            kind: "resolve_remote_collision",
+            t: "Delete the stale remote branch, then redeliver",
+            d: "The remote vib-1 is unrelated to this task's work.",
+            rec: true,
+          },
+        ])}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        canDiscardBranch
+        archiveDisclosure={{
+          taskKey: "VIB-1",
+          branch: "vib-1",
+          pendingRecommendations: 0,
+          unownedPr: 232,
+        }}
+        onResolveCustom={() => {}} onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+    fireEvent.click(container.querySelector(".packet-actions .btn.primary")!);
+    // Nothing resolved on the first click — the ceremony interposes.
+    expect(onResolve).not.toHaveBeenCalled();
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Packet collision dialog"]',
+    )!;
+    expect(dialog).toBeTruthy();
+    // The three-row truth: deletes the REMOTE ref + closes the unowned PR,
+    // KEEPS the local delivery.
+    expect(dialog.textContent).toContain("vib-1");
+    expect(dialog.textContent).toContain("#232");
+    expect(dialog.textContent).toContain("cannot be undone");
+    expect(dialog.textContent).toContain("local delivery");
+    fireEvent.click(
+      Array.from(dialog.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Clear collision"),
       )!,
     );
     expect(onResolve).toHaveBeenCalledWith(0, "");
@@ -2363,6 +2450,151 @@ describe("DecisionPacket — pass-20 governance", () => {
     const opts = container.querySelectorAll<HTMLButtonElement>(".options .opt");
     expect(opts[0]!.getAttribute("aria-disabled")).toBe("true");
     expect(opts[0]!.textContent).toContain("your role can't discard the branch");
+  });
+
+  /**
+   * V16 — `resolve_remote_collision` was dimmed, `aria-disabled` and hover-
+   * titled below `approve-transition`, but the per-option DESCRIPTION chain
+   * (which its three siblings all appear in) had no arm for it. A `title` needs
+   * a pointer, so a keyboard or touch user got an inert option and no reason at
+   * all. The gate table is what closes it: one row per kind, read by the option
+   * row, the hover title AND the card-level refusal.
+   */
+  it("V16: a blocked resolve_remote_collision states its tier in the description, the title and the deny note", () => {
+    const { container } = render(
+      <DecisionPacket
+        packet={withOptions([
+          {
+            kind: "resolve_remote_collision",
+            t: "Delete the stale remote branch, then redeliver",
+            d: "The remote vib-1 is unrelated to this task's work.",
+            rec: true,
+          },
+          { kind: "request_edit", t: "Send it back", d: "", rec: false },
+        ])}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        canDiscardBranch={false}
+        onResolveCustom={() => {}} onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const opts = container.querySelectorAll<HTMLButtonElement>(".options .opt");
+    expect(opts[0]!.getAttribute("aria-disabled")).toBe("true");
+    // Canary: drop the collision row's `option` from PACKET_TIER_GATES (or the
+    // `note` off it) and this goes red — that was the shipped state.
+    expect(opts[0]!.querySelector(".od")!.textContent).toContain(
+      "your role can't clear the collision",
+    );
+    expect(opts[0]!.title).toContain(
+      "Clearing a branch collision is reserved for maintainers and admins",
+    );
+    // The un-gated sibling stays live, so the ONE deny note is the tier refusal
+    // for the selected option (not the every-option-forbidden escalation).
+    expect(opts[1]!.getAttribute("aria-disabled")).toBeNull();
+    const denies = container.querySelectorAll(".deny-note");
+    expect(denies).toHaveLength(1);
+    expect(denies[0]!.textContent).toContain(
+      "Clearing a branch collision is reserved for maintainers and admins.",
+    );
+  });
+
+  /**
+   * V16 — the three ask-first ceremonies are ONE shell with three sets of rows
+   * (`PacketDestructiveConfirm`). They were three shell-for-shell copies of the
+   * standard rulings 20 (R15-1) and 53 (R18-7) hold every one-way write to, so
+   * a change to the shared half landed on whichever copy was open. This pins
+   * the shell on all three at once: the same alertdialog contract, the same
+   * close affordance, the same obs body, the same "Not yet" beside one danger
+   * commit whose label names the outcome.
+   */
+  it("V16: all three destructive ceremonies render the same alertdialog shell", () => {
+    const shells: {
+      option: OptionDraft;
+      screenLabel: string;
+      confirm: string;
+    }[] = [
+      {
+        option: {
+          kind: "archive_task",
+          t: "Archive and delete the branch",
+          d: "",
+          rec: true,
+          deleteBranch: true,
+        },
+        screenLabel: "Packet archive dialog",
+        confirm: "Archive & delete vib-1",
+      },
+      {
+        option: {
+          kind: "discard_branch",
+          t: "Discard the workspace branch",
+          d: "",
+          rec: true,
+        },
+        screenLabel: "Packet discard dialog",
+        confirm: "Discard vib-1",
+      },
+      {
+        option: {
+          kind: "resolve_remote_collision",
+          t: "Delete the stale remote branch, then redeliver",
+          d: "",
+          rec: true,
+        },
+        screenLabel: "Packet collision dialog",
+        confirm: "Clear collision & redeliver",
+      },
+    ];
+    for (const shell of shells) {
+      const { container } = render(
+        <DecisionPacket
+          packet={withOptions([shell.option])}
+          busy={false}
+          canResolve
+          canResolveCompletion
+          canEditGoal
+          canArchive
+          canDiscardBranch
+          archiveDisclosure={{
+            taskKey: "VIB-1",
+            branch: "vib-1",
+            pendingRecommendations: 0,
+            unownedPr: 232,
+          }}
+          onResolveCustom={() => {}} onResolve={() => {}}
+          onAsk={() => {}}
+        />,
+      );
+      fireEvent.click(container.querySelector(".packet-actions .btn.primary")!);
+      const dialog = container.ownerDocument.querySelector(
+        `dialog[data-screen-label="${shell.screenLabel}"]`,
+      );
+      expect(dialog, shell.screenLabel).toBeTruthy();
+      expect(dialog!.className).toBe("modal-card release-card");
+      expect(dialog!.getAttribute("role")).toBe("alertdialog");
+      expect(dialog!.getAttribute("aria-label")).toBeTruthy();
+      expect(dialog!.querySelector(".modal-head .agent-glyph.lg.warn")).toBeTruthy();
+      expect(dialog!.querySelector(".mh-main h2")!.textContent).toBeTruthy();
+      expect(
+        dialog!.querySelector('.icon-btn.modal-close[aria-label="Close"]'),
+      ).toBeTruthy();
+      expect(
+        dialog!.querySelector(".modal-body.tight .packet-obs.flush"),
+      ).toBeTruthy();
+      expect(dialog!.querySelector(".modal-foot .foot-hint")!.textContent).toBeTruthy();
+      const foot = [
+        ...dialog!.querySelectorAll<HTMLButtonElement>(".modal-foot button"),
+      ];
+      expect(foot.map((b) => b.className)).toEqual(["btn ghost", "btn danger"]);
+      expect(foot[0]!.textContent).toBe("Not yet");
+      // The commit names the outcome, not "Confirm".
+      expect(foot[1]!.textContent).toContain(shell.confirm);
+      cleanup();
+    }
   });
 
   it("F20-17: a viewer who cannot resolve sees every option inert + one card-level deny note", () => {
@@ -2410,7 +2642,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canEditGoal={false}
         canArchive={false}
         canDiscardBranch={false}
-        archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0 }}
+        archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0, unownedPr: null }}
         onResolveCustom={() => {}} onResolve={() => {}}
         onRequestMaintainer={onRequestMaintainer}
         onAsk={() => {}}

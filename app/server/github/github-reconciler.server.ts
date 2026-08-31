@@ -531,21 +531,61 @@ async function reconcileTaskUnlocked(
   }
 
   const existingGithub: GithubCache | null = fm.github;
+  // F31-1 — PROVENANCE. `compare` and the discovered PR's `changed` describe
+  // whatever currently sits under the task's branch NAME on GitHub, and a name
+  // is not an identity (R15-15). The prefix filter cannot save the commits half
+  // — a wiped instance's `[VIB-1]` commits match a fresh VIB-1's prefix — so
+  // live, a task whose agent had errored before creating any branch showed
+  // "14 files · +313 −30" with two foreign commits, and the completion evidence
+  // later claimed "2 commit(s) delivered" it never made.
+  //
+  // V5 — the test is POSITIVE evidence that the branch head is this task's
+  // work, not the absence of an unowned PR. `unownedPr` is only ever non-null
+  // when `findPrForBranch` found a PR at all, so a stale remote branch carrying
+  // foreign `[KEY]`-prefixed commits and NO pr passed the old absence test and
+  // told the same lie with no collision row to explain it.
+  //
+  // Two questions, two answers:
+  //  · `deliveredThisBranch` — does the task's OWN record say it delivered
+  //    here? An owned PR (live or cached) or a work revision minted on this
+  //    branch. That record is also what makes an EXISTING cache honest: the
+  //    workspace-delivery path writes `github.commits` and `workRevision`
+  //    together, so a cache with no such record behind it is compare-derived,
+  //    and possibly derived before the collision was visible;
+  //  · `provenBranchHead` — may THIS pass record what the branch head shows?
+  //    Only when the record holds AND no stranger's PR stands on it.
+  //
+  // So while a collision stands the compare/PR footprint records nothing new,
+  // the honestly-captured workspace cache survives, and a footprint with no
+  // provenance at all is DROPPED rather than carried forward forever.
+  const deliveredThisBranch =
+    ownsAPr || fm.pr !== null || fm.workRevision?.branch === branch;
+  const provenBranchHead = deliveredThisBranch && !unownedPr;
   // Commit association: `[KEY]`-prefixed commits on the branch. Agents don't
   // always follow the prefix convention, so an EMPTY filtered list must not
   // wipe a non-empty cache captured from the run workspace for this same
-  // branch — keep what we honestly recorded rather than zeroing it.
-  const prefixCommits = compare ? taskCommits(compare.commits, fm.key) : null;
+  // branch — keep what we honestly recorded rather than zeroing it. `null` is
+  // "not derived this pass", which leaves the cache below standing.
+  const prefixCommits =
+    compare && provenBranchHead ? taskCommits(compare.commits, fm.key) : null;
   const existingCommits = existingGithub?.commits ?? [];
   const branchCommits =
     prefixCommits !== null && prefixCommits.length === 0 && existingCommits.length > 0
       ? existingCommits
       : prefixCommits;
+  const ownedChanged = pr && ownsAPr ? pr.changed : undefined;
+  // The cache a pass that derived nothing falls back to — empty when the task
+  // has no delivery record for this branch, because then the cache describes
+  // somebody else's work.
+  const cachedCommits = deliveredThisBranch ? existingCommits : [];
+  const cachedChanged = deliveredThisBranch
+    ? (existingGithub?.changed ?? null)
+    : null;
   const newGithub: GithubCache | null =
-    branchCommits !== null || pr?.changed || existingGithub || unownedPr
+    branchCommits !== null || ownedChanged || existingGithub || unownedPr
       ? {
-          commits: branchCommits ?? existingCommits,
-          changed: pr?.changed ?? existingGithub?.changed ?? null,
+          commits: branchCommits ?? cachedCommits,
+          changed: ownedChanged ?? cachedChanged,
           // Part of the compared snapshot below, so the collision note fires on
           // the tick it appears and stays quiet on the ~288 that follow.
           unownedPr: unownedPr?.number ?? null,
@@ -1515,5 +1555,108 @@ export async function deleteTaskRemoteBranch(
         : del.kind === "http"
           ? `GitHub refused the deletion (${del.message}).`
           : `GitHub gave an unexpected response (${del.status}).`,
+  };
+}
+
+/** Outcome of the F31-6 branch-collision remedy. `cleared` means the stale
+ *  remote ref is gone (and the recorded unowned PR is closed or closing) —
+ *  the caller may re-deliver; `refused` names the step that stood in the way. */
+export type RemoteCollisionResult =
+  | { status: "cleared"; branch: string; closedUnownedPr: number | null }
+  | { status: "refused"; message: string };
+
+/**
+ * F31-6 — clear a task-key branch collision: the remote holds an unrelated
+ * branch (usually with an unowned PR, R15-15) under this task's branch name,
+ * so delivery push-conflicts. Steps, each honest on the timeline:
+ *   1. close the recorded unowned PR (best-effort — deleting its head branch
+ *      would close it anyway; closing first records the intent),
+ *   2. delete the stale REMOTE branch (all of `deleteTaskRemoteBranch`'s
+ *      refusals still bind — the task's OWN open PR or the default branch is
+ *      never deleted this way),
+ * The LOCAL workspace branch — this task's actual delivery — is untouched;
+ * the caller re-delivers it once the name is free.
+ */
+export async function resolveRemoteBranchCollision(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: AuditActor,
+  ctx: GithubActionContext = {},
+): Promise<RemoteCollisionResult> {
+  const ref = taskRefOf(input, ctx);
+  const file = readTaskFile(ref);
+  const branch = file?.parsed.frontmatter.branch;
+  if (!file || !branch) {
+    return { status: "refused", message: "The task has no workspace branch." };
+  }
+  const unowned = file.parsed.frontmatter.github?.unownedPr ?? null;
+
+  const gh = getProjectGithubContext(db, input.projectSlug, githubOptionsOf(ctx));
+  if (gh.status !== "ok") {
+    return {
+      status: "refused",
+      message: "This project has no GitHub repo or credential configured.",
+    };
+  }
+
+  let closedUnownedPr: number | null = null;
+  if (unowned !== null) {
+    const close = await gh.client.request(
+      "PATCH",
+      `/repos/${gh.repo}/pulls/${unowned}`,
+      z.unknown(),
+      { body: { state: "closed" } },
+    );
+    // Best-effort by design: a PR that is already closed answers 200, and one
+    // GitHub refuses to close still disappears when its head branch does. Only
+    // a SUCCESS is recorded — a failure is not a stop, the branch delete is.
+    if (close.ok) {
+      closedUnownedPr = unowned;
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "github",
+        actor: { kind: "human", userId: actor.userId!, nameHint: userName(db, actor.userId!) },
+        title: null,
+        text: `Closed unrelated PR #${unowned} that stood on branch \`${branch}\` (it was not ${input.taskKey}'s review PR).`,
+        toAgent: false,
+        evidence: null,
+      });
+      recordAudit(db, {
+        action: "github.pr.closed_unowned",
+        actor,
+        subjectKind: "pull_request",
+        subjectId: `${gh.repo}#${unowned}`,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        details: { repo: gh.repo, branch, prNumber: unowned },
+      });
+    }
+  }
+
+  const del = await deleteTaskRemoteBranch(db, input, actor, ctx);
+  if (del.status === "deleted" || del.status === "already_gone") {
+    // The R15-15 record is stale the moment the ref is gone — clear it so the
+    // GitHub card and the policy engine stop reporting a collision that no
+    // longer exists (the next reconcile would clear it too; this is sooner).
+    await updateTaskFile(ref, (parsed) => {
+      if (parsed.frontmatter.github?.unownedPr != null) {
+        parsed.frontmatter.github.unownedPr = null;
+      }
+    });
+    rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
+    return { status: "cleared", branch, closedUnownedPr };
+  }
+  if (del.status === "no_branch") {
+    return { status: "refused", message: "The task has no workspace branch." };
+  }
+  if (del.status === "refused") {
+    return { status: "refused", message: del.message };
+  }
+  // GithubContextFailure — the context vanished between the check above and
+  // the delete (credential detached mid-flight). Same words as the up-front
+  // refusal: the human's remedy is identical.
+  return {
+    status: "refused",
+    message: "This project has no GitHub repo or credential configured.",
   };
 }

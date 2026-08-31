@@ -131,14 +131,33 @@
      small: sub-28px icon buttons, chips, kbd, calendar days.
      button: inputs, buttons, menu rows.  box: nested sub-cards, popovers,
      the console, toast.  card: top-level cards.  panel: modals and page
-     panels.  chip: full pills.  (2-3px micro radii on meters/underlines and
-     4px on 16px checkboxes stay literal — they are proportional, not steps.) */
+     panels.  chip: full pills.  (2-3px micro radii on meters, progress bars
+     and inline text highlights, and 4px on 16px boxes — the checkbox, the tag
+     remove button — stay literal: they are proportional to a tiny box, not
+     steps. `50%` for a true circle, `0` and `inherit` are the other sanctioned
+     non-steps.)  The six values, the micro set and every `border-radius` in
+     this sheet are locked in app.css.test.ts — a seventh radius is a
+     deliberate widening of the scale, made there. */
   --radius-small: 6px;
   --radius-button: 8px;
   --radius-box: 12px;
   --radius-chip: 999px;
   --radius-card: 16px;
   --radius-panel: 22px;
+
+  /* THE SPACING SCALE (pass 30). Padding, margin and gap come off nine steps —
+     `0` plus a .125rem-based ladder that doubles twice, halves once, then
+     doubles again:
+       0  .125rem (2px)  .25rem (4px)  .375rem (6px)  .5rem (8px)
+       .75rem (12px)  1rem (16px)  1.5rem (24px)  2rem (32px)
+     Untokenized on purpose — these are literal lengths the sheet reads at a
+     glance, and `gap: .5rem` says more at the call site than `gap: var(--s3)`.
+     The scale is locked by SHAPE in app.css.test.ts: any value that reaches ten
+     spacing sites is a de-facto step, and the de-facto steps must be exactly
+     these. Off-scale one-offs still exist (optical negative nudges, sub-step
+     chip padding, a handful of fixed panel widths) and are NOT sanctioned — but
+     they are one-site values, and the gate's job is to stop a tenth `.6rem`
+     from quietly becoming a step nobody chose. */
 
   --rail-w: 232px;
   --topbar-h: 60px;
@@ -4702,7 +4721,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   flex: none;
   padding: .04rem .25rem;
   border: 1px solid #3d3560;
-  border-radius: .3rem;
+  border-radius: var(--radius-small);
   background: #241f38;
   color: #d9ccff;
   font-weight: 600;
@@ -4725,7 +4744,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   gap: .25rem;
   padding: .04rem .375rem;
   border: 1px solid #333a4d;
-  border-radius: .3rem;
+  border-radius: var(--radius-small);
   font-size: .68rem;
   color: #b7c0d4;
 }

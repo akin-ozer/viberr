@@ -57,6 +57,7 @@ function unownedTask(): TaskSummary {
     prReview: null,
     commits: [],
     changed: null,
+    unownedPr: null,
     goal: "Keep the console readable on long runs.",
     eventCount: 0,
     commentCount: 0,

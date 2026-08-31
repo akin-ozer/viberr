@@ -137,6 +137,12 @@ stage: review                     # id into the project's stage list
 previousStageId: impl             # where the task CAME from (null until the
                                   # first transition) — the operator's agent
                                   # choice weighs it (ruling 98)
+heldAtStage: null                 # durable deliberate-hold marker (V18): the
+                                  # stage the operator held twice in a row on
+                                  # purpose; while it names the CURRENT stage
+                                  # the stranded backstop stays quiet. Cleared
+                                  # by transitions, packet resolutions and
+                                  # goal edits (not by manual operator runs)
 readiness: input_required         # canonical 4-value enum ONLY (ruling 1):
                                   # ready | input_required |
                                   # inconsistency_risk_detected | blocked
@@ -209,8 +215,18 @@ One-paragraph goal statement (prose).
 option kinds; the list below mirrors it. *(Corrected 2026-08-06, pass 19 — N19-3. This block
 said "The 8 kinds" and omitted `archive_task`, which arrived with R14-3 (the task archive).
 Updated 2026-08-15, pass 20 — F20-6/R20-2 added `discard_branch` (decisions.md ruling 7), so
-the block that said "The 9 kinds" was itself the straggler. Ten is the count today —
+the block that said "The 9 kinds" was itself the straggler. Updated 2026-08-31, pass 31 —
+F31-6 added `resolve_remote_collision`, the branch-collision remedy (close the unowned PR,
+delete the stale remote branch, re-deliver the local work). Eleven is the count today —
 re-derive it from the schema rather than from here.)*
+
+*(Corrected 2026-08-31, pass 31 — A3. The option sample below carried an `accept: true` field
+annotated "acceptance path marker — human-only". `packetOptionSchema` has no such field:
+acceptance is gated **solely** on `kind === "accept_completion"`, plus the admin|maintainer
+re-check in `resolvePacket`. The schema is `.loose()`, so an `accept:` key copied out of this
+doc would round-trip as an unknown field and be read by nothing — a silent no-op that looked
+load-bearing. Beyond the four keys shown, the fields the schema actually defines on an option
+are `ev`, `backend`, `profileId` and `deleteBranch`.)*
 
 ```yaml
 type: input                       # input | blocked (card tint)
@@ -223,12 +239,14 @@ observations:
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
 options:
-  - kind: accept_completion       # STABLE kind (ruling 7). The 10 kinds:
+  - kind: accept_completion       # STABLE kind (ruling 7). The 11 kinds:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
     rec: true                     #   redirect | retry_other_backend |
-    accept: true                  #   edit_goal | archive_task | discard_branch | custom
-                                  # (acceptance path marker — human-only)
+                                  #   edit_goal | archive_task | discard_branch |
+                                  #   resolve_remote_collision | custom
+                                  # There is NO acceptance marker field: the
+                                  # acceptance path is gated on the KIND alone.
                                   # Source of truth: PACKET_OPTION_KINDS in
                                   # app/schemas/task-file.schema.ts.
   - kind: request_edit

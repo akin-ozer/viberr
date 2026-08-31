@@ -83,6 +83,22 @@ export interface OversightSummary {
    *  managing. A project with the guardrail off contributes none: nothing is
    *  compacting there. */
   longTimelines: number;
+  /** F31-D6 — coordination overhead: the COORDINATION runs' share of all
+   *  reported run spend in scope. Live pass 31 read 63% before anyone had a
+   *  number for it. Coordination is `operator` + `controller` (RunKind): both
+   *  are machinery that decides what the working agents do rather than doing
+   *  the work, they carry real cost, and the runtime treats them as one class
+   *  (claude-runtime: "the controller is coordination machinery like the
+   *  operator"). Counting only the operator understated the overhead by every
+   *  controller turn on the instance. Derived from the same cost column the
+   *  totals card sums; runs that reported no cost contribute to neither side,
+   *  and with zero reported spend the share is null (never a fake 0%). */
+  coordination: {
+    coordinationCostUsd: number;
+    totalCostUsd: number;
+    /** coordination / total over cost-reporting runs; null when none. */
+    share: number | null;
+  };
 }
 
 export interface InsightsSummary {
@@ -116,6 +132,10 @@ const totalsSchema = z.object({
   runs: z.number(),
   costed_runs: z.number(),
   cost: z.number().nullable(),
+  /** F31-D6's numerator, summed in the SAME pass as `cost` — it is the same
+   *  rows under the same scope, so a second full aggregate over `agent_runs`
+   *  bought nothing but another table scan. */
+  coordination_cost: z.number().nullable(),
   input_tokens: z.number().nullable(),
   cached_input_tokens: z.number().nullable(),
   output_tokens: z.number().nullable(),
@@ -250,6 +270,9 @@ function avg(values: number[]): number | null {
 function oversightSummary(
   db: DatabaseSync,
   filter: InsightsFilter,
+  // F31-D6 rides in from the totals aggregate rather than re-querying
+  // `agent_runs`: same rows, same scope, one scan.
+  coordination: OversightSummary["coordination"],
 ): OversightSummary {
   const { clause, params } = scope(filter);
 
@@ -404,6 +427,7 @@ function oversightSummary(
       const threshold = compressionAt.get(t.project_slug);
       return threshold != null && t.event_count >= threshold;
     }).length,
+    coordination,
   };
 }
 
@@ -418,9 +442,15 @@ export function getInsightsSummary(
   const totals = totalsSchema.parse(
     db
       .prepare(
+        // F31-D6's numerator is one more CASE column here rather than its own
+        // aggregate: `operator` and `controller` are the coordination kinds
+        // (RunKind) — machinery that decides what the working agents do — and
+        // both carry real cost.
         `SELECT count(*) AS runs,
                 count(total_cost_usd) AS costed_runs,
                 COALESCE(SUM(total_cost_usd), 0) AS cost,
+                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
+                                  THEN total_cost_usd END), 0) AS coordination_cost,
                 COALESCE(SUM(input_tokens), 0) AS input_tokens,
                 COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
                 COALESCE(SUM(output_tokens), 0) AS output_tokens,
@@ -429,6 +459,16 @@ export function getInsightsSummary(
       )
       .get(...params),
   );
+
+  // F31-D6: the share is read off the totals pair — both sides come from the
+  // same scan, so they can never disagree about what "all reported spend" is.
+  const coordinationCost = totals.coordination_cost ?? 0;
+  const totalCost = totals.cost ?? 0;
+  const coordination = {
+    coordinationCostUsd: coordinationCost,
+    totalCostUsd: totalCost,
+    share: totalCost > 0 ? coordinationCost / totalCost : null,
+  };
 
   const outcomeRows = z.array(outcomeSchema).parse(
     db
@@ -563,8 +603,10 @@ export function getInsightsSummary(
     byModel: group("model"),
     avgDurationMs: duration.avg_ms,
     daily,
-    oversight: oversightSummary(db, filter),
-    backendQuota: latestBackendRateLimits(db),
+    oversight: oversightSummary(db, filter, coordination),
+    // D5: `nowIso` retires an exhaustion record whose provider-named reset
+    // instant has already passed — the window it described is over.
+    backendQuota: latestBackendRateLimits(db, nowIso),
     windowDays: WINDOW_DAYS,
     generatedAt: nowIso,
   };

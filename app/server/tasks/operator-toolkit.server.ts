@@ -432,7 +432,9 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               z.object({
                 kind: z
                   .enum(PACKET_OPTION_KINDS)
-                  .describe("Stable option kind the resolver dispatches on."),
+                  .describe(
+                    "Stable option kind the resolver dispatches on. For a delivery push_conflict caused by an UNRELATED remote branch squatting on this task's branch name (usually with an unowned PR), use 'resolve_remote_collision' — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work. Never author 'discard_branch' for that shape: it deletes the LOCAL branch and is refused on a task with a delivered revision or an occupied branch name.",
+                  ),
                 title: z.string().describe("Button label, e.g. 'Reassign to a different developer'."),
                 detail: z.string().optional().describe("Short explanation under the option."),
                 recommended: z.boolean().optional().describe("Mark exactly ONE option recommended."),
@@ -580,7 +582,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "deliver_for_review",
-        "DELIVER the task: push the delivering agent's committed branch and open (or reuse) the review pull request. Delivery is YOUR decision, not a stage side-effect — deliver when the work is committed and plausible for review, weighing the task's REMAINING stages (a later stage like QA need not gate delivery for this task; offer early delivery when so). When unsure whether the branch should be pushed, open a decision packet instead. The result reports the push status and PR number honestly: a `push_conflict` means the remote branch diverged (a history conflict, NOT a credential problem) and no PR was opened — open a decision packet naming the branch so a human resolves it. Never instruct a specialist to push or open a PR; this tool is how delivery happens.",
+        "DELIVER the task: push the delivering agent's committed branch and open (or reuse) the review pull request. Delivery is YOUR decision, not a stage side-effect — deliver when the work is committed and plausible for review, weighing the task's REMAINING stages (a later stage like QA need not gate delivery for this task; offer early delivery when so). When unsure whether the branch should be pushed, open a decision packet instead. The result reports the push status and PR number honestly: a `push_conflict` means the remote branch diverged (a history conflict, NOT a credential problem) and no PR was opened — open a decision packet naming the branch with a `resolve_remote_collision` option (clears the stale remote branch and its recorded squatting PR, then re-delivers; never `discard_branch`, which destroys the task's LOCAL commits) so a human resolves it. Never instruct a specialist to push or open a PR; this tool is how delivery happens.",
         {
           reason: z
             .string()

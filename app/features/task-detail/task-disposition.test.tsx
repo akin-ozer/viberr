@@ -76,6 +76,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     prReview: null,
     commits: [],
     changed: null,
+    unownedPr: null,
     goal: "Keep the timeline readable on long tasks.",
     packet: null,
     eventCount: 0,
@@ -1387,6 +1388,7 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
     taskKey: "VIB-151",
     branch: "vib-151",
     pendingRecommendations: 2,
+    unownedPr: null,
   };
 
   const archivePacket = (deleteBranch: boolean): PacketRender => {
@@ -1532,6 +1534,90 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
     fireEvent.click(findButton(container, "Confirm decision")!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(archiveDialog(container)).toBeNull();
+  });
+});
+
+/**
+ * V1 — the `resolve_remote_collision` ceremony's "and closes its pull request
+ * #N" clause was unreachable in the product. `PacketArchiveDisclosure.unownedPr`
+ * was optional, and the ONE production producer (this page) built the
+ * disclosure as an object literal carrying the other three fields and skipping
+ * that one, so the card only ever saw `undefined` and the clause rendered
+ * nowhere but in a component test that passed the number by hand. The number
+ * was on `task.unownedPr` the whole time, beside the branch the same literal
+ * already read.
+ *
+ * So these render the PAGE, not the card: the defect was the WIRING, and a test
+ * that supplies the disclosure itself cannot see it. The field is required now,
+ * which is what keeps the next literal from skipping it silently.
+ */
+describe("V1: the page hands the collision ceremony the unowned PR", () => {
+  const collisionPacket: PacketRender = {
+    type: "blocked",
+    kind: "blocked decision",
+    from: "Operator",
+    title: "The remote vib-151 is not this task's work",
+    body: "An unrelated branch is squatting on this task's branch name.",
+    observations: [],
+    options: [
+      {
+        kind: "resolve_remote_collision",
+        t: "Delete the stale remote branch, then redeliver",
+        d: "Reclaims the branch name for this task.",
+        rec: true,
+      },
+    ],
+  };
+
+  const collisionDialog = (container: HTMLElement) =>
+    container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Packet collision dialog"]',
+    );
+
+  it("names the pull request the resolution closes, read off the task", () => {
+    const { container } = renderPage({
+      task: { packet: collisionPacket, unownedPr: 232 },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const text = collisionDialog(container)!.textContent!;
+    // Canary: drop `unownedPr: task.unownedPr` from the page's
+    // `archiveDisclosure` literal and both of these go red, which is exactly
+    // the state that shipped.
+    expect(text).toContain("closes its pull request");
+    expect(text).toContain("#232");
+    // The deletes/keeps split it sits inside is still intact.
+    expect(text).toContain("vib-151");
+    expect(text).toContain("cannot be undone");
+    expect(text).toContain("local delivery");
+  });
+
+  it("claims no pull-request closure when the task records none", () => {
+    const { container } = renderPage({
+      task: { packet: collisionPacket, unownedPr: null },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const text = collisionDialog(container)!.textContent!;
+    expect(text).not.toContain("closes its pull request");
+    expect(text).not.toContain("#");
+    expect(text).toContain("vib-151");
+  });
+
+  it("confirming resolves the packet by index, with the note", async () => {
+    const { container, submitted } = renderPage({
+      task: { packet: collisionPacket, unownedPr: 232 },
+    });
+    fireEvent.change(container.querySelector("#pkt-note")!, {
+      target: { value: "the stale ref is from the old vib-5 experiment" },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    expect(submitted).toHaveLength(0);
+    fireEvent.click(findButton(container, "Clear collision & redeliver")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("resolve-packet");
+    expect(submitted[0]!.option).toBe("0");
+    expect(submitted[0]!.note).toBe(
+      "the stale ref is from the old vib-5 experiment",
+    );
   });
 });
 

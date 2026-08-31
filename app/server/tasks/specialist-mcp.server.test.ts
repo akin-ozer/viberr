@@ -198,13 +198,12 @@ describe("resolveSpecialistMcpServersDetailed", () => {
   it("C6: a registry read failure lands EVERY declared grant in unresolved, not silence", () => {
     // The org MCP registry read throwing used to drop every grant with no
     // unresolved entry and no log — the run advertised tool surfaces that never
-    // mounted, invisibly. A db whose query throws stands in for that failure.
-    const throwingDb = {
-      prepare() {
-        throw new Error("registry unreadable");
-      },
-    } as unknown as Parameters<typeof resolveSpecialistMcpServersDetailed>[0];
-    const resolved = resolveSpecialistMcpServersDetailed(throwingDb, [
+    // mounted, invisibly. A REAL migrated database missing the registry table
+    // IS that failure (`listMcpServers` throws "no such table"), so this drives
+    // the path through the actual driver rather than a hand-cast stand-in.
+    const store = setupTestStore(ctx);
+    store.db.exec("DROP TABLE org_mcp_servers");
+    const resolved = resolveSpecialistMcpServersDetailed(store.db, [
       "billing-api",
       "vm-memory",
       "viberr", // reserved: built in-process, never a grant → not reported

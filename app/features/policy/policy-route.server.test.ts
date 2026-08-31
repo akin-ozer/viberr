@@ -199,9 +199,12 @@ describe("set-role", () => {
       userId: ids.selin,
       role: "viewer",
     })) as PolicyAccepted;
+    // D2 (pass 31): the FULL display name — a first name alone is ambiguous
+    // among members who share one, and the toast is the only confirmation of
+    // WHOSE role just moved.
     expect(result).toEqual({
       ok: true,
-      toast: "Selin is now Viewer · enforced on the next action",
+      toast: "Selin Aksoy is now Viewer · enforced on the next action",
     });
 
     // Canonical file updated…

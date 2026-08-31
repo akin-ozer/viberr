@@ -217,6 +217,9 @@ export interface TaskSummary {
   prReview: PrReviewState | null;
   commits: { sha: string; msg: string }[];
   changed: { files: number; add: number; del: number } | null;
+  /** R15-15 / F31-6: a PR found on this task's branch that this task did NOT
+   *  open — the branch-collision signature. Null = no collision recorded. */
+  unownedPr: number | null;
   /**
    * Ruling 53 + ruling 88 — the DELIVERED revision's head sha, or null before
    * delivery.
@@ -635,6 +638,7 @@ export function mapTaskProjectionRow(
     prReview: mapPrReview(pr),
     commits: github?.commits ?? [],
     changed: github?.changed ?? null,
+    unownedPr: github?.unownedPr ?? null,
     workRevisionSha: row.work_revision_sha,
     goal: row.goal,
     goalRef:

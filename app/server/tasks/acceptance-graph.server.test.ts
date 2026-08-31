@@ -279,6 +279,23 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     expect(detail?.timeline[0]).toMatchObject({ type: "completion" });
   });
 
+  it("V18 (pass-31 review): a real stage move clears the durable deliberate-hold marker", async () => {
+    // `heldAtStage` keeps the stranded backstop quiet while the operator's
+    // recorded hold stands. Any real move re-litigates it — and a stale marker
+    // for a different stage must not ambush the task if it ever returns.
+    const store = prepared();
+    seed(store, { stage: "triage", waiting: "human", heldAtStage: "triage" });
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const fm = taskFile(store).parsed.frontmatter;
+    expect(fm.stage).toBe("ready");
+    expect(fm.heldAtStage).toBeNull();
+  });
+
   it("derives 'none' for accepted work nothing was ever delivered for", async () => {
     const store = prepared();
     seed(store, { stage: "review", waiting: "human" });

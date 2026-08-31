@@ -25,6 +25,14 @@ import {
 import * as reconciler from "./github-reconciler.server";
 import type { ProjectReconcileSummary } from "./github-reconciler.server";
 
+/** The registry symbol `reconcile-poller.server.ts` parks its interval handle
+ *  under, and the shape of that process-global slot — mirrored here so the test
+ *  reads the poller's own contract instead of an open dictionary. */
+const POLLER_KEY = Symbol.for("viberr.githubReconcilePoller");
+interface PollerHost {
+  [POLLER_KEY]?: ReturnType<typeof setInterval>;
+}
+
 /**
  * C7 (pass-24 fix): the alert fires from a returned SUMMARY, not only a thrown
  * error — because `reconcileProject` NEVER throws for a revoked/expired/removed
@@ -263,6 +271,8 @@ describe("pollGithubReconcile (P11-14)", () => {
 });
 
 describe("C7: a persistent reconcile failure alerts the people who can fix it", () => {
+  // SAFETY: the two selected columns are the aliased `user_id` and `title`, both
+  // non-null TEXT on every `notifications` row the baseline can produce.
   const policyRows = (store: TestStore) =>
     store.db
       .prepare(
@@ -304,11 +314,9 @@ describe("C7: a persistent reconcile failure alerts the people who can fix it", 
 })
 
 describe("E4: poller failure isolation + lifecycle", () => {
-  const POLLER_KEY = Symbol.for("viberr.githubReconcilePoller");
   // SAFETY: a viberr-namespaced registry symbol the poller parks its interval
   // handle under; the test only reads presence/identity, never the handle's API.
-  const pollerHandle = () =>
-    (globalThis as Record<symbol, unknown>)[POLLER_KEY];
+  const pollerHandle = () => (globalThis as PollerHost)[POLLER_KEY];
 
   afterEach(() => {
     stopGithubReconcilePoller();

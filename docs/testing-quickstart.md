@@ -23,6 +23,16 @@ exit 0 — findings are fixed, not suppressed (ruling 86 / R21-3):
 npm run lint
 ```
 
+In a worktree (or any checkout without `node_modules`) the plugin silently fails to
+load and the command "passes" without linting anything. Install both packages at the
+same version first, off the lockfile — and never while a `vitest run` is in flight:
+
+```sh
+npm i --no-save oxlint@1.79 @oxlint/plugins@1.79
+```
+
+See [testing.md](./testing.md#lint) for why.
+
 ## Typecheck
 
 Generate React Router types and run TypeScript checks:

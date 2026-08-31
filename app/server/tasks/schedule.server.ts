@@ -17,7 +17,7 @@ import {
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
-import { CLONE_TIMEOUT_MS } from "~/server/tasks/git-clone-auth.server";
+import { cloneTimeoutMs } from "~/server/tasks/git-clone-auth.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import type { TaskMutationContext } from "./task-actions.server";
@@ -307,7 +307,7 @@ const scheduleListSchema = z
  * The floor is the slowest LEGITIMATE start, and R19-1 moved it: `runOperator`
  * now provisions the operator's read-only repository checkout before the drive
  * begins, so a healthy drive can sit inside `runOperator` for up to
- * `CLONE_TIMEOUT_MS` (15 minutes by default) on a big — or unreachable —
+ * `cloneTimeoutMs()` (15 minutes by default) on a big — or unreachable —
  * repository. The old flat 5 minutes therefore declared a LIVE drive crashed
  * halfway through its own clone: the next tick re-drove the same occurrence,
  * that second trigger queued behind the first drive's lease, and the drain
@@ -316,9 +316,12 @@ const scheduleListSchema = z
  *
  * Derived rather than re-guessed, so the invariant survives someone raising
  * `VIBERR_GIT_CLONE_TIMEOUT_MS`. Exported so a test can pin the relationship
- * rather than a magic number.
+ * rather than a magic number. A function (V19): the clone ceiling is now a
+ * lazy env read, so this follows it call-by-call.
  */
-export const CLAIM_LEASE_MS = CLONE_TIMEOUT_MS + 5 * 60_000;
+export function claimLeaseMs(): number {
+  return cloneTimeoutMs() + 5 * 60_000;
+}
 /** F10-16: bounded retry — after this many failed enqueue/run attempts the
  *  occurrence becomes terminal `failed` (visible) instead of retrying forever. */
 const MAX_SCHEDULE_RETRIES = 3;
@@ -360,7 +363,7 @@ export async function fireDueSchedules(
   const isStaleClaim = (s: TaskSchedule): boolean => {
     if (s.status !== "claimed") return false;
     const claimedMs = s.claimedAt ? Date.parse(s.claimedAt) : NaN;
-    return !Number.isFinite(claimedMs) || nowMs - claimedMs >= CLAIM_LEASE_MS;
+    return !Number.isFinite(claimedMs) || nowMs - claimedMs >= claimLeaseMs();
   };
 
   let fired = 0;
@@ -559,8 +562,8 @@ export async function fireDueSchedules(
         // Re-stamp the lease as THIS occurrence's drive begins. `claimedAt` is
         // written when the tick claims the batch, but this drain is sequential
         // and one drive can legitimately sit inside `runOperator` for
-        // CLONE_TIMEOUT_MS. With several occurrences due at once, a later one's
-        // WAIT alone can outlast CLAIM_LEASE_MS, so the next tick reads its
+        // cloneTimeoutMs(). With several occurrences due at once, a later one's
+        // WAIT alone can outlast claimLeaseMs(), so the next tick reads its
         // claim as crashed and re-drives it — the FR39 double-drive the lease
         // exists to prevent. Stamped here, the lease measures what the
         // staleness check means: time since this occurrence started running.

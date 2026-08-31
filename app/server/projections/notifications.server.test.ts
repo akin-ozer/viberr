@@ -15,6 +15,7 @@ import {
 } from "~/server/events/projection-events.server";
 import { setPref } from "~/server/prefs/user-prefs.server";
 import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
+import { setNotifRoutingPref } from "~/features/profile/profile-actions.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import { listHomeProjectsForUser } from "~/features/home/home-query.server";
 import {
@@ -343,6 +344,49 @@ describe("createNotification routing prefs (FIX #4)", () => {
     setPref(db, "u_1", NOTIFS_PREF_KEY, { policy: { app: false } });
     expect(createNotification(db, { userId: "u_1", kind: "policy", text: "t" })).toBeNull();
     expect(createNotification(db, { userId: "u_2", kind: "policy", text: "t" })).not.toBeNull();
+  });
+
+  /**
+   * T16 (pass 31) — UC-32, verified live: the profile toggle for "Decision
+   * packets for you" persisted, and the routing half went to this test plan.
+   *
+   * The three tests above hand-write the pref blob with `setPref`, so they
+   * prove the READER's gate and nothing about the WRITER the product actually
+   * uses. `setNotifRoutingPref` merges into the stored document rather than
+   * replacing it, and a merge bug is invisible to a hand-written fixture. The
+   * uncovered half is the return trip: no test anywhere writes `app: true`
+   * back, so "unticking silences it" was locked and "re-ticking restores it"
+   * was not — a toggle a human cannot undo is worse than one that never worked.
+   */
+  it("T16: the profile toggle silences ONE user's packets and re-enabling restores delivery", () => {
+    // Canary: drop the `...current` spread in `setNotifRoutingPref` (so the
+    // write replaces the document instead of merging) and the bystander
+    // assertions still pass while `approval` for u_1 starts failing; hard-code
+    // `app: false` there and the re-enable assertion fails.
+    const db = ctx.makeDb();
+    mkUser(db, "u_1");
+    mkUser(db, "u_2");
+
+    // Off, through the product's own writer — the profile page's action.
+    setNotifRoutingPref(db, "u_1", "packets", false);
+    expect(createNotification(db, { userId: "u_1", kind: "packet", text: "t" })).toBeNull();
+    // Only that category, and only that user.
+    expect(createNotification(db, { userId: "u_1", kind: "approval", text: "t" })).not.toBeNull();
+    expect(createNotification(db, { userId: "u_2", kind: "packet", text: "t" })).not.toBeNull();
+
+    // …and back on again.
+    setNotifRoutingPref(db, "u_1", "packets", true);
+    expect(createNotification(db, { userId: "u_1", kind: "packet", text: "t" })).not.toBeNull();
+    // Membership, not order: the two rows land within the same millisecond,
+    // so their newest-first order is a coin flip under load (full-suite flake).
+    expect(
+      listNotifications(db, "u_1")
+        .map((n) => n.kind)
+        .sort(),
+    ).toEqual(["approval", "packet"]);
+    // The toggle is validated, not free-form — an unknown category is refused
+    // rather than silently stored as a category nothing will ever consult.
+    expect(() => setNotifRoutingPref(db, "u_1", "not-a-category", false)).toThrow();
   });
 });
 

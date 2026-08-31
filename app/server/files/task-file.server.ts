@@ -1,11 +1,14 @@
 import YAML from "yaml";
+import { z } from "zod";
 import {
   diagError,
   diagInfo,
   diagWarning,
+  tolerantRowsOf,
   type FileDiagnostic,
 } from "~/schemas/file-diagnostics";
 import {
+  packetOptionSchema,
   parseTaskFrontmatter,
   taskPacketSchema,
   TIMELINE_EVENT_TYPES,
@@ -374,6 +377,31 @@ function parsePacketSection(
     return null;
   }
   if (raw === undefined || raw === null) return null;
+  // F31-C5 — per-ROW option tolerance, the F18 idiom the frontmatter lists
+  // already use. `options: z.array(packetOptionSchema)` voided the WHOLE
+  // packet on one malformed row, and "packet ignored" here is durable loss:
+  // the task reads `waiting: human` with no card to answer, and the next
+  // `updateTaskFile` serializes the packet section away entirely. One bad
+  // option now drops only itself (with a diagnostic); the human still gets
+  // the surviving options plus the always-offered custom directive.
+  const optionsProbe = z
+    .object({ options: z.array(z.unknown()) })
+    .loose()
+    .safeParse(raw);
+  if (optionsProbe.success) {
+    optionsProbe.data.options = tolerantRowsOf(
+      diagnostics,
+      optionsProbe.data.options,
+      packetOptionSchema,
+      "packet.invalid_option",
+      (i) => ({
+        subject: `Packet option [${i}]`,
+        noun: "option",
+        path: "packet.options",
+      }),
+    );
+    raw = optionsProbe.data;
+  }
   const result = taskPacketSchema.safeParse(raw);
   if (result.success) {
     const recCount = result.data.options.filter((o) => o.rec).length;

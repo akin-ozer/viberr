@@ -12,7 +12,10 @@ import {
   insertUser,
   updateUserFields,
 } from "~/server/auth/user-store.server";
-import { serializeAgentProfile } from "~/server/files/agent-profile-file.server";
+import {
+  serializeAgentProfile,
+  type AgentProfileFrontmatter,
+} from "~/server/files/agent-profile-file.server";
 import { writeFileAtomic } from "~/server/files/atomic-file.server";
 import {
   agentProfileFilePath,
@@ -156,11 +159,11 @@ export async function runDemoSeed(
     // still exercises BOTH backends — the codex delivery path, the "Codex" actor
     // glyphs, and the live-backend-overlay drift scenarios all depend on it.
     // Test-only: production deploys straight from `agent-catalog`.
-    const frontmatter =
+    const frontmatter: AgentProfileFrontmatter =
       profile.frontmatter.id === "developer"
         ? {
             ...profile.frontmatter,
-            backends: ["codex", "claude"] as ("codex" | "claude")[],
+            backends: ["codex", "claude"],
             model: "gpt-5.6-terra",
           }
         : profile.frontmatter;

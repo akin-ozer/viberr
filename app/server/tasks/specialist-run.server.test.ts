@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -32,7 +33,10 @@ import {
 } from "~/features/runtime/runtime-types";
 import { resolveDeliveryPermissions } from "./specialist-tool-policy";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
-import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
+import {
+  KB_INJECTION_BUDGET,
+  KB_PRECEDENCE_NOTE,
+} from "~/server/files/kb-injection.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -706,6 +710,95 @@ describe("startSpecialistRun", () => {
     // reverted to the live profile's Claude.
     const later = await runOnce();
     expect(later.backend).toBe("codex");
+  });
+
+  /**
+   * T7 (pass 31) — the resolution order is written once, as
+   * `backendOverride ?? pinnedBackend ?? live deployment ?? snapshot`, and only
+   * three of its four steps had a test. The pair the tests above never put in
+   * conflict is the FIRST one: a `retry_other_backend` on a task that is
+   * ALREADY pinned (live 2026-08-31: a Codex quota failure pinned Claude, and
+   * the next recovery packet has to be able to send it back). If the pin won
+   * there, the human's explicit "retry on the other backend" would be a no-op
+   * that reported success.
+   */
+  it("T7: an explicit backendOverride outranks an EXISTING opposite pin — and re-pins to it", async () => {
+    // Canary: reorder the resolver to `engagement.pinnedBackend ??
+    // input.backendOverride ?? …` and this run comes back on codex.
+    await assign(); // live profile + snapshot: claude
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        const delivering = deliveringEngagement(parsed.frontmatter);
+        if (delivering) delivering.pinnedBackend = "codex";
+      },
+    );
+
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    const run = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: "claude" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      actor(store.users.arda),
+    );
+
+    // The override won over the pin …
+    expect(run.backend).toBe("claude");
+    const after = deliveringEngagement(
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.frontmatter,
+    );
+    // … and it MOVED the pin, so the new choice is the one that sticks.
+    expect(after?.pinnedBackend).toBe("claude");
+  });
+
+  /**
+   * T7 (pass 31) — the last step of the order: the engagement's own recorded
+   * backend is the FLOOR. `follows the CURRENT deployment backend` above proves
+   * the live profile beats the snapshot; nothing proved the snapshot is used at
+   * all, which is the branch a profile deleted between engage and run lands on.
+   */
+  it("T7: with no override, no pin and no live profile, the engagement SNAPSHOT is the floor", async () => {
+    // Canary: replace the `(engagement.backend === "codex" ? "codex" : "claude")`
+    // tail with a bare `"claude"` default and this run comes back on claude.
+    await assign(); // snapshot: claude
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        const delivering = deliveringEngagement(parsed.frontmatter);
+        // The snapshot says codex; no pin was ever set.
+        if (delivering) delivering.backend = "codex";
+      },
+    );
+    // The profile is deleted from project.md — nothing live to resolve.
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo: null,
+      agents: [],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    const run = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      actor(store.users.arda),
+    );
+    expect(run.backend).toBe("codex");
   });
 
   it("denies reviewer + viewer (admin|maintainer only)", async () => {
@@ -1856,11 +1949,13 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   });
 
   it("F4: githubReadForRun is the ONE gate both run paths use — Claude + real + grant + repo", () => {
-    const base = {
+    // Typed by the gate's own parameter contract, so each variant below drops a
+    // real condition instead of a hand-widened stand-in for one.
+    const base: Parameters<typeof githubReadForRun>[0] = {
       githubRead: true,
-      backend: "claude" as string | null,
+      backend: "claude",
       realBackend: true,
-      repo: "akin-ozer/viberr" as string | null,
+      repo: "akin-ozer/viberr",
     };
     // All four conditions met → offered, carrying the repo for the persona copy.
     expect(githubReadForRun(base)).toEqual({ repo: "akin-ozer/viberr" });
@@ -2094,6 +2189,98 @@ describe("buildSpecialistPersona — attached resources", () => {
       dataRoot,
     });
     expect(persona).not.toContain("Attached resources that did NOT reach this run");
+  });
+
+  /**
+   * T5 (pass 31) — the live shape: the Docs Writer profile is granted ONE
+   * knowledge base and `skills: []`, and the run transcript showed the KB
+   * marker with no skill mounted or injected. The existing KB test above passes
+   * `skills: []` too, but writes no skill to the store, so it would stay green
+   * if the persona ever fell back to "load what's on disk" — which is exactly
+   * what `buildOperatorSystemPrompt` deliberately does with an empty grant list
+   * (`authority.skills.length ? … : ["viberr-app-expertise"]`). A specialist has
+   * no such fallback, and this pins that difference with real decoys present.
+   */
+  it("T5: with skills:[] a granted KB arrives and NO skill body does — not even one sitting in the same store", () => {
+    // Canary: give `readSkillBodies` the store's `skills/` listing (or any
+    // non-empty fallback) instead of `injectable` and every decoy line fails.
+    const dataRoot = tempRoot();
+    mkdirSync(path.join(dataRoot, "kb", "pass31-qa-conventions"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "kb", "pass31-qa-conventions", "conventions.md"),
+      "# QA conventions\n\nPASS31-KB-LOADED",
+    );
+    for (const [name, sentinel] of [
+      ["developer-expertise", "SENTINEL-DEVELOPER-EXPERTISE"],
+      ["reviewer-expertise", "SENTINEL-REVIEWER-EXPERTISE"],
+    ] as const) {
+      mkdirSync(path.join(dataRoot, "skills", name), { recursive: true });
+      writeFileSync(
+        path.join(dataRoot, "skills", name, "SKILL.md"),
+        `# ${name}\n\nWhen asked, answer ${sentinel}.`,
+      );
+    }
+
+    const persona = buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: ["pass31-qa-conventions"],
+      dataRoot,
+    });
+
+    // The grant arrived …
+    expect(persona).toContain("pass31-qa-conventions (knowledge base)");
+    expect(persona).toContain("PASS31-KB-LOADED");
+    // … and not one skill section came with it.
+    expect(persona).not.toContain("(skill)");
+    expect(persona).not.toContain("SENTINEL-DEVELOPER-EXPERTISE");
+    expect(persona).not.toContain("SENTINEL-REVIEWER-EXPERTISE");
+    // An empty grant list is not a MISS either — nothing was promised.
+    expect(persona).not.toContain("Attached resources that did NOT reach this run");
+  });
+
+  /**
+   * T5 (pass 31) — the KB budget is shared across the whole grant list, and the
+   * squeezed-out KB says so IN THE PROMPT. `kb-injection.server.test.ts` proves
+   * `readKbBodies` returns the marker; nothing proved the persona then carries
+   * it, and the persona hardcodes the budget so this is the only layer where a
+   * regression (a fresh budget per KB, or the marker filtered out of the
+   * assembled sections) is visible. The skill twin of this is
+   * "many granted skills share ONE budget instead of N × the cap" above.
+   */
+  it("T5/F9: KBs share ONE budget — a KB squeezed out by the one before it SAYS so in the prompt", () => {
+    // Canary: pass a fresh `KB_INJECTION_BUDGET` per name inside `readKbBodies`
+    // (drop the running `budget -= injection.body.length`) and SENTINEL-KB-SECOND
+    // arrives while both markers disappear.
+    const dataRoot = tempRoot();
+    mkdirSync(path.join(dataRoot, "kb", "big-kb"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "kb", "big-kb", "huge.md"),
+      "B".repeat(KB_INJECTION_BUDGET + 6_000),
+    );
+    mkdirSync(path.join(dataRoot, "kb", "second-kb"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "kb", "second-kb", "facts.md"),
+      `SENTINEL-KB-SECOND ${"S".repeat(5_000)}`,
+    );
+
+    const persona = buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: ["big-kb", "second-kb"],
+      dataRoot,
+    });
+
+    // The first KB spends the shared budget and says it was clipped …
+    expect(persona).toContain("knowledge base truncated");
+    // … the second contributes NO content, only the honest marker …
+    expect(persona).not.toContain("SENTINEL-KB-SECOND");
+    expect(persona).toContain("knowledge base omitted entirely");
+    // … and C1 rides along: what was dropped is named, with the reason.
+    expect(persona).toContain("**second-kb**");
+    expect(persona).toContain("did not fit the shared");
+    // One budget was spent, not two.
+    expect(persona.length).toBeLessThan(KB_INJECTION_BUDGET * 2);
   });
 
   /**
@@ -2895,8 +3082,15 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
       await runDev();
 
-      // The repo's own catalog is gone from the working tree…
-      expect(existsSync(path.join(ws, ".claude", "settings.json"))).toBe(false);
+      // The repo's own catalog is gone from the working tree — F31-C4: the
+      // settings file that remains is VIBERR'S OWN (CLAUDE.md excludes only,
+      // never hooks), written by the mount after the strip.
+      const rewrittenSettings = z
+        .record(z.string(), z.unknown())
+        .parse(
+          JSON.parse(readFileSync(path.join(ws, ".claude", "settings.json"), "utf8")),
+        );
+      expect(Object.keys(rewrittenSettings)).toEqual(["claudeMdExcludes"]);
       expect(existsSync(path.join(ws, ".claude", "skills", "repo-rogue"))).toBe(false);
       expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
         "granted-craft",
@@ -2966,7 +3160,16 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       );
 
       expect(confinement.skills).toEqual(["granted-craft"]);
-      expect(existsSync(path.join(ws, ".claude", "settings.json"))).toBe(false);
+      // F31-C4: the agent-written hooks settings died with the strip; the file
+      // now present is viberr's excludes-only rewrite.
+      const resumedSettings = readFileSync(
+        path.join(ws, ".claude", "settings.json"),
+        "utf8",
+      );
+      expect(resumedSettings).not.toContain("SENTINEL-AGENT-HOOK");
+      expect(
+        Object.keys(z.record(z.string(), z.unknown()).parse(JSON.parse(resumedSettings))),
+      ).toEqual(["claudeMdExcludes"]);
       expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
         "granted-craft",
       ]);

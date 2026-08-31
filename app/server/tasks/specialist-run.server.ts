@@ -127,7 +127,7 @@ import {
 } from "./specialist-browser-mcp.server";
 import { githubReadPersonaSection } from "~/server/github/agent-github-read.server";
 import {
-  CLONE_TIMEOUT_MS,
+  cloneTimeoutMs,
   cloneFailureLogDetails,
   cloneFailureSentence,
   githubRemoteSanitizationArgs,
@@ -3115,7 +3115,7 @@ async function cloneRepo(
         mkdirSync(path.dirname(dir), { recursive: true });
         try {
           await execFileAsync("git", ["clone", "--local", deliveringDir, dir], {
-            timeout: CLONE_TIMEOUT_MS,
+            timeout: cloneTimeoutMs(),
           });
           await execFileAsync(
             "git",
@@ -3205,7 +3205,7 @@ async function cloneRepo(
       taskKey: input.taskKey,
       repo: input.repo,
       hadCredential,
-      timeoutMs: CLONE_TIMEOUT_MS,
+      timeoutMs: cloneTimeoutMs(),
       ...details,
     };
     logger.warn(
@@ -3219,7 +3219,7 @@ async function cloneRepo(
       hadCredential,
       sentence: cloneFailureSentence(details, {
         hadCredential,
-        timeoutMs: CLONE_TIMEOUT_MS,
+        timeoutMs: cloneTimeoutMs(),
       }),
     };
     if (stderrExcerpt) failure.stderrExcerpt = stderrExcerpt;
@@ -3435,7 +3435,7 @@ export function listDeployedSpecialists(
       headlineMode === undefined ||
       headlineMode === "off" ||
       headlineMode === "human";
-    out.push({
+    const specialist: DeployedSpecialistView = {
       id: resolved.profileId,
       name: resolved.name,
       role: resolved.role,
@@ -3476,12 +3476,14 @@ export function listDeployedSpecialists(
       },
       stages: resolved.stages,
       spanAll: resolved.spanAll,
-      // Present only when a real run marked this agent's resolved model
-      // unavailable on the account (F20-4); the run control renders the warning.
-      ...(view.modelUnavailable
-        ? { modelUnavailable: view.modelUnavailable.reason }
-        : {}),
-    });
+    };
+    // Set only when a real run marked this agent's resolved model unavailable
+    // on the account (F20-4); the run control renders the warning. Absent (not
+    // undefined) otherwise, so the view stays byte-identical to before.
+    if (view.modelUnavailable) {
+      specialist.modelUnavailable = view.modelUnavailable.reason;
+    }
+    out.push(specialist);
   }
   return out;
 }

@@ -6,19 +6,33 @@ import { z } from "zod";
  * org admin edits, read process-side. Distinct from `user_prefs` (per-user) and
  * project.md (per-project) — these are instance config with no natural owner row.
  *
- * The only setting today is the run concurrency cap; the store is generic so the
- * next instance knob is a key, not a column.
+ * The store is generic so the next instance knob is a key, not a column — the
+ * concurrency cap below is one such knob, and the backend-quota observations
+ * (backend-quota.server) are another. The three accessors are EXPORTED for that
+ * reason: every other keyed reader/writer of this table goes through them, so
+ * the tolerant-parse and upsert rules live in exactly one place.
  */
 
 /** The JSON-serializable shapes an instance setting may hold. Named so the
  *  writer parses a domain type at its boundary rather than taking `unknown`.
- *  Secrets NEVER go here — a sealed secret needs a dedicated column for key
- *  rotation (see s3_audit_config). */
-type InstanceSettingValue = number | string | boolean;
+ *  Recursive because a knob can be a record (a backend's latest quota reading),
+ *  not just a scalar. Secrets NEVER go here — a sealed secret needs a dedicated
+ *  column for key rotation (see s3_audit_config). */
+export type InstanceSettingValue =
+  | number
+  | string
+  | boolean
+  | null
+  | InstanceSettingValue[]
+  | { [key: string]: InstanceSettingValue };
 
 const rowSchema = z.object({ value_json: z.string() });
 
-function getSetting<S extends z.ZodType>(
+/** One setting, parsed by `schema`; null when the key is absent, the JSON is
+ *  corrupt, or the stored value no longer matches the schema. Tolerant by
+ *  design: none of those are worth failing a page over, and every caller has a
+ *  default. */
+export function getSetting<S extends z.ZodType>(
   db: DatabaseSync,
   key: string,
   schema: S,
@@ -39,7 +53,7 @@ function getSetting<S extends z.ZodType>(
   return parsed.success ? parsed.data : null;
 }
 
-function setSetting(
+export function setSetting(
   db: DatabaseSync,
   key: string,
   value: InstanceSettingValue,
@@ -50,6 +64,13 @@ function setSetting(
      ON CONFLICT (key) DO UPDATE SET
        value_json = excluded.value_json, updated_at = excluded.updated_at`,
   ).run(key, JSON.stringify(value), new Date().toISOString());
+}
+
+/** Drop a setting entirely. Absence is a meaningful state for an observation
+ *  key (backend-quota's "nothing is refusing work any more"), which is why this
+ *  is a delete rather than a write of a falsy value. */
+export function deleteSetting(db: DatabaseSync, key: string): void {
+  db.prepare(`DELETE FROM instance_settings WHERE key = ?`).run(key);
 }
 
 const MAX_CONCURRENT_RUNS_KEY = "maxConcurrentRuns";

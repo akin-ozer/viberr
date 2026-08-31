@@ -7,7 +7,6 @@ import {
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
-  deliverGate,
   gate,
   operatorOpenPacket,
   type OperatorActionResult,
@@ -74,11 +73,9 @@ type Gate = "direct" | "recommend" | "deny";
  * An EXPLICIT grant always wins, so an admin can separate the two.
  */
 export function updateBranchGate(authority: OperatorAuthority): Gate {
-  if (!authority.deployed) return "deny";
-  if (authority.policy.has(UPDATE_BRANCH_CAPABILITY)) {
-    return gate(authority, UPDATE_BRANCH_CAPABILITY);
-  }
-  return deliverGate(authority);
+  // F31-C2: the absent-follows-delivery polarity now lives inside gate()
+  // itself (absentPolarityGate), so this front is a plain delegation.
+  return gate(authority, UPDATE_BRANCH_CAPABILITY);
 }
 
 export interface OperatorUpdateBranchInput {

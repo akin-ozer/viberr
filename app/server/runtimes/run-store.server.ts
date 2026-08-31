@@ -43,6 +43,11 @@ export type AgentRunRow = {
   interrupted_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Staging key for a Claude `report_outcome` envelope (`staged_outcomes`).
+   *  Null on every row that never staged one (Codex, recovered, seed rows).
+   *  Persisted so boot recovery can re-find the envelope after a restart —
+   *  see `recoverUnreactedAgentRuns`. */
+  outcome_key: string | null;
 };
 
 export interface InsertRunInput {
@@ -145,6 +150,13 @@ export interface RunPatch {
   totalCostUsd?: number | null;
   interruptedBy?: string | null;
   backend?: RunBackend;
+  /** C1 (pass 31): the `staged_outcomes` key for this run's Claude
+   *  `report_outcome` envelope. It used to be written by a raw
+   *  `UPDATE agent_runs SET outcome_key = ?` in `registerAgentCompletion`,
+   *  which meant the store's own types did not know the column existed and
+   *  `AgentRunRow` silently lied about the row shape. Patched like every other
+   *  column now, so the exhaustiveness check below covers it too. */
+  outcomeKey?: string | null;
 }
 
 /** Patch selected fields on a run row; always bumps updated_at. */
@@ -166,6 +178,7 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     totalCostUsd: ["total_cost_usd", patch.totalCostUsd],
     interruptedBy: ["interrupted_by", patch.interruptedBy],
     backend: ["backend", patch.backend],
+    outcomeKey: ["outcome_key", patch.outcomeKey],
   } satisfies Record<keyof RunPatch, readonly [string, SQLInputValue | undefined]>;
 
   const cols: string[] = [];

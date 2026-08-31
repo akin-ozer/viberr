@@ -2015,6 +2015,85 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(task().packet).toBeNull();
   });
 
+  /**
+   * F31-6 (pass 31, live-caught): the operator authored "delete the
+   * conflicting REMOTE branch and push this task's commit fresh" onto a
+   * `discard_branch` option — whose actual semantics delete the LOCAL branch
+   * and its commits. Authoring now refuses the incoherent shape and names the
+   * verb that fits, and that verb is accepted on the same task.
+   */
+  it("F31-6: refuses discard_branch on a delivered/occupied branch and accepts resolve_remote_collision", async () => {
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        title: "Collision shape",
+        branch: "vib-1",
+        workRevision: {
+          id: "rev_collision1",
+          headSha: "a".repeat(40),
+          treeSha: "b".repeat(40),
+          branch: "vib-1",
+          createdAt: new Date().toISOString(),
+          sourceProfileId: "developer",
+          kind: "delivered",
+        },
+        github: { commits: [], changed: null, unownedPr: 232 },
+      }),
+      goal: "Prove packet-option coherence.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const refused = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Branch collision — pick a recovery path",
+        options: [
+          {
+            kind: "discard_branch" as const,
+            title: "Delete the stale remote vib-1 branch, then redeliver",
+            recommended: true,
+          },
+        ],
+      },
+      authority("supervised"),
+    );
+    expect(refused.outcome).toBe("noop");
+    expect(refused.message).toContain("resolve_remote_collision");
+    expect(task().packet).toBeNull();
+
+    const accepted = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Branch collision — pick a recovery path",
+        options: [
+          {
+            kind: "resolve_remote_collision" as const,
+            title: "Clear the stale remote branch and redeliver",
+            recommended: true,
+          },
+          { kind: "custom" as const, title: "Something else" },
+        ],
+      },
+      authority("supervised"),
+    );
+    expect(accepted.outcome).toBe("done");
+    expect(task().packet!.options[0]!.kind).toBe("resolve_remote_collision");
+  });
+
   it("rejects an unknown option kind", async () => {
     deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
     seedTask("impl");
@@ -2206,6 +2285,48 @@ describe("applyRecommendation / dismissRecommendation", () => {
     // …and it stays readable without its title, because the operator's own
     // recentTimeline window drops titles.
     expect(snapshot().recentTimeline[0]!.text).toContain(label);
+  });
+
+  it("F31-3: the operator snapshot names the INSTANCE resource catalog (existence is checkable)", async () => {
+    seedTask("impl");
+    deployRoster([{ capabilityId: "append-typed-events", mode: "direct" }]);
+    // An org KB that exists on disk but is granted to nothing on this project
+    // — the exact live shape the F31-3 packet misread as "does not exist".
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const kbDir = join(store.dataRoot, "kb", "pass31-qa-conventions");
+    mkdirSync(kbDir, { recursive: true });
+    writeFileSync(join(kbDir, "rules.md"), "# rules\n");
+    const org = snapshot().orgResources!;
+    expect(org).toBeTruthy();
+    expect(Array.isArray(org.skills)).toBe(true);
+    expect(Array.isArray(org.mcps)).toBe(true);
+    // The catalog surfaces the ungranted KB by NAME — the operator can now
+    // distinguish "exists, not granted here" from "does not exist".
+    expect(org.kbs).toContain("pass31-qa-conventions");
+  });
+
+  it("V19 (pass-31 review): the snapshot names the recorded branch collision (unownedPr)", () => {
+    // The operator authors `resolve_remote_collision` — but the R15-15
+    // collision record reached only human surfaces (the Collision card row),
+    // so at the exact moment the packet is due the model had to reconstruct
+    // the collision from timeline prose. State the fact.
+    seedTask("impl");
+    deployRoster([{ capabilityId: "append-typed-events", mode: "direct" }]);
+    expect(snapshot().unownedPr).toBeNull();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        title: "Operator drive",
+        branch: "vib-1",
+        github: { commits: [], changed: null, unownedPr: 232 },
+      }),
+      goal: "Prove the operator drives the task.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(snapshot().unownedPr).toBe(232);
   });
 
   it("the operator snapshot carries its own PENDING recommendations", async () => {

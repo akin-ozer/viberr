@@ -20,7 +20,7 @@ import {
   recoverUnreactedAgentRuns,
   RECOVERY_REINVOKE_CAP,
 } from "./run-recovery.server";
-import { getRun, insertRunLine, upsertRun } from "./run-store.server";
+import { getRun, insertRunLine, patchRun, upsertRun } from "./run-store.server";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -46,6 +46,31 @@ function seedRun(id: string, over: Partial<Parameters<typeof upsertRun>[1]> = {}
     startedAt: new Date().toISOString(), ...over,
   });
 }
+
+describe("outcome_key lives in the run store (C1, pass 31)", () => {
+  /**
+   * BEFORE: `registerAgentCompletion` persisted the staging key with a raw
+   * `UPDATE agent_runs SET outcome_key = ?`, so the store's own `AgentRunRow`
+   * did not declare the column and `RunPatch` could not write it — the one
+   * column on this table whose reads were untyped and whose writes bypassed
+   * `patchRun` entirely. This pins the typed round-trip.
+   */
+  it("patchRun writes outcome_key and getRun reads it back", () => {
+    seedRun("run_oc");
+    // A run that never staged an envelope reads null, not undefined — the row
+    // type has to admit the column.
+    expect(getRun(store.db, "run_oc")!.outcome_key).toBeNull();
+    patchRun(store.db, "run_oc", { outcomeKey: "oc_1" });
+    expect(getRun(store.db, "run_oc")!.outcome_key).toBe("oc_1");
+    // Clearing is expressible too (null is a value, not "leave alone").
+    patchRun(store.db, "run_oc", { outcomeKey: null });
+    expect(getRun(store.db, "run_oc")!.outcome_key).toBeNull();
+    // An omitted key leaves the column untouched (the `undefined` skip).
+    patchRun(store.db, "run_oc", { outcomeKey: "oc_2" });
+    patchRun(store.db, "run_oc", { phase: "working" });
+    expect(getRun(store.db, "run_oc")!.outcome_key).toBe("oc_2");
+  });
+});
 
 describe("finalizeOrphanedRuns (F-RUN1)", () => {
   it("flips a running run to error with interrupted_by=restart", () => {

@@ -151,6 +151,8 @@ describe("selfHealProjectionDbIfCorrupt", () => {
     expect(result.movedTo).toBeUndefined();
     expect(statSync(p).mtimeMs).toBe(before);
     const db = new DatabaseSync(p, { readOnly: true });
+    // SAFETY: a bare COUNT(*) always returns exactly one row, and `c` is its
+    // only column — an INTEGER SQLite cannot report as anything else.
     expect((db.prepare("SELECT count(*) c FROM users").get() as { c: number }).c).toBe(3);
     db.close();
   });
@@ -184,6 +186,8 @@ describe("selfHealProjectionDbIfCorrupt", () => {
     // file (so the boot rescan re-projects them from the .md files).
     expect(result.salvaged.provenance).toBeUndefined();
     const db = new DatabaseSync(p, { readOnly: true });
+    // SAFETY: a bare COUNT(*) always returns exactly one row, and `c` is its
+    // only column — an INTEGER SQLite cannot report as anything else.
     expect((db.prepare("SELECT count(*) c FROM provenance").get() as { c: number }).c).toBe(0);
     db.close();
   });

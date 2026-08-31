@@ -453,6 +453,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     prReview: null,
     commits: [],
     changed: null,
+    unownedPr: null,
     goal: "Keep going from the record.",
     packet: {
       type: "input",

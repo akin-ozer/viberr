@@ -593,8 +593,10 @@ export async function bootServer(): Promise<void> {
         movedTo: heal.movedTo,
         salvaged: heal.salvaged,
         // Non-empty ⇒ some readable rows could not be reinserted (constraint /
-        // bind) and are only in the preserved file — a cue to look there.
-        ...(Object.keys(heal.skipped).length > 0 ? { skipped: heal.skipped } : {}),
+        // bind) and are only in the preserved file — a cue to look there. An
+        // empty set logs `undefined`, which JSON.stringify drops, so the record
+        // carries no `skipped` key at all (same as `movedTo` above).
+        skipped: Object.keys(heal.skipped).length > 0 ? heal.skipped : undefined,
       },
     );
   }

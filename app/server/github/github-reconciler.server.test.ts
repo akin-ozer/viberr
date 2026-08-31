@@ -26,6 +26,7 @@ import {
   openScopeViolation,
 } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { getTaskDetail } from "~/server/projections/task-query.server";
 import {
   createPat,
   getPatMetadata,
@@ -540,6 +541,277 @@ describe("reconcileTask", () => {
     // changed on GitHub, and calling it one is what produced the bad advice.
     expect(collision!.text).not.toContain("Divergence");
     expect(events.some((e) => /Divergence/.test(e.text))).toBe(false);
+  });
+
+  it("F31-1: a colliding branch's footprint is never recorded as this task's stats", async () => {
+    // Pass-31 live: a fresh VIB-1 whose agent errored before creating ANY
+    // branch showed "14 files · +313 −30" and two commits from a wiped
+    // instance's `vib-1`, and the completion evidence later claimed
+    // "2 commit(s) delivered". The prefix filter cannot save the commits half
+    // — the stranger's commits carry the SAME `[VIB-301]` prefix here. While
+    // an unowned PR stands on the branch, the compare/PR footprint records
+    // nothing as this task's.
+    // Canary: drop `&& !unownedPr` from `prefixCommits` and the foreign
+    // `[VIB-301]` commits land in `github.commits` again.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        // No pr, no workRevision: nothing was ever delivered by THIS task.
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // The collision itself is recorded…
+    expect(fm.github?.unownedPr).toBe(318);
+    // …but the stranger's footprint is not: no commits (despite the
+    // prefix-matched `[VIB-301]` entries in the compare) and no diff stats.
+    expect(fm.github?.commits ?? []).toEqual([]);
+    expect(fm.github?.changed ?? null).toBeNull();
+  });
+
+  it("V5: a PR-LESS stale branch's foreign commits are never recorded as this task's", async () => {
+    // F31-1 gated on `!unownedPr`, which is only ever set when a PR was FOUND on
+    // the branch. A stale remote branch under a reused key needs no PR to tell
+    // the same lie: its `[VIB-301]`-prefixed commits match the prefix filter,
+    // the absence test passed, and the stranger's commits were recorded as this
+    // task's footprint with no collision row to explain them.
+    // Canary: relax `deliveredThisBranch` back to `!unownedPr` (drop the
+    // positive test) and the two foreign commits land in `github.commits`.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        // No pr, no workRevision: this task has delivered nothing anywhere.
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const routes = happyRoutes();
+    // Nobody opened a PR on the branch — the squatter is the branch itself.
+    routes[`GET ${REPO_PATH}/pulls`] = { body: [] };
+    const result = await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+
+    expect(result).toMatchObject({ status: "reconciled", commits: 0 });
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.github?.commits ?? []).toEqual([]);
+    expect(fm.github?.changed ?? null).toBeNull();
+    // Residual, deliberately asserted: the collision SURFACE keys on a PR
+    // number, so a PR-less squatter has nothing to render. The lie is stopped;
+    // naming it needs a marker the file format does not have.
+    expect(fm.github?.unownedPr ?? null).toBeNull();
+  });
+
+  it("V5: a branch this task delivered still records its commits with no PR at all", async () => {
+    // The other half of positive provenance: the evidence is not only an owned
+    // PR. A task whose work revision was minted ON THIS BRANCH delivered here,
+    // so the branch's `[VIB-301]` commits are its own — before any PR exists.
+    // Canary: narrow `deliveredThisBranch` to `ownsAPr || fm.pr !== null` and
+    // this task's real commits vanish from its footprint.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        workRevision: {
+          id: "rev_1",
+          headSha: "a91f7c2ffff",
+          treeSha: null,
+          branch: "vib-301-workspace",
+          createdAt: "2026-08-31T08:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls`] = { body: [] };
+    const result = await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+
+    expect(result).toMatchObject({ status: "reconciled", commits: 2 });
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.github?.commits).toEqual([
+      { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate" },
+      { sha: "4ce0b18", msg: "[VIB-301] branch reconciler" },
+    ]);
+  });
+
+  it("V5: a foreign footprint cached before the collision was visible is DROPPED, not carried", async () => {
+    // Cache permanence. The pass that recorded "14 files · +313 −30" and two
+    // foreign commits ran BEFORE the collision was detectable; every pass after
+    // it skipped re-derivation and fell back to `existingCommits`, so the lie
+    // outlived the fix that stopped writing it. A cache with no delivery record
+    // behind it is compare-derived and goes with the provenance that failed.
+    // Canary: restore `commits: branchCommits ?? existingCommits` and
+    // `changed: ownedChanged ?? existingGithub?.changed ?? null` and the stale
+    // foreign footprint survives every reconcile forever.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        // No pr, no workRevision — but a footprint an earlier pass wrote.
+        github: {
+          commits: [
+            { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate" },
+            { sha: "4ce0b18", msg: "[VIB-301] branch reconciler" },
+          ],
+          changed: { files: 14, add: 313, del: 30 },
+          unownedPr: null,
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.github?.commits ?? []).toEqual([]);
+    expect(fm.github?.changed ?? null).toBeNull();
+    // The collision is still named, and the drop reaches every surface.
+    expect(fm.github?.unownedPr).toBe(318);
+    const detail = getTaskDetail(store.db, store.slug, "VIB-301");
+    expect(detail?.commits).toEqual([]);
+    expect(detail?.changed).toBeNull();
+  });
+
+  it("V5: a delivered branch KEEPS its workspace-captured cache while a collision stands", async () => {
+    // The counterweight to the drop above. The workspace-delivery path writes
+    // `github.commits` and `workRevision` together, so a cache with that record
+    // behind it was captured from the task's OWN run — a stranger appearing on
+    // the branch stops new derivation (F31-1) but must not erase honest history.
+    // Canary: gate `cachedCommits` on `provenBranchHead` instead of
+    // `deliveredThisBranch` and the delivered footprint is wiped by the squatter.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        // Delivered here, but the PR standing on the branch is somebody else's
+        // (its head is not this revision, so R16-1 refuses adoption).
+        workRevision: {
+          id: "rev_1",
+          headSha: "deliveredsha",
+          treeSha: null,
+          branch: "vib-301-workspace",
+          createdAt: "2026-08-31T08:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+        github: {
+          commits: [{ sha: "de11ver", msg: "delivered from the workspace" }],
+          changed: null,
+          unownedPr: null,
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.github?.unownedPr).toBe(318);
+    expect(fm.github?.commits).toEqual([
+      { sha: "de11ver", msg: "delivered from the workspace" },
+    ]);
+    // …and the stranger's prefix-matched commits are still not adopted into it.
+    expect(fm.github?.commits?.some((c) => c.sha === "a91f7c2")).toBe(false);
+  });
+
+  it("T3/R15-15: the recorded collision reaches the PROJECTION every surface reads", async () => {
+    // The frontmatter write is only half of it. `unownedPr` is a DISPLAY fact:
+    // the task-detail GitHub card renders collision framing off it, and the
+    // archive ceremony asks for a remote-branch decision because of it. Both
+    // read the projection, never the file — so a reconcile that recorded the
+    // collision and did not reproject would leave every surface still saying
+    // "no pull request", which is the state that produced the bad advice
+    // R15-15 was filed for.
+    // Canary: drop `unownedPr: unownedPr?.number ?? null` from `newGithub` in
+    // `reconcileTaskUnlocked` and the projected value reads null while the
+    // task's own `pr` assertion still passes.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        // No `pr`: this task opened nothing. #318 on the branch is a stranger's.
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+
+    const detail = getTaskDetail(store.db, store.slug, "VIB-301");
+    expect(detail?.unownedPr).toBe(318);
+    // …and the stranger never becomes the task's own PR on the way through.
+    expect(detail?.pr).toBeNull();
   });
 
   it("R16-1/H8: a name-matched MERGED stranger never replaces the PR the task owns", async () => {
@@ -1077,6 +1349,19 @@ describe("reconcileTask", () => {
         stage: "review",
         branch: "vib-301-workspace",
         ownerUserId: store.users.arda.id,
+        // The workspace delivery that captured those commits stamped the
+        // revision they came from in the same pass — the record that makes this
+        // branch (and so this cache) demonstrably the task's own (V5). Its head
+        // is the branch's PR head, so the reconcile owns the PR it discovers
+        // and the prefix filter actually runs.
+        workRevision: {
+          id: "rev_1",
+          headSha: "headsha318",
+          treeSha: null,
+          branch: "vib-301-workspace",
+          createdAt: "2026-07-01T09:00:00.000Z",
+          sourceProfileId: "developer",
+        },
         github: {
           commits: [
             { sha: "a91f7c2", msg: "VIB-301: add repo attach policy gate" },

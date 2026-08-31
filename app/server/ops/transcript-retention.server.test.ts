@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { resetEnvCacheForTests } from "~/server/config/env.server";
 import { ensureDataRootDirs } from "~/server/files/file-store-root.server";
 import {
   DEFAULT_SESSION_HOME_RETENTION_DAYS,
@@ -22,6 +23,9 @@ const ctx = createTestDbContext();
 afterEach(() => {
   delete process.env.VIBERR_TRANSCRIPT_RETENTION_DAYS;
   delete process.env.VIBERR_SESSION_HOME_RETENTION_DAYS;
+  // C3 (pass 31): both windows read the CACHED validated env now, so a test
+  // that sets these must drop the cache on the way in AND on the way out.
+  resetEnvCacheForTests();
   ctx.cleanup();
 });
 
@@ -152,6 +156,7 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
   it("is configurable, and 0 disables a half outright", () => {
     process.env.VIBERR_TRANSCRIPT_RETENTION_DAYS = "7";
     process.env.VIBERR_SESSION_HOME_RETENTION_DAYS = "0";
+    resetEnvCacheForTests();
     expect(transcriptRetentionDays()).toBe(7);
     expect(sessionHomeRetentionDays()).toBe(0);
 

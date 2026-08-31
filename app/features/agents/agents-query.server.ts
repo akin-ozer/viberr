@@ -368,11 +368,13 @@ export function effectiveProfileView(
   // reads it) over/under-states authority (F15-20 / BUG-1 / pass-24 A-1,A-2):
   //  · specialist: the `isWithheld` polarity — grant-required → `off`, else the
   //    catalog default.
-  //  · operator: `gate()` reads an absent grant as `off` for EVERY coordination
-  //    capability (`authority.policy.get(id) ?? "off"`); the two governance-
-  //    dependent grants are already materialized above at the delivery-gate mode;
-  //    web egress keeps its catalog default (`operatorWebWithheld` leaves an
-  //    absent grant ON). Materializing a coordination cap at its catalog `direct`/
+  //  · operator: `gate()` resolves an absent grant through `absentPolarityGate`
+  //    (F31-C2) — `off` for most coordination capabilities, with per-capability
+  //    exceptions this table mirrors: `dispatch-agents` and `use-web-search-fetch`
+  //    keep their catalog default, and the two governance-dependent grants
+  //    (`deliver-review-pr`, `update-task-branch`) are already materialized
+  //    above at the delivery-gate mode, so they never reach this fallback.
+  //    Materializing any other coordination cap at its catalog `direct`/
   //    `recommend` would show — and let a save arm — authority the gate denies.
   const absentMode = (c: (typeof UNIFIED_CAP_CATALOG)[number]): CapabilityMode => {
     if (alwaysHuman.has(c.id)) return "human";

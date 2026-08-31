@@ -6,6 +6,7 @@ import {
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -14,6 +15,7 @@ import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { installFakeRuntime, queueFakeRun } from "../../../test-support/fake-runtime";
 import { getRun } from "./run-store.server";
 import {
+  drainRunQueue,
   interruptRun,
   reserveRun,
   runConcurrencySnapshot,
@@ -175,6 +177,135 @@ describe("run concurrency cap", () => {
     await settle();
     expect(getRun(store.db, b)?.state).toBe("running");
     expect(getRun(store.db, c)?.state).toBe("running");
+  });
+
+  /**
+   * T11 (pass 31) — UC-25, verified live: cap 1 queued the second run, and
+   * setting the cap back to 0 drained it WITHOUT anything finishing. The test
+   * above proves the drain re-reads the cap, but it also frees a slot, so it
+   * would still pass if raising the cap were a dead end until a run exited.
+   * `setMaxConcurrentRuns` deliberately does not drain; the org-settings
+   * `set-concurrency` action pairs the two (`app/routes/org.settings.tsx`), and
+   * this is that pair with nothing else moving.
+   */
+  it("T11: raising the cap alone drains the queue — no run has to finish first", async () => {
+    // Canary: make `drainRunQueue` read a cap captured at module load (or drop
+    // the `drainRunQueue(db)` line from the set-concurrency action) and the
+    // queued run stays queued.
+    setMaxConcurrentRuns(store.db, 1);
+    const a = await startHeldRun("r0");
+    const b = await startHeldRun("r1"); // over the cap
+    await settle();
+    expect(getRun(store.db, b)?.state).toBe("queued");
+
+    setMaxConcurrentRuns(store.db, 2);
+    drainRunQueue(store.db);
+    await settle();
+
+    // Nothing exited — a is still holding its slot — and b went live anyway.
+    expect(getRun(store.db, a)?.state).toBe("running");
+    expect(getRun(store.db, b)?.state).toBe("running");
+    expect(runConcurrencySnapshot(store.db)).toMatchObject({
+      cap: 2,
+      live: 2,
+      queued: 0,
+    });
+  });
+});
+
+/**
+ * T11/F26-1 (pass 31) — the cap end to end, through a REAL specialist dispatch.
+ *
+ * `reserveRun` never writes a `queued` row: it grants a slot or returns null.
+ * The queued state on the dispatch path exists only because the dispatcher
+ * falls through to the gated `startRun` when the reservation is declined, and
+ * that fallthrough is the entire product-visible half of the pass-26 fix (the
+ * cap was COSMETIC because reserveRun bypassed the gate). The reserved-path
+ * tests below stop at `reserveRun(...) === null`; nothing asserted that a
+ * dispatch actually lands `queued` and later drains.
+ */
+describe("run concurrency cap — a real specialist dispatch", () => {
+  /** Deploy a `dev` specialist with no repo (so the run skips the clone) and
+   *  engage it on VIB-1 — the shape a Run-agent click produces. */
+  async function deployAndAssignDev(): Promise<void> {
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const { assignSpecialist } = await import("~/server/tasks/specialist-run.server");
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            effort: "",
+          },
+        },
+      ],
+    });
+    const { rebuildAll: rebuild } = await import("~/server/projections/rebuilder.server");
+    rebuild(store.db, { dataRoot: store.dataRoot, force: true });
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+  }
+
+  it("T11/F26-1: a dispatch past the cap lands `queued`, and a raised cap drains it to `running`", async () => {
+    // Canary: return a reservation unconditionally from `reserveRun` (drop its
+    // cap check) and the dispatched run is `running` immediately — the exact
+    // cosmetic-cap regression pass 26 found.
+    await deployAndAssignDev();
+    setMaxConcurrentRuns(store.db, 1);
+
+    // One live run occupies the single slot.
+    const held = await startHeldRun("held");
+    await settle();
+    expect(getRun(store.db, held)?.state).toBe("running");
+
+    // The real dispatch: its reservation is declined, so it must fall through
+    // to the gated path rather than launching anyway.
+    const { startAgentRun } = await import("~/server/tasks/specialist-run.server");
+    // Held open too, so "it drained" is observable as `running` rather than as
+    // a run that already finished (which a never-launched run cannot be either).
+    queueFakeRun({
+      lines: [{ t: "1", ev: "text", tag: "assistant", text: "working" }],
+      keepRunning: true,
+    });
+    const dispatched = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    await settle();
+    expect(getRun(store.db, dispatched.runId)?.state).toBe("queued");
+    expect(runConcurrencySnapshot(store.db)).toMatchObject({
+      cap: 1,
+      live: 1,
+      queued: 1,
+    });
+
+    // Raise the cap the way an org admin does, and it drains.
+    setMaxConcurrentRuns(store.db, 2);
+    drainRunQueue(store.db);
+    await settle();
+    expect(getRun(store.db, dispatched.runId)?.state).toBe("running");
+
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: dispatched.runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
   });
 });
 

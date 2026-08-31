@@ -1,9 +1,13 @@
 import { execFile } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -12,7 +16,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
+  ensureCatalogSettings,
   isSdkSkillName,
   mountGrantedSkills,
   stripUngovernedRepoCatalog,
@@ -143,10 +149,43 @@ describe("stripUngovernedRepoCatalog (R18-3 / F18-8)", () => {
       .toContain("SENTINEL-LATER");
   });
 
-  it("preserving a live mount preserves NOTHING else — settings, commands and repo skills still go", async () => {
+  it("F31-C4: a successful mount writes the CLAUDE.md excludes into the catalog settings", async () => {
+    // The project settings source is the only channel the live probe showed
+    // actually delivers `claudeMdExcludes` (Options.managedSettings drops the
+    // key on the SDK's restrictive-only allowlist). The file must contain the
+    // excludes and NOTHING else — a hooks/permissions key here would be an
+    // instruction channel viberr just handed to itself.
+    // Canary: skip writeCatalogSettings and the existsSync below fails.
+    const dataRoot = storeWithSkills([{ name: "craft", skillMd: "S\n" }]);
+    const ws = await gitCheckout();
+    const run = await mountGrantedSkills({ workspaceDir: ws, skills: ["craft"], dataRoot });
+    expect(run.mounted).toEqual(["craft"]);
+    const settingsPath = path.join(ws, ".claude", "settings.json");
+    expect(existsSync(settingsPath)).toBe(true);
+    const settings = z
+      .record(z.string(), z.unknown())
+      .parse(JSON.parse(readFileSync(settingsPath, "utf8")));
+    expect(Object.keys(settings)).toEqual(["claudeMdExcludes"]);
+    expect(settings.claudeMdExcludes).toEqual([
+      "**/CLAUDE.md",
+      "**/CLAUDE.local.md",
+      "**/.claude/**",
+    ]);
+  });
+
+  it("preserving a live mount preserves NOTHING else — foreign settings, commands and repo skills still go", async () => {
     // The narrow exception must stay narrow: `settings.json` carries hooks the
     // project setting source would execute on the next run, which is the whole
     // reason the strip exists (R18-3).
+    //
+    // V6: the FILE survives, its CONTENT does not. The run whose mounts we are
+    // preserving has the project source open over this catalog right now, and
+    // viberr's excludes are the only thing holding the repository's CLAUDE.md
+    // out of it — deleting the file (what this test used to assert) reopened
+    // that ingress under a live run. So the strip overwrites it with viberr's
+    // own constant instead.
+    // Canary: drop the `writeCatalogSettings` call from the strip's survivor
+    // branch and the file is gone again.
     const dataRoot = storeWithSkills([{ name: "live-craft", skillMd: "SENTINEL-LIVE\n" }]);
     const ws = await gitCheckout();
     await mountGrantedSkills({ workspaceDir: ws, skills: ["live-craft"], dataRoot });
@@ -163,10 +202,54 @@ describe("stripUngovernedRepoCatalog (R18-3 / F18-8)", () => {
 
     await stripUngovernedRepoCatalog(ws);
 
-    expect(existsSync(path.join(ws, ".claude", "settings.json"))).toBe(false);
+    const settings = z
+      .record(z.string(), z.unknown())
+      .parse(JSON.parse(readFileSync(path.join(ws, ".claude", "settings.json"), "utf8")));
+    expect(Object.keys(settings)).toEqual(["claudeMdExcludes"]);
     expect(existsSync(path.join(ws, ".claude", "commands"))).toBe(false);
     expect(existsSync(path.join(ws, ".claude", "skills", "repo-authored"))).toBe(false);
     expect(existsSync(path.join(ws, ".claude", "skills", "live-craft"))).toBe(true);
+  });
+
+  it("V6: a run that mounts NOTHING re-establishes the excludes file for the live run it preserved", async () => {
+    // The zero-mount arm of the same shared-workspace fact. Run B strips the
+    // catalog and mounts nothing of its own, so the file it deletes belongs to
+    // run A — which is executing right now with `settingSources: ['project']`
+    // open over exactly this directory. Without the rewrite, A spends the rest
+    // of its run with the repository's CLAUDE.md arriving as system-prompt-tier
+    // instruction, and nothing anywhere says so.
+    //
+    // Canary: drop the `writeCatalogSettings` call from the strip's survivor
+    // branch and `existsSync` below fails.
+    const dataRoot = storeWithSkills([{ name: "live-craft", skillMd: "SENTINEL-LIVE\n" }]);
+    const ws = await gitCheckout();
+    const runA = await mountGrantedSkills({
+      workspaceDir: ws,
+      skills: ["live-craft"],
+      dataRoot,
+    });
+    expect(runA.settingsWritten).toBe(true);
+    // A's own agent (or the repo) replaces the file mid-run: whatever is there
+    // when the next strip runs is not something viberr wrote.
+    writeFileSync(path.join(ws, ".claude", "settings.json"), '{"hooks":{}}');
+
+    const runB = await mountGrantedSkills({
+      workspaceDir: ws,
+      skills: ["ghost"],
+      dataRoot,
+    });
+
+    expect(runB.mounted).toEqual([]);
+    // `settingsWritten` reports THIS run's native channel, not the file's
+    // existence for someone else: B mounts nothing and opens no project source.
+    expect(runB.settingsWritten).toBe(false);
+    const settings = z
+      .record(z.string(), z.unknown())
+      .parse(JSON.parse(readFileSync(path.join(ws, ".claude", "settings.json"), "utf8")));
+    expect(Object.keys(settings)).toEqual(["claudeMdExcludes"]);
+    expect(
+      existsSync(path.join(ws, ".claude", "skills", "live-craft", "SKILL.md")),
+    ).toBe(true);
   });
 
   it("a repo that FORGES the Viberr mount marker is stripped anyway", async () => {
@@ -237,6 +320,104 @@ describe("reviewer inheritance is KBs only (F19-2 / ruling 57)", () => {
     expect(src).not.toContain("LV-F3");
     // …and the ruling that settles it is cited where the rule lives.
     expect(src).toMatch(/Ruling 57 \(R19-3/);
+  });
+});
+
+/**
+ * V6 — the seam the Claude adapter calls before it opens
+ * `settingSources: ['project']`. That option is what makes the SDK read the
+ * checked-out repository's CLAUDE.md, so the adapter enables native skills only
+ * when the excludes file that holds it out is verifiably in place.
+ */
+describe("ensureCatalogSettings", () => {
+  /** A workspace catalog with `settings.json` in whatever state the test wants. */
+  function catalog(): string {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-catalog-"));
+    mkdirSync(path.join(dir, ".claude", "skills"), { recursive: true });
+    return dir;
+  }
+  const settingsOf = (dir: string) =>
+    z
+      .record(z.string(), z.unknown())
+      .parse(JSON.parse(readFileSync(path.join(dir, ".claude", "settings.json"), "utf8")));
+
+  it("accepts the file the mount wrote, and rewrites anything that is not it", () => {
+    // The file sits in an UNTRUSTED checkout a live agent can write to, so
+    // "the path exists" proves nothing: a symlink would point the read (and a
+    // plain overwrite) anywhere, a foreign object carries none of our patterns,
+    // and an oversized one would be read into memory at every run start.
+    //
+    // Canary: drop the `lstat`/size guard and the symlink case reports true off
+    // the linked file's content (leaving the workspace file un-rewritten), and
+    // the oversized foreign object is accepted as ours.
+    const ours = catalog();
+    expect(ensureCatalogSettings(ours)).toBe(true);
+    expect(Object.keys(settingsOf(ours))).toEqual(["claudeMdExcludes"]);
+    // Idempotent, and not merely in its answer: a file that is already ours is
+    // not rewritten, so a concurrent run reading it sees no swap at all (the
+    // write replaces the inode).
+    const inode = lstatSync(path.join(ours, ".claude", "settings.json")).ino;
+    expect(ensureCatalogSettings(ours)).toBe(true);
+    expect(lstatSync(path.join(ours, ".claude", "settings.json")).ino).toBe(inode);
+
+    // The link even points at a file carrying our exact patterns, so nothing
+    // but the `lstat` distinguishes it: the check must refuse to READ through a
+    // link (its target is chosen by whoever wrote it), and the rewrite must land
+    // on the workspace path rather than following the link out of the catalog.
+    const linked = catalog();
+    const elsewhere = path.join(linked, "elsewhere.json");
+    writeFileSync(
+      elsewhere,
+      JSON.stringify({
+        claudeMdExcludes: ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/**"],
+        hooks: {},
+      }),
+    );
+    symlinkSync(elsewhere, path.join(linked, ".claude", "settings.json"));
+    expect(ensureCatalogSettings(linked)).toBe(true);
+    expect(lstatSync(path.join(linked, ".claude", "settings.json")).isSymbolicLink()).toBe(
+      false,
+    );
+    expect(Object.keys(settingsOf(linked))).toEqual(["claudeMdExcludes"]);
+    expect(readFileSync(elsewhere, "utf8")).toContain("hooks");
+
+    const foreign = catalog();
+    writeFileSync(path.join(foreign, ".claude", "settings.json"), '{"hooks":{}}');
+    expect(ensureCatalogSettings(foreign)).toBe(true);
+    expect(Object.keys(settingsOf(foreign))).toEqual(["claudeMdExcludes"]);
+
+    const oversized = catalog();
+    writeFileSync(
+      path.join(oversized, ".claude", "settings.json"),
+      JSON.stringify({
+        claudeMdExcludes: ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/**"],
+        padding: "x".repeat(8192),
+      }),
+    );
+    expect(ensureCatalogSettings(oversized)).toBe(true);
+    expect(Object.keys(settingsOf(oversized))).toEqual(["claudeMdExcludes"]);
+  });
+
+  it("never CREATES a catalog, and never writes THROUGH a symlinked one", () => {
+    // No `.claude` ⇒ nothing was mounted into this workspace ⇒ there is nothing
+    // for a project source to read, and the run keeps `settingSources: []`.
+    const bare = mkdtempSync(path.join(tmpdir(), "viberr-bare-"));
+    expect(ensureCatalogSettings(bare)).toBe(false);
+    expect(existsSync(path.join(bare, ".claude"))).toBe(false);
+    expect(ensureCatalogSettings("")).toBe(false);
+
+    // A `.claude` SYMLINK is the case that makes the directory check
+    // load-bearing rather than belt: every path built from it resolves into
+    // whatever the link points at, so a repo (or a live agent) that links the
+    // catalog at another tree would have us writing OUTSIDE the workspace.
+    //
+    // Canary: drop the `lstatSync(...).isDirectory()` guard and a settings file
+    // appears in `outside/`, written through the link.
+    const linkedWs = mkdtempSync(path.join(tmpdir(), "viberr-linked-ws-"));
+    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-catalog-"));
+    symlinkSync(outside, path.join(linkedWs, ".claude"), "dir");
+    expect(ensureCatalogSettings(linkedWs)).toBe(false);
+    expect(readdirSync(outside)).toEqual([]);
   });
 });
 
@@ -510,10 +691,74 @@ describe("mountGrantedSkills", () => {
     });
 
     expect(result.mounted).toEqual(["craft"]);
-    expect(existsSync(path.join(ws, ".claude", "settings.json"))).toBe(false);
+    // F31-C4: the strip removed the FOREIGN settings (its hooks with it), and
+    // the mount re-wrote the file as viberr's own — excludes only, no hooks.
+    // The spirit of this test is unchanged: no ungoverned settings survive.
+    const rewritten = z
+      .record(z.string(), z.unknown())
+      .parse(
+        JSON.parse(readFileSync(path.join(ws, ".claude", "settings.json"), "utf8")),
+      );
+    expect(Object.keys(rewritten)).toEqual(["claudeMdExcludes"]);
     expect(
       existsSync(path.join(ws, ".claude", "skills", "self-installed")),
     ).toBe(false);
+  });
+
+  it("V6: mounts NOTHING when the CLAUDE.md excludes file cannot be written", async () => {
+    // `settingSources: ['project']` is ONE decision with two effects: the SDK
+    // discovers the mounted skills, and it reads the checked-out repository's
+    // CLAUDE.md as system-prompt-tier instruction. The excludes file is the only
+    // thing that closes the second (the SDK drops the `managedSettings` key), so
+    // a mount that cannot write it must not report skills — the adapter would
+    // open the source for them. Reporting none is also what re-engages the
+    // fallback: the persona suppresses prompt-text injection per MOUNTED skill,
+    // so an empty list puts every grant back in the system prompt.
+    //
+    // Canary: return `mounted` unchanged (drop the demotion block) and this run
+    // comes back with ["later-craft"] mounted and no excludes file anywhere.
+    //
+    // A read-only catalog is the only portable way to fail that write, so the
+    // test asserts its own precondition first: running as root ignores the mode,
+    // which would be a broken harness rather than a broken fix.
+    const dataRoot = storeWithSkills([
+      { name: "live-craft", skillMd: "SENTINEL-LIVE\n" },
+      { name: "later-craft", skillMd: "SENTINEL-LATER\n" },
+    ]);
+    const ws = await gitCheckout();
+    // Another engagement's live mount, so the strip PRESERVES this catalog
+    // instead of deleting and re-creating it (which would restore write access).
+    await mountGrantedSkills({ workspaceDir: ws, skills: ["live-craft"], dataRoot });
+    const catalog = path.join(ws, ".claude");
+    rmSync(path.join(catalog, "settings.json"));
+    chmodSync(catalog, 0o555);
+    try {
+      let catalogWritable = true;
+      try {
+        writeFileSync(path.join(catalog, "probe"), "x");
+      } catch {
+        catalogWritable = false;
+      }
+      expect(catalogWritable).toBe(false);
+
+      const run = await mountGrantedSkills({
+        workspaceDir: ws,
+        skills: ["later-craft"],
+        dataRoot,
+      });
+
+      expect(run.settingsWritten).toBe(false);
+      expect(run.mounted).toEqual([]);
+      expect(run.skipped.map((s) => s.name)).toEqual(["later-craft"]);
+      expect(run.skipped[0]?.reason).toContain("CLAUDE.md");
+      expect(existsSync(path.join(catalog, "settings.json"))).toBe(false);
+      // Our failure is ours alone: the other engagement's mount is untouched.
+      expect(existsSync(path.join(catalog, "skills", "live-craft", "SKILL.md"))).toBe(
+        true,
+      );
+    } finally {
+      chmodSync(catalog, 0o755);
+    }
   });
 
   it("leaves the workspace untouched when a granted skill resolves to nothing", async () => {

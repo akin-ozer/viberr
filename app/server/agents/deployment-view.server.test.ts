@@ -31,10 +31,25 @@ describe("primaryRunBackend — the first real backend, else claude", () => {
   });
 });
 
+/**
+ * What a hand-edited (untrusted) `project.md` can actually leave where a
+ * deployment override belongs: the override keys these cases exercise, each
+ * carrying whatever the YAML parser produced rather than the type the schema
+ * will eventually enforce. Naming the malformed shape keeps the fiction at the
+ * fixture — the decode's contract is precisely that it survives these.
+ */
+interface HandEditedDeployment {
+  kind?: unknown;
+  name?: unknown;
+  stages?: unknown;
+  resources?: unknown;
+  backends?: unknown;
+}
+
 describe("parseDeploymentDefinition — tolerant per-field decode", () => {
   // The decode exists to survive a hand-edited (untrusted) project.md, so every
   // case below feeds a shape the TS type forbids on purpose.
-  const raw = (v: unknown) =>
+  const raw = (v: HandEditedDeployment) =>
     // SAFETY: the decode's whole job is to accept malformed input; the test
     // deliberately feeds shapes the compile-time type rules out.
     parseDeploymentDefinition(v as AgentDeploymentDefinition | undefined);

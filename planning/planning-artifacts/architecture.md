@@ -181,7 +181,7 @@ npx create-react-router@latest --template remix-run/react-router-templates/defau
 React Router framework mode on a Node-capable runtime with TypeScript-oriented conventions and first-class route type generation.
 
 **Styling Solution:**
-The official Node.js with Docker template includes Tailwind CSS.
+The official Node.js with Docker template includes Tailwind CSS. *(Corrected 2026-08-31, pass 31 — A5. **Viberr does not use Tailwind and never has.** Whatever the upstream template ships, this repo carries exactly ONE plain stylesheet, `app/app.css`, with a flat unprefixed token block in `:root`; it is the only `.css` file under `app/`. `package.json` declares no `tailwindcss`, `postcss` or `autoprefixer` dependency in either list, and — as the tree notes further down already say — no `tailwind.config.ts` or `postcss.config.mjs` has ever existed here. The integrity gate is `app/app.css.test.ts`, which checks token resolution, class coverage and contrast against that single sheet with no allowlist. Read this bullet as a note on the starter's defaults, not on Viberr's styling solution.)*
 
 **Build Tooling:**
 Official React Router CLI and framework build flow, with server-rendered deployment support and Docker-ready startup conventions.
@@ -193,7 +193,7 @@ The official starter documentation does not advertise a bundled testing stack as
 Framework conventions center around files such as `root.tsx`, `routes.ts`, and `react-router.config.ts`, plus route-module structure that works well with explicit application boundaries. The current upstream starter may provide client/server entry files and Tailwind/PostCSS wiring implicitly; Viberr keeps explicit compatibility files in-repo so those runtime boundaries remain visible and stable for later stories.
 
 **Development Experience:**
-Strong React development ergonomics, framework conventions instead of ad hoc setup, SSR and static rendering flexibility, Tailwind-ready UI scaffolding, and an official Docker deployment path.
+Strong React development ergonomics, framework conventions instead of ad hoc setup, SSR and static rendering flexibility, Tailwind-ready UI scaffolding, and an official Docker deployment path. *(Corrected 2026-08-31, pass 31 — A5: "Tailwind-ready UI scaffolding" is the second of this section's two Tailwind claims and, like the first, describes the upstream starter rather than Viberr. The scaffolding was not taken. See the Styling Solution correction above.)*
 
 ### Starter Commitments vs Early Implementation Stories
 
@@ -532,6 +532,19 @@ OAuth optional, see §Authentication):
   - `task.readiness-changed`
   - `projection.rebuilt`
   - `auth.session-expired`
+- *(Corrected 2026-08-31, pass 31 — A5.)* **Two of those four examples never shipped and
+  must not be copied.** `task.readiness-changed` and `auth.session-expired` are not in the
+  wire contract and never were — neither string appears anywhere under `app/`. Readiness
+  travels as a field on `task.updated`'s payload, and no event announces session expiry.
+  The naming *rule* above is real and held. The shipped set is `SSE_EVENT_NAMES` in `app/schemas/sse-event.schema.ts` — the one
+  source, zod-parsed by the publisher before anything goes on the wire, and mirrored to the
+  client through `app/features/live-updates/event-types.ts`. Fourteen names as of
+  2026-08-31: `task.updated` · `task.removed` · `project.updated` · `project.removed` ·
+  `projection.rebuilt` · `notification.created` · `notification.read` · `violation.updated`
+  · `run.log-appended` · `run.state-changed` · `controller.updated` · `goal.updated`, plus
+  the two broker CONTROL events `stream.open` and `stream.resync` (connection bookkeeping,
+  never buffered or replayed). There is exactly one SSE endpoint, `/resources/events`
+  (`app/routes/resources.events.ts`); no other stream URL exists.
 - Event payloads use:
   - `{ type, entityId, occurredAt, data }`
 - SSE payloads should carry compact facts and references, not giant denormalized business objects
@@ -597,7 +610,9 @@ OAuth optional, see §Authentication):
 - JSON endpoint success response:
   - `{ "data": { "taskId": "VIB-142", "readinessState": "ready" } }`
 - SSE event:
-  - `task.readiness-changed`
+  - `task.readiness-changed` *(Corrected 2026-08-31, pass 31 — this is not a shipped event
+    name; it illustrates the naming shape only. Use a real one, e.g. `task.updated`, and
+    read `SSE_EVENT_NAMES` in `app/schemas/sse-event.schema.ts` for the full set.)*
 - Co-located test:
   - `task-projection-service.test.ts`
 
@@ -681,15 +696,20 @@ viberr/
     ├── routes.ts
     ├── entry.client.tsx
     ├── entry.server.tsx
-    ├── routes/                 # 26 thin route modules (was 25 before /resources/search)
+    ├── routes/                 # 32 route modules (recounted 2026-08-31 — see the note below)
     │   ├── _index.tsx          # home (project list)
     │   ├── login.tsx  logout.tsx  api.auth.$.ts     # api.auth.$ is better-auth's splat
     │   ├── projects.tsx  project.tsx  project._index.tsx
     │   ├── project.board.tsx  project.review.tsx  project.agents.tsx
+    │   ├── project.controller.tsx                   # ruling 99 — conversation + Goals panel
     │   ├── project.policy.tsx  project.github.tsx  project.activity.tsx
     │   ├── project.settings.tsx  project.task.tsx
-    │   ├── org.settings.tsx  profile.tsx  notifications.tsx  notifications.read.tsx
-    │   ├── prefs.theme.tsx
+    │   ├── palette-shell.tsx   # pathless layout: ⌘K over the non-workspace surfaces
+    │   ├── org.settings.tsx  org.settings.audit-export.ts
+    │   ├── controller.tsx      # ruling 99 — the instance controller, any signed-in user
+    │   ├── insights.tsx        # instance-wide agent-run analytics (org admin)
+    │   ├── profile.tsx  notifications.tsx  notifications.read.tsx
+    │   ├── prefs.theme.tsx  task-attachment.ts      # R19-19, member-only raw bytes
     │   └── resources.{events,health,run-log,search,session-export,model-catalog}.ts
     │                           # resources.search backs the ⌘K palette (R15-5)
     ├── ui/                     # reusable primitives + shared hooks
@@ -700,12 +720,14 @@ viberr/
     │   └── use-{dialog,dismiss,action-toast,fetcher-result,relative-time,shortcut-hint}.ts
     ├── lib/
     │   └── auth.server.ts      # the better-auth instance + its Viberr bridge
-    ├── features/               # 16 product surfaces; no auth/ — login is a route
+    ├── features/               # 18 product surfaces; no auth/ — login is a route
     │   ├── activity/           # audit + activity feed
     │   ├── agents/             # profiles, capability matrix, deployment
     │   ├── board/              # board-page + pure filter predicates
+    │   ├── controller/         # controller page, transcript, composer, Goals panel
     │   ├── github/             # repo/PR view, credential card, pills, actions
     │   ├── home/               # project list + project creation
+    │   ├── insights/           # instance-wide run analytics surface
     │   ├── kb-browser/         # knowledge-base / skill store browser
     │   ├── live-updates/       # SSE client hook + event types
     │   ├── notifications/
@@ -720,19 +742,25 @@ viberr/
     ├── schemas/
     │   ├── task-file.schema.ts       # the largest contract: frontmatter, packets, events
     │   ├── project-file.schema.ts
+    │   ├── goal-file.schema.ts        # ruling 99 — the chained-goal file contract
     │   ├── sse-event.schema.ts
     │   ├── github-pat.schema.ts
     │   └── file-diagnostics.ts
     ├── server/
     │   ├── boot.server.ts      # the one startup sequence (dirs, migrations, seed admin,
     │   │                       # recovery, retention, schedule runner, reconcile poller)
+    │   ├── actions/            # action-watchdog (long-running action supervision)
+    │   ├── agents/             # deployment-view (per-project deployment read model)
     │   ├── audit/              # audit-recorder
     │   ├── auth/               # csrf, login, identity, password, oauth provisioning,
     │   │                       # project authority, route guards, user store/admin
     │   ├── config/             # env.server.ts — the ONLY place env is parsed
+    │   ├── controller/         # ruling 99 — controller profile/config, per-turn toolkit,
+    │   │                       # conversation + message store, turn run + lease/queue
     │   ├── db/                 # sqlite, migration runner, transaction, retention
     │   ├── errors/             # AppError + stable machine codes
     │   ├── events/             # sse-broker, event-publisher, projection-events
+    │   ├── insights/           # getInsightsSummary — the one run-analytics query
     │   ├── files/              # store root, watchers, atomic writes, per-file mutex,
     │   │                       # frontmatter, task/project/agent-profile readers+writers,
     │   │                       # KB + skill body injection
@@ -740,10 +768,12 @@ viberr/
     │   │                       # reconciler, reconcile poller, workspace delivery, scope flags
     │   ├── interpretation/     # readiness-policy, diagnostics-policy, freshness-policy
     │   ├── logging/            # logger.server.ts
+    │   ├── ops/                # build info, disk space, maintenance, transcript retention
     │   ├── provenance/         # the ONLY writer/reader of the provenance table
     │   ├── org/                # org users, connections, resources (KB/skills/MCP),
     │   │                       # global agents, store files, org seed
     │   ├── prefs/  theme/      # user preferences; theme cookie
+    │   ├── settings/           # instance-settings
     │   ├── projections/        # rebuilder, rescan, rebuild, board/task queries,
     │   │                       # activity feed, decisions, notifications, review queue,
     │   │                       # policy violations, agent deployments
@@ -767,6 +797,18 @@ viberr/
 
 **Notes on shape, so the next change stays inside it:**
 
+- *(Recounted 2026-08-31, pass 31 — A5.)* **The counts above were wrong in three places and
+  are now measured, not remembered.** `app/routes/` holds **32 route modules** — 23 `.tsx`
+  plus 9 `.ts`, with the 14 `*.test.ts` / 3 `*.test.tsx` co-located suites and the one
+  non-route helper `project-visibility.server.ts` excluded — and `app/routes.ts` declares
+  exactly **32 entries** (31 path/index routes plus the one pathless `palette-shell.tsx`
+  layout), so the two agree. The comment previously said 26; the Completeness section
+  below said 25, and the two disagreeing with each other is what made the drift invisible.
+  `app/features/` holds **18** surfaces, not 16 — `controller/` and `insights/` shipped
+  after the last resync and are added above. `app/server/` holds **25** directories, not
+  18: `actions/`, `agents/`, `controller/`, `insights/`, `ops/` and `settings/` were
+  missing and are added above. Recount before editing these numbers: `ls app/routes/`,
+  `ls -d app/features/*/`, `ls -d app/server/*/`.
 - There is no `app/features/auth/`. Sign-in is one route (`app/routes/login.tsx`) over
   `app/server/auth/` and `app/lib/auth.server.ts`. Do not create one.
 - `app/server/tasks/` is where governed task mutation lives, and `task-actions.server.ts`
@@ -801,12 +843,15 @@ The shipped layout, created at boot from `DATA_ROOT_SUBDIRS`:
 ├── projects/                # authoritative/shared
 │   └── <project-slug>/
 │       ├── project.md
+│       ├── goals/           # ruling 99 — one <goal-id>.md per chained goal
 │       └── tasks/
 │           └── VIB-142/
 │               ├── task.md
 │               └── workspace/        # the agent's git clone — NOT canonical
 ├── agents/                  # system-managed
-│   └── profiles/            # org-level agent profile templates (*.md)
+│   ├── profiles/            # org-level agent profile templates (*.md), incl. controller.md
+│   └── definitions/         # operator.md + controller.md doctrine bodies, written
+│                            # by the boot backfill (seedDefaultAgentAssets)
 ├── runtimes/                # system-managed
 │   ├── claude-home/         # SDK session home + raw NDJSON run logs
 │   └── codex-home/          # ditto; may hold auth.json (a live credential)
@@ -869,6 +914,33 @@ Operational ownership rules:
 - `db/migrations/` applies only to that database, never to primary business truth in files.
 - PATs and encrypted secrets are AES-256-GCM sealed **in SQLite**, with the key from the environment. They never appear in task or project files, in logs, in SSE payloads, or in error messages. *(The prescribed on-disk `auth/` secret directory does not exist and was removed on purpose; the security rule it carried is unchanged and is enforced.)*
 
+### The Controller and Chained Goals
+
+*(Added 2026-08-31, pass 31 — A5. Ruling 99 (owner directive, 2026-08-30) and the two requirements it produced, FR40 and FR41, shipped and were then absent from this document entirely: no `goals/` directory, no `app/server/controller/`, no `app/features/controller/`, no `goal-file.schema.ts`, while `controller.updated` and `goal.updated` were already live SSE events. That is the failure mode ruling 44 exists to stop — a rule readable in only one place is a rule that gets reversed. Every fact below is taken from `planning/discovery-2026-08-31-pass31/docs/03-operator-controller.md` §2–3 and from ruling 99 in `docs/architecture/decisions.md`; it describes what shipped, not what is planned.)*
+
+**One controller per instance, sitting above the operators.** A third profile kind, `kind: controller`, exactly one per instance (`CONTROLLER_PROFILE_ID`). Its template is `agents/profiles/controller.md` and its doctrine body `agents/definitions/controller.md`, with a `FALLBACK_CONTROLLER_DEFINITION` compiled in so a hand-wiped store still refuses correctly rather than running promptless; `resolveControllerConfig` degrades to defaults and reports `profilePresent: false` rather than downing the surface. It carries **no capability matrix** — its runtime authority is the asking user's, so a stored grant row would be a toggle with no effect — and it is **not deployable to a project** (`readTemplate` resolves a controller-kind template as absent, keeping the two-kind deployment world closed). It is **Claude-only, enforced and disclosed**, by the same security decision as `read-github-api`: the toolkit is in-process, so DB handles and sealed credentials never cross a process boundary, and a single-shot plan executor cannot serve a conversation that must read mid-turn. An unavailable Claude backend refuses honestly *in the transcript*. Only org admins modify the controller itself — model, resource grants, instructions, through the org-settings Controller tab, audited as `org.controller.updated`.
+
+**Two surfaces, one machinery.** `/controller` (`app/routes/controller.tsx`) is open to every signed-in user (`?c=<id>` selects a conversation, `?all=1` is the org-admin everyone's-conversations view); `/projects/:slug/controller` (`app/routes/project.controller.tsx`) is a first-class `WORKSPACE_NAV` item — third in the rail, after Board and Review queue, taking the nav to eight — and carries `requireProjectMember` on **its own** loader, not only the layout's, so a single-fetch `?_routes=` request cannot reach it unguarded. `getControllerSurface` (`app/features/controller/controller-query.server.ts`) assembles conversations, transcript and turn state, and — on the project surface only — the goal list. `ControllerPage` renders the list, transcript, composer and `GoalsPanel`; task detail carries a goal chip linking back.
+
+**Authority is the asking user's, resolved live on every tool call.** `buildControllerToolkit` builds an SDK MCP server (`viberr_controller`) per turn, under actor `{ userId, label: "<email> · via controller" }` — the guards bind to the human, the audit row discloses the instrument. Org role for instance tools (users, KBs, skills, MCP connections, global agent templates, audit inspection, run analytics), the project-role matrix through the **same** `assertProjectAction` / `requireAction` guards humans use for board tools; `create_project` is the one instance tool open to any signed-in user (FR5 parity, creator seeded project admin). Nothing is snapshotted: `orgAdmin()` re-resolves per call. Refusals are relayed out loud — a 401/403 becomes `[denied] <the guard's own sentence>`, anything else `[error] …`, and the toolkit instructions tell the model a `[denied]` is **final**. An instance-scope denial also writes `controller.authority.denied`, so instance denials do not read cleaner than project ones. `requireVisible` converts *any* project-access failure into one uniform "not visible" sentence, so missing and forbidden read identically and a probe cannot learn a project exists (R15-4).
+
+**The controller is never an escalation channel.** There is no tool for merge, acceptance, force-accept, packet resolution, or a move into the terminal stage — `move_task` refuses a Done target out loud and points at the task page, because ruling 88's disclosure ceremony is the load-bearing thing chat cannot impersonate. **No tool deletes anything, in either scope.** Secrets never travel through chat (`save_mcp_server` takes no credential); the one exception is relaying a just-minted single-use temporary password, bounded by `pwreset_required`. Policy edits *are* offered, gated on the asker's own `edit-policy`: `ALWAYS_HUMAN`'s `change-project-policy` bounds **agent-initiated** change, and the controller never initiates — it executes an explicit human directive, the same authorization a settings-form click carries.
+
+**Conversations are agent runs.** `controller_conversations` / `controller_messages` are app-owned SQLite in the notifications/sessions family — a transcript is single-writer app state, not board truth — owned by the asking user and readable by that user and live-resolved org admins; project members do not read each other's, and a non-owner gets a 404 shape so "not yours" and "never existed" are indistinguishable. `appendMessage` allocates `seq` as `MAX+1` under the write lock behind a `UNIQUE (conversation_id, seq)` index and publishes the owner-routed SSE `controller.updated`. **One message is one run**: the user message is recorded *first* (whether a run starts or queues is a scheduling fact, not a data one), then a single-flight lease per conversation with a FIFO capped at 8 queued messages — a queue-full refusal is written into the **transcript**, not a toast. The run is an ordinary `agent_runs` row with `kind: "controller"`, `project_slug: ""` and `task_key: <conversation id>` — a scope no task query matches — so NDJSON capture, redaction, token accounting, the run-log console (owner-or-admin gated at the route) and boot orphan finalization are all inherited rather than rebuilt. `disallowedTools` blocks `Read`/`Grep`/`Glob`/`WebFetch`/`WebSearch`: the controller's world is the product, not the disk. Continuity is the provider session plus a bounded recent-exchange digest (30 messages / 24 000 chars, budgeted newest-first then restored chronologically), because unlike an operator the controller has no `task.md` to re-anchor on; a restart-orphaned turn gets an honest "interrupted" note at boot.
+
+**Chained goals: one outcome, an ordered chain of tasks.** Canonical at `projects/<slug>/goals/<goal-id>.md` (`app/server/files/goal-writer.server.ts`, `app/schemas/goal-file.schema.ts`). Frontmatter carries `status` (`active|paused|attention|completed|cancelled`), `onFailure` (`pause|continue`), `createdBy` and `links[{index,title,goal,taskKey,status,note}]` with link status `pending|active|done|failed|skipped`; the body is a description plus a newest-first timeline of narration bullets, and unknown keys round-trip. The back-reference is the task's own `goalRef: {goalId, linkIndex}` frontmatter, projected to `task_projections.goal_id` / `goal_link_index` so nothing joins through files at read time — the project→task shape: the chain file owns the list, the task carries its position.
+
+- **Tasks are created lazily**: link 1 with the goal, each next link when the previous one completes. `createGoal` holds a goals lock across id minting → link 1's `createTask` → the goal-file write, and creates the task *first* so a refusal leaves no orphan file. `GOAL_MAX_LINKS = 20`.
+- **`reconcileGoal` is the one convergent engine** — hooks and the runner both merely say "look at this goal now". It derives each linked task's state from the **canonical file**, not the projection (archived → failed, terminal stage → done, missing → gone), parks the chain in `attention` on a failed link when `onFailure: pause` or marks the link `skipped` and rides past it when `continue`, completes the goal when every link has settled and the status is not `attention` (audit `goal.completed`), and starts the next link under a per-link lock that re-checks the chain's status *inside* it and again after `createTask` returns, so a cancel or pause committing in that window is honoured.
+- **It is hooked where task truth changes**: transition, archive and acceptance writes, plus a sweep over `goal_projections WHERE status IN ('active','attention')` run once at boot and then every 60 seconds by the goal runner, which is what catches out-of-band file edits.
+- **Authority follows FR39's precedent for unattended action.** Creating a chain requires the asking user's own `create-task`. Advancement runs under the *recorded creator* and **re-proves** their live `create-task` at every step; a lost authority parks the chain in `attention` and notifies rather than escalating. Redirect — pause, resume, cancel, skip a link, retry a link, edit or add pending links — is the creator or a member holding `run-agents`; the project route accepts only the first five ops and the rest are controller-tool-only. **Nothing deletes a goal**; terminal chains stay readable.
+- **Projection and events**: `goal_projections`, rebuilt by the goal rebuilder with link statuses re-derived against live task rows and goals walked *after* tasks so they read fresh rows. `goal.updated` is emitted only from that rebuilder — which is why the writer's no-op-write guard matters.
+- Every link's task is a full ordinary task and gets its own operator through `createTask`'s existing auto-invoke. The controller sits **above** operators — brief, trigger, steer through `run_agent_on_task` / `comment_on_task` — and never duplicates one.
+
+**Schedules are one-shot occurrences baked into the run controls.** There is no cron, no cadence and no recurrence anywhere in the product: every entry is a single occurrence with an absolute `dueAt`, a fired occurrence is terminal, and there is no "next run time" field. Entries are canonical in the task file's `frontmatter.schedules` and mirrored to `task_projections.schedules_json` so the runner need not read every file; the field is `action` (`run-operator | run-agent`), and it pins **no backend and no autonomy** — the agent arm pins only the profile identity and everything else resolves from the live deployment at fire time (ruling 94 / R22, unchanged by ruling 98). There is **no scheduled-actions panel**: each run control carries a when-picker (now / 5m / 1h / 6h / 24h) that flips Run into Schedule and lists its own pending entries with a cancel confirm. The runner ticks every 60 seconds from boot behind a symbol guard so a reload cannot arm a second interval, and claims an occurrence by writing `pending → claimed` **into the file under lock** before any run is enqueued, finalising to `fired` only after the enqueue returns; a claim older than a derived lease is treated as crashed and re-driven. Creation is human-only through the route — `CronCreate` / `CronDelete` / `CronList` / `ScheduleWakeup` are denied builtins, because scheduling is Viberr's job, not the agent's.
+
+**Module homes**: `app/server/controller/` (profile/config, per-turn toolkit, conversation store, turn run), `app/server/tasks/goal-actions.server.ts` (authority, `reconcileGoal`, the runner), `app/server/files/goal-writer.server.ts`, `app/schemas/goal-file.schema.ts`, `app/server/tasks/schedule.server.ts`, `app/features/controller/`, `app/routes/controller.tsx` and `app/routes/project.controller.tsx`.
+
 ### Requirements to Structure Mapping
 
 **FR Category Mapping** *(resynced 2026-07-25 to the shipped module names)***:**
@@ -880,14 +952,17 @@ Operational ownership rules:
 - Oversight views & human governance → `app/features/board`, `app/features/review`, `app/features/task-detail`, `app/features/live-updates`
 - GitHub delivery & traceability → `app/server/github`, `app/server/secrets`, `app/features/github`, `app/features/task-detail`
 - Integrity, audit & recovery → `app/server/audit`, `app/server/logging`, `app/server/errors`, `app/server/projections`, `app/server/interpretation`
+- Instance control & goal chains (FR40, FR41) → `app/server/controller`, `app/server/tasks/goal-actions.server.ts`, `app/server/files/goal-writer.server.ts`, `app/features/controller` *(added 2026-08-31, pass 31 — ruling 99)*
 
 **Subsystem Mapping.** Four subsystems the PRD mandates were absent from this document
-entirely, which is how they ended up with no named home. They are:
+entirely, which is how they ended up with no named home *(a fifth was added 2026-08-31 —
+see the last bullet)*. They are:
 
 - **Decision & blocking packets** (FR26, FR27) — the packet shape is in `app/schemas/task-file.schema.ts` (stable option `kind`s, never English titles); generation and resolution are in `app/server/tasks/`; the surfaces are `app/features/task-detail/decision-packet.tsx` and `app/features/review/`.
 - **The operator agent** (FR18, FR20, FR26) — `app/server/tasks/operator-actions.server.ts` plus `operator-toolkit.server.ts` (the tool surface it is allowed to act through) and `app/server/runtimes/operator-run.server.ts`. The operator re-anchors on a fresh task snapshot every turn; it does not rely on provider-side history.
 - **Specialist execution** (FR19, FR21, FR22) — `app/server/tasks/specialist-run.server.ts`, `agent-toolkit.server.ts`, `agent-reply.server.ts`, `specialist-tool-policy.ts`, over the adapters in `app/server/runtimes/`.
 - **Context resources: knowledge bases, skills, and MCP servers** (FR9) — the org-level catalog and store are `app/server/org/`, injection into a run is `app/server/files/kb-injection.server.ts` and `skill-body.server.ts`, MCP wiring is `app/server/tasks/specialist-mcp.server.ts`, and the browsing surface is `app/features/kb-browser/`. A grant resolves **by store directory**, never by display name.
+- *(Added 2026-08-31, pass 31 — a fifth, and the same failure repeating: it shipped 2026-08-30 and was homeless here for a pass.)* **The instance controller and chained goals** (FR40, FR41; ruling 99) — `app/server/controller/` for the profile, per-turn toolkit, conversation store and turn run; `app/server/tasks/goal-actions.server.ts` for chain authority and the reconcile engine; `app/server/files/goal-writer.server.ts` and `app/schemas/goal-file.schema.ts` for the canonical `projects/<slug>/goals/<id>.md` contract; the surfaces are `app/features/controller/`, `app/routes/controller.tsx` and `app/routes/project.controller.tsx`. See **The Controller and Chained Goals** above.
 
 **Cross-Cutting Concerns:**
 
@@ -1061,8 +1136,12 @@ including the largest one — so it is now maintained the other way round: the t
 generated from what exists, and a divergence is a doc bug to fix, not scope to build.
 
 - root config/build files: listed as they exist, including the ones deliberately absent
-- app route and feature surfaces: all 25 routes and 16 feature folders named
-- server module boundaries: all 18 server directories named, with what each owns
+- app route and feature surfaces: all **32** route modules and **18** feature folders named
+  *(recounted 2026-08-31, pass 31 — this line said 25 routes and 16 folders while the tree
+  itself said 26 routes; both were stale, and two sibling counts disagreeing is exactly how
+  the staleness stayed invisible. See the recount note under the structure tree.)*
+- server module boundaries: all **25** server directories named, with what each owns
+  *(recounted 2026-08-31, pass 31 — this line said 18, and the tree it summarised listed 19)*
 - SQLite migration location defined
 - test organization defined
 - runtime data root: matches `DATA_ROOT_SUBDIRS`

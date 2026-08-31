@@ -120,6 +120,7 @@ export function baseTaskFrontmatter(
     schedules: [],
     stage: "triage",
     previousStageId: null,
+    heldAtStage: null,
     goalRef: null,
     readiness: "input_required",
     waiting: "human",
