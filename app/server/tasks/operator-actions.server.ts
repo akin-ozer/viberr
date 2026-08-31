@@ -447,6 +447,44 @@ export function resolveOperatorAuthority(
   };
 }
 
+/**
+ * F31-C2 — the ONE absent-polarity table. Four capabilities postdate live
+ * operator deployments, and their canon resolves an ABSENT grant to a derived
+ * default rather than "off" (each dedicated gate below documents why). That
+ * split was a standing trap: every consumer that reached for the plain
+ * `gate()` silently re-broke one of them — three separate call sites were
+ * individually corrected for `dispatch-agents` alone, and a fourth added
+ * later would have re-broken dispatching on every pre-rework project. The
+ * table lives inside `gate()` itself, so any consumer may now resolve any
+ * capability through it and get the same answer the dedicated gate gives.
+ * Returns null for the ordinary absent-means-off family.
+ */
+function absentPolarityGate(
+  authority: OperatorAuthority,
+  capabilityId: string,
+): Gate | null {
+  switch (capabilityId) {
+    case "deliver-review-pr":
+      // R15-9: derived from the project's governance, not a constant — and
+      // deliberately NOT promoted by full autonomy (only an explicit stored
+      // mode rides the promotion in the mode arm below).
+      return absentDeliverReviewPrMode(authority.humanGatedBeforeWork);
+    case "dispatch-agents":
+      // Ruling 98(b): dispatch IS the old assign/summon pair's default.
+      return "direct";
+    case "update-task-branch":
+      // Bringing the branch up to date is delivery's sibling — absent
+      // follows whatever delivery resolves to (update-branch-operator).
+      return deliverGate(authority);
+    case "use-web-search-fetch":
+      // Catalog default `direct` — absent means granted; only an explicit
+      // off/human withholds (operatorWebWithheld).
+      return "direct";
+    default:
+      return null;
+  }
+}
+
 /** Resolve one capability to direct / recommend / deny for this authority. */
 export function gate(authority: OperatorAuthority, capabilityId: string): Gate {
   // A4: no operator deployed ⇒ no operator authority, full stop. The
@@ -455,6 +493,12 @@ export function gate(authority: OperatorAuthority, capabilityId: string): Gate {
   // both gates answer from — a future default in that branch cannot quietly
   // hand a project that deployed no operator a working capability.
   if (!authority.deployed) return "deny";
+  if (!authority.policy.has(capabilityId)) {
+    // F31-C2: the absent-means-derived family resolves here for EVERY
+    // consumer, not only the callers that knew to use a dedicated gate.
+    const absent = absentPolarityGate(authority, capabilityId);
+    if (absent !== null) return absent;
+  }
   const mode = authority.policy.get(capabilityId) ?? "off";
   if (mode === "direct") return "direct";
   if (mode === "recommend") {
@@ -503,6 +547,10 @@ export function deliverGate(authority: OperatorAuthority): Gate {
   // its own. Derive the same answer the preset would have given instead, so the
   // rule is "what does this project's governance say", not "when was it made".
   // Shared with the policy surface so the two can never disagree (F15-20).
+  // F31-C2: `gate()` now answers the absent case identically through
+  // `absentPolarityGate`; this explicit arm stays because `absentPolarityGate`
+  // calls THIS function for `update-task-branch` (avoiding the loop), and as
+  // the documented front for delivery-specific reasoning.
   return absentDeliverReviewPrMode(authority.humanGatedBeforeWork);
 }
 
@@ -521,11 +569,9 @@ export function deliverGate(authority: OperatorAuthority): Gate {
  * default); an undeployed operator stays denied (A4).
  */
 export function dispatchGate(authority: OperatorAuthority): Gate {
-  if (!authority.deployed) return "deny";
-  if (authority.policy.has("dispatch-agents")) {
-    return gate(authority, "dispatch-agents");
-  }
-  return "direct";
+  // F31-C2: the plain gate() carries the same absent polarity now; this
+  // front remains as the named, documented resolver.
+  return gate(authority, "dispatch-agents");
 }
 
 // ------------------------------------------------------------- helpers

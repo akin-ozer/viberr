@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -709,6 +710,95 @@ describe("startSpecialistRun", () => {
     // reverted to the live profile's Claude.
     const later = await runOnce();
     expect(later.backend).toBe("codex");
+  });
+
+  /**
+   * T7 (pass 31) — the resolution order is written once, as
+   * `backendOverride ?? pinnedBackend ?? live deployment ?? snapshot`, and only
+   * three of its four steps had a test. The pair the tests above never put in
+   * conflict is the FIRST one: a `retry_other_backend` on a task that is
+   * ALREADY pinned (live 2026-08-31: a Codex quota failure pinned Claude, and
+   * the next recovery packet has to be able to send it back). If the pin won
+   * there, the human's explicit "retry on the other backend" would be a no-op
+   * that reported success.
+   */
+  it("T7: an explicit backendOverride outranks an EXISTING opposite pin — and re-pins to it", async () => {
+    // Canary: reorder the resolver to `engagement.pinnedBackend ??
+    // input.backendOverride ?? …` and this run comes back on codex.
+    await assign(); // live profile + snapshot: claude
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        const delivering = deliveringEngagement(parsed.frontmatter);
+        if (delivering) delivering.pinnedBackend = "codex";
+      },
+    );
+
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    const run = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: "claude" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      actor(store.users.arda),
+    );
+
+    // The override won over the pin …
+    expect(run.backend).toBe("claude");
+    const after = deliveringEngagement(
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.frontmatter,
+    );
+    // … and it MOVED the pin, so the new choice is the one that sticks.
+    expect(after?.pinnedBackend).toBe("claude");
+  });
+
+  /**
+   * T7 (pass 31) — the last step of the order: the engagement's own recorded
+   * backend is the FLOOR. `follows the CURRENT deployment backend` above proves
+   * the live profile beats the snapshot; nothing proved the snapshot is used at
+   * all, which is the branch a profile deleted between engage and run lands on.
+   */
+  it("T7: with no override, no pin and no live profile, the engagement SNAPSHOT is the floor", async () => {
+    // Canary: replace the `(engagement.backend === "codex" ? "codex" : "claude")`
+    // tail with a bare `"claude"` default and this run comes back on claude.
+    await assign(); // snapshot: claude
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        const delivering = deliveringEngagement(parsed.frontmatter);
+        // The snapshot says codex; no pin was ever set.
+        if (delivering) delivering.backend = "codex";
+      },
+    );
+    // The profile is deleted from project.md — nothing live to resolve.
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo: null,
+      agents: [],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    const run = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      actor(store.users.arda),
+    );
+    expect(run.backend).toBe("codex");
   });
 
   it("denies reviewer + viewer (admin|maintainer only)", async () => {
@@ -2992,8 +3082,15 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
       await runDev();
 
-      // The repo's own catalog is gone from the working tree…
-      expect(existsSync(path.join(ws, ".claude", "settings.json"))).toBe(false);
+      // The repo's own catalog is gone from the working tree — F31-C4: the
+      // settings file that remains is VIBERR'S OWN (CLAUDE.md excludes only,
+      // never hooks), written by the mount after the strip.
+      const rewrittenSettings = z
+        .record(z.string(), z.unknown())
+        .parse(
+          JSON.parse(readFileSync(path.join(ws, ".claude", "settings.json"), "utf8")),
+        );
+      expect(Object.keys(rewrittenSettings)).toEqual(["claudeMdExcludes"]);
       expect(existsSync(path.join(ws, ".claude", "skills", "repo-rogue"))).toBe(false);
       expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
         "granted-craft",
@@ -3063,7 +3160,16 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       );
 
       expect(confinement.skills).toEqual(["granted-craft"]);
-      expect(existsSync(path.join(ws, ".claude", "settings.json"))).toBe(false);
+      // F31-C4: the agent-written hooks settings died with the strip; the file
+      // now present is viberr's excludes-only rewrite.
+      const resumedSettings = readFileSync(
+        path.join(ws, ".claude", "settings.json"),
+        "utf8",
+      );
+      expect(resumedSettings).not.toContain("SENTINEL-AGENT-HOOK");
+      expect(
+        Object.keys(z.record(z.string(), z.unknown()).parse(JSON.parse(resumedSettings))),
+      ).toEqual(["claudeMdExcludes"]);
       expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
         "granted-craft",
       ]);

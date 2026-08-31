@@ -221,6 +221,43 @@ describe("scheduleTaskAction", () => {
     expect(listAuditEvents(store.db).some((e) => e.action === "task.schedule.created")).toBe(true);
   });
 
+  /**
+   * T17 (pass 31) — UC-20, verified live: "Run operator in 5 min" wrote a
+   * schedules entry carrying WHO scheduled it, and the task page shows that
+   * attribution on the pending row. Nothing read `createdBy`/`createdByLabel`
+   * back off a real `scheduleTaskAction` — the only occurrences in this file
+   * are hand-written `rawSchedule()` literals, which never exercise the writer.
+   * A schedule fires an autonomous operator turn minutes later; "who armed it"
+   * is the audit trail for that turn.
+   */
+  it("T17: the created entry records WHO scheduled it (creator attribution round-trips)", async () => {
+    // Canary: drop `createdByLabel: actor.label` (or swap `createdBy` for
+    // "system") in scheduleTaskAction and this reads the wrong author back.
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await scheduleTaskAction(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+        prompt: "re-check the review queue",
+      },
+      actor(),
+      dctx(),
+    );
+
+    // Read it off the FILE, not the returned object — the canonical store is
+    // what the runner and the task page both read.
+    const stored = schedules("VIB-1")[0]!;
+    expect(stored.createdBy).toBe(store.users.elif.id);
+    expect(stored.createdByLabel).toBe("Elif Demir");
+    expect(stored.prompt).toBe("re-check the review queue");
+    // …and the timeline names the human too, so the arming is visible in situ.
+    expect(timeline("VIB-1").some((e) => e.actor?.kind === "human")).toBe(true);
+  });
+
   it("R22: pins no autonomy or backend — the run resolves the live profile at fire time", async () => {
     // R22 supersedes R19-A's schedule-time clamp: the entry stores nothing to
     // clamp, so the fired run resolves AND clamps against whatever operator
@@ -344,6 +381,47 @@ describe("cancelScheduledAction", () => {
     // Idempotent — a second cancel is a no-op.
     expect((await cancelScheduledAction(store.db, { projectSlug: store.slug, taskKey: "VIB-1", scheduleId: "sch_test1" }, actor(), dctx())).cancelled).toBe(false);
   });
+
+  /**
+   * T17 (pass 31) — cancel means the run NEVER HAPPENS, which the test above
+   * does not check: it asserts the status flip and the audit row, both of which
+   * a "cancel, then fire anyway" bug would leave intact. The occurrence here is
+   * already DUE when it is cancelled — the only window where the distinction
+   * between "marked cancelled" and "never fired" is observable, and the window
+   * a human uses (they cancel because the run is about to start).
+   */
+  it("T17: a cancelled schedule is never fired — no run starts and firedAt stays null", async () => {
+    // Canary: drop the `status !== "pending"` guard from the fire path's claim
+    // (schedule.server.ts) and this fires a cancelled occurrence.
+    writeTask(store.dataRoot, store.slug, {
+      // Already due, not in the future: the cancel has to beat the tick.
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", schedules: [rawSchedule()] }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const res = await cancelScheduledAction(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", scheduleId: "sch_test1" },
+      actor(),
+      dctx(),
+    );
+    expect(res.cancelled).toBe(true);
+
+    const tick = await fireDueSchedules(store.db, dctx());
+    expect(tick.fired).toBe(0);
+
+    const after = schedules("VIB-1")[0]!;
+    expect(after.status).toBe("cancelled");
+    // P11-75: a cancelled occurrence carries no fire timestamp — the field is
+    // what every surface reads to say "this ran".
+    expect(after.firedAt).toBeNull();
+    expect(after.claimedAt).toBeNull();
+    // And the thing that actually matters: no operator turn was started.
+    expect(operatorRunCount()).toBe(0);
+    expect(
+      listAuditEvents(store.db).some((e) => e.action === "task.schedule.fired"),
+    ).toBe(false);
+  });
 });
 
 describe("fireDueSchedules", () => {
@@ -382,6 +460,53 @@ describe("fireDueSchedules", () => {
 
     // Idempotent — a second pass finds nothing due (already fired).
     expect((await fireDueSchedules(store.db, dctx())).fired).toBe(0);
+  });
+
+  /**
+   * T17 (pass 31) — the claim protocol's whole reason for existing is that two
+   * ticks can be in flight at once (the boot pass and the interval; an HMR
+   * reload; a slow drive overlapping the next tick). Every existing test drives
+   * `fireDueSchedules` SEQUENTIALLY, so the in-lock re-check
+   * (`target.status !== "pending" && !isStaleClaim(target)`) has never been put
+   * under the race it was written for. One occurrence must produce ONE claim
+   * and ONE operator run, whichever tick wins.
+   *
+   * The trigger is asserted alongside it: a scheduled fire is not an ordinary
+   * react, and the operator's prompt has to say so (B-WF3) — F11 this pass was
+   * the operator confabulating "this scheduled run" on runs that were nothing
+   * of the kind.
+   */
+  it("T17: two ticks racing one due occurrence claim it EXACTLY once — one operator run, one audit row", async () => {
+    // Canary: drop the in-lock `status !== "pending"` re-check in the fire
+    // path and both ticks claim, producing two operator runs.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        schedules: [rawSchedule({ id: "sch_raced", prompt: "re-check before standup" })],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const [first, second] = await Promise.all([
+      fireDueSchedules(store.db, dctx()),
+      fireDueSchedules(store.db, dctx()),
+    ]);
+    // Exactly one tick got the occurrence — either one may win.
+    expect(first.fired + second.fired).toBe(1);
+
+    await waitForSchedule("VIB-1", "sch_raced", "fired");
+    expect(schedules("VIB-1")[0]!.claimedAt).toBeNull();
+    const fired = listAuditEvents(store.db).filter((e) => e.action === "task.schedule.fired");
+    expect(fired).toHaveLength(1);
+    expect(fired[0]!.details?.outcome).toBe("claimed");
+    // ONE operator turn, not two — the cost of a lost race is a duplicate
+    // autonomous run on the same task.
+    expect(operatorRunCount()).toBe(1);
+
+    // …and that run is a SCHEDULED one carrying the reason it was armed with.
+    const spec = startedRunSpecs().find((s) => s.kind === "operator")!;
+    expect(spec.prompt).toContain("SCHEDULED re-check");
+    expect(spec.prompt).toContain("re-check before standup");
   });
 
   it("P14-RV-03: an ARCHIVED task never fires — the run is retired, not started", async () => {

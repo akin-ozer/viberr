@@ -12,7 +12,9 @@ export default [
 
   // F20-30: the top-level authenticated surfaces that render OUTSIDE the
   // workspace layout — the org-settings tabs and the two URL-addressable
-  // PageOverlays (shell spec §4.6 / home spec §5.11). Without this wrapper the
+  // PageOverlays (historical: shell spec §4.6 / home spec §5.11 in the
+  // docs/build/specs set deleted by c1acf2c; overlay behavior is canon in
+  // planning-artifacts/ux-design-specification.md). Without this wrapper the
   // ⌘K palette — which `home-page.tsx` calls "one shortcut app-wide" — never
   // reached them: a viewer on /profile had to navigate back to a shell first.
   // The pathless layout keeps their URLs unchanged and mounts only the shortcut

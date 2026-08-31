@@ -9,6 +9,7 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -1065,6 +1066,118 @@ describe("resolvePacket kind matrix", () => {
       texts.some((t) => t.includes("**Decision:** Retry on Claude Code")),
     ).toBe(true);
   });
+
+  /**
+   * T7 (pass 31) — the packet is where the STICKY switch is actually decided,
+   * and the test above stops one field short of it. It asserts the snapshot
+   * (`engagement.backend`) moved, which a plain profile edit also does; the
+   * pin (`pinnedBackend`) is the thing that makes the human's choice outrank
+   * the live profile on every later run, and no test connected the two.
+   *
+   * Live 2026-08-31 (UC-2): a Codex quota error raised a recovery packet, the
+   * human picked "Retry on Claude", and the switch had to survive the fact
+   * that the Developer profile was still deployed on Codex.
+   */
+  it(
+    "T7/F27-B1: resolving retry_other_backend PINS the engagement — the switch outlives the live profile",
+    { timeout: 20_000 },
+    async () => {
+      // Canary: drop the `engaged.pinnedBackend = input.backendOverride`
+      // write-back in specialist-run and the pin assertion fails; keep it but
+      // reorder the resolver to prefer the live deployment and the second run
+      // comes back on codex.
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      const { startAgentRun } = await import("./specialist-run.server");
+      const { readProjectFile } = await import("~/server/files/project-writer.server");
+      installFakeRuntime();
+      const store = prepared();
+      // The Developer profile is DEPLOYED ON CODEX — the backend the retry
+      // exists to escape. Without a pin, every later run reverts to it.
+      const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...project.parsed.frontmatter,
+        repo: null,
+        agents: [
+          {
+            profileId: "dev",
+            capabilities: [],
+            extras: [],
+            definition: {
+              kind: "specialist",
+              name: "dev",
+              role: "developer",
+              backends: ["codex"],
+              model: "gpt-5.6-terra",
+              effort: "",
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+      withTask(
+        store,
+        {
+          stage: "impl",
+          waiting: "human",
+          readiness: "blocked",
+          engagements: [
+            { profileId: "dev", backend: "codex", role: "developer", delivers: true, verdictCapable: false },
+          ],
+        },
+        {
+          type: "blocked",
+          kind: "Blocked decision",
+          from: "operator",
+          title: "The Codex run failed — pick a recovery path",
+          body: "",
+          observations: [],
+          options: [
+            { kind: "retry_other_backend", t: "Retry on Claude Code", d: "", rec: true, backend: "claude" },
+            { kind: "redirect", t: "Redirect", d: "", rec: false },
+          ],
+        },
+      );
+
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      );
+
+      const read = () =>
+        readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+          .parsed.frontmatter;
+      const { listRunsForTaskRows } = await import("~/server/runtimes/run-store.server");
+      const first = listRunsForTaskRows(store.db, store.slug, "VIB-1");
+      expect(first).toHaveLength(1);
+      expect(first[0]!.backend).toBe("claude");
+      interruptRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: first[0]!.id },
+        actor(store.users.murat),
+      );
+
+      // The packet's choice was recorded as a PIN, not just a snapshot refresh.
+      expect(deliveringEngagement(read())?.pinnedBackend).toBe("claude");
+
+      // …so the next ordinary run stays on Claude even though the deployed
+      // profile still says Codex.
+      const later = await startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      );
+      interruptRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: later.runId },
+        actor(store.users.murat),
+      );
+      expect(later.backend).toBe("claude");
+    },
+  );
 
   // The recovery packet the operator authors on a closed-without-merge PR
   // (pr-diverged trigger): rework / archive / archive+delete-branch.

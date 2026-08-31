@@ -32,6 +32,16 @@ workflowType: ux-design
 
 <!-- UX design content will be appended sequentially through collaborative workflow steps -->
 
+> **Line-citation drift — do not trust a `ux-design-specification.md:NNN` citation without re-checking it.** *(Recorded 2026-08-31, pass 31 — A4a.)* Every line citation to this file that was written into a code comment **before 2026-08** is stale, and in one direction only: the amendment blocks inserted since keep pushing the cited text further down. Measured across the tree on 2026-08-31 the drift was uniformly **+37 lines**; this pass then inserted its own amendments above the cited passages, so those same citations are now **+87** off. Exactly three such citations exist in the tree, and these are their real targets in this revision of the document:
+>
+> | Code comment | Cites | Real target here | What is actually at it |
+> |---|---|---|---|
+> | `app/features/shell/nav.ts:48` | `:824-825` | **911-912** | §Navigation Patterns → *Context preservation* — "Filters, queue position, and recent focus should not reset unnecessarily" |
+> | `app/features/board/board-filters.ts:205` | `:846-847` | **933-934** | §Additional Patterns → *Empty states* — "explain what is absent, why it matters, and what the user can do next" |
+> | `app/features/shell/route-pending-bar.tsx:9` | `:849-850` | **936-937** | §Additional Patterns → *Loading and refreshing* — "preserve layout stability … skeletons or placeholder structures are preferable to large spinners" |
+>
+> Those citations live in **code**, so this document cannot repair them from here — this note is the correction of record. Two things follow. First, the **named** citations in the tree (`§Accessibility Strategy`, `§Breakpoint Strategy`, `§State Semantics`) are unaffected and still resolve: prefer a section name over a line number in any new citation, because a section name cannot drift out from under an amendment, and the numbers above will themselves go stale the next time this file is amended. Second, the `§4.6` / `§5.11`-style section numbers in code comments (`app/routes.ts:15`, `org-settings-page.tsx:20`, `board-page.tsx:962`, `rich-text.tsx:6`, `mini-modal.tsx:9`) do **not** address this document at all — they belong to the deleted `docs/build/specs/*.md` set, removed in commit `c1acf2c` (2026-07-22) and still readable with `git show c1acf2c^:docs/build/specs/<name>.md`.
+
 ## Executive Summary
 
 ### Project Vision
@@ -255,6 +265,14 @@ The design system should begin with a small, disciplined foundation rather than 
 >
 > The app is deliberately right here and the documents are the ones being corrected (`planning/README.md`'s canon rule). The integrity gate is `app/app.css.test.ts`, which checks token integrity and contrast against the real stylesheet. Never copy a value out of `design/*.html`; read the `:root` block.
 
+> **Amended 2026-08-31 (pass 31) — the "no spacing scale and no elevation scale" bullet above is itself stale; design pass 30 built both.** The note it corrects was true on 2026-08-06 and false by 2026-08-27, which is the failure the Typography note already names: *a superseding note that has itself gone stale is worse than the advisory text it supersedes.* Re-verified against `app/app.css` on 2026-08-31:
+>
+> - **Spacing IS a scale now — nine steps:** `0 · .125 · .25 · .375 · .5 · .75 · 1 · 1.5 · 2` rem. Design pass 30 (`6ca0f25`, 2026-08-27) snapped ~760 `gap` / `padding` / `margin` values onto it. Sub-`.1rem` optical nudges and negative overlaps were deliberately left literal, and a handful of genuine one-offs survive. The steps are a *convention carried by the sheet*, not a `--space-*` token family: there is nothing to `var()`, and `gap: .5rem` is meant to say more at the call site than a token name would. "Match the surrounding component's rhythm" is still the right instinct — the rhythm is now one of these nine.
+> - **Elevation IS a scale now — five tokens**, declared in the `:root` block and described there as four resting steps plus one interaction step, chosen by z-position: `--shadow-ring` · `--shadow-card` (resting surfaces) · `--shadow-menu` (anchored popovers, calendar, stage menu) · `--shadow-pop` (modals, toast, page overlays) · `--shadow-lift` (the hover-raise every lifting surface shares). The bullet above lists only ring/card/pop, so it also under-counts the "tokens the app added that no spec records" line.
+> - The type scale the original note never mentioned is **13 steps** (`.62 … 1.9` rem), documented at the token block and locked in `app/app.css.test.ts`.
+>
+> The canon rule is unchanged: read the `:root` block, not this table. What changed is that the instruction at the head of this section — "start with semantic tokens for color, typography, spacing, radius, elevation …" — was **eventually taken in full**, three passes late.
+
 The initial component inventory should be intentionally narrow and tied directly to real product surfaces: buttons, inputs, filters, command surfaces, badges, cards, panels, tabs, tables, drawers, dialogs, timeline blocks, decision packets, task-health indicators, and execution-profile displays. The system should avoid rebuilding a full generic component library before those core surfaces are proven.
 
 Because Viberr is a browser-based web application optimized for desktop workflows and screen sizes, the system should support compact layouts, strong keyboard behavior, clear focus handling, and progressive disclosure. These interaction rules are part of the design-system foundation, not implementation detail.
@@ -368,6 +386,19 @@ Both light and dark themes should be supported, but semantic meaning must remain
 >
 > The two radius tightenings were deliberate at port time; the rest are simply tokens the port did not take. Nothing in the product can reach for the unported four by accident: the porting rule is **a `var(--x)` that is not defined in `:root` is a bug, not a style choice**, and `app/app.css.test.ts` enforces it with no allowlist ("every var(--x) reference resolves to a declared token"). So the drift is a *documentation* hazard only — nobody's build breaks, a reader is just told the wrong number. Which is exactly why it is written down here instead of left for the next reader to re-derive: the mock stays as the visual reference it is good at being, and the token values are read from the stylesheet.
 
+> **Amended 2026-08-31 (pass 31) — "the shipped radius vocabulary is exactly four" is no longer true; it is six.** Design pass 30 (`61da697`, 2026-08-27) added two steps between the existing ones so every adjacent pair is a real jump. Re-verified against `app/app.css`'s `:root` on 2026-08-31, in declaration order:
+>
+> | Token | Value | What it is for (the sheet's own words) |
+> |---|---|---|
+> | `--radius-small` | `6px` | sub-28px icon buttons, chips, kbd, calendar days |
+> | `--radius-button` | `8px` | inputs, buttons, menu rows |
+> | `--radius-box` | `12px` | nested sub-cards, popovers, the console, toast |
+> | `--radius-chip` | `999px` | full pills |
+> | `--radius-card` | `16px` | top-level cards |
+> | `--radius-panel` | `22px` | modals and page panels |
+>
+> `--radius-small` and `--radius-box` are the two additions; `card 16` / `panel 22` and the never-ported `--radius-large` are unchanged, so the row above still reads correctly against the mock — only the count sentence went stale. Deliberate non-steps survive and are documented in the sheet itself: `50%` for a true circle, `0`, `inherit`, the 2–3px micro radii on meters and inline highlights, and 4px on a 16px box such as the checkbox — proportional to a tiny box rather than steps. Everything else rounds through a token: of the 226 `border-radius` declarations counted on 2026-08-31, all but a couple of dozen are `var(--radius-*)`, and every literal among the rest falls in that sanctioned set. Read `app/app.css`'s `:root` for the values and `app/app.css.test.ts` for whatever the gate currently locks; do not re-derive a count from this note.
+
 ### Typography System
 
 The typography system should reinforce precision, calmness, and rapid scanning. Viberr is a scan-first interface, not a read-first editorial product, so the hierarchy should prioritize status labels, ownership, waiting state, packet headings, and operational summaries before longer narrative content.
@@ -402,6 +433,15 @@ Viberr should use a disciplined spacing system that balances information density
 The foundation should use an 8px base spacing system with 4px sub-steps for tighter internal component structure. This provides enough precision for compact board cards, dense metadata zones, and layered task views while preserving consistency across components.
 
 > **Superseded — the ported design system defines no spacing tokens and no 12-column grid.** `app/app.css` uses rem values chosen per component and CSS grid/flex layouts sized to their content. Match the surrounding component's rhythm rather than introducing a spacing scale now; a retrofit would touch every surface for no user-visible gain. The intent below — spacing reinforces hierarchy, urgent states get clearer rather than louder — is what actually binds.
+
+> **Amended 2026-08-31 (pass 31) — the retrofit happened, and the note above is half stale.** Design pass 30 (`6ca0f25`, 2026-08-27) did exactly the sweep this note advised against, and it was worth doing: ~760 `gap` / `padding` / `margin` values were snapped onto a **nine-step spacing scale** — `0 · .125 · .25 · .375 · .5 · .75 · 1 · 1.5 · 2` rem — re-measured against `app/app.css` on 2026-08-31, where those nine are the only values that reach double-digit usage. So:
+>
+> - **"No spacing scale" is now false.** "Match the surrounding component's rhythm" still holds as advice, but the rhythm is one of those nine steps, and a new value that is not a step is drift rather than a judgement call. Sub-`.1rem` optical nudges, negative overlaps and a small tail of one-site values stay literal on purpose; what the scale exists to prevent is a tenth value quietly becoming a step nobody chose.
+> - **"No spacing tokens" is still true**, and the distinction matters: the scale is a convention the sheet keeps, not a `--space-*` token family. There is nothing to `var()`, and `gap: .5rem` reads better at the call site than a token name would.
+> - **"No 12-column grid" is still true.** Zero `repeat(12, …)` declarations exist; the "12-column grid for major page structures" bullet below remains unbuilt, and layouts are still sized to their content.
+> - The `8px` base with `4px` sub-steps prescribed above never shipped in those units, but the shipped scale is the same idea at a 16px root: `.5rem` = 8px, `.25rem` = 4px, `.125rem` = 2px. The prescription was directionally right; the units are rem.
+>
+> The intent sentence at the end of the superseded note is unchanged and still binds.
 
 The layout should be optimized for browser-based desktop workflows and screen sizes:
 - 12-column grid for major page structures
@@ -623,6 +663,16 @@ Semantic product patterns are reusable state and meaning systems that can appear
 - expresses current owner, role, and execution context
 - appears in board cards, task headers, and reassignment or packet contexts
 
+> **Amended 2026-08-31 (pass 31) — "reassign" is retired vocabulary; the verb is DISPATCH.** *(Ruling 98, owner directive 2026-08-29, `docs/architecture/decisions.md`; it amends FR14 and FR39 in the PRD.)* This note is recorded once, here, because the Execution Profile Pattern is where the retired concept was most load-bearing — but it governs **every** occurrence of "reassign" in this document. Nothing below is deleted: the historical text is what the retirement is a correction *to*.
+>
+> **What was retired.** There are no assignment slots to reassign. The static delivering/reviewer assignment is gone: `engagements[]` is now written by the dispatch itself — running an unengaged deployed profile engages it, *delivering* if the task has no deliverer and the profile holds repo-write, *supporting* otherwise. The assign/engage menus, the per-row Run buttons and the `assign-specialist` / `run-specialist` / `assign-reviewer` / `run-reviewer` intents were **deleted**, not renamed. The operator's `engage_agent` / `run_agent` / `prompt_agent` trio collapsed into one `run_agent(profileId, prompt?, delivers?)` behind the `dispatch-agents` capability.
+>
+> **What replaced it.** One selector-plus-prompt control (`run-agent`): a human picks *which* deployed agent and *when* — the same picker carries the now / 5m / 1h / 6h / 24h delay that flips Run into Schedule. Releasing a supporting engagement survives as the ledger's ✕ (`release-agent`), and an explicit `delivers: true` is a delivery hand-off through the single-deliverer machinery. So the human steering verbs this spec teaches are now **approve · redirect · comment · dispatch · release**, and this pattern's third bullet should read "board cards, task headers, and dispatch or packet contexts".
+>
+> **Where the retired word still stands in this document** (kept as history, read them with this note): *Effortless Interactions* — "Approving, redirecting, commenting, or reassigning"; *Design Implications* — "Approval, redirect, reassignment, and comment actions"; *§2.5 Experience Mechanics* — "approve, redirect, comment, reassign"; the *Arda Supervises Active Work* mermaid journey node "Approve, redirect, comment, or reassign"; this pattern's own third bullet; and *Button Hierarchy*'s worked example of a primary action, "confirming a reassignment" — where the live equivalent is confirming a dispatch or a schedule.
+>
+> **One consequence for the run-control law below.** Ruling 98(d) partially supersedes the *"the run controls SHOW configuration; they do not pick it"* note in §Design Direction Decision → Implementation Approach: backend and autonomy are still shown-and-never-picked, but the human now explicitly picks *which agent* and *when it runs*. Restated: **configuration lives on the profile and the surface discloses it; the dispatch target and timing are the human's choice.**
+
 **Packet Severity Pattern**
 - expresses blocked, warning, informational, and completion-ready packet states
 - standardizes visual hierarchy, action emphasis, and escalation language
@@ -758,6 +808,8 @@ Viberr should define state semantics as a first-class product language. These st
 - waiting on agent: a secondary execution signal showing the current action is pending work from the assigned execution profile
 - degraded continuity: a diagnostic or execution-truth condition showing provider-side or runtime continuity is impaired, but canonical task truth remains authoritative enough to support governed recovery
 - review-ready and done: workflow or outcome labels rather than canonical readiness states
+
+> **Amended 2026-08-31 (pass 31).** The shipped UI also renders a DERIVED display state this list never declared: `agent_working` — shown on a board card and task header whenever the task is `waiting: agent` while its stored readiness is `ready` or `input_required`. It is not a canonical readiness state and is never persisted; it is derived per render (`deriveDisplayReadiness`, `app/shared/mapping/task.server.ts`) and collapses back to the stored readiness when `waiting` moves off `agent`. The same deriver also promotes a `ready` + `waiting: human` task with an open input packet to display as `input_required`. Recorded here so the spec's own "every state must mean the same thing everywhere" rule covers both derivations.
 
 **Pattern rules**
 - Every state must mean the same thing everywhere it appears

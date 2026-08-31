@@ -2582,3 +2582,121 @@ describe("app.css type scale (pass 30)", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/* ------------------------------------------------------- the radius scale */
+
+describe("app.css radius scale (pass 30)", () => {
+  // The radius family is SIX steps, declared once at the token block. Unlike
+  // the type scale it is tokenized, so it needs two locks: the values must not
+  // drift (a 16px card quietly becoming 14px changes every top-level surface),
+  // and no `border-radius` may sidestep the tokens with a literal.
+  const RADIUS_SCALE = {
+    "--radius-small": "6px",
+    "--radius-button": "8px",
+    "--radius-box": "12px",
+    "--radius-chip": "999px",
+    "--radius-card": "16px",
+    "--radius-panel": "22px",
+  };
+
+  /** The proportional micro radii the token block sanctions: 2-3px on meters,
+   *  progress bars and inline text highlights, 4px on 16px boxes. They are a
+   *  fraction of a tiny box, not steps — a scale step on a 16px square reads as
+   *  a circle. */
+  const MICRO = ["2px", "3px", "4px"];
+
+  /** `50%` is a true circle (avatars, dots), `0` un-rounds a corner, `inherit`
+   *  makes a child follow the box it fills. None of them is a length choice. */
+  const NON_STEPS = ["50%", "0", "inherit"];
+
+  it("declares the six radius tokens, and only those", () => {
+    const declared = [...CODE.matchAll(/(--radius-[a-z0-9-]+)\s*:\s*([^;}]+)/g)]
+      .map((m) => [m[1], m[2].trim()] as const);
+    // One definition each — a second `--radius-card` further down the file is
+    // exactly how `--font-display` came to lie for four passes (P16-UI-04).
+    expect(declared.map(([name]) => name).sort()).toEqual(
+      Object.keys(RADIUS_SCALE).sort(),
+    );
+    expect(Object.fromEntries(declared)).toEqual(RADIUS_SCALE);
+  });
+
+  it("every border-radius is a scale token (or a sanctioned non-step)", () => {
+    // Shorthands round individual corners (`0 2px 2px 0` on a progress fill),
+    // so the check is per corner value, not per declaration.
+    const allowed = new Set([
+      ...Object.keys(RADIUS_SCALE).map((t) => `var(${t})`),
+      ...MICRO,
+      ...NON_STEPS,
+    ]);
+    const offScale = [...CODE.matchAll(/border-radius:\s*([^;}]+)/g)]
+      .flatMap((m) => m[1].trim().split(/\s+/))
+      .filter((corner) => !allowed.has(corner));
+    expect([...new Set(offScale)].sort()).toEqual([]);
+  });
+
+  it("rounds no corner with a bare copy of a token's own value", () => {
+    // `border-radius: 8px` renders identically to `var(--radius-button)` and is
+    // the way a scale dies: the literal survives a token change. The micro set
+    // shares no value with the scale, so this stays unambiguous.
+    const literals = new Set(Object.values(RADIUS_SCALE));
+    const bare = [...CODE.matchAll(/border-radius:\s*([^;}]+)/g)]
+      .flatMap((m) => m[1].trim().split(/\s+/))
+      .filter((corner) => literals.has(corner));
+    expect([...new Set(bare)].sort()).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------ the spacing scale */
+
+describe("app.css spacing scale (pass 30)", () => {
+  // Nine steps, documented at the token block and deliberately untokenized.
+  // They are not lockable the way font-size is: 81 of the sheet's 944 spacing
+  // declarations carry an off-scale value, and most are not drift — negative
+  // optical nudges (`margin-top: -1px`), sub-step chip padding (`.04rem`), and
+  // fixed panel measures (`4.4rem`) are one-site decisions, not steps. Snapping
+  // them would be 81 layout changes wearing a lint fix's clothes.
+  //
+  // So the lock is on the scale's SHAPE instead of on every usage: a value that
+  // reaches ten spacing sites is, by then, a step of the app's rhythm whether
+  // anyone chose it or not. The set of those must be exactly the nine.
+  const SPACING_SCALE = [
+    "0", ".125rem", ".25rem", ".375rem", ".5rem", ".75rem", "1rem", "1.5rem",
+    "2rem",
+  ];
+  /** Not a length — `margin: 0 auto` centres, it does not space. */
+  const STRUCTURAL = ["auto"];
+  const DE_FACTO_STEP_AT = 10;
+
+  const SPACING_PROP =
+    /(?:^|[{;\s])(?:padding|margin|gap|row-gap|column-gap|(?:padding|margin)-(?:top|right|bottom|left|block|inline))\s*:\s*([^;}]+)/g;
+
+  function spacingValueCounts(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const m of CODE.matchAll(SPACING_PROP)) {
+      // `calc(26px + .75rem)` splits into fragments no lookup will match; it is
+      // one site either way, and one site never reaches the step threshold.
+      for (const part of m[1].trim().split(/\s+/)) {
+        counts.set(part, (counts.get(part) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }
+
+  it("has exactly nine de-facto steps, and they are the nine it declares", () => {
+    const steps = [...spacingValueCounts()]
+      .filter(([value, n]) => n >= DE_FACTO_STEP_AT && !STRUCTURAL.includes(value))
+      .map(([value]) => value);
+    expect(steps.sort()).toEqual([...SPACING_SCALE].sort());
+  });
+
+  it("keeps every declared step in real use", () => {
+    // The other direction of the same gate: a step nothing uses is not a scale,
+    // it is a comment. `2rem` is the thin one (11 sites) — if a pass retires it,
+    // that is a decision made here, not a silent narrowing.
+    const counts = spacingValueCounts();
+    const unused = SPACING_SCALE.filter(
+      (step) => (counts.get(step) ?? 0) < DE_FACTO_STEP_AT,
+    );
+    expect(unused).toEqual([]);
+  });
+});

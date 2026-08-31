@@ -298,7 +298,45 @@ export async function mountGrantedSkills(input: {
       skipped,
     });
   }
+  if (mounted.length > 0) {
+    writeCatalogSettings(dir);
+  }
   return { mounted, skipped };
+}
+
+/**
+ * F31-C4 — CLOSE the CLAUDE.md ingress that `settingSources: ['project']`
+ * opens, through the one channel VERIFIED to work.
+ *
+ * Live probe (2026-08-31, in-container, canary CLAUDE.md + one-turn run with
+ * exactly the options viberr passes): `Options.managedSettings.claudeMdExcludes`
+ * is SILENTLY DROPPED — the SDK filters `managedSettings` restrictive-only
+ * against an allowlist ("non-allowlisted keys are dropped regardless",
+ * sdk.d.ts), and the excludes key is not on it. The canary leaked. The same
+ * patterns written into `<cwd>/.claude/settings.json` — a file the project
+ * settings source actually loads — flipped the canary to hidden.
+ *
+ * Viberr owns this file by construction: the strip removes every repo-shipped
+ * `.claude` entry each run before this write, and the catalog rides
+ * `.git/info/exclude` so it can never reach the delivery. The object contains
+ * exactly the excludes — never hooks, never permissions — so the file cannot
+ * become an instruction channel itself.
+ */
+const CATALOG_SETTINGS = JSON.stringify({
+  claudeMdExcludes: ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/**"],
+});
+
+function writeCatalogSettings(repoDir: string): void {
+  try {
+    writeFileSync(path.join(repoDir, ".claude", "settings.json"), CATALOG_SETTINGS);
+  } catch (error) {
+    // The mount itself succeeded; a failed settings write reopens only the
+    // memory-file ingress — say so rather than failing the run.
+    logger.warn("could not write the catalog settings (CLAUDE.md excludes)", {
+      repoDir,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 }
 
 /** A plain checkout (`.git` is a real directory) — not a worktree/submodule

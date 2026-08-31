@@ -26,6 +26,7 @@ import {
   openScopeViolation,
 } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { getTaskDetail } from "~/server/projections/task-query.server";
 import {
   createPat,
   getPatMetadata,
@@ -582,6 +583,42 @@ describe("reconcileTask", () => {
     // prefix-matched `[VIB-301]` entries in the compare) and no diff stats.
     expect(fm.github?.commits ?? []).toEqual([]);
     expect(fm.github?.changed ?? null).toBeNull();
+  });
+
+  it("T3/R15-15: the recorded collision reaches the PROJECTION every surface reads", async () => {
+    // The frontmatter write is only half of it. `unownedPr` is a DISPLAY fact:
+    // the task-detail GitHub card renders collision framing off it, and the
+    // archive ceremony asks for a remote-branch decision because of it. Both
+    // read the projection, never the file — so a reconcile that recorded the
+    // collision and did not reproject would leave every surface still saying
+    // "no pull request", which is the state that produced the bad advice
+    // R15-15 was filed for.
+    // Canary: drop `unownedPr: unownedPr?.number ?? null` from `newGithub` in
+    // `reconcileTaskUnlocked` and the projected value reads null while the
+    // task's own `pr` assertion still passes.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        // No `pr`: this task opened nothing. #318 on the branch is a stranger's.
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+
+    const detail = getTaskDetail(store.db, store.slug, "VIB-301");
+    expect(detail?.unownedPr).toBe(318);
+    // …and the stranger never becomes the task's own PR on the way through.
+    expect(detail?.pr).toBeNull();
   });
 
   it("R16-1/H8: a name-matched MERGED stranger never replaces the PR the task owns", async () => {

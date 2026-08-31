@@ -336,6 +336,106 @@ describe("completeForcedPasswordReset", () => {
 });
 
 /**
+ * T14 (pass 31) — the temp-password lifecycle, end to end.
+ *
+ * Every piece of this was covered in isolation and the CHAIN was not: the
+ * forced-gate test above fabricates `pwresetRequired: true` on a fixture
+ * password, and `user-admin.server.test.ts` proves a re-issued temp replaces
+ * the old one only at the HASH level (`verifyPassword(old, hash) === false`).
+ * No test ever took a temp password the product actually minted and put it
+ * through a real sign-in — which is the only thing that answers "does the
+ * credential an admin just read off the screen work, and does the previous one
+ * stop?". There is no mailer in V1, so an admin hands these over by hand and
+ * re-issues them freely; a stale temp that still signs in is a live credential
+ * nobody is tracking.
+ *
+ * (The account state is `"invited"` in the data model — "setup pending" is the
+ * rendered pill for it.)
+ */
+describe("T14: temp-password lifecycle (create → forced gate → re-issue)", () => {
+  it("a minted temp signs in under the forced gate, and a re-issued one kills it immediately", async () => {
+    // Canary: have `resetLocalPassword` return a fresh temp WITHOUT calling
+    // `resetPassword` (or drop the better-auth credential update inside it) and
+    // the old temp keeps signing in.
+    const db = ctx.makeDb();
+    const auth = makeAuth(db);
+    const admin = await seedUser(db); // the org admin doing the granting
+    const adminActor = { userId: admin.id, label: admin.email };
+
+    const { createLocalAccount, resetLocalPassword } = await import(
+      "~/server/org/org-users.server"
+    );
+
+    // 1. Allow access → an account that exists but is not set up yet.
+    const created = await createLocalAccount(
+      db,
+      { name: "QA Maintainer", email: "qa-maintainer@viberr.test", role: "member" },
+      adminActor,
+    );
+    expect(created.user.status).toBe("invited");
+    expect(created.tempPassword.length).toBeGreaterThanOrEqual(8);
+
+    // 2. The temp really signs in — and lands on the set-password gate rather
+    //    than a normal session the user could just keep using.
+    const firstLogin = await loginWithCredentials(
+      db,
+      auth,
+      { email: "qa-maintainer@viberr.test", password: created.tempPassword },
+      requestDeps("192.0.2.70"),
+    );
+    expect(firstLogin.ok).toBe(true);
+    if (firstLogin.ok) expect(firstLogin.mustResetPassword).toBe(true);
+
+    // 3. Generate a new temp: the admin lost the first one, or re-issued it.
+    const reissued = await resetLocalPassword(db, created.user.id, adminActor);
+    expect(reissued.tempPassword).not.toBe(created.tempPassword);
+
+    // 4. The OLD temp stops working immediately — not at next sign-in, not
+    //    after the session expires.
+    const stale = await loginWithCredentials(
+      db,
+      auth,
+      { email: "qa-maintainer@viberr.test", password: created.tempPassword },
+      requestDeps("192.0.2.71"),
+    );
+    expect(stale).toEqual({ ok: false, reason: "wrong_password" });
+
+    // 5. …and the new one works, still behind the gate.
+    const secondLogin = await loginWithCredentials(
+      db,
+      auth,
+      { email: "qa-maintainer@viberr.test", password: reissued.tempPassword },
+      requestDeps("192.0.2.72"),
+    );
+    expect(secondLogin.ok).toBe(true);
+    if (secondLogin.ok) expect(secondLogin.mustResetPassword).toBe(true);
+
+    // 6. Setting a real password is what finally clears the gate.
+    const account = findUserById(db, created.user.id)!;
+    await completeForcedPasswordReset(db, {
+      user: account,
+      newPassword: "a-real-password-now",
+    });
+    const settled = await loginWithCredentials(
+      db,
+      auth,
+      { email: "qa-maintainer@viberr.test", password: "a-real-password-now" },
+      requestDeps("192.0.2.73"),
+    );
+    expect(settled.ok).toBe(true);
+    if (settled.ok) expect(settled.mustResetPassword).toBe(false);
+    // The second temp is dead too — a temp is single-use by design.
+    const staleAgain = await loginWithCredentials(
+      db,
+      auth,
+      { email: "qa-maintainer@viberr.test", password: reissued.tempPassword },
+      requestDeps("192.0.2.74"),
+    );
+    expect(staleAgain).toEqual({ ok: false, reason: "wrong_password" });
+  });
+});
+
+/**
  * `/sign-in/social` is reachable through the `/api/auth/*` splat and is POSTed
  * by both login.tsx and profile-page.tsx. Better Auth's built-in limiter keys
  * on the client ip, which is null on this proxy-less deployment, so its default

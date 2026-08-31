@@ -169,6 +169,31 @@ describe("task.md round-trip", () => {
   });
 });
 
+describe("packet option tolerance (F31-C5)", () => {
+  it("one malformed option drops only itself — the packet (and the human's decision) survives", () => {
+    // The whole-array shape of the durable-loss class: `options` used to be a
+    // plain z.array, so ONE bad row voided the ENTIRE packet ("packet
+    // ignored"), the task read `waiting: human` with no card to answer, and
+    // the next write serialized the open decision away for good.
+    // Canary: revert the per-row filter in parsePacketSection and the packet
+    // below parses to null.
+    const text = serializeTaskFile(FULL).replace(
+      "options:",
+      'options:\n  - kind: 42\n    t: ""',
+    );
+    const { parsed, diagnostics } = parseTaskFileContent(text, {
+      fallbackKey: "VIB-142",
+    });
+    expect(parsed.packet, "the packet must survive one bad option").not.toBeNull();
+    expect(parsed.packet!.options.length).toBe(FULL.packet!.options.length);
+    expect(
+      diagnostics.some((d) => d.code === "packet.invalid_option"),
+    ).toBe(true);
+    // Nothing else was harmed by the salvage.
+    expect(parsed.packet!.title).toBe(FULL.packet!.title);
+  });
+});
+
 describe("task.md event-body escaping (structure-like text)", () => {
   // A hostile-but-legitimate multi-line comment: every line here would be
   // re-interpreted as file structure if serialized verbatim.

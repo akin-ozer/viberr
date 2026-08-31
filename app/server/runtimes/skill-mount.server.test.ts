@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   isSdkSkillName,
   mountGrantedSkills,
@@ -141,6 +142,30 @@ describe("stripUngovernedRepoCatalog (R18-3 / F18-8)", () => {
       .toContain("SENTINEL-LIVE");
     expect(readFileSync(path.join(ws, ".claude", "skills", "later-craft", "SKILL.md"), "utf8"))
       .toContain("SENTINEL-LATER");
+  });
+
+  it("F31-C4: a successful mount writes the CLAUDE.md excludes into the catalog settings", async () => {
+    // The project settings source is the only channel the live probe showed
+    // actually delivers `claudeMdExcludes` (Options.managedSettings drops the
+    // key on the SDK's restrictive-only allowlist). The file must contain the
+    // excludes and NOTHING else — a hooks/permissions key here would be an
+    // instruction channel viberr just handed to itself.
+    // Canary: skip writeCatalogSettings and the existsSync below fails.
+    const dataRoot = storeWithSkills([{ name: "craft", skillMd: "S\n" }]);
+    const ws = await gitCheckout();
+    const run = await mountGrantedSkills({ workspaceDir: ws, skills: ["craft"], dataRoot });
+    expect(run.mounted).toEqual(["craft"]);
+    const settingsPath = path.join(ws, ".claude", "settings.json");
+    expect(existsSync(settingsPath)).toBe(true);
+    const settings = z
+      .record(z.string(), z.unknown())
+      .parse(JSON.parse(readFileSync(settingsPath, "utf8")));
+    expect(Object.keys(settings)).toEqual(["claudeMdExcludes"]);
+    expect(settings.claudeMdExcludes).toEqual([
+      "**/CLAUDE.md",
+      "**/CLAUDE.local.md",
+      "**/.claude/**",
+    ]);
   });
 
   it("preserving a live mount preserves NOTHING else — settings, commands and repo skills still go", async () => {
@@ -510,7 +535,15 @@ describe("mountGrantedSkills", () => {
     });
 
     expect(result.mounted).toEqual(["craft"]);
-    expect(existsSync(path.join(ws, ".claude", "settings.json"))).toBe(false);
+    // F31-C4: the strip removed the FOREIGN settings (its hooks with it), and
+    // the mount re-wrote the file as viberr's own — excludes only, no hooks.
+    // The spirit of this test is unchanged: no ungoverned settings survive.
+    const rewritten = z
+      .record(z.string(), z.unknown())
+      .parse(
+        JSON.parse(readFileSync(path.join(ws, ".claude", "settings.json"), "utf8")),
+      );
+    expect(Object.keys(rewritten)).toEqual(["claudeMdExcludes"]);
     expect(
       existsSync(path.join(ws, ".claude", "skills", "self-installed")),
     ).toBe(false);

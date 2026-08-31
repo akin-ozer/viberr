@@ -339,18 +339,17 @@ export function nativeSkillNames(skills?: readonly string[]): string[] {
 /**
  * Policy-tier settings for a run that opens `settingSources: ['project']`.
  *
- * HONEST NOTE — an ACCEPTED, UNVERIFIED mitigation. `'project'` is also the
- * source that loads CLAUDE.md memory files, so enabling it to reach the skills
- * Viberr mounted also lets the CHECKED-OUT REPOSITORY's `CLAUDE.md` become
- * system-prompt-tier instruction. That is a real trust-boundary crossing: the
- * codex leg deliberately closes the same door with `project_doc_max_bytes: 0`,
- * and the Claude leg used to get it for free from `settingSources: []`.
- * `claudeMdExcludes` is the SDK's documented switch for exactly this (it applies
- * to the User/Project/Local memory tiers), so we pass it — but it has NOT been
- * verified live against a real run, and it cannot be verified from a unit test.
- * Treat the ingress as OPEN until someone reads a run's system prompt and
- * confirms otherwise; the deterministic guarantees of this change are the
- * stripped-and-rewritten `.claude` catalog and the `skills` filter, not this.
+ * F31-C4 — VERIFIED live (2026-08-31, in-container canary probe): this
+ * channel DOES NOT deliver `claudeMdExcludes`. The SDK filters
+ * `managedSettings` restrictive-only against an allowlist ("non-allowlisted
+ * keys are dropped regardless", sdk.d.ts), the excludes key is not on it, and
+ * the canary CLAUDE.md leaked into the run with exactly this option set. The
+ * ingress is CLOSED elsewhere: `mountGrantedSkills` writes the same patterns
+ * into `<workspace>/.claude/settings.json` (skill-mount.server.ts,
+ * `writeCatalogSettings`), which the project settings source actually loads —
+ * the probe's canary flipped to hidden through that file. This constant still
+ * rides along as a belt: harmless while dropped, effective the day the SDK
+ * allowlists it. The codex leg's equivalent stays `project_doc_max_bytes: 0`.
  */
 const MANAGED_SETTINGS = {
   claudeMdExcludes: ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/**"],

@@ -1,5 +1,9 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import { taskDir } from "~/server/files/file-store-root.server";
 import {
   baseTaskFrontmatter,
   setupTestStore,
@@ -230,6 +234,105 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     expect(event!.text).toContain("not a credential problem");
     expect(event!.text).toContain("No review PR was opened");
     expect(event!.text).toContain("`vib-1`");
+  });
+
+  /**
+   * T3 (pass 31) — the SEAM the two mocked halves leave open.
+   *
+   * Every other test here injects `pushWorkspaceBranch`, and every
+   * push-workspace test injects `exec`. So "a remote branch holding foreign
+   * commits produces `push_conflict`, and that opens no PR" is proved twice,
+   * on either side of a join nothing crosses: the classifier is fed a
+   * hand-written stderr string, and the decision is fed a hand-written status.
+   * Live on 2026-08-31 the real shape appeared — a stale remote `vib-1` from a
+   * wiped instance stood on the task's branch name — and this is the only test
+   * that reproduces it with real git: a real bare origin whose `vib-1` carries
+   * a commit the local delivery has never seen.
+   *
+   * `deps` deliberately omits `pushWorkspaceBranch`, so the real module runs;
+   * `openTaskPr` stays a double purely so "no PR was opened" is observable.
+   */
+  it("T3: a REAL non-fast-forward push refuses with push_conflict and opens NO PR", async () => {
+    // Canary: relax `isNonFastForwardStderr` (drop the non-fast-forward arm) and
+    // this lands on `push_failed` — same refusal, wrong diagnosis, and the
+    // event blames a credential. Delete the `openPr` guard on a conflicted push
+    // in performDelivery and the openPrMock assertion fails.
+    seed({ stage: "review", branch: "vib-1" });
+    const patActor = actor(store.users.arda);
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_realpush0001" },
+      patActor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+
+    const git = (cwd: string, args: string[]): string =>
+      execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
+
+    // The workspace clone the delivery pushes from. `akin-ozer/viberr` → viberr.
+    const repoDir = path.join(
+      taskDir(store.slug, "VIB-1", store.dataRoot),
+      "workspace",
+      "viberr",
+    );
+    rmSync(repoDir, { recursive: true, force: true });
+    mkdirSync(repoDir, { recursive: true });
+    git(repoDir, ["init", "-q", "-b", "main"]);
+    git(repoDir, ["config", "user.email", "t@viberr.local"]);
+    git(repoDir, ["config", "user.name", "Test"]);
+    writeFileSync(path.join(repoDir, "README.md"), "# repo\n");
+    git(repoDir, ["add", "-A"]);
+    git(repoDir, ["commit", "-q", "-m", "init"]);
+
+    const remoteDir = path.join(store.dataRoot, "bare-origin.git");
+    mkdirSync(remoteDir, { recursive: true });
+    git(remoteDir, ["init", "-q", "--bare"]);
+    git(repoDir, ["remote", "add", "origin", remoteDir]);
+    git(repoDir, ["push", "-q", "origin", "main"]);
+    git(repoDir, ["fetch", "-q", "origin"]);
+
+    // A STRANGER's `vib-1` on the remote: a commit this task never made.
+    git(repoDir, ["checkout", "-q", "-b", "stranger", "main"]);
+    writeFileSync(path.join(repoDir, "stranger.txt"), "from a wiped instance\n");
+    git(repoDir, ["add", "-A"]);
+    git(repoDir, ["commit", "-q", "-m", "foreign work"]);
+    git(repoDir, ["push", "-q", "origin", "stranger:refs/heads/vib-1"]);
+    git(repoDir, ["checkout", "-q", "main"]);
+    git(repoDir, ["branch", "-q", "-D", "stranger"]);
+
+    // This task's OWN delivery: a local `vib-1` branched from main, so its
+    // history and the remote's share only the root commit.
+    git(repoDir, ["checkout", "-q", "-b", "vib-1", "main"]);
+    writeFileSync(path.join(repoDir, "work.txt"), "this task's work\n");
+    git(repoDir, ["add", "-A"]);
+    git(repoDir, ["commit", "-q", "-m", "[VIB-1] deliver"]);
+
+    const outcome = await performDelivery(
+      store.db,
+      {
+        dataRoot: store.dataRoot,
+        // No pushWorkspaceBranch — the real one runs against real git.
+        deps: { openTaskPr: openPrMock, mergeTaskPr: mergeMock },
+      },
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+
+    expect(outcome.status).toBe("push_conflict");
+    if (outcome.status === "push_conflict") {
+      expect(outcome.branch).toBe("vib-1");
+      expect(outcome.message).toContain("non-fast-forward");
+    }
+    // The whole point: nothing was opened over the stranger's content.
+    expect(openPrMock).not.toHaveBeenCalled();
+    const event = fm().timeline.find((e) => e.type === "github");
+    expect(event!.text).toContain("not a credential problem");
+    expect(event!.text).toContain("No review PR was opened");
+    // And the remote branch still holds ONLY the stranger's commit — a refused
+    // delivery never force-writes over it (R18-4).
+    const remoteTip = git(remoteDir, ["log", "-1", "--format=%s", "refs/heads/vib-1"]);
+    expect(remoteTip).toBe("foreign work");
   });
 
   it("push_failed: the PR attempt is refused too (a stale-head PR reviews the wrong content)", async () => {
