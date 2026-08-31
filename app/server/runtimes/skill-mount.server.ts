@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -31,7 +32,10 @@ import { logger } from "~/server/logging/logger.server";
  *     nothing ungoverned is discoverable.
  *  2. {@link mountGrantedSkills} — WRITE the agent's GRANTED skills back in as
  *     `.claude/skills/<name>/`, which is the filesystem contract the Claude
- *     Agent SDK's native skills mechanism reads.
+ *     Agent SDK's native skills mechanism reads, PLUS the `settings.json` that
+ *     holds the checked-out repository's CLAUDE.md out of the run (see
+ *     {@link CATALOG_SETTINGS}) — one write, because the SDK option that
+ *     discovers the skills is the same option that opens that ingress.
  *
  * Both halves exist because of the same rule: a governed run may see the
  * resources its profile grants and NOTHING else. Splitting them across modules
@@ -153,8 +157,30 @@ export async function stripUngovernedRepoCatalog(repoDir: string): Promise<void>
   // A live run's skills are in here. Take out everything else BY NAME rather
   // than deleting and re-creating: another run is reading these files right now,
   // so there must be no window in which they are absent.
+  //
+  // V6 — `settings.json` is one of those files. The run whose mounts we are
+  // preserving has `settingSources: ['project']` OPEN over this catalog, and
+  // our excludes file is the only thing in it keeping the repository's CLAUDE.md
+  // out of that run's system prompt ({@link CATALOG_SETTINGS}). Deleting it —
+  // which is what "everything else goes" used to mean — reopened that ingress
+  // under a run already executing. Ours is a constant, so we OVERWRITE it in
+  // place first (same content that run started with, and no window in which it
+  // is absent) and delete it only if that write fails, because a repo-authored
+  // `settings.json` surviving is the R18-3 hook leak and must lose to it. If
+  // the delete cannot happen either, this throws and the run dies with it —
+  // fail closed, rather than starting over a catalog we do not own.
+  //
+  // No survivors ⇒ the whole catalog goes, above, and that stays right: nobody
+  // is reading it, and a run of ours that mounts nothing keeps
+  // `settingSources: []`, so it opens no project source to protect.
+  if (!writeCatalogSettings(repoDir)) {
+    rmSync(path.join(catalog, CATALOG_SETTINGS_FILE), {
+      recursive: true,
+      force: true,
+    });
+  }
   for (const entry of readdirSync(catalog)) {
-    if (entry !== "skills") {
+    if (entry !== "skills" && entry !== CATALOG_SETTINGS_FILE) {
       rmSync(path.join(catalog, entry), { recursive: true, force: true });
     }
   }
@@ -225,11 +251,26 @@ export interface SkillMount {
   /** Granted skills that did NOT mount, with the reason (they fall back to
    *  prompt-text injection, so this is diagnostic, not capability loss). */
   skipped: { name: string; reason: string }[];
+  /** Whether THIS mount established the CLAUDE.md excludes file
+   *  ({@link CATALOG_SETTINGS}) — the precondition for opening
+   *  `settingSources: ['project']` at all, and therefore reported rather than
+   *  left to a log line. `mounted` non-empty implies `true`: a failed write
+   *  empties `mounted` instead of handing the adapter skills it would open the
+   *  ingress for. A run that mounts nothing reports `false` even when the file
+   *  is present for a co-engaged run's mounts, because this run opens no
+   *  project source either way. `mountGrantedSkills` always sets it; the field
+   *  is optional only so a caller can build the zero value
+   *  (`{ mounted: [], skipped: [] }`) for a run that never mounts. */
+  settingsWritten?: boolean;
 }
 
 /** No checkout ⇒ no project source we control ⇒ no native skills (see below). */
 const NO_WORKSPACE_REASON =
   "this run has no git checkout to mount skills into (Viberr injects it as prompt text instead)";
+
+/** The mount succeeded but its half of the ingress did not (see the write). */
+const NO_CATALOG_SETTINGS_REASON =
+  "the workspace settings that keep the repository's CLAUDE.md out of this run could not be written, so nothing is mounted natively (Viberr injects it as prompt text instead)";
 
 /**
  * Copy each GRANTED skill from the store into `<workspace>/.claude/skills/<name>`
@@ -251,7 +292,9 @@ const NO_WORKSPACE_REASON =
  * as well as viberr's `git add -A` delivery finalization).
  *
  * Returns the mounted names — the caller passes exactly these to the SDK and
- * suppresses their prompt-text injection.
+ * suppresses their prompt-text injection. EMPTY when the catalog settings could
+ * not be written: the native channel and the CLAUDE.md excludes are one
+ * decision, never half of one (see {@link CATALOG_SETTINGS}).
  */
 export async function mountGrantedSkills(input: {
   /** The run's git checkout (`clone.dir`), or null when it has none. */
@@ -261,12 +304,15 @@ export async function mountGrantedSkills(input: {
   dataRoot?: string;
 }): Promise<SkillMount> {
   const names = [...new Set(input.skills)];
-  if (names.length === 0) return { mounted: [], skipped: [] };
+  if (names.length === 0) {
+    return { mounted: [], skipped: [], settingsWritten: false };
+  }
   const dir = input.workspaceDir;
   if (!dir || !isPlainGitCheckout(dir)) {
     return {
       mounted: [],
       skipped: names.map((name) => ({ name, reason: NO_WORKSPACE_REASON })),
+      settingsWritten: false,
     };
   }
 
@@ -285,11 +331,36 @@ export async function mountGrantedSkills(input: {
     if (reason) skipped.push({ name, reason });
     else mounted.push(name);
   }
+  // The excludes file is the OTHER HALF of the native channel, not a decoration
+  // on top of it: the adapter opens `settingSources: ['project']` for a run that
+  // mounted skills, and that same option is what lets the checked-out repo's
+  // CLAUDE.md reach the model as system-prompt-tier instruction. So a mount
+  // whose settings write fails mounts NOTHING — every grant falls back to the
+  // prompt-text injection the caller already implements, which costs the run
+  // progressive disclosure and costs governance nothing.
+  //
+  // The folders written above stay on disk under this process's mark: F19-15
+  // never collects a mount, because it cannot tell a finished run's from a live
+  // one's. They are inert for THIS run — with `mounted` empty the caller passes
+  // no `skills`, so the adapter keeps `settingSources: []` and the `Skill` tool
+  // denied, and an unlisted skill is unreachable either way.
+  let settingsWritten = false;
+  if (mounted.length > 0) {
+    settingsWritten = writeCatalogSettings(dir);
+    if (!settingsWritten) {
+      skipped.push(
+        ...mounted.map((name) => ({ name, reason: NO_CATALOG_SETTINGS_REASON })),
+      );
+      mounted.length = 0;
+    }
+  }
   if (mounted.length === 0) {
     // Leave the workspace exactly as a skill-less run would find it — but go
     // back through the strip rather than `rm -rf`ing the catalog, so a
     // CONCURRENT run's mounts survive our failure to mount anything (F19-15).
-    // With no live mounts present this deletes the whole `.claude`, as before.
+    // With no live mounts present this deletes the whole `.claude`, settings
+    // file included, which is right: this run opens no project source. With
+    // survivors the strip re-establishes THEIR excludes file (see the strip).
     await stripUngovernedRepoCatalog(dir);
   }
   if (skipped.length > 0) {
@@ -298,10 +369,7 @@ export async function mountGrantedSkills(input: {
       skipped,
     });
   }
-  if (mounted.length > 0) {
-    writeCatalogSettings(dir);
-  }
-  return { mounted, skipped };
+  return { mounted, skipped, settingsWritten };
 }
 
 /**
@@ -321,21 +389,120 @@ export async function mountGrantedSkills(input: {
  * `.git/info/exclude` so it can never reach the delivery. The object contains
  * exactly the excludes — never hooks, never permissions — so the file cannot
  * become an instruction channel itself.
+ *
+ * V6 — this file is a PRECONDITION of the native skills channel, not an
+ * improvement to it. `settingSources: ['project']` is one decision with two
+ * effects: the SDK discovers `<cwd>/.claude/skills`, AND it reads the memory
+ * files of the repository under review. Everything here therefore moves
+ * together: {@link mountGrantedSkills} mounts nothing when this write fails,
+ * {@link stripUngovernedRepoCatalog} re-establishes the file whenever it
+ * preserves another run's live mounts, and the Claude adapter re-checks it
+ * through {@link ensureCatalogSettings} before it opens the source at all.
+ * "Best effort" here would mean the ingress is open on a path nobody watches.
  */
-const CATALOG_SETTINGS = JSON.stringify({
-  claudeMdExcludes: ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/**"],
-});
+const CLAUDE_MD_EXCLUDES = [
+  "**/CLAUDE.md",
+  "**/CLAUDE.local.md",
+  "**/.claude/**",
+] as const;
+const CATALOG_SETTINGS = JSON.stringify({ claudeMdExcludes: CLAUDE_MD_EXCLUDES });
+const CATALOG_SETTINGS_FILE = "settings.json";
 
-function writeCatalogSettings(repoDir: string): void {
+/** Only shape enough to answer "are our patterns still in this file?" — the
+ *  file is ours, but a live run may be reading a version an older process
+ *  wrote, and a hand-edited one must read as absent rather than as trusted. */
+const catalogSettingsSchema = z.object({ claudeMdExcludes: z.array(z.string()) });
+/** Ours is ~70 bytes. Anything larger was written by the repo or by an agent
+ *  in its own checkout, so it is not ours to trust OR to read into memory. */
+const CATALOG_SETTINGS_MAX_BYTES = 4096;
+
+/**
+ * Write the excludes file; report whether it is now in place.
+ *
+ * Temp file + rename, not a plain overwrite: ONE workspace, MANY runs — a
+ * concurrent run's SDK may be reading this exact path, and a rename swaps the
+ * whole file in a single step, so no reader can observe the empty middle of a
+ * truncate-then-write.
+ */
+function writeCatalogSettings(repoDir: string): boolean {
+  const catalog = path.join(repoDir, ".claude");
+  const tmp = path.join(catalog, `${CATALOG_SETTINGS_FILE}.${randomUUID()}.tmp`);
   try {
-    writeFileSync(path.join(repoDir, ".claude", "settings.json"), CATALOG_SETTINGS);
+    writeFileSync(tmp, CATALOG_SETTINGS);
+    renameSync(tmp, path.join(catalog, CATALOG_SETTINGS_FILE));
+    return true;
   } catch (error) {
-    // The mount itself succeeded; a failed settings write reopens only the
-    // memory-file ingress — say so rather than failing the run.
-    logger.warn("could not write the catalog settings (CLAUDE.md excludes)", {
-      repoDir,
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // A temp file we cannot remove is collected by the next strip, which
+      // keeps only `skills/` and the settings file itself.
+    }
+    logger.warn(
+      "could not write the catalog settings (CLAUDE.md excludes) — this run mounts no native skills",
+      {
+        repoDir,
+        err: error instanceof Error ? error : new Error(String(error)),
+      },
+    );
+    return false;
+  }
+}
+
+/**
+ * The precondition seam the Claude adapter calls before opening
+ * `settingSources: ['project']` — true only when the workspace really does hold
+ * the excludes above.
+ *
+ * It REPAIRS rather than only reporting, because the workspace is shared: a
+ * second engagement's mount strips this catalog on every run of its own, and
+ * the agent of any live run can delete files inside its own checkout. Between
+ * this run's mount and its start, the file can therefore go missing while the
+ * skills it belongs to are still mounted. Rewriting a constant we own is exactly
+ * as safe as writing it the first time, and it keeps the honest failure —
+ * running without native skills — for the case where the filesystem genuinely
+ * refuses us.
+ *
+ * Never CREATES a catalog, and never writes THROUGH one: `.claude` must already
+ * be a real directory. Absent, it means nothing was mounted into this workspace
+ * and there is nothing for a project source to read; a SYMLINK means every path
+ * built from it lands wherever the repo (or a live agent) pointed it, which is
+ * the one way this writer could leave the workspace at all.
+ */
+export function ensureCatalogSettings(repoDir: string): boolean {
+  if (!repoDir) return false;
+  if (catalogSettingsInPlace(repoDir)) return true;
+  try {
+    if (!lstatSync(path.join(repoDir, ".claude")).isDirectory()) return false;
+  } catch {
+    return false;
+  }
+  return writeCatalogSettings(repoDir);
+}
+
+/**
+ * Does the workspace catalog hold every exclude pattern we depend on?
+ *
+ * `lstat` first, and only a plain file of a plausible size: this path lives in
+ * an UNTRUSTED checkout that a live agent can write to, so a symlink (pointing
+ * the read anywhere) and an oversized file (read into memory at run start) both
+ * read as "not ours" — and the repair above then replaces them with a rename,
+ * which follows no symlink.
+ */
+function catalogSettingsInPlace(repoDir: string): boolean {
+  const file = path.join(repoDir, ".claude", CATALOG_SETTINGS_FILE);
+  try {
+    const stat = lstatSync(file);
+    if (!stat.isFile() || stat.size > CATALOG_SETTINGS_MAX_BYTES) return false;
+    const parsed = catalogSettingsSchema.safeParse(
+      JSON.parse(readFileSync(file, "utf8")),
+    );
+    if (!parsed.success) return false;
+    return CLAUDE_MD_EXCLUDES.every((pattern) =>
+      parsed.data.claudeMdExcludes.includes(pattern),
+    );
+  } catch {
+    return false;
   }
 }
 

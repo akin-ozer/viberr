@@ -127,7 +127,7 @@ import {
 } from "./specialist-browser-mcp.server";
 import { githubReadPersonaSection } from "~/server/github/agent-github-read.server";
 import {
-  CLONE_TIMEOUT_MS,
+  cloneTimeoutMs,
   cloneFailureLogDetails,
   cloneFailureSentence,
   githubRemoteSanitizationArgs,
@@ -3115,7 +3115,7 @@ async function cloneRepo(
         mkdirSync(path.dirname(dir), { recursive: true });
         try {
           await execFileAsync("git", ["clone", "--local", deliveringDir, dir], {
-            timeout: CLONE_TIMEOUT_MS,
+            timeout: cloneTimeoutMs(),
           });
           await execFileAsync(
             "git",
@@ -3205,7 +3205,7 @@ async function cloneRepo(
       taskKey: input.taskKey,
       repo: input.repo,
       hadCredential,
-      timeoutMs: CLONE_TIMEOUT_MS,
+      timeoutMs: cloneTimeoutMs(),
       ...details,
     };
     logger.warn(
@@ -3219,7 +3219,7 @@ async function cloneRepo(
       hadCredential,
       sentence: cloneFailureSentence(details, {
         hadCredential,
-        timeoutMs: CLONE_TIMEOUT_MS,
+        timeoutMs: cloneTimeoutMs(),
       }),
     };
     if (stderrExcerpt) failure.stderrExcerpt = stderrExcerpt;

@@ -7,6 +7,7 @@ import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
 import {
   clearBackendQuotaExhaustion,
   parseQuotaResetAt,
+  quotaExhaustionEvidence,
   recordBackendQuotaExhaustion,
   recordBackendRateLimit,
 } from "./backend-quota.server";
@@ -380,17 +381,32 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
         //
         // Both adapters classify their own failure and ride the class on the
         // err line's tag as `·quota` (the same structured channel
-        // `runFailureReason` routes on), so this reads the CLASS, never the
-        // prose. Recorded off the REDACTED display: this sentence is stored and
-        // rendered on an admin page, and the raw form has not been scrubbed yet
-        // at this point in the function.
+        // `runFailureReason` routes on), so the CLASS is the entry condition —
+        // never a regex over the whole line. Recorded off the REDACTED display:
+        // this sentence is stored and rendered on an admin page, and the raw
+        // form has not been scrubbed yet at this point in the function.
+        //
+        // V4 (pass 31): the class alone is not sufficient, though. Both
+        // classifiers fold transient rate limiting (`rate limit`, `too many
+        // requests`, `429`) into `quota` alongside a genuinely spent
+        // subscription window, and a momentary 429 names no reset instant — so
+        // it was recorded as exhaustion that nothing retired, and the panel
+        // read "usage limit reached" at 100% indefinitely. The provider's own
+        // sentence (only that half of the line, never the adapter's canonical
+        // prose) has to evidence a usage window before this store hears about
+        // it — see `quotaExhaustionEvidence`.
         if (display?.tag?.endsWith("·quota") && display.text) {
-          recordBackendQuotaExhaustion(db, effectiveBackend, {
-            resetsAt: parseQuotaResetAt(display.text),
-            providerText: display.text,
-            runId: spec.runId,
-            observedAt: line.occurredAt,
-          });
+          const evidence = quotaExhaustionEvidence(display.text);
+          if (evidence) {
+            const reset = parseQuotaResetAt(evidence);
+            recordBackendQuotaExhaustion(db, effectiveBackend, {
+              resetsAt: reset?.at ?? null,
+              resetsAtPrecision: reset?.precision ?? null,
+              providerText: display.text,
+              runId: spec.runId,
+              observedAt: line.occurredAt,
+            });
+          }
         }
 
         // 1. Raw truth (append-only .jsonl).

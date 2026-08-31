@@ -257,6 +257,33 @@ export function listKnowledgeBases(
   return dirs.map((dir) => buildKb(dir, rowByDir.get(dir) ?? null, ctx));
 }
 
+/**
+ * Names only, no tree scan (F31-3 / pass-31 review V12): the operator snapshot
+ * wants the CATALOG of grantable resources, not their contents. `buildKb` walks
+ * every store directory (`scanStoreTree` stats each file), which is far too
+ * heavy for `get_task` — the operator's most-called tool. Same union-of-disk-
+ * and-rows membership as `listKnowledgeBases`, same name fallback (`dir`), just
+ * without building the views.
+ */
+export function listKnowledgeBaseNames(
+  db: DatabaseSync,
+  ctx: OrgSeedContext = {},
+): string[] {
+  // SAFETY: the SELECT names exactly the two columns the cast declares, both
+  // NOT NULL TEXT in the baseline DDL (0001_baseline.sql).
+  const rows = db
+    .prepare(
+      `SELECT name, dir FROM org_knowledge_bases ORDER BY created_at ASC, id ASC`,
+    )
+    .all() as { name: string; dir: string }[];
+  const rowByDir = new Map(rows.map((r) => [r.dir, r]));
+  const dirs = unionDiskAndRows(
+    rows.map((r) => r.dir),
+    subDirNames(kbRootDir(ctx.dataRoot)),
+  );
+  return dirs.map((dir) => rowByDir.get(dir)?.name ?? dir);
+}
+
 export function getKnowledgeBase(
   db: DatabaseSync,
   id: string,
@@ -776,6 +803,18 @@ export function listMcpServers(db: DatabaseSync): McpView[] {
     .prepare(`${MCP_SQL} ORDER BY created_at ASC, id ASC`)
     .all() as McpRow[];
   return rows.map(mapMcp);
+}
+
+/** Names only (F31-3 / pass-31 review V12): the operator snapshot's catalog
+ *  needs no transport/credential columns. MCP servers live in rows alone (no
+ *  disk union). */
+export function listMcpServerNames(db: DatabaseSync): string[] {
+  // SAFETY: the SELECT names exactly the one NOT NULL TEXT column the cast
+  // declares (0001_baseline.sql).
+  const rows = db
+    .prepare(`SELECT name FROM org_mcp_servers ORDER BY created_at ASC, id ASC`)
+    .all() as { name: string }[];
+  return rows.map((r) => r.name);
 }
 
 export function getMcpServer(
@@ -1944,6 +1983,27 @@ export function listSkills(
     subDirNames(skillsRootDir(ctx.dataRoot)),
   );
   return names.map((name) => buildSkill(name, rowByName.get(name) ?? null, ctx));
+}
+
+/**
+ * Names only, no tree scan and no SKILL.md read (F31-3 / pass-31 review V12):
+ * `buildSkill` reads each skill's full body (up to 256KB) — pure waste when the
+ * caller wants the catalog. Skills are keyed by name on disk and in rows, so
+ * the union IS the name list.
+ */
+export function listSkillNames(
+  db: DatabaseSync,
+  ctx: OrgSeedContext = {},
+): string[] {
+  // SAFETY: the SELECT names exactly the one NOT NULL TEXT column the cast
+  // declares (0001_baseline.sql).
+  const rows = db
+    .prepare(`SELECT name FROM org_skills ORDER BY created_at ASC, id ASC`)
+    .all() as { name: string }[];
+  return unionDiskAndRows(
+    rows.map((r) => r.name),
+    subDirNames(skillsRootDir(ctx.dataRoot)),
+  );
 }
 
 export function getSkill(

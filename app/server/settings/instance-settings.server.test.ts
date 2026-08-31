@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  deleteSetting,
   getMaxConcurrentRuns,
+  getSetting,
   MAX_CONCURRENT_RUNS_CEILING,
   setMaxConcurrentRuns,
+  setSetting,
 } from "./instance-settings.server";
 
 const ctx = createTestDbContext();
@@ -38,5 +42,62 @@ describe("instance settings — run concurrency cap", () => {
     expect(() => setMaxConcurrentRuns(db, Number.NaN)).toThrow();
     // The prior value is intact — a bad write never silently reset the cap.
     expect(getMaxConcurrentRuns(db)).toBe(5);
+  });
+});
+
+/**
+ * V14 (pass 31): backend-quota carried its own line-for-line copy of these
+ * three accessors (a tolerant read, an upsert, a delete). They are the store's
+ * accessors, not the concurrency cap's, so they are exported and shared — which
+ * means the record shapes a keyed observation writes have to survive them.
+ */
+describe("instance settings — the shared key/value accessors", () => {
+  const recordSchema = z.object({
+    utilization: z.number().nullable(),
+    observedAt: z.string(),
+    tags: z.array(z.string()),
+  });
+
+  it("round-trips a record value, not just a scalar", () => {
+    const db = ctx.makeDb();
+    const value = {
+      utilization: 0.91,
+      observedAt: "2026-08-31T09:00:00.000Z",
+      tags: ["seven_day"],
+    };
+    setSetting(db, "quota.claude", value);
+    expect(getSetting(db, "quota.claude", recordSchema)).toEqual(value);
+    // A later write REPLACES the value under the same key (the upsert arm).
+    setSetting(db, "quota.claude", { ...value, utilization: null });
+    expect(getSetting(db, "quota.claude", recordSchema)?.utilization).toBeNull();
+  });
+
+  it("reads absent, corrupt and off-schema rows as null rather than throwing", () => {
+    const db = ctx.makeDb();
+    expect(getSetting(db, "quota.codex", recordSchema)).toBeNull();
+    // Corrupt JSON — a page must not fail over a value it can live without.
+    db.prepare(
+      `INSERT INTO instance_settings (key, value_json, updated_at)
+       VALUES ('quota.codex', '{not json', '2026-08-31T09:00:00.000Z')`,
+    ).run();
+    expect(getSetting(db, "quota.codex", recordSchema)).toBeNull();
+    // Valid JSON of a shape this schema no longer accepts.
+    setSetting(db, "quota.codex", { utilization: 0.5 });
+    expect(getSetting(db, "quota.codex", recordSchema)).toBeNull();
+  });
+
+  it("deletes a key so absence is readable as absence", () => {
+    const db = ctx.makeDb();
+    setSetting(db, "quota.claude", {
+      utilization: 1,
+      observedAt: "2026-08-31T09:00:00.000Z",
+      tags: [],
+    });
+    // CANARY: make `deleteSetting` a no-op and this key survives, which is
+    // exactly how a cleared quota-exhaustion flag would come back.
+    deleteSetting(db, "quota.claude");
+    expect(getSetting(db, "quota.claude", recordSchema)).toBeNull();
+    // Deleting a key that was never there is a no-op, not an error.
+    expect(() => deleteSetting(db, "quota.claude")).not.toThrow();
   });
 });

@@ -73,8 +73,13 @@ function spec(runId: string): RunSpec {
   };
 }
 
-function emitted(display: LogLine, raw: string): EmittedLine {
-  return { raw, display, facts: {}, occurredAt: new Date().toISOString() };
+function emitted(
+  display: LogLine,
+  raw: string,
+  // Fixed by the tests that assert on a record's AGE; `now` otherwise.
+  occurredAt: string = new Date().toISOString(),
+): EmittedLine {
+  return { raw, display, facts: {}, occurredAt };
 }
 
 /** A run row + a sink over it. `threadId` is only ever passed when a test needs
@@ -372,26 +377,50 @@ describe("quota exhaustion from a refused run (D5)", () => {
     "\n\nThe provider reported: You've hit your usage limit. To continue using " +
     "Codex, start a free trial of Plus today, or try again at Sep 18th, 2026 5:20 PM.";
 
-  function quotaFor(backend: "claude" | "codex") {
-    return latestBackendRateLimits(store.db).find((q) => q.backend === backend)!;
+  /** V4: the SAME class (`·quota`) both classifiers give a spent subscription —
+   *  but the provider's sentence is transient back-pressure that clears in
+   *  seconds, and it names no window at all. */
+  const TRANSIENT_429 =
+    "The Claude model is over its usage quota. Retry after the limit resets." +
+    '\n\nThe provider reported: 429 {"type":"error","error":{"type":' +
+    '"rate_limit_error","message":"Number of request tokens has exceeded your ' +
+    'per-minute rate limit"}}';
+
+  /** A genuinely spent window whose sentence names NO reset date. */
+  const UNDATED_REFUSAL =
+    "Codex usage limit was reached. Retry after the subscription limit resets." +
+    "\n\nThe provider reported: You've hit your usage limit. To continue using " +
+    "Codex, start a free trial of Plus today.";
+
+  function quotaFor(backend: "claude" | "codex", nowIso?: string) {
+    return latestBackendRateLimits(store.db, nowIso).find(
+      (q) => q.backend === backend,
+    )!;
   }
 
   it("parses both providers' reset clauses, and answers null rather than guessing", () => {
-    // Codex: English prose in the account's timezone, with an ordinal suffix
-    // that Date.parse rejects outright.
-    const codex = parseQuotaResetAt(CODEX_REFUSAL);
-    expect(codex).not.toBeNull();
-    expect(new Date(codex! * 1000).getFullYear()).toBe(2026);
-    expect(new Date(codex! * 1000).getMonth()).toBe(8); // September
-    // Claude: a bare unix epoch after a pipe.
-    expect(parseQuotaResetAt("Claude AI usage limit reached|1750000000")).toBe(
-      1_750_000_000,
-    );
+    // Codex: English prose in the ACCOUNT's timezone, with an ordinal suffix
+    // that Date.parse rejects outright. V9: the components are resolved in UTC,
+    // not in whatever timezone this server happens to run in — Date.parse made
+    // the same sentence mean different instants on a container and a laptop.
+    // CANARY: build the instant with `new Date(year, month, day, …)` instead of
+    // `Date.UTC` and this shifts by the runner's own offset.
+    expect(parseQuotaResetAt(CODEX_REFUSAL)).toEqual({
+      at: Date.UTC(2026, 8, 18, 17, 20) / 1000,
+      precision: "prose",
+    });
+    // Claude: a bare unix epoch after a pipe — no interpretation, no timezone.
+    expect(parseQuotaResetAt("Claude AI usage limit reached|1750000000")).toEqual({
+      at: 1_750_000_000,
+      precision: "exact",
+    });
     // No date named, and prose that only mentions the limit: null, so the card
     // falls back to the observed instant instead of inventing a window.
     expect(
       parseQuotaResetAt("You've hit your usage limit. Upgrade to Plus."),
     ).toBeNull();
+    // A word in a month's position that is not a month is not a date.
+    expect(parseQuotaResetAt("try again at soon 18, 2026")).toBeNull();
   });
 
   it("records the exhaustion off a classified ·quota line, with its evidence", () => {
@@ -412,7 +441,134 @@ describe("quota exhaustion from a refused run (D5)", () => {
       expect(row.exhausted).toBeTruthy();
       expect(row.exhausted!.runId).toBe(runId);
       expect(row.exhausted!.providerText).toContain("usage limit");
-      expect(row.exhausted!.resetsAt).toBe(parseQuotaResetAt(CODEX_REFUSAL));
+      expect(row.exhausted!.resetsAt).toBe(parseQuotaResetAt(CODEX_REFUSAL)!.at);
+      // V9: the record says HOW the instant was derived, so the reader can be
+      // conservative about it and the panel can render it honestly.
+      expect(row.exhausted!.resetsAtPrecision).toBe("prose");
+    } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+
+  /**
+   * V4 (pass 31). Both classifiers fold `rate limit` / `too many requests` /
+   * `429` into the SAME `quota` class as a spent subscription window. A
+   * momentary 429 therefore recorded an exhaustion — with no reset instant to
+   * retire it — and /insights read "usage limit reached" at 100% until some
+   * later run on that backend happened to finish. The class is not the
+   * evidence; the provider's own sentence is.
+   */
+  it("does not record transient rate limiting, even on a ·quota-classified line", () => {
+    const runId = `run_429_${randomBytes(6).toString("hex")}`;
+    const sink = sinkFor(runId);
+    sink.markRunning();
+    try {
+      sink.line(
+        emitted(
+          { t: "10:00:00", ev: "err", tag: "run·error·quota", text: TRANSIENT_429 },
+          "{}",
+        ),
+      );
+      // CANARY: have `quotaExhaustionEvidence` return the sentence
+      // unconditionally and this momentary 429 becomes a spent window.
+      expect(quotaFor("claude").exhausted).toBeNull();
+      // …while the same class carrying a real usage-limit sentence still lands.
+      sink.line(
+        emitted(
+          { t: "10:00:01", ev: "err", tag: "run·error·quota", text: CODEX_REFUSAL },
+          "{}",
+        ),
+      );
+      expect(quotaFor("claude").exhausted).toBeTruthy();
+    } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+
+  /**
+   * V4: a record naming no reset instant used to be retired by nothing but a
+   * later COMPLETED run on the same backend, so on an instance where the next
+   * run never came it claimed a spent window forever. Provider windows are
+   * hours; past the TTL the record is stale evidence.
+   */
+  it("expires an exhaustion record that named no reset instant, on age alone", () => {
+    const runId = `run_undated_${randomBytes(6).toString("hex")}`;
+    const sink = sinkFor(runId);
+    sink.markRunning();
+    const observedAt = "2026-08-31T09:00:00.000Z";
+    try {
+      sink.line(
+        emitted(
+          { t: "09:00:00", ev: "err", tag: "run·error·quota", text: UNDATED_REFUSAL },
+          "{}",
+          observedAt,
+        ),
+      );
+      expect(quotaFor("claude", observedAt).exhausted!.resetsAt).toBeNull();
+      // Five hours later it is still the best evidence anyone has…
+      expect(quotaFor("claude", "2026-08-31T14:00:00.000Z").exhausted).toBeTruthy();
+      // …and past the TTL it is not evidence of anything. CANARY: drop the
+      // `observedAt + UNDATED_EXHAUSTION_TTL_MS` arm of `exhaustionExpired` and
+      // this record stands until some later run happens to finish.
+      expect(quotaFor("claude", "2026-08-31T16:00:00.000Z").exhausted).toBeNull();
+    } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+
+  /**
+   * V9: a prose reset is a wall clock in the ACCOUNT's timezone, resolved here
+   * in UTC — which can sit up to 12 hours before the true instant. Retiring the
+   * record at that derived moment would announce a reopened window while the
+   * provider is still refusing every run, so the grace window is spent instead.
+   * A provider-emitted epoch needs no such slack and gets none.
+   */
+  it("holds a prose-derived reset through the grace window", () => {
+    const runId = `run_prose_${randomBytes(6).toString("hex")}`;
+    const sink = sinkFor(runId);
+    sink.markRunning();
+    try {
+      sink.line(
+        emitted(
+          { t: "10:00:00", ev: "err", tag: "run·error·quota", text: CODEX_REFUSAL },
+          "{}",
+        ),
+      );
+      // 17:20 UTC on the 18th is the derived instant; an hour past it the
+      // record stands, because the account may be as far west as UTC-12.
+      // CANARY: set `QUOTA_RESET_GRACE_MS` to 0 and the panel announces a
+      // reopened window while the provider is still refusing runs.
+      expect(quotaFor("claude", "2026-09-18T18:20:00.000Z").exhausted).toBeTruthy();
+      // A full day later no real timezone can still be inside the window.
+      expect(quotaFor("claude", "2026-09-19T18:20:00.000Z").exhausted).toBeNull();
+    } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+
+  it("retires a provider-EMITTED reset instant to the second, with no grace", () => {
+    const runId = `run_exact_${randomBytes(6).toString("hex")}`;
+    const sink = sinkFor(runId);
+    sink.markRunning();
+    try {
+      // The Claude shape: a unix epoch (2026-09-18T14:20:00Z) the provider
+      // computed itself, so the moment it names is the moment it means.
+      sink.line(
+        emitted(
+          {
+            t: "10:00:00",
+            ev: "err",
+            tag: "run·error·quota",
+            text: "Claude AI usage limit reached|1789741200",
+          },
+          "{}",
+        ),
+      );
+      const stored = quotaFor("claude", "2026-09-18T14:19:00.000Z").exhausted;
+      expect(stored!.resetsAtPrecision).toBe("exact");
+      // CANARY: give the `exact` arm of `exhaustionExpired` the prose grace and
+      // this record outlives the instant the provider itself computed.
+      expect(quotaFor("claude", "2026-09-18T14:21:00.000Z").exhausted).toBeNull();
     } finally {
       rmSync(rawLogPath("claude", runId), { force: true });
     }

@@ -531,34 +531,61 @@ async function reconcileTaskUnlocked(
   }
 
   const existingGithub: GithubCache | null = fm.github;
+  // F31-1 — PROVENANCE. `compare` and the discovered PR's `changed` describe
+  // whatever currently sits under the task's branch NAME on GitHub, and a name
+  // is not an identity (R15-15). The prefix filter cannot save the commits half
+  // — a wiped instance's `[VIB-1]` commits match a fresh VIB-1's prefix — so
+  // live, a task whose agent had errored before creating any branch showed
+  // "14 files · +313 −30" with two foreign commits, and the completion evidence
+  // later claimed "2 commit(s) delivered" it never made.
+  //
+  // V5 — the test is POSITIVE evidence that the branch head is this task's
+  // work, not the absence of an unowned PR. `unownedPr` is only ever non-null
+  // when `findPrForBranch` found a PR at all, so a stale remote branch carrying
+  // foreign `[KEY]`-prefixed commits and NO pr passed the old absence test and
+  // told the same lie with no collision row to explain it.
+  //
+  // Two questions, two answers:
+  //  · `deliveredThisBranch` — does the task's OWN record say it delivered
+  //    here? An owned PR (live or cached) or a work revision minted on this
+  //    branch. That record is also what makes an EXISTING cache honest: the
+  //    workspace-delivery path writes `github.commits` and `workRevision`
+  //    together, so a cache with no such record behind it is compare-derived,
+  //    and possibly derived before the collision was visible;
+  //  · `provenBranchHead` — may THIS pass record what the branch head shows?
+  //    Only when the record holds AND no stranger's PR stands on it.
+  //
+  // So while a collision stands the compare/PR footprint records nothing new,
+  // the honestly-captured workspace cache survives, and a footprint with no
+  // provenance at all is DROPPED rather than carried forward forever.
+  const deliveredThisBranch =
+    ownsAPr || fm.pr !== null || fm.workRevision?.branch === branch;
+  const provenBranchHead = deliveredThisBranch && !unownedPr;
   // Commit association: `[KEY]`-prefixed commits on the branch. Agents don't
   // always follow the prefix convention, so an EMPTY filtered list must not
   // wipe a non-empty cache captured from the run workspace for this same
-  // branch — keep what we honestly recorded rather than zeroing it.
-  //
-  // F31-1 — PROVENANCE. `compare` and the discovered PR's `changed` describe
-  // whatever currently sits under the task's branch NAME on GitHub, and a
-  // name is not an identity (R15-15): with an UNOWNED PR standing on the
-  // branch, both describe a stranger. The prefix filter cannot save the
-  // commits half — a wiped instance's `[VIB-1]` commits match a fresh VIB-1's
-  // prefix — so live, a task whose agent had errored before creating any
-  // branch showed "14 files · +313 −30" with two foreign commits, and the
-  // completion evidence later claimed "2 commit(s) delivered" it never made.
-  // While the collision stands, the compare/PR footprint records NOTHING as
-  // this task's; the honestly-captured cache (workspace delivery) survives.
+  // branch — keep what we honestly recorded rather than zeroing it. `null` is
+  // "not derived this pass", which leaves the cache below standing.
   const prefixCommits =
-    compare && !unownedPr ? taskCommits(compare.commits, fm.key) : null;
+    compare && provenBranchHead ? taskCommits(compare.commits, fm.key) : null;
   const existingCommits = existingGithub?.commits ?? [];
   const branchCommits =
     prefixCommits !== null && prefixCommits.length === 0 && existingCommits.length > 0
       ? existingCommits
       : prefixCommits;
   const ownedChanged = pr && ownsAPr ? pr.changed : undefined;
+  // The cache a pass that derived nothing falls back to — empty when the task
+  // has no delivery record for this branch, because then the cache describes
+  // somebody else's work.
+  const cachedCommits = deliveredThisBranch ? existingCommits : [];
+  const cachedChanged = deliveredThisBranch
+    ? (existingGithub?.changed ?? null)
+    : null;
   const newGithub: GithubCache | null =
     branchCommits !== null || ownedChanged || existingGithub || unownedPr
       ? {
-          commits: branchCommits ?? existingCommits,
-          changed: ownedChanged ?? existingGithub?.changed ?? null,
+          commits: branchCommits ?? cachedCommits,
+          changed: ownedChanged ?? cachedChanged,
           // Part of the compared snapshot below, so the collision note fires on
           // the tick it appears and stays quiet on the ~288 that follow.
           unownedPr: unownedPr?.number ?? null,

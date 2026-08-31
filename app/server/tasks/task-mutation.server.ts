@@ -138,6 +138,11 @@ export interface TaskWatcherNotice {
   occurredAt?: string;
   /** Skip this user (e.g. the human who triggered the event). */
   exceptUserId?: string;
+  /** Skip these users — e.g. recipients an earlier notification about the SAME
+   *  event already reached (T13's per-recipient dedupe: the packet row and the
+   *  quality fallback must never both land in one person's queue, but a watcher
+   *  whose prefs dropped the packet row still needs the fallback). */
+  exceptUserIds?: readonly string[];
 }
 
 /** Notify the owner and project supervisors, respecting routing preferences. */
@@ -182,6 +187,7 @@ export function notifyTaskWatchers(
     return [];
   }
   if (notice.exceptUserId) recipients.delete(notice.exceptUserId);
+  for (const userId of notice.exceptUserIds ?? []) recipients.delete(userId);
 
   const notified: string[] = [];
   for (const userId of recipients) {

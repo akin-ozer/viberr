@@ -343,19 +343,35 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(g.clarity.pct).toBeCloseTo(2 / 3, 5);
   });
 
-  it("F31-D6: coordination overhead is the operator's share of REPORTED spend, null when nothing reported", () => {
+  /**
+   * V3 (pass 31): the numerator is every COORDINATION run, and `RunKind` has
+   * two of them. A controller turn (ruling 99) decides what the working agents
+   * do exactly as the operator does, carries real cost, and the runtime treats
+   * the pair as one class — counting only `operator` understated the overhead
+   * by every controller turn on the instance. The kind list is pinned here.
+   */
+  it("F31-D6: coordination overhead is the operator AND controller share of REPORTED spend, null when nothing reported", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
-    // $0.60 operator + $0.40 specialist = 60% share; the cost-less run
-    // contributes to neither side of the ratio.
-    insertRun(db, { kind: "operator", cost: 0.6 });
+    // $0.50 operator + $0.10 controller = $0.60 coordination, over $1.00
+    // reported → 60%; the cost-less run contributes to neither side.
+    insertRun(db, { kind: "operator", cost: 0.5 });
+    insertRun(db, { kind: "controller", cost: 0.1 });
     insertRun(db, { kind: "primary", cost: 0.3 });
     insertRun(db, { kind: "reviewer", cost: 0.1 });
     insertRun(db, { kind: "operator", cost: null });
     const g = getInsightsSummary(db, NOW).oversight;
-    expect(g.coordination.operatorCostUsd).toBeCloseTo(0.6, 5);
+    // CANARY: narrow the totals CASE back to `kind = 'operator'` and the share
+    // drops to 50%, hiding the controller's spend inside the denominator.
+    expect(g.coordination.coordinationCostUsd).toBeCloseTo(0.6, 5);
     expect(g.coordination.totalCostUsd).toBeCloseTo(1.0, 5);
     expect(g.coordination.share).toBeCloseTo(0.6, 5);
+    // The denominator is the SAME number the totals card renders — both sides
+    // now come off one aggregate, so they cannot disagree.
+    expect(getInsightsSummary(db, NOW).totals.cost).toBeCloseTo(
+      g.coordination.totalCostUsd,
+      5,
+    );
 
     // Canary: with ZERO reported spend the share is null — never a fake 0%.
     const empty = ctx.makeDb();

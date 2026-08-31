@@ -1,3 +1,5 @@
+import type { z } from "zod";
+
 /**
  * Diagnostics produced by tolerant file parsing (task.md / project.md /
  * agent profile files). Parsing NEVER throws and NEVER drops an entity:
@@ -59,4 +61,39 @@ export function diagError(
   if (path) diagnostic.path = path;
   if (hardStop) diagnostic.hardStop = true;
   return diagnostic;
+}
+
+/**
+ * The F18 per-ROW tolerance idiom, once (V17): validate each element of an
+ * already-extracted list, keep the good rows, and record one warning per bad
+ * row instead of voiding the whole list. Shared by the task/project
+ * frontmatter list parsers and the packet-option probe — three hand-rolled
+ * copies of this loop had already drifted apart in diagnostic wording and
+ * path shape. Callers keep their own container handling (absent field,
+ * non-array value): that part differs legitimately per site.
+ */
+export function tolerantRowsOf<T>(
+  diagnostics: FileDiagnostic[],
+  rows: readonly unknown[],
+  element: z.ZodType<T>,
+  code: string,
+  describe: (index: number) => { subject: string; noun: string; path: string },
+): T[] {
+  const out: T[] = [];
+  rows.forEach((entry, i) => {
+    const r = element.safeParse(entry);
+    if (r.success) {
+      out.push(r.data);
+      return;
+    }
+    const d = describe(i);
+    diagnostics.push(
+      diagWarning(
+        code,
+        `${d.subject} is invalid (${r.error.issues[0]?.message ?? "unparseable"}) — dropping this ${d.noun}, keeping the rest.`,
+        d.path,
+      ),
+    );
+  });
+  return out;
 }

@@ -16,6 +16,7 @@ const FULL: ParsedTaskFile = {
     title: "Attach execution workspace to task runtime",
     stage: "review",
     previousStageId: null,
+    heldAtStage: null,
     readiness: "input_required",
     waiting: "human",
     ownerUserId: "u_arda01",

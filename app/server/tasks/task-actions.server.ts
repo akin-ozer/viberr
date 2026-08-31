@@ -499,6 +499,7 @@ export async function createTask(
     // No transition has happened yet — the previous stage is a fact only a
     // real move writes.
     previousStageId: null,
+    heldAtStage: null,
     readiness: "input_required",
     waiting: "human",
     ownerUserId: null,
@@ -584,6 +585,9 @@ export async function updateTaskGoal(
   let clearedPacket = false;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.goal = goal;
+    // V18: an edited goal re-litigates a recorded deliberate hold — the hold
+    // was the operator honoring the OLD goal.
+    parsed.frontmatter.heldAtStage = null;
     // A confirmed `edit_goal` packet decision is fulfilled by THIS edit —
     // clear the packet immediately (no operator round-trip). A blocked packet
     // lifted its own readiness gate with it.
@@ -2229,15 +2233,18 @@ function latestAgentReplyText(
  * telling anyone at all.
  */
 type StuckLoopEscalation =
-  /** A packet was written and its watcher notification sent. */
-  | "opened"
+  /** A packet was written and its watcher notification sent. `notifiedUserIds`
+   *  lists who that notification actually REACHED (routing prefs applied per
+   *  recipient) — a watcher whose prefs dropped the packet row is NOT in it,
+   *  and the T13 caller owes them the quality fallback. */
+  | { status: "opened"; notifiedUserIds: string[] }
   /** A packet was ALREADY open on this task, so nothing was written and nobody
    *  was notified for THIS event (the earlier packet had its own notification,
    *  which may have been about something else entirely). */
-  | "already_open"
+  | { status: "already_open" }
   /** The packet was refused or the write threw; a timeline note was left
    *  instead, and no notification was sent. */
-  | "failed";
+  | { status: "failed" };
 
 /** Open one recovery packet when the bounded operator loop stalls. */
 async function openStuckLoopPacket(
@@ -2262,8 +2269,8 @@ async function openStuckLoopPacket(
     const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
     // Unreadable task file: nothing was escalated and nothing can be — that is
     // a failure, not an existing packet (T13 reads these apart).
-    if (!existing) return "failed";
-    if (existing.parsed.packet) return "already_open"; // already escalated
+    if (!existing) return { status: "failed" };
+    if (existing.parsed.packet) return { status: "already_open" }; // already escalated
     const { operatorOpenPacket, resolveOperatorAuthority } = await import(
       "./operator-actions.server"
     );
@@ -2321,16 +2328,16 @@ async function openStuckLoopPacket(
       // packet was refused — so without a note the task sits waiting on a human
       // with no card saying why. Leave one.
       await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey);
-      return "failed";
+      return { status: "failed" };
     }
-    return "opened";
+    return { status: "opened", notifiedUserIds: result.notifiedUserIds ?? [] };
   } catch (error) {
     logger.warn("stuck-loop packet escalation failed", {
       taskKey: input.taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
     await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey);
-    return "failed";
+    return { status: "failed" };
   }
 }
 
@@ -2452,12 +2459,15 @@ async function withdrawSupersededStuckPacket(
  * so supersede it here (readiness lifts with it), the same shape as the
  * retry-packet supersession after a successful agent run.
  *
- * Scoped by the packet's `discard_branch` option — the structured marker of the
- * branch/delivery-conflict family (delete/rename the branch, or discard it and
- * re-deliver under a new name). A reject-recovery packet ("PR closed without
- * merging") uses `archive_task` instead and is deliberately left alone, as is
- * any `accept_completion` packet. Best-effort; never turns the open PR into an
- * error.
+ * Scoped by the packet's `discard_branch` or `resolve_remote_collision` option —
+ * the structured markers of the branch/delivery-conflict family (discard the
+ * local branch, or clear a remote key collision and re-deliver). Both kinds must
+ * match: F31-6 refuses `discard_branch` authoring exactly when work stands on
+ * the branch, so post-F31-6 conflict packets carry `resolve_remote_collision`
+ * instead and keying on `discard_branch` alone would reopen F29-7. A
+ * reject-recovery packet ("PR closed without merging") uses `archive_task`
+ * instead and is deliberately left alone, as is any `accept_completion` packet.
+ * Best-effort; never turns the open PR into an error.
  */
 async function withdrawSupersededDeliveryPacket(
   db: DatabaseSync,
@@ -2471,7 +2481,10 @@ async function withdrawSupersededDeliveryPacket(
   }): boolean =>
     p.type === "blocked" &&
     !p.options.some((o) => o.kind === "accept_completion") &&
-    p.options.some((o) => o.kind === "discard_branch");
+    p.options.some(
+      (o) =>
+        o.kind === "discard_branch" || o.kind === "resolve_remote_collision",
+    );
   try {
     const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
     const packet = existing?.parsed.packet;
@@ -3561,7 +3574,7 @@ export async function applyAgentCompletionEffects(
       { ...ctx, operatorAuthorized: true },
       stuck,
     );
-    // T13 (pass 31): ONE notification per failure, not two.
+    // T13 (pass 31): ONE notification per failure PER RECIPIENT, not two.
     //
     // `openStuckLoopPacket` → `operatorOpenPacket` already notifies the same
     // watchers with the actionable row ("Blocked, decision needed: Work
@@ -3571,23 +3584,27 @@ export async function applyAgentCompletionEffects(
     // supervisor's queue for a single failed run, differing only in wording —
     // and the shorter one is the one that cannot be acted on.
     //
-    // It is still sent when NO packet notification went out: an escalation that
-    // was refused or threw ("failed"), or one that found a packet already open
-    // ("already_open" — that packet's own notification may have been about
-    // something else entirely, and was certainly not about this failure). A
-    // failed run must never pass silently.
-    if (escalation !== "opened") {
-      notifyTaskWatchers(
-        db,
-        {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          kind: "quality",
-          text: `${input.role} run failed: ${reasonText}.`,
-        },
-        ctx,
-      );
+    // The dedupe is per recipient, not global: `packet` and `quality` are
+    // independent routing categories, so a watcher who silenced packets (but
+    // kept quality on) never saw the packet row — a global skip would leave
+    // them with NOTHING about the failed run. The escalation reports exactly
+    // who the packet row reached; everyone else still gets the quality row
+    // (their own prefs may drop that too, which is their stated choice). It is
+    // also sent to all watchers when NO packet notification went out: an
+    // escalation that was refused or threw ("failed"), or one that found a
+    // packet already open ("already_open" — that packet's own notification may
+    // have been about something else entirely, and was certainly not about
+    // this failure). A failed run must never pass silently.
+    const failureNotice: TaskWatcherNotice = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      kind: "quality",
+      text: `${input.role} run failed: ${reasonText}.`,
+    };
+    if (escalation.status === "opened") {
+      failureNotice.exceptUserIds = escalation.notifiedUserIds;
     }
+    notifyTaskWatchers(db, failureNotice, ctx);
     await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
     return;
   }
@@ -4441,6 +4458,10 @@ export async function transitionStage(
     // the work stage from Review is rework, not a fresh build — and before this
     // field the fact evaporated with the one-hop transition trigger.
     parsed.frontmatter.previousStageId = fromStageId;
+    // V18: any real move re-litigates a recorded deliberate hold — and a stale
+    // marker for a DIFFERENT stage must not ambush the task if it ever returns
+    // to the held stage later.
+    parsed.frontmatter.heldAtStage = null;
     if (input.toStageId === lastStageId) {
       parsed.frontmatter.waiting = "none";
     }
@@ -6412,6 +6433,9 @@ export async function resolvePacket(
     }
     mutate(parsed.frontmatter);
     if (clearPacket) parsed.packet = null;
+    // V18: a resolved decision is a human re-litigating the task's direction —
+    // a recorded deliberate hold no longer speaks for them.
+    parsed.frontmatter.heldAtStage = null;
     // edit_goal keeps the packet but marks the decision made — updateTaskGoal
     // clears it when the edited goal lands.
     if (option.kind === "edit_goal" && parsed.packet) {
@@ -6749,6 +6773,8 @@ export async function resolvePacket(
       { userId: actor.userId, label: actor.label },
       collisionCtx,
     );
+    let noteText: string | null = null;
+    let delivered = false;
     if (collision.status === "cleared") {
       // The name is free again — re-deliver through the same audited door the
       // task page's "Deliver branch & open PR" uses (maintainer+/owner gate;
@@ -6760,35 +6786,38 @@ export async function resolvePacket(
         ctx,
       );
       if (delivery.status !== "delivered") {
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
+        noteText = `The stale remote branch was cleared, but the re-delivery did not complete: ${delivery.message} Deliver again from the task page when it is resolved.`;
+      } else {
+        delivered = true;
+      }
+    } else {
+      noteText = `The branch collision was **not** cleared: ${collision.message} Nothing was re-delivered.`;
+    }
+    if (noteText !== null || delivered) {
+      await updateTaskFile(
+        taskRef(ctx, input.projectSlug, input.taskKey),
+        (parsed) => {
+          // The push-conflict packet held `readiness: blocked` down with it, and
+          // nothing in the delivery path writes readiness (the F29-7 withdrawal
+          // can't either — the resolution write already cleared the packet). A
+          // successful re-delivery falsifies the block, so lift it here; on the
+          // refused/failed arms the block is still real and stays. `waiting`
+          // stays "human": the resolver is present, and acceptance is
+          // verdict-gated regardless.
+          if (delivered && parsed.frontmatter.readiness === "blocked") {
+            parsed.frontmatter.readiness = "ready";
+          }
+          if (noteText !== null) {
             parsed.timeline.unshift({
               occurredAt: new Date().toISOString(),
               type: "note",
               actor: { kind: "system", systemId: "policy-engine" },
               title: null,
-              text: `The stale remote branch was cleared, but the re-delivery did not complete: ${delivery.message} Deliver again from the task page when it is resolved.`,
+              text: noteText,
               toAgent: false,
               evidence: null,
             });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-      }
-    } else {
-      await updateTaskFile(
-        taskRef(ctx, input.projectSlug, input.taskKey),
-        (parsed) => {
-          parsed.timeline.unshift({
-            occurredAt: new Date().toISOString(),
-            type: "note",
-            actor: { kind: "system", systemId: "policy-engine" },
-            title: null,
-            text: `The branch collision was **not** cleared: ${collision.message} Nothing was re-delivered.`,
-            toAgent: false,
-            evidence: null,
-          });
+          }
         },
       );
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
@@ -7764,6 +7793,9 @@ export async function applyAcceptanceWrite(
       parsed.frontmatter.previousStageId = parsed.frontmatter.stage;
     }
     parsed.frontmatter.stage = input.doneStageId;
+    // V18: every stage writer clears the deliberate-hold marker (same "every
+    // stage write records..." rule as previousStageId above).
+    parsed.frontmatter.heldAtStage = null;
     parsed.frontmatter.readiness = "ready";
     parsed.frontmatter.waiting = "none";
     // P14-LV-02: acceptance used to stamp `validation: healthy` with the comment

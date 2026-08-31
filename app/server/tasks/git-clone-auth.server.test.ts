@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  CLONE_TIMEOUT_MS,
+  cloneTimeoutMs,
   cloneFailureLogDetails,
   cloneFailureSentence,
   createGitHubClonePlan,
@@ -188,7 +188,7 @@ describe("clone timeout + failure sentence", () => {
     // probe-verified credential, and every downstream signal blamed the
     // credential. A shallow clone is bounded by repo size and link speed; this
     // ceiling exists to stop a HUNG clone, not to cap how big a repo may be.
-    expect(CLONE_TIMEOUT_MS).toBeGreaterThanOrEqual(600_000);
+    expect(cloneTimeoutMs()).toBeGreaterThanOrEqual(600_000);
   });
 
   it("a timeout with a working credential says so, in as many words", () => {

@@ -98,9 +98,9 @@ import {
 } from "./specialist-run.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 import {
-  listKnowledgeBases,
-  listMcpServers,
-  listSkills,
+  listKnowledgeBaseNames,
+  listMcpServerNames,
+  listSkillNames,
 } from "~/server/org/resources.server";
 
 /** Capability-gated task mutations used only by the in-process operator toolkit. */
@@ -179,6 +179,11 @@ export interface OperatorActionResult {
    */
   outcome: "done" | "recommended" | "denied" | "noop";
   message: string;
+  /** Users the action's own watcher notification actually REACHED (routing
+   *  prefs applied per recipient). Set by the packet writer so a caller that
+   *  owes a fallback notice about the same event (T13) can dedupe per
+   *  recipient instead of assuming the packet row reached everyone. */
+  notifiedUserIds?: string[];
 }
 
 // ------------------------------------------------------------- authority
@@ -1155,7 +1160,7 @@ export async function operatorOpenPacket(
     taskKey: input.taskKey,
     details: { type: input.packetType },
   });
-  notifyTaskWatchers(
+  const notifiedUserIds = notifyTaskWatchers(
     db,
     {
       projectSlug: input.projectSlug,
@@ -1172,6 +1177,7 @@ export async function operatorOpenPacket(
   );
   return {
     outcome: "done",
+    notifiedUserIds,
     message: `Opened a ${input.packetType === "blocked" ? "blocking" : "decision"} packet with ${options.length} option(s).`,
   };
 }
@@ -1455,6 +1461,16 @@ export interface OperatorTaskSnapshot {
   /** The task's delivery branch (null before any delivery). Lets recovery
    *  packets name the branch a `deleteBranch` archive option would remove. */
   branch: string | null;
+  /** V19: an unrelated PR squatting this task's branch name (R15-15 collision,
+   *  recorded by the reconciler as `github.unownedPr`). The operator was
+   *  structurally blind to the collision at the exact moment it must author a
+   *  `resolve_remote_collision` packet — the Collision card row and the
+   *  refusal notes rendered it for humans only, so the model had to guess from
+   *  timeline prose. Null when no collision is recorded.
+   *
+   *  Optional only so hand-built test fixtures need not restate it; the real
+   *  producer (`operatorSnapshot`) always sets it. */
+  unownedPr?: number | null;
   /** R19-1: the project's repository ("owner/name"), or null when none is
    *  attached. The coordinator used to be blind to it — it could not even NAME
    *  the repository it operates on, which is part of how it came to call its own
@@ -1829,6 +1845,9 @@ export function operatorSnapshot(
     // option with `deleteBranch: true` would delete instead of gesturing at
     // "the branch".
     branch: fm.branch ?? null,
+    // V19: the recorded branch-name collision, so the operator can author
+    // `resolve_remote_collision` from a fact instead of timeline prose.
+    unownedPr: fm.github?.unownedPr ?? null,
     // R19-1: name the repository the read-only view reads.
     repo: project.parsed.frontmatter.repo ?? null,
     // R19-8: the "nothing to deliver" shape, stated outright.
@@ -1856,10 +1875,13 @@ export function operatorSnapshot(
       capabilities: Object.fromEntries(authority.policy),
     },
     // F31-3: instance catalog names, so "does not exist" claims are checkable.
+    // Names-only readers (V12): the snapshot backs `get_task`, the operator's
+    // most-called tool — the full view builders walk every KB/skill store
+    // directory and read every SKILL.md body, all discarded for `.name`.
     orgResources: {
-      kbs: listKnowledgeBases(db, orgCtx).map((k) => k.name),
-      skills: listSkills(db, orgCtx).map((s) => s.name),
-      mcps: listMcpServers(db).map((m) => m.name),
+      kbs: listKnowledgeBaseNames(db, orgCtx),
+      skills: listSkillNames(db, orgCtx),
+      mcps: listMcpServerNames(db),
     },
   };
 }
@@ -2461,8 +2483,12 @@ export async function operatorDeliverForReview(
         message:
           `Delivery push CONFLICTED: ${outcome.message}. No PR was opened. This is a ` +
           `branch-history conflict on \`${outcome.branch}\`, not a credential problem. ` +
-          `Open a decision packet so a human resolves the remote branch (delete/rename ` +
-          `or deliberate force-push) or archives the task.`,
+          `Open a decision packet with a \`resolve_remote_collision\` option — its ` +
+          `ceremony closes the squatting PR (when one is recorded), deletes the stale ` +
+          `remote branch, and re-delivers this task's local work — or an ` +
+          `\`archive_task\` option to abandon the task. Do NOT author ` +
+          `\`discard_branch\` here: it destroys this task's LOCAL commits and is ` +
+          `refused while delivered work stands on the branch.`,
       };
     case "grant_withheld":
     case "push_failed":

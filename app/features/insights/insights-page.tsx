@@ -206,23 +206,35 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         icon="memory"
         sub="tasks past their project's compression threshold"
       />
-      {/* F31-D6: pass 31 measured the operator at 63% of all run spend with
+      {/* F31-D6: pass 31 measured coordination at 63% of all run spend with
           no card saying so — coordination cost was invisible next to the
-          work it coordinated. Share over COST-REPORTING runs only; null when
-          nothing reported a cost (never a fake 0%). */}
+          work it coordinated. "Coordination" is the operator AND the
+          controller: both decide what the working agents do rather than doing
+          the work, so the sub-text names both instead of implying the
+          controller's turns are free. Share over COST-REPORTING runs only;
+          null when nothing reported a cost (never a fake 0%). */}
       <StatCard
         label="Coordination overhead"
         value={fmtPercent(g.coordination.share)}
         icon="shield"
         sub={
           g.coordination.totalCostUsd > 0
-            ? `operator runs spent $${g.coordination.operatorCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)} reported`
+            ? `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)} reported`
             : "no run has reported a cost yet"
         }
       />
       </div>
     </section>
   );
+}
+
+/** Is `iso` strictly newer than `thanIso`? False when either is missing or
+ *  unparseable — an unreadable stamp never displaces a recorded claim. */
+function observedAfter(iso: string | undefined, thanIso: string): boolean {
+  if (!iso) return false;
+  const a = Date.parse(iso);
+  const b = Date.parse(thanIso);
+  return Number.isFinite(a) && Number.isFinite(b) && a > b;
 }
 
 /**
@@ -247,6 +259,15 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
       <ul className="bar-list">
         {quota.map(({ backend, reading, exhausted }) => {
           const pct = reading ? pctOf(reading.utilization) : null;
+          // V4 (pass 31): an exhaustion record is a claim about ONE moment. A
+          // utilization reading this backend reported AFTER that moment is
+          // fresher evidence from the same provider, so it wins — the refusal
+          // is history by then, and showing it would pin the row at 100% while
+          // the backend is demonstrably answering runs again.
+          const refusal =
+            exhausted && !observedAfter(reading?.observedAt, exhausted.observedAt)
+              ? exhausted
+              : null;
           return (
             <li key={backend} className="bar-row">
               <span className="bar-label" title={backend}>
@@ -257,16 +278,16 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                   className="bar-fill"
                   // D5: a provider that REFUSED a run said the window is spent,
                   // so the track is full. That is the provider's own words, not
-                  // an invented utilization number: `exhausted` is a separate
+                  // an invented utilization number: the refusal is a separate
                   // record from `reading`, and the label below says which one
                   // the row is showing.
-                  style={{ width: `${exhausted ? 100 : (pct ?? 0)}%` }}
+                  style={{ width: `${refusal ? 100 : (pct ?? 0)}%` }}
                 />
               </span>
               <span
                 className={
                   "bar-val" +
-                  (exhausted == null && (reading == null || pct == null) ? " na" : "")
+                  (refusal == null && (reading == null || pct == null) ? " na" : "")
                 }
               >
                 {/* Four honest states: the provider refused a run for being over
@@ -277,14 +298,14 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                     omit it, so say so rather than "no reading yet" next to a
                     reset date); a full percentage reading. Absent states render
                     de-emphasized (.na), never at value weight. */}
-                {exhausted
+                {refusal
                   ? "usage limit reached"
                   : reading == null
                     ? "no reading yet"
                     : pct == null
                       ? `${reading.rateLimitType.replaceAll("_", " ")} · utilization not reported`
                       : `${pct}% of ${reading.rateLimitType.replaceAll("_", " ")}`}
-                {exhausted && (
+                {refusal && (
                   <span
                     className="bar-cost"
                     // Same hydration gate as the reading branch below: a
@@ -292,9 +313,9 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                     // timezone, and React re-renders rather than patching it.
                     title={
                       hydrated
-                        ? `run ${exhausted.runId} was refused ${new Date(
-                            exhausted.observedAt,
-                          ).toLocaleString()}: ${exhausted.providerText}`
+                        ? `run ${refusal.runId} was refused ${new Date(
+                            refusal.observedAt,
+                          ).toLocaleString()}: ${refusal.providerText}`
                         : undefined
                     }
                   >
@@ -304,11 +325,17 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                       // blurred the two would be claiming a live measurement it
                       // never took.
                       "from a refused run",
-                      exhausted.resetsAt != null
+                      // V9: only an `exact` reset is a real instant (the
+                      // provider emitted a unix epoch). A `prose` one was
+                      // reconstructed from wall-clock words in the ACCOUNT's
+                      // timezone, which this app does not know, so it renders
+                      // as the calendar DATE it named and never as a
+                      // to-the-minute local time we cannot stand behind.
+                      refusal.resetsAt != null
                         ? `retry after ${
-                            hydrated
-                              ? new Date(exhausted.resetsAt * 1000).toLocaleString()
-                              : new Date(exhausted.resetsAt * 1000)
+                            hydrated && refusal.resetsAtPrecision === "exact"
+                              ? new Date(refusal.resetsAt * 1000).toLocaleString()
+                              : new Date(refusal.resetsAt * 1000)
                                   .toISOString()
                                   .slice(0, 10)
                           }`
@@ -318,7 +345,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                       .join(" · ")}
                   </span>
                 )}
-                {!exhausted && reading && (
+                {!refusal && reading && (
                   <span
                     className="bar-cost"
                     // The reading's own age — a weeks-old 91% must be visibly
@@ -370,7 +397,8 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
         means new runs may start failing when the window is exhausted. A row
         reading &ldquo;usage limit reached&rdquo; is derived from a run the
         provider refused, not from a reported utilization figure; it clears as
-        soon as a run on that backend completes.
+        soon as a run on that backend completes, when the window it names has
+        passed, or when the backend reports a newer reading.
       </p>
     </section>
   );

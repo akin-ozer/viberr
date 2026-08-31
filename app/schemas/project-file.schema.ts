@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   diagError,
   diagWarning,
+  tolerantRowsOf,
   type FileDiagnostic,
 } from "./file-diagnostics";
 
@@ -322,23 +323,17 @@ function tolerantArray<T>(
     );
     return [];
   }
-  const element = arraySchema.element;
-  const out: T[] = [];
-  value.forEach((entry, i) => {
-    const r = element.safeParse(entry);
-    if (r.success) {
-      out.push(r.data);
-    } else {
-      diagnostics.push(
-        diagWarning(
-          "frontmatter.invalid_field",
-          `Frontmatter \`${path}[${i}]\` is invalid (${r.error.issues[0]?.message ?? "unparseable"}) — dropping this entry, keeping the rest.`,
-          `${path}[${i}]`,
-        ),
-      );
-    }
-  });
-  return out;
+  return tolerantRowsOf(
+    diagnostics,
+    value,
+    arraySchema.element,
+    "frontmatter.invalid_field",
+    (i) => ({
+      subject: `Frontmatter \`${path}[${i}]\``,
+      noun: "entry",
+      path: `${path}[${i}]`,
+    }),
+  );
 }
 
 function derivePrefix(slug: string): string {

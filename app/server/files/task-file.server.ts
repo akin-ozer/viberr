@@ -4,6 +4,7 @@ import {
   diagError,
   diagInfo,
   diagWarning,
+  tolerantRowsOf,
   type FileDiagnostic,
 } from "~/schemas/file-diagnostics";
 import {
@@ -388,22 +389,17 @@ function parsePacketSection(
     .loose()
     .safeParse(raw);
   if (optionsProbe.success) {
-    const kept: unknown[] = [];
-    optionsProbe.data.options.forEach((entry, i) => {
-      const r = packetOptionSchema.safeParse(entry);
-      if (r.success) {
-        kept.push(r.data);
-      } else {
-        diagnostics.push(
-          diagWarning(
-            "packet.invalid_option",
-            `Packet option [${i}] is invalid (${r.error.issues[0]?.message ?? "unparseable"}) — dropping this option, keeping the rest.`,
-            "packet.options",
-          ),
-        );
-      }
-    });
-    optionsProbe.data.options = kept;
+    optionsProbe.data.options = tolerantRowsOf(
+      diagnostics,
+      optionsProbe.data.options,
+      packetOptionSchema,
+      "packet.invalid_option",
+      (i) => ({
+        subject: `Packet option [${i}]`,
+        noun: "option",
+        path: "packet.options",
+      }),
+    );
     raw = optionsProbe.data;
   }
   const result = taskPacketSchema.safeParse(raw);

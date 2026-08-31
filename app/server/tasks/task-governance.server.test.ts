@@ -1410,6 +1410,7 @@ describe("resolvePacket kind matrix", () => {
       {
         stage: "review",
         waiting: "human",
+        readiness: "blocked",
         branch: "vib-1-work",
         workRevision: {
           id: "rev_collision3",
@@ -1458,6 +1459,9 @@ describe("resolvePacket kind matrix", () => {
         t.includes("the re-delivery did not complete"),
       ),
     ).toBe(true);
+    // V11: the lift is delivery-gated — a re-delivery that did NOT complete
+    // leaves the block standing (the failure arm's block is still real).
+    expect(fm.readiness).toBe("blocked");
     expect(
       listAuditEvents(store.db, { action: "github.pr.closed_unowned" }),
     ).toHaveLength(1);

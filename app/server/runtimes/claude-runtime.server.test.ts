@@ -1,4 +1,8 @@
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { resetEnvCacheForTests } from "../config/env.server";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
 import {
@@ -64,6 +68,48 @@ interface CapturedOptions {
   strictMcpConfig?: boolean;
   disallowedTools?: string[];
   managedSettings?: { claudeMdExcludes?: string[] };
+}
+
+/**
+ * A run workspace as `mountGrantedSkills` leaves it: the granted skill folders
+ * plus the `settings.json` whose excludes keep the checked-out repository's
+ * CLAUDE.md out of the run.
+ *
+ * V6 — the adapter treats that file as the PRECONDITION for opening
+ * `settingSources: ['project']` (the option that discovers the skills is the
+ * option that reads the repo's memory files), so a spec carrying skills has to
+ * point at a real one. `excludes: false` is the workspace a failed settings
+ * write leaves behind.
+ */
+function mountedWorkspace(
+  skills: string[],
+  opts: { excludes?: boolean } = {},
+): string {
+  const dir = mkdtempSync(path.join(tmpdir(), "viberr-claude-ws-"));
+  mkdirSync(path.join(dir, ".claude", "skills"), { recursive: true });
+  for (const name of skills) {
+    mkdirSync(path.join(dir, ".claude", "skills", name), { recursive: true });
+  }
+  if (opts.excludes !== false) {
+    writeFileSync(
+      path.join(dir, ".claude", "settings.json"),
+      JSON.stringify({
+        claudeMdExcludes: ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/**"],
+      }),
+    );
+  }
+  return dir;
+}
+
+/** The excludes the workspace catalog carries, read back off disk. */
+function catalogExcludes(workspaceDir: string): string[] {
+  return z
+    .object({ claudeMdExcludes: z.array(z.string()) })
+    .parse(
+      JSON.parse(
+        readFileSync(path.join(workspaceDir, ".claude", "settings.json"), "utf8"),
+      ),
+    ).claudeMdExcludes;
 }
 
 const SPEC: RunSpec = {
@@ -361,6 +407,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // below fails.
     const captured = await optionsFor({
       ...SPEC,
+      workdir: mountedWorkspace(["conventional-commits", "terraform-review"]),
       skills: ["conventional-commits", "terraform-review"],
     });
 
@@ -377,8 +424,58 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(captured.disallowedTools).toEqual(expect.arrayContaining(["Task", "Workflow"]));
     // The CLAUDE.md ingress `settingSources: ['project']` opens — see
     // MANAGED_SETTINGS. Asserted so the mitigation cannot be dropped silently;
-    // it is NOT proof the ingress is closed (that needs a live run).
+    // it is NOT proof the ingress is closed (the SDK drops this key: the
+    // workspace file the next two tests are about is the real mitigation).
     expect(captured.managedSettings?.claudeMdExcludes).toContain("**/CLAUDE.md");
+  });
+
+  it("V6: keeps the project source CLOSED when the workspace has no CLAUDE.md excludes", async () => {
+    // The workspace of a run whose mount could not write the excludes file (its
+    // strip then took the catalog with it), or whose file a co-engaged run
+    // removed. Opening `settingSources: ['project']` here would hand the model
+    // the checked-out repository's own CLAUDE.md at system-prompt tier — the
+    // ingress this adapter is supposed to be closing, on the exact path where
+    // nothing else is watching. The run keeps the fully isolated shape instead
+    // and its grants ride the system prompt as text.
+    //
+    // Canary: drop the `ensureCatalogSettings` gate from `nativeSkillsForRun`
+    // and settingSources is ['project'] again, over an open ingress.
+    const bare = mkdtempSync(path.join(tmpdir(), "viberr-claude-bare-"));
+
+    const captured = await optionsFor({
+      ...SPEC,
+      workdir: bare,
+      skills: ["conventional-commits"],
+    });
+
+    expect(captured.settingSources).toEqual([]);
+    expect(captured.skills).toEqual([]);
+    // …and the fence that replaces the `skills` filter comes back with it: a
+    // run listing no skill of its own must not keep the `Skill` tool, or the
+    // SDK's ~16 bundled skills are invokable.
+    expect(captured.disallowedTools).toContain("Skill");
+  });
+
+  it("V6: re-writes the excludes file when the mounted catalog is there without it", async () => {
+    // One workspace, MANY engagements: every mount strips this catalog, and any
+    // live agent can delete inside its own checkout, so the file can go missing
+    // between this run's mount and its start. Losing the run's granted craft
+    // over that would be a silent capability loss; the content is a constant
+    // viberr owns, so the adapter re-establishes it and starts natively.
+    //
+    // Canary: return `false` instead of writing in `ensureCatalogSettings` and
+    // this run drops to settingSources: [] with its skills unlisted.
+    const ws = mountedWorkspace(["conventional-commits"], { excludes: false });
+
+    const captured = await optionsFor({
+      ...SPEC,
+      workdir: ws,
+      skills: ["conventional-commits"],
+    });
+
+    expect(captured.settingSources).toEqual(["project"]);
+    expect(captured.skills).toEqual(["conventional-commits"]);
+    expect(catalogExcludes(ws)).toContain("**/CLAUDE.md");
   });
 
   it("never lets a skill name the SDK would throw on reach query()", async () => {
@@ -390,6 +487,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // the raw list back, wildcard included.
     const mixed = await optionsFor({
       ...SPEC,
+      workdir: mountedWorkspace(["good-skill"]),
       skills: ["good-skill", "my skill (v2)", "*", "good-skill"],
     });
     expect(mixed.skills).toEqual(["good-skill"]);

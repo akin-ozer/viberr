@@ -1477,11 +1477,80 @@ describe("stranded auto-stage resume", () => {
         expect(
           parsed.timeline.some((ev) => ev.text.includes("deliberate hold")),
         ).toBe(true);
+        // …and DURABLY, in frontmatter (V18) — the marker later settles read.
+        expect(parsed.frontmatter.heldAtStage).toBe(parsed.frontmatter.stage);
         // …and coordination settles to the human instead of a third drive.
         expect(parsed.frontmatter.waiting).toBe("human");
       });
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(operatorRuns()).toHaveLength(2);
+    });
+
+    /**
+     * V18 (pass-31 review): the hold must survive LATER external triggers. The
+     * one-nudge guard alone was per-drive, in-memory — every schedule firing
+     * or machine trigger started an unmarked drive, the backstop paid one
+     * fresh nudge, and the second stranding appended a byte-identical hold
+     * note: two drives and a duplicate note per trigger, forever. The durable
+     * `heldAtStage` marker keeps the backstop quiet until a human re-litigates
+     * (transition, packet resolution, goal edit).
+     */
+    it("a recorded hold keeps the backstop quiet on later external triggers — no duplicate note, no paid nudge", async () => {
+      // Reach the recorded-hold state: drive 1 strands → nudge (drive 2) →
+      // strands again → hold recorded.
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "create",
+        dataRoot: store2.dataRoot,
+      });
+      adapter2.finish(store2, JSON.stringify({ reasoning: "", actions: [] }), "finished");
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(2);
+        expect(adapter2.pending).not.toBeNull();
+      });
+      adapter2.finish(store2, JSON.stringify({ reasoning: "", actions: [] }), "finished");
+      await eventually(() => {
+        expect(
+          readTaskFile({
+            projectSlug: store2.slug,
+            taskKey: "VIB-1",
+            dataRoot: store2.dataRoot,
+          })!.parsed.frontmatter.heldAtStage,
+        ).not.toBeNull();
+      });
+
+      // A later EXTERNAL machine trigger (the schedule-fire shape) drives once…
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "transition",
+        dataRoot: store2.dataRoot,
+      });
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(3);
+        expect(adapter2.pending).not.toBeNull();
+      });
+      // …and that drive ends stranded at the SAME held stage.
+      adapter2.finish(store2, JSON.stringify({ reasoning: "", actions: [] }), "finished");
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      // The recorded hold answers: no fourth drive, and still exactly ONE
+      // hold note on the timeline.
+      expect(operatorRuns()).toHaveLength(3);
+      const parsed = readTaskFile({
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        dataRoot: store2.dataRoot,
+      })!.parsed;
+      expect(
+        parsed.timeline.filter((ev) => ev.text.includes("deliberate hold")),
+      ).toHaveLength(1);
+      expect(parsed.frontmatter.heldAtStage).toBe(parsed.frontmatter.stage);
     });
 
     it("an ERRORED drive is not resumed — failures must not loop", async () => {
@@ -1908,6 +1977,34 @@ describe("pending trigger queue", () => {
       expect(adapter3.pending?.spec.prompt).toContain(
         'moved this task from "Ready" to "In Progress"',
       );
+    });
+  });
+
+  it("V13 (pass-31 review): a queued stranded-resume nudge keeps its marker through machine-trigger coalescing", async () => {
+    // The nudge fires as a machine trigger carrying `strandedResume: true`.
+    // Machine triggers are newest-wins in `queue.latest`, and a wholesale
+    // overwrite dropped the marker — the drive that eventually ran was
+    // unmarked, so a second stranding re-armed another paid nudge instead of
+    // recording the deliberate hold (the F31-11 burst, narrowly re-opened).
+    await drive({ trigger: "manual" });
+    expect(adapter3.pending).not.toBeNull();
+
+    // The nudge lands while the lease is held…
+    await drive({ trigger: "transition", strandedResume: true });
+    // …and a later machine trigger overwrites the queued slot.
+    await drive({
+      trigger: "transition",
+      transitionFromName: "Ready",
+      transitionToName: "In Progress",
+    });
+
+    adapter3.finish(store3, emptyPlan, "finished");
+
+    // The drained drive is still MARKED: its turn instruction carries the
+    // nudge's advance-or-record-the-hold context.
+    await eventually(() => {
+      expect(operatorRuns()).toHaveLength(2);
+      expect(adapter3.pending?.spec.prompt).toContain("re-invoked ONCE");
     });
   });
 

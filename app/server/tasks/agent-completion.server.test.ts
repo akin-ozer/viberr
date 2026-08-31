@@ -824,6 +824,106 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(parsed.frontmatter.waiting).toBe("human");
   });
 
+  it("V2 (pass-31 review): a watcher who silenced packet notifications still gets the quality row", async () => {
+    // T13's dedupe is PER RECIPIENT, not global. `packet` and `quality` are
+    // independent routing categories, so a supervisor who turned off decision
+    // packets (they don't resolve them) but kept quality flags on never saw
+    // the packet row — a global "skip quality when the packet opened" left
+    // them with NOTHING about the failed run, violating the invariant the
+    // dedupe's own comment states.
+    const { setNotifRoutingPref } = await import(
+      "~/features/profile/profile-actions.server"
+    );
+    setNotifRoutingPref(store.db, store.users.murat.id, "packets", false);
+
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runId = "run_v2_prefsplit";
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t-v2",
+      role: "Developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      backend: "codex",
+      model: "gpt-5.5",
+      sdk: "codex",
+      state: "error",
+    });
+    insertRunLine(store.db, {
+      runId,
+      seq: 0,
+      occurredAt: "2026-07-12T10:00:00.000Z",
+      raw: JSON.stringify({ ev: "err", tag: "turn.failed" }),
+      display: {
+        t: "10:00:00",
+        ev: "err",
+        tag: "turn.failed",
+        text: "You've hit your usage limit. Upgrade to Plus to continue using Codex.",
+      },
+    });
+    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "developer",
+        role: "Developer",
+        delivers: true,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "error" },
+    );
+    expect(taskFile().parsed.packet, "the recovery packet still opens").toBeTruthy();
+
+    // SAFETY: every selected column is declared on `notifications` (0001), and
+    // `kind`/`text` are NOT NULL.
+    const notifs = store.db
+      .prepare(
+        `SELECT user_id, kind, text FROM notifications WHERE task_key = 'VIB-1'`,
+      )
+      .all() as { user_id: string; kind: string; text: string }[];
+    const murats = notifs.filter((n) => n.user_id === store.users.murat.id);
+    const ardas = notifs.filter((n) => n.user_id === store.users.arda.id);
+    // The packet-silenced watcher hears about the failure through the quality
+    // fallback — exactly once.
+    expect(murats).toHaveLength(1);
+    expect(murats[0]!.kind).toBe("quality");
+    expect(murats[0]!.text).toContain("run failed");
+    // A watcher the packet row REACHED is excluded from the fallback — still
+    // exactly one row, the actionable one.
+    expect(ardas).toHaveLength(1);
+    expect(ardas[0]!.kind).toBe("packet");
+  });
+
   /**
    * T13's other half: the dedupe must not become silence. When no packet
    * notification goes out — here because no operator is deployed, so the

@@ -2306,6 +2306,29 @@ describe("applyRecommendation / dismissRecommendation", () => {
     expect(org.kbs).toContain("pass31-qa-conventions");
   });
 
+  it("V19 (pass-31 review): the snapshot names the recorded branch collision (unownedPr)", () => {
+    // The operator authors `resolve_remote_collision` — but the R15-15
+    // collision record reached only human surfaces (the Collision card row),
+    // so at the exact moment the packet is due the model had to reconstruct
+    // the collision from timeline prose. State the fact.
+    seedTask("impl");
+    deployRoster([{ capabilityId: "append-typed-events", mode: "direct" }]);
+    expect(snapshot().unownedPr).toBeNull();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        title: "Operator drive",
+        branch: "vib-1",
+        github: { commits: [], changed: null, unownedPr: 232 },
+      }),
+      goal: "Prove the operator drives the task.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(snapshot().unownedPr).toBe(232);
+  });
+
   it("the operator snapshot carries its own PENDING recommendations", async () => {
     await seedRecommendation();
     const pending = snapshot().recommendations!.pending;

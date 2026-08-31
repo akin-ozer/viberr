@@ -426,6 +426,137 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     );
   });
 
+  it("V10 (pass-31 review): a conflict packet authored with resolve_remote_collision is superseded too", async () => {
+    // F31-6 refuses `discard_branch` authoring exactly when delivered work
+    // stands on the branch, so post-F31-6 push-conflict packets carry
+    // `resolve_remote_collision` instead. Keying the supersession on
+    // `discard_branch` alone reopened F29-7 for every such packet: the human
+    // resolves the branch out-of-band, re-delivers, and the task keeps a
+    // blocked "no PR opened" card beside a live "PR #N" panel.
+    const COLLISION_CONFLICT_PACKET: TaskPacket = {
+      id: "pkt_conflict_rrc",
+      type: "blocked",
+      kind: "Blocked decision",
+      from: "operator",
+      title: "Delivery push conflict on branch `vib-1` — remote holds unrelated commits",
+      body: "No review PR was opened.",
+      observations: [],
+      options: [
+        {
+          kind: "resolve_remote_collision",
+          t: "Clear the stale remote branch and re-deliver",
+          d: "",
+          rec: true,
+        },
+        { kind: "archive_task", t: "Archive this task", d: "", rec: false },
+      ],
+    };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1",
+        readiness: "blocked",
+      }),
+      packet: COLLISION_CONFLICT_PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
+    openPrMock.mockResolvedValue({
+      status: "ok",
+      prNumber: 13,
+      created: true,
+      url: "https://github.com/x/y/pull/13",
+    });
+
+    const outcome = await performDelivery(
+      store.db,
+      dataCtx(),
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+    expect(outcome).toMatchObject({ status: "delivered", prNumber: 13 });
+
+    const after = fm();
+    expect(after.packet).toBeNull();
+    expect(after.frontmatter.readiness).not.toBe("blocked");
+    expect(after.timeline.some((e) => /Packet withdrawn/.test(e.text ?? ""))).toBe(
+      true,
+    );
+  });
+
+  it("V11 (pass-31 review): a fully successful resolve_remote_collision lifts the packet's readiness block", async () => {
+    // The push-conflict packet floored readiness at `blocked`
+    // (operatorOpenPacket does that for every blocked packet), and the
+    // resolution write clears the PACKET before the remedy runs — so the F29-7
+    // withdrawal can never lift the gate (no packet left to withdraw), and
+    // nothing in the delivery path writes readiness. Without the explicit lift
+    // the task stayed in the board's Blocked filter forever, packet-less, even
+    // after the PR opened.
+    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_v11collision0000000000000000000001" },
+      patActor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    github = fakeGithubFetch({
+      "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 204, body: "" },
+    });
+    const COLLISION_PACKET: TaskPacket = {
+      id: "pkt_v11",
+      type: "blocked",
+      kind: "Blocked decision",
+      from: "operator",
+      title: "Delivery push conflict on branch `vib-1`",
+      body: "No review PR was opened.",
+      observations: [],
+      options: [
+        {
+          kind: "resolve_remote_collision",
+          t: "Clear the stale remote branch and re-deliver",
+          d: "",
+          rec: true,
+        },
+      ],
+    };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1",
+        readiness: "blocked",
+        waiting: "human",
+        workRevision: revision(),
+        github: { commits: [], changed: null, unownedPr: 232 },
+      }),
+      packet: COLLISION_PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
+    openPrMock.mockResolvedValue({
+      status: "ok",
+      prNumber: 14,
+      created: true,
+      url: "https://github.com/x/y/pull/14",
+    });
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      dataCtx(),
+    );
+
+    const after = fm();
+    expect(after.packet).toBeNull();
+    expect(after.frontmatter.github?.unownedPr ?? null).toBeNull();
+    // The lift: cleared + re-delivered means the block is falsified.
+    expect(after.frontmatter.readiness).toBe("ready");
+    // The resolver is present; acceptance stays verdict-gated regardless.
+    expect(after.frontmatter.waiting).toBe("human");
+  });
+
   it("F29-7: a successful delivery does NOT touch a reject-recovery packet (archive_task, not a branch conflict)", async () => {
     // A "PR closed without merging → choose recovery path" packet uses
     // archive_task options; it is a different question and stays for the human.

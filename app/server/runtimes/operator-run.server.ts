@@ -15,7 +15,7 @@ import {
 } from "~/server/files/project-writer.server";
 import { getPatToken, getProjectCredential } from "~/server/secrets/pat-store.server";
 import {
-  CLONE_TIMEOUT_MS,
+  cloneTimeoutMs,
   cloneFailureLogDetails,
   cloneFailureSentence,
 } from "~/server/tasks/git-clone-auth.server";
@@ -435,7 +435,21 @@ function queueOperatorTrigger(
       });
     }
   } else {
+    // Newest-wins for machine triggers, but two accounting fields must SURVIVE
+    // the overwrite (V13): `strandedResume` marks the one paid nudge per
+    // settle — losing it to a later trigger un-marks the eventual drive, so a
+    // second stranding re-arms another nudge instead of recording the hold —
+    // and `transitionDepth` bounds the transition chain, so the deeper count
+    // wins or the cap resets mid-chain.
+    const prior = queue.latest;
     queue.latest = input;
+    if (prior?.strandedResume && input.strandedResume !== true) {
+      queue.latest = { ...input, strandedResume: true };
+    }
+    const priorDepth = prior?.transitionDepth ?? 0;
+    if (priorDepth > (input.transitionDepth ?? 0)) {
+      queue.latest = { ...queue.latest, transitionDepth: priorDepth };
+    }
   }
   state.pending.set(key, queue);
   // C2 (pass 23): the caller surfaces these on the timeline — the module's own
@@ -760,29 +774,54 @@ export async function maybeResumeStrandedOperator(
   );
   if (!stranded) return false;
 
+  // V18: a DURABLE hold already stands for this exact stage — recorded by an
+  // earlier settle (below) and not yet re-litigated by a human (transitions,
+  // packet resolutions and goal edits all clear it).
+  // Without this read, the marker's whole point is lost: every external
+  // trigger (a schedule firing hourly, an @operator aside) started an unmarked
+  // drive, the backstop paid ONE fresh nudge, and the second stranding
+  // appended a byte-identical hold note — two drives and a duplicate note per
+  // trigger, forever. Quiet is correct here: the hold is already on the
+  // timeline.
+  if (
+    file.parsed.frontmatter.heldAtStage !== null &&
+    file.parsed.frontmatter.heldAtStage === file.parsed.frontmatter.stage
+  ) {
+    logger.info("stranded-operator resume withheld — a recorded hold stands for this stage", {
+      taskKey: ref.taskKey,
+      stage: file.parsed.frontmatter.stage,
+    });
+    return false;
+  }
+
   // One nudge per settle (F31-11). THIS drive already was the stranded
   // resume's nudge, its turn instruction said "advance or RECORD the hold" —
   // and it ended stranded anyway. That is a deliberate hold, not an
-  // interrupted chain: record it once and settle to human instead of looping
-  // paid drives until the chain cap (which only pauses the burst — the next
-  // trigger re-armed it, fourteen drives on one no-op task).
+  // interrupted chain: record it once — durably, via `heldAtStage`, so later
+  // external triggers find it above instead of re-arming a nudge — and settle
+  // to human instead of looping paid drives until the chain cap (which only
+  // pauses the burst — the next trigger re-armed it, fourteen drives on one
+  // no-op task).
   if (ref.strandedResume) {
-    const { appendTimelineEvent, resolveTaskFilePath } = await import(
+    const { updateTaskFile, resolveTaskFilePath } = await import(
       "~/server/files/task-writer.server"
     );
     const { rebuildPath } = await import("~/server/projections/rebuilder.server");
-    await appendTimelineEvent(
+    await updateTaskFile(
       { projectSlug: ref.projectSlug, taskKey: ref.taskKey, dataRoot: ref.dataRoot },
-      {
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "system", systemId: "policy-engine" },
-        title: null,
-        text:
-          "**Note:** this stage auto-advances, but the operator held it twice in a row without advancing, dispatching, or opening a packet — treating that as a deliberate hold. " +
-          "Coordination is paused here: run the operator manually when the hold should end, adjust the goal, or loosen the boundary in Policy → Workflow rules.",
-        toAgent: false,
-        evidence: null,
+      (parsed) => {
+        parsed.frontmatter.heldAtStage = parsed.frontmatter.stage;
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text:
+            "**Note:** this stage auto-advances, but the operator held it twice in a row without advancing, dispatching, or opening a packet — treating that as a deliberate hold. " +
+            "Coordination is paused here: run the operator manually when the hold should end, adjust the goal, or loosen the boundary in Policy → Workflow rules.",
+          toAgent: false,
+          evidence: null,
+        });
       },
     );
     rebuildPath(
@@ -1178,7 +1217,7 @@ export async function ensureOperatorRepoCheckout(
       kind: "unavailable",
       repo,
       sentence:
-        cloneFailureSentence(details, { hadCredential, timeoutMs: CLONE_TIMEOUT_MS }) +
+        cloneFailureSentence(details, { hadCredential, timeoutMs: cloneTimeoutMs() }) +
         (stderrExcerpt ? ` The checkout reported: ${stderrExcerpt}` : ""),
     };
   }
@@ -3393,7 +3432,7 @@ function operatorTurnDoctrine(
     "- Work stage where the deliverer's run is IN FLIGHT — `liveRuns` in the snapshot is the ONLY proof of that (`waiting` is a display flag and a directive comment on the timeline is not a running agent): do nothing and stop — you are re-invoked when it reports. Never duplicate a run that is already working.\n" +
     "- Work stage where the deliverer already reported and its report is still the LATEST word (no newer human steer, rework decision, or request-changes after it): do nothing and stop.\n" +
     "- Work stage where a human steer, rework decision, or request-changes arrived AFTER the deliverer's last report (e.g. the task was sent back from review): the deliverer owes NEW work — `run_agent` the delivering profile with that steer as its prompt, quoting it.\n" +
-    "- DELIVERY (push the branch + open the review PR) is YOUR decision, made with `deliver_for_review` — it is no longer a stage side-effect, and a stage named \"Review\" delivers nothing by itself. Deliver when the deliverer's work is committed and plausible for review. Weigh the REMAINING stages: a later stage (e.g. QA) need not gate delivery for this task — offer or perform early delivery when so. When unsure whether the branch should be pushed, `open_decision_packet` and ask. The tool result is honest: a `push_conflict` means the remote branch diverged (a history problem, never a credential problem) and NO PR was opened — open a decision packet naming the branch (resolve/force-push deliberately, or archive) instead of retrying blindly.\n" +
+    "- DELIVERY (push the branch + open the review PR) is YOUR decision, made with `deliver_for_review` — it is no longer a stage side-effect, and a stage named \"Review\" delivers nothing by itself. Deliver when the deliverer's work is committed and plausible for review. Weigh the REMAINING stages: a later stage (e.g. QA) need not gate delivery for this task — offer or perform early delivery when so. When unsure whether the branch should be pushed, `open_decision_packet` and ask. The tool result is honest: a `push_conflict` means the remote branch diverged (a history problem, never a credential problem) and NO PR was opened — open a decision packet naming the branch, offering `resolve_remote_collision` (clear the stale remote branch and its recorded squatting PR, then re-deliver) or `archive_task`, instead of retrying blindly. Never offer `discard_branch` for a push conflict: it destroys the task's LOCAL commits and its authoring is refused while delivered work stands.\n" +
     "- A directive you sent earlier that never became a run is an UNDELIVERED hand-off — the timeline says so (\"did NOT start a run\"), or `liveRuns` is empty with no report after your prompt. Once the blocker is gone (e.g. the stage moved to one the profile works), re-send the prompt yourself; do not wait for a report that can never come.\n" +
     "Take exactly one such action and stop. NEVER end your turn leaving the task at a pre-work or `auto` stage with nothing done and no packet: either advance the boundary, hand off to a specialist, or `open_decision_packet` when a human must scope or unblock it. A pre-work stage that needs no human input must never be left waiting on a human."
   );

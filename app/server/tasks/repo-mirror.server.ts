@@ -9,7 +9,7 @@ import {
   redactGitOutput,
 } from "~/server/secrets/git-output-redact.server";
 import {
-  CLONE_TIMEOUT_MS,
+  cloneTimeoutMs,
   createGitHubAskpassEnv,
   createGitHubClonePlan,
   githubRepositoryUrl,
@@ -196,7 +196,7 @@ function withMirrorLock<T>(key: string, work: () => Promise<T>): Promise<T> {
 
 /** How long the mirror's own network step may run. The first one is a full
  *  clone, so it gets the clone budget; a refresh finishes in seconds. */
-const MIRROR_TIMEOUT_MS = CLONE_TIMEOUT_MS;
+const mirrorTimeoutMs = (): number => cloneTimeoutMs();
 
 /**
  * The refresh gets its OWN, much shorter budget (R21-4b).
@@ -341,7 +341,7 @@ async function ensureProjectMirror(input: {
     // failure path below (and its redaction) is unchanged.
     await runGitCloneWithProgress(
       ["clone", "--bare", "--progress", remoteUrl, mirrorDir],
-      { timeout: MIRROR_TIMEOUT_MS, env },
+      { timeout: mirrorTimeoutMs(), env },
       input.onCloneProgress,
     );
     // `--bare` writes `remote.origin.url` but NO fetch refspec, so a later
@@ -499,7 +499,7 @@ export async function cloneWorkspaceRepo(
       // credential is involved at all — this step never leaves the disk — and
       // the prompt suppression is belt and braces against a hang.
       await execFileAsync("git", ["clone", mirror.dir, input.destination], {
-        timeout: CLONE_TIMEOUT_MS,
+        timeout: cloneTimeoutMs(),
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
       });
       // The tree must never be handed on pointing at a local path: every
@@ -539,7 +539,7 @@ export async function cloneWorkspaceRepo(
         : plan.args;
     await runGitCloneWithProgress(
       progressArgs,
-      { timeout: CLONE_TIMEOUT_MS, env: plan.env },
+      { timeout: cloneTimeoutMs(), env: plan.env },
       input.onCloneProgress,
     );
     return { viaMirror: false };

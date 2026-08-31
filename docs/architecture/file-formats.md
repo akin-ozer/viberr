@@ -137,6 +137,12 @@ stage: review                     # id into the project's stage list
 previousStageId: impl             # where the task CAME from (null until the
                                   # first transition) — the operator's agent
                                   # choice weighs it (ruling 98)
+heldAtStage: null                 # durable deliberate-hold marker (V18): the
+                                  # stage the operator held twice in a row on
+                                  # purpose; while it names the CURRENT stage
+                                  # the stranded backstop stays quiet. Cleared
+                                  # by transitions, packet resolutions and
+                                  # goal edits (not by manual operator runs)
 readiness: input_required         # canonical 4-value enum ONLY (ruling 1):
                                   # ready | input_required |
                                   # inconsistency_risk_detected | blocked

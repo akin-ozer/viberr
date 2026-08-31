@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
+import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
-import { Icon } from "~/ui/icon";
+import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
 
@@ -111,9 +112,110 @@ export interface PacketArchiveDisclosure {
   branch: string | null;
   /** Pending operator recommendations this archive withdraws. */
   pendingRecommendations: number;
-  /** F31-6: the unrelated PR recorded on this task's branch name (R15-15) —
-   *  what the resolve_remote_collision ceremony says it closes. */
-  unownedPr?: number | null;
+  /**
+   * F31-6: the unrelated PR recorded on this task's branch name (R15-15) —
+   * what the `resolve_remote_collision` ceremony says it closes.
+   *
+   * V1: REQUIRED, not optional. The one production producer (the task page)
+   * wrote the other three fields as an object literal and left this one out, so
+   * the "and closes its pull request #N" clause was unreachable outside tests —
+   * `task.unownedPr` was sitting right there on the same task. An optional field
+   * is a slot a literal can silently skip; a required one fails typecheck.
+   */
+  unownedPr: number | null;
+}
+
+/**
+ * The shell the three ask-first ceremonies below share: an `alertdialog` with a
+ * warn glyph and a close, a `packet-obs flush` body of what-happens rows, and a
+ * foot of "Not yet" beside one danger commit.
+ *
+ * Rulings 20 (R15-1) and 53 (R18-7) hold every one-way write to ONE ceremony,
+ * and the three that live on this card were three shell-for-shell copies of it:
+ * a change to the shared half (the close affordance, the foot layout, the
+ * alertdialog contract) landed on whichever copy was open at the time. Each
+ * ceremony now supplies only what makes it different — its subject, its rows and
+ * its wording — and the standard itself lives here once.
+ */
+function PacketDestructiveConfirm({
+  ariaLabel,
+  screenLabel,
+  icon,
+  heading,
+  subhead,
+  footHint,
+  confirmLabel,
+  busy,
+  onCancel,
+  onConfirm,
+  children,
+}: {
+  /** Accessible name of the dialog. */
+  ariaLabel: string;
+  /** `data-screen-label` — the handle the co-located tests select the dialog by. */
+  screenLabel: string;
+  /** Head glyph AND commit-button icon: one destructiveness cue, stated once. */
+  icon: IconName;
+  heading: string;
+  /** Under the heading: the option title, sometimes prefixed with the task key. */
+  subhead: ReactNode;
+  footHint: string;
+  /** The commit button's visible label, which must name the outcome. */
+  confirmLabel: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+  /** The `.obs` rows stating what this resolution does and does not touch. */
+  children: ReactNode;
+}) {
+  const { ref: panelRef, close } = useDialog(onCancel);
+  return (
+    <dialog
+      className="modal-card release-card"
+      role="alertdialog"
+      aria-label={ariaLabel}
+      data-screen-label={screenLabel}
+      ref={panelRef}
+    >
+      <div className="modal-head">
+        <span className="agent-glyph lg warn">
+          <Icon name={icon} />
+        </span>
+        <div className="mh-main">
+          <h2>{heading}</h2>
+          <div className="mh-sub">{subhead}</div>
+        </div>
+        <button
+          type="button"
+          className="icon-btn modal-close"
+          onClick={close}
+          aria-label="Close"
+        >
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="modal-body tight">
+        <div className="packet-obs flush">{children}</div>
+      </div>
+      <div className="modal-foot">
+        <span className="foot-hint">{footHint}</span>
+        <div className="foot-actions">
+          <button type="button" className="btn ghost" onClick={close}>
+            Not yet
+          </button>
+          <button
+            type="button"
+            className="btn danger"
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            <Icon name={icon} />
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
 }
 
 /**
@@ -136,7 +238,9 @@ export interface PacketArchiveDisclosure {
  * named an `AcceptDisclosureProvider` context that never shipped): the shared
  * ceremony exists because FOUR surfaces can reach `acceptCompletion` and were
  * drifting apart (F19-3/F19-7). Ruling 17 gives branch deletion exactly one
- * surface — this card — so there is nothing to keep in sync.
+ * surface — this card — so there is nothing to keep in sync. It still wears the
+ * `PacketDestructiveConfirm` shell above; local means "not routed through
+ * accept-confirm.tsx", not "its own copy of the ceremony".
  */
 function PacketArchiveConfirm({
   option,
@@ -156,7 +260,6 @@ function PacketArchiveConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref: panelRef, close } = useDialog(onCancel);
   const deletesBranch = option.deleteBranch === true;
   const branch = disclosure?.branch ?? null;
   const pending = disclosure?.pendingRecommendations ?? 0;
@@ -172,115 +275,85 @@ function PacketArchiveConfirm({
       : []),
   ];
   return (
-    <dialog
-      className="modal-card release-card"
-      role="alertdialog"
-      aria-label={
+    <PacketDestructiveConfirm
+      ariaLabel={
         (deletesBranch ? "Archive and delete the branch for " : "Archive ") +
         subject
       }
-      data-screen-label="Packet archive dialog"
-      ref={panelRef}
+      screenLabel="Packet archive dialog"
+      icon={deletesBranch ? "alert" : "lock"}
+      heading={
+        deletesBranch
+          ? "Archive this task and delete its branch?"
+          : "Archive this task?"
+      }
+      subhead={
+        <>
+          {disclosure ? (
+            <>
+              <span className="mono">{disclosure.taskKey}</span> ·{" "}
+            </>
+          ) : null}
+          {option.t}
+        </>
+      }
+      footHint={
+        deletesBranch
+          ? "The archive is reversible. Deleting the branch on GitHub is not."
+          : "Recorded as a timeline note and an audit row."
+      }
+      confirmLabel={
+        deletesBranch
+          ? branch
+            ? `Archive & delete ${branch}`
+            : "Archive & delete the branch"
+          : `Archive ${subject}`
+      }
+      busy={busy}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
     >
-      <div className="modal-head">
-        <span className="agent-glyph lg warn">
-          <Icon name={deletesBranch ? "alert" : "lock"} />
-        </span>
-        <div className="mh-main">
-          <h2>
-            {deletesBranch
-              ? "Archive this task and delete its branch?"
-              : "Archive this task?"}
-          </h2>
-          <div className="mh-sub">
-            {disclosure ? (
+      {/* The human pressed "Confirm decision" — a label that names no
+          outcome. Say which decision option this dialog is about, the way
+          the acceptance dialog names its own entry point (F19-7). */}
+      <div className="obs">
+        <span className="k">Decision</span>
+        <span>Confirming “{option.t}” archives {subject}.</span>
+      </div>
+      {deletesBranch && (
+        <div className="obs warn">
+          <span className="k">Deletes</span>
+          <span>
+            {branch ? (
               <>
-                <span className="mono">{disclosure.taskKey}</span> ·{" "}
+                The remote branch <span className="mono">{branch}</span> on
+                GitHub,
               </>
-            ) : null}
-            {option.t}
-          </div>
+            ) : (
+              <>This task's remote branch on GitHub,</>
+            )}{" "}
+            and every commit that exists only there.{" "}
+            <strong>Deleting it cannot be undone.</strong> Restoring the task
+            later does not bring the branch back.
+          </span>
         </div>
-        <button
-          type="button"
-          className="icon-btn modal-close"
-          onClick={close}
-          aria-label="Close"
-        >
-          <Icon name="x" />
-        </button>
-      </div>
-      <div className="modal-body tight">
-        <div className="packet-obs flush">
-          {/* The human pressed "Confirm decision" — a label that names no
-              outcome. Say which decision option this dialog is about, the way
-              the acceptance dialog names its own entry point (F19-7). */}
-          <div className="obs">
-            <span className="k">Decision</span>
-            <span>Confirming “{option.t}” archives {subject}.</span>
-          </div>
-          {deletesBranch && (
-            <div className="obs warn">
-              <span className="k">Deletes</span>
-              <span>
-                {branch ? (
-                  <>
-                    The remote branch <span className="mono">{branch}</span> on
-                    GitHub,
-                  </>
-                ) : (
-                  <>This task's remote branch on GitHub,</>
-                )}{" "}
-                and every commit that exists only there.{" "}
-                <strong>Deleting it cannot be undone.</strong> Restoring the
-                task later does not bring the branch back.
-              </span>
-            </div>
-          )}
-          <div className="obs">
-            <span className="k">After</span>
-            <span>
-              Off the board and out of the review queue. The task file, its
-              timeline and its audit trail are kept exactly as they are. The
-              archive itself is a disposition, not a delete, and a maintainer
-              can restore it.
-            </span>
-          </div>
-          <div className="obs">
-            <span className="k">Withdrawn</span>
-            <span>
-              {withdrawn.join(" and ")}. Restoring the task reopens the
-              question.
-            </span>
-          </div>
-        </div>
-      </div>
-      <div className="modal-foot">
-        <span className="foot-hint">
-          {deletesBranch
-            ? "The archive is reversible. Deleting the branch on GitHub is not."
-            : "Recorded as a timeline note and an audit row."}
+      )}
+      <div className="obs">
+        <span className="k">After</span>
+        <span>
+          Off the board and out of the review queue. The task file, its
+          timeline and its audit trail are kept exactly as they are. The
+          archive itself is a disposition, not a delete, and a maintainer can
+          restore it.
         </span>
-        <div className="foot-actions">
-          <button type="button" className="btn ghost" onClick={close}>
-            Not yet
-          </button>
-          <button
-            type="button"
-            className="btn danger"
-            disabled={busy}
-            onClick={onConfirm}
-          >
-            <Icon name={deletesBranch ? "alert" : "lock"} />
-            {deletesBranch
-              ? branch
-                ? `Archive & delete ${branch}`
-                : "Archive & delete the branch"
-              : `Archive ${subject}`}
-          </button>
-        </div>
       </div>
-    </dialog>
+      <div className="obs">
+        <span className="k">Withdrawn</span>
+        <span>
+          {withdrawn.join(" and ")}. Restoring the task reopens the question.
+        </span>
+      </div>
+    </PacketDestructiveConfirm>
   );
 }
 
@@ -306,81 +379,44 @@ function PacketDiscardConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref: panelRef, close } = useDialog(onCancel);
   return (
-    <dialog
-      className="modal-card release-card"
-      role="alertdialog"
-      aria-label="Discard this task's workspace branch"
-      data-screen-label="Packet discard dialog"
-      ref={panelRef}
+    <PacketDestructiveConfirm
+      ariaLabel="Discard this task's workspace branch"
+      screenLabel="Packet discard dialog"
+      icon="alert"
+      heading="Discard this task’s workspace branch?"
+      subhead={option.t}
+      footHint="Recorded as a timeline note and an audit row."
+      confirmLabel={branch ? `Discard ${branch}` : "Discard the branch"}
+      busy={busy}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
     >
-      <div className="modal-head">
-        <span className="agent-glyph lg warn">
-          <Icon name="alert" />
+      <div className="obs">
+        <span className="k">Decision</span>
+        <span>Confirming &ldquo;{option.t}&rdquo; discards the branch.</span>
+      </div>
+      <div className="obs warn">
+        <span className="k">Deletes</span>
+        <span>
+          The <strong>local</strong> workspace branch{" "}
+          {branch ? (
+            <span className="mono">{branch}</span>
+          ) : (
+            <>for this task</>
+          )}{" "}
+          and every commit that exists only there.{" "}
+          <strong>This cannot be undone.</strong>
         </span>
-        <div className="mh-main">
-          <h2>Discard this task&rsquo;s workspace branch?</h2>
-          <div className="mh-sub">{option.t}</div>
-        </div>
-        <button
-          type="button"
-          className="icon-btn modal-close"
-          onClick={close}
-          aria-label="Close"
-        >
-          <Icon name="x" />
-        </button>
       </div>
-      <div className="modal-body tight">
-        <div className="packet-obs flush">
-          <div className="obs">
-            <span className="k">Decision</span>
-            <span>Confirming &ldquo;{option.t}&rdquo; discards the branch.</span>
-          </div>
-          <div className="obs warn">
-            <span className="k">Deletes</span>
-            <span>
-              The <strong>local</strong> workspace branch{" "}
-              {branch ? (
-                <span className="mono">{branch}</span>
-              ) : (
-                <>for this task</>
-              )}{" "}
-              and every commit that exists only there.{" "}
-              <strong>This cannot be undone.</strong>
-            </span>
-          </div>
-          <div className="obs">
-            <span className="k">GitHub</span>
-            <span>
-              Nothing on GitHub changes: this branch was never pushed. (If it
-              had been, the discard is refused and the archive option is the
-              path.)
-            </span>
-          </div>
-        </div>
-      </div>
-      <div className="modal-foot">
-        <span className="foot-hint">
-          Recorded as a timeline note and an audit row.
+      <div className="obs">
+        <span className="k">GitHub</span>
+        <span>
+          Nothing on GitHub changes: this branch was never pushed. (If it had
+          been, the discard is refused and the archive option is the path.)
         </span>
-        <div className="foot-actions">
-          <button type="button" className="btn ghost" onClick={close}>
-            Not yet
-          </button>
-          <button
-            type="button"
-            className="btn danger"
-            disabled={busy}
-            onClick={onConfirm}
-          >
-            <Icon name="alert" />
-            {branch ? `Discard ${branch}` : "Discard the branch"}
-          </button>
-        </div>
       </div>
-    </dialog>
+    </PacketDestructiveConfirm>
   );
 }
 
@@ -409,91 +445,170 @@ function PacketCollisionConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref: panelRef, close } = useDialog(onCancel);
   const branchLabel = branch ? (
     <span className="mono">{branch}</span>
   ) : (
     <>this task&rsquo;s branch</>
   );
   return (
-    <dialog
-      className="modal-card release-card"
-      role="alertdialog"
-      aria-label="Clear this task's branch collision"
-      data-screen-label="Packet collision dialog"
-      ref={panelRef}
+    <PacketDestructiveConfirm
+      ariaLabel="Clear this task's branch collision"
+      screenLabel="Packet collision dialog"
+      icon="alert"
+      heading="Clear the branch collision?"
+      subhead={option.t}
+      footHint="Recorded as timeline events and audit rows."
+      confirmLabel="Clear collision & redeliver"
+      busy={busy}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
     >
-      <div className="modal-head">
-        <span className="agent-glyph lg warn">
-          <Icon name="alert" />
+      <div className="obs">
+        <span className="k">Decision</span>
+        <span>
+          Confirming &ldquo;{option.t}&rdquo; reclaims the branch name for this
+          task.
         </span>
-        <div className="mh-main">
-          <h2>Clear the branch collision?</h2>
-          <div className="mh-sub">{option.t}</div>
-        </div>
-        <button
-          type="button"
-          className="icon-btn modal-close"
-          onClick={close}
-          aria-label="Close"
-        >
-          <Icon name="x" />
-        </button>
       </div>
-      <div className="modal-body tight">
-        <div className="packet-obs flush">
-          <div className="obs">
-            <span className="k">Decision</span>
-            <span>
-              Confirming &ldquo;{option.t}&rdquo; reclaims the branch name for
-              this task.
-            </span>
-          </div>
-          <div className="obs warn">
-            <span className="k">Deletes</span>
-            <span>
-              The stale branch {branchLabel} on GitHub, the unrelated one
-              squatting on this task&rsquo;s branch name
-              {unownedPr !== null ? (
-                <>
-                  , and closes its pull request{" "}
-                  <span className="mono">#{unownedPr}</span>
-                </>
-              ) : null}
-              . <strong>Deleting the remote branch cannot be undone.</strong>
-            </span>
-          </div>
-          <div className="obs">
-            <span className="k">Keeps</span>
-            <span>
-              This task&rsquo;s local delivery. After the stale ref is gone it
-              is pushed fresh and the real review PR opens.
-            </span>
-          </div>
-        </div>
-      </div>
-      <div className="modal-foot">
-        <span className="foot-hint">
-          Recorded as timeline events and audit rows.
+      <div className="obs warn">
+        <span className="k">Deletes</span>
+        <span>
+          The stale branch {branchLabel} on GitHub, the unrelated one squatting
+          on this task&rsquo;s branch name
+          {unownedPr !== null ? (
+            <>
+              , and closes its pull request{" "}
+              <span className="mono">#{unownedPr}</span>
+            </>
+          ) : null}
+          . <strong>Deleting the remote branch cannot be undone.</strong>
         </span>
-        <div className="foot-actions">
-          <button type="button" className="btn ghost" onClick={close}>
-            Not yet
-          </button>
-          <button
-            type="button"
-            className="btn danger"
-            disabled={busy}
-            onClick={onConfirm}
-          >
-            <Icon name="alert" />
-            Clear collision &amp; redeliver
-          </button>
-        </div>
       </div>
-    </dialog>
+      <div className="obs">
+        <span className="k">Keeps</span>
+        <span>
+          This task&rsquo;s local delivery. After the stale ref is gone it is
+          pushed fresh and the real review PR opens.
+        </span>
+      </div>
+    </PacketDestructiveConfirm>
   );
 }
+
+/** The card's authority flags, as the gate table reads them. */
+interface PacketTierGrants {
+  canResolveCompletion: boolean;
+  canEditGoal: boolean;
+  canArchive: boolean;
+  canDiscardBranch: boolean;
+}
+
+/** One gated option kind: the grant it needs and how a refusal is stated. */
+interface PacketTierGate {
+  /** The grant this kind needs, which `resolvePacket` re-checks server-side. */
+  held: (grants: PacketTierGrants) => boolean;
+  /** Card-level refusal beside Confirm, when this kind is the SELECTED option. */
+  denyNote: string;
+  /**
+   * Per-option treatment: the option itself goes inert, carries this hover
+   * title, and appends this clause to its description.
+   *
+   * `accept_completion` has none on purpose. A packet addressed to someone
+   * else's task keeps that option selectable and blocks the Confirm button
+   * instead of 403ing on click (adversarial-review #15).
+   */
+  option: { title: string; note: string } | null;
+}
+
+/**
+ * V16 — the authority tier each packet-option kind re-checks, in ONE table.
+ *
+ * Five kinds are gated, and each gate used to be threaded as its own
+ * `o.kind === "…"` chain through six sites in the card below: the selected
+ * option's refusal, the refusal SENTENCE, the every-option-above-tier scan, the
+ * per-option inert flag, its hover title and its description suffix. Six chains
+ * is five chances to add a kind to only five of them, and that is exactly what
+ * happened: `resolve_remote_collision` shipped inert and hover-titled with NO
+ * description clause, so the one reason a keyboard or touch user can actually
+ * reach (a `title` needs a pointer) said nothing at all. One row per kind,
+ * consulted from every site, is what keeps them together.
+ */
+const PACKET_TIER_GATES = new Map<PacketOptionKind, PacketTierGate>([
+  [
+    "accept_completion",
+    {
+      held: (grants) => grants.canResolveCompletion,
+      // N20-8: one phrasing for the same [A,M] tier. The sibling notes read
+      // "reserved for maintainers" and "reserved for maintainers and admins",
+      // and the first misread as excluding admins.
+      denyNote:
+        "Accepting completion is reserved for maintainers and this task's owner.",
+      option: null,
+    },
+  ],
+  [
+    "edit_goal",
+    {
+      held: (grants) => grants.canEditGoal,
+      denyNote: "Editing the goal is reserved for maintainers and admins.",
+      option: {
+        title:
+          "Editing the goal is reserved for maintainers and admins. Ask one to refine it",
+        note: " · your role can't edit the goal (a maintainer or admin must)",
+      },
+    },
+  ],
+  [
+    "archive_task",
+    {
+      held: (grants) => grants.canArchive,
+      denyNote: "Archiving is reserved for maintainers and admins.",
+      option: {
+        title: "Archiving is reserved for maintainers and admins",
+        note: " · your role can't archive (a maintainer or admin must)",
+      },
+    },
+  ],
+  [
+    "discard_branch",
+    {
+      held: (grants) => grants.canDiscardBranch,
+      denyNote: "Discarding the branch is reserved for maintainers and admins.",
+      option: {
+        title: "Discarding the branch is reserved for maintainers and admins",
+        note: " · your role can't discard the branch (a maintainer or admin must)",
+      },
+    },
+  ],
+  [
+    "resolve_remote_collision",
+    {
+      // F31-6: deleting a remote ref takes the same `approve-transition` tier
+      // the archive-with-branch-deletion and the local discard take.
+      held: (grants) => grants.canDiscardBranch,
+      denyNote:
+        "Clearing a branch collision is reserved for maintainers and admins.",
+      option: {
+        title:
+          "Clearing a branch collision is reserved for maintainers and admins",
+        note: " · your role can't clear the collision (a maintainer or admin must)",
+      },
+    },
+  ],
+]);
+
+/**
+ * The option kinds whose ask-first ceremony interposes before the resolve is
+ * dispatched (rulings 20/53: a one-way write states what it destroys and offers
+ * a way out). `archive_task` with `deleteBranch` performs the product's ONLY
+ * remote-branch deletion (ruling 17), `discard_branch` destroys local commits,
+ * and `resolve_remote_collision` deletes a remote ref and closes a PR.
+ */
+const CONFIRM_FIRST_KINDS: ReadonlySet<PacketOptionKind> = new Set([
+  "archive_task",
+  "discard_branch",
+  "resolve_remote_collision",
+]);
 
 export function DecisionPacket({
   packet,
@@ -571,12 +686,10 @@ export function DecisionPacket({
   const choiceCount = p.options.length + (customOffered ? 1 : 0);
   const customSelected = customOffered && sel === customIndex;
   const [customText, setCustomText] = useState("");
-  // UX19-9: the archive_task option index awaiting its confirm (null = none).
-  const [pendingArchive, setPendingArchive] = useState<number | null>(null);
-  // F20-6: the discard_branch option index awaiting its confirm (null = none).
-  const [pendingDiscard, setPendingDiscard] = useState<number | null>(null);
-  // F31-6: the resolve_remote_collision option awaiting its confirm.
-  const [pendingCollision, setPendingCollision] = useState<number | null>(null);
+  // UX19-9 / F20-6 / F31-6: the option index whose ask-first ceremony is open
+  // (null = none). ONE slot, not one per kind: the open ceremony is chosen by
+  // the pending option's own `kind`, so two can never stand at once.
+  const [pendingConfirm, setPendingConfirm] = useState<number | null>(null);
   const isBlocked = p.type === "blocked";
   // N20-16: a packet raised by the operator recommends its own default; one
   // raised by a delivering/reviewing agent (an ask_human question) carries the
@@ -634,50 +747,52 @@ export function DecisionPacket({
   // `.deny-note` the sheet defines for exactly this — visible to a sighted
   // keyboard user and announced via `aria-describedby` to a screen reader.
   const selected = customSelected ? undefined : p.options[sel];
+  // The one place the card reads its own authority flags. Every refusal below —
+  // the selected option's, each row's, and the every-option scan — comes back
+  // through `gateFor`, so a kind cannot be gated on one surface and open on
+  // another (V16).
+  const grants: PacketTierGrants = {
+    canResolveCompletion,
+    canEditGoal,
+    canArchive,
+    canDiscardBranch,
+  };
+  /** The gate a kind TRIPS, or null when this viewer holds its tier (or it has
+   *  no tier at all: `custom`, `request_edit`, the rest). */
+  const gateFor = (kind: PacketOptionKind): PacketTierGate | null => {
+    const gate = PACKET_TIER_GATES.get(kind);
+    return gate && !gate.held(grants) ? gate : null;
+  };
   // accept_completion is maintainer+ OR this task's own owner (R6-2, widened by
   // R14-2); anyone else gets a server 403, so block the button while it's
-  // selected rather than let them click into one.
-  const completionBlocked =
-    selected?.kind === "accept_completion" && !canResolveCompletion;
-  // UI-42: same treatment for `edit_goal` — `update-goal` is admin|maintainer,
-  // so resolving it without that grant leaves the packet open with no way to
-  // type the new goal.
-  const selectedGoalBlocked = selected?.kind === "edit_goal" && !canEditGoal;
-  const selectedArchiveBlocked =
-    selected?.kind === "archive_task" && !canArchive;
-  // F20-6: `discard_branch` re-checks `approve-transition` server-side.
-  const selectedDiscardBlocked =
-    selected?.kind === "discard_branch" && !canDiscardBranch;
-  // F31-6: `resolve_remote_collision` takes the same `approve-transition` tier
-  // (it deletes a remote ref).
-  const selectedCollisionBlocked =
-    selected?.kind === "resolve_remote_collision" && !canDiscardBranch;
-  // N20-8: one phrasing for the same [A,M] tier — the sibling notes read
-  // "reserved for maintainers" and "reserved for maintainers and admins", and
-  // the first misread as excluding admins. Say "maintainers and admins" once.
-  const blockReason = completionBlocked
-    ? "Accepting completion is reserved for maintainers and this task's owner."
-    : selectedGoalBlocked
-      ? "Editing the goal is reserved for maintainers and admins."
-      : selectedArchiveBlocked
-        ? "Archiving is reserved for maintainers and admins."
-        : selectedDiscardBlocked
-          ? "Discarding the branch is reserved for maintainers and admins."
-          : selectedCollisionBlocked
-            ? "Clearing a branch collision is reserved for maintainers and admins."
-            : null;
+  // selected rather than let them click into one. UI-42 gave `edit_goal` the
+  // same treatment (`update-goal` is admin|maintainer, so resolving it without
+  // that grant leaves the packet open with no way to type the new goal), and
+  // R14-3 / F20-6 / F31-6 the three that touch a branch.
+  const selectedGate = selected ? gateFor(selected.kind) : null;
+  const blockReason = selectedGate?.denyNote ?? null;
   // F20-17/F20-18: is EVERY option above this viewer's tier? Only meaningful
   // when they can resolve at all (a contributor-OWNER — the owner exception let
   // them open the card, but each option re-checks a higher tier). A single
   // un-gated option (custom / request_edit / …) means they are not stranded.
-  const optionAboveTier = (o: PacketRender["options"][number]) =>
-    (o.kind === "accept_completion" && !canResolveCompletion) ||
-    (o.kind === "edit_goal" && !canEditGoal) ||
-    (o.kind === "archive_task" && !canArchive) ||
-    (o.kind === "discard_branch" && !canDiscardBranch) ||
-    (o.kind === "resolve_remote_collision" && !canDiscardBranch);
   const everyOptionForbidden =
-    canResolve && p.options.length > 0 && p.options.every(optionAboveTier);
+    canResolve &&
+    p.options.length > 0 &&
+    p.options.every((o) => gateFor(o.kind) !== null);
+
+  // The open ask-first ceremony, chosen by the pending option's own `kind`. The
+  // list is re-read every render rather than captured at click time, so a packet
+  // replaced underneath an open dialog re-derives it (or drops it) instead of
+  // leaving a ceremony describing an option that is gone.
+  const pendingOption =
+    pendingConfirm === null ? undefined : p.options[pendingConfirm];
+  const cancelConfirm = () => setPendingConfirm(null);
+  const commitConfirm = () => {
+    if (pendingConfirm === null) return;
+    const index = pendingConfirm;
+    setPendingConfirm(null);
+    onResolve(index, note);
+  };
 
   // UI-44: roving tabindex + real focus movement. Every `role="radio"` used to
   // stay tabbable and the arrow handler only changed `sel`, so DOM focus stayed
@@ -758,28 +873,16 @@ export function DecisionPacket({
           }}
         >
           {p.options.map((o, i) => {
-            // UI-42: an option the viewer cannot carry out is disabled and says
-            // why, instead of recording a decision that dead-ends.
-            const goalBlocked = o.kind === "edit_goal" && !canEditGoal;
-            // archive_task re-checks `approve-transition` server-side (R14-3):
-            // same honest block for a resolver below that tier (LV-08 — no
-            // control that only exists to 403).
-            const archiveBlocked = o.kind === "archive_task" && !canArchive;
-            // F20-6: discard_branch re-checks the same `approve-transition` tier.
-            const discardBlocked = o.kind === "discard_branch" && !canDiscardBranch;
-            // F31-6: resolve_remote_collision deletes a remote ref — same tier.
-            const collisionBlocked =
-              o.kind === "resolve_remote_collision" && !canDiscardBranch;
+            // UI-42 / R14-3 / F20-6 / F31-6: an option the viewer cannot carry
+            // out is inert and says why, instead of recording a decision that
+            // dead-ends at the server's own re-check (LV-08 — no control that
+            // only exists to 403).
+            const refusal = gateFor(o.kind)?.option ?? null;
             // F20-17: a viewer who cannot resolve this packet at ALL used to see
             // every option fully interactive with no Confirm and no reason — the
             // un-gated ones read as "yours". Mark them all inert; the one
             // card-level deny note below names who can decide.
-            const blocked =
-              goalBlocked ||
-              archiveBlocked ||
-              discardBlocked ||
-              collisionBlocked ||
-              !canResolve;
+            const blocked = refusal !== null || !canResolve;
             return (
               <button
                 key={i}
@@ -795,17 +898,7 @@ export function DecisionPacket({
                   "opt" + (sel === i ? " sel" : "") + (o.rec ? " recommend" : "")
                 }
                 style={blocked ? { opacity: 0.55 } : undefined}
-                title={
-                  goalBlocked
-                    ? "Editing the goal is reserved for maintainers and admins. Ask one to refine it"
-                    : archiveBlocked
-                      ? "Archiving is reserved for maintainers and admins"
-                      : discardBlocked
-                        ? "Discarding the branch is reserved for maintainers and admins"
-                        : collisionBlocked
-                          ? "Clearing a branch collision is reserved for maintainers and admins"
-                          : undefined
-                }
+                title={refusal?.title}
                 onClick={() => {
                   if (blocked) return;
                   setSel(i);
@@ -814,17 +907,12 @@ export function DecisionPacket({
                 <span className="radio" />
                 <span>
                   <div className="ot">{o.t}</div>
+                  {/* The refusal belongs in the DESCRIPTION, not only in the
+                      `title`: a title needs a pointer, and a keyboard or touch
+                      user reading a dimmed option has nothing else to go on. */}
                   <div className="od">
                     {o.d}
-                    {goalBlocked
-                      ? " · your role can't edit the goal (a maintainer or admin must)"
-                      : ""}
-                    {archiveBlocked
-                      ? " · your role can't archive (a maintainer or admin must)"
-                      : ""}
-                    {discardBlocked
-                      ? " · your role can't discard the branch (a maintainer or admin must)"
-                      : ""}
+                    {refusal ? refusal.note : ""}
                   </div>
                 </span>
                 {/* The destructive half of archive_task is loud: this option
@@ -1038,27 +1126,12 @@ export function DecisionPacket({
                   if (customText.trim()) onResolveCustom(customText);
                   return;
                 }
-                // UX19-9: `archive_task` is the packet's one-way half — it
-                // archives the task and, with `deleteBranch`, permanently
-                // deletes the remote branch (ruling 17: the product's only
-                // remote-branch deletion). Rulings 20/53 put a confirm on
-                // every one-way write; this one committed from a generic
-                // "Confirm decision" while the *reversible* Archive button
-                // beside it asked first.
-                if (selected?.kind === "archive_task") {
-                  setPendingArchive(sel);
-                  return;
-                }
-                // F20-6: discard_branch destroys commits — ask first, like its
-                // archive sibling, before the deletion is dispatched.
-                if (selected?.kind === "discard_branch") {
-                  setPendingDiscard(sel);
-                  return;
-                }
-                // F31-6: resolve_remote_collision deletes a remote ref — same
-                // ask-first ceremony, with the keeps/deletes split spelled out.
-                if (selected?.kind === "resolve_remote_collision") {
-                  setPendingCollision(sel);
+                // The packet's one-way halves ask first (rulings 20/53), each
+                // through its own ceremony below. They used to commit from this
+                // generic "Confirm decision" while the *reversible* Archive
+                // button beside them asked.
+                if (selected && CONFIRM_FIRST_KINDS.has(selected.kind)) {
+                  setPendingConfirm(sel);
                   return;
                 }
                 onResolve(sel, note);
@@ -1076,47 +1149,35 @@ export function DecisionPacket({
         </div>
       </div>
 
-      {pendingArchive !== null && p.options[pendingArchive] && (
+      {pendingOption?.kind === "archive_task" && (
         <PacketArchiveConfirm
-          option={p.options[pendingArchive]!}
+          option={pendingOption}
           packetTitle={p.title}
           {...(archiveDisclosure ? { disclosure: archiveDisclosure } : {})}
           busy={busy}
-          onCancel={() => setPendingArchive(null)}
-          onConfirm={() => {
-            const index = pendingArchive;
-            setPendingArchive(null);
-            onResolve(index, note);
-          }}
+          onCancel={cancelConfirm}
+          onConfirm={commitConfirm}
         />
       )}
 
-      {pendingDiscard !== null && p.options[pendingDiscard] && (
+      {pendingOption?.kind === "discard_branch" && (
         <PacketDiscardConfirm
-          option={p.options[pendingDiscard]!}
+          option={pendingOption}
           branch={archiveDisclosure?.branch ?? null}
           busy={busy}
-          onCancel={() => setPendingDiscard(null)}
-          onConfirm={() => {
-            const index = pendingDiscard;
-            setPendingDiscard(null);
-            onResolve(index, note);
-          }}
+          onCancel={cancelConfirm}
+          onConfirm={commitConfirm}
         />
       )}
 
-      {pendingCollision !== null && p.options[pendingCollision] && (
+      {pendingOption?.kind === "resolve_remote_collision" && (
         <PacketCollisionConfirm
-          option={p.options[pendingCollision]!}
+          option={pendingOption}
           branch={archiveDisclosure?.branch ?? null}
           unownedPr={archiveDisclosure?.unownedPr ?? null}
           busy={busy}
-          onCancel={() => setPendingCollision(null)}
-          onConfirm={() => {
-            const index = pendingCollision;
-            setPendingCollision(null);
-            onResolve(index, note);
-          }}
+          onCancel={cancelConfirm}
+          onConfirm={commitConfirm}
         />
       )}
     </div>

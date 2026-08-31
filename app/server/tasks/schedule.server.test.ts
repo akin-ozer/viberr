@@ -23,9 +23,9 @@ import type { RunHandle, RunSpec, RuntimeAdapter } from "~/server/runtimes/adapt
 import { configureRunServiceForTests } from "~/server/runtimes/run-service.server";
 import { resetOperatorLeasesForTests } from "~/server/runtimes/operator-run.server";
 import type { TaskFileEvent, TaskSchedule } from "~/schemas/task-file.schema";
-import { CLONE_TIMEOUT_MS } from "./git-clone-auth.server";
+import { cloneTimeoutMs } from "./git-clone-auth.server";
 import {
-  CLAIM_LEASE_MS,
+  claimLeaseMs,
   cancelScheduledAction,
   fireDueSchedules,
   scheduleTaskAction,
@@ -602,12 +602,12 @@ describe("fireDueSchedules", () => {
   it("the claim lease outlives the slowest LEGITIMATE start (a clone), so a live drive is never re-driven", () => {
     // R19-1 put a repository clone inside `runOperator`, BEFORE the drive
     // starts: a healthy scheduled drive can now sit there for up to
-    // `CLONE_TIMEOUT_MS`. A lease shorter than that declares that live drive
+    // `cloneTimeoutMs()`. A lease shorter than that declares that live drive
     // crashed, and the next tick re-drives the same occurrence — two unwatched
     // operator turns for one scheduled action, which is the exact thing FR39
     // exists to prevent. Pinned as a RELATIONSHIP, not a number, so raising
     // `VIBERR_GIT_CLONE_TIMEOUT_MS` cannot silently reintroduce the overlap.
-    expect(CLAIM_LEASE_MS).toBeGreaterThan(CLONE_TIMEOUT_MS);
+    expect(claimLeaseMs()).toBeGreaterThan(cloneTimeoutMs());
   });
 
   it("F10-16: re-drives a STALLED claim (crash recovery — never lost)", async () => {
@@ -623,7 +623,7 @@ describe("fireDueSchedules", () => {
           rawSchedule({
             id: "sch_stale",
             status: "claimed",
-            claimedAt: new Date(Date.now() - CLAIM_LEASE_MS - 60_000).toISOString(),
+            claimedAt: new Date(Date.now() - claimLeaseMs() - 60_000).toISOString(),
           }),
         ],
       }),
@@ -639,7 +639,7 @@ describe("fireDueSchedules", () => {
    * The lease outlasting a clone is only half the invariant. The drain is
    * SEQUENTIAL, so a later occurrence's drive begins long after the tick that
    * claimed it: with several due at once, its WAIT alone can outlast
-   * CLAIM_LEASE_MS, and the next tick then reads the claim as crashed and
+   * claimLeaseMs(), and the next tick then reads the claim as crashed and
    * re-drives it — two unwatched turns for one occurrence. The lease must be
    * re-stamped as each drive STARTS, so it measures time-since-this-drive.
    */

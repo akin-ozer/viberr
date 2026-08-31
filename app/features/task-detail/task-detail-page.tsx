@@ -725,14 +725,18 @@ export function TaskDetailPage({
             // F20-6: discard_branch re-checks the same `approve-transition` tier
             // the archive-with-branch-deletion needs (it destroys commits).
             canDiscardBranch={canArchiveViaPacket}
-          // UX19-9: what an `archive_task` resolution destroys — the branch its
-          // `deleteBranch` variant deletes permanently, and the recommendations
-          // the archive withdraws. The same two facts ArchiveConfirm is handed.
-          archiveDisclosure={{
-            taskKey: task.key,
-            branch: task.branch,
-            pendingRecommendations: recommendations.length,
-          }}
+            // UX19-9: what an `archive_task` resolution destroys — the branch
+            // its `deleteBranch` variant deletes permanently, and the
+            // recommendations the archive withdraws. The same two facts
+            // ArchiveConfirm is handed. F31-6 adds the unowned PR the
+            // `resolve_remote_collision` ceremony closes, which lives on the
+            // same task the other three are read off.
+            archiveDisclosure={{
+              taskKey: task.key,
+              branch: task.branch,
+              pendingRecommendations: recommendations.length,
+              unownedPr: task.unownedPr,
+            }}
             onResolve={onResolve}
             onResolveCustom={submitResolveCustom}
             // F20-18: only the contributor-owner-who-cannot-resolve-directly

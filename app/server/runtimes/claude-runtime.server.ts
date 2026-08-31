@@ -10,7 +10,7 @@ import {
   type RuntimeAdapter,
 } from "./adapter.server";
 import { SESSION_MISSING_RE } from "./session-export.server";
-import { isSdkSkillName } from "./skill-mount.server";
+import { ensureCatalogSettings, isSdkSkillName } from "./skill-mount.server";
 import { projectEnvelope } from "./wire-format.server";
 import { redactProviderText } from "~/server/secrets/git-output-redact.server";
 
@@ -337,6 +337,45 @@ export function nativeSkillNames(skills?: readonly string[]): string[] {
 }
 
 /**
+ * The skills THIS run enables natively — the names above, gated on the one
+ * precondition the native channel cannot run without.
+ *
+ * V6 — `settingSources: ['project']` is a single decision with two effects: the
+ * SDK discovers `<cwd>/.claude/skills`, and it reads the memory files of the
+ * repository under review, at system-prompt tier, ungoverned. The only thing
+ * that closes the second is the excludes file `mountGrantedSkills` writes into
+ * the same catalog (`managedSettings` is dropped by the SDK — see
+ * {@link MANAGED_SETTINGS}). That write used to be best effort: it warned and
+ * the run started with the source open anyway.
+ *
+ * So the adapter never opens the source on faith. It re-checks the file at
+ * start, repairs it when the catalog is there without it (the workspace is
+ * shared by every engagement on the task, and each of their mounts strips this
+ * catalog), and enables NO native skill when neither holds: the run keeps the
+ * fully isolated shape and `Skill` stays denied.
+ *
+ * What that costs, stated rather than implied. When the MOUNT sees the failure
+ * it reports no mounted skills, and the caller's persona then injects every
+ * grant as prompt text — the same fallback a run with no checkout gets. When the
+ * file goes missing AFTER the mount (this seam's own case, and only if the
+ * repair also fails), the persona has already been written on the assumption the
+ * skills mounted, so they are announced to the agent and not enabled: a real
+ * capability loss for that run. Closing it means threading
+ * `SkillMount.settingsWritten` into `buildSpecialistPersona`; losing craft is
+ * the lesser harm against the repository under review writing the system prompt.
+ */
+export function nativeSkillsForRun(spec: RunSpec): string[] {
+  const granted = nativeSkillNames(spec.skills);
+  if (granted.length === 0) return [];
+  if (ensureCatalogSettings(spec.workdir)) return granted;
+  logger.warn(
+    "no CLAUDE.md excludes in the run workspace — starting with NO native skills so the project settings source stays closed",
+    { runId: spec.runId, workdir: spec.workdir, skills: granted },
+  );
+  return [];
+}
+
+/**
  * Policy-tier settings for a run that opens `settingSources: ['project']`.
  *
  * F31-C4 — VERIFIED live (2026-08-31, in-container canary probe): this
@@ -350,6 +389,10 @@ export function nativeSkillNames(skills?: readonly string[]): string[] {
  * the probe's canary flipped to hidden through that file. This constant still
  * rides along as a belt: harmless while dropped, effective the day the SDK
  * allowlists it. The codex leg's equivalent stays `project_doc_max_bytes: 0`.
+ *
+ * Because this option is inert, it proves nothing about the run: the file is
+ * the whole mitigation, and {@link nativeSkillsForRun} is what makes it a
+ * precondition of opening the source rather than a hope about it.
  */
 const MANAGED_SETTINGS = {
   claudeMdExcludes: ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/**"],
@@ -732,8 +775,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         const queryFn = deps.queryFn ?? (await realQuery());
         const resolvedModel = resolveClaudeModel(spec.model);
         // The granted skills Viberr MOUNTED into this run's workspace (empty for
-        // a run with no grants, no checkout, or a Codex profile — see below).
-        const nativeSkills = nativeSkillNames(spec.skills);
+        // a run with no grants, no checkout, or a Codex profile — see below —
+        // and for one whose workspace lost the CLAUDE.md excludes file).
+        const nativeSkills = nativeSkillsForRun(spec);
         const options: ClaudeQueryOptions = {
           cwd: spec.workdir,
           // Fully autonomous: bypass ALL permission prompts so a
@@ -773,7 +817,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           //    and cwd is the repo root, so the SDK's parent walk stops there and
           //    can never reach the data root or a host `.claude` above it. Still
           //    NEVER `'user'`/`'local'`: those are the host tiers F13 closed.
-          //    See MANAGED_SETTINGS for the CLAUDE.md ingress this opens.
+          //    This source also carries the repo's CLAUDE.md: `nativeSkillsForRun`
+          //    is empty unless the excludes file that holds it out is verified in
+          //    place, so the two never come apart.
           settingSources: nativeSkills.length ? ["project"] : [],
           skills: nativeSkills,
           plugins: [],

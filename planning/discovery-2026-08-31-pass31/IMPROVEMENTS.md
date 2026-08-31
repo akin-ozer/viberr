@@ -27,7 +27,7 @@ Sources: doc-agent sweeps (docs/00..06), live UI use, owner answers.
 - C5 FIXED (last sibling: one malformed packet OPTION voided the whole open packet; now per-row tolerant with diagnostic; project/task arrays verified already per-row) Whole-array tolerant parse durable-loss class: recurring; grep remaining siblings (task + project schemas). [from 01]
 - C6 VERIFIED ALREADY-SURFACED (budget-omitted KBs emit unresolved rows -> run_inputs.unresolvedResources -> run console lines; no code needed) Injection budgets shared across grant list and charged for headings — later KBs silently dropped into "omitted" marker; at minimum surface that in UI. [from 01]
 - C7 FIXED (semantics documented at RunKind with index/CHECK dependencies named) `agent_runs.kind` naming trap (non-delivering developer stored as 'reviewer'); rename or document at the schema. [from 01]
-- C8 PARTIAL (AcceptDisclosureProvider comment + pr-divergence naming left; low value, tracked) Ghost names: pr-divergence-operator.server.ts exists only as a TEST file name; AcceptDisclosureProvider comment refers to never-shipped context (decision-packet.tsx:131); advanceGoalForTask survives only in DESIGN.md. Rename/clean. [from 03/05]
+- C8 FIXED (comment names AcceptConfirm; test file renamed pr-divergence-wake) Ghost names: pr-divergence-operator.server.ts exists only as a TEST file name; AcceptDisclosureProvider comment refers to never-shipped context (decision-packet.tsx:131); advanceGoalForTask survives only in DESIGN.md. Rename/clean. [from 03/05]
 - C9 FIXED (constant extracted) `packet.kind === "Agent question"` load-bearing English string at task-actions.server.ts:6412. Type it.
 
 - F6 FIXED (batch 1: resolve_remote_collision verb + coherence guard + ceremony) - was HIGH, safety/trust): Packet option kind mismatch — operator emitted `kind: discard_branch, deleteBranch: true` with option text "Delete the conflicting REMOTE branch (and its unrelated PR #232) and push this task's commit fresh", but discard_branch's real semantics (F20-6/R20-2, PacketDiscardConfirm in decision-packet.tsx) are: delete the LOCAL never-pushed workspace branch, destroying its commits; refuses only if branch exists on remote (ruling 17). Confirming the packet's stated promise would (with remote since deleted) silently destroy the delivered local commit e46279a and redeliver nothing — the opposite of the option text. Chain: (a) no packet kind / task action exists for the remote-collision remedy the system itself recommends in its policy note ("delete or rename the remote branch, then deliver again"); (b) open_decision_packet accepts arbitrary text on a kind with fixed semantics — no server-side coherence check; (c) ceremony copy contradicts option copy in the same dialog. FIX (implementation phase): add a first-class resolve-remote-collision action (ceremony: delete stale REMOTE branch + optionally close its unowned PR, then auto-redeliver), teach the operator toolkit to use it, and validate discard_branch option coherence at packet-open time.
@@ -39,9 +39,9 @@ Sources: doc-agent sweeps (docs/00..06), live UI use, owner answers.
 - D1 FIXED /insights page has no document title (F31-1).
 - D2 FIXED Role-change toast uses first name only ("QA is now Contributor") — ambiguous among QA users; use full display name.
 - D3 OPEN Agent resources page doesn't show a profile's capability template/modes at a glance (F31-5).
-- D4 OPEN First-task clone of a large repo takes ~15-20 min with only "Cloning · N%" as feedback; consider shallow/partial clone (blob:none filter) for the mirror, or at least surface expected size/ETA. VERIFY whether --filter is safe with delivery flow.
+- D4 DECIDED-NO-CHANGE (investigated 2026-08-31): keep the full mirror. A blob:none partial clone would make later checkouts/log/diff operations lazily fetch blobs over the network MID-RUN (agents routinely run git show/diff/log in workspaces), turning a one-time visible wait into unpredictable stalls inside paid agent runs, and offline/degraded-GitHub behavior would regress. The existing mitigations already ship: cold-clone honesty label (R21-4/D1 pass 23) + live percentage streaming (F27-U1), and the mirror is per-project one-time. Revisit only if a customer-scale repo makes first-task latency a real complaint.
 - D5 FIXED (quota-exhausted refusals feed the card honestly with reset time) Insights "Backend quota" card shows "no reading yet" for codex even though a run just failed with an explicit quota-exhausted provider message (with reset date). Feed quota-error signals into the card.
-- D6 DEFERRED-BY-DESIGN? No: implemented? NOT implemented - candidate for next pass (metric design needs owner input on definition) Insights: operator runs are 16/23 and $2.32/$4.13 (56%) — consider an "orchestration overhead" metric (operator cost per delivered task / vs specialist cost).
+- D6 FIXED (Coordination overhead card: operator share of reported spend, null-honest) Insights: operator runs are 16/23 and $2.32/$4.13 (56%) — consider an "orchestration overhead" metric (operator cost per delivered task / vs specialist cost).
 - D7 OPEN /insights document title missing (same as F31-1/D1 — confirmed again: title empty on data-filled page).
 
 ## F. Live-use findings (pass-31 session)
@@ -66,3 +66,29 @@ Sources: doc-agent sweeps (docs/00..06), live UI use, owner answers.
 - E3 (from 00 Q7) Three-browser support matrix claimed but only chromium exercised — verify or strike?
 - E4 (from 00 Q9) FR33 90-day audit hard-delete has no ruling number and no long-term export path beyond S3 schedule — accept as-is?
 - E5 (from 02) Codex runs have no read-only sandbox anymore (workspace-write even for reviewer/operator) — Claude-only enforcement for repo-write family. Comfortable, or add compensating guard?
+
+## R. Self-review round (2026-08-31, PR #253 pre-merge)
+
+High-effort /code-review of main...pass31/implementation: 5 finder agents (8 angles) -> 19 deduped candidates -> 19 adversarial verifiers -> 16 CONFIRMED + 1 PLAUSIBLE + 2 REFUTED. Every surviving finding FIXED on the same branch, all canaried, full gates re-run.
+
+- V1 FIXED: archiveDisclosure producer never passed unownedPr -> collision confirm omitted "closes its pull request #N". Field made REQUIRED; page passes task.unownedPr; page-level tests. Live-proven on :5174 (dialog names PR #249).
+- V2 FIXED: T13 dedupe made per-recipient (packet/quality are independent per-user categories). notifyTaskWatchers gained exceptUserIds; operatorOpenPacket returns notifiedUserIds; StuckLoopEscalation is now an object.
+- V3 FIXED: coordination overhead numerator now kind IN (operator, controller), folded into the existing totals SELECT (third aggregate deleted). Live-proven: 100% on an operator+controller-only instance.
+- V4 FIXED: exhaustion recorded only on usage-limit/quota provider wording (transient 429/rate-limit excluded); resetsAt-null records get a bounded TTL; panel prefers a NEWER reading over a stale exhausted row.
+- V5 FIXED: reconciler records compare-derived commits only on POSITIVE provenance (owned PR, cached pr, or workRevision on this branch); unproven caches dropped instead of carried forever; PR-less squatters no longer credited.
+- V6 FIXED: excludes settings write is a reported precondition (settingsWritten); write failure mounts NOTHING (prompt-text fallback); strip overwrites settings.json in place for preserved live mounts (fail-closed delete otherwise).
+- V7 REFUTED: zero-option packet still resolvable via always-offered custom directive. V8 REFUTED: SDK claudeMdExcludes matcher is memory-type-gated; SKILL.md scanning unaffected.
+- V9 FIXED: prose reset dates parsed via Date.UTC + 24h grace (QUOTA_RESET_GRACE_MS); prose-derived resets render date-only (resetsAtPrecision exact|prose).
+- V10 FIXED: withdrawSupersededDeliveryPacket family marker widened to discard_branch OR resolve_remote_collision (F29-7 regression closed).
+- V11 FIXED: successful resolve_remote_collision lifts readiness blocked->ready in the outcome write (failure arms keep the block; waiting stays human).
+- V12 FIXED: orgResources uses new names-only readers (listKnowledgeBaseNames/listSkillNames/listMcpServerNames) - no scanStoreTree/readSkillBody on get_task.
+- V13 FIXED: queue.latest coalescing carries strandedResume forward (and max transitionDepth).
+- V14 FIXED: backend-quota now uses shared getSetting/setSetting/deleteSetting from instance-settings (three duplicate accessors deleted).
+- V15 FIXED: collision arm's duplicated note blocks unified into one noteText write.
+- V16 FIXED: one PacketDestructiveConfirm shell for all three ceremonies; PACKET_TIER_GATES map replaces 5 parallel kind-chains and closes the missing collision arm in the .od description.
+- V17 FIXED: shared tolerantRowsOf in file-diagnostics.ts used by task frontmatter lists, project tolerantArray, and the packet-option probe.
+- V18 FIXED: durable heldAtStage frontmatter marker - backstop stays quiet while the hold stands; cleared by transitions, packet resolutions, goal edits (deliberately NOT by manual drives).
+- V19 FIXED: resolve_remote_collision taught at point of use (push_conflict tool result, turn doctrine, deliver_for_review description, prAdoptionRefusalNote); snapshot gained unownedPr; CLONE_TIMEOUT_MS/CLAIM_LEASE_MS now lazy cloneTimeoutMs()/claimLeaseMs().
+- Also: stale absentMode comment in agents-query.server.ts rewritten for the F31-C2 gate() polarity.
+
+Gates after fixes: vitest 4741 green (was 4708), tsc 0, lint 0 errors + 2 pre-existing warnings, build green, compose e2e green. Live UI validation: collision dialog PR clause + coordination card on :5174.

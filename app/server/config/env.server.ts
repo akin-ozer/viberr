@@ -146,7 +146,7 @@ const envSchema = z.object({
   //    Claude runs had no hang guard at all, so a stalled run pinned the
   //    delivering single-flight until the next restart).
   //  - VIBERR_GIT_CLONE_TIMEOUT_MS: ceiling on one `git clone`/mirror fetch, in
-  //    ms (default 15 minutes; `CLONE_TIMEOUT_MS` in git-clone-auth.server.ts,
+  //    ms (default 15 minutes; `cloneTimeoutMs()` in git-clone-auth.server.ts,
   //    which the scheduler's claim lease is sized against). Ignored unless it
   //    parses to a positive integer.
   //  - VIBERR_TRANSCRIPT_RETENTION_DAYS: age at which a raw `runtimes/<backend>/
