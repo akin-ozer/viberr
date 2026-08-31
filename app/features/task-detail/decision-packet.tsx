@@ -131,8 +131,10 @@ export interface PacketArchiveDisclosure {
  * announced the outcome only afterwards, as a timeline note. That inverts the
  * app's own escalation of ceremony with destructiveness.
  *
- * It is a local dialog rather than a second `AcceptDisclosureProvider`: that
- * context exists because FOUR surfaces can reach `acceptCompletion` and were
+ * It is a local dialog rather than a second shared `AcceptConfirm`-style
+ * ceremony (accept-confirm.tsx — F31-C8: an earlier revision of this comment
+ * named an `AcceptDisclosureProvider` context that never shipped): the shared
+ * ceremony exists because FOUR surfaces can reach `acceptCompletion` and were
  * drifting apart (F19-3/F19-7). Ruling 17 gives branch deletion exactly one
  * surface — this card — so there is nothing to keep in sync.
  */

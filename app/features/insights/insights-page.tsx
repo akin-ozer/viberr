@@ -206,6 +206,20 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         icon="memory"
         sub="tasks past their project's compression threshold"
       />
+      {/* F31-D6: pass 31 measured the operator at 63% of all run spend with
+          no card saying so — coordination cost was invisible next to the
+          work it coordinated. Share over COST-REPORTING runs only; null when
+          nothing reported a cost (never a fake 0%). */}
+      <StatCard
+        label="Coordination overhead"
+        value={fmtPercent(g.coordination.share)}
+        icon="shield"
+        sub={
+          g.coordination.totalCostUsd > 0
+            ? `operator runs spent $${g.coordination.operatorCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)} reported`
+            : "no run has reported a cost yet"
+        }
+      />
       </div>
     </section>
   );

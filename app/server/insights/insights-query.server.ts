@@ -83,6 +83,17 @@ export interface OversightSummary {
    *  managing. A project with the guardrail off contributes none: nothing is
    *  compacting there. */
   longTimelines: number;
+  /** F31-D6 — coordination overhead: the operator's share of ALL reported run
+   *  spend in scope. Live pass 31 read 63% before anyone had a number for it.
+   *  Derived from the same cost column the totals card sums; runs that
+   *  reported no cost contribute to neither side, and with zero reported
+   *  spend the share is null (never a fake 0%). */
+  coordination: {
+    operatorCostUsd: number;
+    totalCostUsd: number;
+    /** operator / total over cost-reporting runs; null when nothing reported. */
+    share: number | null;
+  };
 }
 
 export interface InsightsSummary {
@@ -404,6 +415,31 @@ function oversightSummary(
       const threshold = compressionAt.get(t.project_slug);
       return threshold != null && t.event_count >= threshold;
     }).length,
+    coordination: coordinationOverhead(db, filter),
+  };
+}
+
+/** F31-D6 — operator spend vs all spend, over runs that reported a cost. */
+function coordinationOverhead(
+  db: DatabaseSync,
+  filter: InsightsFilter,
+): OversightSummary["coordination"] {
+  const { clause, params } = scope(filter);
+  // SAFETY: both SELECTed aggregates are COALESCEd REAL sums over
+  // `total_cost_usd` (REAL, nullable in 0001_baseline.sql), so the row is
+  // exactly `{ operator: number; total: number }`.
+  const row = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN kind = 'operator' THEN total_cost_usd END), 0) AS operator,
+         COALESCE(SUM(total_cost_usd), 0) AS total
+       FROM agent_runs ${clause}`,
+    )
+    .get(...params) as { operator: number; total: number };
+  return {
+    operatorCostUsd: row.operator,
+    totalCostUsd: row.total,
+    share: row.total > 0 ? row.operator / row.total : null,
   };
 }
 

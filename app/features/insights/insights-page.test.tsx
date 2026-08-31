@@ -50,6 +50,7 @@ const FULL: InsightsSummary = {
     cost: i === 29 ? 1.2 : 0,
   })),
   oversight: {
+    coordination: { operatorCostUsd: 0.6, totalCostUsd: 1.2, share: 0.5 },
     clarity: { activeTasks: 8, clearTasks: 7, pct: 7 / 8 },
     traceability: { deliveredTasks: 5, tracedTasks: 5, pct: 1 },
     packetResolution: {

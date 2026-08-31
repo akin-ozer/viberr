@@ -343,6 +343,27 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(g.clarity.pct).toBeCloseTo(2 / 3, 5);
   });
 
+  it("F31-D6: coordination overhead is the operator's share of REPORTED spend, null when nothing reported", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    // $0.60 operator + $0.40 specialist = 60% share; the cost-less run
+    // contributes to neither side of the ratio.
+    insertRun(db, { kind: "operator", cost: 0.6 });
+    insertRun(db, { kind: "primary", cost: 0.3 });
+    insertRun(db, { kind: "reviewer", cost: 0.1 });
+    insertRun(db, { kind: "operator", cost: null });
+    const g = getInsightsSummary(db, NOW).oversight;
+    expect(g.coordination.operatorCostUsd).toBeCloseTo(0.6, 5);
+    expect(g.coordination.totalCostUsd).toBeCloseTo(1.0, 5);
+    expect(g.coordination.share).toBeCloseTo(0.6, 5);
+
+    // Canary: with ZERO reported spend the share is null — never a fake 0%.
+    const empty = ctx.makeDb();
+    insertProject(empty, "gp");
+    insertRun(empty, { kind: "operator", cost: null });
+    expect(getInsightsSummary(empty, NOW).oversight.coordination.share).toBeNull();
+  });
+
   it("computes key↔branch↔PR traceability over tasks with a delivery footprint", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
