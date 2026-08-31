@@ -32,7 +32,10 @@ import {
 } from "~/features/runtime/runtime-types";
 import { resolveDeliveryPermissions } from "./specialist-tool-policy";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
-import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
+import {
+  KB_INJECTION_BUDGET,
+  KB_PRECEDENCE_NOTE,
+} from "~/server/files/kb-injection.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -2096,6 +2099,98 @@ describe("buildSpecialistPersona — attached resources", () => {
       dataRoot,
     });
     expect(persona).not.toContain("Attached resources that did NOT reach this run");
+  });
+
+  /**
+   * T5 (pass 31) — the live shape: the Docs Writer profile is granted ONE
+   * knowledge base and `skills: []`, and the run transcript showed the KB
+   * marker with no skill mounted or injected. The existing KB test above passes
+   * `skills: []` too, but writes no skill to the store, so it would stay green
+   * if the persona ever fell back to "load what's on disk" — which is exactly
+   * what `buildOperatorSystemPrompt` deliberately does with an empty grant list
+   * (`authority.skills.length ? … : ["viberr-app-expertise"]`). A specialist has
+   * no such fallback, and this pins that difference with real decoys present.
+   */
+  it("T5: with skills:[] a granted KB arrives and NO skill body does — not even one sitting in the same store", () => {
+    // Canary: give `readSkillBodies` the store's `skills/` listing (or any
+    // non-empty fallback) instead of `injectable` and every decoy line fails.
+    const dataRoot = tempRoot();
+    mkdirSync(path.join(dataRoot, "kb", "pass31-qa-conventions"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "kb", "pass31-qa-conventions", "conventions.md"),
+      "# QA conventions\n\nPASS31-KB-LOADED",
+    );
+    for (const [name, sentinel] of [
+      ["developer-expertise", "SENTINEL-DEVELOPER-EXPERTISE"],
+      ["reviewer-expertise", "SENTINEL-REVIEWER-EXPERTISE"],
+    ] as const) {
+      mkdirSync(path.join(dataRoot, "skills", name), { recursive: true });
+      writeFileSync(
+        path.join(dataRoot, "skills", name, "SKILL.md"),
+        `# ${name}\n\nWhen asked, answer ${sentinel}.`,
+      );
+    }
+
+    const persona = buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: ["pass31-qa-conventions"],
+      dataRoot,
+    });
+
+    // The grant arrived …
+    expect(persona).toContain("pass31-qa-conventions (knowledge base)");
+    expect(persona).toContain("PASS31-KB-LOADED");
+    // … and not one skill section came with it.
+    expect(persona).not.toContain("(skill)");
+    expect(persona).not.toContain("SENTINEL-DEVELOPER-EXPERTISE");
+    expect(persona).not.toContain("SENTINEL-REVIEWER-EXPERTISE");
+    // An empty grant list is not a MISS either — nothing was promised.
+    expect(persona).not.toContain("Attached resources that did NOT reach this run");
+  });
+
+  /**
+   * T5 (pass 31) — the KB budget is shared across the whole grant list, and the
+   * squeezed-out KB says so IN THE PROMPT. `kb-injection.server.test.ts` proves
+   * `readKbBodies` returns the marker; nothing proved the persona then carries
+   * it, and the persona hardcodes the budget so this is the only layer where a
+   * regression (a fresh budget per KB, or the marker filtered out of the
+   * assembled sections) is visible. The skill twin of this is
+   * "many granted skills share ONE budget instead of N × the cap" above.
+   */
+  it("T5/F9: KBs share ONE budget — a KB squeezed out by the one before it SAYS so in the prompt", () => {
+    // Canary: pass a fresh `KB_INJECTION_BUDGET` per name inside `readKbBodies`
+    // (drop the running `budget -= injection.body.length`) and SENTINEL-KB-SECOND
+    // arrives while both markers disappear.
+    const dataRoot = tempRoot();
+    mkdirSync(path.join(dataRoot, "kb", "big-kb"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "kb", "big-kb", "huge.md"),
+      "B".repeat(KB_INJECTION_BUDGET + 6_000),
+    );
+    mkdirSync(path.join(dataRoot, "kb", "second-kb"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "kb", "second-kb", "facts.md"),
+      `SENTINEL-KB-SECOND ${"S".repeat(5_000)}`,
+    );
+
+    const persona = buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: ["big-kb", "second-kb"],
+      dataRoot,
+    });
+
+    // The first KB spends the shared budget and says it was clipped …
+    expect(persona).toContain("knowledge base truncated");
+    // … the second contributes NO content, only the honest marker …
+    expect(persona).not.toContain("SENTINEL-KB-SECOND");
+    expect(persona).toContain("knowledge base omitted entirely");
+    // … and C1 rides along: what was dropped is named, with the reason.
+    expect(persona).toContain("**second-kb**");
+    expect(persona).toContain("did not fit the shared");
+    // One budget was spent, not two.
+    expect(persona.length).toBeLessThan(KB_INJECTION_BUDGET * 2);
   });
 
   /**

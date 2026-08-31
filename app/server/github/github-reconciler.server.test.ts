@@ -542,6 +542,48 @@ describe("reconcileTask", () => {
     expect(events.some((e) => /Divergence/.test(e.text))).toBe(false);
   });
 
+  it("F31-1: a colliding branch's footprint is never recorded as this task's stats", async () => {
+    // Pass-31 live: a fresh VIB-1 whose agent errored before creating ANY
+    // branch showed "14 files · +313 −30" and two commits from a wiped
+    // instance's `vib-1`, and the completion evidence later claimed
+    // "2 commit(s) delivered". The prefix filter cannot save the commits half
+    // — the stranger's commits carry the SAME `[VIB-301]` prefix here. While
+    // an unowned PR stands on the branch, the compare/PR footprint records
+    // nothing as this task's.
+    // Canary: drop `&& !unownedPr` from `prefixCommits` and the foreign
+    // `[VIB-301]` commits land in `github.commits` again.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        // No pr, no workRevision: nothing was ever delivered by THIS task.
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // The collision itself is recorded…
+    expect(fm.github?.unownedPr).toBe(318);
+    // …but the stranger's footprint is not: no commits (despite the
+    // prefix-matched `[VIB-301]` entries in the compare) and no diff stats.
+    expect(fm.github?.commits ?? []).toEqual([]);
+    expect(fm.github?.changed ?? null).toBeNull();
+  });
+
   it("R16-1/H8: a name-matched MERGED stranger never replaces the PR the task owns", async () => {
     // Live H8, 2026-08-04: a brand-new VIB-4 ended up with
     // `pr: {number: 113, state: merged, title: "[VIB-4] Verify MCP tool…",

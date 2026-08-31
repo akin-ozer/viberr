@@ -1408,6 +1408,43 @@ function traceAcceptance(
   };
 }
 
+describe("GithubTrace — branch collision framing (F31-1)", () => {
+  it("names the unowned PR as a collision instead of leaving the branch to read as this task's", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({ unownedPr: 232 })}
+          acceptance={traceAcceptance()}
+        />
+      </MemoryRouter>,
+    );
+    const row = Array.from(container.querySelectorAll(".kv-row")).find((r) =>
+      r.textContent?.includes("Collision"),
+    )!;
+    expect(row).toBeDefined();
+    expect(row.textContent).toContain("#232");
+    expect(row.textContent).toContain("not this task");
+  });
+
+  it("renders no collision row when nothing squats on the branch", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({ unownedPr: null })}
+          acceptance={traceAcceptance()}
+        />
+      </MemoryRouter>,
+    );
+    expect(
+      Array.from(container.querySelectorAll(".kv-row")).some((r) =>
+        r.textContent?.includes("Collision"),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("GithubTrace — admin force-accept (DG-2)", () => {
   it("renders the Force-accept button when blocked AND onForceAccept is provided", () => {
     // C1: the block REASON no longer renders here — it has one owner, the

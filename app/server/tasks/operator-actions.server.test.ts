@@ -2287,6 +2287,25 @@ describe("applyRecommendation / dismissRecommendation", () => {
     expect(snapshot().recentTimeline[0]!.text).toContain(label);
   });
 
+  it("F31-3: the operator snapshot names the INSTANCE resource catalog (existence is checkable)", async () => {
+    seedTask("impl");
+    deployRoster([{ capabilityId: "append-typed-events", mode: "direct" }]);
+    // An org KB that exists on disk but is granted to nothing on this project
+    // — the exact live shape the F31-3 packet misread as "does not exist".
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const kbDir = join(store.dataRoot, "kb", "pass31-qa-conventions");
+    mkdirSync(kbDir, { recursive: true });
+    writeFileSync(join(kbDir, "rules.md"), "# rules\n");
+    const org = snapshot().orgResources!;
+    expect(org).toBeTruthy();
+    expect(Array.isArray(org.skills)).toBe(true);
+    expect(Array.isArray(org.mcps)).toBe(true);
+    // The catalog surfaces the ungranted KB by NAME — the operator can now
+    // distinguish "exists, not granted here" from "does not exist".
+    expect(org.kbs).toContain("pass31-qa-conventions");
+  });
+
   it("the operator snapshot carries its own PENDING recommendations", async () => {
     await seedRecommendation();
     const pending = snapshot().recommendations!.pending;

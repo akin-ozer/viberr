@@ -97,6 +97,11 @@ import {
   type DeployedSpecialistView,
 } from "./specialist-run.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
+import {
+  listKnowledgeBases,
+  listMcpServers,
+  listSkills,
+} from "~/server/org/resources.server";
 
 /** Capability-gated task mutations used only by the in-process operator toolkit. */
 
@@ -1457,6 +1462,18 @@ export interface OperatorTaskSnapshot {
     /** capabilityId → mode the OPERATOR holds (the RBAC its own tools honor). */
     capabilities: Record<string, string>;
   };
+  /**
+   * F31-3 — the INSTANCE resource catalog, names only. Every other field here
+   * is project-scoped, so a goal citing a knowledge base that existed at the
+   * org level but was granted to no deployed profile read as "does not exist"
+   * in a live packet headline. These lists answer the EXISTENCE half: a name
+   * here but under no `deployedSpecialists[].resources` means "exists, not
+   * granted on this project" — the remedy is granting it from the project's
+   * Agents surface, never re-creating it. Names only, bounded by the org
+   * catalog's own size; optional so hand-built fixtures need not restate it
+   * (`operatorSnapshot` always sets it).
+   */
+  orgResources?: { kbs: string[]; skills: string[]; mcps: string[] };
 }
 
 /** [1] Hard bound on `snapshot.recommendations`: the whole snapshot is
@@ -1616,6 +1633,7 @@ export function operatorSnapshot(
   if (!project) throw AppError.notFound(`Project ${projectSlug} not found.`);
 
   const fm = file.parsed.frontmatter;
+  const orgCtx: { dataRoot?: string } = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
   const stages = project.parsed.frontmatter.stages;
   const workflow = project.parsed.frontmatter.workflow;
   const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
@@ -1790,6 +1808,12 @@ export function operatorSnapshot(
       scope: "operator",
       note: OPERATOR_POLICY_SCOPE_NOTE,
       capabilities: Object.fromEntries(authority.policy),
+    },
+    // F31-3: instance catalog names, so "does not exist" claims are checkable.
+    orgResources: {
+      kbs: listKnowledgeBases(db, orgCtx).map((k) => k.name),
+      skills: listSkills(db, orgCtx).map((s) => s.name),
+      mcps: listMcpServers(db).map((m) => m.name),
     },
   };
 }

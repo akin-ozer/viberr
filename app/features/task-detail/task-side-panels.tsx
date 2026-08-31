@@ -287,6 +287,20 @@ export function GithubTrace({
             <span className="mono">{task.branch}</span>
           </span>
         </div>
+        {/* F31-1: while an unrelated PR squats on this task's branch name
+            (R15-15), the branch on GitHub is a STRANGER — say so instead of
+            leaving the panel to read as this task's footprint. The reconciler
+            no longer records the stranger's stats, so `changed`/`commits`
+            below are this task's own honest cache (usually empty pre-work). */}
+        {task.unownedPr !== null && (
+          <div className="kv-row">
+            <span className="k">Collision</span>
+            <span className="v">
+              PR <span className="mono">#{task.unownedPr}</span> holds this
+              branch name but is not this task&rsquo;s review PR
+            </span>
+          </div>
+        )}
         {task.changed && (
           <div className="kv-row">
             <span className="k">Diff</span>

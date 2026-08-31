@@ -535,17 +535,30 @@ async function reconcileTaskUnlocked(
   // always follow the prefix convention, so an EMPTY filtered list must not
   // wipe a non-empty cache captured from the run workspace for this same
   // branch — keep what we honestly recorded rather than zeroing it.
-  const prefixCommits = compare ? taskCommits(compare.commits, fm.key) : null;
+  //
+  // F31-1 — PROVENANCE. `compare` and the discovered PR's `changed` describe
+  // whatever currently sits under the task's branch NAME on GitHub, and a
+  // name is not an identity (R15-15): with an UNOWNED PR standing on the
+  // branch, both describe a stranger. The prefix filter cannot save the
+  // commits half — a wiped instance's `[VIB-1]` commits match a fresh VIB-1's
+  // prefix — so live, a task whose agent had errored before creating any
+  // branch showed "14 files · +313 −30" with two foreign commits, and the
+  // completion evidence later claimed "2 commit(s) delivered" it never made.
+  // While the collision stands, the compare/PR footprint records NOTHING as
+  // this task's; the honestly-captured cache (workspace delivery) survives.
+  const prefixCommits =
+    compare && !unownedPr ? taskCommits(compare.commits, fm.key) : null;
   const existingCommits = existingGithub?.commits ?? [];
   const branchCommits =
     prefixCommits !== null && prefixCommits.length === 0 && existingCommits.length > 0
       ? existingCommits
       : prefixCommits;
+  const ownedChanged = pr && ownsAPr ? pr.changed : undefined;
   const newGithub: GithubCache | null =
-    branchCommits !== null || pr?.changed || existingGithub || unownedPr
+    branchCommits !== null || ownedChanged || existingGithub || unownedPr
       ? {
           commits: branchCommits ?? existingCommits,
-          changed: pr?.changed ?? existingGithub?.changed ?? null,
+          changed: ownedChanged ?? existingGithub?.changed ?? null,
           // Part of the compared snapshot below, so the collision note fires on
           // the tick it appears and stays quiet on the ~288 that follow.
           unownedPr: unownedPr?.number ?? null,
