@@ -202,10 +202,13 @@ function NtfStream({
                   </strong>
                   <span className="act-sep">·</span>
                   <RichText text={n.text} mentions={false} />{" "}
-                  {/* B-FD6: rendered only when the row HAS a destination.
-                      An org-wide row has none, and this was a focusable
-                      control whose onOpen was a no-op. */}
-                  {n.href !== null && (
+                  {/* B-FD6: the keybtn NAVIGATES, so it renders only when the row
+                      has a destination. An org-wide row has none (nothing shown).
+                      F18-1: an ORPHAN (its project was deleted) also has no
+                      destination but MUST still say so — otherwise the row is
+                      indistinguishable from a live one and the bell popover, which
+                      still shows "project no longer exists", disagrees with it. */}
+                  {n.href !== null ? (
                     <button
                       type="button"
                       className="keybtn"
@@ -217,7 +220,14 @@ function NtfStream({
                     >
                       {keybtnLabel(n)}
                     </button>
-                  )}
+                  ) : n.targetMissing ? (
+                    <span
+                      className="keybtn dead"
+                      title="The project this refers to no longer exists"
+                    >
+                      {keybtnLabel(n)}
+                    </span>
+                  ) : null}
                 </span>
                 {n.unread && (
                   <button

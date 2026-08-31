@@ -158,6 +158,49 @@ describe("startMcpWarmup (R19-18)", () => {
     expect(row.warmingSince).toBeNull();
   });
 
+  /**
+   * bug-sweep #8: re-pointing a row THROUGH a save while its warm-up is in
+   * flight. The save's own `startMcpWarmup` used to no-op on the in-flight
+   * guard, the old warm-up's target-scoped verdict then matched nothing, and its
+   * `finally` cleared the flag — so the NEW command never installed and only a
+   * manual retest recovered it. The new command must warm on its own.
+   */
+  it("re-pointing a server mid-warm-up warms the NEW command (bug-sweep #8)", async () => {
+    const db = dbCtx.makeDb();
+    // Command A: a slow installer that answers with 2 tools.
+    const first = await saveMcpServer(
+      db,
+      { name: "moving2", transport: "stdio", target: "uvx original", cred: "" },
+      ACTOR,
+      { spawnImpl: installerSpawn(60, 2), timeoutMs: 5, capMs: 5000 },
+    );
+    expect(first.mcp.warmingSince).not.toBeNull();
+
+    // Re-point the SAME row to command B (5 tools) while A's warm-up is running.
+    // B's own probe gives up ("installing"); only a warm-up can finish it, and
+    // the id already has A's warm-up in flight.
+    await saveMcpServer(
+      db,
+      {
+        id: first.mcp.id,
+        name: "moving2",
+        target: "uvx replacement",
+        transport: "stdio",
+        cred: "",
+      },
+      ACTOR,
+      { spawnImpl: installerSpawn(40, 5), timeoutMs: 5, capMs: 5000 },
+    );
+
+    // A finishes (~60ms), which re-arms B; B finishes (~40ms).
+    await settle();
+    await settle();
+    const row = listMcpServers(db).find((m) => m.name === "moving2")!;
+    expect(row.target).toBe("uvx replacement");
+    // The NEW command's own verdict landed — green, with ITS tool count.
+    expect(row).toMatchObject({ up: true, tools: 5, warmingSince: null });
+  });
+
   it("a restart never leaves a row claiming to install with nothing running", async () => {
     const db = dbCtx.makeDb();
     await saveMcpServer(

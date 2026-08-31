@@ -46,7 +46,10 @@ export interface DailyPoint {
   /** YYYY-MM-DD. */
   date: string;
   runs: number;
-  cost: number;
+  /** Total cost for the day, or null when the day HAS runs but none reported a
+   *  cost (all-Codex) — rendered "not reported", never a dishonest $0.00. A
+   *  gap-filled quiet day (no runs) is a real 0. */
+  cost: number | null;
 }
 
 /**
@@ -514,8 +517,11 @@ export function getInsightsSummary(
   const dailyRows = z.array(dailySchema).parse(
     db
       .prepare(
+        // No COALESCE: a day whose runs all report no cost (all-Codex) keeps a
+        // NULL sum, surfaced as "not reported" — never a dishonest $0.00, the
+        // same honesty the breakdown groups carry.
         `SELECT substr(started_at, 1, 10) AS date, count(*) AS runs,
-                COALESCE(SUM(total_cost_usd), 0) AS cost
+                SUM(total_cost_usd) AS cost
          FROM agent_runs
          ${and("started_at IS NOT NULL AND substr(started_at, 1, 10) >= ?")}
          GROUP BY date ORDER BY date ASC`,
@@ -529,7 +535,8 @@ export function getInsightsSummary(
       .toISOString()
       .slice(0, 10);
     const row = byDate.get(d);
-    daily.push({ date: d, runs: row?.runs ?? 0, cost: row?.cost ?? 0 });
+    // A real day keeps its (possibly null) cost; a gap-filled quiet day is 0.
+    daily.push({ date: d, runs: row?.runs ?? 0, cost: row ? row.cost : 0 });
   }
 
   return {

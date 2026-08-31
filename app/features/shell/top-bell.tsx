@@ -45,7 +45,13 @@ export function TopBell({
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const fetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const readFetcher = useFetcher<{ ok: boolean; error?: string }>();
+  // R14-3: mark-all-read owns its own fetcher. Sharing one with the row read
+  // meant a row click ABORTED an in-flight mark-all, and React Router drops an
+  // aborted submission's result — so the row's own success then spoke for the
+  // mark-all, and the mark-all's failure branch was unreachable. Fixed for the
+  // /notifications page in the same pass; this is that page's twin bell.
+  const readAllFetcher = useFetcher<{ ok: boolean; error?: string }>();
   const csrf = useCsrfToken();
   const push = useToast();
   const popRef = useRef<HTMLDialogElement>(null);
@@ -71,14 +77,11 @@ export function TopBell({
     wasOpen.current = open;
   }, [open]);
 
-  // The mark-all-read toast fires on the server RESULT, not on submit: the
-  // bell's fetcher also handles single-row reads, so a `wantAllRead` flag
-  // scopes the toast, and a failed POST (expired session/CSRF) reports the
-  // failure instead of a false success (P11-40).
-  const wantAllRead = useRef(false);
-  useFetcherResult(fetcher, (data) => {
-    if (!wantAllRead.current) return;
-    wantAllRead.current = false;
+  // Mark-all-read toast fires on the server RESULT, not on submit: a failed
+  // POST (expired session/CSRF) reports the failure, not a false success
+  // (P11-40). Its own fetcher means this result can only be a mark-all's, so no
+  // submit-time flag has to scope it.
+  useFetcherResult(readAllFetcher, (data) => {
     push(
       data.ok
         ? "All notifications marked read"
@@ -92,14 +95,13 @@ export function TopBell({
     fd.set("_csrf", csrf);
     fd.set("intent", "read");
     for (const id of ids) fd.append("id", id);
-    fetcher.submit(fd, { method: "post", action: "/notifications/read" });
+    readFetcher.submit(fd, { method: "post", action: "/notifications/read" });
   };
   const markAllRead = () => {
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "read-all");
-    wantAllRead.current = true;
-    fetcher.submit(fd, { method: "post", action: "/notifications/read" });
+    readAllFetcher.submit(fd, { method: "post", action: "/notifications/read" });
   };
 
   const openItem = (n: NotificationView) => {

@@ -2620,6 +2620,10 @@ dialog[data-closing]::backdrop {
   transition: background .12s ease;
 }
 .keybtn:hover { background: color-mix(in srgb, var(--blue), transparent 74%); }
+/* F18-1: an orphan row's project is gone — the label is a non-navigable note,
+   not a live-looking pill (the bell popover shows the same note inline). */
+.keybtn.dead { color: var(--faint); background: none; cursor: default; }
+.keybtn.dead:hover { background: none; }
 
 /* policy activity */
 .pev-list { display: flex; flex-direction: column; }

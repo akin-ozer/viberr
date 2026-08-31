@@ -211,6 +211,11 @@ export interface NotifyMentionsInput {
   /** The author's user id (human comments) — never notify the author. */
   excludeUserId?: string | null;
   occurredAt?: string;
+  /** Users a PRIOR comment already notified for the same content — skipped so a
+   *  reply whose body duplicates an earlier comment but adds new @tags (the
+   *  dispatch-completion cc line, ruling 98) pings only the added handles,
+   *  never re-notifying anyone the earlier comment already reached. */
+  skipUserIds?: ReadonlySet<string>;
 }
 
 export interface MentionFanout {
@@ -241,6 +246,7 @@ export function fanOutMentions(
   const mentioned: string[] = [];
   for (const userId of userIds) {
     if (input.excludeUserId && userId === input.excludeUserId) continue;
+    if (input.skipUserIds?.has(userId)) continue;
     mentioned.push(userId);
     const notification: CreateNotificationInput = {
       userId,
@@ -267,4 +273,13 @@ export function notifyMentionedUsers(
   input: NotifyMentionsInput,
 ): string[] {
   return fanOutMentions(db, input).mentioned;
+}
+
+/** The enabled users a text unambiguously @mentions — for diffing a reply's
+ *  mentions against the comment it duplicates (see `skipUserIds`). */
+export function mentionedUserIdsOf(
+  db: DatabaseSync,
+  text: string,
+): Set<string> {
+  return new Set(resolveMentionTargets(enabledUsers(db), text).userIds);
 }

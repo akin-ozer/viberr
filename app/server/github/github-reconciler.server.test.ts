@@ -1125,6 +1125,67 @@ describe("reconcileTask", () => {
     ]);
   });
 
+  it("a Complete-merge landing mid-pass is not clobbered back to accepted (bug-sweep #3)", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-302", {
+        title: "Race merge",
+        stage: "done",
+        branch: "vib-302-race",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 319, state: "accepted", title: "Race merge" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler05" },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+
+    const routes = happyRoutes();
+    // PR still OPEN on GitHub, so the pass carries the local "accepted" forward.
+    routes[`GET ${REPO_PATH}/pulls/319`] = {
+      body: {
+        number: 319, title: "Race merge", state: "open",
+        merged: false, merged_at: null, head: { sha: "headsha319" },
+        additions: 1, deletions: 0, changed_files: 1,
+      },
+    };
+    const base = fakeGithubFetch(routes).fetchImpl;
+    let raced = false;
+    const fetchImpl: typeof base = async (url, init) => {
+      // A human clicks Complete merge DURING the pass's awaited round trips:
+      // stamp pr.state "merged" once, before the pass writes its snapshot back.
+      if (!raced) {
+        raced = true;
+        await updateTaskFile(
+          { projectSlug: store.slug, taskKey: "VIB-302", dataRoot: store.dataRoot },
+          (p) => {
+            if (p.frontmatter.pr) p.frontmatter.pr.state = "merged";
+          },
+        );
+      }
+      return base(url, init);
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-302" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-302",
+      dataRoot: store.dataRoot,
+    })!;
+    // The irreversible merge survived; the accepted pass did NOT stamp it back
+    // down (which would re-offer "Complete merge" on an already-merged PR).
+    expect(file.parsed.frontmatter.pr?.state).toBe("merged");
+  });
+
   it("accepted PR closed on GitHub without merging → downgrade + typed policy event explaining why (B9)", async () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {

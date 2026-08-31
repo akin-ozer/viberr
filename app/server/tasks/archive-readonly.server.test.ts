@@ -116,6 +116,33 @@ describe("archived project is read-only (R6-3)", () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 
+  /**
+   * bug-sweep #12: an AUTO boundary crossed with `manual` omitted (a server-side
+   * caller — e.g. applyRecommendation on a declared edge — not the UI, which
+   * always sends manual:true) lands on the any-member arm, which unlike the
+   * requireAction arms did NOT assert the archive freeze. The freeze now lives
+   * on the arm itself, so an auto move into a read-only project is refused too.
+   */
+  it("refuses an AUTO-boundary transition (manual omitted) on an archived project (409)", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "triage",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await archive();
+    await expect(
+      transitionStage(
+        store.db,
+        // triage→ready is a declared `auto` boundary; no `manual` flag.
+        { projectSlug: store.slug, taskKey: "VIB-2", toStageId: "ready" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
   it("refuses editing the goal on an archived project (409)", async () => {
     await archive();
     await expect(

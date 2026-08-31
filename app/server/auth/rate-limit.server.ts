@@ -71,11 +71,7 @@ export class TokenBucketLimiter {
       bucket = { tokens: this.capacity, updatedAt: now };
       this.buckets.set(key, bucket);
     } else {
-      const elapsed = Math.max(0, now - bucket.updatedAt);
-      bucket.tokens = Math.min(
-        this.capacity,
-        bucket.tokens + (elapsed * this.capacity) / this.refillIntervalMs,
-      );
+      bucket.tokens = this.liveTokens(bucket, now);
       bucket.updatedAt = now;
     }
     if (bucket.tokens < 1) return false;
@@ -83,14 +79,25 @@ export class TokenBucketLimiter {
     return true;
   }
 
+  /** Current token count with continuous refill applied, clamped to capacity. */
+  private liveTokens(bucket: Bucket, now: number): number {
+    const elapsed = Math.max(0, now - bucket.updatedAt);
+    return Math.min(
+      this.capacity,
+      bucket.tokens + (elapsed * this.capacity) / this.refillIntervalMs,
+    );
+  }
+
   /**
    * Holds the map under {@link MAX_TRACKED_KEYS} before a new key is inserted.
    *
-   * Map iteration is insertion order, so the front is the oldest key: dropping
-   * it forgives at most one throttled caller, and flushing a SPECIFIC key costs
-   * an attacker MAX_TRACKED_KEYS fresh attempts that this same limiter meters.
-   * That is a far better failure than a map an unauthenticated caller grows
-   * without bound.
+   * Eviction targets the LEAST-throttled bucket — the one with the most live
+   * tokens — never the oldest-inserted. A caller being actively rate-limited has
+   * FEW tokens, so it is never the eviction target: a flood of fresh
+   * full-capacity keys can no longer evict a specific throttled victim to reset
+   * its lockout (insertion-order eviction forgave whoever was inserted first,
+   * which an unauthenticated attacker controls). Forgetting the most-refilled
+   * bucket also loses the least enforcement, since it was closest to full anyway.
    */
   private makeRoom(now: number): void {
     if (this.buckets.size < MAX_TRACKED_KEYS) return;
@@ -99,9 +106,17 @@ export class TokenBucketLimiter {
       this.prune();
     }
     while (this.buckets.size >= MAX_TRACKED_KEYS) {
-      const oldest = this.buckets.keys().next().value;
-      if (oldest === undefined) break;
-      this.buckets.delete(oldest);
+      let victimKey: string | undefined;
+      let mostTokens = Number.NEGATIVE_INFINITY;
+      for (const [key, bucket] of this.buckets) {
+        const tokens = this.liveTokens(bucket, now);
+        if (tokens > mostTokens) {
+          mostTokens = tokens;
+          victimKey = key;
+        }
+      }
+      if (victimKey === undefined) break;
+      this.buckets.delete(victimKey);
     }
   }
 
@@ -114,10 +129,7 @@ export class TokenBucketLimiter {
   prune(): void {
     const now = this.now();
     for (const [key, bucket] of this.buckets) {
-      const elapsed = Math.max(0, now - bucket.updatedAt);
-      const tokens =
-        bucket.tokens + (elapsed * this.capacity) / this.refillIntervalMs;
-      if (tokens >= this.capacity) this.buckets.delete(key);
+      if (this.liveTokens(bucket, now) >= this.capacity) this.buckets.delete(key);
     }
   }
 }

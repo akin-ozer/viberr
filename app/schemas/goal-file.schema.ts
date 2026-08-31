@@ -104,7 +104,21 @@ export interface ParsedGoalFile {
   frontmatter: GoalFrontmatter;
   description: string;
   timeline: GoalTimelineEntry[];
+  /** Frontmatter keys the goal schema does not know, preserved verbatim so a
+   *  hand-added or future/foreign field round-trips through a write instead of
+   *  being silently dropped (file-formats §2: writers ALWAYS preserve unknown
+   *  frontmatter fields — the task and project writers already do). Absent on a
+   *  freshly minted file. */
+  unknownFrontmatter?: GoalUnknownFrontmatter;
 }
+
+/** Raw, still-undecoded frontmatter keys — the same shape the task/project
+ *  schemas name `RawFrontmatter`; a schema-derived value type, not a bare
+ *  dictionary, so unknown keys keep a defined contract as they round-trip. */
+export type GoalUnknownFrontmatter = z.infer<
+  typeof goalUnknownFrontmatterSchema
+>;
+const goalUnknownFrontmatterSchema = z.record(z.string(), z.unknown());
 
 /** A goal is COMPLETE when every link is settled and none failed-and-blocked;
  *  helper for both the writer and the projection. */

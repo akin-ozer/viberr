@@ -393,7 +393,7 @@ function DailyChart({ summary }: { summary: InsightsSummary }) {
           <span
             key={d.date}
             className="daily-col"
-            title={`${d.date}: ${d.runs} run${d.runs === 1 ? "" : "s"}, ${fmtCost(d.cost)}`}
+            title={`${d.date}: ${d.runs} run${d.runs === 1 ? "" : "s"}, ${d.cost == null ? "cost not reported" : fmtCost(d.cost)}`}
           >
             <span
               className="daily-bar"

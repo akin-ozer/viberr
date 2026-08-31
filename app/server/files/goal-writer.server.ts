@@ -68,7 +68,8 @@ function unescapeDescription(text: string): string {
 export function parseGoalFileContent(content: string): ParsedGoalFile | null {
   const { data, body } = splitFrontmatter(content);
   const mapping = yamlMappingSchema.safeParse(data);
-  const parsed = goalFrontmatterSchema.safeParse(mapping.success ? mapping.data : {});
+  const rawMapping: YamlMapping = mapping.success ? mapping.data : {};
+  const parsed = goalFrontmatterSchema.safeParse(rawMapping);
   if (!parsed.success) return null;
 
   let description = "";
@@ -93,7 +94,15 @@ export function parseGoalFileContent(content: string): ParsedGoalFile | null {
     }
   }
   description = unescapeDescription(descriptionLines.join("\n")).trim();
-  return { frontmatter: parsed.data, description, timeline };
+  // Preserve any frontmatter keys the schema does not know, so a hand-added or
+  // future/foreign field survives the next write (file-formats §2) instead of
+  // being dropped on the first reconcile tick that rewrites the file.
+  const knownKeys = new Set<string>(GOAL_FRONTMATTER_KEYS);
+  const unknownFrontmatter: YamlMapping = {};
+  for (const [k, v] of Object.entries(rawMapping)) {
+    if (!knownKeys.has(k)) unknownFrontmatter[k] = v;
+  }
+  return { frontmatter: parsed.data, description, timeline, unknownFrontmatter };
 }
 
 /**
@@ -148,7 +157,10 @@ export function serializeGoalFile(parsed: ParsedGoalFile): string {
   const body =
     `${DESCRIPTION_HEAD}\n\n${escapeDescription(parsed.description.trim())}\n\n` +
     `${TIMELINE_HEAD}\n\n${timeline}`;
-  return serializeFrontmatterFile(known, {}, body);
+  // Re-emit unknown frontmatter keys (file-formats §2 round-trip contract); the
+  // frontmatter serializer keeps the known keys' canonical order and appends the
+  // rest, so a foreign/future field is never dropped by a write.
+  return serializeFrontmatterFile(known, parsed.unknownFrontmatter ?? {}, body);
 }
 
 /** History bullets are ONE line each — flatten whatever prose arrives. */

@@ -1039,6 +1039,52 @@ function tolerant<T>(
 }
 
 /**
+ * Validate a list field ONE ROW AT A TIME, keeping the good rows and dropping
+ * only the bad ones with a per-index diagnostic — the F18 contract.
+ *
+ * The whole-array {@link tolerant} above empties the ENTIRE list on one bad
+ * row, and because the diagnostic is only a warning (not a hardStop) the file
+ * stays writable, so the next `updateTaskFile` serializes the emptied list back
+ * over the rows that had been fine — a durable, silent loss. Any list whose
+ * loss would persist (verdicts, schedules, engagements, …) parses through here.
+ */
+function tolerantRows<T>(
+  diagnostics: FileDiagnostic[],
+  data: RawFrontmatter,
+  path: ReadableFrontmatterKey,
+  element: z.ZodType<T>,
+): T[] {
+  const value = data[path];
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    diagnostics.push(
+      diagWarning(
+        "frontmatter.invalid_field",
+        `Frontmatter field \`${path}\` is not a list — using an empty list.`,
+        path,
+      ),
+    );
+    return [];
+  }
+  const out: T[] = [];
+  value.forEach((entry, i) => {
+    const parsed = element.safeParse(entry);
+    if (parsed.success) {
+      out.push(parsed.data);
+      return;
+    }
+    diagnostics.push(
+      diagWarning(
+        "frontmatter.invalid_field",
+        `Frontmatter \`${path}[${i}]\` is invalid (${parsed.error.issues[0]?.message ?? "unparseable"}) — dropping this entry, keeping the rest.`,
+        `${path}[${i}]`,
+      ),
+    );
+  });
+  return out;
+}
+
+/**
  * Engagement parsing enforces one row per profile and at most one delivering
  * workspace owner. (The legacy `specialist`/`reviewers`/`consultants` slot
  * absorption lived here until the dynamic-dispatch rework, 2026-08-29 —
@@ -1049,35 +1095,12 @@ function parseEngagementRows(
   diagnostics: FileDiagnostic[],
   data: RawFrontmatter,
 ): Engagement[] {
-  const value = data.engagements;
-  if (value === undefined) return [];
-  if (!Array.isArray(value)) {
-    diagnostics.push(
-      diagWarning(
-        "frontmatter.invalid_field",
-        "Frontmatter field `engagements` is not a list — using an empty list.",
-        "engagements",
-      ),
-    );
-    return [];
-  }
-  const element = taskFrontmatterFields.engagements.element;
-  const out: Engagement[] = [];
-  value.forEach((entry, i) => {
-    const parsed = element.safeParse(entry);
-    if (parsed.success) {
-      out.push(parsed.data);
-      return;
-    }
-    diagnostics.push(
-      diagWarning(
-        "frontmatter.invalid_field",
-        `Frontmatter \`engagements[${i}]\` is invalid (${parsed.error.issues[0]?.message ?? "unparseable"}) — dropping this entry, keeping the rest.`,
-        `engagements[${i}]`,
-      ),
-    );
-  });
-  return out;
+  return tolerantRows(
+    diagnostics,
+    data,
+    "engagements",
+    taskFrontmatterFields.engagements.element,
+  );
 }
 
 function parseEngagements(
@@ -1258,21 +1281,22 @@ export function parseTaskFrontmatter(
       taskFrontmatterFields.operator,
       null,
     ),
-    recommendations: tolerant(
+    // Per-ROW (F18): one malformed recommendation drops only itself, never the
+    // whole list — a whole-array wipe would persist on the next write.
+    recommendations: tolerantRows(
       diagnostics,
       data,
       "recommendations",
-      taskFrontmatterFields.recommendations,
-      [],
+      taskFrontmatterFields.recommendations.element,
     ),
     // schedules — absent on tasks that predate O-3 → empty, silently (mirrors
-    // recommendations: a missing optional array is not a diagnostic).
-    schedules: tolerant(
+    // recommendations: a missing optional array is not a diagnostic). Per-ROW so
+    // one bad occurrence never drops the rest (FR39 server-fired runs).
+    schedules: tolerantRows(
       diagnostics,
       data,
       "schedules",
-      taskFrontmatterFields.schedules,
-      [],
+      taskFrontmatterFields.schedules.element,
     ),
     // urgent is an optional boolean by contract — absent means false, silently.
     urgent: tolerant(
@@ -1290,13 +1314,10 @@ export function parseTaskFrontmatter(
       taskFrontmatterFields.priority,
       "normal",
     ),
-    labels: tolerant(
-      diagnostics,
-      data,
-      "labels",
-      taskFrontmatterFields.labels,
-      [],
-    ),
+    // Per-ROW (F18): one malformed label drops only itself. (`labels` carries a
+    // `.default([])` wrapper, so its element is named directly rather than via
+    // `.element`, which only a bare `z.array` exposes.)
+    labels: tolerantRows(diagnostics, data, "labels", z.string()),
     dueDate: tolerant(
       diagnostics,
       data,
@@ -1327,12 +1348,14 @@ export function parseTaskFrontmatter(
       taskFrontmatterFields.workRevision,
       null,
     ),
-    verdicts: tolerant(
+    // Per-ROW (F18): one malformed verdict drops only itself, never the whole
+    // list — a whole-array wipe of recorded reviewer approvals would persist on
+    // the next write and silently revert review state.
+    verdicts: tolerantRows(
       diagnostics,
       data,
       "verdicts",
-      taskFrontmatterFields.verdicts,
-      [],
+      taskFrontmatterFields.verdicts.element,
     ),
     branch: tolerant(
       diagnostics,

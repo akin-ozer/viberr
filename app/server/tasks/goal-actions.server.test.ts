@@ -759,3 +759,89 @@ function countProjectTasks(): number {
     (entry) => entry.isDirectory() && !entry.name.startsWith("."),
   ).length;
 }
+
+/**
+ * R99 / bug-sweep #13: a retry un-parks the chain (attention→active) and records
+ * "retried" BEFORE the fresh task is created. If creation is refused, the chain
+ * must re-park to attention with an honest note — not sit active with a still
+ * -failed link for the next 60s reconcile to flap back (a spurious re-notify and
+ * a transcript claiming a retry that never started).
+ */
+describe("chained goals — retry re-parks when its task cannot be created", () => {
+  it("a refused retry re-parks to attention instead of leaving the chain active", async () => {
+    const { createGoal, getGoalView, reconcileGoal, updateGoal } = await import(
+      "./goal-actions.server"
+    );
+    const { updateProjectFile } = await import(
+      "~/server/files/project-writer.server"
+    );
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildTaskFile } = await import(
+      "~/server/projections/rebuilder.server"
+    );
+
+    const created = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Retry re-park",
+        description: "Two links.",
+        links: [
+          { title: "One", goal: "First. Done when merged." },
+          { title: "Two", goal: "Second. Done when merged." },
+        ],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    const gid = created.goalId;
+
+    // Advance to link 2, then FAIL it by archiving its task → chain parks.
+    await closeTaskToDone(created.activeTaskKey!);
+    await reconcileGoal(app.db, SLUG, gid, { dataRoot: app.dataRoot });
+    const link2Task = getGoalView(SLUG, gid, { dataRoot: app.dataRoot })!.links[1]!
+      .taskKey!;
+    await updateTaskFile(
+      { projectSlug: SLUG, taskKey: link2Task, dataRoot: app.dataRoot },
+      (p) => {
+        p.frontmatter.archived = true;
+      },
+    );
+    rebuildTaskFile(app.db, SLUG, link2Task, { dataRoot: app.dataRoot });
+    await reconcileGoal(app.db, SLUG, gid, { dataRoot: app.dataRoot });
+    expect(getGoalView(SLUG, gid, { dataRoot: app.dataRoot })!.status).toBe(
+      "attention",
+    );
+
+    // Demote the creator to viewer: retry_link still passes (creator arm =
+    // any-member), but createTask's `create-task` check refuses the fresh task.
+    await updateProjectFile(
+      { projectSlug: SLUG, dataRoot: app.dataRoot },
+      (p) => {
+        p.frontmatter.members.find((m) => m.userId === contributorId)!.role =
+          "viewer";
+      },
+    );
+    try {
+      const result = await updateGoal(
+        app.db,
+        { projectSlug: SLUG, goalId: gid, action: { op: "retry_link", index: 2 } },
+        actorOf(contributorId, "selin@viberr.dev"),
+        { dataRoot: app.dataRoot },
+      );
+      // The chain must be re-parked, not left active with a failed link.
+      expect(result.status).toBe("attention");
+      const after = getGoalView(SLUG, gid, { dataRoot: app.dataRoot })!;
+      expect(after.status).toBe("attention");
+      expect(after.links[1]!.status).toBe("failed");
+    } finally {
+      await updateProjectFile(
+        { projectSlug: SLUG, dataRoot: app.dataRoot },
+        (p) => {
+          p.frontmatter.members.find((m) => m.userId === contributorId)!.role =
+            "contributor";
+        },
+      );
+    }
+  });
+});

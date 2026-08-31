@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type {
   CodexOptions,
@@ -9,6 +9,7 @@ import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
 import {
   CODEX_SDK_VERIFIED_VERSION,
   createCodexAdapter,
+  INTERRUPT_SETTLE_GRACE_MS,
   resolveCodexReasoningEffort,
   resolveCodexSandboxMode,
   type CodexClient,
@@ -742,6 +743,48 @@ describe("codex adapter (SDK, injected fake client)", () => {
     handle.interrupt();
     await drain();
     expect(exit).toMatchObject({ outcome: "interrupted" });
+  });
+
+  /**
+   * bug-sweep #11: the interrupt grace-timer sibling of the Claude fix. Codex's
+   * abort SIGTERMs the child, but a child that SURVIVES SIGTERM (trapped signal,
+   * a grandchild holding the stdout pipe) never ends the iterator, so the run
+   * would sit `running` until the next restart's orphan sweep. A deadline
+   * force-settles it instead.
+   */
+  it("force-settles an interrupt the codex child never answers (bug-sweep #11)", async () => {
+    vi.useFakeTimers();
+    try {
+      // A thread that IGNORES the abort signal — hangs forever even after it.
+      const wedgedThread: CodexThread = {
+        id: "wedged",
+        async runStreamed() {
+          const gen = (async function* () {
+            yield { type: "thread.started", thread_id: "wedged" };
+            await new Promise<void>(() => {}); // never resolves; ignores abort
+          })();
+          return { events: asSdkEvents(gen) };
+        },
+      };
+      const client: CodexClient = {
+        startThread: () => wedgedThread,
+        resumeThread: () => wedgedThread,
+      };
+      const adapter = createCodexAdapter({ codexFactory: () => client });
+      let exit: RunExit | null = null;
+      const handle = adapter.start(SPEC, {
+        onLine: () => {},
+        onExit: (e) => (exit = e),
+      });
+      await vi.advanceTimersByTimeAsync(1); // let the stream start
+      handle.interrupt();
+      expect(exit).toBeNull(); // abort sent, but the wedged child ignores it
+
+      await vi.advanceTimersByTimeAsync(INTERRUPT_SETTLE_GRACE_MS + 1);
+      expect(exit).toMatchObject({ outcome: "interrupted" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("idle-timeout settles error (not interrupted) on a hung stream (A8)", async () => {

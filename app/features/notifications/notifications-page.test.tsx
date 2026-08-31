@@ -398,6 +398,35 @@ describe("NotificationsPage", () => {
     ).toBeTruthy();
   });
 
+  /**
+   * bug-sweep #14: gating the stream keybtn on `href !== null` (aimed at
+   * org-wide rows) also swallowed ORPHAN rows, since listNotifications sets
+   * href=null whenever targetMissing — so the "project no longer exists" note
+   * became dead code and the page silently disagreed with the bell popover,
+   * which still shows it. The orphan row must disclose why it opens nothing.
+   */
+  it("an orphan stream row discloses 'project no longer exists', non-interactively (F18-1)", () => {
+    const orphan: NotificationPageItem = {
+      ...ITEMS[3]!, // a mention row → routes to the stream
+      id: "n-orphan",
+      href: null,
+      targetMissing: true,
+      unread: false,
+      waitingOnYou: false,
+    };
+    const { container, getByText } = renderPage([orphan], 0, 0);
+    // Present on the page, matching the bell popover's disclosure.
+    expect(getByText("project no longer exists")).toBeTruthy();
+    // Rendered as a non-navigating label, not a live-looking keybtn button.
+    const dead = container.querySelector(".keybtn.dead")!;
+    expect(dead).toBeTruthy();
+    expect(dead.tagName).toBe("SPAN");
+    // A read orphan row carries NO navigating keybtn button.
+    expect(
+      container.querySelector(".ntf-ev")!.querySelector("button.keybtn"),
+    ).toBeNull();
+  });
+
   it("Mark all read invokes the shared read-all handler", () => {
     const { getByText, onReadAll } = renderPage();
     fireEvent.click(getByText("Mark all read"));

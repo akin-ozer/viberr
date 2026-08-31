@@ -804,3 +804,56 @@ describe("parseTaskFrontmatter — per-entry engagement tolerance", () => {
     expect(diagnostics.some((d) => d.path === "engagements")).toBe(true);
   });
 });
+
+describe("parseTaskFrontmatter — per-entry verdict/schedule tolerance", () => {
+  // A whole-array wipe of these lists PERSISTS: the diagnostic is a warning, so
+  // the file stays writable and the next updateTaskFile serializes `[]` back.
+  it("keeps valid verdicts and drops only the malformed row", () => {
+    const good = (profileId: string, at: string) => ({
+      profileId,
+      revisionId: "rev-1",
+      headSha: "sha-1",
+      result: "approve" as const,
+      at,
+    });
+    const { frontmatter, diagnostics } = parseTaskFrontmatter(
+      {
+        key: "VIB-1",
+        verdicts: [
+          good("reviewer-a", "2026-08-31T00:00:00Z"),
+          // Malformed: `revisionId`/`headSha`/`at` missing.
+          { profileId: "reviewer-b", result: "approve" },
+          good("reviewer-c", "2026-08-31T01:00:00Z"),
+        ],
+      },
+      { fallbackKey: "VIB-1" },
+    );
+    expect(frontmatter.verdicts.map((v) => v.profileId)).toEqual([
+      "reviewer-a",
+      "reviewer-c",
+    ]);
+    expect(diagnostics.some((d) => d.path === "verdicts[1]")).toBe(true);
+  });
+
+  it("keeps valid schedules and drops only the malformed row", () => {
+    const { frontmatter, diagnostics } = parseTaskFrontmatter(
+      {
+        key: "VIB-1",
+        schedules: [
+          { id: "s-1", action: "not-a-real-action" }, // malformed: bad enum
+          {
+            id: "s-2",
+            action: "run-operator",
+            dueAt: "2026-08-31T09:00:00Z",
+            createdBy: "u1",
+            createdAt: "2026-08-31T00:00:00Z",
+          },
+        ],
+      },
+      { fallbackKey: "VIB-1" },
+    );
+    // The good occurrence survives its malformed neighbour.
+    expect(frontmatter.schedules.map((s) => s.id)).toContain("s-2");
+    expect(diagnostics.some((d) => d.path === "schedules[0]")).toBe(true);
+  });
+});

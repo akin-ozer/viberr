@@ -446,6 +446,14 @@ async function noteDroppedOperatorTurn(
   };
   if (dropped.dataRoot) ref.dataRoot = dropped.dataRoot;
   const who = dropped.humanCommentBy?.trim() || "someone";
+  // The copy is kind-specific: a human comment stays on the timeline to re-send,
+  // but a dropped SCHEDULED occurrence has no comment there (its note is carried
+  // precisely because it exists nowhere else), and it was already stamped
+  // `fired` — so telling a human it "stays on the timeline" would be false.
+  const text =
+    dropped.trigger === "scheduled"
+      ? "The pending @operator queue was full, so a scheduled operator re-check did not get its turn. Run the operator manually, or wait for the next scheduled occurrence, if it still needs attention."
+      : `The pending @operator queue was full, so ${who}'s earlier comment did not get its own operator turn. It stays on the timeline for the operator to read, but re-send it if it needs a dedicated answer.`;
   try {
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift({
@@ -453,7 +461,7 @@ async function noteDroppedOperatorTurn(
         type: "note",
         actor: { kind: "system", systemId: "operator" },
         title: null,
-        text: `The pending @operator queue was full, so ${who}'s earlier comment did not get its own operator turn. It stays on the timeline for the operator to read, but re-send it if it needs a dedicated answer.`,
+        text,
         toAgent: false,
         evidence: null,
       });

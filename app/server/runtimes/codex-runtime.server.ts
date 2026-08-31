@@ -391,6 +391,17 @@ export function codexIdleTimeoutMs(): number {
   return Number.isFinite(n) && n > 0 ? n : 15 * 60 * 1000;
 }
 
+/**
+ * After an interrupt or idle-abort has SIGTERM'd the codex child (via the SDK's
+ * spawn signal), how long to wait for the stream to actually end before
+ * force-settling the run. The abort IS the kill lever here — unlike the Claude
+ * adapter's cooperative `interrupt()` — but a child that survives SIGTERM (a
+ * trapped signal, or a grandchild holding the stdout pipe open) never ends the
+ * iterator, so without this the row sits `running` until the next restart's
+ * orphan sweep: the Stop-did-nothing defect, on the other backend.
+ */
+export const INTERRUPT_SETTLE_GRACE_MS = 20_000;
+
 /** CLI failures can include stderr and command lines. Those may contain
  * credentials, so the raw text is never logged unscrubbed — but R20-3 settled
  * that a REDACTED provider complaint is loggable (ruling 69), so instead of
@@ -549,6 +560,17 @@ export function createCodexAdapter(
       let idleTimedOut = false;
       let emittedAdapterFailure = false;
       const abort = new AbortController();
+      // Force-settle deadline armed after an abort, so a child that survives
+      // SIGTERM cannot leave the row `running` forever. `settle` disarms it.
+      let interruptTimer: ReturnType<typeof setTimeout> | null = null;
+      const armSettleDeadline = (onTimeout: () => void) => {
+        if (interruptTimer) clearTimeout(interruptTimer);
+        interruptTimer = setTimeout(() => {
+          if (settled) return;
+          onTimeout();
+        }, INTERRUPT_SETTLE_GRACE_MS);
+        interruptTimer.unref?.();
+      };
 
       // R21-4 / G5 (FR28): the live phase/step the run strip renders — the same
       // vocabulary the Claude adapter emits, so the strip reads identically on
@@ -584,6 +606,19 @@ export function createCodexAdapter(
           } catch {
             // already done
           }
+          // If the child ignores the abort (survives SIGTERM), force-settle so
+          // the hung run does not sit `running` until the next restart.
+          armSettleDeadline(() => {
+            logger.warn(
+              "codex run did not stop after the idle abort — settling it",
+              { runId: spec.runId, graceMs: INTERRUPT_SETTLE_GRACE_MS },
+            );
+            emitAdapterFailure(
+              `Codex stopped after ${idleMs} ms without producing an event.`,
+              "idle_timeout",
+            );
+            settle("error");
+          });
         }, idleMs);
       };
       const disarmIdle = () => {
@@ -597,6 +632,10 @@ export function createCodexAdapter(
         if (settled) return;
         settled = true;
         disarmIdle();
+        if (interruptTimer) {
+          clearTimeout(interruptTimer);
+          interruptTimer = null;
+        }
         cb.onExit({
           outcome,
           effectiveBackend: "codex",
@@ -851,6 +890,16 @@ export function createCodexAdapter(
           } catch {
             // Already completed.
           }
+          // The abort SIGTERMs the child; if it does not die, the iterator never
+          // ends and the run would sit `running` until the next restart's orphan
+          // sweep — force-settle after a grace so Stop is never a no-op.
+          armSettleDeadline(() => {
+            logger.warn(
+              "codex run did not stop after an interrupt — settling it",
+              { runId: spec.runId, graceMs: INTERRUPT_SETTLE_GRACE_MS },
+            );
+            settle("interrupted");
+          });
         },
       };
     },

@@ -410,16 +410,50 @@ export async function updateGoal(
   });
 
   // A retry creates the fresh link task under the PRESENT caller's authority.
+  // The un-park (attention→active) + "retried" history already committed above,
+  // so if the task cannot be created (e.g. the caller lost create-task
+  // authority) re-park to attention HERE with an honest note — otherwise the
+  // chain sits active with a still-failed link until the next 60s reconcile
+  // flaps it back, re-notifying and recording a retry that never started. Same
+  // shape as reconcileGoal's advance path.
   if (retryLinkIndex !== null) {
-    await startLinkTask(
-      db,
-      input.projectSlug,
-      input.goalId,
-      retryLinkIndex,
-      actor,
-      ctx,
-      "retry",
-    );
+    try {
+      await startLinkTask(
+        db,
+        input.projectSlug,
+        input.goalId,
+        retryLinkIndex,
+        actor,
+        ctx,
+        "retry",
+      );
+    } catch (error) {
+      logger.error("goal link retry task creation failed", {
+        goalId: input.goalId,
+        linkIndex: retryLinkIndex,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateGoalFile(
+        goalRef(ctx, input.projectSlug, input.goalId),
+        (goal) => {
+          if (goal.frontmatter.status !== "active") return;
+          goal.frontmatter.status = "attention";
+          return `Retry could not start link ${retryLinkIndex}'s task (${error instanceof Error ? error.message : "unknown error"}); parked for redirect.`;
+        },
+      );
+      const after = readGoalFile(goalRef(ctx, input.projectSlug, input.goalId));
+      if (after) {
+        notifyCreator(
+          db,
+          after.parsed.frontmatter,
+          input.projectSlug,
+          "A link retry could not start its task. Resume or redirect the goal to try again.",
+        );
+      }
+      rebuildGoalFile(db, input.projectSlug, input.goalId, {
+        dataRoot: ctx.dataRoot,
+      });
+    }
   } else if (advanceAfter) {
     await reconcileGoal(db, input.projectSlug, input.goalId, ctx);
   }
@@ -526,6 +560,13 @@ async function startLinkTaskLocked(
   const fm = current.parsed.frontmatter;
   const link = fm.links.find((l) => l.index === linkIndex);
   if (!link) return null;
+  // The chain must still be ACTIVE to start a link. The goal-start lock is a
+  // DIFFERENT navigator.locks key from the goal-file lock that a concurrent
+  // cancel/pause commits under, so check the freshest status here — and again
+  // under the file lock at attach time below, to close the createTask window.
+  // reconcileGoal early-returns on a cancelled/completed chain forever, so a
+  // link started on one strands its task in perpetual limbo.
+  if (fm.status !== "active") return null;
   if (mode === "advance" && (link.taskKey !== null || link.status !== "pending")) {
     return null;
   }
@@ -544,14 +585,31 @@ async function startLinkTaskLocked(
     actor,
     ctx,
   );
+  let attached = false;
   await updateGoalFile(ref, (goal) => {
+    // Re-check under the goal-FILE lock: a cancel/pause may have committed during
+    // the createTask await above. A non-active chain must not gain an active
+    // link — it would strand this task on a goal reconcileGoal never revisits.
+    if (goal.frontmatter.status !== "active") return;
     const target = goal.frontmatter.links.find((l) => l.index === linkIndex);
     if (!target) return;
+    attached = true;
     target.taskKey = created.key;
     target.status = "active";
     target.note = null;
     return `Link ${linkIndex} (${target.title}) started as ${created.key}.`;
   });
+  if (!attached) {
+    // The chain went non-active mid-create. The task exists and carries a
+    // goalRef (so it still surfaces as this goal's), but no link claims it and
+    // the card shows no active link on a dead/parked chain — the honest state.
+    logger.warn("goal link start abandoned: chain no longer active", {
+      goalId,
+      linkIndex,
+      taskKey: created.key,
+    });
+    return null;
+  }
   rebuildGoalFile(db, projectSlug, goalId, { dataRoot: ctx.dataRoot });
   notifyCreator(
     db,

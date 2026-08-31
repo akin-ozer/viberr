@@ -77,6 +77,21 @@ describe("getInsightsSummary", () => {
     expect(s.outcomes.successRate).toBeCloseTo(0.5, 5);
   });
 
+  it("a day whose runs all report no cost shows null, not $0, in the daily series (bug-sweep #15)", () => {
+    const db = ctx.makeDb();
+    const day = "2026-08-22";
+    // Both runs on this day are Codex — no cost reported (total_cost_usd NULL).
+    insertRun(db, { state: "finished", cost: null, startedAt: `${day}T09:00:00.000Z` });
+    insertRun(db, { state: "finished", cost: null, startedAt: `${day}T10:00:00.000Z` });
+    const s = getInsightsSummary(db, NOW);
+    const point = s.daily.find((d) => d.date === day)!;
+    expect(point.runs).toBe(2);
+    // Unknown, not a dishonest $0.00 — the same honesty the breakdown groups carry.
+    expect(point.cost).toBeNull();
+    // A gap-filled quiet day (no runs) is still a real 0, not "not reported".
+    expect(s.daily.find((d) => d.runs === 0)!.cost).toBe(0);
+  });
+
   it("successRate is null with no terminal runs", () => {
     const db = ctx.makeDb();
     insertRun(db, { state: "running" });

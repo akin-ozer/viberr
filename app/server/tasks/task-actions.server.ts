@@ -144,6 +144,7 @@ import { withheldAgentGrants } from "~/features/agents/capability-catalog";
 import {
   ambiguousMentionHandles,
   ambiguousMentionNote,
+  mentionedUserIdsOf,
   mentionNotifiesUser,
   notifyMentionedUsers,
   withAmbiguityDisclosure,
@@ -1791,7 +1792,15 @@ function projectRepoFor(
 type PreparedReply =
   | { status: "empty" }
   | { status: "dropped" }
-  | { status: "event"; event: TaskFileEvent; duplicate: boolean };
+  | {
+      status: "event";
+      event: TaskFileEvent;
+      duplicate: boolean;
+      /** When `duplicate`, the text of the mid-run comment it repeats — so the
+       *  caller can fan out only the @tags this reply ADDS over it (the
+       *  dispatch-completion cc line). Null when not a duplicate. */
+      duplicatedText: string | null;
+    };
 
 /** `text` without the dispatch-completion `cc @…` bookkeeping lines (ruling 98).
  *
@@ -1811,8 +1820,15 @@ function stripCcLine(text: string | null): string | null {
         .trim();
 }
 
-/** True when one of `candidates` (cc-stripped) matches a comment THIS agent posted
- *  DURING this run — the mid-run `post_comment` its final report is repeating.
+/** The TEXT of a comment THIS agent posted DURING this run that one of
+ *  `candidates` (cc-stripped) matches — the mid-run `post_comment` its final
+ *  report is repeating — or null when there is none.
+ *
+ *  Returns the matched comment's text (not a bare bool) so the caller can notify
+ *  only the @tags the reply ADDS over it: the dispatch-completion cc line
+ *  (ruling 98 / R20-9) is appended to the final reply alone, so a report that
+ *  otherwise duplicates a mid-run comment still carries a guaranteed ping the
+ *  comment never delivered — dropping the whole reply used to swallow it.
  *
  *  Bounded to `occurredAt >= the run's start`: a byte-identical reply from a
  *  PRIOR run (or any older own comment) is NOT this run's duplicate and must
@@ -1823,7 +1839,7 @@ function stripCcLine(text: string | null): string | null {
  *  two sides; passing both the separated and un-separated reply forms catches
  *  that. (A workspace-absolute path normalized only on the reply side is a
  *  residual gap — that repeat still posts, which is safe.) */
-function duplicatesOwnCommentThisRun(
+function duplicatedOwnCommentText(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
@@ -1831,20 +1847,20 @@ function duplicatesOwnCommentThisRun(
   runId: string,
   actorRef: FileActorRef,
   candidates: readonly string[],
-): boolean {
+): string | null {
   const startedAt = getRun(db, runId)?.started_at ?? null;
-  if (!startedAt) return false;
+  if (!startedAt) return null;
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
-  if (!file?.parsed) return false;
+  if (!file?.parsed) return null;
   const mine = encodeActorRef(actorRef);
   const wanted = new Set(candidates.map((c) => stripCcLine(c)));
   for (const ev of file.parsed.timeline) {
     if (ev.type !== "comment") continue;
     if (ev.occurredAt < startedAt) continue; // only THIS run's own comments
     if (encodeActorRef(ev.actor) !== mine) continue;
-    if (wanted.has(stripCcLine(ev.text))) return true;
+    if (wanted.has(stripCcLine(ev.text))) return ev.text;
   }
-  return false;
+  return null;
 }
 
 /** Build the reply event without writing so completion effects can land atomically. */
@@ -1887,7 +1903,7 @@ async function prepareAgentReplyEvent(
   // evidence-separation guardrail is off, so no second disclosure pass).
   const candidates =
     separated === replyText ? [text] : [text, withAmbiguityDisclosure(db, replyText)];
-  const duplicate = duplicatesOwnCommentThisRun(
+  const duplicatedText = duplicatedOwnCommentText(
     db,
     ctx,
     projectSlug,
@@ -1907,7 +1923,8 @@ async function prepareAgentReplyEvent(
       toAgent: false,
       evidence: null,
     },
-    duplicate,
+    duplicate: duplicatedText !== null,
+    duplicatedText,
   };
 }
 
@@ -2616,6 +2633,26 @@ export async function recordAgentCompletion(
   const postsReplyEvent = prepared.status === "event" && !prepared.duplicate;
   const suppressedReason = suppressedReplyReason(prepared);
   const hasEvidence = !!(evidence && evidence.length);
+  // A reply whose BODY duplicates a mid-run comment does not re-post — but the
+  // dispatch-completion cc line (ruling 98 / R20-9) is content that comment
+  // never carried, and its guaranteed @tag would otherwise never notify: the
+  // reply fan-out below was gated on the reply POSTING, on the false premise
+  // that a duplicate's mentions were already delivered. Fan out ONLY the handles
+  // this reply ADDS over the comment it repeats (no double-notify) — and do it
+  // HERE, before the nothing-to-record early return, which the pure-dedup case
+  // (the exact dispatch trigger: repeated body + cc line) hits.
+  if (prepared.status === "event" && prepared.duplicatedText !== null) {
+    notifyMentionedUsers(db, {
+      text: prepared.event.text,
+      projectSlug,
+      taskKey,
+      from: createActorResolver(db, {
+        agentNames: agentNamesByProfile(db, projectSlug),
+      })(actorRef),
+      occurredAt: prepared.event.occurredAt,
+      skipUserIds: mentionedUserIdsOf(db, prepared.duplicatedText),
+    });
+  }
   // Nothing to record at all. Evidence rows and attachments each count as
   // something: a run whose prose was suppressed but that still produced evidence
   // or saved files gets a producing event below, so neither is lost with the
@@ -2871,8 +2908,6 @@ export async function recordAgentCompletion(
     // the run completes — notified nobody, on either backend. The reply
     // directive explicitly instructs the agent to tag the commenter, so this
     // was the majority of agent @tags. Same helper/`from` shape as :1169.
-    // Only when the reply actually POSTED: a suppressed F22-12 duplicate's
-    // mentions were already fanned out by the mid-run comment it repeats.
     if (postsReplyEvent) {
       notifyMentionedUsers(db, {
         text: prepared.event.text,
@@ -2884,6 +2919,8 @@ export async function recordAgentCompletion(
         occurredAt: prepared.event.occurredAt,
       });
     }
+    // The deduped-reply case is fanned out earlier (before the nothing-to-record
+    // early return), so it is NOT repeated here — see notifyAddedReplyMentions.
     // Recovery-idempotency audit for the reply (posted, guardrail-dropped, or
     // deduped as an F22-12 duplicate). Skip only a genuinely empty reply.
     if (prepared.status !== "empty") {
@@ -4280,8 +4317,13 @@ export async function transitionStage(
       requireAction(db, project, actor, "approve-transition", "change the task stage");
     }
   } else if (boundary!.boundary === "auto") {
-    // An auto boundary crossed by a human (unreachable from the UI, which always
-    // sends manual:true) — the loosest gate: any member.
+    // An auto boundary crossed by a human (the UI always sends manual:true, but
+    // a server-side caller that omits `manual` — e.g. applyRecommendation on a
+    // declared edge — lands here) — the loosest gate: any member. The
+    // archived-project freeze (R6-3) is NOT free on this arm the way it is on
+    // the requireAction arms, so assert it here at the chokepoint: without it an
+    // auto-boundary move writes stage into a read-only archived project.
+    requireProjectMutable(project, "move this task");
     requireAnyMember(db, project, actor, "move this task");
   } else if (boundary!.boundary === "approval") {
     if (input.recommendationAuthorized) {

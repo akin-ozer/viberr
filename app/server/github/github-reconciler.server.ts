@@ -652,14 +652,31 @@ async function reconcileTaskUnlocked(
     await updateTaskFile(ref, (parsed) => {
       const applied: Partial<TaskFrontmatter> = { ...patch };
       const current = parsed.frontmatter.pr;
-      if (
-        applied.pr &&
-        current &&
-        current.number === applied.pr.number &&
-        applied.pr.state === "review" &&
-        (current.state === "accepted" || current.state === "merged")
-      ) {
-        applied.pr = { ...applied.pr, state: current.state };
+      if (current) {
+        if (!applied.pr) {
+          // The snapshot carried no PR, but one exists NOW — a delivery linked
+          // it during this pass's awaited round trips. Do not null it back out.
+          if ("pr" in applied) delete applied.pr;
+        } else if (current.number === applied.pr.number) {
+          // A concurrent writer can advance the PR lifecycle during this pass's
+          // awaited GitHub round trips; the blind assign below must not regress
+          // what it committed:
+          //  · MERGED is irreversible — never let any pass (an `accepted` one
+          //    whose GitHub lookup was refused and fell back to the snapshot, or
+          //    a stale `review`) stamp it back down and re-offer "Complete
+          //    merge" on a merged PR.
+          //  · a local ACCEPT must survive a pass that only re-read the PR as
+          //    still-open (`review`) — the acceptance never recovers otherwise
+          //    (only an acceptance writes it, and the task is already in Done) —
+          //    but a REAL GitHub close/merge still advances it (accepted→closed
+          //    / accepted→merged both land).
+          const keepCurrent =
+            (current.state === "merged" && applied.pr.state !== "merged") ||
+            (current.state === "accepted" && applied.pr.state === "review");
+          if (keepCurrent) {
+            applied.pr = { ...applied.pr, state: current.state };
+          }
+        }
       }
       if (supersededIds.size > 0) {
         applied.recommendations = parsed.frontmatter.recommendations.filter(
