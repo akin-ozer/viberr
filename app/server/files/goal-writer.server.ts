@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { diagError, type FileDiagnostic } from "~/schemas/file-diagnostics";
 import {
   GOAL_FRONTMATTER_KEYS,
   goalFrontmatterSchema,
@@ -37,10 +38,38 @@ const DESCRIPTION_HEAD = "## Description";
 const TIMELINE_HEAD = "## Timeline";
 const TIMELINE_LINE_RE = /^-\s+(\S+)\s+·\s+(.*)$/;
 
+/**
+ * The description is human/model prose that sits ABOVE the timeline in the
+ * same file, so a `## Timeline` line inside it closes the description early
+ * and turns whatever follows into forged history bullets. The timeline itself
+ * is single-writer app narration and needs no escaping; the description does.
+ *
+ * Same backslash convention as task.md (file-formats §2): the serializer adds
+ * one to any line that reads as a section fence, the parser strips exactly
+ * one, so round-trips are byte-exact for every input.
+ */
+const NEEDS_HEAD_ESCAPE_RE = /^\\*\s*## /;
+const ESCAPED_HEAD_RE = /^\\+\s*## /;
+
+function escapeDescription(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (NEEDS_HEAD_ESCAPE_RE.test(line) ? `\\${line}` : line))
+    .join("\n");
+}
+
+function unescapeDescription(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (ESCAPED_HEAD_RE.test(line) ? line.slice(1) : line))
+    .join("\n");
+}
+
 export function parseGoalFileContent(content: string): ParsedGoalFile | null {
   const { data, body } = splitFrontmatter(content);
   const mapping = yamlMappingSchema.safeParse(data);
-  const parsed = goalFrontmatterSchema.safeParse(mapping.success ? mapping.data : {});
+  const rawMapping: YamlMapping = mapping.success ? mapping.data : {};
+  const parsed = goalFrontmatterSchema.safeParse(rawMapping);
   if (!parsed.success) return null;
 
   let description = "";
@@ -64,8 +93,59 @@ export function parseGoalFileContent(content: string): ParsedGoalFile | null {
       if (entry) timeline.push({ occurredAt: entry[1]!, text: entry[2]! });
     }
   }
-  description = descriptionLines.join("\n").trim();
-  return { frontmatter: parsed.data, description, timeline };
+  description = unescapeDescription(descriptionLines.join("\n")).trim();
+  // Preserve any frontmatter keys the schema does not know, so a hand-added or
+  // future/foreign field survives the next write (file-formats §2) instead of
+  // being dropped on the first reconcile tick that rewrites the file.
+  const knownKeys = new Set<string>(GOAL_FRONTMATTER_KEYS);
+  const unknownFrontmatter: YamlMapping = {};
+  for (const [k, v] of Object.entries(rawMapping)) {
+    if (!knownKeys.has(k)) unknownFrontmatter[k] = v;
+  }
+  return { frontmatter: parsed.data, description, timeline, unknownFrontmatter };
+}
+
+/**
+ * Why a goal file could not be read, for the store doctor.
+ *
+ * {@link parseGoalFileContent} answers null — enough for a caller that just
+ * needs to skip the file, useless to a human holding a rescan summary that
+ * says `errors: 1`. Goal files are canonical (file-formats §2b), so the doctor
+ * must NAME the file and the reason exactly as it does for task.md and
+ * project.md. Unlike those two there is no tolerant field recovery here: a
+ * goal whose frontmatter the schema rejects has no partially usable form, so
+ * every finding is a hardStop.
+ */
+export function diagnoseGoalFileContent(content: string): FileDiagnostic[] {
+  const { data, diagnostics } = splitFrontmatter(content);
+  const found = [...diagnostics];
+  const mapping = yamlMappingSchema.safeParse(data);
+  if (!mapping.success) {
+    found.push(
+      diagError(
+        "frontmatter.not_a_map",
+        "Frontmatter is not a YAML mapping, so the goal cannot be read at all.",
+        undefined,
+        true,
+      ),
+    );
+    return found;
+  }
+  const parsed = goalFrontmatterSchema.safeParse(mapping.data);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      const at = issue.path.join(".");
+      found.push(
+        diagError(
+          "frontmatter.invalid_field",
+          `${at || "frontmatter"}: ${issue.message}`,
+          at || undefined,
+          true,
+        ),
+      );
+    }
+  }
+  return found;
 }
 
 export function serializeGoalFile(parsed: ParsedGoalFile): string {
@@ -75,9 +155,12 @@ export function serializeGoalFile(parsed: ParsedGoalFile): string {
     .map((entry) => `- ${entry.occurredAt} · ${flattenHistoryText(entry.text)}`)
     .join("\n");
   const body =
-    `${DESCRIPTION_HEAD}\n\n${parsed.description.trim()}\n\n` +
+    `${DESCRIPTION_HEAD}\n\n${escapeDescription(parsed.description.trim())}\n\n` +
     `${TIMELINE_HEAD}\n\n${timeline}`;
-  return serializeFrontmatterFile(known, {}, body);
+  // Re-emit unknown frontmatter keys (file-formats §2 round-trip contract); the
+  // frontmatter serializer keeps the known keys' canonical order and appends the
+  // rest, so a foreign/future field is never dropped by a write.
+  return serializeFrontmatterFile(known, parsed.unknownFrontmatter ?? {}, body);
 }
 
 /** History bullets are ONE line each — flatten whatever prose arrives. */
@@ -116,20 +199,30 @@ function goalNumber(id: string): number {
   return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
 }
 
-/** Mint the next `goal-<n>` id by directory scan, under the goals-dir lock so
- *  two concurrent creates cannot collide (goals are rare; a scan is enough —
- *  no counter field in project.md). */
-export async function allocateGoalId(
+/** The next free `goal-<n>` for a project, by directory scan (goals are rare;
+ *  a scan is enough — there is no counter field in project.md).
+ *
+ *  UNLOCKED on purpose: an id is only reserved once the file bearing it
+ *  exists, and creation does real work in between. Call it inside
+ *  {@link withGoalsLock}, which the one caller holds across that whole
+ *  sequence — a lock released at mint time would hand the same id to two
+ *  concurrent creates. */
+export function nextGoalId(projectSlug: string, dataRoot?: string): string {
+  const max = listGoalIds(projectSlug, dataRoot).reduce((acc, id) => {
+    const m = GOAL_ID_RE.exec(id);
+    return m ? Math.max(acc, Number(m[1])) : acc;
+  }, 0);
+  return `goal-${max + 1}`;
+}
+
+/** Serialize everything that mints a goal id for one project, from the scan
+ *  through the write that makes the id real. */
+export async function withGoalsLock<T>(
   projectSlug: string,
-  dataRoot?: string,
-): Promise<string> {
-  return withFileLock(`goals:${goalsDir(projectSlug, dataRoot)}`, () => {
-    const max = listGoalIds(projectSlug, dataRoot).reduce((acc, id) => {
-      const m = GOAL_ID_RE.exec(id);
-      return m ? Math.max(acc, Number(m[1])) : acc;
-    }, 0);
-    return `goal-${max + 1}`;
-  });
+  dataRoot: string | undefined,
+  fn: () => Promise<T> | T,
+): Promise<T> {
+  return withFileLock(`goals:${goalsDir(projectSlug, dataRoot)}`, fn);
 }
 
 export async function createGoalFile(
@@ -159,7 +252,15 @@ export async function createGoalFile(
 
 /**
  * Locked read-modify-write. `mutate` edits the parsed file in place and may
- * return a history line to prepend; `updatedAt` is bumped on every write.
+ * return a history line to prepend; `updatedAt` is bumped whenever the file
+ * actually changes.
+ *
+ * A mutation that changes NOTHING writes nothing. The advance engine is
+ * convergent, so it calls this on every hook and on every 60s runner tick for
+ * every live goal; bumping `updatedAt` unconditionally would rewrite each of
+ * those files a minute forever, re-project them (the content hash moved), and
+ * fan a `goal.updated` event out to every client with the project open — churn
+ * that also makes the displayed "updated" time meaningless.
  */
 export async function updateGoalFile(
   ref: GoalFileRef,
@@ -170,7 +271,8 @@ export async function updateGoalFile(
     if (!existsSync(abs)) {
       throw AppError.notFound(`Goal ${ref.goalId} not found.`);
     }
-    const parsed = parseGoalFileContent(readFileSync(abs, "utf8"));
+    const raw = readFileSync(abs, "utf8");
+    const parsed = parseGoalFileContent(raw);
     if (!parsed) {
       throw AppError.conflict(
         `Goal ${ref.goalId} could not be parsed. Repair the file before changing it.`,
@@ -183,6 +285,9 @@ export async function updateGoalFile(
         text: history,
       });
     }
+    // Serialized with the OLD `updatedAt` still in place, so this compares the
+    // substance of the file and not the timestamp we are about to set.
+    if (serializeGoalFile(parsed) === raw) return parsed;
     parsed.frontmatter.updatedAt = new Date().toISOString();
     writeFileAtomic(abs, serializeGoalFile(parsed));
     return parsed;

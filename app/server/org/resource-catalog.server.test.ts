@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -81,6 +81,28 @@ describe("buildResourceCatalog (item-2: live resource picker)", () => {
       .items.map((i) => i.id);
     expect(mcps).not.toContain("viberr");
     expect(mcps).toContain("notes-fixture");
+  });
+
+  /**
+   * C5/pass-16 switched the store LISTINGS to a non-dereferencing lister so a
+   * symlinked folder is not a resource. The picker kept its own private
+   * `statSync` copy, which dereferences — so a linked folder was offered as
+   * grantable here while org settings hid it and every run refused to read it.
+   * The two now share one lister and cannot disagree again.
+   */
+  it("does not offer a symlinked KB or skill folder the store listings hide", () => {
+    const store = setupTestStore(ctx);
+    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    writeFileSync(path.join(outside, "SKILL.md"), "outside the store");
+    mkdirSync(path.join(store.dataRoot, "skills"), { recursive: true });
+    mkdirSync(path.join(store.dataRoot, "kb"), { recursive: true });
+    symlinkSync(outside, path.join(store.dataRoot, "skills", "linked-skill"));
+    symlinkSync(outside, path.join(store.dataRoot, "kb", "linked-kb"));
+
+    const groups = buildResourceCatalog(store.db, store.dataRoot);
+    const offered = groups.flatMap((g) => g.items.map((i) => i.id));
+    expect(offered).not.toContain("linked-skill");
+    expect(offered).not.toContain("linked-kb");
   });
 
   it("handles a store with no resources without throwing", () => {

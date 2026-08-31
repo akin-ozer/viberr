@@ -1317,6 +1317,46 @@ describe("stranded auto-stage resume", () => {
         .all()
         .map((row) => ({ id: String(row.id), state: String(row.state) }));
 
+    /**
+     * A drive that throws before `startRun` creates its row releases the lease
+     * with the token's `runId` still null. Judging that drive by "the newest
+     * operator run for this task" reads a PREVIOUS, unrelated run — usually
+     * `finished` — so the "only a run that FINISHED cleanly resumes" guard
+     * passed and the backstop fired an unwatched resume chain for a drive that
+     * never ran at all.
+     */
+    it("a drive that produced no run row is not judged by a previous run", async () => {
+      // One earlier operator run for this task, finished cleanly.
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "create",
+        dataRoot: store2.dataRoot,
+      });
+      adapter2.finish(
+        store2,
+        JSON.stringify({ reasoning: "", actions: [] }),
+        "finished",
+      );
+      await eventually(() => {
+        expect(operatorRuns().length).toBeGreaterThan(0);
+        expect(operatorRuns()[0]!.state).toBe("finished");
+      });
+
+      const { maybeResumeStrandedOperator } = await import("./operator-run.server");
+      const resumed = await maybeResumeStrandedOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        dataRoot: store2.dataRoot,
+        // The failure shape: the starting stage was read, the run never was.
+        runId: null,
+        stageAtStart: "triage",
+      });
+      expect(resumed).toBe(false);
+    });
+
     it("a drive that ends doing NOTHING at an auto stage is resumed; a pending decision ends the chain", async () => {
       await runOperator(store2.db, {
         projectSlug: store2.slug,
@@ -1780,6 +1820,48 @@ describe("pending trigger queue", () => {
       .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
       .all()
       .map((row) => ({ id: String(row.id) }));
+
+  it("FR39: a queued scheduled re-check survives a later machine trigger", async () => {
+    // CANARY: route `scheduled` back into the newest-wins `latest` slot — the
+    // transition below overwrites it and the re-check never happens.
+    //
+    // The schedule runner stamps the occurrence `fired` the moment this
+    // trigger is queued, so an overwritten one is a run FR39 promised, recorded
+    // in the file, the audit row and the timeline as delivered, that never ran.
+    // Its note exists nowhere else in the run's input — the same reason a human
+    // question is queued rather than replaced.
+    await drive({ trigger: "manual" });
+    expect(adapter3.pending).not.toBeNull();
+
+    await drive({
+      trigger: "scheduled",
+      scheduleNote: "re-check the flaky test before we ship",
+    });
+    await drive({
+      trigger: "transition",
+      transitionFromName: "Ready",
+      transitionToName: "In Progress",
+    });
+
+    adapter3.finish(store3, emptyPlan, "finished");
+
+    // The SCHEDULED trigger fires first, its note intact.
+    await eventually(() => {
+      expect(operatorRuns()).toHaveLength(2);
+      expect(adapter3.pending?.spec.prompt).toContain(
+        "re-check the flaky test before we ship",
+      );
+    });
+
+    // …and the machine trigger is still queued behind it.
+    adapter3.finish(store3, emptyPlan, "finished");
+    await eventually(() => {
+      expect(operatorRuns()).toHaveLength(3);
+      expect(adapter3.pending?.spec.prompt).toContain(
+        'moved this task from "Ready" to "In Progress"',
+      );
+    });
+  });
 
   it("B-OP2: a queued @operator question survives a later machine trigger", async () => {
     await drive({ trigger: "manual" });

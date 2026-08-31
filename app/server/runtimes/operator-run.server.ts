@@ -357,16 +357,19 @@ function leaseKeyFor(projectSlug: string, taskKey: string): string {
 /** One task's queued triggers (see the lease doc above for the coalescing
  *  rule). */
 interface PendingTriggers {
-  /** The newest queued MACHINE trigger, or null. */
+  /** The newest queued newest-wins MACHINE trigger, or null. Never a
+   *  `scheduled` one — those go in `carried`. */
   latest: RunOperatorInput | null;
-  /** Queued human `@operator …` triggers, oldest first. */
-  humanComments: RunOperatorInput[];
+  /** Queued triggers carrying a reason that exists NOWHERE else in the run's
+   *  input: human `@operator …` comments and `scheduled` re-checks. Oldest
+   *  first. */
+  carried: RunOperatorInput[];
 }
 
-/** Bound on queued human triggers per task. Beyond this the OLDEST are
- *  dropped: the newest questions are the ones still awaiting an answer, and
- *  every dropped one still sits on the timeline the next drive reads. */
-const MAX_PENDING_HUMAN_TRIGGERS = 8;
+/** Bound on queued reason-carrying triggers per task. Beyond this the OLDEST
+ *  are dropped: the newest are the ones still awaiting an answer, and every
+ *  dropped one still sits on the timeline the next drive reads. */
+const MAX_PENDING_CARRIED_TRIGGERS = 8;
 
 /**
  * Queue a trigger that arrived while the lease was held.
@@ -384,27 +387,37 @@ function queueOperatorTrigger(
   input: RunOperatorInput,
 ): RunOperatorInput[] {
   const state = leaseState();
-  const queue = state.pending.get(key) ?? { latest: null, humanComments: [] };
+  const queue = state.pending.get(key) ?? { latest: null, carried: [] };
   const dropped: RunOperatorInput[] = [];
-  if (input.humanComment?.trim()) {
-    const previous = queue.humanComments[queue.humanComments.length - 1];
+  // A `scheduled` re-check carries a note the human wrote for THIS occurrence,
+  // and the schedule runner stamps that occurrence `fired` the moment the
+  // trigger is queued — so an overwritten one is a run FR39 promised, recorded
+  // as delivered, that never happens. Like a human question, it is kept in
+  // arrival order rather than replaced by the next machine trigger.
+  const comment = input.humanComment?.trim();
+  if (comment || input.trigger === "scheduled") {
+    const previous = queue.carried[queue.carried.length - 1];
     const by = input.humanCommentBy?.trim();
-    if (by && previous && previous.humanCommentBy?.trim() === by) {
-      queue.humanComments[queue.humanComments.length - 1] = {
+    // Merging is a HUMAN-comment rule (one person typing three messages costs
+    // one turn). A scheduled re-check has its own occurrence and its own note,
+    // so it is never folded into a neighbour.
+    if (comment && by && previous && previous.humanCommentBy?.trim() === by) {
+      queue.carried[queue.carried.length - 1] = {
         ...input,
-        humanComment: `${previous.humanComment?.trim()}\n\n${input.humanComment.trim()}`,
+        humanComment: `${previous.humanComment?.trim()}\n\n${comment}`,
       };
       state.pending.set(key, queue);
       return dropped;
     }
-    queue.humanComments.push(input);
-    while (queue.humanComments.length > MAX_PENDING_HUMAN_TRIGGERS) {
-      const drop = queue.humanComments.shift();
+    queue.carried.push(input);
+    while (queue.carried.length > MAX_PENDING_CARRIED_TRIGGERS) {
+      const drop = queue.carried.shift();
       if (drop) dropped.push(drop);
-      logger.warn("dropping the oldest queued @operator comment — queue is full", {
+      logger.warn("dropping the oldest queued reason-carrying trigger — queue is full", {
         key,
+        trigger: drop?.trigger ?? "manual",
         by: drop?.humanCommentBy ?? "unknown",
-        cap: MAX_PENDING_HUMAN_TRIGGERS,
+        cap: MAX_PENDING_CARRIED_TRIGGERS,
       });
     }
   } else {
@@ -433,6 +446,14 @@ async function noteDroppedOperatorTurn(
   };
   if (dropped.dataRoot) ref.dataRoot = dropped.dataRoot;
   const who = dropped.humanCommentBy?.trim() || "someone";
+  // The copy is kind-specific: a human comment stays on the timeline to re-send,
+  // but a dropped SCHEDULED occurrence has no comment there (its note is carried
+  // precisely because it exists nowhere else), and it was already stamped
+  // `fired` — so telling a human it "stays on the timeline" would be false.
+  const text =
+    dropped.trigger === "scheduled"
+      ? "The pending @operator queue was full, so a scheduled operator re-check did not get its turn. Run the operator manually, or wait for the next scheduled occurrence, if it still needs attention."
+      : `The pending @operator queue was full, so ${who}'s earlier comment did not get its own operator turn. It stays on the timeline for the operator to read, but re-send it if it needs a dedicated answer.`;
   try {
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift({
@@ -440,7 +461,7 @@ async function noteDroppedOperatorTurn(
         type: "note",
         actor: { kind: "system", systemId: "operator" },
         title: null,
-        text: `The pending @operator queue was full, so ${who}'s earlier comment did not get its own operator turn. It stays on the timeline for the operator to read, but re-send it if it needs a dedicated answer.`,
+        text,
         toAgent: false,
         evidence: null,
       });
@@ -473,13 +494,13 @@ function takePendingTrigger(key: string): RunOperatorInput | null {
   const queue = state.pending.get(key);
   if (!queue) return null;
   let next: RunOperatorInput | null = null;
-  if (queue.humanComments.length > 0) {
-    next = queue.humanComments.shift() ?? null;
+  if (queue.carried.length > 0) {
+    next = queue.carried.shift() ?? null;
   } else if (queue.latest) {
     next = queue.latest;
     queue.latest = null;
   }
-  if (queue.humanComments.length === 0 && !queue.latest) state.pending.delete(key);
+  if (queue.carried.length === 0 && !queue.latest) state.pending.delete(key);
   return next;
 }
 
@@ -513,7 +534,7 @@ function releaseOperatorLease(
   logger.info("operator lease released — firing the queued trigger", {
     key,
     trigger: queued.trigger ?? "manual",
-    queuedHumanComments: leaseState().pending.get(key)?.humanComments.length ?? 0,
+    queuedCarriedTriggers: leaseState().pending.get(key)?.carried.length ?? 0,
   });
   void runOperator(db, queued).catch((error) =>
     noteQueuedTriggerFireFailed(
@@ -542,7 +563,7 @@ function drainPendingAfterInFlight(db: DatabaseSync, key: string): void {
   logger.info("cross-boot in-flight finished — firing the queued trigger", {
     key,
     trigger: queued.trigger ?? "manual",
-    queuedHumanComments: state.pending.get(key)?.humanComments.length ?? 0,
+    queuedCarriedTriggers: state.pending.get(key)?.carried.length ?? 0,
   });
   void runOperator(db, queued).catch((error) =>
     noteQueuedTriggerFireFailed(
@@ -643,7 +664,7 @@ export function operatorLeftTaskStranded(
  * FINISHED cleanly resumes — an errored drive must not loop. Returns true
  * when a resume was fired (the caller then skips the waiting flip).
  */
-async function maybeResumeStrandedOperator(
+export async function maybeResumeStrandedOperator(
   db: DatabaseSync,
   ref: {
     projectSlug: string;
@@ -673,20 +694,27 @@ async function maybeResumeStrandedOperator(
     );
     return false;
   }
-  // SAFETY: both arms SELECT one column, `agent_runs.state`, which the baseline
-  // schema declares TEXT NOT NULL — so a returned row is exactly
+  // A ref with no run id belongs to a drive that never produced a row —
+  // `startRun` threw, and the lease was released with the token's `runId`
+  // still null. Falling back to "the newest operator run for this task" judged
+  // THIS drive by a PREVIOUS one, which is usually `finished`, so the guard
+  // above ("only a run that FINISHED cleanly resumes") passed and the backstop
+  // fired an unwatched resume chain for a drive that never ran. Same posture
+  // as an unknown starting stage: a ref that cannot name its own drive does
+  // not get to judge it.
+  if (!ref.runId) {
+    logger.warn(
+      "stranded-operator backstop skipped — this drive produced no run row to judge",
+      { projectSlug: ref.projectSlug, taskKey: ref.taskKey },
+    );
+    return false;
+  }
+  // SAFETY: the statement SELECTs one column, `agent_runs.state`, which the
+  // baseline schema declares TEXT NOT NULL — so a returned row is exactly
   // `{ state: string }`, and no matching row at all is `undefined`.
-  const stateRow = ref.runId
-    ? (db.prepare(`SELECT state FROM agent_runs WHERE id = ?`).get(ref.runId) as
-        | { state: string }
-        | undefined)
-    : (db
-        .prepare(
-          `SELECT state FROM agent_runs
-           WHERE project_slug = ? AND task_key = ? AND kind = 'operator'
-           ORDER BY rowid DESC LIMIT 1`,
-        )
-        .get(ref.projectSlug, ref.taskKey) as { state: string } | undefined);
+  const stateRow = db
+    .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
+    .get(ref.runId) as { state: string } | undefined;
   if (stateRow?.state !== "finished") return false;
 
   const { readProjectFile } = await import("~/server/files/project-writer.server");

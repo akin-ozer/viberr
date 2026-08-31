@@ -23,6 +23,7 @@ const base: NotificationView = {
   text: "Workspace attach implemented, **PR #318** open, validation green.",
   projectSlug: "viberr-core",
   projectName: "Viberr Core",
+  href: "/projects/viberr-core/tasks/VIB-142",
   taskKey: "VIB-142",
   occurredAt: todayIso,
   unread: true,

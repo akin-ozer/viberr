@@ -30,6 +30,7 @@ import {
   RUN_INPUTS_TAG,
   type RunInputs,
 } from "~/features/runtime/runtime-types";
+import { resolveDeliveryPermissions } from "./specialist-tool-policy";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
 import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -164,6 +165,55 @@ describe("listDeployedSpecialists", () => {
       role: "developer",
       backend: "claude",
     });
+  });
+
+  /**
+   * XS-4 again, on the SELECTION side. The headline
+   * `execute-code-or-write-repo` gates every delivery step, and
+   * `repairDeliveryGrants` deliberately preserves "headline off, scoped grant
+   * on" (B-AG1) — so that state is really savable. Advertising it as
+   * delivery-capable sends the operator (and any human picking from the run
+   * control) to an agent whose write tools are all denied.
+   */
+  it("does not advertise delivery when the headline repo-write grant is withheld", () => {
+    const file = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    const fm = file.parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [
+            { capabilityId: "execute-code-or-write-repo", mode: "off" },
+            { capabilityId: "commit-push-branch", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            effort: "xhigh",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const listed = listDeployedSpecialists(store.slug, { dataRoot: store.dataRoot });
+    expect(listed).toHaveLength(1);
+    // What the picker is told must be what the runtime will actually allow.
+    const runtime = resolveDeliveryPermissions([
+      { capabilityId: "execute-code-or-write-repo", mode: "off" },
+      { capabilityId: "commit-push-branch", mode: "direct" },
+    ]);
+    expect(runtime.canCommitPush).toBe(false);
+    expect(listed[0]!.capabilities.delivery).toBe(false);
   });
 
   it("surfaces a model-availability mark so the run control can warn (F3)", () => {
@@ -412,6 +462,35 @@ describe("engagement uniqueness (adversarial-review)", () => {
     expect(fm.engagements.filter((e) => e.profileId === "style")).toHaveLength(1);
     expect(deliveringEngagement(fm)?.profileId).toBe("style");
     expect(supportingEngagements(fm).some((e) => e.profileId === "style")).toBe(false);
+  });
+
+  it("F27-B1: promoting a supporting engagement carries its backend pin", async () => {
+    // A `retry_other_backend` resolution records `pinnedBackend` on the
+    // engagement and F27-B1 says that pin STICKS. Promotion REPLACES the row,
+    // so rebuilding it from the bare profile ref silently reverted the next run
+    // to the profile's own backend — the one the retry existed to escape, with
+    // no record a pin was ever in force.
+    deploySecond("style");
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        const supporting = parsed.frontmatter.engagements.find(
+          (e) => e.profileId === "style",
+        );
+        if (supporting) supporting.pinnedBackend = "codex";
+      },
+    );
+
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    const promoted = deliveringEngagement(fm)!;
+    expect(promoted.profileId).toBe("style");
+    expect(promoted.pinnedBackend).toBe("codex");
   });
 
   it("engaging the current deliverer as a reviewer is a no-op (no duplicate)", async () => {
@@ -885,6 +964,24 @@ describe("assignReviewer / removeReviewer", () => {
       );
       const fm = readFm();
       expect(supportingEngagements(fm)).toEqual([]);
+      expect(fm.validation).toBe("changed");
+    });
+
+    it("assignSpecialist disarms a healthy cache when a hand-off drops the approving reviewer", async () => {
+      // The third roster writer. `engagements` feeds `requiredReviewers`, so
+      // promoting `critic` to deliverer removes it from the required set (a
+      // deliverer never reviews its own work) and drops `dev` entirely — the
+      // approval on rev-1 no longer gates anything, so `healthy` no longer
+      // derives. Only this writer was not re-deriving the cache.
+      expect(readFm().validation).toBe("healthy"); // honest before the change
+      await assignSpecialist(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const fm = readFm();
+      expect(fm.engagements.some((e) => e.profileId === "critic" && e.delivers)).toBe(true);
       expect(fm.validation).toBe("changed");
     });
 

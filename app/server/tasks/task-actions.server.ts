@@ -144,6 +144,7 @@ import { withheldAgentGrants } from "~/features/agents/capability-catalog";
 import {
   ambiguousMentionHandles,
   ambiguousMentionNote,
+  mentionedUserIdsOf,
   mentionNotifiesUser,
   notifyMentionedUsers,
   withAmbiguityDisclosure,
@@ -323,6 +324,12 @@ function requireAcceptCompletion(
   ownerUserId: string | null | undefined,
   what: string,
 ): void {
+  // The freeze comes FIRST. The owner exception is about role — a contributor
+  // owner decides about their own task — and it short-circuits past
+  // `requireAction`, the one chokepoint that enforces R6-3. Owning a task on
+  // an archived board is not a licence to close it: acceptance attempts a real
+  // merge on a project the product calls read-only.
+  requireProjectMutable(project, what);
   if (ownerException(project, actor, ownerUserId)) return;
   requireAction(db, project, actor, "accept-completion", what);
 }
@@ -347,6 +354,10 @@ function requireDecisionAuthority(
   ownerUserId: string | null | undefined,
   what: string,
 ): void {
+  // Same reason as `requireAcceptCompletion`: the owner short-circuit skips
+  // `requireAction` and with it the archive freeze, and resolving a packet
+  // starts an operator run on a board that is supposed to be read-only.
+  requireProjectMutable(project, what);
   if (ownerException(project, actor, ownerUserId)) return;
   requireAction(db, project, actor, "resolve-packet", what);
 }
@@ -1781,10 +1792,43 @@ function projectRepoFor(
 type PreparedReply =
   | { status: "empty" }
   | { status: "dropped" }
-  | { status: "event"; event: TaskFileEvent; duplicate: boolean };
+  | {
+      status: "event";
+      event: TaskFileEvent;
+      duplicate: boolean;
+      /** When `duplicate`, the text of the mid-run comment it repeats — so the
+       *  caller can fan out only the @tags this reply ADDS over it (the
+       *  dispatch-completion cc line). Null when not a duplicate. */
+      duplicatedText: string | null;
+    };
 
-/** True when one of `candidates` (trimmed) matches a comment THIS agent posted
- *  DURING this run — the mid-run `post_comment` its final report is repeating.
+/** `text` without the dispatch-completion `cc @…` bookkeeping lines (ruling 98).
+ *
+ *  The pipeline appends that line to the reply BEFORE the reply is compared to
+ *  anything, and its content varies with the DISPATCH SOURCE rather than with
+ *  what the agent said. Every agent-text-vs-agent-text comparison therefore has
+ *  to run on this form, or the bookkeeping decides the answer: a dispatched
+ *  run's report never equals the mid-run comment it repeats verbatim, and two
+ *  identical reports compare unequal purely because one was dispatched. */
+function stripCcLine(text: string | null): string | null {
+  return text === null
+    ? null
+    : text
+        .split("\n")
+        .filter((line) => !/^cc @/.test(line))
+        .join("\n")
+        .trim();
+}
+
+/** The TEXT of a comment THIS agent posted DURING this run that one of
+ *  `candidates` (cc-stripped) matches — the mid-run `post_comment` its final
+ *  report is repeating — or null when there is none.
+ *
+ *  Returns the matched comment's text (not a bare bool) so the caller can notify
+ *  only the @tags the reply ADDS over it: the dispatch-completion cc line
+ *  (ruling 98 / R20-9) is appended to the final reply alone, so a report that
+ *  otherwise duplicates a mid-run comment still carries a guaranteed ping the
+ *  comment never delivered — dropping the whole reply used to swallow it.
  *
  *  Bounded to `occurredAt >= the run's start`: a byte-identical reply from a
  *  PRIOR run (or any older own comment) is NOT this run's duplicate and must
@@ -1795,7 +1839,7 @@ type PreparedReply =
  *  two sides; passing both the separated and un-separated reply forms catches
  *  that. (A workspace-absolute path normalized only on the reply side is a
  *  residual gap — that repeat still posts, which is safe.) */
-function duplicatesOwnCommentThisRun(
+function duplicatedOwnCommentText(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
@@ -1803,20 +1847,20 @@ function duplicatesOwnCommentThisRun(
   runId: string,
   actorRef: FileActorRef,
   candidates: readonly string[],
-): boolean {
+): string | null {
   const startedAt = getRun(db, runId)?.started_at ?? null;
-  if (!startedAt) return false;
+  if (!startedAt) return null;
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
-  if (!file?.parsed) return false;
+  if (!file?.parsed) return null;
   const mine = encodeActorRef(actorRef);
-  const wanted = new Set(candidates.map((c) => c.trim()));
+  const wanted = new Set(candidates.map((c) => stripCcLine(c)));
   for (const ev of file.parsed.timeline) {
     if (ev.type !== "comment") continue;
     if (ev.occurredAt < startedAt) continue; // only THIS run's own comments
     if (encodeActorRef(ev.actor) !== mine) continue;
-    if (wanted.has(ev.text.trim())) return true;
+    if (wanted.has(stripCcLine(ev.text))) return ev.text;
   }
-  return false;
+  return null;
 }
 
 /** Build the reply event without writing so completion effects can land atomically. */
@@ -1859,7 +1903,7 @@ async function prepareAgentReplyEvent(
   // evidence-separation guardrail is off, so no second disclosure pass).
   const candidates =
     separated === replyText ? [text] : [text, withAmbiguityDisclosure(db, replyText)];
-  const duplicate = duplicatesOwnCommentThisRun(
+  const duplicatedText = duplicatedOwnCommentText(
     db,
     ctx,
     projectSlug,
@@ -1879,7 +1923,8 @@ async function prepareAgentReplyEvent(
       toAgent: false,
       evidence: null,
     },
-    duplicate,
+    duplicate: duplicatedText !== null,
+    duplicatedText,
   };
 }
 
@@ -2588,6 +2633,26 @@ export async function recordAgentCompletion(
   const postsReplyEvent = prepared.status === "event" && !prepared.duplicate;
   const suppressedReason = suppressedReplyReason(prepared);
   const hasEvidence = !!(evidence && evidence.length);
+  // A reply whose BODY duplicates a mid-run comment does not re-post — but the
+  // dispatch-completion cc line (ruling 98 / R20-9) is content that comment
+  // never carried, and its guaranteed @tag would otherwise never notify: the
+  // reply fan-out below was gated on the reply POSTING, on the false premise
+  // that a duplicate's mentions were already delivered. Fan out ONLY the handles
+  // this reply ADDS over the comment it repeats (no double-notify) — and do it
+  // HERE, before the nothing-to-record early return, which the pure-dedup case
+  // (the exact dispatch trigger: repeated body + cc line) hits.
+  if (prepared.status === "event" && prepared.duplicatedText !== null) {
+    notifyMentionedUsers(db, {
+      text: prepared.event.text,
+      projectSlug,
+      taskKey,
+      from: createActorResolver(db, {
+        agentNames: agentNamesByProfile(db, projectSlug),
+      })(actorRef),
+      occurredAt: prepared.event.occurredAt,
+      skipUserIds: mentionedUserIdsOf(db, prepared.duplicatedText),
+    });
+  }
   // Nothing to record at all. Evidence rows and attachments each count as
   // something: a run whose prose was suppressed but that still produced evidence
   // or saved files gets a producing event below, so neither is lost with the
@@ -2843,8 +2908,6 @@ export async function recordAgentCompletion(
     // the run completes — notified nobody, on either backend. The reply
     // directive explicitly instructs the agent to tag the commenter, so this
     // was the majority of agent @tags. Same helper/`from` shape as :1169.
-    // Only when the reply actually POSTED: a suppressed F22-12 duplicate's
-    // mentions were already fanned out by the mid-run comment it repeats.
     if (postsReplyEvent) {
       notifyMentionedUsers(db, {
         text: prepared.event.text,
@@ -2856,6 +2919,8 @@ export async function recordAgentCompletion(
         occurredAt: prepared.event.occurredAt,
       });
     }
+    // The deduped-reply case is fanned out earlier (before the nothing-to-record
+    // early return), so it is NOT repeated here — see notifyAddedReplyMentions.
     // Recovery-idempotency audit for the reply (posted, guardrail-dropped, or
     // deduped as an F22-12 duplicate). Skip only a genuinely empty reply.
     if (prepared.status !== "empty") {
@@ -3575,14 +3640,6 @@ export async function applyAgentCompletionEffects(
   // was dispatched and one was not — a looping agent then bought an extra
   // operator react per source change. Strip the appended line from BOTH sides
   // of the comparison; it is bookkeeping, not progress.
-  const stripCcLine = (text: string | null): string | null =>
-    text === null
-      ? null
-      : text
-          .split("\n")
-          .filter((line) => !/^cc @/.test(line))
-          .join("\n")
-          .trim();
   const shouldReact = operatorShouldReactToReply(
     finished.state,
     stripCcLine(replyForCompare),
@@ -4260,8 +4317,13 @@ export async function transitionStage(
       requireAction(db, project, actor, "approve-transition", "change the task stage");
     }
   } else if (boundary!.boundary === "auto") {
-    // An auto boundary crossed by a human (unreachable from the UI, which always
-    // sends manual:true) — the loosest gate: any member.
+    // An auto boundary crossed by a human (the UI always sends manual:true, but
+    // a server-side caller that omits `manual` — e.g. applyRecommendation on a
+    // declared edge — lands here) — the loosest gate: any member. The
+    // archived-project freeze (R6-3) is NOT free on this arm the way it is on
+    // the requireAction arms, so assert it here at the chokepoint: without it an
+    // auto-boundary move writes stage into a read-only archived project.
+    requireProjectMutable(project, "move this task");
     requireAnyMember(db, project, actor, "move this task");
   } else if (boundary!.boundary === "approval") {
     if (input.recommendationAuthorized) {
@@ -5839,6 +5901,11 @@ export async function resolvePacket(
    *  `accept_completion` arm — the shared write below re-reads the stage under
    *  the lock and skips itself when the task is already there. */
   let acceptsInto: string | null = null;
+  /** OBS-11: the empty branch this resolution closes over. Decided by the
+   *  `accept_completion` arm from the PRE-acceptance frontmatter, but acted on
+   *  only after the write lands, so the decision has to outlive that arm's
+   *  block scope. Every other arm leaves it `none`. */
+  let branchDisposition: EmptyBranchDisposition = { kind: "none" };
 
   switch (option.kind) {
     case "accept_completion": {
@@ -5992,6 +6059,25 @@ export async function resolvePacket(
             toAgent: false,
             evidence: null,
           };
+      // OBS-11 / OBS-13: a packet is a writer to Done like the Accept button,
+      // so the empty branch is disposed of here too. Without it the same
+      // branch's fate depended on which door the human used, and a branch the
+      // acceptance itself proved carries nothing sat on GitHub forever with no
+      // timeline sentence saying so. Decided from the PRE-acceptance
+      // frontmatter so the completion event can state the branch's fate; the
+      // deletion runs after the write, below.
+      branchDisposition = emptyBranchDisposition(
+        db,
+        existing.parsed.frontmatter,
+        noChange,
+        input.projectSlug,
+      );
+      // The branch sentence rides on the no-change event only: the merge path's
+      // copy is about a pull request, and a task WITH a PR never reaches a
+      // `branch_empty` verification (the same rule acceptCompletion follows).
+      if (noChange.applies) {
+        event.text += emptyBranchNote(branchDisposition, input.taskKey);
+      }
       mutate = (fm) => {
         // In-lock re-check (B-WF1): the generic resolution write below holds the
         // file lock — this is the last word before Done is recorded. A2: the
@@ -6012,6 +6098,12 @@ export async function resolvePacket(
         // R20-2 (F20-6): a server-proved no-change acceptance repairs the flag so
         // the durable record matches the outcome. Set before deriveValidation.
         if (noChange.applies && noChange.autoDetected) fm.noChanges = true;
+        // Ruling 98: EVERY stage write records where the task came from. This
+        // arm writes the terminal stage itself rather than going through
+        // `applyAcceptanceWrite`, which owns the field — without this the Done
+        // task's `previousStageId` still names the stage before review, and the
+        // next operator turn is told it arrived from there.
+        if (fm.stage !== doneStageId) fm.previousStageId = fm.stage;
         fm.stage = doneStageId;
         fm.readiness = "ready";
         fm.waiting = "none";
@@ -6347,6 +6439,15 @@ export async function resolvePacket(
         resolvedOption,
       );
     }
+  }
+
+  // OBS-11: the same cleanup the Accept button runs, on the acceptance door
+  // that skipped it. Skipped when the write itself was skipped (U3): a racing
+  // acceptance owns the branch as well as the completion record, so running it
+  // here too would delete the branch twice for one close. Every non-acceptance
+  // arm leaves the disposition `none`, which the helper returns on immediately.
+  if (!alreadyAccepted) {
+    await cleanUpEmptyTaskBranch(db, ctx, input, branchDisposition, actor);
   }
 
   // archive_task: the decision IS the archive — run the real R14-3 contract
@@ -7835,13 +7936,32 @@ async function acceptCompletion(
     details: { to: doneStageId, boundary: "human", via: "accept_completion" },
   });
 
-  // OBS-11: the empty branch goes, once the task is genuinely Done. AFTER the
-  // write on purpose — a deletion in front of a refusal (a verdict that landed
-  // mid-flight, a head that moved) would have removed a branch from a task that
-  // stayed open. Best-effort: a failed cleanup never un-accepts a completion,
-  // and `deleteTaskRemoteBranch` writes its own `github` timeline event and
-  // audit row on success, keeps its own refusals (never the default branch,
-  // never a branch with an open PR), and never throws.
+  await cleanUpEmptyTaskBranch(db, ctx, input, branchDisposition, actor);
+  return true;
+}
+
+/**
+ * OBS-11: the empty branch goes, once the task is genuinely Done.
+ *
+ * Lives here rather than inside one acceptance path because a no-change task
+ * can be closed through the Accept button OR through an operator decision
+ * packet, and a cleanup only one door runs makes the same branch's fate depend
+ * on which button the human pressed.
+ *
+ * Called AFTER the write on purpose: a deletion in front of a refusal (a
+ * verdict that landed mid-flight, a head that moved) would have removed a
+ * branch from a task that stayed open. Best-effort — a failed cleanup never
+ * un-accepts a completion, and `deleteTaskRemoteBranch` writes its own `github`
+ * timeline event and audit row on success, keeps its own refusals (never the
+ * default branch, never a branch with an open PR), and never throws.
+ */
+async function cleanUpEmptyTaskBranch(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  input: { projectSlug: string; taskKey: string },
+  branchDisposition: EmptyBranchDisposition,
+  actor: TaskActor,
+): Promise<void> {
   if (branchDisposition.kind === "delete" && actor.userId) {
     try {
       const { deleteTaskRemoteBranch } = await import(
@@ -7917,7 +8037,6 @@ async function acceptCompletion(
       }
     }
   }
-  return true;
 }
 
 /**

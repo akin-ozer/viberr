@@ -13,11 +13,13 @@ import {
   type AuthorityProject,
 } from "~/server/auth/project-authority.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { withFileLock } from "~/server/files/file-mutex.server";
 import {
-  allocateGoalId,
   createGoalFile,
+  nextGoalId,
   readGoalFile,
   updateGoalFile,
+  withGoalsLock,
 } from "~/server/files/goal-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
@@ -29,6 +31,7 @@ import {
   createTask,
   loadProjectContext,
   requireAction,
+  requireProjectMutable,
   type ProjectContext,
 } from "./task-actions.server";
 import type { TaskActor, TaskMutationContext } from "./task-mutation.server";
@@ -146,42 +149,54 @@ export async function createGoal(
     );
   }
 
-  const goalId = await allocateGoalId(input.projectSlug, ctx.dataRoot);
-  const now = new Date().toISOString();
-  const frontmatter: GoalFrontmatter = {
-    id: goalId,
-    title,
-    status: "active",
-    createdBy: actor.userId,
-    createdByLabel: actor.label,
-    onFailure: input.onFailure ?? "pause",
-    links,
-    createdAt: now,
-    updatedAt: now,
-  };
+  // The id is minted from a directory scan and only becomes real when the goal
+  // file is written — and link 1's task is created in between. Hold the
+  // project's goals lock across all three, or two concurrent creates mint the
+  // SAME id, both create a task, and the loser's `createGoalFile` throws with
+  // its task already created and dispatched to an operator.
+  const { goalId, created } = await withGoalsLock(
+    input.projectSlug,
+    ctx.dataRoot,
+    async () => {
+      const id = nextGoalId(input.projectSlug, ctx.dataRoot);
+      const now = new Date().toISOString();
+      const fm: GoalFrontmatter = {
+        id,
+        title,
+        status: "active",
+        createdBy: actor.userId,
+        createdByLabel: actor.label,
+        onFailure: input.onFailure ?? "pause",
+        links,
+        createdAt: now,
+        updatedAt: now,
+      };
 
-  // Link 1's task is created FIRST (under the asking user's own authority —
-  // requireAction inside createTask), so a refusal there leaves no orphan
-  // goal file behind.
-  const first = links[0]!;
-  const created = await createTask(
-    db,
-    {
-      projectSlug: input.projectSlug,
-      title: first.title,
-      goal: linkGoalText(frontmatter, first, null),
-      goalRef: { goalId, linkIndex: 1 },
+      // Link 1's task is created FIRST (under the asking user's own authority —
+      // requireAction inside createTask), so a refusal there leaves no orphan
+      // goal file behind.
+      const first = links[0]!;
+      const task = await createTask(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          title: first.title,
+          goal: linkGoalText(fm, first, null),
+          goalRef: { goalId: id, linkIndex: 1 },
+        },
+        actor,
+        ctx,
+      );
+      first.taskKey = task.key;
+      first.status = "active";
+
+      await createGoalFile(goalRef(ctx, input.projectSlug, id), {
+        frontmatter: fm,
+        description: input.description?.trim() ?? "",
+      });
+      return { goalId: id, created: task };
     },
-    actor,
-    ctx,
   );
-  first.taskKey = created.key;
-  first.status = "active";
-
-  await createGoalFile(goalRef(ctx, input.projectSlug, goalId), {
-    frontmatter,
-    description: input.description?.trim() ?? "",
-  });
   rebuildGoalFile(db, input.projectSlug, goalId, { dataRoot: ctx.dataRoot });
 
   recordAudit(db, {
@@ -227,7 +242,11 @@ function requireGoalAuthority(
   what: string,
 ): void {
   if (actor.userId === createdBy) {
-    // The creator redirects their own chain; membership is still required.
+    // The creator redirects their own chain; membership is still required —
+    // and so is a live project. This arm bypasses `requireAction`, the
+    // chokepoint that freezes an archived project (R6-3), so it has to say so
+    // itself; the `run-agents` arm below gets it from `requireAction` for free.
+    requireProjectMutable(project, what);
     const decision = resolveProjectAuthority(db, project, actor, "any-member", {
       action: "any-member",
       what,
@@ -391,8 +410,50 @@ export async function updateGoal(
   });
 
   // A retry creates the fresh link task under the PRESENT caller's authority.
+  // The un-park (attention→active) + "retried" history already committed above,
+  // so if the task cannot be created (e.g. the caller lost create-task
+  // authority) re-park to attention HERE with an honest note — otherwise the
+  // chain sits active with a still-failed link until the next 60s reconcile
+  // flaps it back, re-notifying and recording a retry that never started. Same
+  // shape as reconcileGoal's advance path.
   if (retryLinkIndex !== null) {
-    await startLinkTask(db, input.projectSlug, input.goalId, retryLinkIndex, actor, ctx);
+    try {
+      await startLinkTask(
+        db,
+        input.projectSlug,
+        input.goalId,
+        retryLinkIndex,
+        actor,
+        ctx,
+        "retry",
+      );
+    } catch (error) {
+      logger.error("goal link retry task creation failed", {
+        goalId: input.goalId,
+        linkIndex: retryLinkIndex,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateGoalFile(
+        goalRef(ctx, input.projectSlug, input.goalId),
+        (goal) => {
+          if (goal.frontmatter.status !== "active") return;
+          goal.frontmatter.status = "attention";
+          return `Retry could not start link ${retryLinkIndex}'s task (${error instanceof Error ? error.message : "unknown error"}); parked for redirect.`;
+        },
+      );
+      const after = readGoalFile(goalRef(ctx, input.projectSlug, input.goalId));
+      if (after) {
+        notifyCreator(
+          db,
+          after.parsed.frontmatter,
+          input.projectSlug,
+          "A link retry could not start its task. Resume or redirect the goal to try again.",
+        );
+      }
+      rebuildGoalFile(db, input.projectSlug, input.goalId, {
+        dataRoot: ctx.dataRoot,
+      });
+    }
   } else if (advanceAfter) {
     await reconcileGoal(db, input.projectSlug, input.goalId, ctx);
   }
@@ -454,6 +515,21 @@ function creatorMayCreateTasks(
 /**
  * Create the task for one link (advance target or retry) and mark it active.
  * The actor is whoever's authority the creation runs under.
+ *
+ * ONE start per link at a time. `createTask` is a long await and the link's
+ * `taskKey` — the only durable record that a start happened — cannot be
+ * written until it returns, so two reconciles racing (a task hook and the
+ * runner tick, say) would both read the link as unstarted and grow TWO tasks
+ * for one link, the second overwriting the first's key and orphaning it. The
+ * claim is an in-process lock rather than a field in the goal file on purpose:
+ * a field would survive a crash mid-create and strand the link forever,
+ * whereas a lost lock leaves the link exactly as it was for the next
+ * reconcile to start cleanly.
+ *
+ * `mode` is what the caller believes about the link, re-checked INSIDE the
+ * lock: `advance` starts a pending link that has no task, `retry` re-starts a
+ * link a human parked as failed. A caller whose belief no longer holds lost
+ * the race and returns null.
  */
 async function startLinkTask(
   db: DatabaseSync,
@@ -462,6 +538,21 @@ async function startLinkTask(
   linkIndex: number,
   actor: TaskActor,
   ctx: TaskMutationContext,
+  mode: "advance" | "retry",
+): Promise<string | null> {
+  return withFileLock(`goal-start:${projectSlug}:${goalId}:${linkIndex}`, () =>
+    startLinkTaskLocked(db, projectSlug, goalId, linkIndex, actor, ctx, mode),
+  );
+}
+
+async function startLinkTaskLocked(
+  db: DatabaseSync,
+  projectSlug: string,
+  goalId: string,
+  linkIndex: number,
+  actor: TaskActor,
+  ctx: TaskMutationContext,
+  mode: "advance" | "retry",
 ): Promise<string | null> {
   const ref = goalRef(ctx, projectSlug, goalId);
   const current = readGoalFile(ref);
@@ -469,6 +560,17 @@ async function startLinkTask(
   const fm = current.parsed.frontmatter;
   const link = fm.links.find((l) => l.index === linkIndex);
   if (!link) return null;
+  // The chain must still be ACTIVE to start a link. The goal-start lock is a
+  // DIFFERENT navigator.locks key from the goal-file lock that a concurrent
+  // cancel/pause commits under, so check the freshest status here — and again
+  // under the file lock at attach time below, to close the createTask window.
+  // reconcileGoal early-returns on a cancelled/completed chain forever, so a
+  // link started on one strands its task in perpetual limbo.
+  if (fm.status !== "active") return null;
+  if (mode === "advance" && (link.taskKey !== null || link.status !== "pending")) {
+    return null;
+  }
+  if (mode === "retry" && link.status !== "failed") return null;
   const previous =
     fm.links.filter((l) => l.index < linkIndex).sort((a, b) => b.index - a.index)[0] ??
     null;
@@ -483,14 +585,31 @@ async function startLinkTask(
     actor,
     ctx,
   );
+  let attached = false;
   await updateGoalFile(ref, (goal) => {
+    // Re-check under the goal-FILE lock: a cancel/pause may have committed during
+    // the createTask await above. A non-active chain must not gain an active
+    // link — it would strand this task on a goal reconcileGoal never revisits.
+    if (goal.frontmatter.status !== "active") return;
     const target = goal.frontmatter.links.find((l) => l.index === linkIndex);
     if (!target) return;
+    attached = true;
     target.taskKey = created.key;
     target.status = "active";
     target.note = null;
     return `Link ${linkIndex} (${target.title}) started as ${created.key}.`;
   });
+  if (!attached) {
+    // The chain went non-active mid-create. The task exists and carries a
+    // goalRef (so it still surfaces as this goal's), but no link claims it and
+    // the card shows no active link on a dead/parked chain — the honest state.
+    logger.warn("goal link start abandoned: chain no longer active", {
+      goalId,
+      linkIndex,
+      taskKey: created.key,
+    });
+    return null;
+  }
   rebuildGoalFile(db, projectSlug, goalId, { dataRoot: ctx.dataRoot });
   notifyCreator(
     db,
@@ -545,11 +664,29 @@ export async function reconcileGoal(
     const fm = goal.frontmatter;
     if (fm.status === "completed" || fm.status === "cancelled") return;
     const history: string[] = [];
+    /** A link this pass moved OUT of `failed` — the one park it may lift. */
+    let recoveredLink = false;
 
     for (const link of fm.links) {
       if (!link.taskKey) continue;
-      if (link.status === "done" || link.status === "skipped") continue;
+      // `skipped` is a HUMAN's decision about the link itself and never
+      // re-derives. `done` is a claim about the task, so it is re-derived
+      // below — but only a re-opening undoes it.
+      if (link.status === "skipped") continue;
       const state = taskState(link.taskKey);
+      if (link.status === "done") {
+        if (state === "open") {
+          // The completed task was pulled back out of the terminal stage: the
+          // link is genuinely no longer done. Archiving or losing a completed
+          // task, by contrast, is bookkeeping and leaves the link settled.
+          link.status = "active";
+          link.note = null;
+          history.push(
+            `Link ${link.index} (${link.title}) reopened: ${link.taskKey} left the final stage.`,
+          );
+        }
+        continue;
+      }
       if (state === "done") {
         link.status = "done";
         history.push(`Link ${link.index} (${link.title}) completed by ${link.taskKey}.`);
@@ -561,6 +698,16 @@ export async function reconcileGoal(
             : `Task ${link.taskKey} was archived.`;
         failedLink = { index: link.index, title: link.title, taskKey: link.taskKey };
         history.push(`Link ${link.index} (${link.title}) failed: ${link.note}`);
+      } else if (state === "open" && link.status === "failed") {
+        // The failure was undone — the task is back on the board. Deriving the
+        // failure but never the recovery would leave the chain parked on live
+        // work, and its only exit (retry) would spawn a second task for it.
+        link.status = "active";
+        link.note = null;
+        recoveredLink = true;
+        history.push(
+          `Link ${link.index} (${link.title}) recovered: ${link.taskKey} is on the board again.`,
+        );
       }
     }
 
@@ -573,6 +720,17 @@ export async function reconcileGoal(
           ? `Link ${failedLink.index} failed. The chain is paused for your decision: retry it, skip it, or cancel the goal.`
           : "A link failed. The chain is paused for your decision.";
       history.push("Chain paused (attention): a link failed.");
+    }
+    // …and un-parks when THIS pass saw the failure undone. `attention` is the
+    // machine's own park (`paused` is a human's and is never lifted here), but
+    // it is set for more than a failed link: losing the creator's authority
+    // parks a chain too. Lifting on the mere ABSENCE of a failed link would
+    // flip those chains attention -> active -> attention on every runner tick,
+    // re-notifying the creator each time — so lift only the park whose cause
+    // this pass watched disappear.
+    if (recoveredLink && !anyFailedOpen && fm.status === "attention") {
+      fm.status = "active";
+      history.push("Chain resumed: the failed link is live again.");
     }
 
     if (allLinksSettled(fm.links) && fm.status !== "attention") {
@@ -654,6 +812,7 @@ export async function reconcileGoal(
           label: `${fm.createdByLabel || fm.createdBy} · goal chain`,
         },
         ctx,
+        "advance",
       );
     } catch (error) {
       logger.error("goal link task creation failed", {

@@ -8,8 +8,10 @@ import {
   formatClockUTC,
   formatDayBucket,
   formatDayBucketUTC,
+  localDayKey,
+  utcDayKey,
 } from "~/shared/dates/format";
-import { ntfMeta, ntfPill } from "./notification-meta";
+import { ntfMeta, ntfPill, plainText } from "./notification-meta";
 import {
   needsYouTime,
   splitNotifications,
@@ -33,7 +35,11 @@ import {
 function keybtnLabel(n: NotificationPageItem): string {
   // F18-1: an orphan has nowhere to open — say so instead of a live-looking link.
   if (n.targetMissing) return "project no longer exists";
-  return (n.projectName ? n.projectName + " · " : "") + (n.taskKey ?? "");
+  // Named after where it GOES. Concatenating an absent task key produced
+  // "Viberr Core · " — a trailing separator on a control whose destination is
+  // the project board, not a task.
+  if (!n.taskKey) return n.projectName ?? "";
+  return (n.projectName ? n.projectName + " · " : "") + n.taskKey;
 }
 
 function NtfNeedsYou({
@@ -148,18 +154,29 @@ function NtfStream({
   const now = new Date();
   const dayOf = (iso: string) =>
     local ? formatDayBucket(iso, now) : formatDayBucketUTC(iso);
-  const days = [...new Set(items.map((n) => dayOf(n.occurredAt)))];
+  // Walk the newest-first list ONCE, opening a new section whenever the
+  // ABSOLUTE day changes. Bucketing on a Set of LABELS merged rows a year apart
+  // under one "Mar 30" header (the label carries no year) and drew the year-old
+  // row inside the recent block, with nothing to tell them apart: the row's own
+  // stamp is time-only. The label is still what the reader sees.
+  const keyOf = (iso: string) => (local ? localDayKey(iso) : utcDayKey(iso));
+  const sections: { key: string; day: string; rows: NotificationPageItem[] }[] = [];
+  for (const item of items) {
+    const key = keyOf(item.occurredAt);
+    const last = sections[sections.length - 1];
+    if (last && last.key === key) last.rows.push(item);
+    else sections.push({ key, day: dayOf(item.occurredAt), rows: [item] });
+  }
   return (
     <div className="panel">
       <div className="panel-head">
         <Icon name="bell" />
         <h2>Everything else</h2>
       </div>
-      {days.map((day) => (
-        <div key={day}>
-          <div className="act-day">{day}</div>
-          {items.flatMap((n) => {
-            if (dayOf(n.occurredAt) !== day) return [];
+      {sections.map((section) => (
+        <div key={section.key}>
+          <div className="act-day">{section.day}</div>
+          {section.rows.flatMap((n) => {
             const m = ntfMeta(n);
             return (
               // UI-54: every stream row used to be `role="button" tabIndex={0}`
@@ -185,23 +202,41 @@ function NtfStream({
                   </strong>
                   <span className="act-sep">·</span>
                   <RichText text={n.text} mentions={false} />{" "}
-                  <button
-                    type="button"
-                    className="keybtn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRead(n.id);
-                      onOpen(n);
-                    }}
-                  >
-                    {keybtnLabel(n)}
-                  </button>
+                  {/* B-FD6: the keybtn NAVIGATES, so it renders only when the row
+                      has a destination. An org-wide row has none (nothing shown).
+                      F18-1: an ORPHAN (its project was deleted) also has no
+                      destination but MUST still say so — otherwise the row is
+                      indistinguishable from a live one and the bell popover, which
+                      still shows "project no longer exists", disagrees with it. */}
+                  {n.href !== null ? (
+                    <button
+                      type="button"
+                      className="keybtn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRead(n.id);
+                        onOpen(n);
+                      }}
+                    >
+                      {keybtnLabel(n)}
+                    </button>
+                  ) : n.targetMissing ? (
+                    <span
+                      className="keybtn dead"
+                      title="The project this refers to no longer exists"
+                    >
+                      {keybtnLabel(n)}
+                    </span>
+                  ) : null}
                 </span>
                 {n.unread && (
                   <button
                     type="button"
                     className="keybtn"
-                    aria-label={"Mark “" + n.title + "” read"}
+                    // `title` is NULL for every kind but packet/approval, so
+                    // concatenating it announced `Mark “null” read` — the row
+                    // body's own fallback is the notification's identity.
+                    aria-label={"Mark “" + (n.title || plainText(n.text)) + "” read"}
                     onClick={(e) => {
                       e.stopPropagation();
                       onRead(n.id);

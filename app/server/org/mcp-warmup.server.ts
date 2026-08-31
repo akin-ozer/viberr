@@ -37,6 +37,15 @@ export const WARMUP_CAP_MS = 15 * 60 * 1000;
 /** Server ids with a warm-up in flight IN THIS PROCESS. */
 const inFlight = new Set<string>();
 
+type WarmupArgs = Parameters<typeof startMcpWarmup>;
+/** A re-point requested while a warm-up was already running for that id — the
+ *  NEW command to warm once the current one settles (newest wins). Without this
+ *  the save's `startMcpWarmup` no-op'd on the in-flight guard, the old warm-up's
+ *  target-scoped verdict then matched nothing, and its `finally` cleared the
+ *  installing flag — leaving the re-pointed command never warmed and only a
+ *  manual retest able to recover it. */
+const pending = new Map<string, { input: WarmupArgs[1]; options: WarmupArgs[2] }>();
+
 /** True while this server has a background install running here. */
 export function isWarming(id: string): boolean {
   return inFlight.has(id);
@@ -45,6 +54,7 @@ export function isWarming(id: string): boolean {
 /** Test seam — the suite must never leave a real warm-up armed. */
 export function resetWarmupsForTest(): void {
   inFlight.clear();
+  pending.clear();
 }
 
 function markWarming(db: DatabaseSync, id: string, at: string | null): void {
@@ -64,7 +74,13 @@ export function startMcpWarmup(
   input: { id: string; name: string; target: string; token: string | null },
   options: McpProbeOptions & { capMs?: number; heuristic?: boolean } = {},
 ): void {
-  if (inFlight.has(input.id)) return;
+  if (inFlight.has(input.id)) {
+    // A warm-up is already running for this id. If this call re-points it to a
+    // DIFFERENT command, remember the new one so it warms once the current one
+    // settles (newest wins); a re-register of the SAME target is still a no-op.
+    pending.set(input.id, { input, options });
+    return;
+  }
   inFlight.add(input.id);
   markWarming(db, input.id, new Date().toISOString());
   // R20-4 (N20-2): a HEURISTIC warm-up (the command LOOKS like an installer but
@@ -91,17 +107,24 @@ export function startMcpWarmup(
         timeoutMs: capMs,
       });
       const now = new Date().toISOString();
+      // Every verdict below is scoped `AND target = ?` — the command this
+      // warm-up actually probed. An admin can re-point the row while the probe
+      // runs (a warm-up may take 15 minutes), and a verdict keyed on the id
+      // alone would then stamp `up`, the tool count and `first_success_at` of
+      // the OLD command onto the NEW one. A no-match is the correct outcome:
+      // the save that changed the target ran its own probe and left its own
+      // verdict there.
       if (disc.kind === "up") {
         db.prepare(
           `UPDATE org_mcp_servers
              SET up = 1, tools_count = ?, last_checked_at = ?, last_error = NULL,
-                 warming_since = NULL, first_success_at = COALESCE(first_success_at, ?),
+                 first_success_at = COALESCE(first_success_at, ?),
                  updated_at = ?
-           WHERE id = ?`,
+           WHERE id = ? AND target = ?`,
           // R20-4: the warm-up finishing is this server's first-ever success —
           // stamp it (idempotently) so a later cold probe is never mistaken for
           // a fresh first run.
-        ).run(disc.tools, now, now, now, input.id);
+        ).run(disc.tools, now, now, now, input.id, input.target);
         logger.info("mcp background install finished — server answered", {
           mcp: input.name,
           tools: disc.tools,
@@ -111,9 +134,9 @@ export function startMcpWarmup(
       db.prepare(
         `UPDATE org_mcp_servers
            SET up = 0, tools_count = NULL, last_checked_at = ?, last_error = ?,
-               warming_since = NULL, updated_at = ?
-         WHERE id = ?`,
-      ).run(now, disc.reason, now, input.id);
+               updated_at = ?
+         WHERE id = ? AND target = ?`,
+      ).run(now, disc.reason, now, input.id, input.target);
       logger.warn("mcp background install did not produce a working server", {
         mcp: input.name,
         reason: disc.reason,
@@ -126,7 +149,24 @@ export function startMcpWarmup(
         err: err instanceof Error ? err : new Error(String(err)),
       });
     } finally {
+      // The flag means "a warm-up is running HERE", and one no longer is —
+      // whatever the row now points at, and whether or not the verdict above
+      // matched. Clearing it by id (not by target) is what keeps a re-pointed
+      // row from reading as forever-installing until the next boot, which is
+      // the only other thing that runs `reapStaleWarmups`.
+      markWarming(db, input.id, null);
       inFlight.delete(input.id);
+      // A re-point that arrived mid-warm-up now gets its own install: the
+      // save's own probe left a "down: installing" verdict, and nothing else
+      // would ever warm the new command otherwise. Only when the target
+      // actually changed — a same-target re-register was already covered.
+      const next = pending.get(input.id);
+      if (next) {
+        pending.delete(input.id);
+        if (next.input.target !== input.target) {
+          startMcpWarmup(db, next.input, next.options);
+        }
+      }
     }
   })();
 }

@@ -169,8 +169,13 @@ function renderDetails(patch: Partial<TaskDetail>, canEdit: boolean) {
 
 describe("TaskDetailsPanel", () => {
   it("reads the metadata as kv rows, matching the side-panel style", () => {
+    // A due date in the FUTURE relative to now, so the row always reads "due …"
+    // (a hardcoded past date rots into "overdue · …" once that day passes).
+    const future = new Date(Date.now() + 30 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
     const { container } = renderDetails(
-      { priority: "high", labels: ["qa", "codex"], dueDate: "2026-08-30" },
+      { priority: "high", labels: ["qa", "codex"], dueDate: future },
       false,
     );
     // Panel head + the three rows.
@@ -178,7 +183,8 @@ describe("TaskDetailsPanel", () => {
     expect(kv(container, "Priority")).toContain("high");
     expect(kv(container, "Labels")).toContain("qa");
     expect(kv(container, "Labels")).toContain("codex");
-    expect(kv(container, "Due date")).toContain("due Aug 30");
+    // "due <Mon> <day>", never the "overdue · …" a past date would render.
+    expect(kv(container, "Due date")).toMatch(/^due /);
   });
 
   it("shows 'Normal / None / None' for a bare task", () => {

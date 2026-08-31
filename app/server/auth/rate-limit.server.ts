@@ -32,13 +32,29 @@ interface Bucket {
   updatedAt: number;
 }
 
-const MAX_TRACKED_KEYS = 10_000;
+/**
+ * Hard cap on tracked keys, held by EVICTION.
+ *
+ * The login path is unauthenticated and every distinct `email|ip` mints a
+ * bucket, so the map is attacker-sized. A scan cannot hold the cap on its own:
+ * a bucket is prunable only once it has fully refilled, so under sustained
+ * traffic nothing is ever eligible and the map grows without bound.
+ */
+export const MAX_TRACKED_KEYS = 10_000;
+
+/**
+ * A prune is O(size). Once the map sits at the cap the pruning branch is on the
+ * path of EVERY new key, so an unthrottled scan turns the login throttle into
+ * the quadratic amplifier it exists to prevent.
+ */
+const PRUNE_MIN_INTERVAL_MS = 1_000;
 
 export class TokenBucketLimiter {
   private readonly capacity: number;
   private readonly refillIntervalMs: number;
   private readonly now: () => number;
   private readonly buckets = new Map<string, Bucket>();
+  private lastPrunedAt = Number.NEGATIVE_INFINITY;
 
   constructor(options: TokenBucketOptions) {
     this.capacity = options.capacity;
@@ -51,20 +67,57 @@ export class TokenBucketLimiter {
     const now = this.now();
     let bucket = this.buckets.get(key);
     if (!bucket) {
-      if (this.buckets.size >= MAX_TRACKED_KEYS) this.prune();
+      this.makeRoom(now);
       bucket = { tokens: this.capacity, updatedAt: now };
       this.buckets.set(key, bucket);
     } else {
-      const elapsed = Math.max(0, now - bucket.updatedAt);
-      bucket.tokens = Math.min(
-        this.capacity,
-        bucket.tokens + (elapsed * this.capacity) / this.refillIntervalMs,
-      );
+      bucket.tokens = this.liveTokens(bucket, now);
       bucket.updatedAt = now;
     }
     if (bucket.tokens < 1) return false;
     bucket.tokens -= 1;
     return true;
+  }
+
+  /** Current token count with continuous refill applied, clamped to capacity. */
+  private liveTokens(bucket: Bucket, now: number): number {
+    const elapsed = Math.max(0, now - bucket.updatedAt);
+    return Math.min(
+      this.capacity,
+      bucket.tokens + (elapsed * this.capacity) / this.refillIntervalMs,
+    );
+  }
+
+  /**
+   * Holds the map under {@link MAX_TRACKED_KEYS} before a new key is inserted.
+   *
+   * Eviction targets the LEAST-throttled bucket — the one with the most live
+   * tokens — never the oldest-inserted. A caller being actively rate-limited has
+   * FEW tokens, so it is never the eviction target: a flood of fresh
+   * full-capacity keys can no longer evict a specific throttled victim to reset
+   * its lockout (insertion-order eviction forgave whoever was inserted first,
+   * which an unauthenticated attacker controls). Forgetting the most-refilled
+   * bucket also loses the least enforcement, since it was closest to full anyway.
+   */
+  private makeRoom(now: number): void {
+    if (this.buckets.size < MAX_TRACKED_KEYS) return;
+    if (now - this.lastPrunedAt >= PRUNE_MIN_INTERVAL_MS) {
+      this.lastPrunedAt = now;
+      this.prune();
+    }
+    while (this.buckets.size >= MAX_TRACKED_KEYS) {
+      let victimKey: string | undefined;
+      let mostTokens = Number.NEGATIVE_INFINITY;
+      for (const [key, bucket] of this.buckets) {
+        const tokens = this.liveTokens(bucket, now);
+        if (tokens > mostTokens) {
+          mostTokens = tokens;
+          victimKey = key;
+        }
+      }
+      if (victimKey === undefined) break;
+      this.buckets.delete(victimKey);
+    }
   }
 
   /** Clears a key (e.g. after a successful login). */
@@ -76,10 +129,7 @@ export class TokenBucketLimiter {
   prune(): void {
     const now = this.now();
     for (const [key, bucket] of this.buckets) {
-      const elapsed = Math.max(0, now - bucket.updatedAt);
-      const tokens =
-        bucket.tokens + (elapsed * this.capacity) / this.refillIntervalMs;
-      if (tokens >= this.capacity) this.buckets.delete(key);
+      if (this.liveTokens(bucket, now) >= this.capacity) this.buckets.delete(key);
     }
   }
 }

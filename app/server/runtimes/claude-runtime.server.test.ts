@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
 import {
   createClaudeAdapter,
+  INTERRUPT_ABORT_GRACE_MS,
+  INTERRUPT_GRACE_MS,
   resolveClaudeEffort,
   resolveClaudeModel,
   type ClaudeQuery,
@@ -521,6 +523,88 @@ describe("claude adapter (SDK, injected fake query)", () => {
     await drain();
     expect(wasInterrupted()).toBe(true);
     expect(exit).toMatchObject({ outcome: "interrupted" });
+  });
+
+  /**
+   * `interrupt()` is a cooperative control request, and a CLI wedged mid
+   * tool-call never answers it — while the same call disarms the idle guard,
+   * whose own callback also returns early once `interrupted` is set. The earlier
+   * fix SETTLED the run after the grace but never stopped the child, so a still
+   * -live CLI could keep writing the workspace under a successor run or a
+   * reclaim rmSync. The stop must ABORT the SDK subprocess: after the grace the
+   * adapter aborts `options.abortController`, which tears the child down
+   * (SIGTERM→SIGKILL); the ended stream then settles the run.
+   */
+  it("aborts the subprocess when the CLI never answers the cooperative interrupt", async () => {
+    vi.useFakeTimers();
+    try {
+      let captured: AbortController | undefined;
+      // Ignores the cooperative interrupt; ends ONLY when the abort signal
+      // fires — exactly how the real SDK tears the spawned CLI down.
+      const queryFn: ClaudeQueryFn = ({ options }) => {
+        captured = options?.abortController;
+        const gen = (async function* () {
+          await new Promise<void>((_resolve, reject) => {
+            captured?.signal.addEventListener("abort", () =>
+              reject(new Error("Claude Code process aborted by user")),
+            );
+          });
+        })();
+        return Object.assign(gen, {
+          interrupt: async () => new Promise<void>(() => {}),
+        });
+      };
+      const adapter = createClaudeAdapter({ queryFn });
+      let exit: RunExit | null = null;
+      const handle = adapter.start(SPEC, {
+        onLine: () => {},
+        onExit: (e) => (exit = e),
+      });
+
+      handle.interrupt();
+      expect(exit).toBeNull(); // nothing settles it on its own
+      expect(captured?.signal.aborted).toBe(false); // cooperative window first
+
+      await vi.advanceTimersByTimeAsync(INTERRUPT_GRACE_MS + 1);
+      // The subprocess kill switch fired, and the ended stream settled the run.
+      expect(captured?.signal.aborted).toBe(true);
+      expect(exit).toMatchObject({ outcome: "interrupted" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * Backstop: even a child that ignores the abort (survives SIGTERM/SIGKILL,
+   * or a fake that never reacts) must not leave the row `running` forever — a
+   * second deadline force-settles it after the abort window.
+   */
+  it("force-settles if even the abort never ends the stream", async () => {
+    vi.useFakeTimers();
+    try {
+      // Yields nothing, answers neither the cooperative interrupt nor the abort.
+      const wedged: ClaudeQuery = Object.assign(
+        (async function* () {
+          await new Promise(() => {});
+        })(),
+        { interrupt: async () => new Promise<void>(() => {}) },
+      );
+      const adapter = createClaudeAdapter({ queryFn: () => wedged });
+      let exit: RunExit | null = null;
+      const handle = adapter.start(SPEC, {
+        onLine: () => {},
+        onExit: (e) => (exit = e),
+      });
+
+      handle.interrupt();
+      await vi.advanceTimersByTimeAsync(INTERRUPT_GRACE_MS + 1);
+      expect(exit).toBeNull(); // aborted, but the stream still hasn't ended
+
+      await vi.advanceTimersByTimeAsync(INTERRUPT_ABORT_GRACE_MS + 1);
+      expect(exit).toMatchObject({ outcome: "interrupted" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

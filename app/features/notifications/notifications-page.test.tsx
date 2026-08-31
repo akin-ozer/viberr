@@ -27,6 +27,7 @@ const ITEMS: NotificationPageItem[] = [
     projectSlug: "viberr-core",
     projectName: "Viberr Core",
     taskKey: "VIB-160",
+    href: "/projects/viberr-core/tasks/VIB-160",
     occurredAt: iso(0, 10, 31),
     unread: true,
     waitingOnYou: true,
@@ -44,6 +45,7 @@ const ITEMS: NotificationPageItem[] = [
     projectSlug: "deploy-pipeline",
     projectName: "Deploy Pipeline",
     taskKey: "DEP-31",
+    href: "/projects/deploy-pipeline/tasks/DEP-31",
     occurredAt: iso(0, 10, 12),
     unread: true,
     waitingOnYou: true,
@@ -58,6 +60,7 @@ const ITEMS: NotificationPageItem[] = [
     projectSlug: "viberr-core",
     projectName: "Viberr Core",
     taskKey: "VIB-145",
+    href: "/projects/viberr-core/tasks/VIB-145",
     occurredAt: iso(0, 9, 12),
     unread: false,
     waitingOnYou: true,
@@ -72,6 +75,7 @@ const ITEMS: NotificationPageItem[] = [
     projectSlug: "viberr-core",
     projectName: "Viberr Core",
     taskKey: "VIB-148",
+    href: "/projects/viberr-core/tasks/VIB-148",
     occurredAt: iso(0, 8, 20),
     unread: true,
     waitingOnYou: false,
@@ -86,6 +90,7 @@ const ITEMS: NotificationPageItem[] = [
     projectSlug: "viberr-core",
     projectName: "Viberr Core",
     taskKey: "VIB-145",
+    href: "/projects/viberr-core/tasks/VIB-145",
     occurredAt: iso(1, 16, 4),
     unread: false,
     waitingOnYou: false,
@@ -176,6 +181,62 @@ describe("NotificationsPage", () => {
     fireEvent.click(unread);
     expect(all.getAttribute("aria-pressed")).toBe("false");
     expect(unread.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /**
+   * `title` is NULL for every kind but packet/approval, so concatenating it
+   * into the control's accessible name announced `Mark "null" read`. There is
+   * no other accessible name for the button, so that string WAS the
+   * notification's identity to a screen reader.
+   */
+  it("the per-row Mark read control never announces a null subject", () => {
+    const { container } = renderPage();
+    const labels = [...container.querySelectorAll("button[aria-label]")].map(
+      (b) => b.getAttribute("aria-label") ?? "",
+    );
+    const markRead = labels.filter((l) => l.startsWith("Mark "));
+    expect(markRead.length).toBeGreaterThan(0);
+    for (const label of markRead) expect(label).not.toContain("null");
+    // The title-less mention row is named by its text, the same fallback the
+    // row body uses.
+    expect(markRead.some((l) => l.includes("can you take it?"))).toBe(true);
+  });
+
+  /**
+   * The day label carries no year, so bucketing on a SET of labels merged rows
+   * a year apart under one "Mar 30" header and drew the old row inside the
+   * recent block. Nothing distinguished them: the row's own stamp is time-only.
+   */
+  it("same-day rows from different YEARS get their own sections, in order", () => {
+    const sameDayDifferentYears: NotificationPageItem[] = [
+      {
+        ...ITEMS[2]!,
+        id: "n-recent",
+        text: "recent row",
+        occurredAt: "2026-03-30T10:00:00.000Z",
+        unread: false,
+        waitingOnYou: false,
+      },
+      {
+        ...ITEMS[2]!,
+        id: "n-year-old",
+        text: "a year older",
+        occurredAt: "2025-03-30T10:00:00.000Z",
+        unread: false,
+        waitingOnYou: false,
+      },
+    ];
+    const { container } = renderPage(sameDayDifferentYears, 0, 0);
+    const headers = [...container.querySelectorAll(".act-day")].map(
+      (d) => d.textContent ?? "",
+    );
+    // Two sections, not one merged bucket — even though both read "Mar 30".
+    expect(headers).toHaveLength(2);
+    const rows = container.querySelectorAll(".ntf-ev");
+    expect(rows).toHaveLength(2);
+    // Newest first: the year-old row is at the BOTTOM, not interleaved.
+    expect(rows[0]!.textContent).toContain("recent row");
+    expect(rows[1]!.textContent).toContain("a year older");
   });
 
   it("all-caught-up subtitle hides the Mark all read button", () => {
@@ -335,6 +396,35 @@ describe("NotificationsPage", () => {
     expect(
       getByText("Everything routed to you, across all projects · 2 unread"),
     ).toBeTruthy();
+  });
+
+  /**
+   * bug-sweep #14: gating the stream keybtn on `href !== null` (aimed at
+   * org-wide rows) also swallowed ORPHAN rows, since listNotifications sets
+   * href=null whenever targetMissing — so the "project no longer exists" note
+   * became dead code and the page silently disagreed with the bell popover,
+   * which still shows it. The orphan row must disclose why it opens nothing.
+   */
+  it("an orphan stream row discloses 'project no longer exists', non-interactively (F18-1)", () => {
+    const orphan: NotificationPageItem = {
+      ...ITEMS[3]!, // a mention row → routes to the stream
+      id: "n-orphan",
+      href: null,
+      targetMissing: true,
+      unread: false,
+      waitingOnYou: false,
+    };
+    const { container, getByText } = renderPage([orphan], 0, 0);
+    // Present on the page, matching the bell popover's disclosure.
+    expect(getByText("project no longer exists")).toBeTruthy();
+    // Rendered as a non-navigating label, not a live-looking keybtn button.
+    const dead = container.querySelector(".keybtn.dead")!;
+    expect(dead).toBeTruthy();
+    expect(dead.tagName).toBe("SPAN");
+    // A read orphan row carries NO navigating keybtn button.
+    expect(
+      container.querySelector(".ntf-ev")!.querySelector("button.keybtn"),
+    ).toBeNull();
   });
 
   it("Mark all read invokes the shared read-all handler", () => {

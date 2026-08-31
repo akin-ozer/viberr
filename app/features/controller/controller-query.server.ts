@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { AppError } from "~/server/errors/app-error.server";
+import { data } from "react-router";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
 import {
@@ -72,7 +72,11 @@ export function getControllerSurface(
         orgRole: admin ? "admin" : "member",
       })
     ) {
-      throw AppError.notFound("Conversation not found.");
+      // A thrown Response, not an AppError: both callers are LOADERS, and the
+      // root boundary only reads a route error response. An AppError reached it
+      // as an unhandled throw, so this deliberate 404 rendered as the generic
+      // "Something went wrong" page at HTTP 500 instead.
+      throw data("Conversation not found.", { status: 404 });
     }
     // A conversation opened from the other scope's list still renders; the
     // list stays scope-filtered.

@@ -510,6 +510,83 @@ describe("fireDueSchedules", () => {
     await waitForSchedule("VIB-1", "sch_stale", "fired");
   });
 
+  /**
+   * The lease outlasting a clone is only half the invariant. The drain is
+   * SEQUENTIAL, so a later occurrence's drive begins long after the tick that
+   * claimed it: with several due at once, its WAIT alone can outlast
+   * CLAIM_LEASE_MS, and the next tick then reads the claim as crashed and
+   * re-drives it — two unwatched turns for one occurrence. The lease must be
+   * re-stamped as each drive STARTS, so it measures time-since-this-drive.
+   */
+  it("re-stamps a queued claim's lease when its own drive starts", async () => {
+    const QUEUE_DELAY_MS = 40;
+    const leaseOf = (key: string) =>
+      schedules(key).find((s) => s.id.startsWith("sch_"))?.claimedAt ?? null;
+    /** The lease the SECOND-driven task carried while it waited its turn. */
+    let queuedLeaseBefore: string | null = null;
+    /** The lease it carried once its own drive began. */
+    let queuedLeaseAtStart: string | null = null;
+
+    // Two TASKS, so the operator's per-task single flight cannot mask the
+    // queueing this is about: one tick claims both, the drain drives them one
+    // after the other. Which one goes first is not ours to decide, so the
+    // assertions are written from the drive ORDER, not from task identity.
+    class SlowFirstDrive implements RuntimeAdapter {
+      readonly backend = "claude" as const;
+      private starts = 0;
+      private firstKey = "";
+      start(spec: RunSpec): RunHandle {
+        this.starts += 1;
+        const key = spec.taskKey ?? "";
+        if (this.starts === 1) {
+          this.firstKey = key;
+          const other = key === "VIB-9" ? "VIB-10" : "VIB-9";
+          queuedLeaseBefore = leaseOf(other);
+          // Hold the drain, synchronously, the way a slow clone would. The
+          // defect IS a wait outlasting the lease, so the test needs a wait.
+          const until = Date.now() + QUEUE_DELAY_MS;
+          while (Date.now() < until) {
+            /* deliberately blocking: the next occurrence must queue behind */
+          }
+        } else if (this.starts === 2 && key !== this.firstKey) {
+          queuedLeaseAtStart = leaseOf(key);
+        }
+        return { runId: spec.runId, interrupt() {} };
+      }
+    }
+    const adapter = new SlowFirstDrive();
+    configureRunServiceForTests({ claude: adapter, codex: adapter });
+
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", {
+        stage: "impl",
+        schedules: [rawSchedule({ id: "sch_a" })],
+      }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-10", {
+        stage: "impl",
+        schedules: [rawSchedule({ id: "sch_b" })],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    expect((await fireDueSchedules(store.db, dctx())).fired).toBe(2);
+    // The drain runs detached from the tick that claimed the batch, and drives
+    // sequentially — wait for BOTH, or the second drive has not begun yet.
+    await waitForSchedule("VIB-9", "sch_a", "fired");
+    await waitForSchedule("VIB-10", "sch_b", "fired");
+
+    expect(queuedLeaseBefore).not.toBeNull();
+    expect(queuedLeaseAtStart).not.toBeNull();
+    // Measured from ITS drive, not from the tick that claimed the batch —
+    // otherwise a long queue burns the lease and a later tick re-drives an
+    // occurrence that is already running.
+    expect(Date.parse(queuedLeaseAtStart!)).toBeGreaterThanOrEqual(
+      Date.parse(queuedLeaseBefore!) + QUEUE_DELAY_MS,
+    );
+  });
+
   it("F10-16: does NOT re-drive a FRESH claim (still within its lease)", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {

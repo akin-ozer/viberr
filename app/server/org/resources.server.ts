@@ -22,6 +22,7 @@ import {
 import { AppError } from "~/server/errors/app-error.server";
 import { startMcpWarmup } from "./mcp-warmup.server";
 import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
+import { filteredSpawnEnv } from "~/server/runtimes/runtime-registry.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   isSecretBox,
@@ -109,7 +110,7 @@ function diskNameFromId(id: string): string | null {
  * other store path refuses to follow a link out of the store (P14-RV-02);
  * `lstatSync` does not dereference, so a linked entry is simply not a resource.
  */
-function subDirNames(root: string): string[] {
+export function subDirNames(root: string): string[] {
   try {
     if (!existsSync(root)) return [];
     return readdirSync(root, { withFileTypes: true }).flatMap((entry) =>
@@ -851,6 +852,30 @@ export interface McpProbeOptions {
   spawnImpl?: McpSpawn;
 }
 
+/**
+ * The environment a registered stdio MCP command runs with.
+ *
+ * An MCP command is THIRD-PARTY code an admin named, so it gets the same
+ * secret-filtered environment the agent runtimes get (F10-02). Inheriting
+ * `process.env` — which is what an absent `env` means, and what the
+ * credentialed branch used to spread — handed every registered stdio server
+ * the secret-encryption key that opens every stored PAT and MCP credential,
+ * the session-signing secret and the provider keys. That is strictly more than
+ * the run's own mount receives, and the child's stderr is persisted into
+ * `last_error`, so a server that prints its environment while crashing parks
+ * those values in the database.
+ *
+ * `MCP_CREDENTIAL` is the ONE secret a child is meant to hold (P13-KM-05), and
+ * `withDetail` scrubs it out of persisted stderr by value.
+ */
+export function mcpSpawnEnv(
+  token: string | null | undefined,
+): Record<string, string> {
+  const env = filteredSpawnEnv();
+  if (token) env.MCP_CREDENTIAL = token;
+  return env;
+}
+
 const defaultSpawn: McpSpawn = (command, args, token) => {
   const options: SpawnOptions = {
     // stderr was "ignore" — discarded by the OS, so the one thing that
@@ -862,9 +887,7 @@ const defaultSpawn: McpSpawn = (command, args, token) => {
     // so a boot accumulated defunct chromium/crashpad zombies under pid 1.
     detached: true,
   };
-  // The credential reaches the child through its env (P13-KM-05); without one
-  // the child inherits this process's env untouched, so `env` stays absent.
-  if (token) options.env = { ...process.env, MCP_CREDENTIAL: token };
+  options.env = mcpSpawnEnv(token);
   return spawn(command, args, options);
 };
 

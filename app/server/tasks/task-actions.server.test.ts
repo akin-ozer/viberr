@@ -916,6 +916,44 @@ describe("appendComment", () => {
     });
   });
 
+  it("dedupes a dispatched run's report even after the cc line is appended (ruling 98 x F22-12)", async () => {
+    // CANARY: key the comparison on the raw text again — the appended cc line
+    // makes the report differ from the mid-run comment it repeats verbatim, so
+    // the same finding lands twice and the mention fan-out fires again.
+    //
+    // Ruling 98(c)'s cc line is appended by the PIPELINE, after the agent has
+    // written its report, and its content depends on who dispatched the run.
+    // Comparing agent prose against agent prose has to ignore it.
+    const store = prepared();
+    withTask(store);
+    const ctx = { dataRoot: store.dataRoot };
+    const finding = "Root cause: the projection overlay never runs for this row.";
+    seedRun(store, "run_cc", "2000-01-01T00:00:00.000Z");
+
+    await postAgentComment(store.db, ctx, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      actorRef: REVIEWER_REF,
+      text: finding,
+    });
+    await recordAgentCompletion(store.db, ctx, store.slug, "VIB-1", {
+      actorRef: REVIEWER_REF,
+      runId: "run_cc",
+      // Exactly what the dispatch-completion contract hands this function.
+      replyText: `${finding}\n\ncc @Arda Kaya @operator`,
+      verdict: null,
+      question: null,
+    });
+
+    expect(agentComments(store)).toHaveLength(1);
+    const audit = listAuditEvents(store.db, { action: "task.agent.replied" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.details).toMatchObject({
+      runId: "run_cc",
+      deduped: "duplicate-of-own-comment",
+    });
+  });
+
   it("does NOT dedup a byte-identical reply from a PRIOR run (run-start scoped)", async () => {
     const store = prepared();
     withTask(store);

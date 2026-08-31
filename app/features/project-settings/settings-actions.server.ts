@@ -703,8 +703,15 @@ export async function reorderStages(
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     const stages = parsed.frontmatter.stages;
     const byId = new Map(stages.map((s) => [s.id, s]));
+    // Length and membership alone let a REPEATED id through, and a repeat of
+    // the right length necessarily omits another stage — so the board would
+    // gain a duplicated column and silently lose one, taking `removeStage`'s
+    // "move its tasks out first" guard with it and stranding every task in the
+    // dropped stage in a column the project no longer defines. A reorder is a
+    // permutation: same length, same set, no repeats.
     if (
       input.orderedIds.length !== stages.length ||
+      new Set(input.orderedIds).size !== input.orderedIds.length ||
       input.orderedIds.some((id) => !byId.has(id))
     ) {
       throw AppError.validation("Stage order is out of date. Try again.");

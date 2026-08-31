@@ -88,7 +88,9 @@ import {
 } from "~/server/tasks/goal-actions.server";
 import {
   createTask,
+  loadProjectContext,
   releaseOwner,
+  requireProjectMutable,
   setOwner,
   transitionStage,
   userName,
@@ -976,6 +978,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           labels?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
+          // Visibility BEFORE the action gate. `createTask` refuses a
+          // non-member by naming the project and the role they lack, which
+          // reads differently from the refusal an invented slug gets — exactly
+          // the existence oracle R15-4 closes, and the posture every read tool
+          // here already holds.
+          requireVisible(slug, "create tasks");
           const taskInput: CreateTaskInput = {
             projectSlug: slug,
             title: args.title,
@@ -1015,15 +1023,20 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         }
         const summary = getTaskSummary(db, slug, args.taskKey);
         if (!summary) throw AppError.notFound(`No task ${args.taskKey} in ${slug}.`);
-        const onGraph = project.workflow.some(
-          (w) => w.from === summary.stage && w.to === args.toStageId,
-        );
+        // `manual` ALWAYS, exactly as the board drag and the task dropdown send
+        // it. It is what marks a move as a person's own decision, and it is
+        // what puts every move behind `approve-transition`. Leaving it off for
+        // declared edges would drop an `auto` boundary to the any-member gate
+        // that `transitionStage` documents as unreachable from the UI — so a
+        // viewer could cross through the controller what they cannot cross on
+        // the board. The controller is the human's instrument, never a looser
+        // door than the one they already have.
         const move: Parameters<typeof transitionStage>[1] = {
           projectSlug: slug,
           taskKey: args.taskKey,
           toStageId: args.toStageId,
+          manual: true,
         };
-        if (!onGraph) move.manual = true;
         const moved = await transitionStage(db, move, actor, { dataRoot });
         return `[done] ${args.taskKey} is now in stage ${moved.stage}.`;
       }),
@@ -1043,6 +1056,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       runWith(async (args: { projectSlug?: string; taskKey: string; text: string }) => {
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "comment on this task");
+        // Commenting names no RbacAction, so it never passes through
+        // `requireAction` — the chokepoint that freezes an archived project.
+        // The human comment path guards it explicitly for exactly this reason
+        // (R6-3), and `requireVisible` deliberately allows archived projects so
+        // that READS keep working. Without this the controller is the one door
+        // that writes into a frozen timeline.
+        requireProjectMutable(
+          loadProjectContext({ dataRoot }, slug),
+          "comment on this task",
+        );
         const summary = getTaskSummary(db, slug, args.taskKey);
         if (!summary) throw AppError.notFound(`No task ${args.taskKey} in ${slug}.`);
         const text = `${prose(args.text).trim()}\n\n_Posted by the controller for ${userName(db, user.id)}._`;
@@ -1528,6 +1551,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           links: { title: string; goal: string }[];
         }) => {
           const slug = slugOf(args.projectSlug);
+          // Same reason as `create_task`: the action gate below would refuse a
+          // non-member in words that confirm the project exists.
+          requireVisible(slug, "define goals");
           const goalInput: CreateGoalInput = {
             projectSlug: slug,
             title: args.title,

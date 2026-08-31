@@ -215,3 +215,38 @@ export function countProjectDeploymentGrants(
   }
   return count;
 }
+
+/**
+ * The read-only twin of {@link rewriteTemplates}' walk: how many ORG TEMPLATES
+ * currently grant `slug` of `kind`.
+ *
+ * It walks the profile FILES rather than `listGlobalAgentProfiles` because that
+ * lister is the specialist CRUD list and drops `controller.md` / `operator.md`,
+ * while the delete's rewrite strips the grant out of EVERY profile file. The
+ * delete-confirm counting from the lister therefore said "Nothing grants it"
+ * about the three resources the shipped store attaches to those two templates,
+ * immediately before the delete took them away.
+ *
+ * Never throws: a malformed profile is skipped, exactly as the rewrite skips it.
+ */
+export function countTemplateGrants(
+  kind: ResourceKind,
+  slug: string,
+  dataRoot?: string,
+): number {
+  const dir = agentProfilesDir(dataRoot);
+  if (!existsSync(dir)) return 0;
+  let count = 0;
+  for (const entry of readdirSync(dir).sort()) {
+    if (!entry.endsWith(".md")) continue;
+    try {
+      const { parsed } = parseAgentProfileContent(
+        readFileSync(agentProfileFilePath(entry.slice(0, -3), dataRoot), "utf8"),
+      );
+      if (parsed?.frontmatter.resources[kind]?.includes(slug)) count += 1;
+    } catch {
+      // Unreadable profile: not countable, and the rewrite skips it too.
+    }
+  }
+  return count;
+}

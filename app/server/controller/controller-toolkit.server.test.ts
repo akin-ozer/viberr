@@ -281,6 +281,40 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     );
   });
 
+  /**
+   * The WRITE tools must hold the same posture as the reads. `createTask` and
+   * `createGoal` gate themselves on `create-task`, whose refusal names the
+   * project and the role — so a non-member probing a slug they should not know
+   * exists got a different sentence for a real project than for an invented
+   * one. That difference is the existence oracle R15-4 closes.
+   */
+  it("create_task and create_goal keep the not-visible posture for a non-member", async () => {
+    const probes: { tool: string; args: Record<string, JsonValue> }[] = [
+      { tool: "create_task", args: { title: "Should not land", goal: "Nor this." } },
+      {
+        tool: "create_goal",
+        args: {
+          title: "Should not land",
+          links: [{ title: "One", goal: "Nor this." }],
+        },
+      },
+    ];
+    for (const { tool, args } of probes) {
+      const real = await call(ids.nonMember, tool, args);
+      const invented = await call(
+        ids.nonMember,
+        tool,
+        { ...args, projectSlug: "no-such-project" },
+        null,
+      );
+      expect(real).toContain(`No project "${SLUG}" is visible to you`);
+      expect(invented).toContain('No project "no-such-project" is visible to you');
+      expect(real.replace(SLUG, "X")).toBe(
+        invented.replace("no-such-project", "X"),
+      );
+    }
+  });
+
   it("a VIEWER reads the project, its tasks and one task", async () => {
     const project = await call(ids.viewer, "get_project");
     expect(project).toContain('"slug"');
@@ -336,6 +370,85 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     });
     expect(terminal).toContain("[denied]");
     expect(terminal).toContain("task page");
+  });
+
+  /**
+   * The board and the task dropdown both send `manual: true`, so EVERY human
+   * stage move is gated on `approve-transition` (maintainer+) whatever
+   * boundary it crosses — `transitionStage`'s any-member `auto` branch carries
+   * a comment saying it is unreachable from the UI. A controller that omitted
+   * the flag on declared edges would reopen that branch and let a VIEWER cross
+   * triage -> ready, an action the same person cannot perform on the board.
+   * The controller is the human's instrument: it must knock on the same door.
+   */
+  it("move_task: an ON-GRAPH auto boundary still needs the transition tier", async () => {
+    const created = await call(ids.maintainer, "create_task", {
+      title: "Auto boundary probe",
+      goal: "Sits in triage so the first declared edge can be probed.",
+    });
+    const key = /VIB-\d+/.exec(created)![0];
+
+    const denied = await call(ids.viewer, "move_task", {
+      taskKey: key,
+      toStageId: "ready",
+    });
+    expect(denied).toContain("[denied]");
+    const stillContributor = await call(ids.contributor, "move_task", {
+      taskKey: key,
+      toStageId: "ready",
+    });
+    expect(stillContributor).toContain("[denied]");
+
+    const moved = await call(ids.maintainer, "move_task", {
+      taskKey: key,
+      toStageId: "ready",
+    });
+    expect(moved).toContain("[done]");
+  });
+
+  /**
+   * An archived project is read-only (R6-3). `requireAction` is the chokepoint
+   * that enforces that, and commenting names no RbacAction, so it never passes
+   * through it — the human comment path guards it by hand. `requireVisible`
+   * deliberately allows archived projects so reads keep working, which left
+   * the controller as the one door that could write into a frozen timeline.
+   */
+  it("an archived project refuses controller writes while still answering reads", async () => {
+    const { updateProjectFile } = await import(
+      "~/server/files/project-writer.server"
+    );
+    const { rebuildProject } = await import(
+      "~/server/projections/rebuilder.server"
+    );
+    const setArchived = async (archived: boolean) => {
+      await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+        p.frontmatter.archived = archived;
+      });
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    };
+
+    await setArchived(true);
+    try {
+      const commented = await call(ids.projectAdmin, "comment_on_task", {
+        taskKey: "VIB-142",
+        text: "Should not land on a frozen timeline.",
+      });
+      expect(commented).toContain("archived");
+      const { readTaskFile } = await import("~/server/files/task-writer.server");
+      const file = readTaskFile({
+        projectSlug: SLUG,
+        taskKey: "VIB-142",
+        dataRoot: app.dataRoot,
+      })!;
+      expect(file.parsed.timeline[0]!.text).not.toContain("frozen timeline");
+
+      // Reading an archived project still works — this is a freeze, not a
+      // disappearance.
+      const read = await call(ids.projectAdmin, "get_task", { taskKey: "VIB-142" });
+      expect(read).not.toContain("[denied]");
+    } finally {
+      await setArchived(false);
+    }
   });
 
   it("comment_on_task: any member may publish; the comment lands as the controller with the asker disclosed", async () => {

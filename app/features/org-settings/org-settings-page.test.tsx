@@ -392,9 +392,26 @@ const STAGES = [
   { id: "done", name: "Done", color: "#00b473" },
 ];
 
+/** The template-grant counts the LOADER supplies, matching what GAGENTS
+ *  declares. They are counted server-side over the profile files now, because
+ *  `gagents` is the specialist CRUD list and hides the controller and operator
+ *  templates whose grants the delete still rewrites. */
+const TEMPLATE_GRANTS = {
+  kbs: {},
+  mcps: { "github-mcp": 1 },
+  skills: { "terraform-review": 1 },
+};
+
 function renderResources() {
   return renderPanel(
-    <ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} />,
+    <ResourcesPanel
+      kbs={KBS}
+      mcps={MCPS}
+      skills={SKILLS}
+      gagents={GAGENTS}
+      templateGrants={TEMPLATE_GRANTS}
+      stages={STAGES}
+    />,
   );
 }
 
@@ -709,6 +726,31 @@ describe("ResourcesPanel", () => {
     ).toBeTruthy();
   });
 
+  it("counts a template the specialist list hides (the controller's own resources)", () => {
+    // `gagents` is the specialist CRUD list: the controller and operator
+    // templates are never in it, while the delete rewrites EVERY profile file.
+    // Deriving the count from `gagents` told an admin "Nothing grants it" about
+    // the controller's own knowledge base, right before the delete took it.
+    const { getByText, getByLabelText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={GAGENTS}
+        templateGrants={{
+          kbs: { "architecture-notes": 1 }, // granted by the controller alone
+          mcps: {},
+          skills: {},
+        }}
+        stages={STAGES}
+      />,
+    );
+    fireEvent.click(getByLabelText("Delete Architecture notes"));
+    expect(
+      getByText(/The grant is dropped from 1 agent template\./),
+    ).toBeTruthy();
+  });
+
   it("A2: templates AND project agents are counted together in one tail", () => {
     // github-mcp is granted by 1 org template (Developer) and, say, 3 project
     // deployments — the tail must name both, joined.
@@ -719,6 +761,7 @@ describe("ResourcesPanel", () => {
         skills={SKILLS}
         gagents={GAGENTS}
         projectGrants={{ kbs: {}, mcps: { "github-mcp": 3 }, skills: {} }}
+        templateGrants={TEMPLATE_GRANTS}
         stages={STAGES}
       />,
     );
@@ -1026,6 +1069,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
           skills: SKILLS,
           gagents: GAGENTS,
           projectGrants: { kbs: {}, mcps: {}, skills: {} },
+          templateGrants: { kbs: {}, mcps: {}, skills: {} },
           stages: STAGES,
           providers: { github: false, google: false },
           authProviders: AUTH_PROVIDERS,
@@ -1058,6 +1102,7 @@ describe("C9: instance storage line", () => {
     skills: SKILLS,
     gagents: GAGENTS,
     projectGrants: { kbs: {}, mcps: {}, skills: {} },
+    templateGrants: { kbs: {}, mcps: {}, skills: {} },
     stages: STAGES,
     providers: { github: false, google: false },
     authProviders: AUTH_PROVIDERS,
@@ -1135,6 +1180,7 @@ describe("run concurrency control", () => {
     skills: SKILLS,
     gagents: GAGENTS,
     projectGrants: { kbs: {}, mcps: {}, skills: {} },
+    templateGrants: { kbs: {}, mcps: {}, skills: {} },
     stages: STAGES,
     providers: { github: false, google: false },
     authProviders: AUTH_PROVIDERS,
@@ -1256,6 +1302,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
           skills: SKILLS,
           gagents: GAGENTS,
           projectGrants: { kbs: {}, mcps: {}, skills: {} },
+          templateGrants: { kbs: {}, mcps: {}, skills: {} },
           stages: STAGES,
           providers: { github: false, google: false },
           authProviders: AUTH_PROVIDERS,

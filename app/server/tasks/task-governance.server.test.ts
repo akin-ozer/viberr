@@ -818,6 +818,42 @@ describe("resolvePacket kind matrix", () => {
     expect(detail?.timeline[0]!.text).toContain("accepted, merge pending");
   });
 
+  it("ruling 98: a packet-resolved acceptance records the stage it came from", async () => {
+    // CANARY: drop the previousStageId line from resolvePacket's accept arm —
+    // the Done task still claims it arrived from `impl`.
+    //
+    // Every stage write records where the task came from, and this is the one
+    // Done door that writes the terminal stage itself rather than going through
+    // `applyAcceptanceWrite`. Left alone, the field names the stage two hops
+    // back and the next operator turn is told the task arrived from there.
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        previousStageId: "impl", // the stamp impl -> review left behind
+        waiting: "human",
+        pr: { number: 318, state: "review", title: "PR" },
+      },
+      PACKET,
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.stage).toBe("done");
+    expect(fm.previousStageId).toBe("review");
+  });
+
   it("request_edit: contributor forbidden, maintainer ok — waiting→agent, readiness→ready, packet cleared, ev copy written", async () => {
     const store = prepared();
     withTask(store, { stage: "review", waiting: "human" }, PACKET);

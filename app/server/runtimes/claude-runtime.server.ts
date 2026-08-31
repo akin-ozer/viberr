@@ -177,6 +177,26 @@ export function claudeIdleTimeoutMs(): number {
 }
 
 /**
+ * How long a cooperative stop is given to take effect before the adapter
+ * ABORTS the SDK subprocess. `interrupt()` is a cooperative control request to
+ * the CLI; a wedged one never answers, and it also disarms the idle guard, so
+ * without this the run has no watchdog left at all. Short, because a human is
+ * watching a Stop they just pressed.
+ */
+export const INTERRUPT_GRACE_MS = 20_000;
+
+/**
+ * After the cooperative grace elapses the adapter aborts the SDK's
+ * AbortController, which tears the child down (SIGTERM, then SIGKILL ~5s later).
+ * That abort ends the stream, and the loop's own catch settles the run once the
+ * process is actually gone — the point being that a settled run no longer
+ * leaves a live process writing the workspace. This second window is only a
+ * backstop for the case the aborted generator never unblocks; it must outlast
+ * the SDK's SIGTERM→SIGKILL escalation.
+ */
+export const INTERRUPT_ABORT_GRACE_MS = 10_000;
+
+/**
  * Built-in tools an operator run may never use: it coordinates the task and
  * writes only through its governance MCP tools — it never edits files, runs
  * shell commands, or spawns sub-agents that could. Denied tools are removed
@@ -555,6 +575,10 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let settled = false;
       let idleTimedOut = false;
       let queryHandle: ClaudeQuery | null = null;
+      // Wired into the SDK query options below. Aborting it tears down the
+      // spawned CLI subprocess (SIGTERM→SIGKILL) — the real stop lever behind
+      // the cooperative `interrupt()`, which a wedged CLI never answers.
+      const abortController = new AbortController();
 
       // R21-4 / G5 (FR28): the live phase/step the run strip renders. `lastStep`
       // sticks so a stretch of model thinking still shows the tool the run is
@@ -570,11 +594,47 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       // for this long it is hung, and nothing else would ever settle it.
       const idleMs = claudeIdleTimeoutMs();
       let idleTimer: ReturnType<typeof setTimeout> | null = null;
+      /** Deadline for a cooperative interrupt a wedged CLI never answers. */
+      let interruptTimer: ReturnType<typeof setTimeout> | null = null;
       const disarmIdle = () => {
         if (idleTimer) {
           clearTimeout(idleTimer);
           idleTimer = null;
         }
+      };
+      /**
+       * Escalate a stop the cooperative `interrupt()` did not achieve. After the
+       * grace window ABORT the SDK subprocess (SIGTERM→SIGKILL) so the stream
+       * ends for real and the loop's own catch settles the run once the process
+       * is gone — a settled run must never leave a live process writing the
+       * workspace. `onBackstop` runs only if even the abort never unblocks the
+       * generator, so the row cannot hang `running` forever. `settle` clears
+       * `interruptTimer`, so a real exit at any point cancels the escalation.
+       */
+      const armForcedStop = (onBackstop: () => void) => {
+        if (interruptTimer) clearTimeout(interruptTimer);
+        interruptTimer = setTimeout(() => {
+          if (settled) return;
+          logger.warn(
+            "claude run did not stop cooperatively — aborting the subprocess",
+            { runId: spec.runId, graceMs: INTERRUPT_GRACE_MS },
+          );
+          try {
+            abortController.abort();
+          } catch {
+            // Already aborted / nothing to tear down.
+          }
+          interruptTimer = setTimeout(() => {
+            if (settled) return;
+            logger.warn(
+              "claude subprocess abort did not settle the run — forcing it",
+              { runId: spec.runId, graceMs: INTERRUPT_ABORT_GRACE_MS },
+            );
+            onBackstop();
+          }, INTERRUPT_ABORT_GRACE_MS);
+          interruptTimer.unref?.();
+        }, INTERRUPT_GRACE_MS);
+        interruptTimer.unref?.();
       };
       const armIdle = () => {
         disarmIdle();
@@ -591,6 +651,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           void queryHandle?.interrupt().catch(() => {
             // Generator may already have completed.
           });
+          // A hung stream will not answer the cooperative interrupt either, so
+          // escalate to a real subprocess abort; the backstop settles `error`.
+          armForcedStop(settleIdleTimeout);
         }, idleMs);
       };
 
@@ -626,6 +689,10 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         if (settled) return;
         settled = true;
         disarmIdle();
+        if (interruptTimer) {
+          clearTimeout(interruptTimer);
+          interruptTimer = null;
+        }
         cb.onExit({ outcome, effectiveBackend: "claude", sessionId });
       };
 
@@ -789,6 +856,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           ...(spec.disallowedTools ?? []),
         ];
         if (denied.length) options.disallowedTools = denied;
+        // The subprocess kill switch: the interrupt/idle watchdogs abort this
+        // when the cooperative `interrupt()` goes unanswered (see `armForcedStop`).
+        options.abortController = abortController;
 
         const q = queryFn({ prompt: singlePrompt(spec.prompt), options });
         queryHandle = q;
@@ -932,10 +1002,20 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         interrupt() {
           if (interrupted || settled) return;
           interrupted = true;
+          // First the cooperative control request: a responsive CLI ends its
+          // stream cleanly. Disarming the idle guard here used to leave the run
+          // with NO watchdog — `interrupt()` is cooperative, a wedged CLI never
+          // answers, and the idle callback returns early once `interrupted` is
+          // set — so the row sat `running` with no process until the next
+          // restart's orphan sweep, and the earlier fix only SETTLED the row
+          // without stopping the child, which could then keep writing the
+          // workspace under a successor run or a reclaim rmSync. Escalate to a
+          // real subprocess abort instead; the backstop settles `interrupted`.
           disarmIdle();
           void queryHandle?.interrupt().catch(() => {
             // The generator may already have completed.
           });
+          armForcedStop(() => settle("interrupted"));
         },
       };
     },

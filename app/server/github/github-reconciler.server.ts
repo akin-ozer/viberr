@@ -15,6 +15,7 @@ import {
   patchTaskFrontmatter,
   readTaskFile,
   resolveTaskFilePath,
+  updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { storeRelativePath } from "~/server/files/file-store-root.server";
 import {
@@ -636,13 +637,54 @@ async function reconcileTaskUnlocked(
             (r.kind === "accept_completion" && closedButActive),
         )
       : [];
-    if (supersededRecs.length > 0) {
-      const supersededIds = new Set(supersededRecs.map((r) => r.id));
-      patch.recommendations = fm.recommendations.filter(
-        (r) => !supersededIds.has(r.id),
-      );
-    }
-    await patchTaskFrontmatter(ref, patch);
+    const supersededIds = new Set(supersededRecs.map((r) => r.id));
+    // Everything above was decided from a snapshot taken BEFORE several awaited
+    // GitHub round trips, and this is a blind whole-key assign. Another writer
+    // can land in that window — an acceptance stamping `pr.state: "accepted"`
+    // (merge pending), or a merge stamping `"merged"` — and a plain patch would
+    // overwrite it with the "review" this pass set out with. The `accepted`
+    // case never recovers: only an acceptance writes it, and the task is
+    // already in Done, so "Complete merge" would refuse forever.
+    //
+    // So re-apply the same two decisions against the file as it is NOW, under
+    // the lock: the local lifecycle state wins over a stale remote `review`,
+    // and the superseded-recommendation filter runs on the live list.
+    await updateTaskFile(ref, (parsed) => {
+      const applied: Partial<TaskFrontmatter> = { ...patch };
+      const current = parsed.frontmatter.pr;
+      if (current) {
+        if (!applied.pr) {
+          // The snapshot carried no PR, but one exists NOW — a delivery linked
+          // it during this pass's awaited round trips. Do not null it back out.
+          if ("pr" in applied) delete applied.pr;
+        } else if (current.number === applied.pr.number) {
+          // A concurrent writer can advance the PR lifecycle during this pass's
+          // awaited GitHub round trips; the blind assign below must not regress
+          // what it committed:
+          //  · MERGED is irreversible — never let any pass (an `accepted` one
+          //    whose GitHub lookup was refused and fell back to the snapshot, or
+          //    a stale `review`) stamp it back down and re-offer "Complete
+          //    merge" on a merged PR.
+          //  · a local ACCEPT must survive a pass that only re-read the PR as
+          //    still-open (`review`) — the acceptance never recovers otherwise
+          //    (only an acceptance writes it, and the task is already in Done) —
+          //    but a REAL GitHub close/merge still advances it (accepted→closed
+          //    / accepted→merged both land).
+          const keepCurrent =
+            (current.state === "merged" && applied.pr.state !== "merged") ||
+            (current.state === "accepted" && applied.pr.state === "review");
+          if (keepCurrent) {
+            applied.pr = { ...applied.pr, state: current.state };
+          }
+        }
+      }
+      if (supersededIds.size > 0) {
+        applied.recommendations = parsed.frontmatter.recommendations.filter(
+          (r) => !supersededIds.has(r.id),
+        );
+      }
+      Object.assign(parsed.frontmatter, applied);
+    });
     if (unownedPrIsNew && collisionNote) {
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),

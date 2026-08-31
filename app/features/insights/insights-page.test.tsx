@@ -17,6 +17,7 @@ function renderPage(summary: InsightsSummary) {
 const FULL: InsightsSummary = {
   totals: {
     runs: 42,
+    costedRuns: 42,
     cost: 3.5,
     inputTokens: 120_000,
     cachedInputTokens: 40_000,
@@ -156,7 +157,7 @@ describe("InsightsPage", () => {
   it("shows an empty state when there are no runs", () => {
     const { getByText, container } = renderPage({
       ...FULL,
-      totals: { runs: 0, cost: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, turns: 0 },
+      totals: { runs: 0, costedRuns: 0, cost: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, turns: 0 },
     });
     expect(getByText(/No agent runs yet/)).toBeTruthy();
     expect(container.querySelector(".stat-grid")).toBeNull();

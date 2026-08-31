@@ -4,10 +4,12 @@ import type { DatabaseSync } from "node:sqlite";
 import YAML, { YAMLParseError } from "yaml";
 import { z } from "zod";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
+import { diagnoseGoalFileContent, listGoalIds } from "./goal-writer.server";
 import { parseProjectFileContent } from "./project-file.server";
 import { parseTaskFileContent } from "./task-file.server";
 import {
   getDataRoot,
+  goalFilePath,
   projectFilePath,
   projectsDir,
   storeRelativePath,
@@ -40,7 +42,7 @@ import {
  * file without rolling the SQLite side back with it.
  */
 
-export type StoreFileKind = "project" | "task";
+export type StoreFileKind = "project" | "task" | "goal";
 
 /** Where in the file the problem is, when we can pin it down. */
 export interface FileLocation {
@@ -165,10 +167,12 @@ function checkFile(
       readError: error instanceof Error ? error.message : String(error),
     };
   }
-  const { diagnostics } =
+  const diagnostics =
     kind === "task"
-      ? parseTaskFileContent(content, { fallbackKey: key })
-      : parseProjectFileContent(content, { fallbackSlug: key });
+      ? parseTaskFileContent(content, { fallbackKey: key }).diagnostics
+      : kind === "goal"
+        ? diagnoseGoalFileContent(content)
+        : parseProjectFileContent(content, { fallbackSlug: key }).diagnostics;
   const blocking = diagnostics.filter((d) => d.hardStop === true);
   return {
     path: rel,
@@ -213,6 +217,15 @@ export function checkStore(
         files.push(checkFile(taskFile, "task", key, options.dataRoot));
       }
     }
+    // Ruling 99: goal files are canonical too. Without this walk a rescan
+    // reports `errors: 1` for an unreadable goal and NOTHING names the file —
+    // the exact blind spot this module exists to close.
+    for (const goalId of listGoalIds(slug, options.dataRoot)) {
+      const goalFile = goalFilePath(slug, goalId, options.dataRoot);
+      if (existsSync(goalFile)) {
+        files.push(checkFile(goalFile, "goal", goalId, options.dataRoot));
+      }
+    }
   }
 
   const untrusted = files.filter((f) => !f.trusted);
@@ -235,7 +248,7 @@ function renderCheckReport(
     `viberr store check — ${report.files.length} canonical files under ${report.dataRoot}`,
   ];
   if (report.untrusted.length === 0 && report.degraded.length === 0) {
-    lines.push("", "Every project.md and task.md parsed cleanly.");
+    lines.push("", "Every project, task and goal file parsed cleanly.");
     return lines.join("\n");
   }
 

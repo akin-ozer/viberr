@@ -235,6 +235,47 @@ describe("createProject — policy preset shapes REAL governance", () => {
     expect(opAutonomy(f.agents)).toBeUndefined(); // supervised (default)
   });
 
+  /**
+   * The synthesized description and the written stage list are produced two
+   * lines apart, and only the stage list honoured the custom blueprint — so a
+   * controller-built board was stored, projected and rendered as the
+   * "Standard 5-stage workflow" it is not.
+   */
+  it("a custom board is not described as the Standard 5-stage workflow", async () => {
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+    vi.stubGlobal("fetch", vi.fn());
+    const r = await createProject(
+      store.db,
+      {
+        name: "Release Ops",
+        key: "ROPS",
+        owner: "akin-ozer",
+        repoName: "r",
+        policy: "balanced",
+        custom: {
+          stages: [
+            { name: "Intake" },
+            { name: "Plan" },
+            { name: "Execute" },
+            { name: "Shipped" },
+          ],
+        },
+      },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    const parsed = readProjectFile({
+      projectSlug: r.slug,
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.frontmatter.stages).toHaveLength(4);
+    expect(parsed.description).not.toContain("Standard 5-stage");
+    expect(parsed.description).toContain("Custom 4-stage");
+    // The policy half of the sentence is untouched.
+    expect(parsed.description).toContain("balanced agent policy.");
+  });
+
   it("strict = human-gates the pre-work boundaries (no operator auto-advance)", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);

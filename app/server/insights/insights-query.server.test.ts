@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
+import type { Guardrail } from "~/schemas/project-file.schema";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { getInsightsSummary } from "./insights-query.server";
 
@@ -74,6 +75,21 @@ describe("getInsightsSummary", () => {
     expect(s.outcomes.running).toBe(1);
     // 2 finished of (2+1+1)=4 terminal → 0.5.
     expect(s.outcomes.successRate).toBeCloseTo(0.5, 5);
+  });
+
+  it("a day whose runs all report no cost shows null, not $0, in the daily series (bug-sweep #15)", () => {
+    const db = ctx.makeDb();
+    const day = "2026-08-22";
+    // Both runs on this day are Codex — no cost reported (total_cost_usd NULL).
+    insertRun(db, { state: "finished", cost: null, startedAt: `${day}T09:00:00.000Z` });
+    insertRun(db, { state: "finished", cost: null, startedAt: `${day}T10:00:00.000Z` });
+    const s = getInsightsSummary(db, NOW);
+    const point = s.daily.find((d) => d.date === day)!;
+    expect(point.runs).toBe(2);
+    // Unknown, not a dishonest $0.00 — the same honesty the breakdown groups carry.
+    expect(point.cost).toBeNull();
+    // A gap-filled quiet day (no runs) is still a real 0, not "not reported".
+    expect(s.daily.find((d) => d.runs === 0)!.cost).toBe(0);
   });
 
   it("successRate is null with no terminal runs", () => {
@@ -156,6 +172,34 @@ describe("getInsightsSummary", () => {
     expect(s.byModel.some((r) => r.label === "pricey-xl")).toBe(true);
   });
 
+  /**
+   * Only the Claude result envelope reports a cost, so every Codex run row is
+   * NULL. Coalescing that to 0 turned "unobservable" into "free", and because
+   * the breakdown was ordered cost-first and capped, the busiest groups on the
+   * instance were the first thing the cap dropped.
+   */
+  it("keeps an unpriced but busy group in the breakdown and reports its cost as absent, not $0", () => {
+    const db = ctx.makeDb();
+    // Eight priced Claude models, one run each.
+    for (let m = 0; m < 8; m++) {
+      insertRun(db, { backend: "claude", model: `claude-${m}`, cost: 0.5 });
+    }
+    // The busiest model on the instance reports no cost at all.
+    for (let r = 0; r < 12; r++) {
+      insertRun(db, { backend: "codex", model: "gpt-5", cost: null });
+    }
+
+    const s = getInsightsSummary(db, NOW);
+    const busiest = s.byModel.find((r) => r.label === "gpt-5");
+    expect(busiest, "the busiest model must survive the cap").toBeTruthy();
+    expect(busiest!.runs).toBe(12);
+    // Unknown, never "$0.00".
+    expect(busiest!.cost).toBeNull();
+    // And the headline says how much of the instance the cost covers.
+    expect(s.totals.runs).toBe(20);
+    expect(s.totals.costedRuns).toBe(8);
+  });
+
   it("gap-fills the daily window to exactly windowDays points, oldest first", () => {
     const db = ctx.makeDb();
     insertRun(db, { state: "finished", startedAt: "2026-08-22T09:00:00.000Z", cost: 0.5 });
@@ -195,13 +239,29 @@ const WORKFLOW = JSON.stringify([
   { from: "review", to: "done", boundary: "human" },
 ]);
 
-function insertProject(db: DatabaseSync, slug: string) {
+// The default mirrors the project template's own guardrail row (on, 40
+// events), so every existing case keeps the threshold it was written against.
+// A test that cares about the threshold passes its own.
+function insertProject(
+  db: DatabaseSync,
+  slug: string,
+  guardrails: Guardrail[] = [
+    { id: "compression-threshold", desc: "", on: true, value: 40, unit: "events" },
+  ],
+) {
   db.prepare(
     `INSERT INTO projects
-       (slug, name, task_prefix, stages_json, workflow_json, source_path,
-        content_hash, parsed_at)
-     VALUES (?, ?, 'VIB', ?, ?, ?, 'hash', '2026-08-01T00:00:00.000Z')`,
-  ).run(slug, slug, STAGES, WORKFLOW, `projects/${slug}/project.md`);
+       (slug, name, task_prefix, stages_json, workflow_json, guardrails_json,
+        source_path, content_hash, parsed_at)
+     VALUES (?, ?, 'VIB', ?, ?, ?, ?, 'hash', '2026-08-01T00:00:00.000Z')`,
+  ).run(
+    slug,
+    slug,
+    STAGES,
+    WORKFLOW,
+    JSON.stringify(guardrails),
+    `projects/${slug}/project.md`,
+  );
 }
 
 function insertTask(
@@ -345,6 +405,36 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     const scoped = getInsightsSummary(db, NOW, { projectSlug: "gp" }).oversight;
     expect(scoped.longTimelines).toBe(1);
     expect(scoped.clarity.activeTasks).toBe(2);
+  });
+
+  /**
+   * `compression-threshold` is a PER-PROJECT guardrail with a configurable
+   * value that can also be switched off. A hard-coded 40 counted a task in a
+   * project that compacts at 10 as short, and every task in a project that
+   * compacts nothing at all as one "the readability machinery is actively
+   * managing" — a card contradicting the machinery it describes.
+   */
+  it("counts long timelines against each project's own threshold, and not at all where the guardrail is off", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "tight", [
+      { id: "compression-threshold", desc: "", on: true, value: 10, unit: "events" },
+    ]);
+    insertProject(db, "off", [
+      { id: "compression-threshold", desc: "", on: false, value: 40, unit: "events" },
+    ]);
+    // Actively compacted in `tight` (25 >= 10) — invisible against a flat 40.
+    insertTask(db, { project: "tight", key: "TI-1", eventCount: 25 });
+    // Nothing compacts these: the project has the guardrail off.
+    insertTask(db, { project: "off", key: "OF-1", eventCount: 45 });
+    insertTask(db, { project: "off", key: "OF-2", eventCount: 99 });
+
+    expect(getInsightsSummary(db, NOW).oversight.longTimelines).toBe(1);
+    expect(
+      getInsightsSummary(db, NOW, { projectSlug: "tight" }).oversight.longTimelines,
+    ).toBe(1);
+    expect(
+      getInsightsSummary(db, NOW, { projectSlug: "off" }).oversight.longTimelines,
+    ).toBe(0);
   });
 });
 

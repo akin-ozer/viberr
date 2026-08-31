@@ -181,6 +181,7 @@ export function OrgSettingsPage({
               skills={view.skills}
               gagents={view.gagents}
               projectGrants={view.projectGrants}
+              templateGrants={view.templateGrants}
               stages={view.stages}
             />
           )}

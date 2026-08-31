@@ -112,6 +112,7 @@ import {
   resolveDeliveryPermissions,
   resolveSpecialistDisallowedTools,
   resolveUndeployedDisallowedTools,
+  specialistGrantModes,
 } from "./specialist-tool-policy";
 import {
   resolveSpecialistMcpServersDetailed,
@@ -746,8 +747,17 @@ export async function assignSpecialist(
       // appears twice (a duplicate profileId corrupts run routing — the
       // engagements.find in startAgentRun returns the first match, so a later
       // review run would resolve to the delivers:true entry and run as primary).
+      // Promotion REPLACES the row, so anything durable already recorded on it
+      // has to be carried across. `pinnedBackend` is the one that matters:
+      // F27-B1 says a retry-on-the-other-backend pin STICKS, and rebuilding the
+      // row from the bare `ref` silently reverted the next run to the very
+      // backend the pin existed to escape.
+      const existing = parsed.frontmatter.engagements.find(
+        (e) => e.profileId === ref.profileId,
+      );
       parsed.frontmatter.engagements = [
         {
+          ...existing,
           ...ref,
           delivers: true,
           // F10-15: snapshot verdict authority. A deliverer is excluded from the
@@ -763,6 +773,12 @@ export async function assignSpecialist(
       parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
         (r) => !(r.kind === "run_agent" && r.profileId === ref.profileId),
       );
+      // `engagements` is an input to `requiredReviewers`, so a hand-off that
+      // drops the approving reviewer changes what `validation` derives to. This
+      // is the roster writer that was not re-deriving the cache, leaving the
+      // canonical file asserting a review state that no longer follows from it
+      // (the same UX19-3 line `assignReviewer` and `removeReviewer` carry).
+      parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
       parsed.timeline.unshift(event);
     },
   );
@@ -3408,6 +3424,17 @@ export function listDeployedSpecialists(
           g.capabilityId === id &&
           coerceSpecialistCapabilityMode(g.mode) === "direct",
       );
+    // The headline `execute-code-or-write-repo` gates ALL delivery, so ask the
+    // runtime's own view of it (`specialistGrantModes` includes the repair that
+    // reads an actionable scoped grant as an implied headline) rather than
+    // trusting a scoped grant on its own.
+    const headlineMode = specialistGrantModes(grants).get(
+      "execute-code-or-write-repo",
+    );
+    const repoWriteWithheld =
+      headlineMode === undefined ||
+      headlineMode === "off" ||
+      headlineMode === "human";
     out.push({
       id: resolved.profileId,
       name: resolved.name,
@@ -3417,10 +3444,19 @@ export function listDeployedSpecialists(
       effort: resolved.effort,
       desc: view.desc,
       capabilities: {
+        // Asked of the RUNTIME's own resolver rather than re-derived here.
+        // Re-deriving it as "any scoped delivery grant is direct" was the same
+        // mistake XS-4 fixed on the prompt side: the headline
+        // `execute-code-or-write-repo` gates ALL delivery, so a profile with
+        // the headline off and `commit-push-branch` on read as delivery-capable
+        // to whoever picks the agent, while the tool layer denied every write
+        // it would need. `repairDeliveryGrants` deliberately preserves that
+        // combination (B-AG1), so it is a state a human can really save.
         delivery:
-          granted("execute-code-or-write-repo") ||
-          granted("commit-push-branch") ||
-          granted("create-task-branch"),
+          !repoWriteWithheld &&
+          (granted("execute-code-or-write-repo") ||
+            granted("commit-push-branch") ||
+            granted("create-task-branch")),
         // EXPLICIT grant only — the completion-time transition default
         // (absent grant → verdict-on for supporting engagements) is a
         // RECORDING rule, not a selection signal; applying it here made every

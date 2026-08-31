@@ -1,5 +1,3 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
-import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { ResCatalogGroup } from "~/features/agents/capability-catalog";
 import { kbRootDir, skillsRootDir } from "~/server/files/file-store-root.server";
@@ -7,6 +5,12 @@ import {
   isReservedMcpName,
   listMcpServers,
   listSkills,
+  // The ONE store-folder lister. The private copy here used `statSync`, which
+  // DEREFERENCES, so a symlinked `data/kb/<dir>` was offered in the profile
+  // picker while org settings hid it and every run refused to read it — a
+  // grant that resolves to nothing (P14-RV-02 / C5). Sharing the helper is
+  // what keeps the picker and the settings list from disagreeing again.
+  subDirNames,
 } from "./resources.server";
 
 /**
@@ -41,10 +45,10 @@ export function buildResourceCatalog(
   db: DatabaseSync,
   dataRoot?: string,
 ): ResCatalogGroup[] {
-  const skillIds = new Set<string>(dirNames(skillsRootDir(dataRoot)));
+  const skillIds = new Set<string>(subDirNames(skillsRootDir(dataRoot)));
   for (const s of safe(() => listSkills(db))) skillIds.add(s.name);
 
-  const kbIds = new Set<string>(dirNames(kbRootDir(dataRoot)));
+  const kbIds = new Set<string>(subDirNames(kbRootDir(dataRoot)));
   // SAFETY: `dir` is TEXT NOT NULL UNIQUE on `org_knowledge_bases`
   // (0001_baseline.sql), so every row of this one-column SELECT carries a string.
   for (const row of safe(() =>
@@ -86,22 +90,6 @@ export function buildResourceCatalog(
       items: [...kbIds].sort().map((id) => ({ id, def: false })),
     },
   ];
-}
-
-/** Immediate sub-directory names of a store root ([] when absent). */
-function dirNames(root: string): string[] {
-  try {
-    if (!existsSync(root)) return [];
-    return readdirSync(root).filter((entry) => {
-      try {
-        return statSync(path.join(root, entry)).isDirectory();
-      } catch {
-        return false;
-      }
-    });
-  } catch {
-    return [];
-  }
 }
 
 function safe<T>(fn: () => T[]): T[] {

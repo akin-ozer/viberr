@@ -455,7 +455,7 @@ export const CREDENTIAL_ENV_RE =
 const PRIVATE_RUNTIME_ENV_RE =
   /^(?:DATABASE_URL|REDIS_URL|SSH_AUTH_SOCK|GPG_AGENT_INFO)$/i;
 
-function filteredSpawnEnv(): Record<string, string> {
+export function filteredSpawnEnv(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] =>

@@ -43,6 +43,16 @@ export interface OrphanFinalization {
   reinvoked: number;
   /** Orphaned tasks whose re-invoke was skipped by the crash-loop cap. */
   capped: number;
+  /**
+   * The re-invokes this sweep LAUNCHED, joinable.
+   *
+   * A re-invoked operator drive clones `<taskDir>/workspace/<repo>`, and boot's
+   * workspace reclaim deletes exactly those directories on the claim that no
+   * run of this process holds a working tree — a claim only a caller that can
+   * WAIT for these can honour. Already settled when nothing was re-invoked, and
+   * it never rejects: each re-invoke is caught per task.
+   */
+  reinvokes: Promise<void>;
 }
 
 /**
@@ -75,7 +85,7 @@ export function finalizeOrphanedRuns(db: DatabaseSync): OrphanFinalization {
     kind: string;
   }[];
   if (orphans.length === 0)
-    return { finalized: 0, reinvoked: 0, capped: 0 };
+    return { finalized: 0, reinvoked: 0, capped: 0, reinvokes: Promise.resolve() };
 
   const now = new Date().toISOString();
   const realTasks = new Map<string, { projectSlug: string; taskKey: string }>();
@@ -148,8 +158,9 @@ export function finalizeOrphanedRuns(db: DatabaseSync): OrphanFinalization {
     toReinvoke.push(t);
   }
 
+  let reinvokes: Promise<void> = Promise.resolve();
   if (toReinvoke.length > 0) {
-    void (async () => {
+    reinvokes = (async () => {
       const { runOperator } = await import("./operator-run.server");
       for (const t of toReinvoke) {
         try {
@@ -172,6 +183,7 @@ export function finalizeOrphanedRuns(db: DatabaseSync): OrphanFinalization {
     finalized: orphans.length,
     reinvoked: toReinvoke.length,
     capped,
+    reinvokes,
   };
 }
 

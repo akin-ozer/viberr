@@ -556,6 +556,34 @@ export async function fireDueSchedules(
          *  no retry spent; the next tick's claim pre-check holds it until the
          *  live run ends. */
         let deferredConflict = false;
+        // Re-stamp the lease as THIS occurrence's drive begins. `claimedAt` is
+        // written when the tick claims the batch, but this drain is sequential
+        // and one drive can legitimately sit inside `runOperator` for
+        // CLONE_TIMEOUT_MS. With several occurrences due at once, a later one's
+        // WAIT alone can outlast CLAIM_LEASE_MS, so the next tick reads its
+        // claim as crashed and re-drives it — the FR39 double-drive the lease
+        // exists to prevent. Stamped here, the lease measures what the
+        // staleness check means: time since this occurrence started running.
+        try {
+          await updateTaskFile(
+            taskFileRef(ctx, t.projectSlug, t.taskKey),
+            (parsed) => {
+              const target = parsed.frontmatter.schedules.find(
+                (x) => x.id === t.scheduleId,
+              );
+              if (!target || target.status !== "claimed") return;
+              target.claimedAt = new Date().toISOString();
+            },
+          );
+        } catch (error) {
+          // A lease we could not re-stamp is no reason to skip the drive: the
+          // worst case is exactly the behaviour that existed before.
+          logger.warn("schedule claim lease refresh failed", {
+            taskKey: t.taskKey,
+            projectSlug: t.projectSlug,
+            err: error instanceof Error ? error : new Error(String(error)),
+          });
+        }
         try {
           if (t.action === "run-agent" && !t.profileId) {
             // A run-agent entry with no profile (hand-edited file, or a

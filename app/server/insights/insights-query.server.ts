@@ -1,9 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { guardrailSchema } from "~/schemas/project-file.schema";
 import {
   latestBackendRateLimits,
   type BackendQuotaRow,
 } from "~/server/runtimes/backend-quota.server";
+import { DEFAULT_COMPACTION } from "~/server/tasks/timeline-compaction.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 
 /**
@@ -21,6 +23,9 @@ const TOP_N = 8;
 
 export interface InsightsTotals {
   runs: number;
+  /** Runs that actually reported a cost. `runs - costedRuns` is the slice the
+   *  `cost` sum below can say nothing about, because only Claude reports one. */
+  costedRuns: number;
   cost: number;
   inputTokens: number;
   cachedInputTokens: number;
@@ -31,14 +36,20 @@ export interface InsightsTotals {
 export interface CountRow {
   label: string;
   runs: number;
-  cost: number;
+  /** Summed reported cost, or null when NO run in the group reported one. Only
+   *  the Claude result envelope carries a cost, so a Codex group's cost is
+   *  UNKNOWN, not zero. */
+  cost: number | null;
 }
 
 export interface DailyPoint {
   /** YYYY-MM-DD. */
   date: string;
   runs: number;
-  cost: number;
+  /** Total cost for the day, or null when the day HAS runs but none reported a
+   *  cost (all-Codex) — rendered "not reported", never a dishonest $0.00. A
+   *  gap-filled quiet day (no runs) is a real 0. */
+  cost: number | null;
 }
 
 /**
@@ -67,8 +78,10 @@ export interface OversightSummary {
   };
   /** Task creation → first transition into the project's review-role stage. */
   timeToReview: { tasks: number; avgMs: number | null; medianMs: number | null };
-  /** Tasks whose timeline passed the compression guardrail's threshold —
-   *  long-running records the readability machinery is actively managing. */
+  /** Tasks whose timeline passed THEIR OWN project's compression-guardrail
+   *  threshold — long-running records the readability machinery is actively
+   *  managing. A project with the guardrail off contributes none: nothing is
+   *  compacting there. */
   longTimelines: number;
 }
 
@@ -101,6 +114,7 @@ export interface InsightsSummary {
 
 const totalsSchema = z.object({
   runs: z.number(),
+  costed_runs: z.number(),
   cost: z.number().nullable(),
   input_tokens: z.number().nullable(),
   cached_input_tokens: z.number().nullable(),
@@ -143,10 +157,10 @@ function scope(filter: InsightsFilter): ScopeClause {
 
 // ---------------------------------------------------------- governance
 
-/** The compression guardrail's default threshold (project.md `guardrails`,
- *  `compression-threshold`): a timeline past this many events is a "long"
- *  record the readability machinery is actively managing. */
-const LONG_TIMELINE_EVENTS = 40;
+/** The project.md `guardrails` row that decides when a timeline is compacted —
+ *  the same id the compaction paths read. Its value is PER PROJECT and can be
+ *  switched off, so there is no instance-wide threshold to hard-code here. */
+const COMPRESSION_GUARDRAIL_ID = "compression-threshold";
 
 const govTaskSchema = z.object({
   project_slug: z.string(),
@@ -167,6 +181,7 @@ const govProjectSchema = z.object({
   slug: z.string(),
   stages_json: z.string(),
   workflow_json: z.string(),
+  guardrails_json: z.string(),
 });
 
 const govAuditSchema = z.object({
@@ -197,6 +212,26 @@ const stageDefsSchema = z.array(z.object({ id: z.string() }).loose());
 const workflowDefsSchema = z.array(
   z.object({ from: z.string(), to: z.string() }).loose(),
 );
+const guardrailDefsSchema = z.array(guardrailSchema);
+
+/**
+ * The event count past which THIS project's timelines are actually compacted,
+ * or null when the project has the compression guardrail off or never carried
+ * it.
+ *
+ * A card claiming the readability machinery is managing a task has to agree
+ * with the machinery: a hard-coded 40 counted tasks in a project that compacts
+ * at 10 as short, and tasks in a project that compacts nothing at all as
+ * actively managed.
+ */
+function compressionThreshold(guardrailsJson: string): number | null {
+  const rows = parsedJson(guardrailDefsSchema, guardrailsJson, []);
+  const rail = rows.find((g) => g.id === COMPRESSION_GUARDRAIL_ID && g.on);
+  if (!rail) return null;
+  return rail.value != null && rail.value > 0
+    ? rail.value
+    : DEFAULT_COMPACTION.threshold;
+}
 
 function median(sorted: number[]): number | null {
   if (sorted.length === 0) return null;
@@ -231,7 +266,7 @@ function oversightSummary(
   const projects = z.array(govProjectSchema).parse(
     db
       .prepare(
-        `SELECT slug, stages_json, workflow_json FROM projects` +
+        `SELECT slug, stages_json, workflow_json, guardrails_json FROM projects` +
           (filter.projectSlug ? ` WHERE slug = ?` : ``),
       )
       .all(...(filter.projectSlug ? [filter.projectSlug] : [])),
@@ -246,6 +281,13 @@ function oversightSummary(
         parsedJson(workflowDefsSchema, p.workflow_json, []),
       ),
     ]),
+  );
+
+  // Each project's OWN compression threshold, from the same rows the stage
+  // roles come from: a project with the guardrail off compacts nothing, so no
+  // task in it can be one the readability machinery is managing.
+  const compressionAt = new Map(
+    projects.map((p) => [p.slug, compressionThreshold(p.guardrails_json)]),
   );
 
   // 1. Ownership/state clarity over ACTIVE tasks (not archived, not terminal).
@@ -358,8 +400,10 @@ function oversightSummary(
       avgMs: avg(reviewDurations),
       medianMs: median(reviewDurations),
     },
-    longTimelines: tasks.filter((t) => t.event_count >= LONG_TIMELINE_EVENTS)
-      .length,
+    longTimelines: tasks.filter((t) => {
+      const threshold = compressionAt.get(t.project_slug);
+      return threshold != null && t.event_count >= threshold;
+    }).length,
   };
 }
 
@@ -375,6 +419,7 @@ export function getInsightsSummary(
     db
       .prepare(
         `SELECT count(*) AS runs,
+                count(total_cost_usd) AS costed_runs,
                 COALESCE(SUM(total_cost_usd), 0) AS cost,
                 COALESCE(SUM(input_tokens), 0) AS input_tokens,
                 COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
@@ -403,18 +448,22 @@ export function getInsightsSummary(
   // but expensive outlier (the exact thing "what's driving spend" needs), keeping
   // eight cheap-but-frequent groups instead. Cost-first guarantees the top cost
   // drivers always survive the cap.
-  const group = (column: string): CountRow[] =>
-    z
+  // The cap is applied HERE rather than in SQL. Only the Claude result envelope
+  // reports a cost, so SUM over a Codex-only group is NULL and SQLite's DESC
+  // ordering sorts NULL last — the busiest groups on the instance were the
+  // first thing the LIMIT dropped. A label is a backend/kind/model/project, a
+  // handful of real entities, so grouping over the whole set is cheap; the top
+  // by RUNS is unioned in so no group is dropped purely for being unpriced.
+  const group = (column: string): CountRow[] => {
+    const rows: CountRow[] = z
       .array(groupSchema)
       .parse(
         db
           .prepare(
             `SELECT ${column} AS label, count(*) AS runs,
-                    COALESCE(SUM(total_cost_usd), 0) AS cost
+                    SUM(total_cost_usd) AS cost
              FROM agent_runs ${clause}
-             GROUP BY ${column}
-             ORDER BY cost DESC, runs DESC
-             LIMIT ${TOP_N}`,
+             GROUP BY ${column}`,
           )
           .all(...params),
       )
@@ -423,8 +472,26 @@ export function getInsightsSummary(
       .map((r) => ({
         label: r.label === "" ? "controller (instance)" : (r.label ?? "unknown"),
         runs: r.runs,
-        cost: r.cost ?? 0,
+        cost: r.cost,
       }));
+
+    const byCost = [...rows].sort(
+      (a, b) => (b.cost ?? -1) - (a.cost ?? -1) || b.runs - a.runs,
+    );
+    const byRuns = [...rows].sort((a, b) => b.runs - a.runs);
+    const kept = new Map<string, CountRow>();
+    // Half the slots are reserved for the busiest groups, so a cost dashboard
+    // still leads with spend without hiding where the work happens.
+    const runSlots = Math.floor(TOP_N / 2);
+    for (const row of byRuns.slice(0, runSlots)) kept.set(row.label, row);
+    for (const row of byCost) {
+      if (kept.size >= TOP_N) break;
+      kept.set(row.label, row);
+    }
+    return [...kept.values()].sort(
+      (a, b) => (b.cost ?? -1) - (a.cost ?? -1) || b.runs - a.runs,
+    );
+  };
 
   const duration = durationSchema.parse(
     db
@@ -450,8 +517,11 @@ export function getInsightsSummary(
   const dailyRows = z.array(dailySchema).parse(
     db
       .prepare(
+        // No COALESCE: a day whose runs all report no cost (all-Codex) keeps a
+        // NULL sum, surfaced as "not reported" — never a dishonest $0.00, the
+        // same honesty the breakdown groups carry.
         `SELECT substr(started_at, 1, 10) AS date, count(*) AS runs,
-                COALESCE(SUM(total_cost_usd), 0) AS cost
+                SUM(total_cost_usd) AS cost
          FROM agent_runs
          ${and("started_at IS NOT NULL AND substr(started_at, 1, 10) >= ?")}
          GROUP BY date ORDER BY date ASC`,
@@ -465,12 +535,14 @@ export function getInsightsSummary(
       .toISOString()
       .slice(0, 10);
     const row = byDate.get(d);
-    daily.push({ date: d, runs: row?.runs ?? 0, cost: row?.cost ?? 0 });
+    // A real day keeps its (possibly null) cost; a gap-filled quiet day is 0.
+    daily.push({ date: d, runs: row?.runs ?? 0, cost: row ? row.cost : 0 });
   }
 
   return {
     totals: {
       runs: totals.runs,
+      costedRuns: totals.costed_runs,
       cost: totals.cost ?? 0,
       inputTokens: totals.input_tokens ?? 0,
       cachedInputTokens: totals.cached_input_tokens ?? 0,

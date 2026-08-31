@@ -125,6 +125,68 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
     expect(notifications(store)).toHaveLength(0);
   });
 
+  it("a deduped report still delivers the dispatch cc's ADDED @tag (bug-sweep #7)", async () => {
+    // A dispatched run whose final report REPEATS its mid-run comment verbatim
+    // (F22-12) is deduped and not re-posted — but the dispatch-completion cc line
+    // (ruling 98) tags the dispatcher, a mention that comment never carried.
+    // stripCcLine equalised the two, the reply was dropped, and the guaranteed
+    // ping — fanned out only when the reply POSTED — never fired.
+    const store = setupTestStore(ctx);
+    seedTask(store);
+    const runId = "run_dedup";
+    const startedAt = "2026-08-31T00:00:00.000Z";
+    // A real run row so the mid-run-comment dedup can bound on started_at.
+    store.db
+      .prepare(
+        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
+           backend, model, state, started_at, created_at, updated_at, agent_profile_id)
+         VALUES (?, 'VIB-1', ?, 'th_dedup', 'Docs Writer', 'primary',
+           'codex', 'gpt-test', 'finished', ?, ?, ?, 'docs-writer')`,
+      )
+      .run(runId, store.slug, startedAt, startedAt, startedAt);
+
+    // The agent's mid-run comment — the body its report repeats. Tags NOBODY, so
+    // the dispatch cc below is a genuinely NEW mention (not a re-notify).
+    const body = "The refactor is done and every test passes.";
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: "2026-08-31T00:05:00.000Z",
+          type: "comment",
+          actor: AGENT,
+          title: null,
+          text: body,
+          toAgent: false,
+          evidence: null,
+        });
+      },
+    );
+
+    await recordAgentCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      {
+        actorRef: AGENT,
+        runId,
+        // Body repeats the mid-run comment (deduped); the cc line is the new tag.
+        replyText: `${body}\n\ncc @${store.users.arda.name} @operator`,
+        verdict: null,
+        question: null,
+      },
+    );
+
+    // The dispatcher (Arda) is notified even though the reply body deduped.
+    const rows = notifications(store).filter((r) => r.kind === "mention");
+    expect(rows.map((r) => r.user_id)).toEqual([store.users.arda.id]);
+    // The duplicate body did NOT post a second comment.
+    const comments = timeline(store).filter((e) => e.type === "comment");
+    expect(comments).toHaveLength(1);
+  });
+
   it("fans out on the other backend's shape too — a verdict report that tags a human", async () => {
     // Codex delivers its report as the envelope `summary`; Claude delivers the
     // last assistant text line. Both arrive here as `replyText`, and a verdict

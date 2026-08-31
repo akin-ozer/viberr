@@ -84,6 +84,37 @@ function unescapeEventTextLine(line: string): string {
   return ESCAPED_LINE_RE.test(line) ? line.slice(1) : line;
 }
 
+/**
+ * The same escape, narrowed for a BODY SECTION's prose (`## Goal`).
+ *
+ * Only `## ` ends a section, so only `## ` needs escaping here — `### ` and
+ * the `title:`/`to:`/`evidence:` metadata lines are structure inside a
+ * timeline EVENT and are ordinary prose in the goal. Escaping them too would
+ * mangle sentences like "title: Ship it" for no protection.
+ *
+ * Without this the goal is written from untrusted places (the task form, an
+ * agent's goal edit, the controller's chain context) straight into a section
+ * whose fence it can close: a plain `## Acceptance` heading truncates the goal
+ * at that line, and a `## Timeline` block forges the history the acceptance
+ * decision is read from while demoting the real one to a duplicate.
+ */
+const NEEDS_SECTION_ESCAPE_RE = /^\\*## /;
+const ESCAPED_SECTION_RE = /^\\+## /;
+
+function escapeSectionText(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (NEEDS_SECTION_ESCAPE_RE.test(line) ? `\\${line}` : line))
+    .join("\n");
+}
+
+function unescapeSectionText(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (ESCAPED_SECTION_RE.test(line) ? line.slice(1) : line))
+    .join("\n");
+}
+
 interface RawSection {
   title: string; // "" = preamble before the first `## `
   lines: string[];
@@ -438,7 +469,7 @@ export function parseTaskFileContent(
         duplicateSection("Goal", raw);
         continue;
       }
-      goal = raw.trim();
+      goal = unescapeSectionText(raw).trim();
       sawGoal = true;
     } else if (section.title === "Packet") {
       if (sawPacket) {
@@ -514,7 +545,7 @@ export function serializeTaskFile(parsed: ParsedTaskFile): string {
     if (extra.title === "") bodyParts.push(extra.raw);
   }
 
-  bodyParts.push(`## Goal\n\n${parsed.goal}`.trimEnd());
+  bodyParts.push(`## Goal\n\n${escapeSectionText(parsed.goal)}`.trimEnd());
 
   if (parsed.packet) {
     const yamlText = toYaml(parsed.packet).trimEnd();

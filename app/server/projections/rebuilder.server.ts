@@ -26,6 +26,7 @@ import {
 } from "~/server/files/file-store-root.server";
 import { currentLinkIndex } from "~/schemas/goal-file.schema";
 import {
+  diagnoseGoalFileContent,
   listGoalIds,
   parseGoalFileContent,
 } from "~/server/files/goal-writer.server";
@@ -781,7 +782,15 @@ export function rebuildGoalFile(
   const parsed = parseGoalFileContent(content);
   if (!parsed) {
     // Goal files are app-written; an unparseable one is recorded, and any
-    // existing row is left standing (visible-but-stale beats vanished).
+    // existing row is left standing (visible-but-stale beats vanished). The
+    // diagnostics rows are what make it FINDABLE: `npm run rescan` counts this
+    // as an error, and untrustedFileReport is where it learns the file's name.
+    replaceDiagnostics(db, {
+      sourcePath,
+      projectSlug: slug,
+      taskKey: null,
+      diagnostics: diagnoseGoalFileContent(content),
+    });
     recordProvenance(db, {
       sourcePath,
       contentHash,
@@ -790,6 +799,13 @@ export function rebuildGoalFile(
     });
     return { action: "error", kind: "goal", projectSlug: slug, goalId };
   }
+  // Parsed cleanly: clear any diagnostics a previous broken revision left.
+  replaceDiagnostics(db, {
+    sourcePath,
+    projectSlug: slug,
+    taskKey: null,
+    diagnostics: [],
+  });
   const fm = parsed.frontmatter;
 
   // Reconcile link statuses against the live task rows.
@@ -806,13 +822,22 @@ export function rebuildGoalFile(
       .get(slug, link.taskKey) as { stage: string; archived: number } | undefined;
     if (!task) return link;
     if (link.status === "skipped") return link;
-    if (task.archived) return { ...link, status: "failed" as const };
+    if (task.archived) {
+      // Archiving a task that already COMPLETED its link is bookkeeping, not a
+      // chain failure. The engine treats `done` as settled and never revisits
+      // it, so failing it here would write a status the file can never be
+      // brought to agree with — and the Goals panel would offer Retry/Skip
+      // buttons the server refuses from the file.
+      return link.status === "done" ? link : { ...link, status: "failed" as const };
+    }
     if (stages && isTerminalStage(task.stage, stages)) {
       return { ...link, status: "done" as const };
     }
-    if (link.status === "done") {
-      // The task LEFT the terminal stage since the advance recorded done —
-      // surface the truth; the reconciler run will requeue it.
+    if (link.status === "done" || link.status === "failed") {
+      // The stored status is a CLAIM the advance machinery last wrote, and the
+      // live task contradicts it: it was pulled back out of the terminal stage,
+      // or restored from the archive. Both are re-openings, and the engine
+      // derives the same thing, so the two stay in step.
       return { ...link, status: "active" as const };
     }
     return link;
