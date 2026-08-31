@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, renameSync, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { logger } from "../logging/logger.server";
 import { runMigrations } from "./migration-runner.server";
 import { openDatabase } from "./sqlite.server";
@@ -50,15 +51,26 @@ const REBUILT_FROM_FILES = new Set([
 const SQLITE_CORRUPT = 11;
 const SQLITE_NOTADB = 26;
 
+/**
+ * What `node:sqlite` throws carries the raw SQLite result code on an `errcode`
+ * property its declared type does not mention. Decoding it (rather than
+ * asserting a hand-written type onto the thrown value) keeps the corruption
+ * verdict off anything the driver did not actually report: a throwable with no
+ * numeric `errcode` decodes to `NO_ERRCODE`, which matches no arm — exactly
+ * what the previous property read did.
+ */
+const NO_ERRCODE = -1;
+const sqliteErrcodeSchema = z
+  .object({ errcode: z.number() })
+  .transform((thrown) => thrown.errcode)
+  .catch(NO_ERRCODE);
+
 /** True only for a CORRUPTION result code / message — not an I/O or permission
  *  failure (which must never trigger a heal). Exported for the unit test. */
-export function isCorruptionError(error: unknown): boolean {
-  const errcode =
-    typeof error === "object" && error !== null && "errcode" in error
-      ? (error as { errcode?: unknown }).errcode
-      : undefined;
+export function isCorruptionError(cause: unknown): boolean {
+  const errcode = sqliteErrcodeSchema.parse(cause);
   if (errcode === SQLITE_CORRUPT || errcode === SQLITE_NOTADB) return true;
-  const message = error instanceof Error ? error.message : String(error);
+  const message = cause instanceof Error ? cause.message : String(cause);
   return /malformed|not a database|disk image is malformed/i.test(message);
 }
 
@@ -145,21 +157,30 @@ export interface SelfHealResult {
   movedTo?: string;
 }
 
+/** One table's salvage outcome: rows carried into the fresh database, and rows
+ *  that were readable but refused by it. */
+interface CopyTableCounts {
+  inserted: number;
+  skipped: number;
+}
+
 /** Stream one table's readable rows from `src` into `dst`, keeping the PREFIX
  *  read before any corrupt page throws. Returns inserted/skipped counts. */
 function copyTable(
   src: DatabaseSync,
   dst: DatabaseSync,
   table: string,
-): { inserted: number; skipped: number } {
+): CopyTableCounts {
   const dstCols = columnNames(dst, table);
   let inserted = 0;
   let skipped = 0;
   let stmt: ReturnType<DatabaseSync["prepare"]> | null = null;
   let cols: string[] = [];
   try {
-    for (const raw of src.prepare(`SELECT * FROM ${q(table)}`).iterate()) {
-      const row = raw as Record<string, unknown>;
+    // `iterate()` already yields `Record<string, SQLOutputValue>` — the exact
+    // null|number|bigint|string|Uint8Array set `run()` accepts as bound values,
+    // so the row flows through without an assertion.
+    for (const row of src.prepare(`SELECT * FROM ${q(table)}`).iterate()) {
       if (!stmt) {
         cols = Object.keys(row).filter((c) => dstCols.has(c));
         if (cols.length === 0) return { inserted: 0, skipped: 0 };
@@ -170,15 +191,9 @@ function copyTable(
         );
       }
       try {
-        // SAFETY: node:sqlite bound values are null|number|bigint|string|
-        // Uint8Array, which is exactly what a SELECT * on the same engine
-        // produced. INSERT OR IGNORE returns changes:0 when a constraint (e.g.
-        // a NOT NULL column a newer baseline added) drops the row.
-        const res = stmt.run(
-          ...(cols.map((c) => row[c]) as Array<
-            null | number | bigint | string | Uint8Array
-          >),
-        );
+        // INSERT OR IGNORE returns changes:0 when a constraint (e.g. a NOT NULL
+        // column a newer baseline added) drops the row.
+        const res = stmt.run(...cols.map((c) => row[c]));
         if (res.changes > 0) inserted += 1;
         else skipped += 1;
       } catch {

@@ -321,9 +321,18 @@ it is regenerated from the filesystem rather than restated here.
     not containment (the acceptance gate accepts a head that merely *contains* the delivered
     commit; adoption is the stronger claim), and a task that has delivered nothing adopts
     nothing. A name-matched PR that fails the rule is a branch COLLISION, reported as one
-    (`prAdoptionRefusalNote`; refusals `not_open | no_revision | head_unknown | head_mismatch`)
-    and blocking delivery — never silently bound, never silently dropped. Extends ruling 34
-    (R15-15). `app/server/github/pr-adoption.server.ts`.
+    (`prAdoptionRefusalNote`; refusals `merged | closed | no_revision | head_unknown |
+    head_mismatch`) and blocking delivery — never silently bound, never silently dropped.
+    Extends ruling 34 (R15-15). `app/server/github/pr-adoption.server.ts`.
+    *(Refusal set corrected 2026-08-31, pass 31: this line read `not_open | no_revision |
+    head_unknown | head_mismatch`. F17-L4 (pass 17) split `not_open` into **`merged`** and
+    **`closed`**, because the two carry opposite delivery hazards and must not share one
+    sentence: a merged stranger PR's tip is already an ancestor of the base, so a fresh
+    delivery fast-forwards and the collision is only the stale branch NAME; a closed-unmerged
+    one carries commits that are not on the base, so a fresh push risks a non-fast-forward —
+    a real history hazard. Neither the rule nor its scope changed, only the reason names.
+    Corrected against `PrAdoptionRefusal` in `app/server/github/pr-adoption.server.ts`, which
+    is the source of truth, per ruling 44 (R17-3).)*
 36. **R16-2 (2026-08-04): `input_required` joins the board's attention predicate.** The
     board's "risk"/attention filter selected only `blocked` and
     `inconsistency_risk_detected`, so it matched 0 of 4 tasks on a board full of

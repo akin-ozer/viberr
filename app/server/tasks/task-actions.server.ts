@@ -60,6 +60,7 @@ import {
   encodeActorRef,
 } from "~/server/files/actor-ref.server";
 import {
+  AGENT_QUESTION_PACKET_KIND,
   buildAgentQuestionPacket,
   type AgentOutcomeQuestion,
 } from "./agent-outcome.server";
@@ -112,6 +113,7 @@ import {
   agentNamesByProfile,
   getRun,
   listRunsForTaskRows,
+  patchRun,
 } from "~/server/runtimes/run-store.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import type {
@@ -1815,7 +1817,7 @@ function stripCcLine(text: string | null): string | null {
     ? null
     : text
         .split("\n")
-        .filter((line) => !/^cc @/.test(line))
+        .filter((line) => !line.startsWith("cc @"))
         .join("\n")
         .trim();
 }
@@ -2217,6 +2219,26 @@ function latestAgentReplyText(
   return null;
 }
 
+/**
+ * What a stuck-loop escalation actually did. T13 (pass 31): callers need this
+ * because `operatorOpenPacket` NOTIFIES the task's watchers itself — an
+ * actionable "Blocked, decision needed: …" row. A caller that also sends its own
+ * plain "run failed: …" notification therefore produces two rows about one
+ * event, differing only in wording. Only `"opened"` means that packet
+ * notification went out; the other two arms leave the caller responsible for
+ * telling anyone at all.
+ */
+type StuckLoopEscalation =
+  /** A packet was written and its watcher notification sent. */
+  | "opened"
+  /** A packet was ALREADY open on this task, so nothing was written and nobody
+   *  was notified for THIS event (the earlier packet had its own notification,
+   *  which may have been about something else entirely). */
+  | "already_open"
+  /** The packet was refused or the write threw; a timeline note was left
+   *  instead, and no notification was sent. */
+  | "failed";
+
 /** Open one recovery packet when the bounded operator loop stalls. */
 async function openStuckLoopPacket(
   db: DatabaseSync,
@@ -2235,10 +2257,13 @@ async function openStuckLoopPacket(
      *  actual cause on the packet, not only in the timeline. */
     providerText?: string;
   },
-): Promise<void> {
+): Promise<StuckLoopEscalation> {
   try {
     const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
-    if (!existing || existing.parsed.packet) return; // already escalated
+    // Unreadable task file: nothing was escalated and nothing can be — that is
+    // a failure, not an existing packet (T13 reads these apart).
+    if (!existing) return "failed";
+    if (existing.parsed.packet) return "already_open"; // already escalated
     const { operatorOpenPacket, resolveOperatorAuthority } = await import(
       "./operator-actions.server"
     );
@@ -2296,13 +2321,16 @@ async function openStuckLoopPacket(
       // packet was refused — so without a note the task sits waiting on a human
       // with no card saying why. Leave one.
       await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey);
+      return "failed";
     }
+    return "opened";
   } catch (error) {
     logger.warn("stuck-loop packet escalation failed", {
       taskKey: input.taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
     await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey);
+    return "failed";
   }
 }
 
@@ -3046,10 +3074,7 @@ export async function registerAgentCompletion(
   // staged report_outcome envelope after a restart (AO-1) — the in-process
   // callback below holds it only in a closure that dies with the process.
   if (input.outcomeKey) {
-    db.prepare(`UPDATE agent_runs SET outcome_key = ? WHERE id = ?`).run(
-      input.outcomeKey,
-      input.runId,
-    );
+    patchRun(db, input.runId, { outcomeKey: input.outcomeKey });
   }
   const { registerRunCompletion, noteCompletionEffectsLost } = await import(
     "~/server/runtimes/run-service.server"
@@ -3531,17 +3556,38 @@ export async function applyAgentCompletionEffects(
     };
     if (retryOption.length) stuck.extraOptions = retryOption;
     if (providerText) stuck.providerText = providerText;
-    await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, stuck);
-    notifyTaskWatchers(
+    const escalation = await openStuckLoopPacket(
       db,
-      {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        kind: "quality",
-        text: `${input.role} run failed: ${reasonText}.`,
-      },
-      ctx,
+      { ...ctx, operatorAuthorized: true },
+      stuck,
     );
+    // T13 (pass 31): ONE notification per failure, not two.
+    //
+    // `openStuckLoopPacket` → `operatorOpenPacket` already notifies the same
+    // watchers with the actionable row ("Blocked, decision needed: Work
+    // stalled: pick a recovery path", whose body is this same sentence plus
+    // "Coordination is paused until a human chooses how to proceed"). Sending
+    // this second `quality` row as well put two near-identical entries in every
+    // supervisor's queue for a single failed run, differing only in wording —
+    // and the shorter one is the one that cannot be acted on.
+    //
+    // It is still sent when NO packet notification went out: an escalation that
+    // was refused or threw ("failed"), or one that found a packet already open
+    // ("already_open" — that packet's own notification may have been about
+    // something else entirely, and was certainly not about this failure). A
+    // failed run must never pass silently.
+    if (escalation !== "opened") {
+      notifyTaskWatchers(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          kind: "quality",
+          text: `${input.role} run failed: ${reasonText}.`,
+        },
+        ctx,
+      );
+    }
     await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
     return;
   }
@@ -6284,6 +6330,33 @@ export async function resolvePacket(
       clearPacket = true;
       break;
     }
+    case "resolve_remote_collision": {
+      // F31-6: the branch-collision remedy. Deletes a REMOTE ref (and closes
+      // the recorded unowned PR), so it takes the same `approve-transition`
+      // tier as the sibling destructive options; the GitHub work and the
+      // re-delivery run AFTER the resolution write, below.
+      requireAction(
+        db,
+        project,
+        actor,
+        "approve-transition",
+        "resolve this task's branch collision",
+      );
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text:
+          option.ev ??
+          `**Decision:** ${option.t}. The stale remote branch is removed and this task's local work is re-delivered.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = () => {};
+      clearPacket = true;
+      break;
+    }
     default: {
       // request_edit | redirect | custom — send back to the agent side.
       event = {
@@ -6390,6 +6463,7 @@ export async function resolvePacket(
     "hold_runtime_debug", // the human explicitly asked for no run (§1.2)
     "retry_other_backend", // starts a specialist run above; its completion re-invokes
     "discard_branch", // cleanup only, no coordination change
+    "resolve_remote_collision", // the re-delivery's own machinery owns the follow-up
   ];
   const requeue = !NO_REQUEUE.includes(option.kind);
   if (requeue) {
@@ -6410,7 +6484,9 @@ export async function resolvePacket(
     let answeredAsker = false;
     if (sentBackToAgent) {
       const askedBy =
-        packet.kind === "Agent question" ? (packet.askedBy?.trim() ?? "") : "";
+        packet.kind === AGENT_QUESTION_PACKET_KIND
+          ? (packet.askedBy?.trim() ?? "")
+          : "";
       if (askedBy) {
         const answer: Parameters<typeof answerAskingAgent>[2] = {
           projectSlug: input.projectSlug,
@@ -6651,6 +6727,71 @@ export async function resolvePacket(
             ? { branch: outcome.branch, sha: outcome.sha, basis: "local_only" }
             : { branch, status: outcome.status },
       });
+    }
+  }
+
+  // resolve_remote_collision (F31-6): the decision IS the three-step remedy —
+  // close the recorded unowned PR, delete the stale remote branch, re-deliver
+  // this task's local work. Each step is best-effort AFTER the resolution
+  // write (the decision stands even when GitHub misbehaves), and every
+  // non-success lands on the timeline in plain words.
+  if (option.kind === "resolve_remote_collision" && actor.userId) {
+    const { resolveRemoteBranchCollision } = await import(
+      "~/server/github/github-reconciler.server"
+    );
+    const collisionCtx: Parameters<typeof resolveRemoteBranchCollision>[3] = {
+      dataRoot: ctx.dataRoot,
+    };
+    if (ctx.fetchImpl) collisionCtx.fetchImpl = ctx.fetchImpl;
+    const collision = await resolveRemoteBranchCollision(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      { userId: actor.userId, label: actor.label },
+      collisionCtx,
+    );
+    if (collision.status === "cleared") {
+      // The name is free again — re-deliver through the same audited door the
+      // task page's "Deliver branch & open PR" uses (maintainer+/owner gate;
+      // the approve-transition check above implies it for every resolver).
+      const delivery = await manualDeliverForReview(
+        db,
+        { projectSlug: input.projectSlug, taskKey: input.taskKey },
+        actor,
+        ctx,
+      );
+      if (delivery.status !== "delivered") {
+        await updateTaskFile(
+          taskRef(ctx, input.projectSlug, input.taskKey),
+          (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "policy-engine" },
+              title: null,
+              text: `The stale remote branch was cleared, but the re-delivery did not complete: ${delivery.message} Deliver again from the task page when it is resolved.`,
+              toAgent: false,
+              evidence: null,
+            });
+          },
+        );
+        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      }
+    } else {
+      await updateTaskFile(
+        taskRef(ctx, input.projectSlug, input.taskKey),
+        (parsed) => {
+          parsed.timeline.unshift({
+            occurredAt: new Date().toISOString(),
+            type: "note",
+            actor: { kind: "system", systemId: "policy-engine" },
+            title: null,
+            text: `The branch collision was **not** cleared: ${collision.message} Nothing was re-delivered.`,
+            toAgent: false,
+            evidence: null,
+          });
+        },
+      );
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     }
   }
 

@@ -60,6 +60,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     prReview: null,
     commits: [],
     changed: null,
+    unownedPr: null,
     goal: "Keep the timeline readable.",
     packet: null,
     eventCount: 0,

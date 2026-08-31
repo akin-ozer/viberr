@@ -148,10 +148,15 @@ export async function setMemberRole(
     changed = true;
   });
 
+  // D2 (pass 31): the FULL display name, not `.split(" ")[0]`. A first name is
+  // not an identity on a project with more than one Ayşe — the toast confirming
+  // a role change has to say WHO changed, and the shortened form read as a
+  // different person's role move ("QA is now Contributor" on an instance with
+  // two QA-named members).
   const targetName = userName(db, input.targetUserId);
   if (!changed) {
     return {
-      toast: `${targetName.split(" ")[0]} is now ${ROLE_LABEL[role]} · enforced on the next action`,
+      toast: `${targetName} is now ${ROLE_LABEL[role]} · enforced on the next action`,
       changed: false,
     };
   }
@@ -167,7 +172,7 @@ export async function setMemberRole(
   });
 
   return {
-    toast: `${targetName.split(" ")[0]} is now ${ROLE_LABEL[role]} · enforced on the next action`,
+    toast: `${targetName} is now ${ROLE_LABEL[role]} · enforced on the next action`,
     changed: true,
   };
 }

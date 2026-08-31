@@ -564,7 +564,9 @@ export function getInsightsSummary(
     avgDurationMs: duration.avg_ms,
     daily,
     oversight: oversightSummary(db, filter),
-    backendQuota: latestBackendRateLimits(db),
+    // D5: `nowIso` retires an exhaustion record whose provider-named reset
+    // instant has already passed — the window it described is over.
+    backendQuota: latestBackendRateLimits(db, nowIso),
     windowDays: WINDOW_DAYS,
     generatedAt: nowIso,
   };

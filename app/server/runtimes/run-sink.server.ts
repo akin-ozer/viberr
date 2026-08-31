@@ -4,7 +4,12 @@ import type { LogLine, RunBackend, RunState } from "~/features/runtime/runtime-t
 import { isDatabaseShuttingDown } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
-import { recordBackendRateLimit } from "./backend-quota.server";
+import {
+  clearBackendQuotaExhaustion,
+  parseQuotaResetAt,
+  recordBackendQuotaExhaustion,
+  recordBackendRateLimit,
+} from "./backend-quota.server";
 import { publishRunLogAppended, publishRunStateChanged } from "./run-events.server";
 import { CREDENTIAL_ENV_RE } from "./runtime-registry.server";
 import {
@@ -367,6 +372,27 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
         const raw = redact(line.raw);
         const display = line.display ? redactDisplay(line.display, redact) : null;
 
+        // D5 (pass 31): the OTHER half of quota telemetry. The live
+        // `rate_limit_event` channel above is Claude-only, so an already-spent
+        // Codex subscription produced no reading at all and /insights read "no
+        // reading yet" for a backend that had been refusing every run for days
+        // — with the reset date sitting in the failure the human just read.
+        //
+        // Both adapters classify their own failure and ride the class on the
+        // err line's tag as `·quota` (the same structured channel
+        // `runFailureReason` routes on), so this reads the CLASS, never the
+        // prose. Recorded off the REDACTED display: this sentence is stored and
+        // rendered on an admin page, and the raw form has not been scrubbed yet
+        // at this point in the function.
+        if (display?.tag?.endsWith("·quota") && display.text) {
+          recordBackendQuotaExhaustion(db, effectiveBackend, {
+            resetsAt: parseQuotaResetAt(display.text),
+            providerText: display.text,
+            runId: spec.runId,
+            observedAt: line.occurredAt,
+          });
+        }
+
         // 1. Raw truth (append-only .jsonl).
         appendRawLine(effectiveBackend, spec.runId, raw);
 
@@ -456,6 +482,13 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
       const written = persistOrDrain(() => {
         patchRun(db, spec.runId, patch);
       });
+      // D5: a run that COMPLETED on this backend is proof the account is not
+      // refusing work any more — the real run IS the re-probe (ruling 19), so
+      // the exhaustion flag is retired here rather than by a synthetic check.
+      // Only on `finished`: an interrupted or errored run proves nothing.
+      if (written && state === "finished") {
+        clearBackendQuotaExhaustion(db, effectiveBackend);
+      }
       if (written) publishState(state);
     },
   };

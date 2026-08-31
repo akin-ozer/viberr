@@ -57,7 +57,7 @@ const packet142: PacketRender = {
     { k: "Validation", v: "unit + integration green", code: false },
   ],
   options: [
-    { kind: "accept_completion", t: "Accept completion", d: "Mark task done.", rec: true, accept: true },
+    { kind: "accept_completion", t: "Accept completion", d: "Mark task done.", rec: true },
     { kind: "request_edit", t: "Request one edit", d: "Ask the developer.", rec: false },
     { kind: "block_on_policy", t: "Block on policy", d: "Hold until policy updates.", rec: false },
   ],
@@ -464,6 +464,7 @@ function taskFixture(ownerId: string, ownerName: string): TaskSummary {
     prReview: null,
     commits: [],
     changed: null,
+    unownedPr: null,
     goal: "Bound the timeline payload and add a Show-older affordance.",
     packet: null,
     eventCount: 0,
@@ -2338,6 +2339,55 @@ describe("DecisionPacket — pass-20 governance", () => {
     fireEvent.click(
       Array.from(dialog.querySelectorAll("button")).find((b) =>
         b.textContent?.includes("Discard vib-1"),
+      )!,
+    );
+    expect(onResolve).toHaveBeenCalledWith(0, "");
+  });
+
+  it("F31-6: a resolve_remote_collision option asks first, names the deletes/keeps split, then resolves by index", () => {
+    const onResolve = vi.fn();
+    const { container } = render(
+      <DecisionPacket
+        packet={withOptions([
+          {
+            kind: "resolve_remote_collision",
+            t: "Delete the stale remote branch, then redeliver",
+            d: "The remote vib-1 is unrelated to this task's work.",
+            rec: true,
+          },
+        ])}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        canDiscardBranch
+        archiveDisclosure={{
+          taskKey: "VIB-1",
+          branch: "vib-1",
+          pendingRecommendations: 0,
+          unownedPr: 232,
+        }}
+        onResolveCustom={() => {}} onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+    fireEvent.click(container.querySelector(".packet-actions .btn.primary")!);
+    // Nothing resolved on the first click — the ceremony interposes.
+    expect(onResolve).not.toHaveBeenCalled();
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Packet collision dialog"]',
+    )!;
+    expect(dialog).toBeTruthy();
+    // The three-row truth: deletes the REMOTE ref + closes the unowned PR,
+    // KEEPS the local delivery.
+    expect(dialog.textContent).toContain("vib-1");
+    expect(dialog.textContent).toContain("#232");
+    expect(dialog.textContent).toContain("cannot be undone");
+    expect(dialog.textContent).toContain("local delivery");
+    fireEvent.click(
+      Array.from(dialog.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Clear collision"),
       )!,
     );
     expect(onResolve).toHaveBeenCalledWith(0, "");

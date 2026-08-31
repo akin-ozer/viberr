@@ -26,8 +26,27 @@ npm run lint
 
 Oxlint with the vendored `anti-slop` plugin (`tools/oxlint/anti-slop`, config
 `.oxlintrc.json`). A required CI gate since 2026-08-19 (ruling 86 / R21-3): it
-must exit 0, and there is no suppression list or accepted-findings allowlist, so
-anything it reports is a new violation to fix.
+must exit **0**, and there is no suppression list or accepted-findings allowlist,
+so anything it reports at `error` severity is a new violation to fix. Warnings are
+printed but do not fail the gate.
+
+**Install the two packages before you trust a green.** A fresh worktree has no
+`node_modules`, so `npm run lint` prints nothing and "passes" — a green that means
+the plugin never loaded. Restore it without touching the lockfile; the two versions
+must match:
+
+```sh
+npm i --no-save oxlint@1.79 @oxlint/plugins@1.79
+```
+
+Never run that while a `vitest run` is in flight — mutating `node_modules`
+mid-run produced 688 phantom test failures (2026-08-26).
+
+*(Restored 2026-08-31, pass 31 — A1. The "must exit 0" promise above had gone
+false: the tree carried 26 `anti-slop` errors across 15 files. They were FIXED, not
+allowlisted — which is the only remedy ruling 86 / R21-3 permits — so the promise
+holds again. If you find it false in future, that is the bug; amending this sentence
+is not the fix.)*
 
 ## E2E suite
 
@@ -106,6 +125,3 @@ ON by default for every project via `DEFAULT_GUARDRAILS` in
 `guardrails` array in that project's canonical frontmatter.
 
 See also: [testing-quickstart.md](./testing-quickstart.md).
-
-Pass-14 smoke note: Viberr Meta's release cadence is every second Tuesday.
-Pass-14 external-merge check: this line was merged with gh, outside Viberr.

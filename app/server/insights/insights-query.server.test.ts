@@ -446,8 +446,8 @@ describe("backend quota readings (pass 29)", () => {
     );
     const before = getInsightsSummary(db, NOW).backendQuota;
     expect(before).toEqual([
-      { backend: "claude", reading: null },
-      { backend: "codex", reading: null },
+      { backend: "claude", reading: null, exhausted: null },
+      { backend: "codex", reading: null, exhausted: null },
     ]);
 
     recordBackendRateLimit(db, "claude", {

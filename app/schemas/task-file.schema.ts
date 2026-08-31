@@ -151,6 +151,15 @@ export const PACKET_OPTION_KINDS = [
   // deletion stays ruling 17's archive-packet path). Resolution enforces
   // `approve-transition` (it destroys commits).
   "discard_branch",
+  // pass31 F31-6: the remedy for a task-key BRANCH COLLISION — the remote holds
+  // an unrelated branch (usually with an unowned PR) under this task's branch
+  // name, so the delivery push conflicts. Confirming closes the recorded
+  // unowned PR (when one exists), deletes the stale REMOTE branch, and
+  // re-delivers this task's local work so its real review PR opens. The LOCAL
+  // delivery is kept — this is the exact opposite of `discard_branch`, which
+  // is why authoring refuses to offer discard on a delivered/occupied branch.
+  // Resolution enforces `approve-transition` (it deletes a remote ref).
+  "resolve_remote_collision",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];

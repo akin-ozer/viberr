@@ -3435,7 +3435,7 @@ export function listDeployedSpecialists(
       headlineMode === undefined ||
       headlineMode === "off" ||
       headlineMode === "human";
-    out.push({
+    const specialist: DeployedSpecialistView = {
       id: resolved.profileId,
       name: resolved.name,
       role: resolved.role,
@@ -3476,12 +3476,14 @@ export function listDeployedSpecialists(
       },
       stages: resolved.stages,
       spanAll: resolved.spanAll,
-      // Present only when a real run marked this agent's resolved model
-      // unavailable on the account (F20-4); the run control renders the warning.
-      ...(view.modelUnavailable
-        ? { modelUnavailable: view.modelUnavailable.reason }
-        : {}),
-    });
+    };
+    // Set only when a real run marked this agent's resolved model unavailable
+    // on the account (F20-4); the run control renders the warning. Absent (not
+    // undefined) otherwise, so the view stays byte-identical to before.
+    if (view.modelUnavailable) {
+      specialist.modelUnavailable = view.modelUnavailable.reason;
+    }
+    out.push(specialist);
   }
   return out;
 }

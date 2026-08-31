@@ -61,7 +61,7 @@ const PACKET: TaskPacket = {
   body: "Body.",
   observations: [],
   options: [
-    { kind: "accept_completion", t: "Accept completion", d: "", rec: true, accept: true },
+    { kind: "accept_completion", t: "Accept completion", d: "", rec: true },
     { kind: "request_edit", t: "Request one edit", d: "", rec: false, ev: "**Decision:** request one edit. Developer widens the PAT scope, then the completion report returns for acceptance." },
     { kind: "block_on_policy", t: "Block on policy", d: "", rec: false },
     { kind: "hold_runtime_debug", t: "Hold for runtime debug", d: "", rec: false },
@@ -1194,6 +1194,163 @@ describe("resolvePacket kind matrix", () => {
     expect(
       texts.some((t) => t.includes("The branch was **not** deleted") && t.includes("no GitHub repo or credential")),
     ).toBe(true);
+  });
+
+  // F31-6: the branch-collision remedy — refused tiers, honest degradation.
+  const COLLISION_PACKET: TaskPacket = {
+    type: "blocked",
+    kind: "Blocked decision",
+    from: "operator",
+    title: "Branch vib-1-work collides with an unrelated remote branch",
+    body: "deliver_for_review push-conflicted: the remote branch holds unrelated commits.",
+    observations: [],
+    options: [
+      {
+        kind: "resolve_remote_collision",
+        t: "Delete the stale remote branch, then redeliver",
+        d: "",
+        rec: true,
+      },
+      { kind: "custom", t: "Something else", d: "", rec: false },
+    ],
+  };
+
+  it("resolve_remote_collision: contributor-owner refused (approve-transition tier); unconfigured GitHub degrades honestly", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: store.users.selin.id,
+        branch: "vib-1-work",
+        workRevision: {
+          id: "rev_collision2",
+          headSha: "c".repeat(40),
+          treeSha: "d".repeat(40),
+          branch: "vib-1-work",
+          createdAt: new Date().toISOString(),
+          sourceProfileId: "developer",
+          kind: "delivered",
+        },
+        github: { commits: [], changed: null, unownedPr: 232 },
+      },
+      COLLISION_PACKET,
+    );
+
+    // Same tier as the sibling destructive options: the owner exception admits
+    // selin to the packet, but clearing a collision deletes a remote ref.
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+
+    const { task, option } = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(option.kind).toBe("resolve_remote_collision");
+    // The decision stands even though GitHub is unconfigured in this fixture…
+    expect(task.packet).toBeNull();
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    const texts = detail!.timeline.map((e) => e.text);
+    // …and the degradation is honest: not cleared, nothing re-delivered.
+    expect(
+      texts.some(
+        (t) =>
+          t.includes("The branch collision was **not** cleared") &&
+          t.includes("Nothing was re-delivered"),
+      ),
+    ).toBe(true);
+    const resolved = listAuditEvents(store.db, { action: "task.packet.resolved" });
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]!.details).toMatchObject({
+      optionKind: "resolve_remote_collision",
+    });
+  });
+
+  it("resolve_remote_collision: closes the unowned PR, deletes the stale remote branch, clears the R15-15 record, and reports the redelivery outcome", async () => {
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const { createPat, setProjectCredential } = await import(
+      "~/server/secrets/pat-store.server"
+    );
+    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_collision00000000000000000000001" },
+      patActor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    const github = fakeGithubFetch({
+      "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
+    });
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        branch: "vib-1-work",
+        workRevision: {
+          id: "rev_collision3",
+          headSha: "e".repeat(40),
+          treeSha: "f".repeat(40),
+          branch: "vib-1-work",
+          createdAt: new Date().toISOString(),
+          sourceProfileId: "developer",
+          kind: "delivered",
+        },
+        github: { commits: [], changed: null, unownedPr: 232 },
+      },
+      COLLISION_PACKET,
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+    );
+
+    // Both GitHub writes went out, in intent-first order: close, then delete.
+    expect(github.callsTo("PATCH /repos/akin-ozer/viberr/pulls/232")).toHaveLength(1);
+    expect(
+      github.callsTo("DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work"),
+    ).toHaveLength(1);
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // The stale-collision record is cleared with the ref, not left to the next
+    // reconcile poll.
+    expect(fm.github?.unownedPr ?? null).toBeNull();
+
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    const texts = detail!.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.includes("Closed unrelated PR #232"))).toBe(true);
+    expect(texts.some((t) => t.includes("Deleted branch `vib-1-work`"))).toBe(true);
+    // No workspace exists in this fixture, so the redelivery degrades honestly
+    // — cleared, but the push did not complete, with the next step named.
+    expect(
+      texts.some((t) =>
+        t.includes("the re-delivery did not complete"),
+      ),
+    ).toBe(true);
+    expect(
+      listAuditEvents(store.db, { action: "github.pr.closed_unowned" }),
+    ).toHaveLength(1);
+    expect(
+      listAuditEvents(store.db, { action: "github.branch.deleted" }),
+    ).toHaveLength(1);
   });
 
   // F20-6 (R20-2): the operator's discard option now EXECUTES on confirm.

@@ -421,6 +421,19 @@ export function resolveAgentCollab(
 
 // --------------------------------------------------- question packet shape
 
+/**
+ * C9 (pass 31): the `kind` string every agent-question packet carries.
+ *
+ * `TaskPacket.kind` is free text (a display label), but THIS value is
+ * load-bearing: packet resolution reads `packet.askedBy` and routes the human's
+ * answer back to the asking agent only when the kind matches exactly
+ * (`resolvePacket`, task-actions.server.ts). It was an untyped English literal
+ * duplicated at the writer and the reader, so renaming the label here would
+ * have silently re-routed every agent answer to the operator instead. Written
+ * once, next to the writer that stamps it.
+ */
+export const AGENT_QUESTION_PACKET_KIND = "Agent question";
+
 /** The agent-question decision packet (ask-human, G3): type `input`, from =
  * the agent's own ref, choices as resolvable `custom` options. Shared by the
  * live Claude toolkit and the completion-time Codex envelope path. */
@@ -447,7 +460,7 @@ export function buildAgentQuestionPacket(
   const packet: TaskPacket = {
     id: newId("pkt"), // F10-09: stable identity for concurrent-resolution safety
     type: "input",
-    kind: "Agent question",
+    kind: AGENT_QUESTION_PACKET_KIND,
     from: encodeActorRef(actorRef),
     title: question.title.trim(),
     body: (question.body ?? "").trim(),

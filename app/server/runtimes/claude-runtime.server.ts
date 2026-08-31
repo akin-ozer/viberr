@@ -165,13 +165,16 @@ export function resolveClaudeEffort(effort?: string): string | undefined {
  * refusing every later delivering run on that task, and the board showing an
  * "agent working" badge until the NEXT process restart ran finalizeOrphanedRuns.
  *
- * (Read from the raw process env rather than `getEnv()`: the validated env
- * schema is owned by another workstream this pass. Behaviour is identical —
- * `loadEnvFile` has already folded `.env` into process.env.)
+ * C3 (pass 31): this used to read the raw process env, with a note deferring to
+ * "another workstream" that owned the env schema — an ownership fact, not a
+ * technical reason, and the schema has declared this variable since. It reads
+ * the validated env now, like its Codex twin (`codexIdleTimeoutMs`) and
+ * `claudeMaxTurns`. A test that sets the variable must call
+ * `resetEnvCacheForTests()`, because `getEnv()` caches per process.
  */
 const DEFAULT_CLAUDE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 export function claudeIdleTimeoutMs(): number {
-  const raw = process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
+  const raw = getEnv().VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
   const n = raw ? Number(raw) : NaN;
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_CLAUDE_IDLE_TIMEOUT_MS;
 }

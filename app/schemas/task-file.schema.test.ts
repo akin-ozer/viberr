@@ -665,7 +665,7 @@ describe("packet block parse (tolerant)", () => {
       body: "…",
       observations: [{ k: "Changed", v: "9 files", code: true }],
       options: [
-        { kind: "accept_completion", t: "Accept completion", d: "", rec: true, accept: true },
+        { kind: "accept_completion", t: "Accept completion", d: "", rec: true },
         { kind: "request_edit", t: "Request one edit", d: "", rec: false, ev: "**Decision:** …" },
       ],
     });

@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import type { RunBackend } from "~/features/runtime/runtime-types";
+import { getEnv } from "~/server/config/env.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 
@@ -74,23 +75,28 @@ export interface TranscriptReclamation {
   bytes: number;
 }
 
-function envDays(name: string, fallback: number): number {
-  const raw = process.env[name];
+/** C3 (pass 31): both windows now come off the VALIDATED env (`getEnv`) rather
+ *  than a `process.env[name]` lookup by string — the schema declares them, so a
+ *  typo in the variable name is a compile error here instead of a silent
+ *  fallback to the default. The coercion is unchanged: a non-numeric or
+ *  negative value reads as "unset" (the default), and `0` is a real value
+ *  meaning "keep forever". */
+function days(raw: string | undefined, fallback: number): number {
   if (raw === undefined || raw === "") return fallback;
-  const days = Number(raw);
-  return Number.isFinite(days) && days >= 0 ? days : fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
 export function transcriptRetentionDays(): number {
-  return envDays(
-    "VIBERR_TRANSCRIPT_RETENTION_DAYS",
+  return days(
+    getEnv().VIBERR_TRANSCRIPT_RETENTION_DAYS,
     DEFAULT_TRANSCRIPT_RETENTION_DAYS,
   );
 }
 
 export function sessionHomeRetentionDays(): number {
-  return envDays(
-    "VIBERR_SESSION_HOME_RETENTION_DAYS",
+  return days(
+    getEnv().VIBERR_SESSION_HOME_RETENTION_DAYS,
     DEFAULT_SESSION_HOME_RETENTION_DAYS,
   );
 }

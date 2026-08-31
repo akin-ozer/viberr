@@ -474,6 +474,8 @@ describe("E5: route-only authority gates", () => {
       profileId: "developer",
     });
     expect(result.ok).toBe(false);
-    expect(typeof result.error).toBe("string");
+    // The refusal names the profile and the deployments blocking it — a bare
+    // "in use" would leave the admin nothing to act on.
+    expect(result.error).toMatch(/^Detach .+ from its \d+ projects? first$/);
   });
 });

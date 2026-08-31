@@ -215,6 +215,11 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
  * Latest provider rate-limit reading per backend (pass 29): approaching quota
  * exhaustion is visible here BEFORE a run fails on it. A backend with no
  * reading renders neutral — this is an observation log, never a probe.
+ *
+ * D5 (pass 31): the live reading channel is Claude-only, so a Codex account
+ * that was ALREADY spent showed "no reading yet" while every run on it was
+ * being refused. A refused run is now its own row state, rendered as what it is
+ * ("from a refused run"), never merged into the utilization number.
  */
 function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }) {
   const hydrated = useHydrated();
@@ -226,7 +231,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
         <h2>Backend quota</h2>
       </div>
       <ul className="bar-list">
-        {quota.map(({ backend, reading }) => {
+        {quota.map(({ backend, reading, exhausted }) => {
           const pct = reading ? pctOf(reading.utilization) : null;
           return (
             <li key={backend} className="bar-row">
@@ -236,22 +241,70 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
               <span className="bar-track">
                 <span
                   className="bar-fill"
-                  style={{ width: `${pct ?? 0}%` }}
+                  // D5: a provider that REFUSED a run said the window is spent,
+                  // so the track is full. That is the provider's own words, not
+                  // an invented utilization number: `exhausted` is a separate
+                  // record from `reading`, and the label below says which one
+                  // the row is showing.
+                  style={{ width: `${exhausted ? 100 : (pct ?? 0)}%` }}
                 />
               </span>
-              <span className={"bar-val" + (reading == null || pct == null ? " na" : "")}>
-                {/* Three honest states: no reading ever; a reading whose
-                    envelope carried no utilization number (the provider's
-                    five_hour events often omit it — say so, never "no reading
-                    yet" next to a reset date); a full percentage reading.
-                    Absent states render de-emphasized (.na), never at value
-                    weight. */}
-                {reading == null
-                  ? "no reading yet"
-                  : pct == null
-                    ? `${reading.rateLimitType.replaceAll("_", " ")} · utilization not reported`
-                    : `${pct}% of ${reading.rateLimitType.replaceAll("_", " ")}`}
-                {reading && (
+              <span
+                className={
+                  "bar-val" +
+                  (exhausted == null && (reading == null || pct == null) ? " na" : "")
+                }
+              >
+                {/* Four honest states: the provider refused a run for being over
+                    its limit (D5 — the strongest signal there is, and the only
+                    one a backend with no live rate-limit channel ever produces);
+                    no reading ever; a reading whose envelope carried no
+                    utilization number (the provider's five_hour events often
+                    omit it, so say so rather than "no reading yet" next to a
+                    reset date); a full percentage reading. Absent states render
+                    de-emphasized (.na), never at value weight. */}
+                {exhausted
+                  ? "usage limit reached"
+                  : reading == null
+                    ? "no reading yet"
+                    : pct == null
+                      ? `${reading.rateLimitType.replaceAll("_", " ")} · utilization not reported`
+                      : `${pct}% of ${reading.rateLimitType.replaceAll("_", " ")}`}
+                {exhausted && (
+                  <span
+                    className="bar-cost"
+                    // Same hydration gate as the reading branch below: a
+                    // localized instant rendered during SSR is the SERVER's
+                    // timezone, and React re-renders rather than patching it.
+                    title={
+                      hydrated
+                        ? `run ${exhausted.runId} was refused ${new Date(
+                            exhausted.observedAt,
+                          ).toLocaleString()}: ${exhausted.providerText}`
+                        : undefined
+                    }
+                  >
+                    {[
+                      // Say where this came from. It is NOT a utilization
+                      // reading the provider volunteered, and a card that
+                      // blurred the two would be claiming a live measurement it
+                      // never took.
+                      "from a refused run",
+                      exhausted.resetsAt != null
+                        ? `retry after ${
+                            hydrated
+                              ? new Date(exhausted.resetsAt * 1000).toLocaleString()
+                              : new Date(exhausted.resetsAt * 1000)
+                                  .toISOString()
+                                  .slice(0, 10)
+                          }`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                )}
+                {!exhausted && reading && (
                   <span
                     className="bar-cost"
                     // The reading's own age — a weeks-old 91% must be visibly
@@ -300,7 +353,10 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
       </ul>
       <p className="fine">
         Latest reading each backend reported during a run. A high number here
-        means new runs may start failing when the window is exhausted.
+        means new runs may start failing when the window is exhausted. A row
+        reading &ldquo;usage limit reached&rdquo; is derived from a run the
+        provider refused, not from a reported utilization figure; it clears as
+        soon as a run on that backend completes.
       </p>
     </section>
   );

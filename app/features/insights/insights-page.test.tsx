@@ -72,8 +72,9 @@ const FULL: InsightsSummary = {
         isUsingOverage: false,
         observedAt: "2026-08-23T11:59:00.000Z",
       },
+      exhausted: null,
     },
-    { backend: "codex", reading: null },
+    { backend: "codex", reading: null, exhausted: null },
   ],
   windowDays: 30,
   generatedAt: "2026-08-23T12:00:00.000Z",
@@ -145,13 +146,50 @@ describe("InsightsPage", () => {
             isUsingOverage: false,
             observedAt: "2026-08-27T12:59:20.000Z",
           },
+          exhausted: null,
         },
-        { backend: "codex", reading: null },
+        { backend: "codex", reading: null, exhausted: null },
       ],
     });
     expect(getByText(/five hour · utilization not reported/)).toBeTruthy();
     // "no reading yet" belongs ONLY to codex (truly silent), not to claude.
     expect(queryByText("no reading yet")).toBeTruthy();
+  });
+
+  /**
+   * D5 (pass 31): live-caught. Codex had been quota-blocked for days — every
+   * run refused with the limit and its reset date in the provider's own words —
+   * and this card read "no reading yet", because the live rate-limit channel it
+   * was built on is Claude-only. A refused run is evidence, so it renders; but
+   * it is WEAKER evidence than a reported utilization figure, so it says where
+   * it came from and never borrows the percentage's voice.
+   */
+  it("says the window is exhausted when a run was refused, and names that as its source", () => {
+    const { getByText, queryByText } = renderPage({
+      ...FULL,
+      backendQuota: [
+        { backend: "claude", reading: null, exhausted: null },
+        {
+          backend: "codex",
+          reading: null,
+          exhausted: {
+            resetsAt: 1_789_741_200, // 2026-09-18
+            providerText:
+              "You've hit your usage limit. To continue using Codex, start a " +
+              "free trial of Plus today, or try again at Sep 18th, 2026 5:20 PM.",
+            runId: "run_abc",
+            observedAt: "2026-08-31T09:00:00.000Z",
+          },
+        },
+      ],
+    });
+    expect(getByText("usage limit reached")).toBeTruthy();
+    // Honest about its provenance: this is not a utilization reading.
+    expect(getByText(/from a refused run/)).toBeTruthy();
+    expect(getByText(/retry after/)).toBeTruthy();
+    // …and the contradiction this replaced is gone from the exhausted row
+    // ("no reading yet" now belongs only to the genuinely silent claude row).
+    expect(queryByText("usage limit reached · no reading yet")).toBeNull();
   });
 
   it("shows an empty state when there are no runs", () => {

@@ -779,17 +779,113 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // it must open and mark the task blocked so it surfaces as "waiting on you".
     expect(parsed.packet, "a recovery packet must open on a failed run").toBeTruthy();
     expect(parsed.packet!.type).toBe("blocked");
-    // The task owner + supervisors get a quality notification about the failure.
-    // SAFETY: `COUNT(*) AS n` is an aggregate with no GROUP BY — sqlite answers
-    // it with exactly one row whose only column is the integer `n`.
-    const notif = store.db
+    // T13 (pass 31): the task owner + supervisors are notified — ONCE.
+    //
+    // BEFORE: one failed run put TWO rows in every supervisor's queue, a short
+    // `quality` "Developer run failed: Codex is over its usage quota." and the
+    // packet's own "Blocked, decision needed: Work stalled: pick a recovery
+    // path" whose body is that same sentence plus "Coordination is paused…".
+    // Same event, same recipients, two wordings — and the shorter one is the
+    // one nothing can be done with. The packet notification is the survivor
+    // because it is the actionable one.
+    //
+    // SAFETY: every selected column is declared on `notifications` (0001), and
+    // `kind`/`text` are NOT NULL.
+    const notifs = store.db
       .prepare(
-        `SELECT COUNT(*) AS n FROM notifications WHERE task_key = 'VIB-1' AND kind = 'quality' AND text LIKE '%run failed%'`,
+        `SELECT user_id, kind, ptype, title, text FROM notifications WHERE task_key = 'VIB-1'`,
       )
-      .get() as { n: number };
-    expect(notif.n, "watchers are notified of the run failure").toBeGreaterThan(0);
+      .all() as {
+      user_id: string;
+      kind: string;
+      ptype: string | null;
+      title: string | null;
+      text: string;
+    }[];
+    expect(
+      notifs.length,
+      "watchers are notified of the run failure",
+    ).toBeGreaterThan(0);
+    // Exactly one row per recipient — no near-duplicate pair anywhere.
+    const perUser = new Map<string, number>();
+    for (const n of notifs) perUser.set(n.user_id, (perUser.get(n.user_id) ?? 0) + 1);
+    expect([...perUser.values()].every((n) => n === 1), "one row per watcher").toBe(
+      true,
+    );
+    // …and the one that survived is the ACTIONABLE one: the recovery packet,
+    // carrying the same reason the short row used to duplicate.
+    for (const n of notifs) {
+      expect(n.kind).toBe("packet");
+      expect(n.ptype).toBe("blocked");
+      expect(n.title).toContain("Work stalled");
+      expect(n.text.toLowerCase()).toContain("quota");
+    }
     // waiting must be flipped off `agent` (no phantom "agent working").
     expect(parsed.frontmatter.waiting).toBe("human");
+  });
+
+  /**
+   * T13's other half: the dedupe must not become silence. When no packet
+   * notification goes out — here because no operator is deployed, so the
+   * escalation is refused — the short `quality` row is still the only thing
+   * standing between a failed run and nobody finding out.
+   */
+  it("still notifies watchers when the recovery packet could NOT be opened", async () => {
+    // NO operator deployed on this project (unlike the test above), so
+    // `operatorOpenPacket` refuses and no packet notification is written.
+    const runId = "run_t13_nopacket";
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t-t13",
+      role: "Developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      backend: "codex",
+      model: "gpt-5.5",
+      sdk: "codex",
+      state: "error",
+    });
+    insertRunLine(store.db, {
+      runId,
+      seq: 0,
+      occurredAt: "2026-07-12T10:00:00.000Z",
+      raw: JSON.stringify({ ev: "err", tag: "turn.failed" }),
+      display: {
+        t: "10:00:00",
+        ev: "err",
+        tag: "turn.failed",
+        text: "You've hit your usage limit. Upgrade to Plus to continue using Codex.",
+      },
+    });
+    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "developer",
+        role: "Developer",
+        delivers: true,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "error" },
+    );
+    // No packet opened…
+    expect(taskFile().parsed.packet).toBeFalsy();
+    // …so the plain failure notification is the one that reaches the queue.
+    // SAFETY: `kind` and `text` are NOT NULL TEXT on `notifications` (0001).
+    const notifs = store.db
+      .prepare(`SELECT kind, text FROM notifications WHERE task_key = 'VIB-1'`)
+      .all() as { kind: string; text: string }[];
+    expect(notifs.length).toBeGreaterThan(0);
+    expect(notifs.every((n) => n.kind === "quality")).toBe(true);
+    expect(notifs.every((n) => /run failed/.test(n.text))).toBe(true);
+    expect(taskFile().parsed.frontmatter.waiting).toBe("human");
   });
 });
 

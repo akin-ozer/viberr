@@ -2,6 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { getEnv } from "~/server/config/env.server";
 import {
   gitErrorText,
   redactGitOutput,
@@ -197,7 +198,10 @@ export function createGitHubClonePlan(input: {
  * how big a repository is allowed to be.
  */
 export const CLONE_TIMEOUT_MS = (() => {
-  const raw = process.env.VIBERR_GIT_CLONE_TIMEOUT_MS;
+  // C3 (pass 31): through the validated schema, like every other tuning knob.
+  // The coercion + fallback stay here (the schema keeps these as raw strings)
+  // — only the READ moved, so behaviour is unchanged.
+  const raw = getEnv().VIBERR_GIT_CLONE_TIMEOUT_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 900_000;
 })();

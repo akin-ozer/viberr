@@ -111,6 +111,9 @@ export interface PacketArchiveDisclosure {
   branch: string | null;
   /** Pending operator recommendations this archive withdraws. */
   pendingRecommendations: number;
+  /** F31-6: the unrelated PR recorded on this task's branch name (R15-15) —
+   *  what the resolve_remote_collision ceremony says it closes. */
+  unownedPr?: number | null;
 }
 
 /**
@@ -379,6 +382,117 @@ function PacketDiscardConfirm({
   );
 }
 
+/**
+ * F31-6 — a `resolve_remote_collision` option asks first, like its destructive
+ * siblings: it deletes a REMOTE ref (the stale branch squatting on this task's
+ * branch name) and closes the unrelated PR recorded on it, then re-delivers
+ * the task's local work. The rows spell out what is removed and — as
+ * important — what is KEPT, because this ceremony exists to be the truthful
+ * opposite of `discard_branch` (the local delivery survives).
+ */
+function PacketCollisionConfirm({
+  option,
+  branch,
+  unownedPr,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  option: PacketRender["options"][number];
+  /** The task's branch name (`task.branch`) — the ref being reclaimed. */
+  branch: string | null;
+  /** The unrelated PR recorded on that branch (R15-15), when known. */
+  unownedPr: number | null;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { ref: panelRef, close } = useDialog(onCancel);
+  const branchLabel = branch ? (
+    <span className="mono">{branch}</span>
+  ) : (
+    <>this task&rsquo;s branch</>
+  );
+  return (
+    <dialog
+      className="modal-card release-card"
+      role="alertdialog"
+      aria-label="Clear this task's branch collision"
+      data-screen-label="Packet collision dialog"
+      ref={panelRef}
+    >
+      <div className="modal-head">
+        <span className="agent-glyph lg warn">
+          <Icon name="alert" />
+        </span>
+        <div className="mh-main">
+          <h2>Clear the branch collision?</h2>
+          <div className="mh-sub">{option.t}</div>
+        </div>
+        <button
+          type="button"
+          className="icon-btn modal-close"
+          onClick={close}
+          aria-label="Close"
+        >
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="modal-body tight">
+        <div className="packet-obs flush">
+          <div className="obs">
+            <span className="k">Decision</span>
+            <span>
+              Confirming &ldquo;{option.t}&rdquo; reclaims the branch name for
+              this task.
+            </span>
+          </div>
+          <div className="obs warn">
+            <span className="k">Deletes</span>
+            <span>
+              The stale branch {branchLabel} on GitHub, the unrelated one
+              squatting on this task&rsquo;s branch name
+              {unownedPr !== null ? (
+                <>
+                  , and closes its pull request{" "}
+                  <span className="mono">#{unownedPr}</span>
+                </>
+              ) : null}
+              . <strong>Deleting the remote branch cannot be undone.</strong>
+            </span>
+          </div>
+          <div className="obs">
+            <span className="k">Keeps</span>
+            <span>
+              This task&rsquo;s local delivery. After the stale ref is gone it
+              is pushed fresh and the real review PR opens.
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="modal-foot">
+        <span className="foot-hint">
+          Recorded as timeline events and audit rows.
+        </span>
+        <div className="foot-actions">
+          <button type="button" className="btn ghost" onClick={close}>
+            Not yet
+          </button>
+          <button
+            type="button"
+            className="btn danger"
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            <Icon name="alert" />
+            Clear collision &amp; redeliver
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
 export function DecisionPacket({
   packet,
   busy,
@@ -459,6 +573,8 @@ export function DecisionPacket({
   const [pendingArchive, setPendingArchive] = useState<number | null>(null);
   // F20-6: the discard_branch option index awaiting its confirm (null = none).
   const [pendingDiscard, setPendingDiscard] = useState<number | null>(null);
+  // F31-6: the resolve_remote_collision option awaiting its confirm.
+  const [pendingCollision, setPendingCollision] = useState<number | null>(null);
   const isBlocked = p.type === "blocked";
   // N20-16: a packet raised by the operator recommends its own default; one
   // raised by a delivering/reviewing agent (an ask_human question) carries the
@@ -530,6 +646,10 @@ export function DecisionPacket({
   // F20-6: `discard_branch` re-checks `approve-transition` server-side.
   const selectedDiscardBlocked =
     selected?.kind === "discard_branch" && !canDiscardBranch;
+  // F31-6: `resolve_remote_collision` takes the same `approve-transition` tier
+  // (it deletes a remote ref).
+  const selectedCollisionBlocked =
+    selected?.kind === "resolve_remote_collision" && !canDiscardBranch;
   // N20-8: one phrasing for the same [A,M] tier — the sibling notes read
   // "reserved for maintainers" and "reserved for maintainers and admins", and
   // the first misread as excluding admins. Say "maintainers and admins" once.
@@ -541,7 +661,9 @@ export function DecisionPacket({
         ? "Archiving is reserved for maintainers and admins."
         : selectedDiscardBlocked
           ? "Discarding the branch is reserved for maintainers and admins."
-          : null;
+          : selectedCollisionBlocked
+            ? "Clearing a branch collision is reserved for maintainers and admins."
+            : null;
   // F20-17/F20-18: is EVERY option above this viewer's tier? Only meaningful
   // when they can resolve at all (a contributor-OWNER — the owner exception let
   // them open the card, but each option re-checks a higher tier). A single
@@ -550,7 +672,8 @@ export function DecisionPacket({
     (o.kind === "accept_completion" && !canResolveCompletion) ||
     (o.kind === "edit_goal" && !canEditGoal) ||
     (o.kind === "archive_task" && !canArchive) ||
-    (o.kind === "discard_branch" && !canDiscardBranch);
+    (o.kind === "discard_branch" && !canDiscardBranch) ||
+    (o.kind === "resolve_remote_collision" && !canDiscardBranch);
   const everyOptionForbidden =
     canResolve && p.options.length > 0 && p.options.every(optionAboveTier);
 
@@ -642,12 +765,19 @@ export function DecisionPacket({
             const archiveBlocked = o.kind === "archive_task" && !canArchive;
             // F20-6: discard_branch re-checks the same `approve-transition` tier.
             const discardBlocked = o.kind === "discard_branch" && !canDiscardBranch;
+            // F31-6: resolve_remote_collision deletes a remote ref — same tier.
+            const collisionBlocked =
+              o.kind === "resolve_remote_collision" && !canDiscardBranch;
             // F20-17: a viewer who cannot resolve this packet at ALL used to see
             // every option fully interactive with no Confirm and no reason — the
             // un-gated ones read as "yours". Mark them all inert; the one
             // card-level deny note below names who can decide.
             const blocked =
-              goalBlocked || archiveBlocked || discardBlocked || !canResolve;
+              goalBlocked ||
+              archiveBlocked ||
+              discardBlocked ||
+              collisionBlocked ||
+              !canResolve;
             return (
               <button
                 key={i}
@@ -670,7 +800,9 @@ export function DecisionPacket({
                       ? "Archiving is reserved for maintainers and admins"
                       : discardBlocked
                         ? "Discarding the branch is reserved for maintainers and admins"
-                        : undefined
+                        : collisionBlocked
+                          ? "Clearing a branch collision is reserved for maintainers and admins"
+                          : undefined
                 }
                 onClick={() => {
                   if (blocked) return;
@@ -921,6 +1053,12 @@ export function DecisionPacket({
                   setPendingDiscard(sel);
                   return;
                 }
+                // F31-6: resolve_remote_collision deletes a remote ref — same
+                // ask-first ceremony, with the keeps/deletes split spelled out.
+                if (selected?.kind === "resolve_remote_collision") {
+                  setPendingCollision(sel);
+                  return;
+                }
                 onResolve(sel, note);
               }}
             >
@@ -960,6 +1098,21 @@ export function DecisionPacket({
           onConfirm={() => {
             const index = pendingDiscard;
             setPendingDiscard(null);
+            onResolve(index, note);
+          }}
+        />
+      )}
+
+      {pendingCollision !== null && p.options[pendingCollision] && (
+        <PacketCollisionConfirm
+          option={p.options[pendingCollision]!}
+          branch={archiveDisclosure?.branch ?? null}
+          unownedPr={archiveDisclosure?.unownedPr ?? null}
+          busy={busy}
+          onCancel={() => setPendingCollision(null)}
+          onConfirm={() => {
+            const index = pendingCollision;
+            setPendingCollision(null);
             onResolve(index, note);
           }}
         />

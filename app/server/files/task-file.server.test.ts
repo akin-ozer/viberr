@@ -60,7 +60,7 @@ const FULL: ParsedTaskFile = {
       { k: "Flag", v: "PAT scope missing pull_request:write", code: false },
     ],
     options: [
-      { kind: "accept_completion", t: "Accept completion", d: "Mark task done and merge the review PR. Human-authorized.", rec: true, accept: true },
+      { kind: "accept_completion", t: "Accept completion", d: "Mark task done and merge the review PR. Human-authorized.", rec: true },
       { kind: "request_edit", t: "Request one edit", d: "Ask the developer to widen PAT scope.", rec: false, ev: "**Decision:** request one edit." },
       { kind: "block_on_policy", t: "Block on policy", d: "Hold until policy updates.", rec: false },
       // The pr-diverged recovery option: archive + discard the remote branch.

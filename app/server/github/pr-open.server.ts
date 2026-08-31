@@ -174,12 +174,19 @@ export async function deliveredDiffStats(
   };
 }
 
+/** The two PR-body fragments derived from live compare stats: the one-line
+ *  change summary and the delivery evidence rows. */
+export interface DeliveredPrParts {
+  changeSummary: string;
+  evidence: string[];
+}
+
 /** The PR-body change-summary + delivery evidence rows, from live compare stats. */
 export function deliveredStatsToPrParts(
   stats: DeliveredDiffStats,
   branch: string,
   revisionHeadSha: string | null,
-): { changeSummary: string; evidence: string[] } {
+): DeliveredPrParts {
   const fileLabel = stats.truncated ? "300+" : String(stats.files);
   const evidence: string[] = [
     `${fileLabel} file(s) changed on \`${branch}\` · +${stats.add} · −${stats.del}`,

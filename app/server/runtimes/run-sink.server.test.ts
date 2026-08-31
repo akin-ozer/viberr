@@ -8,6 +8,10 @@ import { logger } from "~/server/logging/logger.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, type TestStore } from "../../../test-support/test-store";
 import type { EmittedLine, RunSpec } from "./adapter.server";
+import {
+  latestBackendRateLimits,
+  parseQuotaResetAt,
+} from "./backend-quota.server";
 import { createLineRedactor, createRunSink } from "./run-sink.server";
 import { listRunLines, rawLogPath, upsertRun } from "./run-store.server";
 
@@ -73,13 +77,14 @@ function emitted(display: LogLine, raw: string): EmittedLine {
   return { raw, display, facts: {}, occurredAt: new Date().toISOString() };
 }
 
-/** A run row + a sink over it. */
-function sinkFor(runId: string) {
+/** A run row + a sink over it. `threadId` is only ever passed when a test needs
+ *  a SECOND run on the same task (one thread holds one run row). */
+function sinkFor(runId: string, threadId = "primary") {
   upsertRun(store.db, {
     id: runId,
     projectSlug: store.slug,
     taskKey: "VIB-1",
-    threadId: "primary",
+    threadId,
     role: "developer",
     kind: "primary",
     backend: "claude",
@@ -347,6 +352,154 @@ describe("run lines during a shutdown drain (F21-24)", () => {
       ).toHaveLength(1);
     } finally {
       error.mockRestore();
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+});
+
+/**
+ * D5 (pass 31) — the other half of quota telemetry.
+ *
+ * `rate_limit_event` is a Claude-only channel, so an already-spent Codex
+ * subscription produced no reading at all: /insights read "no reading yet" for
+ * a backend that had refused every run for days, while the failure the human
+ * had just read carried both the limit and the date it reopens. The sink sees
+ * that failure line, so it is where the fact is captured.
+ */
+describe("quota exhaustion from a refused run (D5)", () => {
+  const CODEX_REFUSAL =
+    "Codex usage limit was reached. Retry after the subscription limit resets." +
+    "\n\nThe provider reported: You've hit your usage limit. To continue using " +
+    "Codex, start a free trial of Plus today, or try again at Sep 18th, 2026 5:20 PM.";
+
+  function quotaFor(backend: "claude" | "codex") {
+    return latestBackendRateLimits(store.db).find((q) => q.backend === backend)!;
+  }
+
+  it("parses both providers' reset clauses, and answers null rather than guessing", () => {
+    // Codex: English prose in the account's timezone, with an ordinal suffix
+    // that Date.parse rejects outright.
+    const codex = parseQuotaResetAt(CODEX_REFUSAL);
+    expect(codex).not.toBeNull();
+    expect(new Date(codex! * 1000).getFullYear()).toBe(2026);
+    expect(new Date(codex! * 1000).getMonth()).toBe(8); // September
+    // Claude: a bare unix epoch after a pipe.
+    expect(parseQuotaResetAt("Claude AI usage limit reached|1750000000")).toBe(
+      1_750_000_000,
+    );
+    // No date named, and prose that only mentions the limit: null, so the card
+    // falls back to the observed instant instead of inventing a window.
+    expect(
+      parseQuotaResetAt("You've hit your usage limit. Upgrade to Plus."),
+    ).toBeNull();
+  });
+
+  it("records the exhaustion off a classified ·quota line, with its evidence", () => {
+    const runId = `run_quota_${randomBytes(6).toString("hex")}`;
+    const sink = sinkFor(runId);
+    sink.markRunning();
+    try {
+      expect(quotaFor("claude").exhausted).toBeNull();
+      sink.line(
+        emitted(
+          { t: "10:00:00", ev: "err", tag: "run·error·quota", text: CODEX_REFUSAL },
+          "{}",
+        ),
+      );
+      const row = quotaFor("claude");
+      // The flag is its OWN record: no utilization number was invented for it.
+      expect(row.reading).toBeNull();
+      expect(row.exhausted).toBeTruthy();
+      expect(row.exhausted!.runId).toBe(runId);
+      expect(row.exhausted!.providerText).toContain("usage limit");
+      expect(row.exhausted!.resetsAt).toBe(parseQuotaResetAt(CODEX_REFUSAL));
+    } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+
+  it("ignores a failure of any OTHER class, and prose that merely says the words", () => {
+    const runId = `run_notquota_${randomBytes(6).toString("hex")}`;
+    const sink = sinkFor(runId);
+    sink.markRunning();
+    try {
+      // An auth failure is not an exhausted window.
+      sink.line(
+        emitted(
+          { t: "10:00:00", ev: "err", tag: "run·error·auth", text: "credential rejected" },
+          "{}",
+        ),
+      );
+      // …and an agent that PRINTS the sentence cannot mark its own backend:
+      // the class rides the tag, and this is ordinary output.
+      sink.line(
+        emitted(
+          { t: "10:00:01", ev: "out", tag: "assistant", text: CODEX_REFUSAL },
+          "{}",
+        ),
+      );
+      expect(quotaFor("claude").exhausted).toBeNull();
+    } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+
+  it("a COMPLETED run on that backend retires the flag (the run is the re-probe)", () => {
+    const failedId = `run_quota_a_${randomBytes(6).toString("hex")}`;
+    const okId = `run_quota_b_${randomBytes(6).toString("hex")}`;
+    try {
+      const failed = sinkFor(failedId);
+      failed.markRunning();
+      failed.line(
+        emitted(
+          { t: "10:00:00", ev: "err", tag: "error·quota", text: CODEX_REFUSAL },
+          "{}",
+        ),
+      );
+      failed.finalize({ outcome: "error", effectiveBackend: "claude" });
+      // An ERRORED run proves nothing about the window — the flag stands.
+      expect(quotaFor("claude").exhausted).toBeTruthy();
+
+      const ok = sinkFor(okId, "retry");
+      ok.markRunning();
+      ok.finalize({ outcome: "finished", effectiveBackend: "claude" });
+      expect(quotaFor("claude").exhausted).toBeNull();
+    } finally {
+      rmSync(rawLogPath("claude", failedId), { force: true });
+      rmSync(rawLogPath("claude", okId), { force: true });
+    }
+  });
+
+  it("retires a record whose provider-named reset instant has passed", () => {
+    const runId = `run_quota_old_${randomBytes(6).toString("hex")}`;
+    const sink = sinkFor(runId);
+    sink.markRunning();
+    try {
+      sink.line(
+        emitted(
+          {
+            t: "10:00:00",
+            ev: "err",
+            tag: "error·quota",
+            text: "usage limit. try again at Jan 2nd, 2020 5:20 PM.",
+          },
+          "{}",
+        ),
+      );
+      // Stored…
+      expect(
+        latestBackendRateLimits(store.db, "2019-12-01T00:00:00.000Z").find(
+          (q) => q.backend === "claude",
+        )!.exhausted,
+      ).toBeTruthy();
+      // …and gone once the window the provider named is over. No sweep, no
+      // clearing job: the reader simply stops asserting what it cannot support.
+      expect(
+        latestBackendRateLimits(store.db, "2026-08-31T00:00:00.000Z").find(
+          (q) => q.backend === "claude",
+        )!.exhausted,
+      ).toBeNull();
+    } finally {
       rmSync(rawLogPath("claude", runId), { force: true });
     }
   });

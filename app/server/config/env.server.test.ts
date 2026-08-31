@@ -129,6 +129,32 @@ describe("parseEnv", () => {
       parseEnv({ ...REQUIRED_ENV, VIBERR_SEED_ADMIN_EMAIL: "not-an-email" }),
     ).toThrowError(/VIBERR_SEED_ADMIN_EMAIL/);
   });
+
+  /**
+   * C3 (pass 31): three knobs the app has always honoured were read straight
+   * off `process.env` and declared nowhere, so the validated surface — the one
+   * an operator (and `.env.example`) treats as the list of what is
+   * configurable — denied they existed. They carry through as raw strings; the
+   * call sites keep their own coercion and defaults.
+   */
+  it("carries the runtime tuning knobs through as raw strings", () => {
+    const env = parseEnv({
+      ...REQUIRED_ENV,
+      VIBERR_GIT_CLONE_TIMEOUT_MS: "1800000",
+      VIBERR_TRANSCRIPT_RETENTION_DAYS: "7",
+      VIBERR_SESSION_HOME_RETENTION_DAYS: "0",
+    });
+    expect(env.VIBERR_GIT_CLONE_TIMEOUT_MS).toBe("1800000");
+    expect(env.VIBERR_TRANSCRIPT_RETENTION_DAYS).toBe("7");
+    // "0" is a real setting (keep forever), not an absent one — so the schema
+    // must not coerce, and the empty-string-is-missing rule must not eat it.
+    expect(env.VIBERR_SESSION_HOME_RETENTION_DAYS).toBe("0");
+
+    const bare = parseEnv(REQUIRED_ENV);
+    expect(bare.VIBERR_GIT_CLONE_TIMEOUT_MS).toBeUndefined();
+    expect(bare.VIBERR_TRANSCRIPT_RETENTION_DAYS).toBeUndefined();
+    expect(bare.VIBERR_SESSION_HOME_RETENTION_DAYS).toBeUndefined();
+  });
 });
 
 /**

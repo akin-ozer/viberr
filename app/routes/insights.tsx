@@ -9,6 +9,10 @@ import { InsightsPage } from "~/features/insights/insights-page";
  * token totals across every project are an instance-owner view). Read-only: the
  * loader runs one aggregate query and the page formats it.
  */
+export function meta() {
+  return [{ title: "Insights · Viberr" }];
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
   await requireRole(request, "admin");
   return { summary: getInsightsSummary(getDb(), new Date().toISOString()) };

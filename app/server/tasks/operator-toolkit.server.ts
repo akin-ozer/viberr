@@ -432,7 +432,9 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               z.object({
                 kind: z
                   .enum(PACKET_OPTION_KINDS)
-                  .describe("Stable option kind the resolver dispatches on."),
+                  .describe(
+                    "Stable option kind the resolver dispatches on. For a delivery push_conflict caused by an UNRELATED remote branch squatting on this task's branch name (usually with an unowned PR), use 'resolve_remote_collision' — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work. Never author 'discard_branch' for that shape: it deletes the LOCAL branch and is refused on a task with a delivered revision or an occupied branch name.",
+                  ),
                 title: z.string().describe("Button label, e.g. 'Reassign to a different developer'."),
                 detail: z.string().optional().describe("Short explanation under the option."),
                 recommended: z.boolean().optional().describe("Mark exactly ONE option recommended."),

@@ -1475,11 +1475,7 @@ describe("stranded auto-stage resume", () => {
         })!.parsed;
         // The hold is recorded once, on the timeline, by the policy engine…
         expect(
-          parsed.timeline.some(
-            (ev) =>
-              typeof ev.text === "string" &&
-              ev.text.includes("deliberate hold"),
-          ),
+          parsed.timeline.some((ev) => ev.text.includes("deliberate hold")),
         ).toBe(true);
         // …and coordination settles to the human instead of a third drive.
         expect(parsed.frontmatter.waiting).toBe("human");

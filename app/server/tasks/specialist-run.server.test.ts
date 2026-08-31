@@ -1856,11 +1856,13 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   });
 
   it("F4: githubReadForRun is the ONE gate both run paths use — Claude + real + grant + repo", () => {
-    const base = {
+    // Typed by the gate's own parameter contract, so each variant below drops a
+    // real condition instead of a hand-widened stand-in for one.
+    const base: Parameters<typeof githubReadForRun>[0] = {
       githubRead: true,
-      backend: "claude" as string | null,
+      backend: "claude",
       realBackend: true,
-      repo: "akin-ozer/viberr" as string | null,
+      repo: "akin-ozer/viberr",
     };
     // All four conditions met → offered, carrying the repo for the persona copy.
     expect(githubReadForRun(base)).toEqual({ repo: "akin-ozer/viberr" });

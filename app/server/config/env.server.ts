@@ -145,9 +145,24 @@ const envSchema = z.object({
   //  - VIBERR_CLAUDE_IDLE_TIMEOUT_MS: the same guard for a Claude run (P13-RT-11 —
   //    Claude runs had no hang guard at all, so a stalled run pinned the
   //    delivering single-flight until the next restart).
+  //  - VIBERR_GIT_CLONE_TIMEOUT_MS: ceiling on one `git clone`/mirror fetch, in
+  //    ms (default 15 minutes; `CLONE_TIMEOUT_MS` in git-clone-auth.server.ts,
+  //    which the scheduler's claim lease is sized against). Ignored unless it
+  //    parses to a positive integer.
+  //  - VIBERR_TRANSCRIPT_RETENTION_DAYS: age at which a raw `runtimes/<backend>/
+  //    <runId>.jsonl` transcript is pruned (default 30; `0` keeps them forever).
+  //  - VIBERR_SESSION_HOME_RETENTION_DAYS: the same window for the provider
+  //    session homes the app owns (default 30; `0` keeps them forever).
+  //
+  // C3 (pass 31): the last three were read straight off `process.env` with no
+  // declaration here, so `.env.example` and this schema — the two places an
+  // operator looks for "what can I configure" — both denied they existed.
   VIBERR_CLAUDE_MAX_TURNS: z.string().optional(),
   VIBERR_CODEX_IDLE_TIMEOUT_MS: z.string().optional(),
   VIBERR_CLAUDE_IDLE_TIMEOUT_MS: z.string().optional(),
+  VIBERR_GIT_CLONE_TIMEOUT_MS: z.string().optional(),
+  VIBERR_TRANSCRIPT_RETENTION_DAYS: z.string().optional(),
+  VIBERR_SESSION_HOME_RETENTION_DAYS: z.string().optional(),
   // Number of trusted reverse proxies in front of the app (default 0 = none).
   // Only when set does the login throttle read X-Forwarded-For, and then as the
   // Nth hop from the right — the ip the outermost trusted proxy saw. Left unset

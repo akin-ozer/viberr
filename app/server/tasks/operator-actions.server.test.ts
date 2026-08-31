@@ -2015,6 +2015,85 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(task().packet).toBeNull();
   });
 
+  /**
+   * F31-6 (pass 31, live-caught): the operator authored "delete the
+   * conflicting REMOTE branch and push this task's commit fresh" onto a
+   * `discard_branch` option — whose actual semantics delete the LOCAL branch
+   * and its commits. Authoring now refuses the incoherent shape and names the
+   * verb that fits, and that verb is accepted on the same task.
+   */
+  it("F31-6: refuses discard_branch on a delivered/occupied branch and accepts resolve_remote_collision", async () => {
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        title: "Collision shape",
+        branch: "vib-1",
+        workRevision: {
+          id: "rev_collision1",
+          headSha: "a".repeat(40),
+          treeSha: "b".repeat(40),
+          branch: "vib-1",
+          createdAt: new Date().toISOString(),
+          sourceProfileId: "developer",
+          kind: "delivered",
+        },
+        github: { commits: [], changed: null, unownedPr: 232 },
+      }),
+      goal: "Prove packet-option coherence.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const refused = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Branch collision — pick a recovery path",
+        options: [
+          {
+            kind: "discard_branch" as const,
+            title: "Delete the stale remote vib-1 branch, then redeliver",
+            recommended: true,
+          },
+        ],
+      },
+      authority("supervised"),
+    );
+    expect(refused.outcome).toBe("noop");
+    expect(refused.message).toContain("resolve_remote_collision");
+    expect(task().packet).toBeNull();
+
+    const accepted = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Branch collision — pick a recovery path",
+        options: [
+          {
+            kind: "resolve_remote_collision" as const,
+            title: "Clear the stale remote branch and redeliver",
+            recommended: true,
+          },
+          { kind: "custom" as const, title: "Something else" },
+        ],
+      },
+      authority("supervised"),
+    );
+    expect(accepted.outcome).toBe("done");
+    expect(task().packet!.options[0]!.kind).toBe("resolve_remote_collision");
+  });
+
   it("rejects an unknown option kind", async () => {
     deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
     seedTask("impl");

@@ -962,6 +962,32 @@ export async function operatorOpenPacket(
   if (!existing) {
     return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
   }
+  // F31-6: option/semantics coherence, checked where the option is AUTHORED.
+  // `discard_branch` deletes the LOCAL, never-pushed branch and destroys its
+  // commits — offered on a task that has a delivered revision, or whose branch
+  // name is occupied on GitHub (a tracked PR or a recorded unowned one), the
+  // human's confirm ceremony would truthfully promise the opposite of the
+  // option's text (live-caught: an operator authored "delete the conflicting
+  // REMOTE branch and push this task's commit fresh" onto a discard_branch
+  // option — confirming it would have destroyed the delivery it promised to
+  // push). Refuse the authoring and name the verb that fits.
+  if (rawOptions.some((o) => o.kind === "discard_branch")) {
+    const fm = existing.parsed.frontmatter;
+    const hasDeliveredWork = fm.workRevision !== null;
+    const branchNameOccupied =
+      fm.pr !== null || (fm.github?.unownedPr ?? null) !== null;
+    if (hasDeliveredWork || branchNameOccupied) {
+      return {
+        outcome: "noop",
+        message:
+          "discard_branch only fits a LOCAL, never-pushed branch with no delivered revision — " +
+          (hasDeliveredWork
+            ? `${input.taskKey} has a delivered revision, so discarding would destroy it. `
+            : "the branch name is occupied on GitHub, so the local/remote framing would mislead. ") +
+          "For a task-key branch collision (an unrelated remote branch or unowned PR under this task's branch name), offer resolve_remote_collision — the human's confirm closes the unowned PR, deletes the stale remote branch, and re-delivers this task's local work. To abandon the work entirely, offer archive_task with deleteBranch.",
+      };
+    }
+  }
   // B3: one open decision at a time, the same refusal every sibling packet
   // writer makes (`openStuckLoopPacket`, `openAgentQuestionPacket`). This
   // writer alone assigned `parsed.packet` unconditionally, so a second packet

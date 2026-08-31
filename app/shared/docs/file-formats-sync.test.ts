@@ -58,7 +58,7 @@ function commentTail(line: string): string {
 /**
  * The `|`-separated enumeration that continues below the "The N kinds:" marker.
  * Collection stops at the first continuation line without a `|`, so the trailing
- * "(acceptance path marker …)" note is not mistaken for a kind.
+ * prose note under the list is not mistaken for a kind.
  */
 function documentedKinds(section: string): string[] {
   const lines = section.split("\n");

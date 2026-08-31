@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { resetEnvCacheForTests } from "../config/env.server";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
 import {
   createClaudeAdapter,
@@ -651,6 +652,8 @@ describe("claude idle hang guard (P13-RT-11)", () => {
    */
   it("settles a stalled stream as `error` with a classified reason line", async () => {
     process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS = "10";
+    // C3 (pass 31): the guard reads the CACHED validated env now.
+    resetEnvCacheForTests();
     let interrupted = false;
     const stalled: ClaudeQuery = Object.assign(
       (async function* () {
@@ -687,10 +690,12 @@ describe("claude idle hang guard (P13-RT-11)", () => {
     expect(lines.at(-1)?.display?.tag).toBe("run·error·idle_timeout");
     expect(lines.at(-1)?.display?.text).toContain("no output");
     delete process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
+    resetEnvCacheForTests();
   });
 
   it("a normal run never trips the guard", async () => {
     process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS = "200";
+    resetEnvCacheForTests();
     const { q } = fakeQuery([
       { type: "system", subtype: "init", session_id: "s-2" },
       { type: "result", subtype: "success", is_error: false },
@@ -703,6 +708,7 @@ describe("claude idle hang guard (P13-RT-11)", () => {
     await drain();
     expect(exit).toMatchObject({ outcome: "finished" });
     delete process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
+    resetEnvCacheForTests();
   });
 });
 
