@@ -13,3 +13,5 @@ QA-ECHO: pass31-mcp-proof-VIB
 
 This confirms the MCP tool channel between the agent and the qa-echo
 server is working end to end.
+
+Outside note: this line was pushed outside Viberr to test divergence handling.
