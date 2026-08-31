@@ -18,6 +18,7 @@ import {
   fanOutMentions,
   notifyMentionedUsers,
   resolveMentionTargets,
+  withAmbiguityDisclosure,
 } from "./mention-notify.server";
 import { postAgentComment } from "./agent-toolkit.server";
 import {
@@ -255,6 +256,24 @@ describe("mention disambiguation (B-FD2)", () => {
     expect(note).toContain("@arda");
     expect(note).toContain("nobody was notified");
     expect(note).toContain("email handle");
+  });
+
+  it("the appended disclosure closes an unclosed ``` fence so the note renders as prose", () => {
+    // Ruling-104 review: the operator-brevity truncation was the only code that
+    // balanced fences before a tail was appended; with it gone, the disclosure
+    // append is the one tail-adder and owns the balance. An author text ending
+    // inside an open fence must not swallow the note into a code block.
+    const store = setupTestStore(ctx);
+    addSecondArda(store);
+    const text = "@arda decide please. Output:\n```\nlog line 1\nlog line 2";
+    const out = withAmbiguityDisclosure(store.db, text);
+    expect(out).toContain("nobody was notified");
+    // Fences in the result are balanced, and the note sits OUTSIDE the fence.
+    expect((out.match(/^```/gm) ?? []).length % 2).toBe(0);
+    expect(out.indexOf("nobody was notified")).toBeGreaterThan(out.lastIndexOf("```"));
+    // A balanced text is left untouched apart from the appended note.
+    const balanced = "@arda decide please.\n```\nlog\n```";
+    expect(withAmbiguityDisclosure(store.db, balanced).startsWith(balanced)).toBe(true);
   });
 });
 

@@ -83,11 +83,15 @@ export const GOVERNED_TEMPLATE: WorkflowTemplate = {
  * The PRD's anti-noise guardrails, ON by default for EVERY project — the seed
  * demo AND app-created projects. Timeline noise is the product's #1 named risk,
  * so a fresh board must ship with these enabled, not with an empty guardrail set
- * that silently disables timeline compaction and operator brevity enforcement.
+ * that silently disables timeline compaction and chatter rejection.
+ *
+ * There is deliberately no operator-brevity row (owner ruling 2026-08-31): the
+ * old hard cap truncated operator narration in the canonical record; brevity is
+ * now a style instruction on the operator's post_comment tool, and the timeline
+ * collapses long comments view-side behind a Show more toggle.
  */
 export const DEFAULT_GUARDRAILS: Guardrail[] = [
   { id: "meaningful-comment", desc: "Agent comments must add information. Status chatter is rejected before it reaches the timeline.", on: true },
-  { id: "operator-brevity", desc: "Operator packets keep to observed → changed → recommended → decision required.", on: true },
   { id: "no-duplicate-summary", desc: "A summary that restates an earlier one is dropped instead of appended.", on: true },
   { id: "compression-threshold", desc: "Long timelines compress once routine events pass the threshold; typed events are always kept.", on: true, value: 40, unit: "events" },
   { id: "evidence-separation", desc: "Raw validation output stays in evidence references, never inline in the task record.", on: true },

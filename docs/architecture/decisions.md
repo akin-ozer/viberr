@@ -1466,6 +1466,27 @@ the quieter packet or the bare owner cell as drift.)*
     struck from the PRD (canon + mirror) rather than left implied. Re-adding an
     engine requires a Playwright project that actually runs it.
 
+104. **Operator narration is stored verbatim; no write-time length cap (owner,
+    2026-08-31).** The `operator-brevity` guardrail hard-truncated operator comments
+    in the canonical record at 1000 chars, so an acceptance caveat's tail existed
+    only in the agent logs while agent replies of any length survived behind the
+    timeline's Show more clamp. The owner ruled the trim out: the record keeps the
+    full narration, `CollapsibleComment` clamps it view-side exactly like long agent
+    replies, and brevity survives as a style instruction on the operator's
+    `post_comment` tool. The guardrail row is gone from `DEFAULT_GUARDRAILS`
+    (a row with no enforcement would be decorative — the ruling-Q3 failure mode);
+    stale rows in existing `project.md` files are inert and tolerated. The other
+    anti-noise guardrails (meaningful-comment, evidence-separation,
+    no-duplicate-summary, compression-threshold) keep their code and defaults.
+    One accepted interaction: the no-duplicate check compares stored text
+    byte-for-byte, and without the cap two long near-identical narrations no
+    longer collapse to an identical trimmed prefix — the one-nudge stranded
+    hold (`heldAtStage`, pass 31) is the guard against repeat-narration loops.
+    The @mention fan-out now scans the PRE-trim text on the operator and
+    agent-reply paths (B-FD8b, made true by this ruling's review), and the
+    ambiguity-disclosure append balances an unclosed ``` fence — the one job
+    the old truncation did that had to survive it.
+
 ## Route map
 
 ```

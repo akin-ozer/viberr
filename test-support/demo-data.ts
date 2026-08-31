@@ -179,13 +179,9 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
           masked: "",
           requiredScopes: ["repo", "workflow", "read:org", "pull_request:write"],
         },
-        guardrails: [
-          { id: "meaningful-comment", desc: "Agent comments must add information — status chatter is rejected before it reaches the timeline.", on: true },
-          { id: "operator-brevity", desc: "Operator packets keep to observed → changed → recommended → decision required.", on: true },
-          { id: "no-duplicate-summary", desc: "A summary that restates an earlier one is dropped instead of appended.", on: true },
-          { id: "compression-threshold", desc: "Long timelines compress once routine events pass the threshold; typed events are always kept.", on: true, value: 40, unit: "events" },
-          { id: "evidence-separation", desc: "Raw validation output stays in evidence references — never inline in the task record.", on: true },
-        ],
+        // The one canonical list — a hand-copy here diverged from
+        // DEFAULT_GUARDRAILS every time the set changed (ruling-104 review).
+        guardrails: DEFAULT_GUARDRAILS,
       },
       description:
         "Viberr Core is the canonical delivery workspace: agents do the stage work, humans govern flow, review and acceptance. Tasks live as markdown files in this store — the board, timelines and packets you see in the app are projections of these files.",

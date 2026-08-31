@@ -1801,6 +1801,11 @@ type PreparedReply =
   | {
       status: "event";
       event: TaskFileEvent;
+      /** The caller's ORIGINAL reply text — the @mention fan-out scans this
+       *  PRE-trim form (B-FD8b): a handle inside a fenced block that
+       *  evidence-separation cut away must still notify. `event.text` is the
+       *  post-trim stored form and may have lost the handle. */
+      mentionSourceText: string;
       duplicate: boolean;
       /** When `duplicate`, the text of the mid-run comment it repeats — so the
        *  caller can fan out only the @tags this reply ADDS over it (the
@@ -1929,6 +1934,7 @@ async function prepareAgentReplyEvent(
       toAgent: false,
       evidence: null,
     },
+    mentionSourceText: replyText,
     duplicate: duplicatedText !== null,
     duplicatedText,
   };
@@ -2093,8 +2099,15 @@ export async function postAgentReplyComment(
     // NEW-4: an agent reply that tags a person ("@Arda …") must reach their
     // inbox — same fan-out as human comments, with the agent as `from`
     // (under its OWN name, not the runtime label — NEW-5).
+    // B-FD8b: when the posted event IS the reply, scan the PRE-trim text — a
+    // handle inside a fence that evidence-separation cut away still notifies.
+    // The producing-note fallback keeps its own text (a suppressed duplicate's
+    // mentions were already delivered by the mid-run comment it repeats).
     notifyMentionedUsers(db, {
-      text: event.text,
+      text:
+        prepared.status === "event" && !prepared.duplicate
+          ? prepared.mentionSourceText
+          : event.text,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       from: createActorResolver(db, {
@@ -2684,7 +2697,8 @@ export async function recordAgentCompletion(
   // (the exact dispatch trigger: repeated body + cc line) hits.
   if (prepared.status === "event" && prepared.duplicatedText !== null) {
     notifyMentionedUsers(db, {
-      text: prepared.event.text,
+      // B-FD8b: pre-trim form, so an added @tag inside a separated fence counts.
+      text: prepared.mentionSourceText,
       projectSlug,
       taskKey,
       from: createActorResolver(db, {
@@ -2951,7 +2965,9 @@ export async function recordAgentCompletion(
     // was the majority of agent @tags. Same helper/`from` shape as :1169.
     if (postsReplyEvent) {
       notifyMentionedUsers(db, {
-        text: prepared.event.text,
+        // B-FD8b: the PRE-trim reply text — a handle inside a separated
+        // evidence fence must still reach the tagged human's inbox.
+        text: prepared.mentionSourceText,
         projectSlug,
         taskKey,
         from: createActorResolver(db, {

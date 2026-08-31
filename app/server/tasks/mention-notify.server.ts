@@ -198,7 +198,13 @@ export function withAmbiguityDisclosure(
 ): string {
   const ambiguous = ambiguousMentionHandles(db, text);
   if (ambiguous.length === 0) return text;
-  return `${text}\n\n${ambiguousMentionNote(ambiguous)}`;
+  // Balance an unclosed ``` fence before appending, or the note renders as
+  // code (and the reader never sees the disclosure as prose). This was done by
+  // the operator-brevity truncation until ruling 104 removed it; the append
+  // site is the one place a tail is added to author text, so it owns the check.
+  const fenceCount = (text.match(/^```/gm) ?? []).length;
+  const closed = fenceCount % 2 === 1 ? `${text}\n\`\`\`` : text;
+  return `${closed}\n\n${ambiguousMentionNote(ambiguous)}`;
 }
 
 export interface NotifyMentionsInput {

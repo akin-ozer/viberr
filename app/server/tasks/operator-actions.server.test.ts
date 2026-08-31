@@ -2876,6 +2876,64 @@ describe("operatorPostComment honest outcome (G1/B-FD8)", () => {
     expect(result.message).toBe("Comment posted to the timeline.");
     expect(task().timeline.some((e) => e.type === "comment")).toBe(true);
   });
+
+  /**
+   * Ruling 104: the operator-brevity guardrail is gone — narration reaches the
+   * canonical record UNTRUNCATED (the timeline collapses it view-side). This
+   * locks the WRITE PATH, not just the pure helper: a cap re-introduced
+   * anywhere in writeOperatorComment fails here.
+   */
+  it("stores a long operator narration verbatim on the timeline (ruling 104)", async () => {
+    deployWithGuardrails([
+      "meaningful-comment",
+      "evidence-separation",
+      "no-duplicate-summary",
+    ]);
+    seedTask("triage");
+    const long =
+      "Acceptance caveat the human must read in full. " +
+      "detail ".repeat(500) +
+      "end.";
+    const result = await operatorPostComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      base(long),
+      authority("full"),
+    );
+    expect(result.outcome).toBe("done");
+    const top = task().timeline[0]!;
+    expect(top.type).toBe("comment");
+    expect(top.text).toBe(long);
+  });
+
+  /**
+   * B-FD8b: the @mention fan-out scans the PRE-trim text. A handle sitting
+   * inside a fenced block that evidence-separation cuts away is gone from the
+   * stored comment — the notification must not be lost with it.
+   */
+  it("notifies a handle that evidence-separation cut from the stored text (B-FD8b)", async () => {
+    deployWithGuardrails(["meaningful-comment", "evidence-separation"]);
+    seedTask("triage");
+    const firstName = store.users.arda.name.split(" ")[0]!;
+    const fenceBody = Array.from({ length: 30 }, (_, i) =>
+      i === 17 ? `@${firstName} please decide on this line` : `log line ${i}`,
+    ).join("\n");
+    await operatorPostComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      base(`Validation output:\n\`\`\`\n${fenceBody}\n\`\`\`\nDecision needed.`),
+      authority("full"),
+    );
+    const top = task().timeline[0]!;
+    // The stored record really lost the handle to the trim…
+    expect(top.text).toContain("evidence-separation guardrail");
+    expect(top.text).not.toContain(`@${firstName}`);
+    // …but the tagged human was still notified.
+    const notes = listNotifications(store.db, store.users.arda.id).filter(
+      (n) => n.kind === "mention",
+    );
+    expect(notes).toHaveLength(1);
+  });
 });
 
 /**

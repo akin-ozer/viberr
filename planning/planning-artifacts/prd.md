@@ -151,7 +151,7 @@ V1 targets GitHub-backed delivery for small teams through a familiar board/task 
 - Governed intervention feels useful rather than bureaucratic, especially when a task is blocked.
 - The operator-agent model improves coordination instead of adding another noisy layer.
 
-The strongest early signal is repeated use on complex tasks where multiple agents, human approvals, and GitHub review must stay aligned. The main risks — timeline noise, operator verbosity, process theater, and memory drift — are mitigated by the anti-noise guardrails (below) and by keeping the canonical task as the single source of truth.
+The strongest early signal is repeated use on complex tasks where multiple agents, human approvals, and GitHub review must stay aligned. The main risks — timeline noise, operator verbosity, process theater, and memory drift — are mitigated by the anti-noise guardrails (below), by the operator's concise-narration style contract with view-side collapse of long comments (ruling 104), and by keeping the canonical task as the single source of truth.
 
 ## Web App Requirements
 
@@ -185,7 +185,7 @@ The strongest early signal is repeated use on complex tasks where multiple agent
 - Task detail page with current state, execution profile, latest decision packet, and unified timeline
 - Typed important events for quality flags, transition requests, blocked decisions, completion reports, and policy violations
 - Branch and PR status visibility
-- Anti-noise guardrails: meaningful-comment, operator brevity, no-duplicate-summary, compression-threshold, evidence-separation
+- Anti-noise guardrails: meaningful-comment, no-duplicate-summary, compression-threshold, evidence-separation *(operator narration is stored verbatim and collapses view-side in the timeline; the write-time operator-brevity cap was removed by owner ruling 2026-08-31)*
 - Agent web capabilities behind per-profile grants: search/fetch egress and a governed headless browser; agent file evidence posted on the task thread via the attachments drop *(added 2026-08-21, pass 22 — shipped 2026-08-14/20 under rulings 75 and 96; see FR9/FR17)*
 
 **Phase 2 (post-MVP):** richer agent-profile templates; analytics on throughput, governance load, and task health; deeper validation/testing workflows; stronger small-team collaboration ergonomics; task-graph and subtask orchestration; better reporting and audit exports; refined runtime management and recovery tooling.
