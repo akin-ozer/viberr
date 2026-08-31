@@ -1477,7 +1477,15 @@ the quieter packet or the bare owner cell as drift.)*
     (a row with no enforcement would be decorative — the ruling-Q3 failure mode);
     stale rows in existing `project.md` files are inert and tolerated. The other
     anti-noise guardrails (meaningful-comment, evidence-separation,
-    no-duplicate-summary, compression-threshold) are unchanged.
+    no-duplicate-summary, compression-threshold) keep their code and defaults.
+    One accepted interaction: the no-duplicate check compares stored text
+    byte-for-byte, and without the cap two long near-identical narrations no
+    longer collapse to an identical trimmed prefix — the one-nudge stranded
+    hold (`heldAtStage`, pass 31) is the guard against repeat-narration loops.
+    The @mention fan-out now scans the PRE-trim text on the operator and
+    agent-reply paths (B-FD8b, made true by this ruling's review), and the
+    ambiguity-disclosure append balances an unclosed ``` fence — the one job
+    the old truncation did that had to survive it.
 
 ## Route map
 

@@ -151,7 +151,7 @@ V1 targets GitHub-backed delivery for small teams through a familiar board/task 
 - Governed intervention feels useful rather than bureaucratic, especially when a task is blocked.
 - The operator-agent model improves coordination instead of adding another noisy layer.
 
-The strongest early signal is repeated use on complex tasks where multiple agents, human approvals, and GitHub review must stay aligned. The main risks — timeline noise, operator verbosity, process theater, and memory drift — are mitigated by the anti-noise guardrails (below) and by keeping the canonical task as the single source of truth.
+The strongest early signal is repeated use on complex tasks where multiple agents, human approvals, and GitHub review must stay aligned. The main risks — timeline noise, operator verbosity, process theater, and memory drift — are mitigated by the anti-noise guardrails (below), by the operator's concise-narration style contract with view-side collapse of long comments (ruling 104), and by keeping the canonical task as the single source of truth.
 
 ## Web App Requirements
 

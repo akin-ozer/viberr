@@ -712,8 +712,11 @@ async function writeOperatorComment(
   reproject(db, ctx, projectSlug, taskKey);
   // NEW-4: the operator is instructed to tag the person it answers ("@Arda …");
   // the tag must actually notify them — same fan-out as every other comment.
+  // B-FD8b: scan the caller's ORIGINAL text, not the stored post-trim form — a
+  // handle inside a fenced block that evidence-separation cut away must still
+  // notify (the record lost the line; the ping must not be lost with it).
   notifyMentionedUsers(db, {
-    text: text2,
+    text,
     projectSlug,
     taskKey,
     from: { kind: "agent", name: "Operator" },

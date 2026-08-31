@@ -3,11 +3,14 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
 import type { FileActorRef } from "~/schemas/task-file.schema";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { recordAgentCompletion } from "./task-actions.server";
 
 /**
@@ -185,6 +188,48 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
     // The duplicate body did NOT post a second comment.
     const comments = timeline(store).filter((e) => e.type === "comment");
     expect(comments).toHaveLength(1);
+  });
+
+  it("notifies a handle that evidence-separation cut from the stored reply (B-FD8b)", async () => {
+    // The fan-out scans the PRE-trim reply text: a @tag sitting inside a fenced
+    // block longer than the evidence cap is gone from the stored comment (only
+    // the head survives), but the tagged human must still be notified.
+    const store = setupTestStore(ctx);
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      guardrails: [{ id: "evidence-separation", desc: "on", on: true }],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedTask(store);
+    const firstName = store.users.arda.name.split(" ")[0]!;
+    const fenceBody = Array.from({ length: 30 }, (_, i) =>
+      i === 17 ? `@${firstName} please decide on this line` : `log line ${i}`,
+    ).join("\n");
+    await recordAgentCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      {
+        actorRef: AGENT,
+        runId: "run_fence",
+        replyText: `Validation output:\n\`\`\`\n${fenceBody}\n\`\`\`\nDone.`,
+        verdict: null,
+        question: null,
+      },
+    );
+    // The stored record really lost the handle to the trim…
+    const stored = timeline(store).find((e) => e.type === "comment")!;
+    expect(stored.text).toContain("evidence-separation guardrail");
+    expect(stored.text).not.toContain(`@${firstName}`);
+    // …but the tagged human was still notified.
+    const rows = notifications(store).filter((r) => r.kind === "mention");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.user_id).toBe(store.users.arda.id);
   });
 
   it("fans out on the other backend's shape too — a verdict report that tags a human", async () => {

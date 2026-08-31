@@ -93,7 +93,9 @@ export interface CommentGuardrailResult {
  *
  * `text` is the POST-trim text to persist; callers keep the caller's original
  * for the @mention fan-out, which must run on the PRE-trim text so a handle
- * sitting inside a separated evidence block still notifies (B-FD8b).
+ * sitting inside a separated evidence block still notifies (B-FD8b — the
+ * operator path scans its original `text`, the agent-reply path threads
+ * `mentionSourceText` through PreparedReply).
  */
 export function applyCommentGuardrails(input: {
   text: string;
