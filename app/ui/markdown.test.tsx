@@ -228,7 +228,7 @@ describe("attachment link repair (owner ask 2026-08-20)", () => {
       <Markdown
         text={"[![shot](attachments/shot.png)](https://example.com/full)"}
         {...props}
-        onAttachmentImageClick={() => () => {}}
+        onAttachmentOpen={() => () => {}}
       />,
     );
     const anchor = container.querySelector("a")!;
@@ -246,7 +246,7 @@ describe("attachment link repair (owner ask 2026-08-20)", () => {
       <Markdown
         text={"![shot](attachments/shot.png)"}
         {...props}
-        onAttachmentImageClick={() => () => {}}
+        onAttachmentOpen={() => () => {}}
       />,
     );
     // A bare embedded attachment (not inside a link) keeps its lightbox button.
@@ -260,7 +260,7 @@ describe("attachment link repair (owner ask 2026-08-20)", () => {
       <Markdown
         text={"![shot](attachments/shot.png)"}
         {...props}
-        onAttachmentImageClick={() => () => {}}
+        onAttachmentOpen={() => () => {}}
       />,
     );
     fireEvent.error(container.querySelector<HTMLImageElement>("img")!);

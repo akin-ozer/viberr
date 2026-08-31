@@ -1,4 +1,4 @@
-import { readdirSync, statSync, type Dirent } from "node:fs";
+import { readdirSync, statSync, unlinkSync, type Dirent } from "node:fs";
 import path from "node:path";
 import {
   resolveStoreSegment,
@@ -98,6 +98,12 @@ export function countTaskAttachments(
  * run's `started_at` names exactly that run's files. A file re-saved under the
  * same name by a later run re-attributes to the later run, which is the honest
  * reading (its content is the later run's).
+ *
+ * Deliberately UNCAPPED (ruling-105 review): this used to ride
+ * `listTaskAttachments`, whose LIST_CAP display bound silently limited the
+ * window to the newest 100 files — so a run that wrote more than 100 working
+ * artifacts (the exact drowning case the prune targets) permanently orphaned
+ * the overflow. The window is a completion-time fact, not a display list.
  */
 export function attachmentNamesSince(
   slug: string,
@@ -106,9 +112,99 @@ export function attachmentNamesSince(
   dataRoot?: string,
 ): string[] {
   if (Number.isNaN(Date.parse(sinceIso))) return [];
-  return listTaskAttachments(slug, key, dataRoot)
-    .filter((entry) => entry.modifiedAt >= sinceIso)
-    .map((entry) => entry.name);
+  const dir = taskAttachmentsDir(slug, key, dataRoot);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return []; // no attachments dir yet — the common case
+  }
+  const inWindow: { name: string; at: string }[] = [];
+  for (const name of names) {
+    if (name.startsWith(".")) continue;
+    try {
+      const st = statSync(path.join(dir, name));
+      if (!st.isFile()) continue;
+      const at = st.mtime.toISOString();
+      if (at >= sinceIso) inWindow.push({ name, at });
+    } catch {
+      // raced unlink between readdir and stat — skip
+    }
+  }
+  inWindow.sort(
+    (a, b) => b.at.localeCompare(a.at) || a.name.localeCompare(b.name),
+  );
+  return inWindow.map((entry) => entry.name);
+}
+
+/** A machine-stamped output name (`page-…Z.png`, `console-…Z.log`,
+ *  `element-…Z.png`, and whatever prefix a future MCP tool invents): a short
+ *  lowercase prefix plus the MCP's dashed-ISO timestamp. A human- or
+ *  agent-chosen filename never has this shape — the ruling-105 review showed
+ *  pinning specific prefixes just leaves the next sibling artifact drowning
+ *  the panel, so the stamp itself is the classifier. */
+const MCP_STAMPED_NAME_RE =
+  /^[a-z][a-z0-9_]*-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\./;
+
+/** Visual evidence — the point of the store. Always kept, never a working
+ *  artifact regardless of how the file was named. */
+const VISUAL_EVIDENCE_RE = /\.(?:png|jpe?g|webp|gif|pdf)$/i;
+
+/**
+ * Owner ask 2026-08-31 (ruling 105): `--output-dir` IS the attachments store,
+ * so the browser MCP's own WORKING artifacts — the `page-*.yml` aria snapshots
+ * and `console-*.log` dumps its tool calls write next to the screenshots —
+ * were posted to humans as if the agent chose to share them, drowning the
+ * panel (VIB-1 held ~20 of them around 2 deliberate screenshots). They are
+ * tool transport for the agent's own reading, not deliverables.
+ *
+ * A working artifact is a machine-stamped name that is NOT visual evidence.
+ * Deliberately named files (`review-col-head-contrast.png`, `notes.txt`) never
+ * match the stamp; screenshots/PDFs never match the extension test.
+ */
+export function isBrowserWorkingArtifact(name: string): boolean {
+  return MCP_STAMPED_NAME_RE.test(name) && !VISUAL_EVIDENCE_RE.test(name);
+}
+
+/**
+ * Delete the working artifacts a finished run left behind, KEEPING any whose
+ * exact filename the run cited (`citedIn` — reply text, evidence rows, and the
+ * timeline since the run started). The persona's contract is "cite the exact
+ * filename", so a citation is the agent saying "this file is for the humans".
+ * Returns the names that survive (the list the producing event should claim)
+ * and the names deleted. A file that cannot be deleted stays listed — the
+ * panel must never name-check files the directory still holds.
+ */
+export function pruneBrowserWorkingArtifacts(
+  slug: string,
+  key: string,
+  names: readonly string[],
+  citedIn: string,
+  dataRoot?: string,
+) {
+  const kept: string[] = [];
+  const pruned: string[] = [];
+  for (const name of names) {
+    if (!isBrowserWorkingArtifact(name) || citedIn.includes(name)) {
+      kept.push(name);
+      continue;
+    }
+    try {
+      unlinkSync(resolveTaskAttachment(slug, key, name, dataRoot));
+      pruned.push(name);
+    } catch (err) {
+      // Already gone counts as pruned — the producing event must never claim
+      // a file the directory does not hold (the exact honesty rule this
+      // function exists for). Any OTHER failure keeps the file listed,
+      // because it is still on disk.
+      // SAFETY: node's fs errors carry `code: string`; reading it off an
+      // unknown non-Error value yields undefined, which simply keeps the file.
+      const code = (err as NodeJS.ErrnoException | null)?.code;
+      if (code === "ENOENT") pruned.push(name);
+      else kept.push(name);
+    }
+  }
+  return { kept, pruned };
 }
 
 /** Absolute path of one attachment, traversal-contained. Throws on an unsafe
@@ -135,6 +231,11 @@ const INLINE_TYPES = new Map<string, string>([
   [".log", "text/plain; charset=utf-8"],
   [".md", "text/plain; charset=utf-8"],
   [".json", "application/json"],
+  // Ruling 105: yaml/csv join the inert-text set so the in-app read-only
+  // viewer can fetch them. Plain text on purpose — never a renderable type.
+  [".yml", "text/plain; charset=utf-8"],
+  [".yaml", "text/plain; charset=utf-8"],
+  [".csv", "text/plain; charset=utf-8"],
 ]);
 
 export function attachmentContentType(name: string): {

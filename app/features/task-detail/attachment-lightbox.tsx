@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useState,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -17,6 +18,12 @@ import { useDialog } from "~/ui/use-dialog";
  * (`useDialog`: showModal, Escape, backdrop click, animated close), and keeps
  * an "Open original" link so the raw-file tab is one click away, not gone.
  *
+ * Ruling 105 (owner ask 2026-08-31) widens it to TEXT evidence: a yaml/log/
+ * txt/md/json/csv attachment opens as a read-only viewer in the same popup,
+ * with a Download button (`?download=1` on the serving route). Any other kind
+ * (archives, binaries) is not interceptable — the factory leaves the anchor
+ * alone and the click stays a plain download link.
+ *
  * The trigger surfaces stay REAL anchors to the serving route: a plain left
  * click is intercepted into the popup, while modified clicks (cmd/ctrl/shift/
  * middle — the browser's own new-tab and save intents) pass through untouched.
@@ -24,6 +31,14 @@ import { useDialog } from "~/ui/use-dialog";
  * components) the handler does nothing and the anchor behaves exactly as
  * before — the popup is an enhancement, never a dependency.
  */
+
+/** Image-typed attachment names — thumbnail previews + the image lightbox. */
+export const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
+
+/** Text-typed attachment names the read-only viewer renders (ruling 105).
+ *  Mirrors the serving route's inert-text whitelist (task-attachments.server
+ *  INLINE_TYPES) — a name matching here must fetch as text, never render. */
+export const TEXT_VIEW_RE = /\.(txt|log|md|json|ya?ml|csv)$/i;
 
 export interface LightboxImage {
   /** Filename, for the caption and the accessible name. */
@@ -37,7 +52,8 @@ const LightboxContext = createContext<((img: LightboxImage) => void) | null>(
 );
 
 /**
- * Click-handler factory for an image-attachment link. Usage:
+ * Click-handler factory for an attachment link — images AND viewable text
+ * files; anything else keeps the plain anchor. Usage:
  *   const lightbox = useAttachmentLightbox();
  *   <a href={url} target="_blank" onClick={lightbox({ name, url })}>…
  */
@@ -48,6 +64,8 @@ export function useAttachmentLightbox(): (
   return useCallback(
     (img: LightboxImage) => (e: ReactMouseEvent<HTMLElement>) => {
       if (!open) return; // no provider: the anchor stays a plain link
+      // Only kinds the popup can actually show — others keep the raw link.
+      if (!IMAGE_RE.test(img.name) && !TEXT_VIEW_RE.test(img.name)) return;
       if (e.defaultPrevented || e.button !== 0) return;
       // The browser's own open-in-new-tab / save intents keep the anchor.
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -55,6 +73,98 @@ export function useAttachmentLightbox(): (
       open(img);
     },
     [open],
+  );
+}
+
+/** Show-at-most bound for the text viewer: the popup is a reader, not an
+ *  editor — a multi-megabyte log renders its head and the note says so. */
+const TEXT_VIEW_MAX_CHARS = 200_000;
+
+/**
+ * Read at most `cap` characters of the body, then STOP the transfer — the
+ * route serves up to 50 MB, and `res.text()` would buffer all of it before
+ * the display cap could apply (ruling-105 review). Falls back to the buffered
+ * read where the body stream is unavailable (older jsdom shims).
+ */
+async function readTextCapped(
+  res: Response,
+  cap: number,
+): Promise<{ text: string; truncated: boolean }> {
+  const reader = res.body?.getReader?.();
+  if (!reader) {
+    const text = await res.text();
+    return { text: text.slice(0, cap), truncated: text.length > cap };
+  }
+  const decoder = new TextDecoder();
+  let out = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return { text: out, truncated: false };
+    out += decoder.decode(value, { stream: true });
+    if (out.length > cap) {
+      await reader.cancel();
+      return { text: out.slice(0, cap), truncated: true };
+    }
+  }
+}
+
+/** The read-only body of a text attachment, fetched from the member-only
+ *  serving route (which serves these types as inert text/plain). */
+function LightboxTextBody({ url }: { url: string }) {
+  const [state, setState] = useState<
+    | { kind: "loading" }
+    | { kind: "failed" }
+    | { kind: "ready"; text: string; truncated: boolean }
+  >({ kind: "loading" });
+  useEffect(() => {
+    let cancelled = false;
+    setState({ kind: "loading" });
+    // A redirect means the response is NOT the attachment (an expired session
+    // 302s to /login, whose HTML would otherwise render as the file's
+    // "content") — treat it as a load failure, same as a non-2xx.
+    fetch(url)
+      .then((res) =>
+        res.ok && !res.redirected
+          ? readTextCapped(res, TEXT_VIEW_MAX_CHARS)
+          : Promise.reject(new Error()),
+      )
+      .then((read) => {
+        if (!cancelled) setState({ kind: "ready", ...read });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ kind: "failed" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+  if (state.kind === "loading") {
+    return <p className="lightbox-text-status">Loading…</p>;
+  }
+  if (state.kind === "failed") {
+    return (
+      <div className="lightbox-broken">
+        <Icon name="file" />
+        <p>This attachment could not be loaded.</p>
+      </div>
+    );
+  }
+  if (state.text === "") {
+    // A zero-byte file is a real, loadable attachment — say so instead of
+    // showing the blank dialog the failure branch exists to avoid.
+    return <p className="lightbox-text-status">This file is empty.</p>;
+  }
+  return (
+    <>
+      <pre className="lightbox-text" tabIndex={0}>
+        {state.text}
+      </pre>
+      {state.truncated && (
+        <p className="lightbox-text-status">
+          Showing the first part of a large file. Download it for the rest.
+        </p>
+      )}
+    </>
   );
 }
 
@@ -70,14 +180,19 @@ function Lightbox({
   // route's 50 MB inline cap (413), or an unsupported type. Show a message
   // instead of a broken image; "Open original" below still reaches the route.
   const [failed, setFailed] = useState(false);
+  // Ruling 105: a text attachment renders as a read-only viewer in the same
+  // popup — the factory only intercepts names one of the two kinds can show.
+  const isText = TEXT_VIEW_RE.test(img.name);
   return (
     <dialog
-      className="modal-card lightbox-card"
+      className={"modal-card lightbox-card" + (isText ? " text" : "")}
       aria-label={`Attachment ${img.name}`}
       data-screen-label="Attachment lightbox"
       ref={ref}
     >
-      {failed ? (
+      {isText ? (
+        <LightboxTextBody url={img.url} />
+      ) : failed ? (
         <div className="lightbox-broken">
           <Icon name="file" />
           <p>This attachment could not be loaded.</p>
@@ -92,6 +207,20 @@ function Lightbox({
       )}
       <div className="lightbox-foot">
         <span className="nm">{img.name}</span>
+        {isText && (
+          // The serving route forces a save dialog on `?download=1` — the raw
+          // URL renders inline (that is what the viewer itself fetches). The
+          // `download` attribute keeps a failed response (404 after deletion,
+          // auth redirect) from replacing the task page with an error body.
+          <a
+            className="btn ghost sm"
+            href={`${img.url}?download=1`}
+            download={img.name}
+            rel="noreferrer"
+          >
+            Download
+          </a>
+        )}
         {/* The raw file, exactly what the click used to open — for zooming
             further, saving, or sharing the URL. */}
         <a className="btn ghost sm" href={img.url} target="_blank" rel="noreferrer">

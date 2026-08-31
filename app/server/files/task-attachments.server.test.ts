@@ -6,7 +6,9 @@ import {
   attachmentContentType,
   attachmentNamesSince,
   countTaskAttachments,
+  isBrowserWorkingArtifact,
   listTaskAttachments,
+  pruneBrowserWorkingArtifacts,
   resolveTaskAttachment,
 } from "./task-attachments.server";
 
@@ -152,5 +154,97 @@ describe("attachmentNamesSince (P21 — a run's own files)", () => {
     expect(
       attachmentNamesSince("p1", "VIB-1", "2026-08-20T00:00:00.000Z", root),
     ).toEqual([]);
+  });
+});
+
+// Ruling 105 (owner ask 2026-08-31): the browser MCP's machine-stamped working
+// files (page-*.yml aria snapshots, console-*.log dumps) land in the store
+// because --output-dir IS the store. They are pruned at run completion unless
+// the run cited the exact filename; visual evidence always stays.
+describe("browser working artifacts (ruling 105)", () => {
+  it("classifies machine-stamped non-visual outputs, and nothing else", () => {
+    expect(isBrowserWorkingArtifact("page-2026-08-31T15-05-03-204Z.yml")).toBe(true);
+    expect(isBrowserWorkingArtifact("console-2026-08-31T15-05-03-056Z.log")).toBe(true);
+    // Visual evidence never counts, however the tool named it.
+    expect(isBrowserWorkingArtifact("page-2026-08-31T15-05-18-081Z.png")).toBe(false);
+    expect(isBrowserWorkingArtifact("element-2026-08-31T15-06-38-205Z.png")).toBe(false);
+    expect(isBrowserWorkingArtifact("page-2026-08-31T15-05-18-081Z.pdf")).toBe(false);
+    // Deliberately named files never match the machine stamp.
+    expect(isBrowserWorkingArtifact("review-notes.yml")).toBe(false);
+    expect(isBrowserWorkingArtifact("notes.txt")).toBe(false);
+    // Review: the stamp itself classifies, not a prefix allowlist — a future
+    // MCP tool's sibling artifact must not start drowning the panel again.
+    expect(isBrowserWorkingArtifact("snapshot-2026-08-31T15-05-03-204Z.yml")).toBe(true);
+    expect(isBrowserWorkingArtifact("trace-2026-08-31T15-05-03-204Z.zip")).toBe(true);
+  });
+
+  it("a name already gone from disk counts as pruned, never as kept (honesty)", () => {
+    root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
+    seed({ "console-2026-08-31T15-05-03-056Z.log": { at: 2_000_000_000_000 } });
+    const ghost = "console-2026-08-31T15-06-00-000Z.log"; // in names, not on disk
+    const result = pruneBrowserWorkingArtifacts(
+      "p1",
+      "VIB-1",
+      ["console-2026-08-31T15-05-03-056Z.log", ghost],
+      "",
+      root,
+    );
+    // Both end up pruned: one really deleted, the ghost acknowledged as gone —
+    // the producing event must never claim a file the directory does not hold.
+    expect(result.pruned).toEqual([
+      "console-2026-08-31T15-05-03-056Z.log",
+      ghost,
+    ]);
+    expect(result.kept).toEqual([]);
+  });
+
+  it("the run window is UNCAPPED — the display cap must not starve the prune", () => {
+    root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
+    const files: Record<string, { at: number }> = {};
+    for (let i = 0; i < 105; i++) {
+      files[`console-2026-08-31T15-05-03-${String(i).padStart(3, "0")}Z.log`] = {
+        at: 2_000_000_000_000 + i * 1000,
+      };
+    }
+    seed(files);
+    const names = attachmentNamesSince(
+      "p1",
+      "VIB-1",
+      new Date(1_999_999_999_999).toISOString(),
+      root,
+    );
+    expect(names).toHaveLength(105);
+  });
+
+  it("prunes uncited artifacts from disk, keeps cited ones and everything else", () => {
+    root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
+    const cited = "page-2026-08-31T15-05-03-204Z.yml";
+    const uncited = "console-2026-08-31T15-05-03-056Z.log";
+    const shot = "page-2026-08-31T15-05-18-081Z.png";
+    seed({
+      [cited]: { at: 2_000_000_000_000 },
+      [uncited]: { at: 2_000_000_000_000 },
+      [shot]: { at: 2_000_000_000_000 },
+      "notes.txt": { at: 2_000_000_000_000 },
+    });
+    const result = pruneBrowserWorkingArtifacts(
+      "p1",
+      "VIB-1",
+      [cited, uncited, shot, "notes.txt"],
+      "Verified in the browser. The aria tree is in `" + cited + "`.",
+      root,
+    );
+    expect(result.pruned).toEqual([uncited]);
+    expect(result.kept).toEqual([cited, shot, "notes.txt"]);
+    const left = listTaskAttachments("p1", "VIB-1", root).map((a) => a.name);
+    expect(left).not.toContain(uncited);
+    expect(left).toContain(cited);
+    expect(left).toContain(shot);
+  });
+
+  it("yaml/csv serve as inert text for the read-only viewer, never renderable", () => {
+    expect(attachmentContentType("page-snap.yml").type).toContain("text/plain");
+    expect(attachmentContentType("page-snap.yml").inline).toBe(true);
+    expect(attachmentContentType("data.csv").type).toContain("text/plain");
   });
 });

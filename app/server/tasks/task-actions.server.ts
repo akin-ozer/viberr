@@ -3190,10 +3190,10 @@ export async function applyAgentCompletionEffects(
   // event below so the panel can say who added each file and from which
   // message; without a recorded start there is no honest window, so nothing is
   // claimed.
-  const { attachmentNamesSince } = await import(
+  const { attachmentNamesSince, pruneBrowserWorkingArtifacts } = await import(
     "~/server/files/task-attachments.server"
   );
-  const runAttachments = thisRunStartedAt
+  const runAttachmentsRaw = thisRunStartedAt
     ? attachmentNamesSince(
         input.projectSlug,
         input.taskKey,
@@ -3253,9 +3253,9 @@ export async function applyAgentCompletionEffects(
   // paths (an admin can still `forceAcceptCompletion`, audited — DG-2). Prefer
   // the engagement snapshot; fall back to the live grant only when there is no
   // engagement row (legacy/ad-hoc runs).
-  const completionFm =
-    readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed
-      .frontmatter ?? null;
+  const completionFile =
+    readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed ?? null;
+  const completionFm = completionFile?.frontmatter ?? null;
   const verdictEngagement =
     input.profileId && completionFm
       ? completionFm.engagements.find((e) => e.profileId === input.profileId)
@@ -3313,6 +3313,74 @@ export async function applyAgentCompletionEffects(
       replyText = `${replyText}\n\ncc ${missing.join(" ")}`;
     }
   }
+  // Ruling 105 (owner ask 2026-08-31): the browser MCP writes its own WORKING
+  // artifacts — `page-*.yml` aria snapshots, `console-*.log` dumps — into the
+  // attachments store, because `--output-dir` IS that store. Tool transport was
+  // posted to humans next to the screenshots and drowned the panel. Delete this
+  // run's machine-stamped non-visual artifacts UNLESS the exact filename is
+  // cited — the persona's "cite the exact filename" contract is how an agent
+  // marks a file as for-humans. Screenshots/PDFs and deliberately named files
+  // are never pruned. Runs after replyText/outcome are FINAL so every citation
+  // source exists, and before every consumer of the list so they all tell the
+  // same story. Two scoping guards (ruling-105 review, both CONFIRMED live):
+  //  · FINISHED runs only — an error/interrupted browsing run never got to
+  //    cite anything, and its console dump is often its only diagnostic;
+  //  · no prune while a SIBLING run is live on this task: the mtime window is
+  //    task-wide, so a finishing run would delete a still-working sibling's
+  //    files before that sibling's citations exist. The sibling prunes its own
+  //    window when it completes.
+  // SAFETY: the SELECT list is the single aliased aggregate `n`; COUNT(*)
+  // over `agent_runs` (0001_baseline) is always a number row.
+  const siblingLiveRuns = (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM agent_runs
+          WHERE project_slug = ? AND task_key = ? AND id != ?
+            AND state IN ('queued', 'running')`,
+      )
+      .get(input.projectSlug, input.taskKey, finished.id) as { n: number }
+  ).n;
+  // The corpus covers every place an agent can cite: the final reply (for a
+  // Codex envelope, ALSO the raw envelope text — replyText is narrowed to its
+  // summary), the evidence rows, the ask-human question, and every timeline
+  // text since the run started (mid-run comments, human directives).
+  const citationCorpus = [
+    replyText ?? "",
+    fullText ?? "",
+    JSON.stringify(outcome?.evidence ?? []),
+    outcome?.question?.title ?? "",
+    outcome?.question?.body ?? "",
+    ...(thisRunStartedAt && completionFile
+      ? completionFile.timeline
+          .filter((e) => e.occurredAt >= thisRunStartedAt)
+          .map((e) => e.text)
+      : []),
+  ].join("\n");
+  const attachmentsPrune =
+    finished.state === "finished" && siblingLiveRuns === 0
+      ? pruneBrowserWorkingArtifacts(
+          input.projectSlug,
+          input.taskKey,
+          runAttachmentsRaw,
+          citationCorpus,
+          ctx.dataRoot,
+        )
+      : { kept: [...runAttachmentsRaw], pruned: [] };
+  if (finished.state === "finished" && siblingLiveRuns > 0) {
+    logger.info("browser working-artifact prune skipped — sibling run live", {
+      taskKey: input.taskKey,
+      runId: finished.id,
+      siblingLiveRuns,
+    });
+  }
+  if (attachmentsPrune.pruned.length > 0) {
+    logger.info("pruned uncited browser working artifacts", {
+      taskKey: input.taskKey,
+      runId: finished.id,
+      pruned: attachmentsPrune.pruned,
+    });
+  }
+  const runAttachments = attachmentsPrune.kept;
   if (finished.state === "finished") {
     // Verdict: envelope first; a verdict-AUTHORIZED agent with no envelope falls
     // back to the prose classifier (G4). The regex NEVER runs without authority

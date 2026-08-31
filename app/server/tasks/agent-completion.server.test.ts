@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
@@ -295,6 +296,144 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(fm.validation).toBe("failing");
     const quality = taskFile().parsed.timeline.find((e) => e.type === "quality");
     expect(quality).toBeTruthy();
+  });
+
+  it("ruling 105: prunes uncited browser working artifacts at completion; cited + visual stay", async () => {
+    // The browser MCP's --output-dir IS the attachments store, so its aria
+    // snapshots and console dumps land next to the screenshots. Completion
+    // must delete the machine-stamped non-visual ones the run left UNCITED,
+    // and the reply event must claim only what survives.
+    writeReviewTask();
+    const cited = "page-2026-08-31T15-05-03-204Z.yml";
+    const uncitedSnap = "page-2026-08-31T15-05-40-487Z.yml";
+    const uncitedLog = "console-2026-08-31T15-05-03-056Z.log";
+    const screenshot = "page-2026-08-31T15-05-18-081Z.png";
+    const runId = await finishedRunWith(
+      `Verified the page in the browser; the full aria tree is in \`${cited}\`.\n` +
+        "Verdict: approve — the rendering matches the spec.",
+    );
+    // Saved during the run window (after started_at, before completion lands).
+    const dir = path.join(
+      store.dataRoot,
+      "projects",
+      store.slug,
+      "tasks",
+      "VIB-1",
+      "attachments",
+    );
+    mkdirSync(dir, { recursive: true });
+    for (const name of [cited, uncitedSnap, uncitedLog, screenshot]) {
+      writeFileSync(path.join(dir, name), `content of ${name}`);
+    }
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    // The uncited working artifacts are gone from the canonical store…
+    expect(existsSync(path.join(dir, uncitedSnap))).toBe(false);
+    expect(existsSync(path.join(dir, uncitedLog))).toBe(false);
+    // …the cited one and the screenshot survive…
+    expect(existsSync(path.join(dir, cited))).toBe(true);
+    expect(existsSync(path.join(dir, screenshot))).toBe(true);
+    // …and the producing event (the verdict carries the files on a review run)
+    // claims exactly the survivors — no event names a pruned file.
+    const claimed = taskFile().parsed.timeline.flatMap((e) => e.attachments ?? []);
+    expect(claimed).toContain(cited);
+    expect(claimed).toContain(screenshot);
+    expect(claimed).not.toContain(uncitedSnap);
+    expect(claimed).not.toContain(uncitedLog);
+  });
+
+  it("ruling 105 review: an ERRORED run keeps its working artifacts (its only diagnostics)", async () => {
+    // A crashed browsing run never got to cite anything — the citation escape
+    // hatch is structurally unreachable on the failure path, so pruning there
+    // deletes the console dump a human needs to diagnose the crash.
+    writeReviewTask();
+    const dump = "console-2026-08-31T16-00-00-000Z.log";
+    const runId = await finishedRunWith("partial output before the crash");
+    const dir = path.join(
+      store.dataRoot,
+      "projects",
+      store.slug,
+      "tasks",
+      "VIB-1",
+      "attachments",
+    );
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, dump), "console output");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "error" },
+    );
+    expect(existsSync(path.join(dir, dump))).toBe(true);
+  });
+
+  it("ruling 105 review: no prune while a SIBLING run is live on the same task", async () => {
+    // The mtime window is task-wide: a finishing run would delete a
+    // still-working sibling's files before that sibling's citations exist.
+    writeReviewTask();
+    const siblingFile = "console-2026-08-31T16-10-00-000Z.log";
+    const runId = await finishedRunWith(
+      "Done reviewing.\nVerdict: approve — matches the spec.",
+    );
+    // A live sibling run on the same task (the shape the dedup test inserts).
+    const now = new Date().toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
+           backend, model, state, started_at, created_at, updated_at, agent_profile_id)
+         VALUES ('run_sibling', 'VIB-1', ?, 'th_sibling', 'Developer', 'primary',
+           'claude', 'sonnet', 'running', ?, ?, ?, 'developer')`,
+      )
+      .run(store.slug, now, now, now);
+    const dir = path.join(
+      store.dataRoot,
+      "projects",
+      store.slug,
+      "tasks",
+      "VIB-1",
+      "attachments",
+    );
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, siblingFile), "the sibling's console dump");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    expect(existsSync(path.join(dir, siblingFile))).toBe(true);
   });
 
   it("still detects a verbatim repeat when the report tags an AMBIGUOUS name (G-A-1)", async () => {

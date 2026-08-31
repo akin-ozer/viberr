@@ -3,7 +3,9 @@ import { prettySize } from "~/features/kb-browser/tree";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { AttachmentThumb } from "./attachment-image";
-import { useAttachmentLightbox } from "./attachment-lightbox";
+import { IMAGE_RE, useAttachmentLightbox } from "./attachment-lightbox";
+
+export { IMAGE_RE };
 
 /**
  * R19-19 — the task's attachments: files an agent's browser saved
@@ -19,10 +21,6 @@ import { useAttachmentLightbox } from "./attachment-lightbox";
  * Member-gated upstream: the loader ships `[]` to non-members (same bar as the
  * run console), and the serving route re-checks membership on every fetch.
  */
-
-/** Image-typed attachment names — these render as previews (the panel's
- * thumbnail grid, and the timeline's producing-comment strip). */
-export const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
 
 export function AttachmentsPanel({
   base,
@@ -124,12 +122,16 @@ export function AttachmentsPanel({
         </div>
       )}
       {files.map((a) => (
+        // Ruling 105: a text-typed file (yaml/log/txt/md/json/csv) opens the
+        // in-app read-only viewer on a plain click — the lightbox factory only
+        // intercepts kinds it can show, so other files stay plain links.
         <a
           key={a.name}
           className="attach-file"
           href={href(a.name)}
           target="_blank"
           rel="noreferrer"
+          onClick={lightbox({ name: a.name, url: href(a.name) })}
         >
           <Icon name="file" />
           <span className="attach-name">{a.name}</span>

@@ -339,14 +339,133 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     expect(baseElement.querySelector(DIALOG)).toBeTruthy();
   });
 
-  it("a non-image chip keeps its plain-link behavior (no popup can render a yml)", () => {
+  // Ruling 105: a text-typed chip opens the read-only viewer in the same
+  // popup — with the content fetched from the serving route and a Download
+  // button that forces the save dialog (`?download=1`).
+  it("a yml chip opens the read-only text viewer with a Download button", async () => {
+    const origFetch = globalThis.fetch;
+    // SAFETY: the viewer calls fetch(url) with a single string argument and
+    // reads only .ok/.text(); this stub covers exactly that call shape.
+    globalThis.fetch = (async () =>
+      new Response("aria: snapshot", { status: 200 })) as typeof fetch;
+    try {
+      const { container, baseElement, findByText } = render(
+        <AttachmentLightboxProvider>
+          <TimelineItem ev={ev()} attachmentsBase={BASE} />
+        </AttachmentLightboxProvider>,
+      );
+      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      const dialog = baseElement.querySelector(DIALOG)!;
+      expect(dialog).toBeTruthy();
+      expect(dialog.querySelector("img")).toBeNull();
+      await findByText("aria: snapshot");
+      const download = dialog.querySelector<HTMLAnchorElement>(
+        'a[href$="?download=1"]',
+      )!;
+      expect(download.getAttribute("href")).toBe(
+        `${BASE}/capture.yml?download=1`,
+      );
+      expect(download.textContent).toContain("Download");
+      // The download attribute keeps a failed response (404, auth redirect)
+      // from replacing the task page with an error body.
+      expect(download.getAttribute("download")).toBe("capture.yml");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it("a redirected response (expired session) shows the failure panel, not the login page's HTML", async () => {
+    const origFetch = globalThis.fetch;
+    const redirectedStub: Pick<Response, "ok" | "redirected" | "body" | "text"> = {
+      ok: true,
+      redirected: true,
+      body: null,
+      text: async () => "<html>Sign in</html>",
+    };
+    // SAFETY: the viewer reads only ok/redirected/body/text off the response;
+    // the stub covers exactly that surface (`redirected` is read-only on a
+    // constructed Response, so a real instance cannot model this case).
+    globalThis.fetch = (async () => redirectedStub as Response) as typeof fetch;
+    try {
+      const { container, findByText } = render(
+        <AttachmentLightboxProvider>
+          <TimelineItem ev={ev()} attachmentsBase={BASE} />
+        </AttachmentLightboxProvider>,
+      );
+      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      await findByText("This attachment could not be loaded.");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it("a zero-byte file says it is empty instead of showing a blank dialog", async () => {
+    const origFetch = globalThis.fetch;
+    // SAFETY: same single-argument fetch shape as above; .ok/.text() only.
+    globalThis.fetch = (async () =>
+      new Response("", { status: 200 })) as typeof fetch;
+    try {
+      const { container, findByText } = render(
+        <AttachmentLightboxProvider>
+          <TimelineItem ev={ev()} attachmentsBase={BASE} />
+        </AttachmentLightboxProvider>,
+      );
+      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      await findByText("This file is empty.");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it("a fetch failure shows the could-not-load panel, never a blank dialog", async () => {
+    const origFetch = globalThis.fetch;
+    // SAFETY: same single-argument fetch shape as above — the viewer only
+    // reads .ok, which routes this 404 to the failure branch.
+    globalThis.fetch = (async () =>
+      new Response("nope", { status: 404 })) as typeof fetch;
+    try {
+      const { container, findByText } = render(
+        <AttachmentLightboxProvider>
+          <TimelineItem ev={ev()} attachmentsBase={BASE} />
+        </AttachmentLightboxProvider>,
+      );
+      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      await findByText("This attachment could not be loaded.");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it("a chip the popup cannot render (zip) keeps its plain-link behavior", () => {
     const { container, baseElement } = render(
       <AttachmentLightboxProvider>
-        <TimelineItem ev={ev()} attachmentsBase={BASE} />
+        <TimelineItem
+          ev={{ ...ev(), attachments: ["bundle.zip"] }}
+          attachmentsBase={BASE}
+        />
       </AttachmentLightboxProvider>,
     );
     fireEvent.click(container.querySelector(".tl-attach-chip")!);
     expect(baseElement.querySelector(DIALOG)).toBeNull();
+  });
+
+  it("the Attachments panel's text-file row opens the same viewer", async () => {
+    const origFetch = globalThis.fetch;
+    // SAFETY: same single-argument fetch shape as above; .ok/.text() only.
+    globalThis.fetch = (async () =>
+      new Response("console says hi", { status: 200 })) as typeof fetch;
+    try {
+      const { container, baseElement, findByText } = render(
+        <AttachmentLightboxProvider>
+          <AttachmentsPanel base={BASE} attachments={[entry("run.log")]} />
+        </AttachmentLightboxProvider>,
+      );
+      fireEvent.click(container.querySelector(".attach-file")!);
+      expect(baseElement.querySelector(DIALOG)).toBeTruthy();
+      await findByText("console says hi");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
   });
 
   it("the Attachments panel's image preview opens the lightbox too", () => {

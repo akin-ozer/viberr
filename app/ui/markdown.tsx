@@ -174,9 +174,11 @@ function repairAttachmentHref(
   return citesTaskAttachment ? `${base}/${encodeURIComponent(name)}` : href;
 }
 
-/** Click-handler factory for an attachment image (the task page passes the
- *  lightbox's own factory — attachment-lightbox.tsx — whose shape this is). */
-type AttachmentImageClickFactory = (img: {
+/** Click-handler factory for an attachment (the task page passes the lightbox
+ *  factory — attachment-lightbox.tsx — whose shape this is). It decides by
+ *  kind: images open the lightbox, viewable text files the read-only viewer
+ *  (ruling 105), and anything else is left to the anchor untouched. */
+type AttachmentOpenFactory = (att: {
   name: string;
   url: string;
 }) => (e: ReactMouseEvent<HTMLElement>) => void;
@@ -193,19 +195,19 @@ function MarkdownImg({
   alt,
   attachments,
   base,
-  onAttachmentImageClick,
+  onAttachmentOpen,
 }: {
   src?: string;
   alt?: string;
   attachments: ReadonlySet<string> | undefined;
   base: string | undefined;
-  onAttachmentImageClick?: AttachmentImageClickFactory;
+  onAttachmentOpen?: AttachmentOpenFactory;
 }) {
   const insideLink = useContext(MarkdownInsideLink);
   const [failed, setFailed] = useState(false);
   const url = repairAttachmentHref(src, attachments, base);
   const isTaskAttachment =
-    onAttachmentImageClick && url && base && url.startsWith(base + "/");
+    onAttachmentOpen && url && base && url.startsWith(base + "/");
   // A task attachment can fail to serve — rotated/removed off disk (404), over
   // the route's 50 MB inline cap (413), or an unsupported type — so it degrades
   // to the same labeled placeholder the timeline/panel tiles use instead of a
@@ -239,7 +241,7 @@ function MarkdownImg({
       type="button"
       className="md-img-btn"
       aria-label={`Open attachment ${name}`}
-      onClick={onAttachmentImageClick({ name, url })}
+      onClick={onAttachmentOpen({ name, url })}
     >
       {image}
     </button>
@@ -249,19 +251,33 @@ function MarkdownImg({
 function componentsFor(
   attachments: ReadonlySet<string> | undefined,
   base: string | undefined,
-  onAttachmentImageClick?: AttachmentImageClickFactory,
+  onAttachmentOpen?: AttachmentOpenFactory,
 ) {
   return {
     a({ children, href }: ComponentPropsWithoutRef<"a">) {
       // Mark the subtree so a nested attachment image renders WITHOUT its
       // lightbox <button> (a <button> inside this <a> is nested-interactive).
-      // The link is the interactive element; clicking follows the href, which is
-      // the correct behavior for an image wrapped in a link.
+      // The link is the interactive element.
+      const repaired = repairAttachmentHref(href, attachments, base);
+      // Ruling 105: a link to a task attachment opens in the in-app popup on a
+      // plain click — the factory decides by kind (image lightbox, text viewer)
+      // and leaves any other kind to the anchor. Modified clicks always keep
+      // the browser's own behavior; non-attachment links are never intercepted.
+      const isAttachmentLink =
+        onAttachmentOpen && repaired && base && repaired.startsWith(base + "/");
       return (
         <a
-          href={repairAttachmentHref(href, attachments, base)}
+          href={repaired}
           target="_blank"
           rel="noopener noreferrer"
+          {...(isAttachmentLink
+            ? {
+                onClick: onAttachmentOpen({
+                  name: decodeURIComponent(repaired.slice(base.length + 1)),
+                  url: repaired,
+                }),
+              }
+            : {})}
         >
           <MarkdownInsideLink.Provider value={true}>
             {children}
@@ -278,7 +294,7 @@ function componentsFor(
           alt={alt}
           attachments={attachments}
           base={base}
-          onAttachmentImageClick={onAttachmentImageClick}
+          onAttachmentOpen={onAttachmentOpen}
         />
       );
     },
@@ -304,7 +320,7 @@ export function Markdown({
   mentionNames,
   attachmentNames,
   attachmentsBase,
-  onAttachmentImageClick,
+  onAttachmentOpen,
 }: {
   text: string;
   /** Known mentionable names, so a multi-word "@Arda Kaya" chips as one span. */
@@ -317,11 +333,11 @@ export function Markdown({
   attachmentsBase?: string;
   /** Opens an embedded attachment image in the task page's lightbox — pass
    *  `useAttachmentLightbox()`'s factory. Absent ⇒ embeds are plain images. */
-  onAttachmentImageClick?: AttachmentImageClickFactory;
+  onAttachmentOpen?: AttachmentOpenFactory;
 }): ReactNode {
   const components =
     attachmentNames && attachmentNames.size > 0 && attachmentsBase
-      ? componentsFor(attachmentNames, attachmentsBase, onAttachmentImageClick)
+      ? componentsFor(attachmentNames, attachmentsBase, onAttachmentOpen)
       : DEFAULT_COMPONENTS;
   return (
     <ReactMarkdown

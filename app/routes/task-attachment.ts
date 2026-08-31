@@ -51,6 +51,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   }
 
   const { type, inline } = attachmentContentType(params.file);
+  // Ruling 105: the in-app text viewer's Download button asks for the same
+  // URL with `?download=1` — force the save dialog instead of inline render.
+  const forceDownload =
+    new URL(request.url).searchParams.get("download") === "1";
   // The filename survived resolveTaskAttachment (no separators/quotes beyond
   // ordinary characters); strip the two characters that could break the header.
   const safeName = params.file.replace(/["\\]/g, "_");
@@ -59,7 +63,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     headers: {
       "content-type": type,
       "content-length": String(size),
-      "content-disposition": `${inline ? "inline" : "attachment"}; filename="${safeName}"`,
+      "content-disposition": `${inline && !forceDownload ? "inline" : "attachment"}; filename="${safeName}"`,
       "x-content-type-options": "nosniff",
       // Even the inline types render inert: no scripts, no plugins reaching
       // back into the origin. Browsers that refuse to show a sandboxed PDF

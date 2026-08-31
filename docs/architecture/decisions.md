@@ -1487,6 +1487,21 @@ the quieter packet or the bare owner cell as drift.)*
     ambiguity-disclosure append balances an unclosed ``` fence — the one job
     the old truncation did that had to survive it.
 
+105. **Browser working artifacts are not deliverables; text attachments get an
+    in-app viewer (owner, 2026-08-31).** The browser MCP's `--output-dir` IS the
+    task attachments store, so its machine-stamped working files — `page-*.yml`
+    aria snapshots, `console-*.log` dumps — were posted to humans next to the
+    screenshots and drowned the panel (VIB-1: ~20 artifacts around 2 deliberate
+    captures). At run completion the machine-stamped non-visual artifacts the run
+    produced are DELETED unless the exact filename is cited in the reply, the
+    evidence rows, or the timeline since run start (the persona's cite-the-exact-
+    filename contract is how an agent marks a file for humans); screenshots, PDFs,
+    and deliberately named files always stay, and the persona discloses the
+    cleanup. Posted text files (txt/log/md/json/yml/yaml/csv) open in the same
+    in-app popup as images — a read-only monospace viewer with a Download button
+    (`?download=1` forces the save dialog); other kinds keep the plain download
+    link. Pre-existing artifacts in old tasks are left in place.
+
 ## Route map
 
 ```
