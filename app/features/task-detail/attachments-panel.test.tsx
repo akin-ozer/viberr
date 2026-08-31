@@ -436,7 +436,10 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     }
   });
 
-  it("a chip the popup cannot render (zip) keeps its plain-link behavior", () => {
+  // Ruling 105 addendum: a kind the popup cannot render still opens the card,
+  // showing a no-preview note in place of content — the point is the uniform
+  // Download button, not the preview.
+  it("a chip the popup cannot render (zip) opens the no-preview card with Download", () => {
     const { container, baseElement } = render(
       <AttachmentLightboxProvider>
         <TimelineItem
@@ -446,7 +449,35 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
       </AttachmentLightboxProvider>,
     );
     fireEvent.click(container.querySelector(".tl-attach-chip")!);
-    expect(baseElement.querySelector(DIALOG)).toBeNull();
+    const dialog = baseElement.querySelector(DIALOG)!;
+    expect(dialog).toBeTruthy();
+    expect(dialog.querySelector("img")).toBeNull();
+    expect(dialog.querySelector(".lightbox-broken")!.textContent).toContain(
+      "No preview for this file type",
+    );
+    const download = dialog.querySelector<HTMLAnchorElement>(
+      'a[href$="?download=1"]',
+    )!;
+    expect(download.getAttribute("href")).toBe(`${BASE}/bundle.zip?download=1`);
+    expect(download.getAttribute("download")).toBe("bundle.zip");
+  });
+
+  // Ruling 105 addendum: the Download button is on EVERY kind's card — before
+  // it, an image opened with only "Open original" and saving took a
+  // right-click on the raw tab.
+  it("the image lightbox carries the same Download button", () => {
+    const { container, baseElement } = render(
+      <AttachmentLightboxProvider>
+        <TimelineItem ev={ev()} attachmentsBase={BASE} />
+      </AttachmentLightboxProvider>,
+    );
+    fireEvent.click(container.querySelector(".tl-attach-thumb")!);
+    const dialog = baseElement.querySelector(DIALOG)!;
+    const download = dialog.querySelector<HTMLAnchorElement>(
+      'a[href$="?download=1"]',
+    )!;
+    expect(download.getAttribute("href")).toBe(`${BASE}/shot.png?download=1`);
+    expect(download.getAttribute("download")).toBe("shot.png");
   });
 
   it("the Attachments panel's text-file row opens the same viewer", async () => {

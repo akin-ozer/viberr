@@ -122,9 +122,9 @@ export function AttachmentsPanel({
         </div>
       )}
       {files.map((a) => (
-        // Ruling 105: a text-typed file (yaml/log/txt/md/json/csv) opens the
-        // in-app read-only viewer on a plain click — the lightbox factory only
-        // intercepts kinds it can show, so other files stay plain links.
+        // Ruling 105 (+ addendum): a plain click opens the in-app card for
+        // EVERY kind — text files render read-only, anything else shows a
+        // no-preview note; both carry the Download button.
         <a
           key={a.name}
           className="attach-file"

@@ -175,9 +175,9 @@ function repairAttachmentHref(
 }
 
 /** Click-handler factory for an attachment (the task page passes the lightbox
- *  factory — attachment-lightbox.tsx — whose shape this is). It decides by
- *  kind: images open the lightbox, viewable text files the read-only viewer
- *  (ruling 105), and anything else is left to the anchor untouched. */
+ *  factory — attachment-lightbox.tsx — whose shape this is). Every kind opens
+ *  the card (ruling 105 + addendum): images the lightbox, viewable text files
+ *  the read-only viewer, anything else a no-preview note with Download. */
 type AttachmentOpenFactory = (att: {
   name: string;
   url: string;

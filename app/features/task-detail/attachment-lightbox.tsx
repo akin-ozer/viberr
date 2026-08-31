@@ -20,9 +20,11 @@ import { useDialog } from "~/ui/use-dialog";
  *
  * Ruling 105 (owner ask 2026-08-31) widens it to TEXT evidence: a yaml/log/
  * txt/md/json/csv attachment opens as a read-only viewer in the same popup,
- * with a Download button (`?download=1` on the serving route). Any other kind
- * (archives, binaries) is not interceptable — the factory leaves the anchor
- * alone and the click stays a plain download link.
+ * with a Download button (`?download=1` on the serving route). The owner's
+ * same-day addendum makes the card UNIVERSAL: every attachment kind opens it
+ * and every kind gets the Download button — images show the picture, text
+ * files the reader, and anything else (archives, binaries) a no-preview note,
+ * so downloading never depends on what the popup can render.
  *
  * The trigger surfaces stay REAL anchors to the serving route: a plain left
  * click is intercepted into the popup, while modified clicks (cmd/ctrl/shift/
@@ -52,8 +54,8 @@ const LightboxContext = createContext<((img: LightboxImage) => void) | null>(
 );
 
 /**
- * Click-handler factory for an attachment link — images AND viewable text
- * files; anything else keeps the plain anchor. Usage:
+ * Click-handler factory for an attachment link — every kind opens the card
+ * (ruling 105 addendum); modified clicks keep the plain anchor. Usage:
  *   const lightbox = useAttachmentLightbox();
  *   <a href={url} target="_blank" onClick={lightbox({ name, url })}>…
  */
@@ -64,8 +66,6 @@ export function useAttachmentLightbox(): (
   return useCallback(
     (img: LightboxImage) => (e: ReactMouseEvent<HTMLElement>) => {
       if (!open) return; // no provider: the anchor stays a plain link
-      // Only kinds the popup can actually show — others keep the raw link.
-      if (!IMAGE_RE.test(img.name) && !TEXT_VIEW_RE.test(img.name)) return;
       if (e.defaultPrevented || e.button !== 0) return;
       // The browser's own open-in-new-tab / save intents keep the anchor.
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -181,8 +181,10 @@ function Lightbox({
   // instead of a broken image; "Open original" below still reaches the route.
   const [failed, setFailed] = useState(false);
   // Ruling 105: a text attachment renders as a read-only viewer in the same
-  // popup — the factory only intercepts names one of the two kinds can show.
+  // popup; per the addendum every other kind opens the card too, with a
+  // no-preview note standing in for content the popup cannot render.
   const isText = TEXT_VIEW_RE.test(img.name);
+  const isImage = IMAGE_RE.test(img.name);
   return (
     <dialog
       className={"modal-card lightbox-card" + (isText ? " text" : "")}
@@ -192,6 +194,11 @@ function Lightbox({
     >
       {isText ? (
         <LightboxTextBody url={img.url} />
+      ) : !isImage ? (
+        <div className="lightbox-broken">
+          <Icon name="file" />
+          <p>No preview for this file type. Download it, or open the original in a new tab.</p>
+        </div>
       ) : failed ? (
         <div className="lightbox-broken">
           <Icon name="file" />
@@ -207,20 +214,20 @@ function Lightbox({
       )}
       <div className="lightbox-foot">
         <span className="nm">{img.name}</span>
-        {isText && (
-          // The serving route forces a save dialog on `?download=1` — the raw
-          // URL renders inline (that is what the viewer itself fetches). The
-          // `download` attribute keeps a failed response (404 after deletion,
-          // auth redirect) from replacing the task page with an error body.
-          <a
-            className="btn ghost sm"
-            href={`${img.url}?download=1`}
-            download={img.name}
-            rel="noreferrer"
-          >
-            Download
-          </a>
-        )}
+        {/* Every kind gets the button (ruling 105 addendum). The serving
+            route forces a save dialog on `?download=1` — the raw URL renders
+            inline where the type allows (that is what the viewer fetches).
+            The `download` attribute keeps a failed response (404 after
+            deletion, auth redirect) from replacing the task page with an
+            error body. */}
+        <a
+          className="btn ghost sm"
+          href={`${img.url}?download=1`}
+          download={img.name}
+          rel="noreferrer"
+        >
+          Download
+        </a>
         {/* The raw file, exactly what the click used to open — for zooming
             further, saving, or sharing the URL. */}
         <a className="btn ghost sm" href={img.url} target="_blank" rel="noreferrer">

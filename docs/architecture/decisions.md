@@ -1499,8 +1499,14 @@ the quieter packet or the bare owner cell as drift.)*
     and deliberately named files always stay, and the persona discloses the
     cleanup. Posted text files (txt/log/md/json/yml/yaml/csv) open in the same
     in-app popup as images — a read-only monospace viewer with a Download button
-    (`?download=1` forces the save dialog); other kinds keep the plain download
-    link. Pre-existing artifacts in old tasks are left in place.
+    (`?download=1` forces the save dialog). Pre-existing artifacts in old tasks
+    are left in place.
+    **Addendum (owner, same day): the Download button is universal.** Every
+    attachment kind opens the card and carries Download — images show the
+    picture (previously the lightbox offered only "Open original"), text files
+    the reader, and any other kind (archives, binaries) a no-preview note. The
+    lightbox factory therefore intercepts every plain click; modified clicks
+    and provider-less renders still fall through to the real anchor.
 
 ## Route map
 
