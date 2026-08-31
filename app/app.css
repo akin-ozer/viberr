@@ -4986,6 +4986,21 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   font-family: var(--font-mono); font-size: .74rem; color: var(--muted);
   margin-right: auto; overflow-wrap: anywhere;
 }
+/* Ruling 105: the read-only TEXT viewer in the same popup — yaml/log/txt/md/
+   json/csv attachments render as scrollable monospace instead of a raw-file
+   tab; the foot gains a Download button (route `?download=1`). */
+.modal-card.lightbox-card.text { width: min(860px, calc(100vw - 2rem)); }
+.lightbox-card .lightbox-text {
+  display: block; max-height: 68vh; overflow: auto;
+  margin: 0; padding: .75rem 1rem;
+  font-family: var(--font-mono); font-size: .8rem; line-height: 1.55;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  color: var(--fg); background: var(--bg);
+  border: 1px solid var(--hairline); border-radius: var(--radius-button);
+}
+.lightbox-card .lightbox-text-status {
+  padding: .5rem .25rem 0; font-size: .74rem; color: var(--muted);
+}
 /* Evidence label token that names a real attachment (timeline.tsx linkify). */
 /* Same token text-links use (P13-D-18 precedent) — --blue on white is 3.84:1
    and fails AA for normal text; --teal-dark clears it in both themes. */

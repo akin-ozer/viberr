@@ -1,4 +1,4 @@
-import { readdirSync, statSync, type Dirent } from "node:fs";
+import { readdirSync, statSync, unlinkSync, type Dirent } from "node:fs";
 import path from "node:path";
 import {
   resolveStoreSegment,
@@ -111,6 +111,65 @@ export function attachmentNamesSince(
     .map((entry) => entry.name);
 }
 
+/** The browser MCP's machine-stamped output names (`page-…Z.png`,
+ *  `console-…Z.log`, `element-…Z.png`). A human- or agent-chosen filename
+ *  never has this shape. */
+const MCP_STAMPED_NAME_RE =
+  /^(?:page|console|element)-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\./;
+
+/** Visual evidence — the point of the store. Always kept, never a working
+ *  artifact regardless of how the file was named. */
+const VISUAL_EVIDENCE_RE = /\.(?:png|jpe?g|webp|gif|pdf)$/i;
+
+/**
+ * Owner ask 2026-08-31 (ruling 105): `--output-dir` IS the attachments store,
+ * so the browser MCP's own WORKING artifacts — the `page-*.yml` aria snapshots
+ * and `console-*.log` dumps its tool calls write next to the screenshots —
+ * were posted to humans as if the agent chose to share them, drowning the
+ * panel (VIB-1 held ~20 of them around 2 deliberate screenshots). They are
+ * tool transport for the agent's own reading, not deliverables.
+ *
+ * A working artifact is a machine-stamped name that is NOT visual evidence.
+ * Deliberately named files (`review-col-head-contrast.png`, `notes.txt`) never
+ * match the stamp; screenshots/PDFs never match the extension test.
+ */
+export function isBrowserWorkingArtifact(name: string): boolean {
+  return MCP_STAMPED_NAME_RE.test(name) && !VISUAL_EVIDENCE_RE.test(name);
+}
+
+/**
+ * Delete the working artifacts a finished run left behind, KEEPING any whose
+ * exact filename the run cited (`citedIn` — reply text, evidence rows, and the
+ * timeline since the run started). The persona's contract is "cite the exact
+ * filename", so a citation is the agent saying "this file is for the humans".
+ * Returns the names that survive (the list the producing event should claim)
+ * and the names deleted. A file that cannot be deleted stays listed — the
+ * panel must never name-check files the directory still holds.
+ */
+export function pruneBrowserWorkingArtifacts(
+  slug: string,
+  key: string,
+  names: readonly string[],
+  citedIn: string,
+  dataRoot?: string,
+) {
+  const kept: string[] = [];
+  const pruned: string[] = [];
+  for (const name of names) {
+    if (!isBrowserWorkingArtifact(name) || citedIn.includes(name)) {
+      kept.push(name);
+      continue;
+    }
+    try {
+      unlinkSync(resolveTaskAttachment(slug, key, name, dataRoot));
+      pruned.push(name);
+    } catch {
+      kept.push(name); // still on disk (or raced) — keep it honest and listed
+    }
+  }
+  return { kept, pruned };
+}
+
 /** Absolute path of one attachment, traversal-contained. Throws on an unsafe
  *  name (the route maps that to 404). */
 export function resolveTaskAttachment(
@@ -135,6 +194,11 @@ const INLINE_TYPES = new Map<string, string>([
   [".log", "text/plain; charset=utf-8"],
   [".md", "text/plain; charset=utf-8"],
   [".json", "application/json"],
+  // Ruling 105: yaml/csv join the inert-text set so the in-app read-only
+  // viewer can fetch them. Plain text on purpose — never a renderable type.
+  [".yml", "text/plain; charset=utf-8"],
+  [".yaml", "text/plain; charset=utf-8"],
+  [".csv", "text/plain; charset=utf-8"],
 ]);
 
 export function attachmentContentType(name: string): {

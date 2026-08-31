@@ -31,12 +31,14 @@ beforeAll(async () => {
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, "board-after.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   writeFileSync(path.join(dir, "sneaky.html"), "<script>alert(1)</script>");
+  writeFileSync(path.join(dir, "page-snap.yml"), "aria: snapshot");
 });
 afterAll(() => app.cleanup());
 
 async function get(
   userId: string,
   file: string,
+  query = "",
 ): Promise<{ status: number; headers: Headers; body: () => Promise<ArrayBuffer> }> {
   const { loader } = await import("~/routes/task-attachment");
   const { cookie } = await app.cookieFor(userId);
@@ -46,7 +48,7 @@ async function get(
     // its matches) is untouched on every path this file exercises.
     const res = await loader({
       request: app.request(
-        `/projects/viberr-core/tasks/VIB-142/attachments/${encodeURIComponent(file)}`,
+        `/projects/viberr-core/tasks/VIB-142/attachments/${encodeURIComponent(file)}${query}`,
         { cookie },
       ),
       params: { slug: "viberr-core", key: "VIB-142", file },
@@ -88,6 +90,22 @@ describe("GET /projects/:slug/tasks/:key/attachments/:file (R19-19)", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/octet-stream");
     expect(res.headers.get("content-disposition")).toContain("attachment");
+  });
+
+  it("ruling 105: a yml serves as inert text/plain inline (the viewer fetches it)", async () => {
+    const res = await get(ardaId, "page-snap.yml");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    expect(res.headers.get("content-disposition")).toContain("inline");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("ruling 105: ?download=1 forces the save dialog on an inline type", async () => {
+    const res = await get(ardaId, "page-snap.yml", "?download=1");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toContain("attachment");
+    // Content itself is unchanged — only the disposition flips.
+    expect(res.headers.get("content-type")).toContain("text/plain");
   });
 
   it("refuses a signed-in NON-member with the same 404 an unknown project gets (R15-4)", async () => {

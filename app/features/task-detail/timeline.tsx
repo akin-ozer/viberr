@@ -5,9 +5,8 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
-import { IMAGE_RE } from "./attachments-panel";
 import { AttachmentThumb } from "./attachment-image";
-import { useAttachmentLightbox } from "./attachment-lightbox";
+import { IMAGE_RE, useAttachmentLightbox } from "./attachment-lightbox";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
@@ -106,7 +105,7 @@ function CollapsibleComment({
           mentionNames={mentionNames}
           {...(attachmentNames ? { attachmentNames } : {})}
           {...(attachmentsBase ? { attachmentsBase } : {})}
-          onAttachmentImageClick={lightbox}
+          onAttachmentOpen={lightbox}
         />
       </div>
       {overflowing && (
@@ -160,9 +159,10 @@ function EvidenceLabel({
               href={url}
               target="_blank"
               rel="noreferrer"
-              {...(IMAGE_RE.test(clean)
-                ? { onClick: lightbox({ name: clean, url }) }
-                : {})}
+              // Images open the lightbox; text files (ruling 105) the read-only
+              // viewer. The factory only intercepts kinds the popup can show,
+              // so any other cited file keeps the raw-file tab.
+              onClick={lightbox({ name: clean, url })}
             >
               {clean}
             </a>
@@ -332,12 +332,18 @@ export function TimelineItem({
               </AttachmentThumb>
             ))}
             {ev.attachments.filter((name) => !IMAGE_RE.test(name)).map((name) => (
+              // Ruling 105: a text-typed chip opens the in-app read-only
+              // viewer; the factory leaves any other kind a plain link.
               <a
                 key={name}
                 className="tl-attach-chip"
                 href={`${attachmentsBase}/${encodeURIComponent(name)}`}
                 target="_blank"
                 rel="noreferrer"
+                onClick={lightbox({
+                  name,
+                  url: `${attachmentsBase}/${encodeURIComponent(name)}`,
+                })}
               >
                 <Icon name="file" />
                 <span className="nm">{name}</span>

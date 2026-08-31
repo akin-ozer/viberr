@@ -225,7 +225,10 @@ export function attachmentsDropSection(attachmentsRel: string): string {
     "and images render inline. Cite the exact filename in your reply and " +
     "evidence references. Use it for things humans need to SEE — screenshots, " +
     "captures, small reports; code and large artifacts belong in the " +
-    "repository and the pull request, not here."
+    "repository and the pull request, not here. The browser tool's own " +
+    "machine-stamped working files (page-….yml snapshots, console-….log dumps) " +
+    "are cleaned up after your run UNLESS you cite the exact filename — cite " +
+    "one only when a human genuinely needs to read it."
   );
 }
 
@@ -265,6 +268,10 @@ export function browserPersonaSection(
     "filename (e.g. `page-….png`, shown in the tool result) in your evidence " +
     "references when a screenshot backs a claim. A screenshot you NAME " +
     "yourself saves into your working directory instead and no human will " +
-    "see it."
+    "see it.\n" +
+    "- **Snapshots and console dumps are yours, not the humans'.** The " +
+    "browser's machine-stamped working files (`page-….yml`, `console-….log`) " +
+    "are removed from the task's attachments after your run unless your reply " +
+    "or evidence cites the exact filename. Screenshots always stay."
   );
 }
