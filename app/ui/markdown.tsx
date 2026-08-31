@@ -174,6 +174,16 @@ function repairAttachmentHref(
   return citesTaskAttachment ? `${base}/${encodeURIComponent(name)}` : href;
 }
 
+/** A percent-escape an author wrote by hand can be malformed ("%zz"), and
+ *  `decodeURIComponent` THROWS on it — mid-render. Null, not a crash. */
+function safeDecodeName(rest: string): string | null {
+  try {
+    return decodeURIComponent(rest);
+  } catch {
+    return null;
+  }
+}
+
 /** Click-handler factory for an attachment (the task page passes the lightbox
  *  factory — attachment-lightbox.tsx — whose shape this is). Every kind opens
  *  the card (ruling 105 + addendum): images the lightbox, viewable text files
@@ -259,21 +269,28 @@ function componentsFor(
       // lightbox <button> (a <button> inside this <a> is nested-interactive).
       // The link is the interactive element.
       const repaired = repairAttachmentHref(href, attachments, base);
-      // Ruling 105: a link to a task attachment opens in the in-app popup on a
-      // plain click — the factory decides by kind (image lightbox, text viewer)
-      // and leaves any other kind to the anchor. Modified clicks always keep
-      // the browser's own behavior; non-attachment links are never intercepted.
-      const isAttachmentLink =
-        onAttachmentOpen && repaired && base && repaired.startsWith(base + "/");
+      // Ruling 105 (+ addendum): a link to a task attachment opens the in-app
+      // card on a plain click, whatever the kind. Only a CLEAN single-segment
+      // suffix of the base is intercepted — an author-written URL carrying a
+      // query, fragment, nested path, or malformed percent-escape would derive
+      // a wrong (or throwing) attachment name, so those keep the plain anchor.
+      // Modified clicks always keep the browser's own behavior;
+      // non-attachment links are never intercepted.
+      const rest =
+        repaired && base && repaired.startsWith(base + "/")
+          ? repaired.slice(base.length + 1)
+          : "";
+      const attachmentName =
+        rest && !/[/?#]/.test(rest) ? safeDecodeName(rest) : null;
       return (
         <a
           href={repaired}
           target="_blank"
           rel="noopener noreferrer"
-          {...(isAttachmentLink
+          {...(onAttachmentOpen && attachmentName && repaired
             ? {
                 onClick: onAttachmentOpen({
-                  name: decodeURIComponent(repaired.slice(base.length + 1)),
+                  name: attachmentName,
                   url: repaired,
                 }),
               }

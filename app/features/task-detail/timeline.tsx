@@ -139,8 +139,9 @@ function EvidenceLabel({
   attachments?: ReadonlySet<string>;
   base?: string;
 }) {
-  // A cited image opens the in-app lightbox on a plain click (owner request
-  // 2026-08-21); modified clicks and non-image files keep the raw-file tab.
+  // A cited file opens the in-app card on a plain click (owner request
+  // 2026-08-21, widened by the ruling-105 addendum to every kind); modified
+  // clicks keep the raw-file tab.
   const lightbox = useAttachmentLightbox();
   if (!attachments || attachments.size === 0 || !base) return <span>{label}</span>;
   const parts = label.split(/(\s+)/);

@@ -424,13 +424,18 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     globalThis.fetch = (async () =>
       new Response("nope", { status: 404 })) as typeof fetch;
     try {
-      const { container, findByText } = render(
+      const { container, baseElement, findByText } = render(
         <AttachmentLightboxProvider>
           <TimelineItem ev={ev()} attachmentsBase={BASE} />
         </AttachmentLightboxProvider>,
       );
       fireEvent.click(container.querySelector(".tl-attach-chip")!);
       await findByText("This attachment could not be loaded.");
+      // The proven failure also drops the Download button — downloading the
+      // 404 would hand some browsers the error body as "capture.yml".
+      expect(
+        baseElement.querySelector(`${DIALOG} a[href$="?download=1"]`),
+      ).toBeNull();
     } finally {
       globalThis.fetch = origFetch;
     }
@@ -439,27 +444,87 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
   // Ruling 105 addendum: a kind the popup cannot render still opens the card,
   // showing a no-preview note in place of content — the point is the uniform
   // Download button, not the preview.
-  it("a chip the popup cannot render (zip) opens the no-preview card with Download", () => {
+  it("a chip the popup cannot render (zip) opens the no-preview card with Download", async () => {
+    const origFetch = globalThis.fetch;
+    // SAFETY: the no-preview card probes fetch(url) once and reads only
+    // .ok/.redirected/.body; this stub covers exactly that call shape.
+    globalThis.fetch = (async () =>
+      new Response("PK", { status: 200 })) as typeof fetch;
+    try {
+      const { container, baseElement, findByText } = render(
+        <AttachmentLightboxProvider>
+          <TimelineItem
+            ev={{ ...ev(), attachments: ["bundle.zip"] }}
+            attachmentsBase={BASE}
+          />
+        </AttachmentLightboxProvider>,
+      );
+      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      const dialog = baseElement.querySelector(DIALOG)!;
+      expect(dialog).toBeTruthy();
+      expect(dialog.querySelector("img")).toBeNull();
+      await findByText(/no in-app preview/);
+      const download = dialog.querySelector<HTMLAnchorElement>(
+        'a[href$="?download=1"]',
+      )!;
+      expect(download.getAttribute("href")).toBe(
+        `${BASE}/bundle.zip?download=1`,
+      );
+      expect(download.getAttribute("download")).toBe("bundle.zip");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  // With the factory's kind gate gone, the markdown `a` renderer is the one
+  // surface that can receive an AUTHOR-WRITTEN URL — a query, fragment,
+  // nested path, or malformed escape under the attachments base would derive
+  // a wrong attachment name, so only a clean single-segment suffix opens the
+  // card and everything else keeps the plain anchor.
+  it("a route URL with a query in a markdown link keeps the plain anchor", () => {
     const { container, baseElement } = render(
       <AttachmentLightboxProvider>
         <TimelineItem
-          ev={{ ...ev(), attachments: ["bundle.zip"] }}
+          ev={ev(`See [the raw file](${BASE}/shot.png?x=1)`)}
+          attachmentNames={new Set(["shot.png"])}
           attachmentsBase={BASE}
         />
       </AttachmentLightboxProvider>,
     );
-    fireEvent.click(container.querySelector(".tl-attach-chip")!);
-    const dialog = baseElement.querySelector(DIALOG)!;
-    expect(dialog).toBeTruthy();
-    expect(dialog.querySelector("img")).toBeNull();
-    expect(dialog.querySelector(".lightbox-broken")!.textContent).toContain(
-      "No preview for this file type",
-    );
-    const download = dialog.querySelector<HTMLAnchorElement>(
-      'a[href$="?download=1"]',
+    const link = [...container.querySelectorAll("a")].find(
+      (a) => a.textContent === "the raw file",
     )!;
-    expect(download.getAttribute("href")).toBe(`${BASE}/bundle.zip?download=1`);
-    expect(download.getAttribute("download")).toBe("bundle.zip");
+    fireEvent.click(link);
+    expect(baseElement.querySelector(DIALOG)).toBeNull();
+  });
+
+  // The no-preview card is the one body that never renders the file, so it
+  // probes the URL — a proven-unservable response (404 after the ruling-105
+  // prune, 413 over the cap, auth redirect) swaps the note for the failure
+  // message and drops Download (some browsers save a failed download's error
+  // body as a file bearing the attachment's real name).
+  it("a gone file's no-preview card reports the failure and hides Download", async () => {
+    const origFetch = globalThis.fetch;
+    // SAFETY: same probe shape as above — .ok routes this 404 to the failure
+    // branch.
+    globalThis.fetch = (async () =>
+      new Response("Not found", { status: 404 })) as typeof fetch;
+    try {
+      const { container, baseElement, findByText } = render(
+        <AttachmentLightboxProvider>
+          <TimelineItem
+            ev={{ ...ev(), attachments: ["bundle.zip"] }}
+            attachmentsBase={BASE}
+          />
+        </AttachmentLightboxProvider>,
+      );
+      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      await findByText("This attachment could not be loaded.");
+      const dialog = baseElement.querySelector(DIALOG)!;
+      expect(dialog.querySelector('a[href$="?download=1"]')).toBeNull();
+    } finally {
+      globalThis.fetch = origFetch;
+    }
   });
 
   // Ruling 105 addendum: the Download button is on EVERY kind's card — before

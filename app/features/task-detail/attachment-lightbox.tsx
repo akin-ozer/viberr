@@ -109,8 +109,18 @@ async function readTextCapped(
 }
 
 /** The read-only body of a text attachment, fetched from the member-only
- *  serving route (which serves these types as inert text/plain). */
-function LightboxTextBody({ url }: { url: string }) {
+ *  serving route (which serves these types as inert text/plain).
+ *  `onUnservable` fires when the fetch PROVED the file unservable (404, 413,
+ *  auth redirect, network failure) so the footer can drop its Download button
+ *  — some browsers save a failed download's error body as a file bearing the
+ *  attachment's real name. */
+function LightboxTextBody({
+  url,
+  onUnservable,
+}: {
+  url: string;
+  onUnservable: () => void;
+}) {
   const [state, setState] = useState<
     | { kind: "loading" }
     | { kind: "failed" }
@@ -132,12 +142,15 @@ function LightboxTextBody({ url }: { url: string }) {
         if (!cancelled) setState({ kind: "ready", ...read });
       })
       .catch(() => {
-        if (!cancelled) setState({ kind: "failed" });
+        if (!cancelled) {
+          setState({ kind: "failed" });
+          onUnservable();
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [url, onUnservable]);
   if (state.kind === "loading") {
     return <p className="lightbox-text-status">Loading…</p>;
   }
@@ -185,6 +198,33 @@ function Lightbox({
   // no-preview note standing in for content the popup cannot render.
   const isText = TEXT_VIEW_RE.test(img.name);
   const isImage = IMAGE_RE.test(img.name);
+  const isOther = !isText && !isImage;
+  // An HTTP-layer response PROVED the file unservable (404 after the ruling-
+  // 105 prune or a delete, 413 over the route's 50 MB cap, auth redirect).
+  // Then the footer drops Download: some browsers save a failed download's
+  // error body as a file bearing the attachment's real name. The image branch
+  // never sets this — <img onError> can't distinguish a 404 from a corrupt-
+  // but-servable file, and for the latter Download is exactly the remedy.
+  const [fetchFailed, setFetchFailed] = useState(false);
+  const markUnservable = useCallback(() => setFetchFailed(true), []);
+  // The no-preview card is the one body that never touches the URL, so it
+  // would happily offer Download on a file that is already gone — probe once,
+  // dropping the body bytes as soon as the status is known.
+  useEffect(() => {
+    if (!isOther) return;
+    let cancelled = false;
+    fetch(img.url)
+      .then((res) => {
+        void res.body?.cancel?.();
+        if (!cancelled && !(res.ok && !res.redirected)) setFetchFailed(true);
+      })
+      .catch(() => {
+        if (!cancelled) setFetchFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [img.url, isOther]);
   return (
     <dialog
       className={"modal-card lightbox-card" + (isText ? " text" : "")}
@@ -193,11 +233,18 @@ function Lightbox({
       ref={ref}
     >
       {isText ? (
-        <LightboxTextBody url={img.url} />
-      ) : !isImage ? (
+        <LightboxTextBody url={img.url} onUnservable={markUnservable} />
+      ) : isOther ? (
         <div className="lightbox-broken">
           <Icon name="file" />
-          <p>No preview for this file type. Download it, or open the original in a new tab.</p>
+          {/* "in-app": the route DOES serve some of these inline (PDFs), so
+              Open original below may still render one — the card only says
+              this popup has no viewer for the kind. */}
+          <p>
+            {fetchFailed
+              ? "This attachment could not be loaded."
+              : "This file type has no in-app preview. Use Download to save it."}
+          </p>
         </div>
       ) : failed ? (
         <div className="lightbox-broken">
@@ -214,20 +261,24 @@ function Lightbox({
       )}
       <div className="lightbox-foot">
         <span className="nm">{img.name}</span>
-        {/* Every kind gets the button (ruling 105 addendum). The serving
-            route forces a save dialog on `?download=1` — the raw URL renders
-            inline where the type allows (that is what the viewer fetches).
-            The `download` attribute keeps a failed response (404 after
-            deletion, auth redirect) from replacing the task page with an
-            error body. */}
-        <a
-          className="btn ghost sm"
-          href={`${img.url}?download=1`}
-          download={img.name}
-          rel="noreferrer"
-        >
-          Download
-        </a>
+        {/* Every kind gets the button (ruling 105 addendum) — unless a fetch
+            proved the file unservable, see `fetchFailed`. The serving route
+            forces a save dialog on `?download=1` — the raw URL renders inline
+            where the type allows (that is what the viewer itself fetches);
+            every call site passes a query-less serving-route URL (the
+            markdown gate rejects anything else), so plain concatenation is
+            safe. The `download` attribute keeps a failed response from
+            replacing the task page with an error body. */}
+        {!fetchFailed && (
+          <a
+            className="btn ghost sm"
+            href={`${img.url}?download=1`}
+            download={img.name}
+            rel="noreferrer"
+          >
+            Download
+          </a>
+        )}
         {/* The raw file, exactly what the click used to open — for zooming
             further, saving, or sharing the URL. */}
         <a className="btn ghost sm" href={img.url} target="_blank" rel="noreferrer">
