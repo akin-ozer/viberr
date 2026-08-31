@@ -92,3 +92,14 @@ High-effort /code-review of main...pass31/implementation: 5 finder agents (8 ang
 - Also: stale absentMode comment in agents-query.server.ts rewritten for the F31-C2 gate() polarity.
 
 Gates after fixes: vitest 4741 green (was 4708), tsc 0, lint 0 errors + 2 pre-existing warnings, build green, compose e2e green. Live UI validation: collision dialog PR clause + coordination card on :5174.
+
+## O. Owner decisions round (2026-08-31, PR #254)
+
+All five E-queue questions ASKED and DECIDED; implemented, gated, merged (9dc7139), container rebuilt.
+- E1 -> ruling 100: both controller asymmetries intended (no change).
+- E5 -> ruling 101: repo-write parity, grants-derived on both legs (codex read-only sandbox restored for withheld runs; Claude supporting denylist narrowed to delivery trio; evidence carve-out; operator read-only on codex). No live codex validation possible (quota).
+- E2 -> full UX-spec retrofit (Controller and Goal Chain Surfaces section + 2 component specs + pattern amendments), claims verified against code.
+- E3 -> ruling 103: Chromium-only matrix (PRD canon+mirror+testing docs).
+- E4 -> ruling 102: FR33 export-before-purge (fail closed, JSONL in data-root audit-exports/, disclosed in UI+PRD).
+- Bonus: org-settings audit list keyboard-focusable (real axe hit); two time-of-day e2e failures fixed (repro'd on pristine main via worktree e2e).
+Gates: vitest 4749, tsc 0, lint 0 errors, build, e2e 63/63.
