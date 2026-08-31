@@ -366,6 +366,52 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
         `${BASE}/capture.yml?download=1`,
       );
       expect(download.textContent).toContain("Download");
+      // The download attribute keeps a failed response (404, auth redirect)
+      // from replacing the task page with an error body.
+      expect(download.getAttribute("download")).toBe("capture.yml");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it("a redirected response (expired session) shows the failure panel, not the login page's HTML", async () => {
+    const origFetch = globalThis.fetch;
+    const redirectedStub: Pick<Response, "ok" | "redirected" | "body" | "text"> = {
+      ok: true,
+      redirected: true,
+      body: null,
+      text: async () => "<html>Sign in</html>",
+    };
+    // SAFETY: the viewer reads only ok/redirected/body/text off the response;
+    // the stub covers exactly that surface (`redirected` is read-only on a
+    // constructed Response, so a real instance cannot model this case).
+    globalThis.fetch = (async () => redirectedStub as Response) as typeof fetch;
+    try {
+      const { container, findByText } = render(
+        <AttachmentLightboxProvider>
+          <TimelineItem ev={ev()} attachmentsBase={BASE} />
+        </AttachmentLightboxProvider>,
+      );
+      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      await findByText("This attachment could not be loaded.");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it("a zero-byte file says it is empty instead of showing a blank dialog", async () => {
+    const origFetch = globalThis.fetch;
+    // SAFETY: same single-argument fetch shape as above; .ok/.text() only.
+    globalThis.fetch = (async () =>
+      new Response("", { status: 200 })) as typeof fetch;
+    try {
+      const { container, findByText } = render(
+        <AttachmentLightboxProvider>
+          <TimelineItem ev={ev()} attachmentsBase={BASE} />
+        </AttachmentLightboxProvider>,
+      );
+      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      await findByText("This file is empty.");
     } finally {
       globalThis.fetch = origFetch;
     }

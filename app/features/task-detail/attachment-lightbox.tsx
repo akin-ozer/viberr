@@ -80,6 +80,34 @@ export function useAttachmentLightbox(): (
  *  editor — a multi-megabyte log renders its head and the note says so. */
 const TEXT_VIEW_MAX_CHARS = 200_000;
 
+/**
+ * Read at most `cap` characters of the body, then STOP the transfer — the
+ * route serves up to 50 MB, and `res.text()` would buffer all of it before
+ * the display cap could apply (ruling-105 review). Falls back to the buffered
+ * read where the body stream is unavailable (older jsdom shims).
+ */
+async function readTextCapped(
+  res: Response,
+  cap: number,
+): Promise<{ text: string; truncated: boolean }> {
+  const reader = res.body?.getReader?.();
+  if (!reader) {
+    const text = await res.text();
+    return { text: text.slice(0, cap), truncated: text.length > cap };
+  }
+  const decoder = new TextDecoder();
+  let out = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return { text: out, truncated: false };
+    out += decoder.decode(value, { stream: true });
+    if (out.length > cap) {
+      await reader.cancel();
+      return { text: out.slice(0, cap), truncated: true };
+    }
+  }
+}
+
 /** The read-only body of a text attachment, fetched from the member-only
  *  serving route (which serves these types as inert text/plain). */
 function LightboxTextBody({ url }: { url: string }) {
@@ -91,16 +119,17 @@ function LightboxTextBody({ url }: { url: string }) {
   useEffect(() => {
     let cancelled = false;
     setState({ kind: "loading" });
+    // A redirect means the response is NOT the attachment (an expired session
+    // 302s to /login, whose HTML would otherwise render as the file's
+    // "content") — treat it as a load failure, same as a non-2xx.
     fetch(url)
-      .then((res) => (res.ok ? res.text() : Promise.reject(new Error())))
-      .then((text) => {
-        if (cancelled) return;
-        const truncated = text.length > TEXT_VIEW_MAX_CHARS;
-        setState({
-          kind: "ready",
-          text: truncated ? text.slice(0, TEXT_VIEW_MAX_CHARS) : text,
-          truncated,
-        });
+      .then((res) =>
+        res.ok && !res.redirected
+          ? readTextCapped(res, TEXT_VIEW_MAX_CHARS)
+          : Promise.reject(new Error()),
+      )
+      .then((read) => {
+        if (!cancelled) setState({ kind: "ready", ...read });
       })
       .catch(() => {
         if (!cancelled) setState({ kind: "failed" });
@@ -119,6 +148,11 @@ function LightboxTextBody({ url }: { url: string }) {
         <p>This attachment could not be loaded.</p>
       </div>
     );
+  }
+  if (state.text === "") {
+    // A zero-byte file is a real, loadable attachment — say so instead of
+    // showing the blank dialog the failure branch exists to avoid.
+    return <p className="lightbox-text-status">This file is empty.</p>;
   }
   return (
     <>
@@ -175,10 +209,13 @@ function Lightbox({
         <span className="nm">{img.name}</span>
         {isText && (
           // The serving route forces a save dialog on `?download=1` — the raw
-          // URL renders inline (that is what the viewer itself fetches).
+          // URL renders inline (that is what the viewer itself fetches). The
+          // `download` attribute keeps a failed response (404 after deletion,
+          // auth redirect) from replacing the task page with an error body.
           <a
             className="btn ghost sm"
             href={`${img.url}?download=1`}
+            download={img.name}
             rel="noreferrer"
           >
             Download

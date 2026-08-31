@@ -98,6 +98,12 @@ export function countTaskAttachments(
  * run's `started_at` names exactly that run's files. A file re-saved under the
  * same name by a later run re-attributes to the later run, which is the honest
  * reading (its content is the later run's).
+ *
+ * Deliberately UNCAPPED (ruling-105 review): this used to ride
+ * `listTaskAttachments`, whose LIST_CAP display bound silently limited the
+ * window to the newest 100 files — so a run that wrote more than 100 working
+ * artifacts (the exact drowning case the prune targets) permanently orphaned
+ * the overflow. The window is a completion-time fact, not a display list.
  */
 export function attachmentNamesSince(
   slug: string,
@@ -106,16 +112,39 @@ export function attachmentNamesSince(
   dataRoot?: string,
 ): string[] {
   if (Number.isNaN(Date.parse(sinceIso))) return [];
-  return listTaskAttachments(slug, key, dataRoot)
-    .filter((entry) => entry.modifiedAt >= sinceIso)
-    .map((entry) => entry.name);
+  const dir = taskAttachmentsDir(slug, key, dataRoot);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return []; // no attachments dir yet — the common case
+  }
+  const inWindow: { name: string; at: string }[] = [];
+  for (const name of names) {
+    if (name.startsWith(".")) continue;
+    try {
+      const st = statSync(path.join(dir, name));
+      if (!st.isFile()) continue;
+      const at = st.mtime.toISOString();
+      if (at >= sinceIso) inWindow.push({ name, at });
+    } catch {
+      // raced unlink between readdir and stat — skip
+    }
+  }
+  inWindow.sort(
+    (a, b) => b.at.localeCompare(a.at) || a.name.localeCompare(b.name),
+  );
+  return inWindow.map((entry) => entry.name);
 }
 
-/** The browser MCP's machine-stamped output names (`page-…Z.png`,
- *  `console-…Z.log`, `element-…Z.png`). A human- or agent-chosen filename
- *  never has this shape. */
+/** A machine-stamped output name (`page-…Z.png`, `console-…Z.log`,
+ *  `element-…Z.png`, and whatever prefix a future MCP tool invents): a short
+ *  lowercase prefix plus the MCP's dashed-ISO timestamp. A human- or
+ *  agent-chosen filename never has this shape — the ruling-105 review showed
+ *  pinning specific prefixes just leaves the next sibling artifact drowning
+ *  the panel, so the stamp itself is the classifier. */
 const MCP_STAMPED_NAME_RE =
-  /^(?:page|console|element)-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\./;
+  /^[a-z][a-z0-9_]*-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\./;
 
 /** Visual evidence — the point of the store. Always kept, never a working
  *  artifact regardless of how the file was named. */
@@ -163,8 +192,16 @@ export function pruneBrowserWorkingArtifacts(
     try {
       unlinkSync(resolveTaskAttachment(slug, key, name, dataRoot));
       pruned.push(name);
-    } catch {
-      kept.push(name); // still on disk (or raced) — keep it honest and listed
+    } catch (err) {
+      // Already gone counts as pruned — the producing event must never claim
+      // a file the directory does not hold (the exact honesty rule this
+      // function exists for). Any OTHER failure keeps the file listed,
+      // because it is still on disk.
+      // SAFETY: node's fs errors carry `code: string`; reading it off an
+      // unknown non-Error value yields undefined, which simply keeps the file.
+      const code = (err as NodeJS.ErrnoException | null)?.code;
+      if (code === "ENOENT") pruned.push(name);
+      else kept.push(name);
     }
   }
   return { kept, pruned };

@@ -355,6 +355,87 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(claimed).not.toContain(uncitedLog);
   });
 
+  it("ruling 105 review: an ERRORED run keeps its working artifacts (its only diagnostics)", async () => {
+    // A crashed browsing run never got to cite anything — the citation escape
+    // hatch is structurally unreachable on the failure path, so pruning there
+    // deletes the console dump a human needs to diagnose the crash.
+    writeReviewTask();
+    const dump = "console-2026-08-31T16-00-00-000Z.log";
+    const runId = await finishedRunWith("partial output before the crash");
+    const dir = path.join(
+      store.dataRoot,
+      "projects",
+      store.slug,
+      "tasks",
+      "VIB-1",
+      "attachments",
+    );
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, dump), "console output");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "error" },
+    );
+    expect(existsSync(path.join(dir, dump))).toBe(true);
+  });
+
+  it("ruling 105 review: no prune while a SIBLING run is live on the same task", async () => {
+    // The mtime window is task-wide: a finishing run would delete a
+    // still-working sibling's files before that sibling's citations exist.
+    writeReviewTask();
+    const siblingFile = "console-2026-08-31T16-10-00-000Z.log";
+    const runId = await finishedRunWith(
+      "Done reviewing.\nVerdict: approve — matches the spec.",
+    );
+    // A live sibling run on the same task (the shape the dedup test inserts).
+    const now = new Date().toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
+           backend, model, state, started_at, created_at, updated_at, agent_profile_id)
+         VALUES ('run_sibling', 'VIB-1', ?, 'th_sibling', 'Developer', 'primary',
+           'claude', 'sonnet', 'running', ?, ?, ?, 'developer')`,
+      )
+      .run(store.slug, now, now, now);
+    const dir = path.join(
+      store.dataRoot,
+      "projects",
+      store.slug,
+      "tasks",
+      "VIB-1",
+      "attachments",
+    );
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, siblingFile), "the sibling's console dump");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    expect(existsSync(path.join(dir, siblingFile))).toBe(true);
+  });
+
   it("still detects a verbatim repeat when the report tags an AMBIGUOUS name (G-A-1)", async () => {
     // The stored comment carries `withAmbiguityDisclosure`, but the no-progress
     // check compared that stored form against the RAW reply — so any repeating
