@@ -7,6 +7,9 @@
 :root {
   --bg: #ffffff;
   --surface: #ffffff;
+  /* VIB-1: the board's own canvas (the .board stage-column grid), not --bg —
+     "board area only" per @Arda's decision. --fg clears 4.85:1 on this red. */
+  --board-bg: #e35d5d;
   --fg: #1c1c1e;
   --muted: #555a6a;
   --pin-star: #e8a800; /* pinned-project star accent (TD-2) */
@@ -850,6 +853,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .board {
   display: grid;
   grid-auto-flow: column;
+  /* VIB-1: the board's own canvas, red per @Arda's "board area only" —
+     --bg (the page canvas) and --surface (task cards) are untouched. */
+  background: var(--board-bg);
   /* Upper bound stops 2-3 stage boards from sprawling into several-hundred-px
      lanes on wide viewports (the list view already caps at 920px). */
   grid-auto-columns: minmax(218px, 21rem);
@@ -885,7 +891,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   content: "";
   position: absolute; top: 0; right: 0; bottom: 0; width: 2.2rem;
   pointer-events: none;
-  background: linear-gradient(to right, transparent, var(--bg));
+  /* VIB-1: was var(--bg) — against the now-red board that read as a white/
+     dark smear rather than an edge cue. It fades into the board's OWN
+     canvas, which is what actually sits behind it now. */
+  background: linear-gradient(to right, transparent, var(--board-bg));
   opacity: 0;
   animation: board-scroll-fade linear both;
   animation-timeline: --board-scroll-x;
@@ -2953,6 +2962,9 @@ dialog[data-closing]::backdrop {
   color-scheme: dark;
   --bg: #131419;
   --surface: #1b1d25;
+  /* VIB-1: a deeper red than the light theme's so --fg/--faint/--placeholder
+     all still clear 4.5:1 against it (13.92 / 5.83 / 4.86 respectively). */
+  --board-bg: #3a1518;
   --fg: #eceef4;
   --muted: #b9bdcb;
   /* P13-D-12: dark mirrors the light ladder. --placeholder was the theme's real
