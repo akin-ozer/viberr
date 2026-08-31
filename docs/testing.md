@@ -72,10 +72,10 @@ project (`chromium` / `devices["Desktop Chrome"]`) and CI installs that browser
 alone. The config's other project, `setup`, is a login fixture — it signs in
 once through the real `/login` UI and stores the session state the chromium
 project depends on — not a second browser.
-The PRD's browser matrix also names current Safari and current Firefox desktop;
-neither has ever been run here, automated or manual. Recorded 2026-08-19 (pass
-21, U6) so the matrix is read as declared support, not as coverage this suite
-provides.
+The PRD's browser matrix is Chromium-only (owner decision 2026-08-31: Safari
+and Firefox were declared intent that nothing ever exercised, so they were
+struck rather than left implied). This suite's chromium project therefore
+covers the whole declared matrix.
 
 ## Test data: two sanctioned ways to build state
 

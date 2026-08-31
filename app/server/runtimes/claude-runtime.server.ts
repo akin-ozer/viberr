@@ -231,29 +231,33 @@ export const OPERATOR_READ_ONLY_DENIED_TOOLS = [
 ] as const;
 
 /**
- * Denied for SUPPORTING (non-delivering, `kind: "reviewer"`) specialist runs
- * (F10-12 / F10-04, owner ruling "supporting agents read-only by default"). A
- * supporting engagement researches, reviews, tests, or advises — it is NOT the
- * delivering agent and must be physically unable to mutate the shared workspace
- * or reach the remote. Only the single `delivers: true` engagement writes and
- * delivers. Deny wins under bypassPermissions, so this removes the file-write
- * built-ins and every git/gh mutation command while keeping Read/Grep/Glob and
- * Bash-for-read-only-validation. (`sed -i`/shell redirection stay reachable —
- * the same honest Bash limitation the deliverer has; on Codex this list is
- * advisory since R22 removed the read-only sandbox.) Closes the VIB-30 class where
- * a review agent committed, pushed, and opened a PR with no delivery linkage.
+ * Denied for SUPPORTING (non-delivering, `kind: "reviewer"`) specialist runs:
+ * the DELIVERY commands only.
+ *
+ * Parity ruling (owner, 2026-08-31) narrowed this list. F10-12's original
+ * kind-based denylist also removed the file-write built-ins from every
+ * supporting run regardless of grants; the owner ruled that write posture is
+ * GRANTS-derived on both backends ("reviewer is just a type of an agent —
+ * some agents should be able to write, some don't, related to their
+ * work/assignment"), so the local-write denies now ride the run's
+ * grant-derived `spec.disallowedTools` (resolveSpecialistDisallowedTools
+ * denies Edit/Write/… exactly when `execute-code-or-write-repo` is withheld)
+ * — a supporting agent GRANTED the family may edit its own isolated checkout
+ * (P8 isolation + sha-bound verdicts keep those edits out of the delivered
+ * branch and the review record).
+ *
+ * What stays kind-based is DELIVERY: reaching the remote belongs to the single
+ * `delivers: true` engagement plus the server-owned gate, whatever the
+ * profile's grants say — a supporting run pushing or opening a PR is the
+ * VIB-30 class (a review agent committed, pushed, and opened a PR with no
+ * delivery linkage). Deny wins under bypassPermissions, so these bind. On
+ * Codex the same split holds structurally: grants decide the sandbox mode
+ * (read-only vs workspace-write, resolveCodexSandboxMode) and the remote is
+ * out of reach regardless (agents hold no credential; delivery is
+ * server-owned).
  */
-const SUPPORTING_DENIED_BUILTINS = [
-  "Edit",
-  "MultiEdit",
-  "Write",
-  "NotebookEdit",
-  "Bash(git commit:*)",
+const SUPPORTING_DELIVERY_DENIED_BUILTINS = [
   "Bash(git push:*)",
-  "Bash(git checkout -b:*)",
-  "Bash(git checkout -B:*)",
-  "Bash(git switch -c:*)",
-  "Bash(git switch -C:*)",
   "Bash(gh pr create:*)",
   "Bash(gh pr merge:*)",
 ] as const;
@@ -899,8 +903,10 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           ...(spec.kind === "operator" || spec.kind === "controller"
             ? OPERATOR_READ_ONLY_DENIED_TOOLS
             : []),
-          // Supporting/reviewing runs are read-only for the repo (F10-12).
-          ...(spec.kind === "reviewer" ? SUPPORTING_DENIED_BUILTINS : []),
+          // Supporting/reviewing runs never touch the remote (VIB-30); their
+          // LOCAL write posture is grants-derived via spec.disallowedTools
+          // (parity ruling 2026-08-31 — see the constant's doc).
+          ...(spec.kind === "reviewer" ? SUPPORTING_DELIVERY_DENIED_BUILTINS : []),
           ...(spec.disallowedTools ?? []),
         ];
         if (denied.length) options.disallowedTools = denied;

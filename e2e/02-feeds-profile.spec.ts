@@ -63,8 +63,13 @@ test("activity feed renders day-grouped events", async ({ page }) => {
   await page.goto("/projects/viberr-core/activity");
 
   await expect(page.locator(".act-day").first()).toBeVisible();
-  // The seed writes governed events attributed to Arda.
-  await expect(page.getByText("Arda Kaya").first()).toBeVisible();
+  // The seed writes governed events attributed to Arda. Scoped to the feed's
+  // actor cell: the stream's own actor-filter <select> also carries her name
+  // as a (hidden) <option>, and once the day's events put her in that filter,
+  // a bare getByText resolves to the option first and fails visibility.
+  await expect(
+    page.locator(".act-actor", { hasText: "Arda Kaya" }).first(),
+  ).toBeVisible();
 });
 
 test("notifications mark-all-read clears every unread row", async ({

@@ -302,9 +302,10 @@ export interface StartRunInput {
   /** Granted skills mounted into the run workspace (`mountGrantedSkills`).
    *  Claude only — the SDK's native skills filter. See RunSpec.skills. */
   skills?: string[];
-  /** The run's `execute-code-or-write-repo` grant is withheld — Claude-enforced
-   *  via the denylist, advisory on Codex since R22 removed the read-only
-   *  sandbox. Omit to let `startRun` derive it from `disallowedTools` (see
+  /** The run's `execute-code-or-write-repo` grant is withheld — enforced on
+   *  BOTH backends (parity ruling 2026-08-31): Claude via the denylist, Codex
+   *  via the read-only sandbox (resolveCodexSandboxMode). Omit to let
+   *  `startRun` derive it from `disallowedTools` (see
    *  `repoWriteWithheldFromDenylist`). */
   repoWriteWithheld?: boolean;
   /** The run's `use-web-search-fetch` grant is withheld — Codex enforces it by

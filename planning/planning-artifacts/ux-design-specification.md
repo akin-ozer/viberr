@@ -32,13 +32,13 @@ workflowType: ux-design
 
 <!-- UX design content will be appended sequentially through collaborative workflow steps -->
 
-> **Line-citation drift — do not trust a `ux-design-specification.md:NNN` citation without re-checking it.** *(Recorded 2026-08-31, pass 31 — A4a.)* Every line citation to this file that was written into a code comment **before 2026-08** is stale, and in one direction only: the amendment blocks inserted since keep pushing the cited text further down. Measured across the tree on 2026-08-31 the drift was uniformly **+37 lines**; this pass then inserted its own amendments above the cited passages, so those same citations are now **+87** off. Exactly three such citations exist in the tree, and these are their real targets in this revision of the document:
+> **Line-citation drift — do not trust a `ux-design-specification.md:NNN` citation without re-checking it.** *(Recorded 2026-08-31, pass 31 — A4a.)* Every line citation to this file that was written into a code comment **before 2026-08** is stale, and in one direction only: the amendment blocks inserted since keep pushing the cited text further down. Measured across the tree on 2026-08-31 the drift was uniformly **+37 lines**; this pass then inserted its own amendments above the cited passages, and the controller retrofit later in the same pass pushed them further still, so the offset is no longer one number worth quoting. Exactly three such citations exist in the tree. The targets below are **located by their text and re-verified** after this pass's last amendment, not derived by adding an offset — the arithmetic version of this table was itself two lines out:
 >
 > | Code comment | Cites | Real target here | What is actually at it |
 > |---|---|---|---|
-> | `app/features/shell/nav.ts:48` | `:824-825` | **911-912** | §Navigation Patterns → *Context preservation* — "Filters, queue position, and recent focus should not reset unnecessarily" |
-> | `app/features/board/board-filters.ts:205` | `:846-847` | **933-934** | §Additional Patterns → *Empty states* — "explain what is absent, why it matters, and what the user can do next" |
-> | `app/features/shell/route-pending-bar.tsx:9` | `:849-850` | **936-937** | §Additional Patterns → *Loading and refreshing* — "preserve layout stability … skeletons or placeholder structures are preferable to large spinners" |
+> | `app/features/shell/nav.ts:48` | `:824-825` | **1052-1053** | §Navigation Patterns → *Context preservation* — "Filters, queue position, and recent focus should not reset unnecessarily" |
+> | `app/features/board/board-filters.ts:205` | `:846-847` | **1074-1075** | §Additional Patterns → *Empty states* — "explain what is absent, why it matters, and what the user can do next" |
+> | `app/features/shell/route-pending-bar.tsx:9` | `:849-850` | **1077-1078** | §Additional Patterns → *Loading and refreshing* — "preserve layout stability … skeletons or placeholder structures are preferable to large spinners" |
 >
 > Those citations live in **code**, so this document cannot repair them from here — this note is the correction of record. Two things follow. First, the **named** citations in the tree (`§Accessibility Strategy`, `§Breakpoint Strategy`, `§State Semantics`) are unaffected and still resolve: prefer a section name over a line number in any new citation, because a section name cannot drift out from under an amendment, and the numbers above will themselves go stale the next time this file is amended. Second, the `§4.6` / `§5.11`-style section numbers in code comments (`app/routes.ts:15`, `org-settings-page.tsx:20`, `board-page.tsx:962`, `rich-text.tsx:6`, `mini-modal.tsx:9`) do **not** address this document at all — they belong to the deleted `docs/build/specs/*.md` set, removed in commit `c1acf2c` (2026-07-22) and still readable with `git show c1acf2c^:docs/build/specs/<name>.md`.
 
@@ -503,6 +503,8 @@ The task-detail view should be implemented as an operator-first workspace. Curre
 
 Split-view behavior should be treated as a secondary pattern rather than a primary product structure. It may be used in lightweight preview panes, queue-to-task transitions, or continuity-supporting task-switching flows, but the main product model should remain clear: board for scan and triage, task for clarity and steering.
 
+> **Amended 2026-08-31 (pass 31) — the product model is three surfaces now, not two.** *(Ruling 99, owner directive 2026-08-30, `docs/architecture/decisions.md`.)* "Board for scan and triage, task for clarity and steering" is still the spine and nothing above is retracted. What it no longer covers is the **controller**: one conversational agent per instance, sitting above the operators, for the work that has no task yet — decomposing an outcome into a chain of tasks, reading across projects, applying a change a form would cost several navigations. It is not a third way to look at a task, which is why it is neither a split view nor a preview pane and does not weaken the paragraph above; Signal Console and Operator Desk continue to define the board and the task page unchanged. §Controller and Goal Chain Surfaces specifies the third surface in full.
+
 ## User Journey Flows
 
 ### Arda Supervises Active Work
@@ -628,6 +630,105 @@ Across these journeys, several reusable UX patterns emerge:
 - Standardize governance moments: packet structure, waiting states, and recovery patterns should feel consistent across the product.
 - Restore task clarity deliberately: every critical journey should reduce ambiguity and return the user to a trusted understanding of system state.
 
+## Controller and Goal Chain Surfaces
+
+*(Added 2026-08-31, pass 31 — ruling 99, owner directive 2026-08-30, `docs/architecture/decisions.md`; the two requirements it produced are FR40 and FR41. The controller and chained goals shipped on 2026-08-30, after every section above was written, and this document then went on describing a two-surface product — the drift the amendment notes above keep repairing after the fact. What follows is specification, not amendment: it describes surfaces that exist. Every claim was verified on 2026-08-31 against `app/routes/controller.tsx`, `app/routes/project.controller.tsx`, `app/features/controller/`, `app/features/org-settings/controller-admin-panel.tsx`, `app/features/shell/nav.ts` and `app/app.css`.)*
+
+Viberr runs one **controller** per instance: a conversational agent above the operators, carrying no capability matrix of its own, whose every tool call resolves the live authority of the person asking. It is not a fourth board view and does not replace the task page. It is the surface for work that has no task yet — decomposing an outcome into a chain of tasks, reading across projects, applying a configuration change that would otherwise cost several navigations — and for questions whose honest answer is a sentence rather than a screen.
+
+That also makes it the riskiest surface in the product for the promises this document has been making since §Anti-Patterns to Avoid. A chat box is the easiest place in software to lose operational legibility, because it invites users to reconstruct truth from a conversation instead of reading it off a surface. Three rules hold the line, and every design decision below follows from them:
+
+- **The controller is an instrument, never an authority.** It can do exactly what the asking human could already have done, resolved per tool call and never snapshotted (ruling 99(b)). What it cannot do, it says out loud.
+- **Consequential outcomes land on durable surfaces, not in the transcript.** A created task appears on the board, a chain appears in the Goals panel and on its tasks, a configuration change appears in the settings form and the audit log. The conversation is the instruction; it is not the record.
+- **Ceremony that exists to be human stays human.** There is no tool for merge, acceptance, force-accept, packet resolution, or a move into the terminal stage; the move tool refuses a Done target out loud and points at the task page, because ruling 88's disclosure ceremony is the load-bearing thing a chat surface cannot impersonate (ruling 99(c)).
+
+### Where The Controller Appears
+
+The controller is reached from three places, and the split between **talking to it** and **configuring it** is the load-bearing distinction across all three.
+
+- **`/controller`, the instance surface.** Open to every signed-in user. It carries no project scope, so it has no Goals panel; it is where instance-level work happens — projects, users, org resources, global agent templates, audit and run analytics, each still gated on the asker's own org role. Because it sits outside the project rail it renders its own way back to the project list, and the project list offers a secondary Controller button beside its primary New project action.
+- **`/projects/:slug/controller`, the board surface.** A first-class workspace rail item, third of eight, after Board and Review queue. Same conversation machinery, bound to one board, plus the Goals panel. Membership is enforced on this route's own loader rather than only the layout's, so the members-only 404 posture of R15-4 (`docs/architecture/decisions.md` 25) holds even for a single-route fetch.
+- **The org-settings Controller tab, the configuration surface.** Admin-only, and it configures the controller itself rather than talking to it. See §The Configuration Surface below.
+
+A user who may not act is still allowed to ask. Conversing is universal; the tool call is where authority binds.
+
+### The Conversation Surface
+
+**Layout.** Two columns under a page header: transcript and composer in the main column, a fixed 340px side column carrying the Goals panel above the conversation list. The transcript scrolls inside its own bounded height so the composer never leaves the viewport, and the newest message is brought into view whenever the message count or the working state changes. At the 1100px reflow point the side column drops beneath the main one and the transcript's height cap is released — the same collapse the settings, policy, activity and profile grids take, and a layout reflow rather than a capability boundary (§Breakpoint Strategy).
+
+**Header.** The controller's configured name as the page title, with one line of scope and authority underneath: *"Managing the `<slug>` board with your own permissions"* on the project surface, *"Managing this instance with your own permissions"* at instance scope. When the Claude backend is unavailable the header carries a risk pill rather than the page going quiet — the controller is Claude-only by the same in-process security decision as `read-github-api` (ruling 99(d)), and a surface that cannot answer should say so where the user is already looking.
+
+**Transcript.** Human and controller messages alternate as bubbles distinguished by side, background and border: the human on the trailing edge over the neutral well, the controller on the leading edge carrying the violet agent-identity tint the rest of the product uses for agent authorship. Each carries an author label and a local timestamp, and the body renders markdown, so a controller answer can be a short table or a list instead of a wall of prose.
+
+**Composer.** A plain labelled textarea, ⌘↵ to send, and one primary Send action — the surface's only primary, per §Button Hierarchy. Its footer states the contract in the same breath as the shortcut: *"Acts with your permissions · refusals say why · ⌘↵ sends"*. The composer disables itself in exactly two conditions and the placeholder names which: the backend is unavailable, or the open conversation belongs to someone else and the viewer is reading it rather than continuing it.
+
+**Empty states.** Both follow §Additional Patterns — what is absent, why it matters, what to do next. With no conversation open the transcript names the controller's actual reach rather than greeting the user: *"Ask a question or ask for a change: boards, tasks, users, resources, agents, goal chains. Everything runs with your own permissions, and refusals say why."* With no conversations at all, the list says so and sends the user to the composer rather than offering a create control the composer already is.
+
+**Permissions**
+- Anyone signed in may converse; the page is not the gate.
+- The composer is owner-only. A reader of someone else's conversation gets an explicit read-only placeholder rather than a control that fails on submit.
+- Org admins get a *Show everyone's* / *Show mine only* toggle over the conversation list. Nobody else sees it.
+
+### Runs, Cost, And What The Surface Chooses Not To Show
+
+One user message is one agent run. That run is an ordinary run record of kind `controller`, so run-log capture, secret redaction, token accounting, the run-log console and boot orphan finalization are inherited rather than rebuilt (ruling 99(d)).
+
+The conversation surface itself shows exactly one live signal — *"`<controller name>` is working…"* — and no token count, elapsed time, cost figure, or link into the run console. That is deliberate. The controller is the surface where a user is thinking in sentences, and metering the conversation in place would make every question feel expensive, which is the opposite of the calm this document asks for under §Desired Emotional Response. The run record is still reachable: the run-log console gates a controller run to the conversation's **owner or an org admin**, the same audience that may read the transcript, so the console cannot become a side door into someone else's conversation.
+
+Cost is disclosed where cost is the subject. The Insights coordination measure attributes spend to *"operator and controller runs"* together rather than naming only the operator, so the controller's turns are never implied to be free.
+
+Two refusals are scheduling facts rather than authority facts, and both are written **into the transcript** instead of a toast: a conversation whose queue is full behind the turn in flight, and a turn a server restart interrupted before it could answer. This is §Feedback Patterns applied literally — a toast must never be the sole record of a consequential event, and "your message went nowhere" is consequential.
+
+### Refusal Is A First-Class Reply
+
+Because authority resolves per call, one turn can succeed at part of what was asked and be refused the rest. The rule is that the refusal is relayed rather than paraphrased: a denied tool answers with the guard's own sentence, and the controller is instructed to treat a denial as final rather than retrying around it. An instance-scope denial also writes an audit row, so a denial reached through chat does not read cleaner than the same denial reached through a form.
+
+Two consequences for the interface. First, a refusal is **not an error state** — no error styling, no failure toast. It is a message in the transcript like any other, which is what lets a user ask freely without treating the surface as a minefield. Second, a project the asker cannot see returns one uniform "not visible" sentence whether it is missing or forbidden, so a conversation cannot be used to probe for a project's existence (R15-4).
+
+### Transcript Visibility
+
+A controller conversation is owned by the person who started it and is readable by that person **and by org admins**. Project members do not read each other's conversations; a non-owner without org admin gets the not-found shape, so "not yours" and "never existed" are indistinguishable.
+
+This is a deliberate asymmetry with the rest of the product, and it is designed rather than incidental. Task truth is **members-only and member-wide**: every member of a project reads the whole task timeline, and nobody reads it without passing the project's own membership gate (R15-4, `docs/architecture/decisions.md` 25). A controller transcript inverts both halves. It is *narrower* than task truth, because it is one person's working conversation rather than the project's record. It is *wider*, because an org admin may read every conversation on the instance. The reasoning confirmed in ruling 99(d) is that a transcript is scoped to what **its user** was entitled to hear, which makes it personal rather than shared, and that an instrument holding everyone's live authority has to be supervisable by whoever is accountable for the instance. Nothing in a transcript is the authoritative record of anything: the durable trail is the audit log and the surfaces the actions landed on.
+
+Two interface consequences follow, and both are built:
+- **Lists are scope-partitioned, never merged.** The instance surface lists only conversations with no project; a project surface lists only that project's. The org-admin *Show everyone's* toggle widens the owner filter within the current scope; it never widens the scope.
+- **Reading is not writing.** An org admin reading another user's conversation gets the read-only composer, exactly like any other non-owner. Supervision is a read, and the interface never blurs it into a takeover.
+
+### Goal Chains
+
+A **goal chain** decomposes one outcome into an ordered sequence of tasks inside a single project (FR41, ruling 99(e)). It is the product's answer to a piece of work that a single task record would either oversimplify or turn into a checklist nobody executes.
+
+Note the vocabulary collision and hold it. A *task* already has a `goal` — the sentence describing what that task delivers. A *goal chain* is the ordered outcome above several tasks. The surfaces keep them apart by never using the bare word alone: the panel is titled Goals, and its empty state, its cards and its task-side chip all speak in chains and links.
+
+**Authoring is conversational; there is no create form.** A chain is planned in the conversation and written by the controller, which is why the Goals panel's empty state is an instruction rather than a button: *"No goal chains yet. Ask the controller to plan one: it decomposes an outcome into an ordered chain of tasks and advances it as each link completes."* This is a deliberate departure from §Form Patterns' structured-form guidance and it earns the exception: decomposition is the judgement being bought, and a form would collect twenty link titles without improving any of them. A chain carries a bounded number of links and a failure policy chosen at authoring time — pause the chain on a failed link, or mark it skipped and ride past it.
+
+**Progression is lazy and convergent.** Only the first link's task exists when the chain is created; each later task is created when the previous link completes. Every link's task is an ordinary task with its own operator, so nothing about the board changes to accommodate a chain — that is the strongest property of the design and the interface should keep it true. One reconcile engine derives every link's state from canonical task truth and re-runs wherever task truth changes, plus on a periodic sweep, so the panel converges on reality rather than being separately maintained.
+
+**How a chain appears**
+- **On the project Controller surface,** as one card per chain in the Goals panel: the chain id in mono, its title, a status pill, then the links as an ordered list. Each link row carries its own status pill, its title, a mono link to its task once one exists, and its note when the engine left one. The link the chain is currently on is marked positionally as the current row.
+- **On a task,** as a chip in the task hero beside the readiness and validation pills, naming the chain and the link index and linking back to the project Controller surface. The chip is the whole of the chain's presence on the task. The task page never restates the chain, which keeps *one task, one truth* intact: the chain file owns the list, the task carries only its position.
+- **On the board, not at all.** A board card carries no chain cue; outside the Goals panel the task hero chip is the chain's only presence.
+
+**Redirect controls.** The panel is where a human steers a chain without going back through the conversation. Pause, Resume and Cancel act on the chain. Retry and Skip act on a link and appear only on a **failed** one — a live chain offers no per-link controls, because the engine is mid-flight and the useful intervention is on the task itself. All controls withdraw once the chain settles into completed or cancelled. The remaining redirects — editing a pending link, adding one, removing one — are conversational only, on the reasoning that they are authoring rather than steering.
+
+**Completion semantics.** A chain completes on its own when every link has settled and nothing has parked it for attention. A failed link either parks the chain in `attention` or is marked skipped and ridden past, per the failure policy chosen at authoring. Cancelling is terminal in the same way completing is. Nothing deletes a chain: cancelled and completed chains stay in the panel and stay readable, which is what makes the panel a record rather than a queue.
+
+**Permissions.** Redirect is the chain's creator, or a member at the run-agents tier. The server re-checks on every submit and the panel only declines to render controls that would be refused — the display never becomes the authority. The instance surface passes no redirect authority at all, because it has no project scope to resolve one against.
+
+**State vocabulary.** A chain is `active`, `paused`, `attention`, `completed` or `cancelled`; a link is `pending`, `active`, `done`, `failed` or `skipped`. These are a second state family beside the canonical readiness states and obey the same rules — see the amendment under §State Semantics.
+
+### The Configuration Surface
+
+Configuring the controller is an org-admin act with its own **Controller** tab in org settings, deliberately apart from the agents CRUD panel, which never lists it. The panel opens by stating the distinction in its own copy — *"One controller manages this instance. Anyone can talk to it; every action it takes runs under the asking person's own permissions. This tab configures the controller itself, which only org admins can do."* — because the likeliest misreading of this surface is that it grants the controller power.
+
+It edits the model, three grant lists (skills, knowledge bases, MCP servers), and the instructions. There is deliberately **no capability matrix**, and the interface says why rather than leaving it to the ruling: the MCP grants *"widen no authority"*. A stored grant row would be a toggle with no effect, because the controller's authority is the asker's, and offering one would be the interface lying about what it controls (ruling 99(a)).
+
+Three smaller rules the panel already follows, and which any later edit should keep:
+- **A missing profile degrades; it does not down the surface.** When the profile file is absent the panel says so, states that defaults apply, and stays usable.
+- **A grant that is no longer in the store still renders, marked as not in the store,** rather than vanishing. A silently dropped grant is the resource-orphan failure this product has hit before.
+- **The save is honest about when it takes effect:** *"Changes apply from the next controller turn."* One primary action, per §Button Hierarchy.
+
 ## Component Strategy
 
 ### Design System Components
@@ -744,6 +845,30 @@ The number of truly first-party workflow components should remain small. Most of
 
 > **Ruled, not deferred — this component is being built.** *(Recorded 2026-08-08, pass 19 — owner ruling R19-10, `docs/architecture/decisions.md` 64.)* The Panel had been carried as open question **D18** for several passes and pass 19's audit found it at zero: no such component existed anywhere in the tree, and pass 18's warning-toned `continuity` typed event was its only partial. The owner ruled build rather than retire, because this component sits on the product's trust story rather than its feature list — degraded runtime continuity is exactly the moment the interface must explain itself instead of going quiet, and the Murat journey above has no other home. The anatomy, states, and content guidance above stand as the build target. This note records the **ruling**, which stands independently of any single implementation attempt; the implementation lands in the same pass-19 wave (`app/features/task-detail/continuity-recovery.tsx`) and this document does not certify it — read the tree.
 
+### Controller Conversation
+
+**Purpose:** Let a human direct the instance conversationally without letting the conversation become the place operational truth lives.  
+**Usage:** The whole of the instance controller surface, and the main column of the project Controller surface.  
+**Anatomy:** Controller identity header with a scope-and-authority line, backend-availability pill, transcript of authored messages with author and local time, working indicator, composer with send shortcut and authority footnote, conversation list with owner labels and an org-admin scope toggle.  
+**States:** empty (no conversation open), reading (someone else's conversation, composer read-only), composing, working, unavailable (backend down), refused (a denial rendered as an ordinary message, never as an error).  
+**Variants:** instance scope (no goals), project scope (Goals panel alongside).  
+**Accessibility:** Labelled transcript region and composer, working indicator as a status live region, keyboard send, no state carried by bubble side or tint alone.  
+**Content Guidelines:** State authority where the action is taken; relay refusals in the guard's own words; keep scheduling refusals in the transcript rather than a toast.  
+**Interaction Behavior:** One message is one run; sending with no conversation open starts one and selects it; the surface revalidates on the owner-routed live event, with a slow fallback poll while a turn is working so a missed event cannot read as a hang.
+
+### Goal Chain Panel
+
+**Purpose:** Make an outcome that spans several tasks readable and steerable in one place.  
+**Usage:** Side column of the project Controller surface; the chain's task-side presence is a chip in the task hero.  
+**Anatomy:** Per chain — id, title, status pill, ordered link list carrying per-link status pill, title, task link and note, current-link marker, chain-level and per-link redirect controls.  
+**States:** chain `active`, `paused`, `attention`, `completed`, `cancelled`; link `pending`, `active`, `done`, `failed`, `skipped`; settled (controls withdrawn); read-only (viewer below the redirect tier).  
+**Variants:** panel card on the Controller surface, task hero chip naming chain and link index.  
+**Accessibility:** Labelled region, ordered-list semantics for link order, every state carrying its own word, redirect controls labelled by outcome.  
+**Content Guidelines:** Name the chain and the link; never restate the task's own goal text; keep link notes to what the engine observed.  
+**Interaction Behavior:** Redirect controls submit and are re-checked server-side; Retry and Skip appear only on a failed link; the empty state instructs rather than offering a create control, because chains are authored in conversation.
+
+> **Both components above were added 2026-08-31 (pass 31) and describe what shipped on 2026-08-30.** *(Ruling 99, `docs/architecture/decisions.md`.)* They are specified in full under §Controller and Goal Chain Surfaces; the entries here exist so the component inventory is complete, and so the rule at the head of §Custom Components — first-party only where the product model is genuinely different — is visibly satisfied rather than assumed. Neither duplicates an existing component. A Controller Conversation is not a Mixed Timeline Item: a transcript is one person's working thread, not the task's shared chronology, and it is scoped to its owner rather than to the project. A Goal Chain Panel is not a Task Status Card: it renders a chain's shape, while each link's task keeps its own card on the board.
+
 ### Component Implementation Strategy
 
 Viberr should implement its UI in three layers:
@@ -761,6 +886,8 @@ Build first-party components only where Viberr’s product model differs materia
 - Execution Truth Strip
 - Mixed Timeline Item
 - Continuity Recovery Panel
+- Controller Conversation *(added 2026-08-31, pass 31 — ruling 99)*
+- Goal Chain Panel *(added 2026-08-31, pass 31 — ruling 99)*
 
 All custom components should:
 - inherit design tokens from the system foundation
@@ -791,6 +918,14 @@ These support the product’s resilience and credibility under stress.
 - continuity-specific packet variants
 - recovery-state rendering across board and task surfaces
 
+**Phase 4 - Instance Control And Goal Chains**
+These extend supervision above the single task, for outcomes that span several of them.
+- Controller Conversation
+- Goal Chain Panel
+- chain cues on the task surfaces a chain touches
+
+> *(Phase 4 added 2026-08-31, pass 31 — ruling 99, `docs/architecture/decisions.md`.)* Written after the fact: both components shipped on 2026-08-30, so this phase records what landed rather than sequencing what to build. The roadmap's own rule held anyway, which is why it is recorded as a phase rather than as an exception — the controller and the Goals panel grew out of a working supervision need, not out of a UI-kit exercise, and neither was built before the surfaces it sits above were proven.
+
 This roadmap keeps the team from overbuilding. The component system should grow in direct response to working supervision and intervention flows, not as a generic UI-kit exercise.
 
 ## UX Consistency Patterns
@@ -810,6 +945,8 @@ Viberr should define state semantics as a first-class product language. These st
 - review-ready and done: workflow or outcome labels rather than canonical readiness states
 
 > **Amended 2026-08-31 (pass 31).** The shipped UI also renders a DERIVED display state this list never declared: `agent_working` — shown on a board card and task header whenever the task is `waiting: agent` while its stored readiness is `ready` or `input_required`. It is not a canonical readiness state and is never persisted; it is derived per render (`deriveDisplayReadiness`, `app/shared/mapping/task.server.ts`) and collapses back to the stored readiness when `waiting` moves off `agent`. The same deriver also promotes a `ready` + `waiting: human` task with an open input packet to display as `input_required`. Recorded here so the spec's own "every state must mean the same thing everywhere" rule covers both derivations.
+
+> **Amended 2026-08-31 (pass 31) — goal chains add a SECOND state family, and the rules below bind it too.** *(Ruling 99(e), `docs/architecture/decisions.md`.)* A chain carries `active | paused | attention | completed | cancelled`; each of its links carries `pending | active | done | failed | skipped`. They are **not** readiness states and never reach a task's readiness pill: a chain's health says nothing about whether the task in front of you can safely progress, and collapsing the two would recreate exactly the generic-error failure the third pattern rule below forbids. Two rules bind them anyway. **Every state means the same thing everywhere** — `attention` takes the same treatment as `input_required`, because at chain scale it means the same thing (the chain cannot advance until a human decides), while `paused` and `cancelled` take the neutral treatment because neither is a fault. **State is never colour alone** — every chain and link state renders as a labelled pill carrying its own word. The one value the panel adds beyond these is the *current link*, marked positionally rather than invented as a sixth link status; like `agent_working` above it is derived per render from the link list and never stored.
 
 **Pattern rules**
 - Every state must mean the same thing everywhere it appears
@@ -906,6 +1043,8 @@ Navigation in Viberr should reinforce the product’s core model: board for supe
 
 **Primary navigation**
 Project-level movement between board, queue, review, and settings should remain stable and predictable.
+
+> **Amended 2026-08-31 (pass 31) — the workspace rail is eight items and the third is the Controller.** *(Ruling 99, `docs/architecture/decisions.md`; the order is exact and is declared in exactly one place, `app/features/shell/nav.ts` — no test pins it, so read that file rather than this list if they ever disagree.)* "Board, queue, review, and settings" under-counts the shipped rail, which reads Board · Review queue · **Controller** · Agents · Policy · GitHub · Activity · Settings. The controller sits third because it is a supervision surface rather than a configuration one; placing it below the configuration items would have taught users it was a setting. The instance controller is deliberately **outside** this rail — it has no project to be a view of — so it is reached from the project list and carries its own way back rather than borrowing the rail's. The stability rule above is unchanged and now covers eight items rather than four. §Controller and Goal Chain Surfaces specifies both surfaces.
 
 **Secondary navigation**
 Inside tasks, use clear sectional navigation for current state, latest packet, timeline, and supporting evidence. Do not bury important task truth behind tabs that users must discover.

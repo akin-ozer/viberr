@@ -566,21 +566,42 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(withheld).toContain("Bash(git push:*)");
     expect(withheld).toContain("Skill");
 
-    // F10-12/F10-04: a SUPPORTING/reviewing run (kind: "reviewer") is read-only
-    // for the repo — the file-write built-ins and every git/gh mutation command
-    // are denied, so a reviewer physically cannot commit, push, or open a PR
-    // (the VIB-30 class). Read/Grep/Bash-for-validation stay available.
+    // Parity ruling (2026-08-31, narrowing F10-12): a SUPPORTING run's
+    // kind-based denies are the DELIVERY commands only — reaching the remote
+    // belongs to the delivers:true engagement (the VIB-30 class), whatever the
+    // grants say. Its LOCAL write posture is grants-derived: the spec's
+    // disallowedTools carry Edit/Write/... exactly when the profile withholds
+    // execute-code-or-write-repo, so a write-GRANTED supporting agent may edit
+    // its own isolated checkout.
     const reviewerDenied = (await run({ ...SPEC, kind: "reviewer" }))?.disallowedTools ?? [];
     expect(reviewerDenied).toEqual(
       expect.arrayContaining([
-        "Edit",
-        "MultiEdit",
-        "Write",
-        "NotebookEdit",
-        "Bash(git commit:*)",
         "Bash(git push:*)",
         "Bash(gh pr create:*)",
         "Bash(gh pr merge:*)",
+      ]),
+    );
+    // No grant-derived denies on this spec ⇒ the local write tools stay.
+    expect(reviewerDenied).not.toContain("Edit");
+    expect(reviewerDenied).not.toContain("Write");
+    expect(reviewerDenied).not.toContain("Bash(git commit:*)");
+    // A WITHHELD supporting run gets the local-write denies from its grants
+    // (the same channel every specialist run uses).
+    const reviewerWithheld =
+      (
+        await run({
+          ...SPEC,
+          kind: "reviewer",
+          disallowedTools: ["Edit", "MultiEdit", "Write", "NotebookEdit", "Bash(git commit:*)"],
+        })
+      )?.disallowedTools ?? [];
+    expect(reviewerWithheld).toEqual(
+      expect.arrayContaining([
+        "Edit",
+        "Write",
+        "Bash(git commit:*)",
+        "Bash(git push:*)",
+        "Bash(gh pr create:*)",
       ]),
     );
     // A delivering (primary) run is NOT read-only — it must be able to write.

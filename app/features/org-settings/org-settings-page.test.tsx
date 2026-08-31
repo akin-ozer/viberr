@@ -1284,6 +1284,52 @@ describe("run concurrency control", () => {
   });
 });
 
+/**
+ * Owner decision, 2026-08-31: the 90-day purge exports expiring rows to the data
+ * root before deleting them. The card used to send an admin to a backup schedule
+ * for ANY record past the window, which is now false, so the disclosure has to
+ * name where the rows actually land and when.
+ */
+describe("FR33: the audit card discloses the export-before-purge record", () => {
+  it("names the folder, the shape, and that the write precedes the delete", () => {
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={{
+          connections: CONNECTIONS,
+          users: [ME],
+          domains: DOMAINS,
+          kbs: KBS,
+          mcps: MCPS,
+          skills: SKILLS,
+          gagents: GAGENTS,
+          projectGrants: { kbs: {}, mcps: {}, skills: {} },
+          templateGrants: { kbs: {}, mcps: {}, skills: {} },
+          stages: STAGES,
+          providers: { github: false, google: false },
+          authProviders: AUTH_PROVIDERS,
+          storage: STORAGE,
+        }}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        auditEvents={[]}
+      />,
+    );
+    const copy = getByText(/Download the audit log/).textContent ?? "";
+    expect(copy).toContain("audit-exports/ in the instance data root");
+    expect(copy).toContain("one JSON object per line");
+    // Ordering is the whole promise: exported, THEN deleted.
+    expect(copy).toContain("before the retention sweep deletes them");
+    // The two bounds on the DOWNLOAD are unchanged and still stated.
+    expect(copy).toContain("100,000 rows");
+    expect(copy).toContain("90-day retention window");
+    // The superseded claim that a schedule is the only longer record is gone.
+    expect(copy).not.toContain("For a longer record");
+  });
+});
+
 describe("R15-13: instance settings name their scope, not a project's name", () => {
   it("titles itself 'Instance settings' — never the product name", () => {
     // "Viberr settings" collided with a PROJECT named Viberr: the surface that

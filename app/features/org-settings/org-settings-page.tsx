@@ -258,7 +258,16 @@ function AuditBrowse({ events }: { events: AuditBrowseRow[] }) {
             : "No events match this filter."}
         </p>
       ) : (
-        <ul className="audit-list">
+        <ul
+          className="audit-list"
+          // The list caps at 15rem and scrolls (app.css .audit-list). A
+          // scrollable region must be reachable by keyboard or its overflowed
+          // rows are mouse-only (WCAG 2.1.1 / axe scrollable-region-focusable
+          // — surfaced by the e2e org-settings audit the first time the seed
+          // log grew past the cap).
+          tabIndex={0}
+          aria-label="Recent audit events"
+        >
           {filtered.map((e) => (
             <li key={e.id} className="audit-row">
               <span className="audit-when">
@@ -315,12 +324,21 @@ function AuditExportCard({
       </div>
       <p className="fine">
         {/* F26-9: state the two real bounds instead of claiming "the full log" —
-            events past the 90-day retention sweep are gone (AUDIT_RETENTION_DAYS),
-            and one export carries at most 100,000 rows (AUDIT_EXPORT_MAX_ROWS). */}
+            events past the 90-day retention sweep are gone from this download
+            (AUDIT_RETENTION_DAYS), and one export carries at most 100,000 rows
+            (AUDIT_EXPORT_MAX_ROWS).
+
+            Owner decision 2026-08-31: those events are no longer GONE, so the
+            sentence that used to send an admin to a backup schedule for any
+            longer record would now be false. The retention pass writes every
+            expiring row to the data root before deleting it
+            (db/retention.server.ts), and this says where it lands. */}
         Download the audit log, or push it to an S3 bucket. An export carries every
         recorded field (actor, action, subject, details) for the events still on
-        file: the most recent 100,000 rows, within the 90-day retention window. For
-        a longer record, export on a schedule.
+        file: the most recent 100,000 rows, within the 90-day retention window.
+        Entries that pass 90 days are written to audit-exports/ in the instance
+        data root, one JSON object per line, before the retention sweep deletes
+        them. For a copy off the box, export on a schedule.
       </p>
       {/* PG26-A: browse the recent log in-app. Org/instance-scoped events
           (sign-ins, PAT changes, user admin) have no other in-app view — the

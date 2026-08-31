@@ -237,9 +237,11 @@ describe("codex adapter (SDK, injected fake client)", () => {
     await drain();
     const opOpts = operator.startOptions()!;
     expect(opOpts).toMatchObject({
-      // R22: no read-only sandbox. The operator is workspace-write, and its
-      // OS-sandbox network stays off.
-      sandboxMode: "workspace-write",
+      // Parity ruling (2026-08-31): the operator is coordination machinery
+      // (its plan executes server-side), so it is read-only again, matching
+      // the Claude operator's OPERATOR_READ_ONLY_DENIED_TOOLS. Its OS-sandbox
+      // network stays off, same as the pre-R22 shape.
+      sandboxMode: "read-only",
       approvalPolicy: "never",
       networkAccessEnabled: false,
     });
@@ -262,9 +264,9 @@ describe("codex adapter (SDK, injected fake client)", () => {
     expect(opWithheldOpts.webSearchMode).toBe("disabled");
     expect(opWithheldOpts.networkAccessEnabled).toBe(false);
 
-    // R22: a supporting/reviewing run is workspace-write now (the read-only
-    // sandbox is gone); its capability limits are advisory on Codex + the
-    // server-owned delivery gate. It keeps network for declared MCP resources.
+    // Ruling 101: a supporting run with NO withheld write family (this SPEC
+    // sets no repoWriteWithheld) is workspace-write — grants decide, never the
+    // role name. It keeps network for declared MCP resources.
     const reviewer = fakeCodex(events);
     createCodexAdapter({ codexFactory: reviewer.factory }).start(
       { ...SPEC, kind: "reviewer" },
@@ -1044,14 +1046,16 @@ describe("codex run isolation (P13-LV-13 / LV-14 / RT-04)", () => {
   });
 });
 
-describe("R22: codex has no read-only sandbox; egress-gated runs stay workspace-write", () => {
-  it("no run is read-only — a withheld repo-write is advisory on Codex now", () => {
-    // R22 (owner ruling): "viberr itself is the sandbox". The Codex read-only
-    // mode is gone; withheld repo-write is advisory (the server-owned delivery
-    // gate is the boundary). This autonomous delivering run has egress, so it
-    // reaches full access even with repo-write withheld — the write-withholding
-    // is no longer PHYSICALLY enforced by the sandbox.
-    // Canary: restore a `read-only` arm to resolveCodexSandboxMode and this reads back "read-only".
+describe("parity ruling (2026-08-31): grants decide the codex sandbox; egress-gated runs stay workspace-write", () => {
+  it("a withheld repo-write run is READ-ONLY — the grant binds physically on Codex again", () => {
+    // The owner's parity ruling partially superseded R22: "reviewer is just a
+    // type of an agent; some agents should be able to write, some don't,
+    // related to their work/assignment, but parity between Claude and Codex is
+    // essential." Claude denies the write tools for this run; the read-only
+    // sandbox is the channel Codex respects. Even a fully-autonomous deliverer
+    // with egress never rises above the withheld family.
+    // Canary: drop the repoWriteWithheld arm from resolveCodexSandboxMode and
+    // this reads back "danger-full-access".
     expect(
       resolveCodexSandboxMode({
         ...SPEC,
@@ -1059,7 +1063,46 @@ describe("R22: codex has no read-only sandbox; egress-gated runs stay workspace-
         autonomous: true,
         repoWriteWithheld: true,
       }),
-    ).toBe("danger-full-access");
+    ).toBe("read-only");
+    expect(
+      resolveCodexSandboxMode({
+        ...SPEC,
+        kind: "reviewer",
+        autonomous: true,
+        repoWriteWithheld: true,
+      }),
+    ).toBe("read-only");
+  });
+
+  it("the evidence carve-out: a withheld run that posts files gets workspace-write, never full access", () => {
+    // Owner-chosen asymmetry: the sandbox cannot express "read-only except
+    // attachments/", and a read-only mode blocks the copy-into-attachments
+    // flow (F22-03). The carve-out widens exactly to workspace-write — the
+    // withheld family still caps the run below the unconditional-network tier.
+    expect(
+      resolveCodexSandboxMode({
+        ...SPEC,
+        kind: "reviewer",
+        autonomous: true,
+        repoWriteWithheld: true,
+        attachmentsWritableDir: "/data/projects/p/tasks/T-1/attachments",
+      }),
+    ).toBe("workspace-write");
+    expect(
+      resolveCodexSandboxMode({
+        ...SPEC,
+        kind: "primary",
+        autonomous: true,
+        repoWriteWithheld: true,
+        attachmentsWritableDir: "/data/projects/p/tasks/T-1/attachments",
+      }),
+    ).toBe("workspace-write");
+  });
+
+  it("a write-GRANTED supporting run is workspace-write — never confined for its role's name (R22's core survives)", () => {
+    expect(resolveCodexSandboxMode({ ...SPEC, kind: "reviewer", autonomous: true })).toBe(
+      "workspace-write",
+    );
   });
 
   it("only an autonomous delivering run with egress gets danger-full-access", () => {
@@ -1072,14 +1115,9 @@ describe("R22: codex has no read-only sandbox; egress-gated runs stay workspace-
     ).toBe("workspace-write");
   });
 
-  it("operators and reviewers are workspace-write, never read-only or full-access", () => {
-    // Operators set autonomous:true but must NOT get danger-full-access — that
-    // would turn the network on and bypass their egress gate.
+  it("the operator is read-only — coordination machinery, like Claude's operator denylist", () => {
     expect(resolveCodexSandboxMode({ ...SPEC, kind: "operator", autonomous: true })).toBe(
-      "workspace-write",
-    );
-    expect(resolveCodexSandboxMode({ ...SPEC, kind: "reviewer", autonomous: true })).toBe(
-      "workspace-write",
+      "read-only",
     );
   });
 
@@ -1096,7 +1134,7 @@ describe("R22: codex has no read-only sandbox; egress-gated runs stay workspace-
     ).toBe("workspace-write");
   });
 
-  it("reaches the SDK thread options as workspace-write for a withheld run", async () => {
+  it("reaches the SDK thread options as read-only for a withheld run", async () => {
     const run = fakeCodex([
       { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
     ]);
@@ -1105,7 +1143,7 @@ describe("R22: codex has no read-only sandbox; egress-gated runs stay workspace-
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();
-    expect(run.startOptions()?.sandboxMode).toBe("workspace-write");
+    expect(run.startOptions()?.sandboxMode).toBe("read-only");
   });
 
   /** R22 / F22-03 — the attachments dir is added at workspace-write (full access
