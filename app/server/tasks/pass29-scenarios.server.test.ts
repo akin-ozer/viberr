@@ -283,11 +283,14 @@ describe("capability catalog — browser coupling and the enforcement honesty th
     expect(coupled.notices.some((n) => n.rule === "browser-egress")).toBe(true);
   });
 
-  it("Claude/Codex parity is DISCLOSED, not pretended: repo-write binds on Claude only, the browser binds on both", () => {
-    // Live: the capability matrix tags repo-write rows CLAUDE-ENFORCED
-    // (advisory on Codex since R22 removed the OS sandbox), while a withheld
-    // browser simply never mounts on either backend.
-    expect(capabilityEnforcement("execute-code-or-write-repo")).toBe("claude-only");
+  it("Claude/Codex parity: the headline repo-write and the browser both bind on BOTH backends", () => {
+    // Ruling 101 (2026-08-31) superseded the R22-era disclosure this test used
+    // to pin: a withheld repo-write now forces the Codex read-only sandbox, so
+    // the headline binds on both legs; the scoped delivery commands remain the
+    // disclosed claude-only rows. A withheld browser still never mounts on
+    // either backend.
+    expect(capabilityEnforcement("execute-code-or-write-repo")).toBe("both");
+    expect(capabilityEnforcement("commit-push-branch")).toBe("claude-only");
     expect(capabilityEnforcement(BROWSER_CAP_ID)).toBe("both");
   });
 });

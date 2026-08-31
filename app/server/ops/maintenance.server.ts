@@ -147,7 +147,14 @@ export function runMaintenancePass(
 
   let retention = EMPTY_RETENTION;
   try {
-    retention = applyRetention(db, options.now);
+    // The audit purge's export-before-delete (ruling 102) writes into the data
+    // root, so the pass's own root override must reach it — the same forwarding
+    // the transcript/workspace sweeps below already do.
+    retention = applyRetention(
+      db,
+      options.now,
+      options.dataRoot ? { dataRoot: options.dataRoot } : {},
+    );
   } catch (error) {
     logger.error("retention pass failed", {
       err: error instanceof Error ? error : new Error(String(error)),

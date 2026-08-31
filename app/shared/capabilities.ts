@@ -250,6 +250,13 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   // claude-only set below; without landing HERE it would read as "advisory",
   // understating the enforcement further than the label it replaced.
   "use-web-search-fetch",
+  // Parity ruling (owner, 2026-08-31): the headline write family binds on BOTH
+  // backends again — Claude via the tool denylist, Codex via the read-only
+  // sandbox a withheld run gets back (resolveCodexSandboxMode; the P13-RT-02
+  // shape R22 had removed). One disclosed nuance: an evidence-granted Codex
+  // run keeps workspace-write so its file-posting assignment stays honest
+  // (the sandbox cannot express "read-only except attachments/").
+  "execute-code-or-write-repo",
   // R19-19: withheld ⇒ the browser MCP server is not mounted into the run, on
   // both backends — the strongest enforcement shape the runtime has (the tool
   // surface simply does not exist, no deny rule needed).
@@ -258,19 +265,23 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
 
 /** Specialist tool-denial capabilities enforced by Claude but advisory on Codex.
  *
- * R22 (owner ruling 2026-08-21): `execute-code-or-write-repo` REJOINED this set.
- * P14-RT-03 had moved it out because P13-RT-02 gave a write-withheld Codex run
- * the read-only sandbox (real OS-level enforcement). R22 removed that sandbox
- * ("viberr itself is the sandbox"), so on Codex the repo-write withholding is
- * once again advisory — the server-owned delivery gate is the real boundary.
- * Claude keeps its tool-denylist enforcement, so the whole repo-write family is
- * claude-only now. (Web egress stays in the both-backend set: withholding it
- * still binds on Codex by forcing workspace-write + `webSearchMode: disabled`.) */
+ * Parity ruling (owner, 2026-08-31): `execute-code-or-write-repo` LEFT this set
+ * again — a write-withheld Codex run gets the read-only sandbox back
+ * (resolveCodexSandboxMode), so the headline family binds on both backends and
+ * lives in ENFORCED_CAPABILITY_IDS above. (History: P13-RT-02 enforced it via
+ * the sandbox, R22 removed the sandbox and made it claude-only, the parity
+ * ruling restored the sandbox for withheld runs while keeping R22's core —
+ * write-GRANTED runs are never confined for their role's name.)
+ *
+ * The SCOPED delivery commands below remain claude-only at the tool layer: the
+ * codex sandbox cannot deny `git push` for a run whose write family is granted
+ * (it is all-or-nothing filesystem confinement). On Codex the real boundary
+ * for them is unchanged — agents hold no credential and delivery is
+ * server-owned. */
 export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "create-task-branch",
   "commit-push-branch",
   "open-review-pr",
-  "execute-code-or-write-repo",
   // The mid-run post_comment tool is mounted only on Claude (Codex has no
   // in-process comment channel at all — its final reply always posts), so
   // withholding comment-on-task binds on Claude and is advisory on Codex.

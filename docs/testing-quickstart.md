@@ -53,9 +53,8 @@ npm run build
 
 CI's second job. It is the only gate that runs a real CLI entrypoint, so run it
 before opening a PR even when the four above are green (it runs one Playwright
-browser project, `chromium`, behind a `setup` login fixture — Safari and Firefox
-are declared support that nothing here exercises; see the PRD's browser-matrix
-note):
+browser project, `chromium`, behind a `setup` login fixture — since 2026-08-31
+the PRD's browser matrix is Chromium-only, so this covers the declared matrix):
 
 ```sh
 npm run e2e

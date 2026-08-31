@@ -36,15 +36,13 @@ async function liftOver(
   page: Page,
   key: string,
   target: Locator,
-  at: "center" | "bottom" = "center",
 ): Promise<void> {
   const card = page.locator(".card-wrap", { hasText: key }).first();
   const from = (await card.boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + 20);
   await page.mouse.down();
   const to = (await target.boundingBox())!;
-  const y = at === "bottom" ? to.y + to.height - 16 : to.y + to.height / 2;
-  await page.mouse.move(to.x + to.width / 2, y, { steps: 12 });
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
 }
 
 test("home renders the three seeded projects", async ({ page }) => {
@@ -133,7 +131,25 @@ test("cross-stage drop onto a column body appends and the card changes column", 
   const triage = column(page, "Triage");
   await expect(triage).toBeVisible();
 
-  await liftOver(page, "VIB-148", triage.locator(".col-body"), "bottom");
+  // Two-phase approach to the APPEND slot. The column's empty tail is
+  // layout-dependent (due-date chips push the seeded cards past the fold as
+  // the wall clock moves), and a single move onto the last card's bottom half
+  // is unstable: the insert-preview shifts the card downward under the
+  // pointer, putting the same screen point back in its TOP half. So: hover
+  // the last card (preview opens above it, layout settles), then a second,
+  // corrective move to just BELOW the card's settled rect — inside the
+  // column droppable, below every card rect — which is the append slot
+  // however the cards shifted.
+  const lastTriageCard = triage.locator(".card-wrap").last();
+  await lastTriageCard.scrollIntoViewIfNeeded();
+  await liftOver(page, "VIB-148", lastTriageCard);
+  await expect(page.locator(".card-drop-preview")).toBeVisible();
+  const settled = (await lastTriageCard.boundingBox())!;
+  await page.mouse.move(
+    settled.x + settled.width / 2,
+    Math.min(settled.y + settled.height + 10, 715),
+    { steps: 4 },
+  );
   await expect(page.locator(".card-drop-preview")).toBeVisible();
 
   const request = reorderPost(

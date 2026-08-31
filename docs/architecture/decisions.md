@@ -1420,6 +1420,52 @@ an owned task's owner cell is just the owner, with no manage affordance. Styling
 no capability, gate or copy contract changed — noted here so a later pass does not read
 the quieter packet or the bare owner cell as drift.)*
 
+100. **Ruling 99's two review-flagged asymmetries are INTENDED (owner, 2026-08-31).**
+    (a) The controller applies policy/workflow edits with no confirm ceremony while
+    most governed actions have one — the controller is an admin-tier instrument
+    executing an explicit human directive, so "has a ceremony" staying the practical
+    always-human test is accepted, not drift. (b) Org admins read project-scoped
+    controller transcripts for projects they are not members of, a deliberate step
+    outside R15-4's members-only posture: the transcript belongs to the ASKING user's
+    scope, and org admins administer the instrument. Both were raised as questions in
+    pass 31's discovery (E1) and confirmed as designed.
+
+101. **Repo-write parity (owner, 2026-08-31 — partially supersedes R22): write posture
+    is GRANTS-derived and binds the SAME on both backends.** "Reviewer is just a type
+    of an agent; some agents should be able to write, some don't, related to their
+    work/assignment — but parity between Claude and Codex is essential." Concretely:
+    (a) a run whose effective `execute-code-or-write-repo` is withheld cannot write on
+    EITHER leg — Claude via the tool denylist (unchanged), Codex via the read-only
+    sandbox restored to `resolveCodexSandboxMode` (the P13-RT-02 shape R22 removed);
+    the capability moves back to `ENFORCED_CAPABILITY_IDS` (both-backend). (b) What
+    R22 got right survives: a write-GRANTED run is never confined for its role's name
+    — a supporting agent granted the family may edit its own isolated checkout (P8
+    isolation + sha-bound verdicts contain it), so Claude's kind-based supporting
+    denylist narrowed to the DELIVERY commands only (`git push`, `gh pr create`,
+    `gh pr merge` — the VIB-30 class stays closed; local-write denies now ride the
+    grant-derived `disallowedTools`). (c) The one disclosed carve-out: a write-
+    withheld Codex run that is EVIDENCE-granted (attachments dir mounted) keeps
+    `workspace-write`, capped below full access — the sandbox cannot express
+    "read-only except attachments/", and blocking the file-posting assignment was the
+    F22-03 defect. (d) The operator is coordination machinery, not an agent with a
+    write assignment: read-only on Codex again, matching Claude's operator denylist.
+    (e) Scoped delivery commands stay claude-only at the tool layer (the sandbox is
+    all-or-nothing); their Codex boundary remains credential-less agents + the
+    server-owned delivery gate. Shipped without live Codex validation (provider quota
+    blocked until Sep 18 2026) — envelope/unit tests pin the contract.
+
+102. **FR33 audit purge exports before it deletes (owner, 2026-08-31).** The 90-day
+    hard-delete of `audit_events` first appends the expiring rows, verbatim, to a
+    JSONL export under the data root (`audit-exports/`); an export failure SKIPS that
+    pass's purge (fail closed — losing a purge tick is recoverable, losing the rows
+    is not). This gives FR33's purge a durable long-term record beyond whatever the
+    S3 schedule happens to capture.
+
+103. **The declared browser matrix is Chromium-only (owner, 2026-08-31).** Safari and
+    Firefox were declared intent that no pass ever exercised (recorded 2026-08-19);
+    struck from the PRD (canon + mirror) rather than left implied. Re-adding an
+    engine requires a Playwright project that actually runs it.
+
 ## Route map
 
 ```

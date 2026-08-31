@@ -225,14 +225,16 @@ export function runInputRows(
         ? `viberr tools: ${inputs.tools.toolkit.join(", ")}`
         : "viberr tools: none",
       inputs.tools.denied.length
-        ? // F-P10 (pass 25): the deny list binds on Claude (SDK denylist) but is
-          // ADVISORY on Codex — codex-runtime never consults `disallowedTools`
-          // (R22 removed the read-only sandbox). This console is the per-run
-          // audit surface, so it must not claim a denial that did not happen on
-          // this backend: say "advisory on this Codex run" rather than a flat
-          // "denied".
+        ? // F-P10 (pass 25): the deny list binds on Claude (SDK denylist);
+          // codex-runtime never consults `disallowedTools` directly. Since the
+          // parity ruling (2026-08-31) two families DO bind on Codex through
+          // derived flags: a withheld repo-write family forces the read-only
+          // sandbox, and withheld web egress disables web search. The
+          // command-level entries (git push, gh pr ...) remain advisory there.
+          // This console is the per-run audit surface, so it says exactly that
+          // rather than a flat "denied" or a flat "advisory".
           backend === "codex"
-          ? `capability grants deny (advisory on this Codex run, not tool-enforced): ${inputs.tools.denied.join(", ")}`
+          ? `capability grants deny (on this Codex run the repo-write and web families bind via sandbox and search toggles; command-level entries are advisory): ${inputs.tools.denied.join(", ")}`
           : `denied by its capability grants: ${inputs.tools.denied.join(", ")}`
         : "no built-in tools denied",
     ].join(" · "),

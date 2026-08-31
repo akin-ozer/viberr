@@ -342,40 +342,58 @@ function codexConfigForRun(
 /**
  * The sandbox a run gets.
  *
- * R22 (owner ruling 2026-08-21) — "viberr itself is the sandbox": the Codex OS
- * read-only sandbox is gone. It used to run operators, reviewers and
- * write-withheld agents `read-only`, PHYSICALLY blocking every write; the owner
- * removed it because the container plus Viberr's server-owned delivery gate
- * (push / open-PR / merge / close / Done are all server actions no agent tool
- * can reach) are the real boundary, and the read-only mode only crippled agents
- * doing legitimate local work. What survives, by the same ruling, is EGRESS: a
- * separate capability the owner keeps enforced (`networkAccessEnabled` /
- * `webSearchMode`, set below). `danger-full-access` cannot honor that — it turns
- * the network on unconditionally — so egress-gated runs use `workspace-write`,
- * the least-confining mode whose network toggle Codex still respects. No run is
- * `read-only` anymore. (Claude keeps its capability tool-denylists unchanged,
- * per the same ruling — the enforcement asymmetry is deliberate: on Claude the
- * withheld capability binds, on Codex it is advisory + the delivery gate, which
- * is exactly what the capability matrix has always disclosed.)
+ * Parity ruling (owner, 2026-08-31, partially superseding R22): repo-write
+ * posture is GRANTS-derived and must bind THE SAME on both backends —
+ * "reviewer is just a type of an agent; some agents should be able to write,
+ * some don't, related to their work/assignment, but parity between Claude and
+ * Codex is essential." Claude binds a withheld `execute-code-or-write-repo`
+ * through its tool denylist; the only channel Codex respects is this sandbox
+ * mode, so a write-withheld Codex run is `read-only` again (the P13-RT-02
+ * shape R22 had removed). What R22 got RIGHT stays: a run whose grants allow
+ * writing is never confined for its role's name alone — a supporting agent
+ * GRANTED the write family runs `workspace-write` and may edit its own
+ * isolated checkout (P8 isolation + sha-bound verdicts contain it).
+ *
+ * The one deliberate asymmetry (owner-chosen): a write-withheld run that is
+ * EVIDENCE-granted (`attachmentsWritableDir` set — its assignment includes
+ * producing files for humans) keeps `workspace-write`, because this sandbox
+ * cannot express "read-only except attachments/" and a read-only mode blocks
+ * the copy-into-attachments flow (the F22-03 defect). Claude expresses the
+ * same intent more finely: file-write tools denied, the browser MCP's own
+ * writes land in attachments/.
+ *
+ * The operator (and the Claude-only controller) are coordination machinery,
+ * not agents with a write assignment: structurally `read-only`, matching
+ * Claude's OPERATOR_READ_ONLY_DENIED_TOOLS. EGRESS survives unchanged from
+ * R22: `danger-full-access` turns the network on unconditionally, so any
+ * egress-gated run must stay below it (`workspace-write`, whose network
+ * toggle Codex respects); only a fully-autonomous delivering run with egress
+ * reaches `danger-full-access`.
  *
  * `spec.autonomous` deliberately does NOT decide repo write access on its own:
- * it also drives Claude's `permissionMode`, and flipping it to `"default"` would
- * hang a server run on an approval nobody can answer. Only a fully-autonomous
- * delivering run — which by definition holds egress too — reaches
- * `danger-full-access`; everything else is `workspace-write`, writable but with
- * the network gated by the egress capability.
+ * it also drives Claude's `permissionMode`, and flipping it to `"default"`
+ * would hang a server run on an approval nobody can answer.
  */
 export function resolveCodexSandboxMode(spec: RunSpec): SandboxMode {
+  // Coordination machinery: read-only, like the Claude operator's denylist.
+  // (Its plan executes server-side; the run itself only reads the checkout.)
+  if (spec.kind === "operator") return "read-only";
+  // Grants decide (parity ruling): a withheld write family binds physically —
+  // unless the run is evidence-granted, the owner's carve-out above, which
+  // widens exactly to `workspace-write` (never to full access: the withheld
+  // family must keep the run below the unconditional-network tier too).
+  if (spec.repoWriteWithheld) {
+    return spec.attachmentsWritableDir ? "workspace-write" : "read-only";
+  }
   // Only a fully-autonomous DELIVERING run with egress reaches
-  // `danger-full-access` (full filesystem + network). Everything else —
-  // operators, reviewers, supervised runs, and any run whose web egress is
-  // withheld — is `workspace-write`: writable and shell-capable, but with the
-  // network gated by the egress capability the owner keeps enforced
-  // (`networkAccessEnabled` / `webSearchMode`, set below). `danger-full-access`
-  // cannot honor that gate (it turns the network on unconditionally), which is
-  // why egress-gated runs must NOT use it. Note operator runs set
-  // `autonomous: true`, so they are excluded explicitly.
-  const isDeliverer = spec.kind !== "operator" && spec.kind !== "reviewer";
+  // `danger-full-access` (full filesystem + network). Everything else is
+  // `workspace-write`: writable and shell-capable, but with the network gated
+  // by the egress capability (`networkAccessEnabled` / `webSearchMode`, set
+  // below). `danger-full-access` cannot honor that gate, which is why
+  // egress-gated runs must NOT use it. Operators (which also set
+  // `autonomous: true`) never reach this line — the read-only early return
+  // above already settled them.
+  const isDeliverer = spec.kind !== "reviewer";
   if (spec.autonomous && isDeliverer && !spec.webSearchWithheld) {
     return "danger-full-access";
   }
@@ -710,17 +728,17 @@ export function createCodexAdapter(
         if (deps.apiKey) codexOptions.apiKey = deps.apiKey;
         if (mergedEnv) codexOptions.env = mergedEnv;
         const codex = factory(codexOptions);
-        // R22 — the Codex OS read-only sandbox is gone (owner ruling: "viberr
-        // itself is the sandbox"). A fully-autonomous delivering run gets
-        // `danger-full-access`, mirroring Claude's bypassPermissions so a
-        // server-spawned run never blocks on an approval it can't answer; every
-        // other run is `workspace-write` (writable + shell-capable). What
-        // survives is EGRESS: operators never reach the network on Codex, and a
-        // specialist whose web egress is withheld loses web search — both set
-        // below, and both need `workspace-write` for the toggle to bind (see
-        // resolveCodexSandboxMode). Repo-write withholding is now advisory on
-        // Codex (the server-owned delivery gate is the real boundary); Claude
-        // keeps its tool-denylist enforcement.
+        // Parity ruling (2026-08-31, superseding R22's advisory posture):
+        // repo-write is GRANTS-derived and binds on BOTH backends — a
+        // write-withheld Codex run is `read-only` (the one channel Codex
+        // respects), a write-granted one is `workspace-write`, and only a
+        // fully-autonomous delivering run with egress gets
+        // `danger-full-access` (mirroring Claude's bypassPermissions so a
+        // server-spawned run never blocks on an approval it can't answer).
+        // EGRESS survives from R22: operators never reach the network on
+        // Codex, and a specialist whose web egress is withheld loses web
+        // search — both set below; the network toggle needs a mode at or
+        // below `workspace-write` to bind (see resolveCodexSandboxMode).
         const sandboxMode: SandboxMode = resolveCodexSandboxMode(spec);
         const reasoningEffort = resolveCodexReasoningEffort(spec.effort);
         const threadOptions: ThreadOptions = {
@@ -738,10 +756,11 @@ export function createCodexAdapter(
           threadOptions.modelReasoningEffort = reasoningEffort;
         }
         // The task's attachments dir joins the writable set at workspace-write;
-        // danger-full-access can already write it. R22 removed the read-only
-        // sandbox, so an evidence-granted reviewer now runs workspace-write and
-        // CAN copy screenshots into attachments/ — the "Posting files" persona
-        // no longer promises a write the sandbox blocked (F22-03/AD-1 resolved).
+        // danger-full-access can already write it. An evidence-granted run is
+        // never `read-only` (the parity ruling's carve-out in
+        // resolveCodexSandboxMode), so a reviewer that posts files CAN copy
+        // screenshots into attachments/ — the "Posting files" persona never
+        // promises a write the sandbox blocks (F22-03/AD-1 stays resolved).
         if (sandboxMode === "workspace-write" && spec.attachmentsWritableDir) {
           threadOptions.additionalDirectories = [spec.attachmentsWritableDir];
         }
