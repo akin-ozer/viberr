@@ -419,8 +419,8 @@ async function createProjectImpl(
     // specialists it can assign — so every project can run governed agent work.
     agents: presetAgents(input.policy, defaultAgentDeployments()),
     credentialPolicy: null,
-    // Ship the anti-noise guardrails ON — timeline compaction + operator brevity
-    // are product defaults (PRD's #1 risk), not opt-in.
+    // Ship the anti-noise guardrails ON — timeline compaction + chatter
+    // rejection are product defaults (PRD's #1 risk), not opt-in.
     guardrails: DEFAULT_GUARDRAILS,
   };
 

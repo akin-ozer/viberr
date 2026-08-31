@@ -33,7 +33,6 @@ import {
   type CommentGuardrailResult,
   guardrailOn,
   guardrailValue,
-  OPERATOR_BREVITY_MAX_CHARS,
 } from "./comment-guardrails.server";
 import { absentDeliverReviewPrMode } from "~/shared/capabilities";
 import {
@@ -632,12 +631,14 @@ async function writeOperatorComment(
   // Anti-noise guardrails — ALL enforced for real (owner ruling Q3):
   //  · meaningful-comment: trivial chatter never reaches the canonical record;
   //  · evidence-separation: raw output dumps are trimmed to a head + reference;
-  //  · operator-brevity: operator narration is hard-capped;
   //  · no-duplicate-summary: an exact restatement of the last operator comment
   //    is dropped;
   //  · compression-threshold: long timelines compact at the CONFIGURED value.
+  // Operator narration is stored VERBATIM (owner ruling 2026-08-31) — the old
+  // operator-brevity hard cap destroyed the overflow in the canonical record;
+  // the timeline clamps long comments view-side behind a Show more toggle.
   //
-  // The meaningful/evidence/brevity trio runs through the shared
+  // The meaningful/evidence pair runs through the shared
   // `applyCommentGuardrails` so the outcome is a value, not a void early-return.
   // The no-duplicate check stays timeline-based (compares against the LAST
   // operator comment inside the write transaction) rather than a passed-in
@@ -646,8 +647,6 @@ async function writeOperatorComment(
     text,
     meaningful: guardrailOn(ctx, projectSlug, "meaningful-comment"),
     evidence: guardrailOn(ctx, projectSlug, "evidence-separation"),
-    brevity: guardrailOn(ctx, projectSlug, "operator-brevity"),
-    brevityMax: OPERATOR_BREVITY_MAX_CHARS,
   });
   if (guardrail.dropped === "meaningless") {
     logger.info("operator comment dropped by the meaningful-comment guardrail", {
@@ -659,7 +658,7 @@ async function writeOperatorComment(
   // S5-G3: the operator is instructed to tag the human it answers, so a handle
   // that matches two people is a NEW-4 failure the operator cannot fix on its
   // own — the comment discloses the non-delivery instead of dropping it in
-  // silence. Applied after brevity so the disclosure is never trimmed away.
+  // silence. Applied after the guardrails so it rides the text actually written.
   const text2 = withAmbiguityDisclosure(db, guardrail.text ?? text);
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),

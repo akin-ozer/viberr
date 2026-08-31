@@ -114,14 +114,16 @@ VIBERR_DATA_ROOT=$(mktemp -d) npm test
 Useful if you're iterating locally and don't want a run to seed, mutate,
 or delete files under your real `./data`.
 
-## Operator-brevity guardrail
+## Operator narration is stored verbatim
 
-Tests that exercise operator comments should expect narration to be hard-capped
-at `OPERATOR_BREVITY_MAX_CHARS` (1000 chars), with overflow trimmed and a
-marker appended; this is enforced in
-`app/server/tasks/comment-guardrails.server.ts` (`enforceOperatorBrevity`), is
-ON by default for every project via `DEFAULT_GUARDRAILS` in
-`app/shared/workflow/templates.ts`, and can be toggled per project through the
-`guardrails` array in that project's canonical frontmatter.
+Tests that exercise operator comments should expect the narration to reach the
+canonical record UNTRUNCATED, however long (owner ruling 2026-08-31 removed the
+old operator-brevity hard cap, which destroyed the overflow at write time).
+Length is handled view-side: the timeline's `CollapsibleComment`
+(`app/features/task-detail/timeline.tsx`) clamps tall comments behind a
+Show more toggle, for operator narration and agent replies alike. The
+remaining write-time guardrails (`meaningful-comment`, `evidence-separation`,
+`no-duplicate-summary`, `compression-threshold`) are still enforced per
+project through the `guardrails` array in the project's canonical frontmatter.
 
 See also: [testing-quickstart.md](./testing-quickstart.md).

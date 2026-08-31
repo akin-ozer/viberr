@@ -11,12 +11,17 @@ import type { TaskMutationContext } from "./task-actions.server";
  * - `meaningful-comment`  → {@link isMeaninglessComment}: trivial status
  *   chatter ("ok", "done", "working on it") is dropped before it reaches the
  *   timeline.
- * - `operator-brevity`    → {@link enforceOperatorBrevity}: an operator
- *   narration comment is hard-capped; the overflow is trimmed with an explicit
- *   marker (operators narrate decisions — reports belong to agents).
  * - `evidence-separation` → {@link separateEvidence}: raw output dumps (long
  *   fenced blocks) are replaced by a head + truthful reference — the full
  *   output remains in the run's agent logs, which is where evidence lives.
+ *
+ * There is deliberately NO length cap on operator narration (owner ruling
+ * 2026-08-31): the record keeps the full text and the timeline handles length
+ * VIEW-side — `CollapsibleComment` in task-detail/timeline.tsx clamps tall
+ * comments behind a Show more toggle, same as long agent replies. The old
+ * `operator-brevity` guardrail hard-truncated the canonical record, which
+ * destroyed the overflow for every future reader; brevity is now a style
+ * instruction on the operator's post_comment tool, not an enforcement.
  *
  * All pure; guardrail lookups are separate so callers wire them per project.
  */
@@ -30,26 +35,6 @@ export function isMeaninglessComment(text: string | null | undefined): boolean {
   if (!t) return true;
   if (t.length > 60) return false; // real content is never this shape
   return CHATTER_RE.test(t);
-}
-
-/** Operator narration cap: decisions read in seconds, reports live in logs. */
-export const OPERATOR_BREVITY_MAX_CHARS = 1000;
-
-export function enforceOperatorBrevity(
-  text: string,
-  maxChars: number = OPERATOR_BREVITY_MAX_CHARS,
-): string {
-  if (text.length <= maxChars) return text;
-  let head = text.slice(0, maxChars - 1).trimEnd();
-  // If the truncation cut through an open ``` fence (odd number of fences),
-  // close it so the appended marker + rest of the timeline don't render as code
-  // (adversarial-review #12 — markdown-aware truncation).
-  const fenceCount = (head.match(/^```/gm) ?? []).length;
-  if (fenceCount % 2 === 1) head += "\n```";
-  return (
-    head +
-    "\n\n_(trimmed by the operator-brevity guardrail — the full narration is in the agent logs)_"
-  );
 }
 
 /** A fenced block longer than this many lines is an evidence dump, not prose. */
@@ -85,7 +70,7 @@ export function separateEvidence(
 export type CommentDropReason = "meaningless" | "duplicate";
 
 /** Guardrails that rewrote the text rather than dropping it. */
-export type CommentTrim = "evidence-separation" | "operator-brevity";
+export type CommentTrim = "evidence-separation";
 
 export interface CommentGuardrailResult {
   /** What to write, or null when the comment was dropped. */
@@ -108,7 +93,7 @@ export interface CommentGuardrailResult {
  *
  * `text` is the POST-trim text to persist; callers keep the caller's original
  * for the @mention fan-out, which must run on the PRE-trim text so a handle
- * sitting past the brevity cap still notifies (B-FD8b).
+ * sitting inside a separated evidence block still notifies (B-FD8b).
  */
 export function applyCommentGuardrails(input: {
   text: string;
@@ -116,10 +101,7 @@ export function applyCommentGuardrails(input: {
   previousText?: string | null;
   meaningful?: boolean;
   evidence?: boolean;
-  brevity?: boolean;
   noDuplicate?: boolean;
-  /** Project-configured brevity cap; falls back to the default. */
-  brevityMax?: number | null;
 }): CommentGuardrailResult {
   if (input.meaningful && isMeaninglessComment(input.text)) {
     return { text: null, dropped: "meaningless", trimmedBy: [] };
@@ -131,14 +113,6 @@ export function applyCommentGuardrails(input: {
     const separated = separateEvidence(text);
     if (separated !== text) trimmedBy.push("evidence-separation");
     text = separated;
-  }
-  if (input.brevity) {
-    const brief = enforceOperatorBrevity(
-      text,
-      input.brevityMax ?? OPERATOR_BREVITY_MAX_CHARS,
-    );
-    if (brief !== text) trimmedBy.push("operator-brevity");
-    text = brief;
   }
 
   if (

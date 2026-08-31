@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyCommentGuardrails,
   commentOutcomeMessage,
-  enforceOperatorBrevity,
   isMeaninglessComment,
-  OPERATOR_BREVITY_MAX_CHARS,
   separateEvidence,
   EVIDENCE_MAX_FENCE_LINES,
 } from "./comment-guardrails.server";
@@ -28,16 +26,26 @@ describe("meaningful-comment guardrail", () => {
   });
 });
 
-describe("operator-brevity guardrail", () => {
-  it("leaves a short narration untouched", () => {
-    const t = "Prompted @dev; waiting for the report.";
-    expect(enforceOperatorBrevity(t)).toBe(t);
-  });
-  it("trims an over-long narration with a marker", () => {
-    const long = "x".repeat(OPERATOR_BREVITY_MAX_CHARS + 500);
-    const out = enforceOperatorBrevity(long);
-    expect(out.length).toBeLessThan(long.length);
-    expect(out).toContain("operator-brevity guardrail");
+/**
+ * Owner ruling 2026-08-31: operator narration reaches the canonical record
+ * UNTRUNCATED — the old operator-brevity cap destroyed the overflow at write
+ * time ("the full narration is in the agent logs"), while the timeline already
+ * collapses tall comments view-side behind a Show more toggle. Locks the
+ * removal: a long narration passes through the guardrails verbatim.
+ */
+describe("operator narration is stored verbatim", () => {
+  it("never truncates a long narration — length is a view concern", () => {
+    const long =
+      "Acceptance caveat the human must read in full. " + "detail ".repeat(2000);
+    const result = applyCommentGuardrails({
+      text: long,
+      meaningful: true,
+      evidence: true,
+      noDuplicate: true,
+    });
+    expect(result.text).toBe(long);
+    expect(result.dropped).toBeNull();
+    expect(result.trimmedBy).toEqual([]);
   });
 });
 
@@ -75,15 +83,6 @@ describe("evidence-separation guardrail", () => {
     expect(out).toContain("Done.");
     expect(out).toContain("Note: use");
   });
-
-  it("brevity truncation closes an open fence so the marker isn't code (#12)", () => {
-    const long = "before\n```\n" + "x".repeat(OPERATOR_BREVITY_MAX_CHARS) + "\nmore";
-    const out = enforceOperatorBrevity(long);
-    // The number of ``` fences in the output must be even (balanced).
-    const fences = (out.match(/^```/gm) ?? []).length;
-    expect(fences % 2).toBe(0);
-    expect(out).toContain("operator-brevity guardrail");
-  });
 });
 
 /**
@@ -91,7 +90,7 @@ describe("evidence-separation guardrail", () => {
  * comment that was dropped goes on to reason about narration nobody can read.
  */
 describe("applyCommentGuardrails + commentOutcomeMessage (B-FD8)", () => {
-  const on = { meaningful: true, evidence: true, brevity: true, noDuplicate: true };
+  const on = { meaningful: true, evidence: true, noDuplicate: true };
 
   it("reports a meaningful-comment DROP instead of a post", () => {
     const result = applyCommentGuardrails({ text: "ok", ...on });
@@ -111,11 +110,12 @@ describe("applyCommentGuardrails + commentOutcomeMessage (B-FD8)", () => {
   });
 
   it("compares the duplicate check against the POST-trim text", () => {
-    const long = "n".repeat(OPERATOR_BREVITY_MAX_CHARS + 200);
-    const trimmed = enforceOperatorBrevity(long);
-    // The stored previous comment is the trimmed form, so re-narrating the same
-    // over-long text is still a duplicate.
-    expect(applyCommentGuardrails({ text: long, previousText: trimmed, ...on }).dropped).toBe(
+    const dump = ["```", ...Array.from({ length: 40 }, (_, i) => `line ${i}`), "```"].join("\n");
+    const text = `Report:\n${dump}`;
+    const trimmed = separateEvidence(text);
+    // The stored previous comment is the evidence-separated form, so re-posting
+    // the same raw dump is still a duplicate.
+    expect(applyCommentGuardrails({ text, previousText: trimmed, ...on }).dropped).toBe(
       "duplicate",
     );
   });
