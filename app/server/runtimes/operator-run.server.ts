@@ -183,6 +183,16 @@ export interface RunOperatorInput {
    *  OPERATOR_TRANSITION_CHAIN_CAP in task-actions). Omitted by every human /
    *  agent-reply trigger, which is what resets the chain. */
   transitionDepth?: number;
+  /** True when THIS drive was fired by the stranded-coordination resume
+   *  (`maybeResumeStrandedOperator`). Exactly one nudge per settle: a drive
+   *  that was itself a stranded resume and still ends stranded is a
+   *  DELIBERATE HOLD — the settle records the hold and stops instead of
+   *  resuming again. Without this, a goal that directs holding an `auto`
+   *  stage ("do nothing yet") looped paid operator drives back-to-back until
+   *  the chain cap, and every later trigger re-armed a fresh burst (F31-11:
+   *  fourteen drives on a no-op task). The turn instruction also reads it, so
+   *  the nudged drive is told to either advance or RECORD the hold. */
+  strandedResume?: boolean;
   /** transition trigger — what just moved (display names) and who moved it.
    *  `transitionByHuman` null = the operator's own move (continue the flow);
    *  a name = a human decided it, and the turn instruction tells the operator
@@ -299,6 +309,10 @@ interface OperatorLeaseEntry {
    *  follow-up (it is fire-and-forget async, so at settle time it may not
    *  have reached the queue yet; resuming here would double-drive). */
   stageAtStart: string | null;
+  /** True when this drive WAS the stranded resume's one nudge — its settle
+   *  must record a deliberate hold instead of nudging again (see
+   *  RunOperatorInput.strandedResume). */
+  strandedResume: boolean;
 }
 
 /**
@@ -673,6 +687,7 @@ export async function maybeResumeStrandedOperator(
     runId?: string | null;
     transitionDepth?: number;
     stageAtStart?: string | null;
+    strandedResume?: boolean;
   },
 ): Promise<boolean> {
   // Only a ref that knows the drive's STARTING stage resumes — the live lease
@@ -745,6 +760,47 @@ export async function maybeResumeStrandedOperator(
   );
   if (!stranded) return false;
 
+  // One nudge per settle (F31-11). THIS drive already was the stranded
+  // resume's nudge, its turn instruction said "advance or RECORD the hold" —
+  // and it ended stranded anyway. That is a deliberate hold, not an
+  // interrupted chain: record it once and settle to human instead of looping
+  // paid drives until the chain cap (which only pauses the burst — the next
+  // trigger re-armed it, fourteen drives on one no-op task).
+  if (ref.strandedResume) {
+    const { appendTimelineEvent, resolveTaskFilePath } = await import(
+      "~/server/files/task-writer.server"
+    );
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    await appendTimelineEvent(
+      { projectSlug: ref.projectSlug, taskKey: ref.taskKey, dataRoot: ref.dataRoot },
+      {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text:
+          "**Note:** this stage auto-advances, but the operator held it twice in a row without advancing, dispatching, or opening a packet — treating that as a deliberate hold. " +
+          "Coordination is paused here: run the operator manually when the hold should end, adjust the goal, or loosen the boundary in Policy → Workflow rules.",
+        toAgent: false,
+        evidence: null,
+      },
+    );
+    rebuildPath(
+      db,
+      resolveTaskFilePath({
+        projectSlug: ref.projectSlug,
+        taskKey: ref.taskKey,
+        dataRoot: ref.dataRoot,
+      }),
+      { dataRoot: ref.dataRoot },
+    );
+    logger.info("stranded-operator resume withheld — the nudged drive held the stage again", {
+      taskKey: ref.taskKey,
+      stage: file.parsed.frontmatter.stage,
+    });
+    return false;
+  }
+
   const { OPERATOR_TRANSITION_CHAIN_CAP } = await import(
     "~/server/tasks/task-actions.server"
   );
@@ -807,6 +863,7 @@ export async function maybeResumeStrandedOperator(
     taskKey: ref.taskKey,
     trigger: "transition",
     transitionDepth: depth,
+    strandedResume: true,
     dataRoot: ref.dataRoot,
   }).catch((error) => {
     logger.error("stranded-operator resume failed", {
@@ -831,6 +888,7 @@ function settleWaitingAfterOperator(
     runId?: string | null;
     transitionDepth?: number;
     stageAtStart?: string | null;
+    strandedResume?: boolean;
   },
 ): void {
   void (async () => {
@@ -1331,6 +1389,7 @@ export async function runOperator(
     dataRoot: input.dataRoot,
     transitionDepth: input.transitionDepth ?? 0,
     stageAtStart: readStageAtStart(taskFileRef(input), "drive"),
+    strandedResume: input.strandedResume === true,
   };
   lease.held.set(leaseKey, leaseToken);
 
@@ -1803,6 +1862,7 @@ async function startCodexOperatorRun(
     transitionContextOf(input),
     input.scheduleNote,
     input.resolvedOption,
+    input.strandedResume,
   );
   const orgMcpServers = mcp.servers;
 
@@ -1944,6 +2004,9 @@ export async function executeStrandedCodexPlan(
     // to do. The stage is what makes "this drive did not move the task"
     // decidable; reading it here costs one file read.
     stageAtStart: readStageAtStart(recoveryRef, "stranded-plan-recovery"),
+    // A cross-boot recovery is never itself the stranded resume's nudge — the
+    // one-nudge accounting starts fresh after a restart, like the chain depth.
+    strandedResume: false,
   };
   lease.held.set(leaseKey, leaseToken);
   try {
@@ -2441,6 +2504,7 @@ async function startRealOperatorRun(
     transitionContextOf(input),
     input.scheduleNote,
     input.resolvedOption,
+    input.strandedResume,
   );
 
   const spec: StartRunInput = {
@@ -3158,6 +3222,7 @@ function operatorTurnDoctrine(
   transition?: TransitionContext,
   scheduleNote?: string,
   resolvedOption?: { kind: string; title: string; note?: string },
+  strandedResume?: boolean,
 ): string {
   if (humanComment?.trim()) {
     const by = humanCommentBy?.trim();
@@ -3298,7 +3363,16 @@ function operatorTurnDoctrine(
     ? "The goal is unspecified. First use `set_goal` to add concrete scope and acceptance criteria, or request genuinely missing scope with one decision packet. " +
       "Drafting the goal is SETUP, not this turn's action — after `set_goal`, continue with the stage rule below in the SAME run; nothing re-invokes you for your own `set_goal`. "
     : "";
+  // F31-11: the stranded-resume nudge is one paid drive, and it is the LAST
+  // automatic one — say so, and give the deliberate-hold case a recordable
+  // exit (a packet flips the stranded predicate durably, so the settle stops
+  // re-judging the stage as abandoned).
+  const resumeContext = strandedResume
+    ? "You are re-invoked ONCE because your previous run ended with this auto-advance stage idle: nothing pending, nothing dispatched, no packet. This is the only automatic nudge — nothing re-invokes you again for the same idle stage. " +
+      "Either take the advancing action now (transition, dispatch, or deliver per the stage rule below), or, if the goal or a human directive tells you to HOLD this stage, record the hold so it is a decision instead of a stall: `open_decision_packet` asking the human to confirm the hold (offer options to resume, adjust the goal, or keep holding). Do not end this turn with the stage idle and nothing recorded. "
+    : "";
   return (
+    resumeContext +
     scheduleContext +
     moveContext +
     scope +
@@ -3346,6 +3420,7 @@ export function buildCodexOperatorPrompt(
   transition?: TransitionContext,
   scheduleNote?: string,
   resolvedOption?: { kind: string; title: string; note?: string },
+  strandedResume?: boolean,
 ): string {
   return (
     "# Task snapshot\n\n```json\n" +
@@ -3362,6 +3437,7 @@ export function buildCodexOperatorPrompt(
       transition,
       scheduleNote,
       resolvedOption,
+      strandedResume,
     ) +
     "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes. Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
@@ -3379,6 +3455,7 @@ export function buildOperatorTurnPrompt(
   transition?: TransitionContext,
   scheduleNote?: string,
   resolvedOption?: { kind: string; title: string; note?: string },
+  strandedResume?: boolean,
 ): string {
   return (
     `You are operating ${snapshot.key}, "${snapshot.title}", at stage "${snapshot.stageName}".\n` +
@@ -3393,6 +3470,7 @@ export function buildOperatorTurnPrompt(
       transition,
       scheduleNote,
       resolvedOption,
+      strandedResume,
     )
   );
 }

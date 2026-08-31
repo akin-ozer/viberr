@@ -1436,6 +1436,58 @@ describe("stranded auto-stage resume", () => {
       expect(operatorRuns()).toHaveLength(3);
     });
 
+    /**
+     * F31-11 (pass 31, live-caught): a goal that directs HOLDING an auto stage
+     * ("do nothing yet") made every drive end stranded, so the resume fired
+     * drive after drive back-to-back until the chain cap — and the next
+     * trigger re-armed a fresh burst (fourteen paid drives on one no-op task).
+     * The resume is ONE nudge: a drive that was itself the nudge and still
+     * ends stranded is a deliberate hold — recorded once, then the settle
+     * flips waiting to human instead of looping.
+     */
+    it("a resume drive that strands AGAIN records a deliberate hold instead of looping", async () => {
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "create",
+        dataRoot: store2.dataRoot,
+      });
+      // Drive 1 strands (no actions) → the backstop fires the nudge (drive 2).
+      adapter2.finish(store2, JSON.stringify({ reasoning: "", actions: [] }), "finished");
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(2);
+        expect(adapter2.pending).not.toBeNull();
+      });
+      // The nudge is TOLD it is the one automatic re-invocation, with the
+      // record-the-hold exit — that instruction is what makes stopping fair.
+      expect(adapter2.pending!.spec.prompt).toContain("re-invoked ONCE");
+      expect(adapter2.pending!.spec.prompt).toContain("record the hold");
+
+      // Drive 2 (the nudge) ALSO strands: the deliberate-hold shape.
+      adapter2.finish(store2, JSON.stringify({ reasoning: "", actions: [] }), "finished");
+      await eventually(() => {
+        const parsed = readTaskFile({
+          projectSlug: store2.slug,
+          taskKey: "VIB-1",
+          dataRoot: store2.dataRoot,
+        })!.parsed;
+        // The hold is recorded once, on the timeline, by the policy engine…
+        expect(
+          parsed.timeline.some(
+            (ev) =>
+              typeof ev.text === "string" &&
+              ev.text.includes("deliberate hold"),
+          ),
+        ).toBe(true);
+        // …and coordination settles to the human instead of a third drive.
+        expect(parsed.frontmatter.waiting).toBe("human");
+      });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(operatorRuns()).toHaveLength(2);
+    });
+
     it("an ERRORED drive is not resumed — failures must not loop", async () => {
       await runOperator(store2.db, {
         projectSlug: store2.slug,
