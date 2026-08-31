@@ -377,10 +377,13 @@ describe("createNotification routing prefs (FIX #4)", () => {
     // …and back on again.
     setNotifRoutingPref(db, "u_1", "packets", true);
     expect(createNotification(db, { userId: "u_1", kind: "packet", text: "t" })).not.toBeNull();
-    expect(listNotifications(db, "u_1").map((n) => n.kind)).toEqual([
-      "packet",
-      "approval",
-    ]);
+    // Membership, not order: the two rows land within the same millisecond,
+    // so their newest-first order is a coin flip under load (full-suite flake).
+    expect(
+      listNotifications(db, "u_1")
+        .map((n) => n.kind)
+        .sort(),
+    ).toEqual(["approval", "packet"]);
     // The toggle is validated, not free-form — an unknown category is refused
     // rather than silently stored as a category nothing will ever consult.
     expect(() => setNotifRoutingPref(db, "u_1", "not-a-category", false)).toThrow();
