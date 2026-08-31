@@ -139,8 +139,9 @@ function EvidenceLabel({
   attachments?: ReadonlySet<string>;
   base?: string;
 }) {
-  // A cited image opens the in-app lightbox on a plain click (owner request
-  // 2026-08-21); modified clicks and non-image files keep the raw-file tab.
+  // A cited file opens the in-app card on a plain click (owner request
+  // 2026-08-21, widened by the ruling-105 addendum to every kind); modified
+  // clicks keep the raw-file tab.
   const lightbox = useAttachmentLightbox();
   if (!attachments || attachments.size === 0 || !base) return <span>{label}</span>;
   const parts = label.split(/(\s+)/);
@@ -160,8 +161,8 @@ function EvidenceLabel({
               target="_blank"
               rel="noreferrer"
               // Images open the lightbox; text files (ruling 105) the read-only
-              // viewer. The factory only intercepts kinds the popup can show,
-              // so any other cited file keeps the raw-file tab.
+              // viewer; any other cited file the no-preview card — every kind
+              // carries the Download button (ruling 105 addendum).
               onClick={lightbox({ name: clean, url })}
             >
               {clean}
@@ -332,8 +333,9 @@ export function TimelineItem({
               </AttachmentThumb>
             ))}
             {ev.attachments.filter((name) => !IMAGE_RE.test(name)).map((name) => (
-              // Ruling 105: a text-typed chip opens the in-app read-only
-              // viewer; the factory leaves any other kind a plain link.
+              // Ruling 105 (+ addendum): a text-typed chip opens the in-app
+              // read-only viewer; any other kind the no-preview card with
+              // its Download button.
               <a
                 key={name}
                 className="tl-attach-chip"
