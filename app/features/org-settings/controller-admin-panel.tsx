@@ -252,6 +252,10 @@ export function ControllerAdminPanel({
         <textarea
           id={`${uid}-instructions`}
           className="ta-long"
+          // The doctrine is the tab's main body and this is a page, not a
+          // modal — keep the old panel's editing area (ta-long only floors
+          // the height).
+          rows={12}
           value={definition}
           onChange={(e) => setDefinition(e.target.value)}
         />
