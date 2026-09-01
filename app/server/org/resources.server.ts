@@ -1357,7 +1357,12 @@ export function isReservedMcpName(name: string): boolean {
     name === "viberr-browser" ||
     // Ruling 99: the controller's in-process toolkit.
     name === "viberr_controller" ||
-    name === "viberr-controller"
+    name === "viberr-controller" ||
+    // Ruling 107: the controller's built-in diagnostics server, mounted on
+    // every controller run. An org row under this name would shadow the mount
+    // key and silently replace the instance's own diagnostics.
+    name === "viberr_ops" ||
+    name === "viberr-ops"
   );
 }
 
