@@ -71,10 +71,12 @@ export const CONTROLLER_SECTION_LABEL = {
   instructions: "instructions",
 } as const;
 
-/** The house flag parse (`forceDataRootTakeover`'s): 1/true/yes unlocks. */
+/** The unlock value for a section, read like a switch: `enabled` unlocks it,
+ *  and every other value — `disabled`, unset, or a typo — keeps it locked, so
+ *  an unexpected value fails safe (closed) rather than opening the section. */
+export const CONTROLLER_UNLOCK_VALUE = "enabled";
 function unlockFlag(raw: string | undefined): boolean {
-  const value = raw?.trim().toLowerCase();
-  return value === "1" || value === "true" || value === "yes";
+  return raw?.trim().toLowerCase() === CONTROLLER_UNLOCK_VALUE;
 }
 
 /** Resolve the live lock state from the deployment environment. Absent flag =
@@ -223,7 +225,7 @@ export function saveControllerConfig(
   };
   const lockedChange = (section: keyof ControllerSectionLocks): void => {
     throw AppError.forbidden(
-      `The controller's ${CONTROLLER_SECTION_LABEL[section]} are locked on this deployment. Set ${CONTROLLER_UNLOCK_ENV[section]}=1 in the app environment and restart to edit them.`,
+      `The controller's ${CONTROLLER_SECTION_LABEL[section]} are locked on this deployment. Set ${CONTROLLER_UNLOCK_ENV[section]}=${CONTROLLER_UNLOCK_VALUE} in the app environment and restart to edit them.`,
     );
   };
   // A locked section writes the STORED list verbatim (order and duplicates

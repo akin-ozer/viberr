@@ -74,6 +74,10 @@ export const CONTROLLER_UNLOCK_ENV_VIEW = {
   instructions: "VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS",
 } as const;
 
+/** The value that unlocks a section, mirrored for the note (pinned to the
+ *  server's `CONTROLLER_UNLOCK_VALUE` by the same drift test). */
+export const CONTROLLER_UNLOCK_VALUE_VIEW = "enabled";
+
 /** Section names for the lock note — mirrors the server's
  *  CONTROLLER_SECTION_LABEL (pinned together by test). */
 const SECTION_LABEL = {
@@ -324,7 +328,12 @@ export function ControllerAdminPanel({
             . Model and effort stay editable. To unlock a section, set its
             variable in the app environment and restart:{" "}
             {lockedSections
-              .map(([section]) => CONTROLLER_UNLOCK_ENV_VIEW[section] + "=1")
+              .map(
+                ([section]) =>
+                  CONTROLLER_UNLOCK_ENV_VIEW[section] +
+                  "=" +
+                  CONTROLLER_UNLOCK_VALUE_VIEW,
+              )
               .join(" · ")}
             . This locks the grant lists and the doctrine file edited on this
             tab; a granted skill or knowledge base can still be edited from

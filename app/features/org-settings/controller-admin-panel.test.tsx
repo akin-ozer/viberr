@@ -8,6 +8,7 @@ import { ToastProvider } from "~/ui/toast";
 import {
   ControllerAdminPanel,
   CONTROLLER_UNLOCK_ENV_VIEW,
+  CONTROLLER_UNLOCK_VALUE_VIEW,
   type ControllerConfigView,
   type ControllerSectionLocks,
 } from "./controller-admin-panel";
@@ -343,7 +344,7 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
       expect(note?.textContent).toContain(label);
     }
     for (const envVar of Object.values(CONTROLLER_UNLOCK_ENV_VIEW)) {
-      expect(note?.textContent).toContain(`${envVar}=1`);
+      expect(note?.textContent).toContain(`${envVar}=enabled`);
     }
     // Model stays editable: once the catalog answers, the select is a real
     // control (it is disabled only during the load, lock or no lock).
@@ -393,7 +394,7 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     const note = container.querySelector(".pol-note");
     expect(note?.textContent).toContain("instructions");
     expect(note?.textContent).toContain(
-      "VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS=1",
+      "VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS=enabled",
     );
     expect(note?.textContent).not.toContain("skill grants");
   });
@@ -421,6 +422,9 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
       "~/server/controller/controller-profile.server"
     );
     expect(CONTROLLER_UNLOCK_ENV_VIEW).toEqual(server.CONTROLLER_UNLOCK_ENV);
+    // The note prints "<VAR>=<value>"; the server refusal names the same
+    // value, so the two must agree on what unlocks a section.
+    expect(CONTROLLER_UNLOCK_VALUE_VIEW).toBe(server.CONTROLLER_UNLOCK_VALUE);
     // The note's section names come from the panel's own map; the refusal
     // sentences use the server's. One vocabulary.
     expect(server.CONTROLLER_SECTION_LABEL).toEqual({
