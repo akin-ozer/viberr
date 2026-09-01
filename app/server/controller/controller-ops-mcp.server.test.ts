@@ -219,6 +219,19 @@ const HEALTH_REPLY = z.object({
     }),
   ),
   runs: z.object({ cap: z.number(), live: z.number(), queued: z.number() }),
+  // C05-A (pass 32): the pinned browser executable's PATH, org admins only.
+  browserDetail: z.string().optional(),
+  // F32-9 (pass 32): what each backend last told us — the reading the
+  // Insights page shows, so the controller cannot answer "no quota exhaustion
+  // flagged" from a poorer source than the admin's own page.
+  quota: z.array(
+    z.object({
+      backend: z.string(),
+      reading: z.unknown().nullable(),
+      credentialRefused: z.object({ runId: z.string() }).nullable(),
+      exhausted: z.object({ runId: z.string() }).nullable(),
+    }),
+  ),
 });
 
 const RUN_LOG_REPLY = z.strictObject({
@@ -325,6 +338,97 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     // The concurrency gate, live: a queued run is the usual answer to "why has
     // nothing started".
     expect(body.runs.cap).toBe(runConcurrencySnapshot(app.db).cap);
+    // F32-9: the quota/credential store rides along, one row per backend.
+    expect(body.quota.map((q) => q.backend)).toEqual(["claude", "codex"]);
+  });
+
+  it("leaves one `controller.ops.read` audit row per successful read, bound to the asker (owner ruling, pass 32)", async () => {
+    const count = () =>
+      (
+        // SAFETY: `SELECT count(*) AS c` is an aggregate with no GROUP BY —
+        // sqlite answers it with exactly one row carrying the integer `c`.
+        app.db
+          .prepare(
+            `SELECT count(*) AS c FROM audit_events WHERE action = 'controller.ops.read' AND actor_user_id = ?`,
+          )
+          .get(ids.nonMember) as { c: number }
+      ).c;
+    const before = count();
+    await call(ids.nonMember, "instance_health");
+    expect(count()).toBe(before + 1);
+    // SAFETY: the count above just proved a row exists for this actor, and the
+    // four selected columns are NOT NULL text in `audit_events`.
+    const row = app.db
+      .prepare(
+        `SELECT actor_label, subject_kind, subject_id, details_json FROM audit_events WHERE action = 'controller.ops.read' AND actor_user_id = ? ORDER BY rowid DESC LIMIT 1`,
+      )
+      .get(ids.nonMember) as {
+      actor_label: string;
+      subject_kind: string;
+      subject_id: string;
+      details_json: string;
+    };
+    // The instrument is disclosed on the label; the person is the actor id.
+    expect(row.actor_label).toContain("via controller");
+    expect(row.subject_kind).toBe("controller");
+    expect(JSON.parse(row.details_json)).toEqual({ tool: "instance_health" });
+    // A DENIED read writes the denial row, never a read row.
+    await call(ids.nonMember, "read_store_doc", { kind: "kb", id: "nope", path: ["x.md"] });
+    expect(count()).toBe(before + 1);
+  });
+
+  it("names the pinned browser executable's path to org admins only (C05-A)", async () => {
+    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
+    process.env.VIBERR_BROWSER_EXECUTABLE = "/nonexistent/chromium-not-installed";
+    resetEnvCacheForTests();
+    try {
+      const member = parsed(HEALTH_REPLY, await call(ids.nonMember, "instance_health"));
+      expect(JSON.stringify(member)).not.toContain("/nonexistent");
+      expect(member.browserDetail).toBeUndefined();
+      const admin = parsed(HEALTH_REPLY, await call(ids.orgAdmin, "instance_health"));
+      expect(admin.browserDetail).toContain("/nonexistent/chromium-not-installed");
+    } finally {
+      delete process.env.VIBERR_BROWSER_EXECUTABLE;
+      resetEnvCacheForTests();
+    }
+  });
+
+  it("carries a refused credential and a spent quota window, and names both as degraded (F32-4/F32-9)", async () => {
+    const {
+      clearBackendCredentialRefusal,
+      clearBackendQuotaExhaustion,
+      recordBackendCredentialRefusal,
+      recordBackendQuotaExhaustion,
+    } = await import("~/server/runtimes/backend-quota.server");
+    recordBackendCredentialRefusal(app.db, "codex", {
+      providerText: "The provider reported: refresh token was already used",
+      runId: "run_auth_probe",
+      observedAt: new Date().toISOString(),
+    });
+    recordBackendQuotaExhaustion(app.db, "claude", {
+      resetsAt: null,
+      resetsAtPrecision: null,
+      providerText: "The provider reported: You've hit your usage limit",
+      runId: "run_quota_probe",
+      observedAt: new Date().toISOString(),
+    });
+    try {
+      const body = parsed(
+        HEALTH_REPLY,
+        await call(ids.nonMember, "instance_health"),
+      );
+      expect(body.degraded).toEqual(
+        expect.arrayContaining(["credential:codex", "quota:claude"]),
+      );
+      expect(body.status).toBe("degraded");
+      const codex = body.quota.find((q) => q.backend === "codex")!;
+      expect(codex.credentialRefused?.runId).toBe("run_auth_probe");
+      const claude = body.quota.find((q) => q.backend === "claude")!;
+      expect(claude.exhausted?.runId).toBe("run_quota_probe");
+    } finally {
+      clearBackendCredentialRefusal(app.db, "codex");
+      clearBackendQuotaExhaustion(app.db, "claude");
+    }
   });
 
   it("keeps the credential EXPLANATION for org admins: it names deployment paths", async () => {
@@ -507,11 +611,29 @@ describe("read_run_log: every page is bounded, and says where it sits", () => {
     expect(body.lines).toEqual([]);
     expect(body.page.firstSeq).toBeNull();
     expect(body.page.lastSeq).toBeNull();
-    expect(body.page.next.older).toBeNull();
+    // C03-OC2 (pass 32): the flags describe the RUN, not the empty page. A
+    // forward cursor past the end has every logged line BEHIND it, so "older
+    // exists" is true and the handed-back cursor walks straight into the tail.
+    expect(body.page.olderExist).toBe(true);
+    expect(body.page.newerExist).toBe(false);
+    expect(body.page.next.older).toEqual({ before: LONG_LINES });
     expect(body.page.next.newer).toBeNull();
+    const recovered = parsed(RUN_LOG_REPLY, await page(body.page.next.older!));
+    expect(recovered.page.lastSeq).toBe(LONG_LINES - 1);
     // …and the run's real size is still on the reply, so an empty page cannot
     // be read as "this run logged nothing".
     expect(body.run.logLines).toBe(LONG_LINES);
+  });
+
+  it("a backward cursor at or below the first line says newer lines exist and hands back the way up", async () => {
+    const body = parsed(RUN_LOG_REPLY, await page({ before: 0 }));
+    expect(body.lines).toEqual([]);
+    expect(body.page.olderExist).toBe(false);
+    expect(body.page.newerExist).toBe(true);
+    expect(body.page.next.older).toBeNull();
+    expect(body.page.next.newer).toEqual({ since: -1 });
+    const recovered = parsed(RUN_LOG_REPLY, await page(body.page.next.newer!));
+    expect(recovered.page.firstSeq).toBe(0);
   });
 });
 

@@ -257,7 +257,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
         <h2>Backend quota</h2>
       </div>
       <ul className="bar-list">
-        {quota.map(({ backend, reading, exhausted }) => {
+        {quota.map(({ backend, reading, exhausted, credentialRefused }) => {
           const pct = reading ? pctOf(reading.utilization) : null;
           // V4 (pass 31): an exhaustion record is a claim about ONE moment. A
           // utilization reading this backend reported AFTER that moment is
@@ -268,6 +268,38 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
             exhausted && !observedAfter(reading?.observedAt, exhausted.observedAt)
               ? exhausted
               : null;
+          // F32-4 (pass 32): a REJECTED CREDENTIAL outranks every other state —
+          // no run on this backend can start until someone fixes it, whatever
+          // the utilization window says. It is its own record (the failed run
+          // + the provider's sentence) and is cleared only by a run that
+          // completes on the backend; the row says exactly that.
+          if (credentialRefused) {
+            return (
+              <li key={backend} className="bar-row">
+                <span className="bar-label" title={backend}>
+                  {backend}
+                </span>
+                <span className="bar-track">
+                  <span className="bar-fill" style={{ width: "100%" }} />
+                </span>
+                <span className="bar-val">
+                  credential refused
+                  <span
+                    className="bar-cost"
+                    title={
+                      hydrated
+                        ? `run ${credentialRefused.runId} was refused ${new Date(
+                            credentialRefused.observedAt,
+                          ).toLocaleString()}: ${credentialRefused.providerText}`
+                        : undefined
+                    }
+                  >
+                    from a refused run · clears when a run on this backend completes
+                  </span>
+                </span>
+              </li>
+            );
+          }
           return (
             <li key={backend} className="bar-row">
               <span className="bar-label" title={backend}>

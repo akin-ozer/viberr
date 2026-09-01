@@ -423,6 +423,54 @@ describe("quota exhaustion from a refused run (D5)", () => {
     expect(parseQuotaResetAt("try again at soon 18, 2026")).toBeNull();
   });
 
+  /**
+   * F32-4 (pass 32). Live: the seeded Codex refresh token had already been
+   * consumed elsewhere, the first Codex run died at turn 0 with "Your access
+   * token could not be refreshed", and both `/resources/health` (`backends`)
+   * and the controller's `instance_health` kept saying "codex · real · verified
+   * via file-based credential" — presence is not validity. The rejected
+   * credential is recorded off the classifiers' `·auth` class exactly the way
+   * quota exhaustion rides `·quota`, and only a completed run retires it.
+   */
+  it("records a rejected credential off a classified ·auth line and retires it on a completed run", () => {
+    const runId = `run_auth_${randomBytes(6).toString("hex")}`;
+    const sink = sinkFor(runId);
+    sink.markRunning();
+    try {
+      expect(quotaFor("claude").credentialRefused).toBeNull();
+      sink.line(
+        emitted(
+          {
+            t: "10:00:00",
+            ev: "err",
+            tag: "run·error·auth",
+            text:
+              "Codex authentication failed. Review the configured subscription credential." +
+              "\n\nThe provider reported: Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.",
+          },
+          "{}",
+        ),
+      );
+      const refused = quotaFor("claude").credentialRefused;
+      expect(refused).toBeTruthy();
+      expect(refused!.runId).toBe(runId);
+      expect(refused!.providerText).toContain("refresh token was already used");
+      // A transient failure of any other class records nothing here.
+      sink.line(
+        emitted(
+          { t: "10:00:01", ev: "err", tag: "run·error·unknown", text: "boom" },
+          "{}",
+        ),
+      );
+      expect(quotaFor("claude").credentialRefused!.runId).toBe(runId);
+      // The re-probe is a real run that COMPLETES on the backend.
+      sink.finalize({ outcome: "finished", effectiveBackend: "claude" });
+      expect(quotaFor("claude").credentialRefused).toBeNull();
+    } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+
   it("records the exhaustion off a classified ·quota line, with its evidence", () => {
     const runId = `run_quota_${randomBytes(6).toString("hex")}`;
     const sink = sinkFor(runId);

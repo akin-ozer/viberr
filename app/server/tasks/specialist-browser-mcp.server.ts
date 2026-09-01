@@ -89,8 +89,12 @@ function playwrightMcpCliPath(): string | null {
 
 export interface BrowserRuntimeStatus {
   available: boolean;
-  /** Present only when unavailable — the human-readable reason. */
+  /** Present only when unavailable — the human-readable reason, free of
+   *  deployment paths (it is served unauthenticated). */
   reason?: string;
+  /** Present only when unavailable AND the cause is configuration — the
+   *  sentence that names the configured value. Org-admin surfaces only. */
+  detail?: string;
 }
 
 /**
@@ -116,7 +120,15 @@ export function browserRuntimeStatus(): BrowserRuntimeStatus {
   if (executable && !existsSync(executable)) {
     return {
       available: false,
-      reason: `the pinned browser executable (VIBERR_BROWSER_EXECUTABLE=${executable}) is not on disk`,
+      // C05-A (pass 32): the REASON names the variable, never its value. This
+      // sentence travels on the unauthenticated health probe and on the
+      // controller's `instance_health` reading for any signed-in person; the
+      // pinned path is deployment configuration, so it rides on `detail`,
+      // which only the org-admin surfaces relay (ruling 107's own standard for
+      // the credential explanation).
+      reason:
+        "the pinned browser executable (VIBERR_BROWSER_EXECUTABLE) is not on disk",
+      detail: `VIBERR_BROWSER_EXECUTABLE=${executable} is not on disk`,
     };
   }
   return { available: true };

@@ -73,9 +73,10 @@ const FULL: InsightsSummary = {
         isUsingOverage: false,
         observedAt: "2026-08-23T11:59:00.000Z",
       },
+      credentialRefused: null,
       exhausted: null,
     },
-    { backend: "codex", reading: null, exhausted: null },
+    { backend: "codex", reading: null, credentialRefused: null, exhausted: null },
   ],
   windowDays: 30,
   generatedAt: "2026-08-23T12:00:00.000Z",
@@ -160,9 +161,10 @@ describe("InsightsPage", () => {
             isUsingOverage: false,
             observedAt: "2026-08-27T12:59:20.000Z",
           },
+          credentialRefused: null,
           exhausted: null,
         },
-        { backend: "codex", reading: null, exhausted: null },
+        { backend: "codex", reading: null, credentialRefused: null, exhausted: null },
       ],
     });
     expect(getByText(/five hour · utilization not reported/)).toBeTruthy();
@@ -192,8 +194,8 @@ describe("InsightsPage", () => {
     const { getByText, queryByText } = renderPage({
       ...FULL,
       backendQuota: [
-        { backend: "claude", reading: null, exhausted: null },
-        { backend: "codex", reading: null, exhausted: REFUSED },
+        { backend: "claude", reading: null, credentialRefused: null, exhausted: null },
+        { backend: "codex", reading: null, credentialRefused: null, exhausted: REFUSED },
       ],
     });
     expect(getByText("usage limit reached")).toBeTruthy();
@@ -203,6 +205,44 @@ describe("InsightsPage", () => {
     // …and the contradiction this replaced is gone from the exhausted row
     // ("no reading yet" now belongs only to the genuinely silent claude row).
     expect(queryByText("usage limit reached · no reading yet")).toBeNull();
+  });
+
+  /**
+   * F32-4 (pass 32): a REJECTED credential is a different fact from a spent
+   * window — the backend cannot run anything until a person fixes it — and it
+   * outranks a utilization reading the same backend reported earlier. The row
+   * names its provenance (a refused run) and what retires it (a completed run).
+   */
+  it("says the credential was refused, above any earlier reading, and names what clears it", () => {
+    const { getByText, queryByText } = renderPage({
+      ...FULL,
+      backendQuota: [
+        { backend: "claude", reading: null, credentialRefused: null, exhausted: null },
+        {
+          backend: "codex",
+          reading: {
+            status: "allowed",
+            rateLimitType: "five_hour",
+            utilization: 0.2,
+            resetsAt: null,
+            isUsingOverage: false,
+            observedAt: "2026-08-31T08:00:00.000Z",
+          },
+          credentialRefused: {
+            providerText:
+              "Codex authentication failed. Review the configured subscription credential." +
+              "\n\nThe provider reported: Your access token could not be refreshed because your refresh token was already used.",
+            runId: "run_auth",
+            observedAt: "2026-08-31T09:00:00.000Z",
+          },
+          exhausted: null,
+        },
+      ],
+    });
+    expect(getByText("credential refused")).toBeTruthy();
+    expect(getByText(/clears when a run on this backend completes/)).toBeTruthy();
+    // The stale 20% reading does not get to reassure anyone.
+    expect(queryByText(/20% of five hour/)).toBeNull();
   });
 
   /**
@@ -217,8 +257,8 @@ describe("InsightsPage", () => {
     const prose = renderPage({
       ...FULL,
       backendQuota: [
-        { backend: "claude", reading: null, exhausted: null },
-        { backend: "codex", reading: null, exhausted: REFUSED },
+        { backend: "claude", reading: null, credentialRefused: null, exhausted: null },
+        { backend: "codex", reading: null, credentialRefused: null, exhausted: REFUSED },
       ],
     });
     // CANARY: drop `refusal.resetsAtPrecision === "exact"` from the hydrated
@@ -229,10 +269,11 @@ describe("InsightsPage", () => {
     const exact = renderPage({
       ...FULL,
       backendQuota: [
-        { backend: "claude", reading: null, exhausted: null },
+        { backend: "claude", reading: null, credentialRefused: null, exhausted: null },
         {
           backend: "codex",
           reading: null,
+          credentialRefused: null,
           exhausted: { ...REFUSED, resetsAtPrecision: "exact" },
         },
       ],
@@ -254,7 +295,7 @@ describe("InsightsPage", () => {
     const { getByText, queryByText, container } = renderPage({
       ...FULL,
       backendQuota: [
-        { backend: "claude", reading: null, exhausted: null },
+        { backend: "claude", reading: null, credentialRefused: null, exhausted: null },
         {
           backend: "codex",
           reading: {
@@ -266,6 +307,7 @@ describe("InsightsPage", () => {
             // An hour after the refusal: the window is demonstrably open.
             observedAt: "2026-08-31T10:00:00.000Z",
           },
+          credentialRefused: null,
           exhausted: REFUSED,
         },
       ],
@@ -284,7 +326,7 @@ describe("InsightsPage", () => {
     const { getByText, queryByText } = renderPage({
       ...FULL,
       backendQuota: [
-        { backend: "claude", reading: null, exhausted: null },
+        { backend: "claude", reading: null, credentialRefused: null, exhausted: null },
         {
           backend: "codex",
           reading: {
@@ -296,6 +338,7 @@ describe("InsightsPage", () => {
             // BEFORE the refusal — stale, and the refusal is what happened next.
             observedAt: "2026-08-31T08:00:00.000Z",
           },
+          credentialRefused: null,
           exhausted: REFUSED,
         },
       ],
