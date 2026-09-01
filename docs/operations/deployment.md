@@ -67,10 +67,12 @@ with TLS, not to weaken the cookie.
 
 Two proxy details worth getting right:
 
-- Forward `X-Forwarded-For`. It is the container's only view of the client IP. The
-  sign-in throttle keys on `email|ip` and falls back to a literal `local` without it, so
-  the limiter still works per account but stops distinguishing attackers from the
-  legitimate owner of that account.
+- Forward `X-Forwarded-For` **and set `VIBERR_TRUST_PROXY=1`** (the number of proxy hops
+  to trust). The header is ignored unless that variable is set, so forwarding it alone
+  changes nothing. It is the container's only view of the client IP: the sign-in throttle
+  keys on `email|ip` and falls back to a literal `local` without it, so the limiter still
+  works per account but stops distinguishing attackers from the legitimate owner of that
+  account. *(Corrected 2026-09-01 — `app/server/auth/rate-limit.server.ts`.)*
 - Forward `Accept` and `Cache-Control` untouched and disable response buffering on
   `/resources/events`. That is the SSE stream; a buffering proxy stalls live updates.
 
@@ -79,9 +81,12 @@ HSTS, certificate renewal and redirect-to-https all belong to the proxy layer.
 ## Agent backends in the container
 
 The image ships everything needed to run real agents: the Claude/Codex SDKs' native
-linux binaries (installed by `npm ci` in the linux build stage) plus `git` and a CA
-bundle in the runtime stage (a real run clones the task's repo and the coding agent
-shells out to git). The container is stateless with no logged-in CLI, so credentials
+linux binaries (installed by `npm ci` in the linux build stage) plus, in the runtime
+stage, `git` and a CA bundle (a real run clones the task's repo and the coding agent
+shells out to git), Debian `chromium` with `fonts-liberation` for the governed browser
+(`VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`), and `uv`/`uvx` for Python stdio MCP
+servers (their caches live under `runtimes/uv-cache` and `runtimes/uv-python` on the
+volume). *(Inventory corrected 2026-09-01.)* The container is stateless with no logged-in CLI, so credentials
 are injected. **You can use a subscription (no per-token API key) for either backend:**
 
 **Claude — Pro/Max subscription (recommended, one env var):**
@@ -147,7 +152,7 @@ invalid key surfaces as a failed run in the agent log, not here.
 ```bash
 cp .env.example .env        # fill in the two required secrets
 docker compose up -d --build
-docker compose logs -f app  # watch the boot integrity log (dirs, migrations, counts)
+docker compose logs -f app  # boot integrity log: dirs, migrations, counts, users, build, disk
 ```
 
 - Migrations apply automatically at boot; no manual migrate step is needed.
@@ -158,11 +163,16 @@ docker compose logs -f app  # watch the boot integrity log (dirs, migrations, co
   `npm run seed` seeds the product baseline — the built-in agent
   catalog, knowledge bases, skills — and nothing else: no demo/mock board data. The board
   always starts as a clean sheet.
-- Health: `GET /resources/health` →
-  `{ ok, projections: { projects, tasks }, watcher, kbWatcher, lock, backends }`.
-  Compose has a healthcheck hitting it; container platforms should use it as the readiness
-  probe. *(Field list corrected 2026-08-06, pass 19 — `kbWatcher`, `lock` and `backends`
-  ship and were missing here, though `lock` and `backends` are both documented below.)*
+- Health: `GET /resources/health` → `{ ok, status, degraded[], projections: { projects,
+  tasks }, watcher, kbWatcher, lock, backends, browser, disk, maintenance, build }` (key
+  order is part of the contract). The bare URL is a **liveness** probe: `200` even when
+  `status: "degraded"`. For a **readiness** probe call `?probe=readiness`: it returns
+  `503` with the same body while anything is degraded (a dead watcher, no lock, low disk).
+  `503 { ok: false, status: "down" }` means SQLite is unreachable. Compose's own
+  healthcheck is the liveness form. *(Corrected 2026-09-01 — the body grew `status`,
+  `degraded`, `browser`, `disk`, `maintenance` and `build`, and the readiness form was
+  undocumented; earlier correction 2026-08-06, pass 19.)* Field reference:
+  [`runbook.md`](runbook.md#health--liveness).
 
 ## Persistence, backup & restore
 
@@ -170,16 +180,24 @@ Everything stateful lives under `./docker-data` in the Compose setup, mounted
 at `/data`. Both SDKs keep their resumable state under `runtimes/`:
 
 ```
-projects/   canonical project.md + task.md (the source of truth — human/agent editable)
-agents/     agents/profiles/*.md — the seeded and org-edited agent profile templates
-kb/ skills/ knowledge-base and skill files
-runtimes/   raw run logs plus Claude/Codex session homes; Codex may contain auth.json
-state/      projection.sqlite (users, sessions, projections, audit, PATs, notifications)
+projects/       canonical project.md, task.md, goals/*.md (the source of truth — editable);
+                per task: workspace/ (git clones, a cache) and attachments/ (evidence files);
+                per project: .repo-mirror/ (bare mirror, a cache)
+agents/         agents/profiles/*.md templates + agents/definitions/ doctrine files
+kb/ skills/     knowledge-base and skill files
+runtimes/       raw NDJSON run logs per backend, Claude/Codex session homes (Codex may hold
+                auth.json), uv-cache/ and uv-python/ in the container
+audit-exports/  audit-events-<date>.jsonl written before each 90-day purge
+state/          projection.sqlite (users, sessions, projections, audit, PATs, notifications),
+                writer.lock, shipped-assets.json
 ```
 
-That is the whole set — created at boot from `DATA_ROOT_SUBDIRS` in
-`app/server/files/file-store-root.server.ts`. There is no `auth/`, `cache/` or `logs/`
-directory; application logs are structured JSON on stdout.
+Boot creates the nine `DATA_ROOT_SUBDIRS` (`projects`, `agents`, `agents/profiles`,
+`runtimes`, `runtimes/claude-home`, `runtimes/codex-home`, `kb`, `skills`, `state`); the rest
+appear when first written. There is no `auth/`, `cache/` or `logs/` directory; application
+logs are structured JSON on stdout. Full layout with retention:
+[`../architecture/data-model.md`](../architecture/data-model.md#2-data-root-layout).
+*(Corrected 2026-09-01.)*
 
 - **Backup** = `npm run backup` (add `--out <dir>`). It writes a timestamped artefact
   containing a genuine point-in-time `projection.sqlite` — taken with `VACUUM INTO` from a
@@ -204,8 +222,6 @@ directory; application logs are structured JSON on stdout.
   than deleting it. To recover a single hand-broken canonical file without touching the
   database: `npm run restore -- --from <artefact> --file projects/<slug>/tasks/<KEY>/task.md`
   — the broken bytes are kept beside it as `task.md.broken-<ts>`.
-
-- **Restore** = drop the directory back — sidecars included — and start the container.
 
 **`state/projection.sqlite` is primary storage, not a cache — back it up.** The
 projection tables inside it are derived and rebuild from `projects/`, but the same file is
@@ -254,7 +270,11 @@ is a safety net for the data, not a way to undo the re-baseline.
 New app version → rebuild the image and `docker compose up -d`. Migrations apply at boot;
 the data-root volume carries state across deploys. Roll back by redeploying the previous
 image against the same volume (migrations are additive and forward-only — take a data-root
-backup before a major upgrade).
+backup before a major upgrade). Verify what is running from `/resources/health` → `build`:
+`version` comes from `package.json`; `revision` is `null` in the image because the
+Dockerfile declares no build ARG and `.git` is not copied. Set `VIBERR_BUILD_SHA` (and
+optionally `VIBERR_BUILD_VERSION`, `VIBERR_BUILD_TIME`) in the container environment if
+you want each deploy identifiable from the probe. *(Noted 2026-09-01.)*
 
 ## Scaling note
 
@@ -268,7 +288,8 @@ by projection query volume and concurrent agent runs, both modest for small team
 SQLite WAL and silently loses transactions — `PRAGMA integrity_check` does NOT detect the
 loss. Boot takes an exclusive `state/writer.lock`; a second process refuses to boot naming
 the holder. As of F18-5 the holder also re-verifies ownership on a 20 s timer and **fails
-closed** (loud `logger.error` + `process.exit(1)`) the moment its lock file is deleted or
+closed** (one synchronous stderr `FATAL` line via `writeFatalSync`, then `process.exit(1)`
+— the async logger line was the thing that got truncated) the moment its lock file is deleted or
 replaced out from under it — because the fd stays valid on the now-unlinked inode while a
 second boot can acquire the freed path. `/resources/health` reports the current holder
 (`lock: { pid, hostname, startedAt }`) so you can confirm exactly one writer.
@@ -283,3 +304,12 @@ Two ways this bites in practice, both to avoid:
   `localhost` → `::1` first). Two live servers can look like one app while writing the same
   bind-mounted `docker-data`. Run exactly one; the writer lock + health holder make it
   visible which.
+
+How the lock is judged: same host and a dead pid → stale, reclaimed automatically with a
+WARN; same host and a live pid → refused; a **different hostname is never probed** and is
+always refused (which is why `compose.yml` pins `hostname: viberr`, so a recreated container
+matches its predecessor). If the holder really is dead and the lock was not reclaimed, boot
+once with `VIBERR_FORCE_DATA_ROOT_LOCK=1`. The writing CLIs (`seed`, `seed:demo`, `rescan`,
+`restore`, `keys -- reseal`) take the same lock and refuse against a running app;
+`backup`, `store:check` and `keys -- status` are readers and need none. *(Added
+2026-09-01; see [`runbook.md`](runbook.md#the-single-writer-lock-and-cli-refusals).)*

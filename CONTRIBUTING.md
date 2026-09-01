@@ -32,7 +32,8 @@ want the mock dataset the route-level and e2e specs are written against, run
 `npm run seed:demo` instead.
 
 See the [README](README.md) for the full quickstart, the bootstrap-admin credentials,
-Docker setup, and the architecture overview.
+Docker setup, and the architecture overview, and [`docs/README.md`](docs/README.md) for the
+code-verified documentation set (agents: read [`AGENTS.md`](AGENTS.md) first).
 
 ## Branch / PR workflow
 
@@ -64,14 +65,15 @@ there is no suppression list, so anything it reports is new (ruling 86 / R21-3).
 
 Don't skip `npm run e2e` because the other four are green. It is the only gate that
 boots the shipped production image end to end (Docker required): the pass-13 install
-regression passed typecheck, 1663 unit tests and the build, and was caught here.
+regression passed typecheck, the whole unit suite and the build, and was caught here.
 
-See [docs/testing-quickstart.md](docs/testing-quickstart.md) for the short test guide.
+See [docs/development/testing.md](docs/development/testing.md) for what each gate runs,
+the harnesses under `test-support/`, and the two sanctioned ways to build test state.
 
 ## Code review & acceptance
 
 - Every change lands through a pull request — no direct pushes to `main`.
-- CI must pass (typecheck, tests, build, e2e) before a PR is considered mergeable.
+- CI must pass (lint, typecheck, tests, build, e2e) before a PR is considered mergeable.
 - Keep route modules thin, put domain behavior in feature/server modules, and use the
   existing file writers so canonical markdown and SQLite projections stay in sync.
 - Preserve authorization, audit, and typed error paths when changing governed actions.
@@ -89,6 +91,9 @@ See [docs/testing-quickstart.md](docs/testing-quickstart.md) for the short test 
 
 ## Where to look next
 
+- [docs/README.md](docs/README.md) — the code-verified documentation set and reading order.
+- [docs/development/contributing.md](docs/development/contributing.md) — where code goes,
+  the invariants to preserve, and the definition of done.
 - [README.md](README.md) — product overview, stack, quickstart, project layout.
 - [docs/architecture/file-formats.md](docs/architecture/file-formats.md) — canonical
   task/project file formats.
