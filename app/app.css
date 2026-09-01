@@ -4689,7 +4689,6 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   /* Ruling 99: the controller's side column joins the 2-up collapse. */
   .ctl-layout { grid-template-columns: minmax(0, 1fr); }
   .ctl-transcript { max-height: none; }
-  .ctladm-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ============================================================
@@ -5234,29 +5233,11 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .ctl-link-note { flex-basis: 100%; }
 .ctl-goal-acts { display: flex; gap: .5rem; }
 
-/* The org-settings Controller tab (admin config of the controller itself). */
+/* The org-settings Controller tab (admin config of the controller itself).
+   Ruling 106: the fields inside are the agent editor's own (.field/.flabel,
+   ModelEffortFields, .ctx-groups pick-chips), so only the panel frame and its
+   footer keep local rules. */
 .ctladm { display: flex; flex-direction: column; gap: .9rem; }
-.ctladm-warn { color: var(--coral-dark); background: var(--coral-light); border-radius: var(--radius-small); padding: .4rem .6rem; margin: 0; }
-.ctladm-field { display: flex; flex-direction: column; gap: .3rem; font-size: .86rem; font-weight: 600; }
-.ctladm-field input,
-.ctladm-field textarea {
-  font: inherit;
-  font-weight: 400;
-  font-size: .92rem;
-  color: var(--fg);
-  background: var(--surface);
-  border: 1px solid var(--border-control);
-  border-radius: var(--radius-button);
-  padding: .45rem .6rem;
-}
-.ctladm-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: .9rem;
-}
-.ctladm-grants h3 { margin: 0 0 .2rem; font-size: .92rem; }
-.ctladm-grants ul { list-style: none; margin: .3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; }
-.ctladm-grants label { display: inline-flex; align-items: center; gap: .45rem; font-size: .86rem; }
 .ctladm-foot { display: flex; align-items: center; justify-content: space-between; gap: .8rem; }
 
 /* The task hero's goal-chain chip: a pill that is also a link. */

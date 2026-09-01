@@ -22,6 +22,7 @@ import { UsersPanel } from "./users-panel";
 const CONTROLLER_CONFIG = {
   name: "Controller",
   model: "",
+  effort: "",
   skills: ["controller-guide"],
   kb: [],
   mcps: [],

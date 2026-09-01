@@ -67,8 +67,10 @@ const BACKENDS: { id: "codex" | "claude"; label: string }[] = [
   { id: "claude", label: "Claude" },
 ];
 
-/** Client mirror of the /resources/model-catalog payload shape. */
-interface CatalogModel {
+/** Client mirror of the /resources/model-catalog payload shape. Exported for
+ *  the controller settings panel, which picks its model/effort with the same
+ *  machinery (ruling 106). */
+export interface CatalogModel {
   value: string;
   displayName: string;
   description: string;
@@ -78,7 +80,7 @@ interface CatalogModel {
    *  for this account — the option is disabled and the reason explained. */
   unavailable?: { reason: string; markedAt: string };
 }
-interface ModelCatalog {
+export interface ModelCatalog {
   models: CatalogModel[];
   efforts: string[];
   defaultModel: string;
@@ -94,8 +96,99 @@ const EFFORT_LABEL = new Map<string, string>([
   ["max", "Maximum"],
 ]);
 
-function effortLabel(id: string): string {
+export function effortLabel(id: string): string {
   return EFFORT_LABEL.get(id) ?? id;
+}
+
+/**
+ * Model + effort catalog state for one backend, shared by this modal and the
+ * controller settings panel (ruling 106): the /resources/model-catalog fetch,
+ * the D5 failed-load detection with its retry, defaulting the picks once the
+ * catalog answers, and the selected-model derivations the pickers render.
+ *
+ * The caller owns `model`/`effort` state (each editor seeds them from its own
+ * stored config); this hook only writes them through the setters when the
+ * loaded catalog says the current value can't stand (empty, or a model id the
+ * catalog doesn't know — exactly what `resolveRunModel` would substitute at
+ * run time, so the picker shows what would actually run).
+ */
+export function useModelCatalog(
+  backend: "codex" | "claude" | "",
+  model: string,
+  setModel: (v: string) => void,
+  effort: string,
+  setEffort: (v: string) => void,
+): {
+  catalog: ModelCatalog | null;
+  catalogLoading: boolean;
+  catalogFailed: boolean;
+  loadCatalog: () => void;
+  selectedModel: CatalogModel | null;
+  showEffort: boolean;
+  effortOptions: string[];
+} {
+  // Fetched whenever a backend is selected (open in edit mode, or the backend
+  // radio changes in create mode). The endpoint returns the curated fallback
+  // even with no credential, so the pickers always populate.
+  const catalogFetcher = useFetcher<{ data: ModelCatalog }>();
+  // D5 (pass 23): so a fetch that SETTLED with no data reads as a failure, not
+  // as the pre-load window. Flipped true once a load has actually fired for the
+  // current backend; a backend switch resets it.
+  const catalogLoadFired = useRef(false);
+  const loadCatalog = () => {
+    if (!backend) return;
+    catalogLoadFired.current = true;
+    catalogFetcher.load(`/resources/model-catalog?backend=${backend}`);
+  };
+  useEffect(() => {
+    if (!backend) return;
+    catalogLoadFired.current = false;
+    loadCatalog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backend]);
+  const catalog = catalogFetcher.data?.data ?? null;
+  const catalogLoading = catalogFetcher.state === "loading";
+  // D5: a load fired and SETTLED (idle) with no catalog → the fetch failed. The
+  // endpoint returns a curated fallback even without a credential, so this is a
+  // real transport/500 failure. Without a signal, the pending state lasts
+  // forever over an empty picker with no way out. This offers the retry.
+  const catalogFailed =
+    Boolean(backend) &&
+    catalogLoadFired.current &&
+    catalogFetcher.state === "idle" &&
+    !catalog;
+
+  // Default the picks to the catalog defaults once it loads and no valid pick
+  // is set (create mode, or a backend switch that invalidated the prior model).
+  useEffect(() => {
+    if (!catalog) return;
+    const known = catalog.models.some((m) => m.value === model);
+    if (!model || !known) setModel(catalog.defaultModel);
+    if (!effort) setEffort(catalog.defaultEffort);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalog]);
+
+  // Effort options come from the selected model (when it constrains them),
+  // else the backend-wide list. Hidden entirely when the model has no effort.
+  const selectedModel = useMemo(
+    () => catalog?.models.find((m) => m.value === model) ?? null,
+    [catalog, model],
+  );
+  const showEffort = !catalog || !selectedModel || selectedModel.supportsEffort;
+  const effortOptions =
+    selectedModel?.efforts && selectedModel.efforts.length
+      ? selectedModel.efforts
+      : (catalog?.efforts ?? []);
+
+  return {
+    catalog,
+    catalogLoading,
+    catalogFailed,
+    loadCatalog,
+    selectedModel,
+    showEffort,
+    effortOptions,
+  };
 }
 
 /**
@@ -397,7 +490,10 @@ function AutonomyField({
   );
 }
 
-function ModelEffortFields({
+/** The model + effort pickers, exported for the controller settings panel
+ *  (ruling 106) — same select, loading/failed/retry, description and
+ *  unavailable-model treatment everywhere a model is chosen. */
+export function ModelEffortFields({
   uid,
   backend,
   model,
@@ -1185,60 +1281,17 @@ export function CreateProfileModal({
 
   const fieldsValid = Boolean(name.trim() && role.trim() && backend && stg.length);
 
-  // Model + effort catalog — fetched from /resources/model-catalog whenever a
-  // backend is selected (open in edit mode, or the backend radio changes in
-  // create mode). The endpoint returns the curated fallback even with no
-  // credential, so the pickers always populate.
-  const catalogFetcher = useFetcher<{ data: ModelCatalog }>();
-  // D5 (pass 23): so a fetch that SETTLED with no data reads as a failure, not as
-  // the pre-load window. Flipped true once a load has actually fired for the
-  // current backend; a backend switch resets it.
-  const catalogLoadFired = useRef(false);
-  const loadCatalog = () => {
-    if (!backend) return;
-    catalogLoadFired.current = true;
-    catalogFetcher.load(`/resources/model-catalog?backend=${backend}`);
-  };
-  useEffect(() => {
-    if (!backend) return;
-    catalogLoadFired.current = false;
-    loadCatalog();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backend]);
-  const catalog = catalogFetcher.data?.data ?? null;
-  const catalogLoading = catalogFetcher.state === "loading";
-  // D5: a load fired and SETTLED (idle) with no catalog → the fetch failed. The
-  // endpoint returns a curated fallback even without a credential, so this is a
-  // real transport/500 failure. Without a signal, `modelPending` stays true
-  // forever and the footer says "Saving is held" over an empty picker with no
-  // way out. This offers the retry.
-  const catalogFailed =
-    Boolean(backend) &&
-    catalogLoadFired.current &&
-    catalogFetcher.state === "idle" &&
-    !catalog;
-
-  // Default the picks to the catalog defaults once it loads and no pick is set
-  // (create mode, or a backend switch that invalidated the prior model).
-  useEffect(() => {
-    if (!catalog) return;
-    const known = catalog.models.some((m) => m.value === model);
-    if (!model || !known) setModel(catalog.defaultModel);
-    if (!effort) setEffort(catalog.defaultEffort);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [catalog]);
-
-  // Effort options come from the selected model (when it constrains them),
-  // else the backend-wide list. Hidden entirely when the model has no effort.
-  const selectedModel = useMemo(
-    () => catalog?.models.find((m) => m.value === model) ?? null,
-    [catalog, model],
-  );
-  const showEffort = !catalog || !selectedModel || selectedModel.supportsEffort;
-  const effortOptions =
-    selectedModel?.efforts && selectedModel.efforts.length
-      ? selectedModel.efforts
-      : (catalog?.efforts ?? []);
+  // Model + effort catalog machinery — shared with the controller settings
+  // panel (the hook holds the fetch, D5 failure/retry and default-seeding).
+  const {
+    catalog,
+    catalogLoading,
+    catalogFailed,
+    loadCatalog,
+    selectedModel,
+    showEffort,
+    effortOptions,
+  } = useModelCatalog(backend, model, setModel, effort, setEffort);
 
   // F21-13: this profile has a backend but no model for it — `pickBackend`
   // cleared the previous backend's id and the new catalog has not answered yet

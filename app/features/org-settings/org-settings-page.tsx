@@ -188,7 +188,9 @@ export function OrgSettingsPage({
           {tab === "controller" && (
             <ControllerAdminPanel
               config={controllerConfig}
-              kbs={view.kbs.map((k) => k.dir)}
+              // KB grants are stored and resolved by store DIR; the picker
+              // shows the display name, like the global-profile editor.
+              kbs={view.kbs.map((k) => ({ dir: k.dir, name: k.name, uri: k.uri }))}
               skills={view.skills.map((k) => k.name)}
               mcps={view.mcps.map((m) => m.name)}
             />

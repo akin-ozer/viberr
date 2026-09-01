@@ -41,6 +41,11 @@ export const agentProfileFrontmatterSchema = z
     icon: z.string().default("cpu"),
     backends: z.array(z.enum(["codex", "claude"])).default([]),
     model: z.string().default(""),
+    /** Reasoning effort. Only the controller profile is edited through this key
+     *  today (ruling 106) — deployed specialists carry model+effort on their
+     *  project.md `agents:` entry, not the template — but the key is schema
+     *  level so carrying it is never "drift". Absent = the backend default. */
+    effort: z.string().optional(),
     scope: z.string().default(""),
     stages: z.array(z.string()).default([]),
     spanAll: z.boolean().default(false),
@@ -86,6 +91,7 @@ const AGENT_PROFILE_KNOWN_KEYS = new Set<string>([
   "icon",
   "backends",
   "model",
+  "effort",
   "scope",
   "stages",
   "spanAll",
