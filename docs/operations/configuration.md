@@ -1,0 +1,149 @@
+# Configuration reference
+
+> Every knob the running app reads, where it is read, and what the default is.
+> Source of truth: `app/server/config/env.server.ts` (the validated schema),
+> plus the raw `process.env` reads listed in §3. `.env.example` documents the
+> operator-facing subset. Verified against `main` @ `68b5480` (2026-09-01).
+
+Viberr is configured almost entirely through environment variables, validated
+once at boot by `parseEnv` in `app/server/config/env.server.ts`. The process
+refuses to start and prints every missing or invalid variable at once. Empty
+strings are treated as unset. A handful of tuning knobs are read straight off
+`process.env` and are listed separately in §3 so the surface is complete.
+
+Three things are **not** environment variables and are listed in §4: instance
+settings an org admin edits in the app, the controller's own configuration
+files, and the in-app OAuth provider rows that override the deployment env.
+
+## 1. Required
+
+| Variable | Rule | Purpose |
+|---|---|---|
+| `VIBERR_SESSION_SECRET` | ≥ 32 characters | Signs the session cookie (`viberr.session_token`) and the CSRF double-submit token. Generate with `openssl rand -base64 48`. |
+| `VIBERR_SECRET_ENCRYPTION_KEY` | base64 decoding to exactly 32 bytes | AES-256-GCM key for every sealed secret in SQLite: GitHub PATs, MCP credentials, OAuth client secrets, the S3 audit export key. Generate with `openssl rand -base64 32`. Losing it makes every stored secret unreadable; rotate it with `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` + `npm run keys`. |
+
+## 2. Validated optional variables (the schema)
+
+### Process and data root
+
+| Variable | Default | Notes |
+|---|---|---|
+| `NODE_ENV` | `development` | `development \| production \| test`. The image sets `production`. |
+| `PORT` | `5173` | Dev server and `react-router-serve`. The image sets `3000`; compose maps `${PORT:-3000}` on both sides. |
+| `VIBERR_DATA_ROOT` | `./data` | The runtime data root (canonical markdown, SQLite, run logs, KBs, skills). The image sets `/data`; `.env.example` tells developers to set `./docker-data` so the host and the container share one store. Relative paths resolve against the working directory. |
+| `VIBERR_FORCE_DATA_ROOT_LOCK` | unset | Set to `1`/`true` for ONE boot to take over a `state/writer.lock` left by a process on another host. See the single-writer lock in the runbook. |
+| `BETTER_AUTH_URL` | unset | Absolute public origin. Optional in dev (inferred per request). **Required behind a reverse proxy**: better-auth derives OAuth callback URLs, `trustedOrigins` and the cookie `Secure` attribute from it. Boot warns when OAuth is configured without it, and when it is an `http://` non-loopback origin in production. |
+| `BETTER_AUTH_SECRET` | falls back to `VIBERR_SESSION_SECRET` | ≥ 32 chars. Set only to rotate the auth secret independently. |
+| `VIBERR_TRUST_PROXY` | unset (trust none) | Number of trusted reverse proxies. Only when set does the login throttle read `X-Forwarded-For`, taking the Nth hop from the right (`clientIpOf` in `app/server/auth/rate-limit.server.ts`). |
+
+### Sign-in
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | unset | GitHub OAuth app (callback `/api/auth/callback/github`). A row in the `oauth_providers` table, managed on the org settings Sign-in & SSO tab, **overrides** these (ruling 72). |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | unset | Google OAuth web client (callback `/api/auth/callback/google`). Same override rule. |
+| `VIBERR_SEED_ADMIN_EMAIL` | `admin@viberr.dev` | Bootstrap admin, created only while the `users` table is empty (boot and `npm run seed` both call `seedInitialAdmin`). |
+| `VIBERR_SEED_ADMIN_PASSWORD` | boot: random one-time password printed once as `VIBERR BOOTSTRAP ADMIN`; seed CLI: `SEED_DEFAULT_PASSWORD` | ≥ 8 characters. The boot-generated password forces a reset at first sign-in (`pwreset_required`). |
+
+### Agent backends
+
+Presence of any one credential makes a backend `real`; the registry never makes a
+paid call to detect availability (`isBackendAvailable` in
+`app/server/runtimes/runtime-registry.server.ts`). Both `*_USE_CLI_AUTH` flags have a
+second, filesystem condition; a key or token never does.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | unset | Claude, pay-as-you-go. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token from `claude setup-token`. Recommended in the container. |
+| `VIBERR_CLAUDE_USE_CLI_AUTH` | unset | `1` = use an already logged-in `claude` CLI. Honoured only if `CLAUDE_CONFIG_DIR` (or `~/.claude`) exists; `<dir>/.credentials.json` proves a file-backed login; on macOS an existing dir with no credentials file is accepted as a Keychain login. Does not work in the container. |
+| `CLAUDE_CONFIG_DIR` | image: `/data/runtimes/claude-home`; otherwise `<dataRoot>/runtimes/claude-home` (or `~/.claude` under CLI auth) | Where the Claude SDK writes resumable session transcripts (`projects/<cwd>/<sid>.jsonl`). Resolved by `resolveClaudeConfigDir` in `claude-config.server.ts`; the session exporter reads the same place. |
+| `CODEX_ACCESS_TOKEN` | unset | ChatGPT Business/Enterprise workspace token (subscription entitlements, no Platform billing). Recommended in the container. |
+| `CODEX_API_KEY` / `OPENAI_API_KEY` | unset | Usage-based Platform billing. |
+| `VIBERR_CODEX_USE_CLI_AUTH` | unset | `1` = use a `codex login` `auth.json`. Honoured only if the file exists in the auth source (`$CODEX_HOME/auth.json`). |
+| `CODEX_HOME` | image: `/data/runtimes/codex-home` | Codex login/auth source. A Viberr run always gets an app-owned run home under `<dataRoot>/runtimes/codex-home` (`resolveCodexHome` in `codex-config.server.ts`); `prepareCodexHome` mirrors `auth.json` in per run. Compose mounts the host `~/.codex` read-only at `/host-codex` and the entrypoint copies `auth.json` in once when the volume lacks it. |
+| `VIBERR_BROWSER_EXECUTABLE` | image: `/usr/bin/chromium` | Chromium binary for the `use-browser` Playwright MCP mount. When set the mount also passes `--no-sandbox`. |
+
+### Runtime tuning
+
+Declared in the schema as raw strings; each call site applies its own coercion
+and fallback.
+
+| Variable | Default | Where |
+|---|---|---|
+| `VIBERR_CLAUDE_MAX_TURNS` | `2000` | Runaway turn cap for a Claude run; hitting it ends the run as `run·error·max_turns` (`claude-runtime.server.ts`). |
+| `VIBERR_CLAUDE_IDLE_TIMEOUT_MS` | `900000` (15 min) | Idle window before a Claude run is treated as hung and interrupted. |
+| `VIBERR_CODEX_IDLE_TIMEOUT_MS` | `900000` (15 min) | Same guard for Codex. |
+| `VIBERR_GIT_CLONE_TIMEOUT_MS` | `900000` (15 min) | Ceiling on one `git clone` / mirror fetch (`cloneTimeoutMs` in `git-clone-auth.server.ts`); the schedule claim lease is sized against it. Ignored unless a positive integer. |
+| `VIBERR_TRANSCRIPT_RETENTION_DAYS` | `30` | Age at which `runtimes/<backend>/<runId>.jsonl` is pruned. `0` keeps forever. Aligned with the 30-day `run_log_lines` window. |
+| `VIBERR_SESSION_HOME_RETENTION_DAYS` | `30` | Same window for the provider session homes (`claude-home/projects/`, `codex-home/sessions/`). `0` keeps forever. |
+
+### Controller configuration locks (ruling 108)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `VIBERR_UNLOCK_CONTROLLER_SKILLS` | locked | `enabled` unlocks the controller's skill grants for in-app editing. Any other value, or unset, keeps them locked, org admins included. |
+| `VIBERR_UNLOCK_CONTROLLER_KB` | locked | Same, for knowledge-base grants. |
+| `VIBERR_UNLOCK_CONTROLLER_MCPS` | locked | Same, for org MCP server grants. The built-in `viberr_ops` diagnostics mount is never a section and cannot be removed. |
+| `VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS` | locked | Same, for the controller's doctrine file. |
+
+Model and effort stay editable regardless. Compose passes all four through with
+`disabled` as the default. Restart to apply.
+
+## 3. Raw `process.env` reads outside the schema
+
+These are honoured but are neither validated nor documented in `.env.example`.
+They are listed here so the configurable surface is complete.
+
+| Variable | Default | Where |
+|---|---|---|
+| `LOG_LEVEL` | `info` in production, `debug` otherwise | `app/server/logging/logger.server.ts`. Values `debug \| info \| warn \| error`. |
+| `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` | unset | Comma-separated retired keys, newest first, for a rotation window (`app/server/secrets/secret-box.server.ts`). Reads only; a malformed entry is skipped silently so a key list never reaches an error message. |
+| `VIBERR_MAINTENANCE_INTERVAL_MS` | `21600000` (6 h) | Cadence of the periodic store-maintenance pass (`app/server/ops/maintenance.server.ts`). |
+| `VIBERR_DISK_CHECK_INTERVAL_MS` | `300000` (5 min) | Cadence of the free-space check on the data root. |
+| `VIBERR_DISK_LOW_FREE_MB` | `2048` | Free-space threshold below which the data root reads `low` (`app/server/ops/disk-space.server.ts`). |
+| `VIBERR_DISK_CRITICAL_FREE_MB` | `512` | Threshold for `critical`. Either state marks health `degraded` and triggers an out-of-band maintenance pass at most every 30 minutes. |
+| `VIBERR_BUILD_SHA` / `VIBERR_BUILD_VERSION` | unset | Optional image-build stamps surfaced by `app/server/ops/build-info.server.ts` in the boot log and `/resources/health`. The Dockerfile does not set them; `package.json` `version` is the fallback. |
+| `VIBERR_GITHUB_WRITE_PROBE` | unset | `1` opts the PAT validator into an empty-payload write probe; by default write access is proved read-only from the repo `permissions` block (`pat-validator.server.ts`). |
+| `VIBERR_E2E_KEEP` | unset | `1` keeps the e2e compose stack up after `npm run e2e` (`scripts/e2e.ts`). |
+| `VIBERR_E2E_BASE_URL` | set by `scripts/e2e.ts` | The Playwright base URL; `playwright.config.ts` refuses to run without it. |
+| `CODEX_CLI_HOME` | `~/.codex` | Compose-only: the host directory mounted read-only at `/host-codex` for the one-time `auth.json` seed. |
+
+The runtime also **sets** environment for the processes it spawns and never
+inherits its own environment into them: spawned MCP servers and agent runs get a
+filtered env (`filteredSpawnEnv` strips every credential-shaped key plus
+`DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`), and git is invoked
+with `GIT_ASKPASS` carrying the PAT, `GIT_CONFIG_SYSTEM`/`GIT_CONFIG_GLOBAL` pointed
+away from the host config, `GIT_ALLOW_PROTOCOL` restricted, and
+`GIT_CEILING_DIRECTORIES` set to the task directory.
+
+## 4. Configuration that is not an environment variable
+
+| Setting | Where it lives | Who edits it |
+|---|---|---|
+| Run concurrency cap (`maxConcurrentRuns`, `0` = unlimited, ceiling 64) | `instance_settings` table | Org admin, Org settings → Agent resources (`set-concurrency` intent) |
+| Backend quota observations (`backendRateLimit.<backend>`) | `instance_settings` | Written by the run sink from Claude `rate_limit_event` envelopes; read by `/insights` |
+| OAuth sign-in providers | `oauth_providers` table (sealed client secret) | Org admin, Sign-in & SSO tab; overrides the env pair per provider |
+| S3 audit export target | `s3_audit_config` table (sealed secret key) | Org admin, Audit panel |
+| Controller model, effort, grants, instructions | `agents/profiles/controller.md` + `agents/definitions/controller.md` in the data root | Org admin, Controller tab; grant sections and instructions locked unless unlocked by env (§2) |
+| Per-project workflow, members, agent deployments, guardrails, credential policy | `projects/<slug>/project.md` | Project admins through Policy / Settings / Agents |
+| Per-user theme, motion, notification routing, timeline default, pins | `users.theme` + cookie `viberr_theme`; `user_prefs` table | The user, Profile overlay |
+
+## 5. What the container image bakes in
+
+From the `Dockerfile` runtime stage: `NODE_ENV=production`, `VIBERR_DATA_ROOT=/data`,
+`CLAUDE_CONFIG_DIR=/data/runtimes/claude-home`, `CODEX_HOME=/data/runtimes/codex-home`,
+`UV_CACHE_DIR=/data/runtimes/uv-cache`, `UV_PYTHON_INSTALL_DIR=/data/runtimes/uv-python`,
+`PORT=3000`, `VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`. Everything else comes from
+`.env` via compose `env_file`. Compose additionally forces `NODE_ENV=production` and
+`VIBERR_DATA_ROOT=/data` even when `.env` carries the dev values, pins `hostname: viberr`
+(so a recreated container can reclaim its own writer lock) and runs with `init: true`.
+
+## 6. Local development
+
+`.claude/launch.json` defines two launchers: `viberr-dev` exports
+`VIBERR_DATA_ROOT=<repo>/docker-data` on port 5173 and **refuses to start while the
+`viberr-app-1` container is running** (two writers on one data root corrupt the
+SQLite WAL); `viberr-dev-hermetic` uses `<repo>/data` on port 5174. `vite.config.ts`
+loads `.env` itself and excludes the data root from the dev watcher, because task
+workspaces under it are full nested clones of the target repository.

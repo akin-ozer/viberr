@@ -3,7 +3,11 @@
 This is the normative contract that code comments across the tree cite as **CONVENTIONS**
 and as **"orchestrator ruling N"**. It condenses
 [`planning/planning-artifacts/architecture.md`](../../planning/planning-artifacts/architecture.md),
-which wins on conflict.
+which wins on conflict. *(Noted 2026-09-01 — that planning document has not been re-validated
+against the tree for several passes and is stale in places; the code-verified reference set is
+[`../README.md`](../README.md) and the disagreements are listed in
+[`../validation/2026-09-01-doc-validation.md`](../validation/2026-09-01-doc-validation.md).
+Where `architecture.md` and the code disagree, the code wins.)*
 
 **Provenance.** The content below was recovered from `docs/build/CONVENTIONS.md`, which was
 deleted in commit c1acf2c ("Remove obsolete code and simplify project structure") along
@@ -30,7 +34,7 @@ app/
   ui/              # reusable primitives — MUST NOT import from features/
   lib/             # better-auth instance + its Viberr bridge
   features/        # per-surface UI + loaders/actions glue
-  schemas/         # shared Zod schemas (task-file, project-file, sse-event, github-pat)
+  schemas/         # shared Zod schemas (task-file, project-file, goal-file, sse-event, github-pat, file-diagnostics)
   server/          # server-only modules
   shared/          # narrow cross-surface helpers
 db/migrations/*.sql   scripts/*.ts   e2e/   test-support/
@@ -38,10 +42,14 @@ db/migrations/*.sql   scripts/*.ts   e2e/   test-support/
 
 The live folder inventory is in
 [`architecture.md`'s directory structure](../../planning/planning-artifacts/architecture.md#complete-project-directory-structure);
-it is regenerated from the filesystem rather than restated here.
+it is regenerated from the filesystem rather than restated here. *(Noted 2026-09-01 — that
+inventory is not regenerated automatically and has drifted; the verified module map is
+[`codebase-map.md`](codebase-map.md).)*
 
 - Server-only files: `*.server.ts` suffix. Never import server modules into client
-  components.
+  components. *(Clarified 2026-09-01 — a client component may import a `.server` module as
+  `import type` only; server code may import `features/*.server.ts` modules and pure catalog
+  helpers, never components. See [`overview.md`](overview.md#3-layers-and-the-rules-between-them).)*
 - Tests co-located: `foo.server.test.ts`. No `utils.ts` / `helpers.ts` dumping grounds.
 - Files/dirs kebab-case; components/types PascalCase; vars/functions camelCase; constants
   UPPER_SNAKE_CASE.
@@ -67,14 +75,20 @@ it is regenerated from the filesystem rather than restated here.
   `{ error: { code, message, details? } }`, real HTTP status codes. Loaders return
   route-shaped data directly; route *actions* are exempt and return their own result
   shapes.
-- **SSE:** event names are lowercase dot-separated facts (`task.updated`,
-  `task.readiness-changed`, `projection.rebuilt`, `run.log-appended`,
-  `auth.session-expired`); payload is `{ type, entityId, occurredAt, data }` — compact
+- **SSE:** event names are lowercase dot-separated facts (`task.updated`, `task.removed`,
+  `project.updated`, `projection.rebuilt`, `run.log-appended`, `run.state-changed`,
+  `notification.created`, `goal.updated`, …); the complete list is `SSE_EVENT_NAMES` in
+  `app/schemas/sse-event.schema.ts`. *(Corrected 2026-09-01 — this bullet listed
+  `task.readiness-changed`, removed in E9, and `auth.session-expired`, which never existed.)*
+  Payload is `{ type, entityId, occurredAt, data }` — compact
   facts and references, never fat objects. The wire shape is parsed before publish because
   it is a contract.
 - **Errors:** typed `AppError` with stable machine codes (`app/server/errors/`). Never leak
-  stack traces or secrets to users. Distinguish user-correctable / inconsistency-diagnostic
-  / infrastructure.
+  stack traces or secrets to users. *(Corrected 2026-09-01 — the "user-correctable /
+  inconsistency-diagnostic / infrastructure" three-way taxonomy this bullet used to ask for
+  was never modelled on `AppError`, which carries `code`, `status`, `userMessage` and
+  `details` only; the nearest real thing is the file-diagnostic severity `info | warning |
+  error` plus `hardStop`, which floors readiness.)*
 
 ## Behavior rules
 
@@ -95,10 +109,14 @@ it is regenerated from the filesystem rather than restated here.
 - RBAC applies to actions, not to file existence. Agents get a per-project capability
   policy, enforced server-side on agent-triggered actions.
 - Human-only, enforced server-side: transition to Done, and completion acceptance.
-  **Narrowed** — see ruling 2 and the note under FR27 in the PRD: under the `auto` preset,
-  a full-autonomy operator holding an explicit `completion-for-acceptance: direct` grant
-  may accept and move a task to Done itself. That is the one deliberate exception, and it
-  is disclosed in the UI. Every other path to Done stays human.
+  **Narrowed** — see ruling 40 and the note under FR27 in the PRD: an operator whose
+  project autonomy is `full` **and** whose grant is literally `completion-for-acceptance:
+  direct` may accept and move a task to Done itself, recording the PR as `accepted` (merge
+  pending). That is the one deliberate exception, and it is disclosed in the UI. Every other
+  path to Done stays human. *(Corrected 2026-09-01 — this used to say "under the `auto`
+  preset"; `auto` is a transition-boundary value, not a preset, and the capability is
+  `promotable: false`, so autonomy alone never raises it — `operatorAcceptCompletion` in
+  `app/server/tasks/operator-actions.server.ts`.)*
 
 ## UI porting rules
 
@@ -148,6 +166,12 @@ it is regenerated from the filesystem rather than restated here.
    **Superseded in part** (ruling 25, 2026-07-28) — projects are members-only: `view` and
    `comment` apply within projects the user is a member of; non-members get a
    404-equivalent. The FR4 sentence above is kept for history.
+   **Corrected 2026-09-01** — two clauses above are stale: (a) the schema does **not**
+   tolerate an org role `viewer` — `users.role CHECK (role IN ('admin','member'))` and
+   `USER_ROLES = ["admin","member"]`; (b) capability modes are four,
+   `direct | recommend | human | off` (`CAPABILITY_MODES`), and ruling 81 removed the
+   `recommend` lane for specialists (a stored `recommend` reads as `off`); only the operator
+   holds a real `recommend`.
 3. **Task-file store** at `$VIBERR_DATA_ROOT/projects/<slug>/tasks/<KEY>/task.md`. The UI
    renders the REAL store-relative path wherever the mock showed `.viberr/...`.
 4. **Timestamps.** UTC ISO at all boundaries; one shared formatter in `app/shared/dates/`
@@ -164,13 +188,18 @@ it is regenerated from the filesystem rather than restated here.
    failure state. **Amended 2026-08-04 (ruling 40 / R16-6)** — that is true only of a human
    acceptance; a full-autonomy operator acceptance records the PR `accepted` (merge pending)
    and a human completes the merge later, because `merge-pull-request` is `ALWAYS_HUMAN`.
-   **Extended** — the kind set is now TEN: `accept_completion`, `request_edit`,
+   **Extended** — the kind set is now ELEVEN: `accept_completion`, `request_edit`,
    `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`,
-   `archive_task`, `discard_branch`, `custom`. (`archive_task` arrived with R14-3 — the task
+   `archive_task`, `discard_branch`, `resolve_remote_collision`, `custom`. (`archive_task` arrived with R14-3 — the task
    archive — and the count here was never updated; corrected 2026-08-05 against
    `PACKET_OPTION_KINDS` in `app/schemas/task-file.schema.ts`, which is the source of
    truth. `discard_branch` arrived 2026-08-15, pass 20 — ruling 77 / R20-2 / F20-6 — as the
-   executable option that deletes a never-pushed local task branch; count nine→ten.) The same
+   executable option that deletes a never-pushed local task branch; count nine→ten.
+   `resolve_remote_collision` arrived 2026-08-31, pass 31 — F31-6 — as the branch-collision
+   remedy: close the unowned PR, delete the stale remote branch, re-deliver the local work;
+   count ten→eleven, corrected here 2026-09-01. `PACKET_OPTION_KINDS` is the source of truth
+   and `file-formats-sync.test.ts` pins the sibling list in `file-formats.md`; this prose is
+   not pinned, so trust the schema over any number here.) The same
    ruling governs the capability catalog: agent policy is id-based
    against the shared catalog, and advisory ids with no runtime consumer get no toggle.
 8. **`tweaks-panel.jsx` is not ported** (dev harness, dead code). Review-queue packet and
@@ -187,6 +216,9 @@ it is regenerated from the filesystem rather than restated here.
     card's waiting count are **member-scoped** — a decision the viewer can actually act on,
     not the project-wide `waiting === "human"` enum. The review queue itself stays
     project-wide.
+    **Corrected 2026-09-01** — R8-3 reached the queue too: the row set is project-wide, but
+    `review-queue.server.ts` splits it per viewer into "Waiting on your acceptance" (tasks this
+    viewer may accept) and "Still in review", and the board chip reads "Waiting on me".
 11. **Run lifecycle** is stored as `queued|running|finished|error|interrupted` and maps to
     the mock pills (queued → neutral "queued"; interrupted → neutral
     "interrupted · by \<actor\>" footer). Raw NDJSON/JSONL is truth; the log line display is
@@ -221,10 +253,20 @@ it is regenerated from the filesystem rather than restated here.
     operator opens ONE recovery packet: rework (custom + note), `archive_task`, or
     `archive_task` + `deleteBranch`. Remote-branch deletion exists only as that packet
     resolution (refuses open PRs and the default branch).
+    **Superseded in part** (ruling 24 and pass 31, noted 2026-09-01) — remote deletion is no
+    longer packet-only: `deleteTaskRemoteBranch` is one function with the same two refusals and
+    three callers — this recovery packet, the post-merge cleanup under the per-project
+    `delete-branch-after-merge` guardrail (ruling 24), and the `resolve_remote_collision` packet
+    option (F31-6).
 18. **Minimum GitHub scopes are exactly `repo` + `pull_request:write`** (2026-07-25,
     recorded 2026-07-28). `workflow` and `read:org` were dropped; a refused workflow-file
     push surfaces as a scope violation when it matters. Fine-grained tokens prove write
     permissions via empty-payload dry-run probes (422 = authorized, 403 = refused).
+    **Amended** (A8 / pass 16, noted here 2026-09-01) — the dry-run is now **opt-in**
+    (`VIBERR_GITHUB_WRITE_PROBE=1`, or `writeProbe: true`); default validation never writes to
+    a user repository. Repository write is proven read-only from `GET /repos/{r}`
+    `permissions.push`; without the probe, `pull_request:write` is reported `assumed` until
+    first use. `read:org` is still honoured when a project requires it but is not a default.
 19. **Scope chips render proven verdicts only** (2026-07-25, recorded 2026-07-28). A chip
     is evidence: scope header, live probe, or open violation. `assumed`/`unchecked` render
     as an honest "unproven" line, never as a pseudo-check.
@@ -263,6 +305,9 @@ it is regenerated from the filesystem rather than restated here.
     "maintained" now means **byte-identical**, and the two files are pinned as such by
     `prd-sync.test.ts` rather than by anyone's memory. The canon copy is the one to edit;
     the design copy is a mirror.
+    *(Noted 2026-09-01 — `planning/README.md` no longer makes a "kept in sync" claim; it
+    narrates the drift history and names canon as the winner. The pin is the test, not a
+    README sentence.)*
 28. **R15-9 (2026-07-29): an absent `deliver-review-pr` grant resolves from the project's
     own governance, not from a constant.** The capability postdates R15-2, so "absent" is
     the normal state on every pre-existing project. Resolving it to a flat `direct` meant
@@ -310,6 +355,8 @@ it is regenerated from the filesystem rather than restated here.
     restarts keys at 1, so a brand-new `VIB-1` gets branch `vib-1`, which on GitHub may
     still carry a previous `VIB-1`'s PR. Five-minute polling is unchanged and still tracks
     state, checks, review and mergeability — for PRs the task actually owns.
+    **Narrowed by ruling 35** (noted 2026-09-01): the one adoption case — an OPEN PR whose head
+    sha IS the delivered revision — is adopted; every other name match stays a collision.
 35. **R16-1 (2026-08-04): a pre-existing PR is adopted ONLY IF it is open AND its head sha
     is the task's delivered revision.** Adoption exists for one case — Viberr lost track of a
     PR it had opened (a crashed delivery, a hand-wiped `pr:` field). Every earlier
@@ -340,6 +387,8 @@ it is regenerated from the filesystem rather than restated here.
     joins the predicate, and the chip is renamed from "Needs attention" to **"Blocked or
     waiting"** so its label names what it selects. `app/features/board/board-filters.ts`,
     `board-page.tsx`.
+    **Amended by ruling 91** (noted 2026-09-01): `input_required` matches only while
+    `waiting !== "agent"`; the chip label is unchanged.
 37. **R16-3 (2026-08-04): terminal GitHub facts outrank process gates in refusal copy.**
     When acceptance is blocked, a TERMINAL GitHub fact — a closed, unmerged PR — is named
     FIRST, ahead of any process gate (missing verdict, head mismatch), because it is the fact
@@ -378,6 +427,8 @@ it is regenerated from the filesystem rather than restated here.
     certain contributor/testing docs "no longer exist" was wrong — `docs/contributing-quickstart.md`
     and `docs/testing-quickstart.md` both exist in the tree today. Record the branch deletion
     as done; discard the missing-docs premise.
+    *(Noted 2026-09-01 — both quickstarts were folded into `docs/development/` (`testing.md`,
+    `contributing.md`) on that date; the premise correction above is history.)*
 42. **R17-1 (2026-08-04): acceptance may accept a head AHEAD of the reviewed revision, but
     MUST surface the divergence.** The accept gate stays containment-based — it accepts a PR
     head that CONTAINS (is ahead of) the delivered/reviewed revision, because a legitimate
@@ -386,8 +437,10 @@ it is regenerated from the filesystem rather than restated here.
     ("N commits added since review"), and the refusal/subline chain must name the divergence;
     the audit log names the real merge head, not the reviewed SHA. A head that has DIVERGED
     (no longer contains the delivered commit) still refuses, unchanged. (Owner ruling gathered
-    pass 17; the surfacing is on this pass's implementation backlog — the gate today pins only
-    the delivered SHA.)
+    pass 17.) *(Corrected 2026-09-01 — the parenthetical that used to end this entry, "the
+    surfacing is on this pass's implementation backlog — the gate today pins only the delivered
+    SHA", is stale: the divergence surfacing shipped (F17-L12) and the gate is containment-based
+    — `accept-confirm.tsx` "N commits added since review", `task-actions.server.ts`.)*
 43. **R17-2 (2026-08-04): a verified no-diff task is a first-class "Completed — no changes"
     outcome.** A task whose branch carries no diff against the base (or has no branch at all)
     may close to Done WITHOUT a PR or merge, through a distinct "Completed — no changes
@@ -405,7 +458,9 @@ it is regenerated from the filesystem rather than restated here.
     closes; rulings 35–43 above are pass 16's and pass 17's, promoted here under this ruling.
     And re-reading the operational docs against the tree (`file-formats.md`, `deployment.md`,
     `runbook.md`, `testing.md`) to catch statements that a correct change elsewhere left stale
-    is itself a required closing phase, alongside the disposition audit.
+    is itself a required closing phase, alongside the disposition audit. *(Noted 2026-09-01 —
+    `docs/testing.md` became `docs/development/testing.md`, and the re-read now covers the whole
+    `docs/` set indexed by `docs/README.md`.)*
 
 45. **R17-4 (2026-08-04): the local sign-in form leads when NO OAuth provider is configured.**
     On a local-only deployment the card used to lead with two DISABLED "not configured"
@@ -461,7 +516,8 @@ it is regenerated from the filesystem rather than restated here.
     Codex was already governed by `CODEX_HOME` + its skills/plugins/AGENTS.md flags. Known,
     accepted limitation: a run whose task is to edit the repo's OWN `.claude` cannot deliver those
     edits — that is the governance posture, not a bug.
-    (`stripUngovernedRepoCatalog` in `app/server/tasks/specialist-run.server.ts`;
+    (`stripUngovernedRepoCatalog` in `app/server/runtimes/skill-mount.server.ts` — moved there
+    from `specialist-run.server.ts`, path corrected 2026-09-01;
     `app/server/runtimes/claude-runtime.server.ts`)
 
 50. **R18-4 (2026-08-05): branch-collision stays a human-gated packet — do NOT auto-reset.** A
@@ -502,8 +558,9 @@ it is regenerated from the filesystem rather than restated here.
 
 54. **R18-8 (2026-08-05): F18-9 is closed as NOT REPRODUCIBLE.** The recorded claim that the
     agent-profile modal defaults every org skill to ON could not be reproduced: both modals
-    initialise a new profile with empty grants (`create-profile-modal.tsx:806-812`,
-    `agent-template-modal.tsx:123-131`). No default was changed — acting on the note would have
+    initialise a new profile with empty grants (`create-profile-modal.tsx`, the
+    `{ skills: [], mcps: [], kb: [] }` initial state; `agent-template-modal.tsx`, `initial ? … : []`
+    — line numbers dropped 2026-09-01, they had moved). No default was changed — acting on the note would have
     introduced the over-granting it warned about. Recorded as a class: a finding taken from a UI
     impression and never re-verified in code can survive several passes as fact.
 
@@ -524,8 +581,8 @@ it is regenerated from the filesystem rather than restated here.
     clone. A clone failure is a FIRST-CLASS `unavailable` arm carrying git's own redacted
     complaint — never an error that strands the drive, and never silence, because a run that
     does not KNOW it is blind falls straight back into describing the task folder. Closes
-    Q19-1, extends F19-4. (`operatorWorkspaceView` in
-    `app/server/runtimes/operator-run.server.ts`)
+    Q19-1, extends F19-4. (the `OperatorWorkspaceView` type and its resolver in
+    `app/server/runtimes/operator-run.server.ts` — identifier corrected 2026-09-01)
     *(History, pass 19 — a cheaper READ-ONLY VIEW was offered as the alternative: let the
     operator list and read the default branch at triage without a working clone. The owner
     rejected it along with the summary-only file listing, ruling for the full clone above; the
@@ -539,13 +596,16 @@ it is regenerated from the filesystem rather than restated here.
     repo file states a convention (README, CONTRIBUTING, `docs/`, a linter/formatter config,
     or the established pattern of the files being edited) the repository wins; KB guidance
     applies where the repo is silent; a genuine conflict is followed *repo-first and reported
-    by name* — surfaced as a typed context-conflict event and never silently resolved in either
-    direction — so a human can reconcile it; and an existing file family is never rewritten into
+    by name* — never silently resolved in either direction — so a human can reconcile it; and an existing file family is never rewritten into
     a KB's style just because the KB describes one. It ships as ONE constant emitted
     immediately before the KB bodies it ranks, imported by both runtimes so it cannot drift
     between them, and emitted only when real KB text is present — a run with no knowledge base
     never carries a rule about a resource it does not have. Closes Q19-2.
     (`KB_PRECEDENCE_NOTE` in `app/server/files/kb-injection.server.ts`)
+    *(Corrected 2026-09-01 — "surfaced as a typed context-conflict event" was removed above:
+    there is no dedicated event type. A specialist reports the conflict in its report; the
+    operator has a `flag_context_conflict` tool that writes a `quality` timeline event (audit
+    `task.operator.context_conflict`). Three runtimes import the constant now, not two.)*
 
 57. **R19-3 (2026-08-06): reviewer inheritance stays KBs only — ruling 47 (R18-1) stands.**
     F19-2 found `specialist-run.server.ts` documenting that the inheritance had been "widened
@@ -575,8 +635,10 @@ it is regenerated from the filesystem rather than restated here.
     (kind, profileId, target), any stage move prunes pending transition cards, and acceptance
     consumes every card, so the synthesized card can neither double up with the operator's own
     nor outlive its moment. Ruling 48's full-autonomy re-queue is unchanged. Closes F19-1.
-    (`ensureDeliveredNextStep` in `app/server/tasks/operator-actions.server.ts`, called from
-    `performDelivery` in `app/server/tasks/task-actions.server.ts`)
+    (`recordDeliveredNextStep` in `app/server/tasks/task-actions.server.ts`, called from
+    `performDelivery` in the same file — corrected 2026-09-01: `ensureDeliveredNextStep` in
+    `operator-actions.server.ts` was deleted because two order-dependent writers after a
+    delivery were the hazard; the single writer of the card carries the guarantee now)
 
 59. **R19-5 (2026-08-06): force-accept MAY skip the remaining stages AND the review gate — but
     it must SAY so.** A pass-19 implementer read F19-25 as "force-accept must not jump the
@@ -923,6 +985,10 @@ it is regenerated from the filesystem rather than restated here.
     `discardLocalTaskBranch` refuses an on-remote branch, as remote deletion has always been
     packet-only. (`no-change-completion.server.ts`, `push-workspace.server.ts`,
     `app/server/tasks/task-actions.server.ts`, `app/schemas/task-file.schema.ts`)
+    **Amended** (pass 28 F28-L1 and pass 31 F31-6, noted 2026-09-01) — the auto-detect became
+    reachable in F28-L1; `discard_branch` is now REFUSED for authoring when work already stands
+    on the branch; the eleventh kind `resolve_remote_collision` handles the remote side (see
+    rulings 7 and 17). "Ruling 7's tenth" is historical.
 
 78. **R20-3 (2026-08-14, F20-4): the provider's OWN WORDS reach the packet and timeline (redacted),
     and model availability is validated against the account.** Live: a seeded Developer shipping
@@ -994,6 +1060,11 @@ it is regenerated from the filesystem rather than restated here.
     writes it. Ruling 78 (R20-3) still ships — a future mismatch is surfaced with the provider's own
     words and marked unavailable, honest rather than generic — so this changes the default, not the
     honesty machinery behind it. (`app/server/seed/agent-catalog.server.ts`)
+    **Superseded in part** (owner, 2026-08-21, pass 22 — noted here 2026-09-01): the seeded
+    Developer now defaults to **Claude** (`backends: ["claude", "codex"]`, `model: sonnet`);
+    `gpt-5.6-terra` survives only as the Codex catalog default a profile falls to when flipped
+    to Codex. The demo fixture (`seed:demo`) still forces its Developer to Codex
+    `gpt-5.6-terra`.
 
 84. **R20-9 (2026-08-15, F20-31): the operator MAY gather a delegated ask itself, and the packet must
     SAY it is standing in for the delivering agent.** A goal can delegate a clarifying question to the
@@ -1167,6 +1238,8 @@ it is regenerated from the filesystem rather than restated here.
     survives as a caption: full autonomy announces itself on the run surface; supervised is the
     quiet default. P11-41 survives without a picker: an unconfigured profile backend disables Run
     with the reason rendered.
+    **Superseded in part by ruling 98** (noted 2026-09-01): dynamic dispatch replaced the
+    steer-only run control with the when-picker and schedule controls; the label rule stands.
 
 93. **R22 (2026-08-21, pass 22): the Codex OS process sandbox is REMOVED — "viberr itself
     is the sandbox."** `resolveCodexSandboxMode` returns `read-only` for NO run anymore:
@@ -1197,6 +1270,15 @@ it is regenerated from the filesystem rather than restated here.
     (`resolveCodexSandboxMode` in `app/server/runtimes/codex-runtime.server.ts:368`;
     `CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS` in `app/shared/capabilities.ts:253`; the modal
     copy in `app/features/agents/capability-matrix-modal.tsx:85-93`)
+    **SUPERSEDED IN PART by ruling 101** (repo-write parity, 2026-08-31 — marked here
+    2026-09-01). The headline no longer holds: `resolveCodexSandboxMode` returns `read-only`
+    for the operator and for any run whose repo write is withheld (`workspace-write` when it
+    has an attachments dir to write), and `execute-code-or-write-repo` is back in the
+    both-backend `ENFORCED_CAPABILITY_IDS`. Surviving from this ruling: the `danger-full-access`
+    rule for an autonomous deliverer with egress, egress gated on both backends, and the
+    writable attachments dir. **Open code drift:** the capability-matrix modal copy
+    (`capability-matrix-modal.tsx`, "On Codex the file and command limits are advisory",
+    "advisory on Codex") still describes the R22 posture and should be rewritten to match 101.
 
 94. **R22-schedule (2026-08-21, F22-02): a scheduled operator re-run resolves the LIVE
     deployed profile at fire time — FR39's per-schedule backend/autonomy pin is
@@ -1621,8 +1703,10 @@ the quieter packet or the bare owner cell as drift.)*
     rewriting what the controller IS operates above the org). The settings
     panel renders locked sections read-only (span chips, read-only doctrine,
     one note listing the locked sections and their variables), and under a
-    lock it skips the P13-KM-01 display-name repair so a locked save
-    round-trips the stored grants byte-for-byte. The `viberr_ops` mount is
+    lock it posts BLANK for the locked sections so the server keeps the stored
+    grants byte-for-byte *(wording corrected 2026-09-01 — the P13-KM-01
+    display-name repair still runs for display; the byte-stable round-trip
+    comes from not posting the locked lists, not from skipping the repair)*. The `viberr_ops` mount is
     unaffected: it is not a section and stays non-removable under every flag
     combination (ruling 107). A dangling grant under a lock is still
     disclosed, just not removable in-app.
@@ -1637,6 +1721,58 @@ the quieter packet or the bare owner cell as drift.)*
     the panel note and this entry state the boundary rather than imply a
     containment the ruling does not provide.
 
+## Owner decisions recorded outside this file (2026-08-20 → 2026-09-01)
+
+*(Added 2026-09-01 by the documentation validation pass. Each item below is an owner decision
+that code comments or pass ledgers cite and that this file never received. They are listed
+here so a reader can find them; promoting each to a numbered ruling is the owner's call —
+ruling 44 says every one should be. Where recorded today is named per item.)*
+
+1. **Web egress is ON by default** (2026-08-22, pass 23). `GRANT_REQUIRED_CAPABILITY_IDS` is
+   the single source of "withheld when absent"; `use-web-search-fetch` is not in it, so an
+   absent grant leaves egress on. `app/shared/capabilities.ts`; pass-23 FINDINGS.
+2. **Codex operator: scratch-dir cwd and egress honoured** (2026-08-22, pass 24 Q1/Q2). The
+   Codex operator's writable root is an empty `.operator-scratch` beside `task.md`; its web
+   search follows `use-web-search-fetch`. `operator-run.server.ts`; pass-24 QUESTIONS.
+3. **`read-github-api` capability** (owner ruling "F4", 2026-08-21). A read-only,
+   authenticated GitHub read for Claude specialists, default off, server-made requests so the
+   PAT never reaches the agent. `app/server/github/agent-github-read.server.ts`. Mentioned
+   here only as a precedent inside ruling 99(d).
+4. **Seeded Developer defaults to Claude** (2026-08-21). `agent-catalog.server.ts`; see the
+   note under ruling 83.
+5. **Model unavailability is shown at the run control before a run is spent** (2026-08-21).
+   `specialist-run.server.ts` `listDeployedSpecialists`. Extension of ruling 78.
+6. **P8 full per-engagement workspace isolation; B2 backend-quota pre-run signal left as-is**
+   (2026-08-23, pass 25). Ruling 101(b) leans on "P8 isolation" as if recorded.
+7. **Pass 26** (2026-08-24): R26-1 task metadata (priority, labels, due date) reaches the
+   operator only, advisory, never the specialist prompt; R26-2 labels searchable on the board
+   and in ⌘K plus a board label filter; R26-3 "Completion rate" label; same change: the
+   run-concurrency cap (`maxConcurrentRuns`), S3 audit push, the org audit browse and
+   `/org/settings/audit-export`.
+8. **Pass 27** (2026-08-24): task keys stay letters-only (2–4); metadata nudges stay advisory;
+   **F27-B1 a retry-on-other-backend switch STICKS** (`engagements[].pinnedBackend` — an
+   exception to ruling 97's live-backend law); F27-U1 clone progress indicator; capability-
+   matrix repo-write honesty.
+9. **F28-A1** (2026-08-26): implicit OAuth account linking no longer trusts github/google for
+   unverified emails (`trustedProviders`); closes an account-takeover hole once OAuth is on.
+   Security-relevant amendment to ruling 72. Same pass: F28-L1 made ruling 77's auto-detect
+   reachable.
+10. **Pass 29** (2026-08-27): R29-1 operator proactivity is intended (no throttle on the
+    multi-run cascade); **R29-2 the seeded Developer ships `use-browser: direct` with an
+    explicit `use-web-search-fetch: direct`** (amends the "default off" story of rulings 75
+    and 95 for the built-in profile); R29-3 Codex disclosures key on backend, not identity;
+    R29-4 keep the matrix "Reserved for humans" label; `/insights` shipped.
+11. **R7-4 rework routing** (made visible 2026-08-27): the operator may move failing work
+    BACKWARD directly (`rework: true` when validation is failing); the snapshot lists
+    `reworkTargets`. Cited in code and pass-14/17 planning; no entry here.
+12. **Pass 31** (2026-08-31): F31-6 `resolve_remote_collision` packet kind and the
+    `discard_branch` authoring refusal (amends 17, 50, 77); F31-11 the stranded-resume backstop
+    is ONE nudge, then a deliberate `heldAtStage` hold (referenced in passing inside ruling
+    104); C5 per-row tolerant packet-option parsing (supersedes the F20-6 whole-packet arm).
+13. **Owner ruling "A8"**: the Codex idle timeout is an inactivity timeout, default 15 min
+    (`VIBERR_CODEX_IDLE_TIMEOUT_MS`); cited as an owner ruling in `codex-runtime.server.ts` and
+    `task-activity.server.ts`.
+
 ## Route map
 
 ```
@@ -1648,7 +1784,9 @@ the quieter packet or the bare owner cell as drift.)*
 /projects/:slug/tasks/:key
 /projects/:slug/tasks/:key/attachments/:file   (R19-19 — member-only, raw bytes)
 /org/settings                           (org admin, tabbed — incl. the Controller tab)
+/org/settings/audit-export              (org admin — CSV/JSON audit download, pass 26)
 /controller                             (ruling 99 — every signed-in user)
+/insights                               (org admin — run analytics, pass 29)
 /profile   /notifications   /notifications/read   /prefs/theme
 /resources/events  (SSE)   /resources/health   /resources/run-log
 /resources/search   /resources/session-export   /resources/model-catalog
@@ -1657,3 +1795,6 @@ the quieter packet or the bare owner cell as drift.)*
 *(Corrected 2026-08-06, pass 19, against `app/routes.ts`: `/projects`, `/notifications/read`,
 `/prefs/theme` and `/resources/search` — the ⌘K palette query from ruling 23 / R15-5 — ship but
 were never added here.)*
+
+*(Corrected 2026-09-01: `/org/settings/audit-export` and `/insights` ship and were missing. The
+per-route guard and form-intent inventory is in [`../ui/surfaces.md`](../ui/surfaces.md).)*

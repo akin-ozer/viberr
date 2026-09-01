@@ -12,22 +12,35 @@ Data-root layout (created at boot by `app/server/files/file-store-root.server.ts
 ```
 ${VIBERR_DATA_ROOT}/
   projects/<slug>/project.md              ← project truth
-  projects/<slug>/tasks/<KEY>/task.md     ← task truth (+ attachments/ later)
-  projects/<slug>/tasks/<KEY>/workspace/  ← the agent's git clone; NOT canonical,
-                                             not watched, not projected. 11-16 MB per
-                                             task; reclaimed at boot once the task
-                                             reaches its terminal stage
+  projects/<slug>/tasks/<KEY>/task.md     ← task truth
+  projects/<slug>/tasks/<KEY>/attachments/ ← agent-posted evidence files (canonical bytes,
+                                             served member-only, not projected — R19-19,
+                                             ruling 96)
+  projects/<slug>/tasks/<KEY>/workspace/  ← git clones (deliverer + operator share
+                                             <repo>/; each supporting run gets
+                                             support/<profileId>/<repo>/). NOT canonical,
+                                             not watched, not projected; reclaimed for
+                                             terminal-stage tasks at boot and on every
+                                             maintenance pass when no run is live
   projects/<slug>/goals/<id>.md           ← chained-goal truth (ruling 99)
+  projects/<slug>/.repo-mirror/           ← bare per-repo mirror (ruling 87); a cache
   agents/profiles/<id>.md                 ← org-level agent profile templates
-  runtimes/claude-home/ runtimes/codex-home/
-                                          ← NDJSON run logs + SDK session homes
+  agents/definitions/{operator,controller}.md ← shipped doctrine files
+  runtimes/<backend>/<runId>.jsonl        ← raw NDJSON run logs (the truth for run logs)
+  runtimes/claude-home/ runtimes/codex-home/ ← app-owned SDK homes (transcripts, auth.json)
   kb/<dir>/  skills/<slug>/               ← knowledge-base and skill folders
+  audit-exports/audit-events-<date>.jsonl ← rows exported before the 90-day audit purge
   state/projection.sqlite                 ← SQLite (never canonical for tasks)
+  state/writer.lock  state/shipped-assets.json
 ```
 
-That is the complete set `DATA_ROOT_SUBDIRS` creates. There is no `cache/`, `auth/` or
-`logs/` directory — they were removed on purpose (P11-56); application logs are structured
-JSON on stdout, and secrets live encrypted in SQLite. Note that `state/projection.sqlite`
+`DATA_ROOT_SUBDIRS` creates nine of these at boot (`projects`, `agents`, `agents/profiles`,
+`runtimes`, `runtimes/claude-home`, `runtimes/codex-home`, `kb`, `skills`, `state`); the rest
+appear when first written. There is no `cache/`, `auth/` or `logs/` directory — they were
+removed on purpose (P11-56); application logs are structured JSON on stdout, and secrets live
+encrypted in SQLite (the container image additionally keeps `runtimes/uv-cache` and
+`runtimes/uv-python` for Python MCP servers). *(Layout corrected 2026-09-01; the full table
+with retention is in [`data-model.md`](data-model.md).)* Note that `state/projection.sqlite`
 is *never canonical for tasks*, but it **is** primary storage for users, sessions, PATs,
 audit and notifications; see
 [`docs/operations/deployment.md`](../operations/deployment.md#persistence-backup--restore).
@@ -81,10 +94,15 @@ members:                          # project roles (4-role system, contracts §3.
                                   # (strict tier; `reviewer` was renamed `contributor` —
                                   # ruling 2 amendment. Source of truth: app/shared/rbac.ts)
 agents:                           # per-project DEPLOYMENT of profile templates
+  - profileId: operator
+    autonomy: supervised          # operator only: supervised | full (ruling 67)
+    capabilities: []
   - profileId: developer
-    capabilities:                 # id-based against CAP_CATALOG (ruling 2)
+    capabilities:                 # id-based against the shared catalog (ruling 2)
       - capabilityId: create-task-branch
-        mode: direct              # direct | recommend | human
+        mode: direct              # direct | recommend | human | off — specialists have
+                                  # no recommend lane; a stored recommend reads as off
+                                  # (ruling 81). Modes: CAPABILITY_MODES
     extras:                       # display-only bespoke labels (near-misses)
       - label: Push commits to the branch
         mode: human
@@ -93,7 +111,11 @@ credentialPolicy:                 # NON-secret policy; the PAT itself lives
   masked: github_pat_••••42af
   requiredScopes: [repo, pull_request:write]   # the exact minimum (ruling 18);
                                   # `workflow` and `read:org` were dropped 2026-07-25
-guardrails:
+guardrails:                       # four defaults (shared/workflow/templates.ts):
+                                  # meaningful-comment, no-duplicate-summary,
+                                  # compression-threshold (value 40), evidence-separation;
+                                  # delete-branch-after-merge is a fifth row whose
+                                  # ABSENCE means on (ruling 24)
   - id: compression-threshold
     desc: Long timelines compress once routine events pass the threshold; typed events are always kept.
     on: true
@@ -302,6 +324,15 @@ Notes:
   re-verified against the live remote before any writer closes the task to Done — a branch
   that has since gained commits cannot ride a stale flag into Done. Cleared the moment a
   delivery opens a PR. Do not hand-set it.
+- **Fields the sample omits** (all in `taskFrontmatterSchema`, added here 2026-09-01):
+  `priority` (`PRIORITY_VALUES`, default `normal`), `labels` (string list) and `dueDate`
+  (ISO or null) — advisory metadata that reaches the operator only (R26-1) and is
+  searchable on the board and in ⌘K; `acceptance: forced` when an admin force-accepted;
+  `goalRef: { goalId, linkIndex }` back-reference to a chained goal; `engagements[].pinnedBackend`
+  (set by a `retry_other_backend` resolution so the switch sticks, F27-B1); `pr.checks`,
+  `pr.review`, `pr.mergeable`, `pr.revisionDrift` (reconciler cache); each `schedules[]`
+  row carries `action` (`run-operator | run-agent`), `dueAt`, `profileId`, `prompt`,
+  `status` (`SCHEDULE_STATUS_VALUES`), `claimedAt`, `firedAt`.
 - Unknown top-level frontmatter keys are preserved verbatim on write (the legacy
   engagement keys above are the deliberate exception).
 
@@ -328,17 +359,19 @@ Notes:
   human would not read as a violation.
 - Optional metadata lines immediately after the heading (before the first
   blank line): `title: <text>` (completion events) and `to: agent`
-  (comments routed to the operator — `comment-card toagent` tint).
+  (comments routed to the operator — `comment-card toagent` tint). An
+  `attachments:` block (file names under `tasks/<KEY>/attachments/`) may follow
+  the text of an agent event, like `evidence:` (ruling 96).
 - Then a blank line and the event text (RichText micro-format: `**bold**`,
   `` `code` ``, `@mention`). Multi-line text is allowed.
 - **Body-line escaping** (structure-like text): an event-body line whose raw
   form would read as file structure — starting with `## `, `### `,
   `title:<ws>`, `to:<ws>`, or a line that is only (whitespace and)
-  `evidence:` — is written with ONE leading backslash: `\## Notes`,
+  `evidence:` or `attachments:` — is written with ONE leading backslash: `\## Notes`,
   `\### 2026-01-01T00:00:00Z · completion · operator`, `\title: x`,
   `\evidence:`. Lines that already start with backslashes in front of such a
   pattern gain one more on write. Readers strip exactly one backslash from
-  any line matching `^\\+(## |### |title:\s|to:\s|\s*evidence:\s*$)` when
+  any line matching `^\\+(## |### |title:\s|to:\s|\s*evidence:\s*$|\s*attachments:\s*$)` when
   reconstructing the text; all other lines (including `\` before
   non-structural text) pass through verbatim. The mapping is bijective, so
   round-trips stay byte-stable, and free text (including fenced code blocks
@@ -391,13 +424,16 @@ Notes:
   task move cannot leave the chain lying.
 - Goal files are app-written and never deleted by the product; terminal chains
   stay readable. `goals/*.md` is watched and projected like every canonical file.
+- The goal parser is **strict**, unlike the task and project parsers: any schema failure is
+  a hard stop for that file (surfaced as a diagnostic), so hand edits must round-trip
+  exactly. *(Noted 2026-09-01.)*
 
 ## 3. Actor references (contracts §3.1)
 
 | Actor | File encoding | Render shape |
 |---|---|---|
 | Human | `user:<userId>` or `user:<userId> (Display Name)` | `{ kind:"human", userId, name, initials, tone, guest? }` — resolved from the users table at projection time; the parenthetical is a snapshot fallback for deleted users; `guest` derives from project membership |
-| Agent | `agent:<backend>/<role-slug>` e.g. `agent:codex/developer` | `{ kind:"agent", backend, name:"Codex"\|"Claude Code", role }` |
+| Agent | `agent:<backend>/<profileId>` e.g. `agent:codex/developer`, optionally with a role snapshot `agent:codex/developer (Implementation)` | `{ kind:"agent", backend, name:"Codex"\|"Claude", role }` — the second segment is the **profile id**, never a role slug, and the backend label is "Claude" (ruling 92). *(Corrected 2026-09-01.)* |
 | Operator | `operator` | `{ kind:"agent", name:"Operator" }` (NO backend, NO role) |
 | Controller | `controller` | `{ kind:"agent", name:"Controller" }` (ruling 99 — instance machinery, same backend-less shape) |
 | System | `system:<id>` e.g. `system:policy-engine` | `{ kind:"system", name:"Policy engine" }` |
@@ -416,7 +452,9 @@ desc: Implements the change on the task branch and reports what it did.
                                   # the markdown body (the long persona).
 icon: branch                      # ui.jsx Icon name
 backends: [codex, claude]
-model: codex-large · claude-sonnet
+model: sonnet                     # ONE catalog id for the first backend (see
+                                  # docs/domain/agents-and-runtime.md §2.3);
+                                  # `effort:` is optional (controller today, ruling 106)
 scope: Global base · customized for Viberr Core
 stages: [ready, impl]             # eligible stages
 spanAll: false                    # operator only
@@ -431,6 +469,10 @@ resources:
 
 Profile description (markdown body).
 ```
+
+Unlike task and project files, unknown top-level keys in a profile raise a drift warning
+and are **dropped** by the serializer (`AGENT_PROFILE_KNOWN_KEYS`). A `kind: controller`
+profile is instance machinery: never deployed into a project's `agents:` list.
 
 Every value in `resources:` is a **store folder name, never a display name**. For
 `skills:` and `mcps:` the slug *is* the folder, so the two coincide. For `kb:` they do

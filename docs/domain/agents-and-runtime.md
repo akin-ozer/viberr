@@ -1,0 +1,483 @@
+# Agents and the run runtime
+
+> How a Claude or Codex process is started for a task, what it is allowed to do, what
+> it sees, how its output is stored and streamed, and how the server recovers when it
+> dies. Source of truth: `app/server/runtimes/*`, `app/server/tasks/specialist-*.ts`,
+> `app/server/tasks/agent-*.ts`, `app/shared/capabilities.ts`, `app/server/seed/*`.
+> Verified against `main` @ `68b5480` (2026-09-01). The operator's own behaviour is in
+> [operator.md](operator.md); the controller's in
+> [controller-and-goals.md](controller-and-goals.md).
+
+## 1. Vocabulary that bites
+
+- **Profile kind** (`agents/profiles/<id>.md`, `kind:`): `operator | specialist |
+  controller`. A specialist is any deployable agent that does stage work (Developer,
+  Reviewer, anything an admin creates).
+- **Run kind** (`agent_runs.kind`): `operator | primary | reviewer | controller`. This is
+  the **delivery axis**, not the persona: `primary` is the run of the delivering
+  engagement, `reviewer` is the run of *any* supporting engagement (a non-delivering
+  Developer is stored as `reviewer`), `controller` rows carry `project_slug = ''` and the
+  conversation id as `task_key`. The persona is in `role` and `agent_profile_id`.
+- **Engagement** (`task.md` `engagements[]`): an agent's seat on a task, with
+  `delivers: true|false`, `verdictCapable`, `backend`, optional `pinnedBackend`. At most
+  one entry delivers; it owns the workspace, branch and PR. Engagements are written by
+  the dispatch itself (ruling 98).
+- **Backend**: `claude` (Claude Agent SDK) or `codex` (Codex SDK 0.146.0). A profile lists
+  the backends it may run on; the first `codex` else `claude` is the deployment's
+  "primary run backend".
+
+## 2. Backends
+
+### 2.1 Credential detection
+
+`isBackendAvailable(backend)` re-probes on **every call**, never makes a paid request, and
+is what `/resources/health` reports as `backends: { claude, codex }` (`real |
+unavailable`). Seven paths count:
+
+| Backend | Available when any one holds |
+|---|---|
+| Claude | `ANTHROPIC_API_KEY` · `CLAUDE_CODE_OAUTH_TOKEN` · `VIBERR_CLAUDE_USE_CLI_AUTH` truthy **and** the Claude config dir is not refuted (`.credentials.json` present = `file`; on darwin an existing dir alone = `presence` because the keychain holds the login; a missing dir = `refuted`) |
+| Codex | `CODEX_ACCESS_TOKEN` · `CODEX_API_KEY` · `OPENAI_API_KEY` · `VIBERR_CODEX_USE_CLI_AUTH` truthy **and** `auth.json` exists under the *login* dir (`CODEX_HOME` or `~/.codex`) |
+
+Truthy means `1 | true | yes`. `backendCredentialHealth` also reports a verification
+level (`credential | file | presence | none`) and one misconfiguration text: when
+`CODEX_HOME` points at the app's own run home (`<dataRoot>/runtimes/codex-home`, which
+is what the Docker image sets) *and* CLI auth is on, the "source" and the mirror target
+are the same path. The container is expected to use `CODEX_ACCESS_TOKEN` or an API key.
+
+A run started on an unavailable backend fails fast with the tag `run·unavailable`, an
+honest error run and a blocked recovery packet. There is no fallback engine.
+
+### 2.2 App-owned config homes
+
+- Claude: `CLAUDE_CONFIG_DIR` wins; else with CLI auth on, `~/.claude`; else
+  `<dataRoot>/runtimes/claude-home`.
+- Codex: the run home is always `<dataRoot>/runtimes/codex-home`; the login source is
+  `CODEX_HOME || ~/.codex`. With CLI auth on, `prepareCodexHome` symlinks (or copies)
+  `auth.json` from the source into the run home before each selection and never throws.
+- Spawn env hygiene: every variable matching `CREDENTIAL_ENV_RE` (`API_KEY`, `TOKEN`,
+  `SECRET`, `PASSWORD`, `PRIVATE_KEY`, `CREDENTIALS`, `AUTH` …) and the private-runtime
+  set (`DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`) is stripped from
+  the child; only the selected backend's own credential is re-added. When a Codex
+  access token or cached login is in play, `CODEX_API_KEY`/`OPENAI_API_KEY` are deleted.
+
+### 2.3 Models and effort
+
+| Backend | Models (default first) | Efforts (default) | Rules |
+|---|---|---|---|
+| claude | `sonnet`, `opus`, `haiku` (aliases), plus any dated `claude-*` id containing a digit, plus the live list from `supportedModels()` (10 min cache, 15 s timeout) | `low medium high xhigh max` (`high`) | Alias or dated id runs verbatim; a string containing opus/haiku/sonnet maps to the alias; anything else falls back to the SDK default |
+| codex | `gpt-5.6-terra`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5` (closed list) | `low medium high xhigh` (`medium`); `minimal` accepted at run time, never offered | A model persisted for the other backend is **substituted silently** at start with only a `run·model_substituted` log line |
+
+`/resources/model-catalog?backend=` serves `{ models, efforts, defaultModel,
+defaultEffort }` to the profile editor (unknown backend → claude; `requireUser` only).
+Effort is ranked `minimal 0 … max 5` and clamped to the backend's list.
+
+**Availability marks** (`model_availability`): a model is marked unavailable only from a
+real run failure whose redacted text matches `MODEL_UNSUPPORTED_RE`, and cleared by a
+real success. Never a synthetic probe (ruling 19 generalised).
+
+**Quota and rate limits** (`instance_settings`): the run sink folds Claude
+`rate_limit_event` envelopes into `backendRateLimit.<backend>`; a quota-refused failure
+(terminal tag ending `·quota`) records `backendQuotaExhausted.<backend>` with the
+provider's sentence and a parsed reset instant (Claude `usage limit reached|<epoch>` is
+exact; Codex "try again at …" prose is resolved in UTC). Grace 24 h; an undated
+exhaustion expires after 6 h. Insights renders both; "no reading yet" is neutral.
+
+### 2.4 Claude adapter
+
+- Query options: `permissionMode: autonomous ? "bypassPermissions" : "default"`,
+  `maxTurns` (default 2000, `VIBERR_CLAUDE_MAX_TURNS`), `strictMcpConfig: true`,
+  `plugins: []`, `settingSources: ["project"]` only when native skills are mounted
+  (else `[]`), `disallowedTools` (binds even under bypass), `allowedTools` for the
+  toolkit and mounted MCP names. `systemPrompt` **replaces** the preset for operator and
+  controller runs and is `{ preset: "claude_code", append }` for specialists.
+- Denylists: `BASE_DENIED_BUILTINS` (Skill, Task*, Workflow, Cron*, ScheduleWakeup,
+  RemoteTrigger, Monitor, PushNotification, SendMessage, DesignSync, Enter/ExitWorktree;
+  `Skill` is re-allowed when native skills are mounted); operator read-only =
+  `Bash Edit MultiEdit Write NotebookEdit`; supporting runs additionally lose `Bash(git
+  push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr merge:*)`; capability-derived denies in
+  §4.3.
+- Timers: idle timeout 15 min (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`), interrupt grace 20 s
+  then abort grace 10 s.
+- `MANAGED_SETTINGS.claudeMdExcludes` is passed but the SDK drops it (documented inert);
+  the effective CLAUDE.md exclusion is the `settings.json` written by skill-mount.
+- Success = a `result` envelope with `!is_error`. Failures tag `run·error·<kind>` with
+  `kind ∈ quota | auth | session_missing | unknown`; idle → `run·error·idle_timeout`;
+  `error_max_turns` → `run·error·max_turns`. Provider text follows
+  `"\n\nThe provider reported: "`.
+
+### 2.5 Codex adapter
+
+- Per-run `config.toml` merged per leaf into `$CODEX_HOME`: `allow_login_shell: false`,
+  `project_doc_max_bytes: 0`, bundled skills and skill instructions off, apps/plugins/hooks
+  off, memories off, `developer_instructions = systemPrompt`, `mcp_servers`.
+- Only five env keys are re-exported through `shell_environment_policy`:
+  `GIT_CEILING_DIRECTORIES`, `GIT_AUTHOR_NAME/EMAIL`, `GIT_COMMITTER_NAME/EMAIL`.
+- **Sandbox mode** (`resolveCodexSandboxMode`), in order: operator → `read-only`;
+  repo-write withheld → `workspace-write` if an attachments dir exists else `read-only`;
+  autonomous deliverer with egress → `danger-full-access`; otherwise `workspace-write`.
+  `approvalPolicy: "never"`, `skipGitRepoCheck: true`; operator threads have network
+  off; withheld egress sets `webSearchMode: "disabled"`.
+- MCP servers are passed **without credentials** (argv exposure), and in-process SDK
+  servers are skipped. A bearer-token HTTP MCP is therefore unauthenticated on Codex.
+- No `maxTurns`; idle 15 min (`VIBERR_CODEX_IDLE_TIMEOUT_MS`); interrupt settle 20 s.
+- Success requires `turn.completed` with no top-level `turn.failed`/`error`; item-level
+  errors are non-fatal. Same failure kinds as Claude on the tag suffix.
+- Structured output: when a specialist has a verdict, ask or evidence grant, the run
+  carries `outputSchema = AGENT_OUTCOME_JSON_SCHEMA` and the envelope replaces the tool
+  calls a Claude specialist would make. The Codex operator returns a plan the server
+  executes ([operator.md §5](operator.md#5-tools-and-the-governed-actions-behind-them)).
+
+## 3. A run's life
+
+### 3.1 Persistence
+
+- `agent_runs`: `id, task_key, project_slug, thread_id, role, kind, backend, model,
+  session_id, sdk, state (queued|running|finished|error|interrupted), phase, step,
+  started_at, finished_at, turns, input_tokens, cached_input_tokens, output_tokens,
+  total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key`.
+- `run_log_lines`: `(run_id, seq)` unique, `raw_json`, `display_json`.
+- Raw NDJSON, the truth: `<dataRoot>/runtimes/<backend>/<runId>.jsonl` (always the run
+  id, never the session id).
+- Single-flight indexes: `idx_agent_runs__one_delivering` (one queued/running `primary`
+  per task) and `idx_agent_runs__one_live_per_support` (one per task and profile among
+  `reviewer` rows); the latter is re-created at every DB open for older roots. A
+  constraint hit becomes a 409 naming which index refused.
+- `staged_outcomes(outcome_key)` holds a specialist's `report_outcome` until completion
+  consumes it once (24 h TTL, in-memory cap 500).
+
+### 3.2 Reservation and admission
+
+`reserveRun` writes a `running` row with a phase before the clone starts, or declines
+when the instance cap is exhausted; `assertRunReservationLive` re-checks after the
+clone. `startRun` audits `runtime.run.started`, substitutes foreign-backend models,
+fails unavailable backends, and otherwise `launch`es a reserved row or `admitRun`s into
+a `pending` queue drained on every completion. The cap is the instance setting
+`maxConcurrentRuns` (0 = unlimited, ceiling 64, Org settings → set-concurrency).
+Default thread ids: `op-<8>`, `primary-<8>`, `r<idx>-<8>`, `controller`.
+
+### 3.3 Streaming
+
+Adapter callbacks → `createRunSink` per line: fold facts → record rate limit → **redact**
+(spawn-env values ≥ 12 chars that match the credential regex, plus `TOKEN_PATTERN_SOURCE`)
+→ record quota exhaustion → append raw NDJSON → insert `run_log_lines` (display only) →
+patch run facts → publish `run.log-appended {runId, seq}` (reference only). The
+`wire-format` projector maps provider envelopes to display lines with `ev ∈ init | text
+| tool | out | err | result | think | meta | diff`; the `step` column advances only on
+`tool` lines (cap 120) and phases are `preparing | starting | working | finishing`
+(updates throttled to 1 s).
+
+Consumers: `GET /resources/run-log?runId=&since=|before=&limit=` (1..500, member-gated;
+controller runs by conversation ownership) returns `{ runId, threadId, state, lines,
+headSeq, oldestSeq, hasMore }`. The client `useRunLogStream` keeps its own `EventSource`
+on the task scope, fetches since `headSeq` on each reference, revalidates once on
+`run.state-changed`, and pages backwards 200 lines at a time. Controller runs publish
+no SSE (`projectSlug === ""`).
+
+### 3.4 Interrupt and completion
+
+`interruptRun` needs `run-agents` (admin or maintainer, non-archived): a live handle gets
+`handle.interrupt()` and `interruptedBy`; a dead one is patched to `interrupted` and its
+slot released; audit `runtime.run.interrupted`. The sink's `finalize` lets the first
+terminal writer win, sets `finishedAt`, clears the backend's quota-exhaustion record on
+`finished`, drains the pending queue, then fires the registered completion callback. A
+callback that throws goes through `noteCompletionEffectsLost`: waiting flips to human
+and a `continuity` timeline event is written, so a lost effect is visible.
+
+### 3.5 Failure kinds
+
+`RunFailureKind = quota | auth | unavailable | max_turns | idle_timeout |
+session_missing | unknown`, read from the terminal tag suffix first and regexes second.
+The completion pipeline opens a stuck-loop packet with a `retry_other_backend` option
+for `quota | auth | unavailable`, notes model availability, and clears waiting to human.
+
+### 3.6 Resume, continuity, export
+
+- `resumeRun` mints `thread_id = prev + "-r" + 6 chars`, probes the provider session
+  (`SESSION_MISSING_RE`: "no conversation found", "rollout not found" …). A missing
+  session records `run·session_missing`, writes a `continuity` timeline event (actor
+  `runtime-continuity`) and starts a fresh run whose prompt carries a continuity-reset
+  preamble anchored on `task.md`. Boot recovery reuses the same path.
+- Transcripts: Claude `$CLAUDE_CONFIG_DIR/projects/<cwd-dashes>/<sid>.jsonl`; Codex
+  `<home>/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl`. `GET
+  /resources/session-export?run=` (member-gated, 404 without a transcript on disk)
+  downloads a bash installer that drops the transcript where the local CLI looks and
+  prints `claude --resume <id>` / `codex resume <id>`.
+- Transcript existence is cached 30 s (500 entries) for the Export link.
+
+### 3.7 What the UI shows
+
+`run-projection` builds a per-task window of 400 lines / 384 KiB, newest run first,
+with `run·resumed` boundary lines between runs; groups are keyed `operator` or
+`<kind>:<profileId>`. Render states: running → running, error → error, finished →
+done or idle, queued/interrupted → idle. `failedBackendUnavailable` (tag
+`run·unavailable` or known signatures) adds an `altBackend` hint. Two UI facts worth
+knowing: every `error` run is labelled **"continuity error"**, not only session
+failures; and telemetry tags are collapsed by `log-noise.ts`. The console shows the
+redacted `run·inputs` line so a human can see exactly what the agent was given.
+
+## 4. Specialist runs
+
+### 4.1 Dispatch
+
+`startAgentRun` → `dispatchAgentRun`:
+
+- `wantsDelivery = input.delivers ?? (no current deliverer && profile is
+  delivery-capable)`; an explicit hand-off requires the repo-write grant; a second
+  deliverer is refused; `delivers: false` on the current deliverer is refused.
+- Backend = `backendOverride ?? engagement.pinnedBackend ?? resolved profile backend ??
+  snapshot`. `pinnedBackend` is written by a `retry_other_backend` packet resolution so
+  the switch sticks.
+- Workspace: the deliverer clones into `tasks/<KEY>/workspace/<repo>` through the
+  project mirror; each supporting run gets `workspace/support/<profileId>/<repo>`, a
+  fresh `git clone --local` of the delivering checkout. On clone failure the run
+  continues from the workspace root and says so.
+- Then: mount granted skills (Claude), resolve the browser MCP, build the persona and
+  the analyze prompt (task text, comments and repo content are **data**, never
+  authority), resolve delivery permissions, compute the denylist (or the "everything
+  off" list when the profile vanished, ruling 26), write the redacted `run·inputs`
+  line, audit `task.agent.run_started`, mark `waiting: agent`, register the completion
+  callback. A resume re-derives all of it (`resolveResumeConfinement`).
+- Git identity in the run: `<profileId>@viberr.local`; `GIT_CEILING_DIRECTORIES` is the
+  task dir.
+
+Stage eligibility (`stages:` on the profile, `spanAll`) is asserted on assignment and
+dispatch; an empty list means eligible everywhere.
+
+### 4.2 The `viberr_agent` toolkit (Claude specialists)
+
+Mounted only when at least one tool is granted; Codex specialists get the outcome
+envelope instead.
+
+| Tool | Grant | Effect |
+|---|---|---|
+| `post_comment` | `comment-on-task` | timeline comment, audit `task.agent.commented` |
+| `ask_human {title, body?, options?}` | `ask-human` | opens an "Agent question" input packet with `askedBy = profileId` (≤ 4 custom options); refused while a packet is open; the resolution resumes this agent (ruling 33) |
+| `report_outcome {summary, verdict?, evidence?}` | `report-validation-verdict` for `verdict`, `attach-evidence-references` for `evidence` | staged under the run's `outcome_key`, consumed once at completion |
+| `github_read {path}` | `read-github-api` | GET-only, repo-scoped read through the project PAT on the server (≤ 48 000 chars), audit `task.agent.github_read` |
+
+### 4.3 Capability → enforcement
+
+Claude: `CAP_DENY_RULES` turn withheld grants into `disallowedTools`. Codex: the same
+markers become `repoWriteWithheld` (`Edit|Write|NotebookEdit` denied) and
+`webSearchWithheld` (`WebFetch|WebSearch` denied) and drive the sandbox mode (§2.5).
+
+| Withheld capability | Claude denies | Codex |
+|---|---|---|
+| `execute-code-or-write-repo` (headline) | `Edit MultiEdit Write NotebookEdit Bash(git commit:*)` | read-only sandbox |
+| `create-task-branch` | `Bash(git checkout -b:*)`, `-B`, `git switch -c/-C` | advisory |
+| `commit-push-branch` | `Bash(git push:*) Bash(git commit:*)` | advisory |
+| `open-review-pr` | `Bash(gh pr create:*)` | advisory |
+| `merge-pull-request` (always human) | `Bash(gh pr merge:*)` | advisory |
+| `use-web-search-fetch` | `WebFetch WebSearch` | `webSearchMode: disabled` |
+| `comment-on-task`, `ask-human`, `report-validation-verdict`, `read-github-api` | the toolkit tool is not built | envelope field ignored / not requested |
+
+"Withheld" means: always-human ids always; absent grant when the id is in
+`GRANT_REQUIRED_CAPABILITY_IDS`; mode `human` or `off`. Specialists have no `recommend`
+lane: a stored `recommend` is coerced to `off` on read (ruling 81). Delivery permissions
+`{ canBranch, canCommitPush, canOpenPr }` are keyed on the headline write grant.
+
+### 4.4 Completion
+
+`registerAgentCompletion` → `applyAgentCompletionEffects`:
+
+1. Grants are re-resolved live (an undeployed profile becomes fully withheld).
+2. Envelope = staged outcome by `outcome_key`, else a Codex parse when one was
+   requested. The reply comment is posted (audit `task.agent.replied`, the recovery
+   idempotency marker), with a cc-line to the dispatcher (`@<name>` or `@operator`).
+3. Verdict: envelope → prose classification (`classifyReviewerVerdict`) → at the review
+   stage a "no verdict" note unless a human directive dispatched the run.
+   `verdictAuthorized = engagement.verdictCapable ?? live verdict grant`.
+4. Question → packet using the live ask grant; evidence rows are written; browser
+   working artifacts not cited are pruned (ruling 105).
+5. Error runs: `blocked` timeline event, model-availability note, stuck-loop packet
+   with `retry_other_backend`, waiting → human.
+6. Finished deliverer runs reconcile what the agent pushed itself
+   (`reconcileWorkspaceDelivery`).
+7. The operator reacts (`trigger: agent-reply`) when the reply is non-empty, differs
+   from the previous one and `reactDepth < 4`, or always when the run was dispatched by
+   name; otherwise a stuck packet and waiting → human. Auto-transition chains are
+   capped at 8.
+
+Comments addressed to agents route by handle (`agent-reply.server.ts`): `@operator` →
+`@agent` (the deliverer) → a named specialist (name or id) → a single backend
+candidate; an ambiguous backend handle routes to nobody. Reserved handles: `operator`,
+`agent`, `claude`, `codex`. The resumed session is the latest run matching profile,
+kind and backend that is not marked session-missing; the reply preview is capped at
+1 200 chars and workspace paths are normalised.
+
+### 4.5 Scheduled runs
+
+`schedules[]` in `task.md`: `scheduleTaskAction({ dueAt, action: run-operator |
+run-agent, profileId?, prompt? })` (future only, not on a terminal task, profile must
+be deployed; audit `task.schedule.created`/`cancelled`). `startScheduleRunner` fires at
+boot and every 60 s: it claims in the file (lease = clone timeout + 5 min, 3 retries),
+skips moot schedules with an outcome (`skipped-done`, `skipped-archived`), starts the
+agent (`400` → failed, `409` → back to pending) or runs the operator with `trigger:
+scheduled`, and audits `task.schedule.fired`. A schedule pins no backend or autonomy
+(ruling 94).
+
+## 5. The capability catalog
+
+`UNIFIED_CAP_CATALOG` in `app/shared/capabilities.ts`; modes `direct | recommend | human |
+off`.
+
+| id | Kinds | Default | Enforcement | Notes |
+|---|---|---|---|---|
+| `dispatch-agents` | operator | direct | operator gate | absent ⇒ granted |
+| `generate-packets` | operator | direct | operator gate | |
+| `append-typed-events` | operator | direct | operator gate | |
+| `stage-transitions` | operator | recommend | operator gate | full autonomy promotes to direct |
+| `completion-for-acceptance` | operator | recommend | operator gate | `promotable: false`; never promoted |
+| `deliver-review-pr` | operator | direct | operator gate | absent ⇒ recommend when a human gates pre-work, else direct (ruling 28) |
+| `update-task-branch` | operator | direct | operator gate | absent follows delivery |
+| `execute-code-or-write-repo` | agent | direct | both | headline write grant; grant-required |
+| `create-task-branch` | agent | direct | claude-only | scoped; grant-required |
+| `commit-push-branch` | agent | direct | claude-only | scoped; grant-required |
+| `open-review-pr` | agent | direct | claude-only | scoped; grant-required |
+| `comment-on-task` | agent | direct | claude-only | |
+| `ask-human` | agent | direct | both | |
+| `use-web-search-fetch` | agent, operator | direct | both | absent ⇒ granted |
+| `use-browser` | agent | off | both | direct forces egress direct (ruling 95) |
+| `read-github-api` | agent | off | claude-only | `promotable: false` |
+| `report-validation-verdict` | agent | off | both | grant-required; gates `approve-review`, `request-changes`, `post-quality-flags` |
+| `attach-evidence-references` | agent | direct | both | |
+| `run-unit-integration-validation`, `move-task-to-review`, `read-repo-diff`, `run-validation-suites`, `post-quality-flags`, `approve-review`, `request-changes`, `author-test-cases`, `read-task-repo`, `flag-underspecified-tasks` | agent | direct | advisory | persona text only, disclosed as such (ruling 31) |
+| `merge-pull-request`, `transition-to-done`, `change-project-policy` | agent | human | always human | never produce a tool on either side |
+
+Couplings applied on save: `repairDeliveryGrants` (the headline is materialised as
+direct only when absent; an explicit off/human is respected with a "withheld" notice),
+`repairBrowserEgressGrants`. `withheldAgentGrants()` (human kept, everything else off)
+is what an undeployed or grant-less specialist runs with. MCP grants are outside the
+matrix (ruling 39).
+
+Absent-grant polarity is deliberately not uniform: `dispatch-agents` and
+`use-web-search-fetch` absent ⇒ granted; `deliver-review-pr` absent ⇒ derived from
+workflow strictness; the grant-required family absent ⇒ withheld.
+
+## 6. Context mounting
+
+- **Skills, Claude**: `mountGrantedSkills` copies each granted `skills/<slug>` folder
+  into the workspace `.claude/skills/` (no symlinks, no nested `.git`, SKILL.md
+  frontmatter rewritten to `name` + `description` ≤ 400 chars, a `.viberr-mount` marker
+  written last), after `stripUngovernedRepoCatalog` has hidden the repo's own tracked
+  `.claude` with `git update-index --skip-worktree`. `settings.json` carries the
+  CLAUDE.md excludes; `.claude/` is appended to `.git/info/exclude` so it can never ride
+  into the delivered PR. The run then gets `settingSources: ["project"]` and a native
+  `skills:` allow-list (ruling 51).
+- **Skills, Codex and the operator**: bodies are injected into the prompt under a shared
+  24 000-char budget (`skill-body.server.ts`); symlinked folders or files are refused.
+- **Knowledge bases**: text files under `kb/<dir>` (depth ≤ 32, no symlinks, no
+  dotfiles) are injected under a separate 24 000-char budget with `### <rel>` headings and
+  truncation markers; `KB_PRECEDENCE_NOTE` (repo conventions outrank KBs) is emitted only
+  when KB text is present, by all three runtimes (ruling 56). Supporting runs inherit the
+  deliverer's KBs, deduplicated, and nothing else (rulings 47, 57).
+- **MCP servers**: org registry rows resolve to stdio `{command, args, env:
+  {MCP_CREDENTIAL}}` or http `{url, headers: {Authorization: Bearer}}`; reserved names
+  are skipped; a missing row is reported "unresolved"; an unhealthy row is still
+  mounted but flagged; stdio mounts get a real discovery handshake before the run and
+  are dropped (and marked unreachable) on failure. Precedence when names collide:
+  org < browser < toolkit. Reserved names: `viberr`, `viberr_agent`, `viberr-agent`,
+  `viberr_browser`, `viberr-browser`, `viberr_controller`, `viberr-controller`,
+  `viberr_ops`, `viberr-ops`.
+- **Browser**: `viberr_browser` = `@playwright/mcp` cli.js run with `process.execPath`,
+  `--headless --isolated --output-dir <attachments>` (+ `--image-responses omit` on
+  Codex, + `--executable-path $VIBERR_BROWSER_EXECUTABLE --no-sandbox` when set).
+  Requires effective `use-browser: direct` **and** `use-web-search-fetch: direct` and
+  the package on disk. `/resources/health.browser` is the instance-level probe.
+
+## 7. Workspaces and git
+
+- Layout: `projects/<slug>/tasks/<KEY>/workspace/<repoName>` (deliverer and operator,
+  shared), `…/workspace/support/<profileId>/<repoName>`, Codex operator scratch
+  `<taskDir>/.operator-scratch`, attachments `<taskDir>/attachments/`.
+- Mirror (ruling 87): bare `projects/<slug>/.repo-mirror/<owner>__<repo>.git`, `fetch
+  --prune` with a heads-to-heads refspec before each clone (timeout 120 s, rebuilt after
+  2 consecutive failures), then a local hardlinked clone with `origin` rewritten to the
+  credential-free `https://github.com/<repo>.git`; a shallow direct clone is the
+  fallback.
+- Credentials never touch argv or `.git/config`: the PAT is delivered through
+  `GIT_ASKPASS` (`x-access-token`), `GIT_TERMINAL_PROMPT=0`, credential helper reset.
+  Clone timeout 15 min (`VIBERR_GIT_CLONE_TIMEOUT_MS`); progress is streamed to the run
+  strip ("Receiving objects" 0..90 %, "Resolving deltas" 90..100 %).
+- Retention: workspaces of tasks in the terminal stage are removed at boot (after run
+  recovery, only when no run is live) and on every maintenance pass; transcripts and
+  session homes older than 30 days are pruned (`VIBERR_TRANSCRIPT_RETENTION_DAYS`,
+  `VIBERR_SESSION_HOME_RETENTION_DAYS`, `0` = forever).
+
+## 8. Boot recovery
+
+`reconcileRestartedWork` (fire-and-forget after the watchers start):
+
+0. `finalizeOrphanedRuns`: `running|queued` rows → `error` with `interruptedBy:
+   "restart"` (controller runs skipped); one `runOperator({ trigger: "manual" })` per
+   affected task, capped at 3 per task per 30 min via `run.recovery.reinvoked` audit
+   rows.
+1. `recoverUnreactedAgentRuns`: finished specialist runs on tasks still `waiting: agent`
+   with no `task.agent.replied` audit row carrying their run id are replayed through the
+   completion pipeline using the persisted `outcome_key` (audit
+   `run.recovery.reply_replayed`).
+2. `recoverStrandedOperatorPlans`: finished Codex operator runs younger than 1 h with no
+   `runtime.operator.plan_executed` audit row are executed.
+3. After the re-invokes settle, terminal workspaces are reclaimed only if no run is
+   active.
+
+Both marker actions are exempt from the 90-day audit purge for exactly this reason.
+Every mutating request is also bounded by a 30 s action watchdog (503 on an async hang).
+
+## 9. Guardrails and loop bounds
+
+- Comment guardrails (`project.md` `guardrails`, defaults on): `meaningful-comment`
+  (only strings ≤ 60 chars can be meaningless), `no-duplicate-summary`,
+  `evidence-separation` (fences longer than 12 lines are moved to evidence, 3 lines
+  kept), `compression-threshold` (project default 40 events; the module fallback is
+  60 / keep 24). Dropped comments audit `task.comment.dropped`. No length cap (ruling
+  104).
+- Prompt-side rules: task text, comments, repo content and agent reports are data; a
+  directive is not an authority grant; a directive asking for delivery posts a policy
+  event; supporting runs get the read-only paragraph and the delivery denies.
+- Bounds: operator react depth 4, transition chain 8, carried triggers 8, recovery
+  re-invokes 3 per 30 min, schedule retries 3, Claude max turns 2000, idle 15 min per
+  backend, action watchdog 30 s.
+
+## 10. Seeded catalog
+
+`SEED_AGENT_PROFILES` (written by `npm run seed` and the demo seed) and the shipped
+base templates (`app/server/seed/assets/`, refreshed by hash through
+`state/shipped-assets.json`, hand-edited copies kept and warned about):
+
+| Profile | Kind | Backends | Model | Stages | Skills / KB | Grants |
+|---|---|---|---|---|---|---|
+| `operator` | operator | claude, codex | `orchestration runtime` (a sentinel, not a catalog id; falls back to the backend default) | all (`spanAll`) | `viberr-app-expertise` / `architecture-notes` in demo stores, `kb: []` in the base template | direct: dispatch, packets, typed events, deliver; recommend: transitions, acceptance; human: repo write, done, policy |
+| `developer` | specialist | claude, codex (Claude first) | `sonnet` | ready, impl | `developer-expertise` / `architecture-notes`, `api-contracts` | direct: repo write, branch, commit/push, open PR, comments, ask, browser, egress, advisory items; human: merge, done |
+| `reviewer` | specialist | claude | `sonnet` | impl, review | `reviewer-expertise` / `api-contracts` | direct: read diff, validation suites, tests, evidence, quality flags, comments, ask, verdict, approve, request changes; human: merge, done, commit/push |
+| `controller` | controller | claude | `sonnet` | n/a | `controller-guide` / `controller-handbook` | none (tools are gated by the asker's RBAC) |
+
+`ensureBaseAgentsDeployed` runs at boot: the operator is ensured on every project;
+Developer and Reviewer are backfilled only into a project with **no** specialists.
+Profile files use `agentProfileFrontmatterSchema` (kind, icon default `cpu`, `resources
+{skills, mcps, kb}`); unknown keys raise a drift warning and are dropped by the
+serializer. Deployment overrides (`project.md` `agents[]`) carry autonomy `supervised |
+full` and the project-effective grants.
+
+## 11. Gotchas
+
+1. `kind: reviewer` means "supporting run", not "the Reviewer profile".
+2. Specialist `recommend` coerces down to `off`; operator `recommend` promotes up to
+   `direct` under full autonomy, except acceptance.
+3. Codex drops MCP credentials and browser images; a bearer-token MCP silently runs
+   unauthenticated there.
+4. Foreign-backend models are substituted silently at start.
+5. `RUN_STATE.error` is labelled "continuity error" for every error run.
+6. Several code comments still describe Codex repo-write as "advisory since R22"; the
+   sandbox mode enforces it since ruling 101.
+7. The `MANAGED_SETTINGS` SDK option is inert; `settings.json` from skill-mount is the
+   real exclusion mechanism.
+8. The Dockerfile sets `CODEX_HOME` to the run home; combined with
+   `VIBERR_CODEX_USE_CLI_AUTH=1` this is the reported misconfiguration. Use a token in
+   containers.
+9. A supporting Claude run with write grants can commit locally in its own support
+   checkout; only push, PR create and PR merge are denied on top of the grants.
+
+Environment variables for all of the above are listed in
+[../operations/configuration.md](../operations/configuration.md).

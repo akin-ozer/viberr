@@ -18,8 +18,16 @@ copy lacked. On 2026-07-28 the design copy absorbed the full 2026-07-25 set plus
 pass-15 rulings (FR4, FR27, FR31), so the two agree again. On any future divergence,
 `planning-artifacts/` wins.
 
-Implementation behavior is verified by the source and test suite; completed discovery
-passes and generated handoff ledgers are not retained here. Binding conventions and the
+Implementation behavior is verified by the source and test suite. The code-verified
+description of the system as built lives in [`docs/`](../docs/README.md) (2026-09-01);
+`planning-artifacts/architecture.md` and `ux-design-specification.md` remain the design
+intent and history, and where they disagree with the code the code wins — the known
+disagreements are listed in
+[`docs/validation/2026-09-01-doc-validation.md`](../docs/validation/2026-09-01-doc-validation.md).
+Requirement-by-requirement status against the PRD is in
+[`docs/product/requirements-status.md`](../docs/product/requirements-status.md). Completed
+discovery passes and generated handoff ledgers under `discovery-*/` are retained as history
+only. Binding conventions and the
 numbered orchestrator rulings that code comments cite live in
 [`docs/architecture/decisions.md`](../docs/architecture/decisions.md).
 
