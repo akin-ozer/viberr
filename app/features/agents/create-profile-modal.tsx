@@ -112,13 +112,7 @@ export function effortLabel(id: string): string {
  * catalog doesn't know — exactly what `resolveRunModel` would substitute at
  * run time, so the picker shows what would actually run).
  */
-export function useModelCatalog(
-  backend: "codex" | "claude" | "",
-  model: string,
-  setModel: (v: string) => void,
-  effort: string,
-  setEffort: (v: string) => void,
-): {
+export interface ModelCatalogState {
   catalog: ModelCatalog | null;
   catalogLoading: boolean;
   catalogFailed: boolean;
@@ -126,7 +120,15 @@ export function useModelCatalog(
   selectedModel: CatalogModel | null;
   showEffort: boolean;
   effortOptions: string[];
-} {
+}
+
+export function useModelCatalog(
+  backend: "codex" | "claude" | "",
+  model: string,
+  setModel: (v: string) => void,
+  effort: string,
+  setEffort: (v: string) => void,
+): ModelCatalogState {
   // Fetched whenever a backend is selected (open in edit mode, or the backend
   // radio changes in create mode). The endpoint returns the curated fallback
   // even with no credential, so the pickers always populate.

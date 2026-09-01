@@ -2,6 +2,7 @@
 import { cleanup, render, fireEvent, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import { ToastProvider } from "~/ui/toast";
 import {
@@ -61,6 +62,9 @@ afterEach(cleanup);
 
 let lastForm: Record<string, string> | null = null;
 
+/** A posted form field the panel sets (text only — the page-test rule). */
+const textField = z.string();
+
 function renderPanel(overrides: Partial<ControllerConfigView> = {}) {
   lastForm = null;
   const config = { ...CONFIG, ...overrides };
@@ -81,7 +85,10 @@ function renderPanel(overrides: Partial<ControllerConfigView> = {}) {
         const fd = await request.formData();
         lastForm = {};
         for (const [k, v] of fd.entries()) {
-          if (typeof v === "string") lastForm[k] = v;
+          // The panel posts text fields only; a File entry names no field
+          // these tests capture (the page-test harness's textField rule).
+          const field = textField.safeParse(v);
+          if (field.success) lastForm[k] = field.data;
         }
         return { ok: true, toast: "stub done" };
       },
@@ -96,9 +103,11 @@ function renderPanel(overrides: Partial<ControllerConfigView> = {}) {
 
 describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
   it("picks the model from the catalog select, not a free-text field", async () => {
-    const { container, getByLabelText, getByText } = renderPanel();
-    const select = getByLabelText("Model");
-    expect(select.tagName).toBe("SELECT");
+    const { container, getByText } = renderPanel();
+    const select = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Model"]',
+    );
+    expect(select).toBeTruthy();
     // The old panel's free-text model input is gone for good.
     expect(
       container.querySelector('input[placeholder*="model id or alias"]'),
@@ -106,31 +115,34 @@ describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
     // Catalog answered: the stored model is the selected option, and the
     // catalog's own description renders under the select — the profile
     // editor's exact treatment.
-    await waitFor(() =>
-      expect((select as HTMLSelectElement).value).toBe("opus"),
-    );
+    await waitFor(() => expect(select?.value).toBe("opus"));
     expect(getByText("Most capable.")).toBeTruthy();
   });
 
   it("seeds an empty stored model to the catalog default the runtime would use", async () => {
-    const { getByLabelText } = renderPanel({ model: "", effort: "" });
-    await waitFor(() =>
-      expect((getByLabelText("Model") as HTMLSelectElement).value).toBe(
-        "sonnet",
-      ),
+    const { container } = renderPanel({ model: "", effort: "" });
+    const model = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Model"]',
     );
+    await waitFor(() => expect(model?.value).toBe("sonnet"));
     // Effort defaults alongside (resolveRunModel/resolveRunEffort honesty).
-    expect((getByLabelText("Effort") as HTMLSelectElement).value).toBe("high");
+    expect(
+      container.querySelector<HTMLSelectElement>('select[aria-label="Effort"]')
+        ?.value,
+    ).toBe("high");
   });
 
   it("saves model, effort and the grants (KBs by dir) in one intent", async () => {
-    const { getByLabelText, getByText } = renderPanel();
-    await waitFor(() =>
-      expect((getByLabelText("Model") as HTMLSelectElement).value).toBe(
-        "opus",
-      ),
+    const { container, getByText } = renderPanel();
+    const model = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Model"]',
     );
-    fireEvent.change(getByLabelText("Effort"), { target: { value: "xhigh" } });
+    const effortSel = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Effort"]',
+    );
+    await waitFor(() => expect(model?.value).toBe("opus"));
+    expect(effortSel).toBeTruthy();
+    fireEvent.change(effortSel!, { target: { value: "xhigh" } });
     fireEvent.click(getByText("Save controller"));
     await waitFor(() => expect(lastForm).not.toBeNull());
     expect(lastForm).toMatchObject({
