@@ -1,14 +1,7 @@
 import { data } from "react-router";
-import { heldDataRootLock } from "~/server/db/data-root-lock.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { isFileWatcherAlive } from "~/server/files/file-watch.service.server";
-import { isKbWatcherAlive } from "~/server/files/kb-watch.service.server";
 import { logger } from "~/server/logging/logger.server";
-import { getBuildInfo } from "~/server/ops/build-info.server";
-import { cachedDataRootSpace } from "~/server/ops/disk-space.server";
-import { maintenanceState } from "~/server/ops/maintenance.server";
-import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
-import { browserRuntimeStatus } from "~/server/tasks/specialist-browser-mcp.server";
+import { healthSnapshot } from "~/server/ops/health-snapshot.server";
 
 /**
  * GET /resources/health — ops probe (Phase 10, docs/architecture/decisions.md route map).
@@ -65,83 +58,23 @@ function requestedProbe(request?: Request): string | null {
 
 export async function loader(args?: { request?: Request }) {
   try {
-    const db = getDb();
-    // SAFETY: `SELECT count(*) AS c` is an aggregate with no GROUP BY — sqlite
-    // answers it with exactly one row carrying the single integer column `c`.
-    const projects = (
-      db.prepare(`SELECT count(*) AS c FROM projects`).get() as { c: number }
-    ).c;
-    // SAFETY: same aggregate guarantee as the `projects` count above.
-    const tasks = (
-      db.prepare(`SELECT count(*) AS c FROM task_projections`).get() as {
-        c: number;
-      }
-    ).c;
-    const lock = heldDataRootLock();
-    const watcher = isFileWatcherAlive();
-    const kbWatcher = isKbWatcherAlive();
-    // Cached (5 s TTL) — this route is unauthenticated and polled every few
-    // seconds by container platforms; a disk fills over hours.
-    const disk = cachedDataRootSpace();
-
-    const degraded: string[] = [];
-    if (!watcher) degraded.push("watcher");
-    if (!kbWatcher) degraded.push("kbWatcher");
-    if (!lock) degraded.push("lock");
-    if (disk && disk.status !== "ok") degraded.push("disk");
+    // Ruling 107: the reading is assembled in `healthSnapshot` so the
+    // controller's `viberr_ops` diagnostics tool answers from the SAME
+    // derivation instead of a second one that drifts. Spread after `ok` keeps
+    // the wire body byte-for-byte what it was.
+    const snapshot = healthSnapshot(getDb());
 
     const probe = requestedProbe(args?.request);
     const readiness = probe === "readiness" || probe === "ready";
-    const status = degraded.length > 0 ? ("degraded" as const) : ("ok" as const);
 
     return data(
       {
         // Liveness, unchanged meaning: false only when SQLite is unreachable.
         // Read `status`/`degraded` for the honest verdict.
         ok: true as const,
-        status,
-        degraded,
-        projections: { projects, tasks },
-        watcher,
-        kbWatcher,
-        // B-FD1/F18-5: which process owns the single-writer lock on this data root.
-        // pid/hostname/startedAt only (bootId is internal) — enough for a human to
-        // confirm exactly one writer and to see WHO it is over a shared mount.
-        lock: lock
-          ? {
-              pid: lock.holder.pid,
-              hostname: lock.holder.hostname,
-              startedAt: lock.holder.startedAt,
-            }
-          : null,
-        backends: {
-          // Env-presence only — never probes token validity (see docblock).
-          claude: isBackendAvailable("claude") ? "real" : "unavailable",
-          codex: isBackendAvailable("codex") ? "real" : "unavailable",
-        },
-        // Whether the `use-browser` capability's runtime (chromium + the
-        // Playwright MCP CLI) is actually installed. Informational, NOT a
-        // `degraded` fault — same stance as `backends`: a deployment that never
-        // grants the browser is correct, but when chromium is missing this now
-        // says so BEFORE a browser-granted run is spent, instead of the run
-        // failing deep inside its first tool call (the ex-invisible gap).
-        browser: (() => {
-          const b = browserRuntimeStatus();
-          return b.available
-            ? ({ status: "ready" as const } as const)
-            : ({ status: "unavailable" as const, reason: b.reason } as const);
-        })(),
-        // Free space on the data root, with the thresholds in force. null when
-        // the filesystem could not be measured — never a fabricated 0.
-        disk,
-        // Proof the periodic pruner is alive (lastPassAt null until its first
-        // pass — neutral, not a fault).
-        maintenance: maintenanceState(),
-        // Which build is serving. Nulls are honest: this image was built
-        // without a version stamp and has no checkout to read.
-        build: getBuildInfo(),
+        ...snapshot,
       },
-      readiness && degraded.length > 0 ? { status: 503 } : undefined,
+      readiness && snapshot.degraded.length > 0 ? { status: 503 } : undefined,
     );
   } catch (error) {
     logger.error("health check failed", {
