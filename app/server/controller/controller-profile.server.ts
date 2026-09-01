@@ -210,10 +210,12 @@ export function saveControllerConfig(
       "The controller profile is missing from the store. Restart the app to restore the shipped one, then edit it.",
     );
   }
-  // Ruling 108: a locked section refuses a CHANGE and passes an identical
-  // round-trip, so the panel's normal save (model/effort edits over read-only
-  // grants) keeps working. Enforced here, not in the route, so every caller
-  // path is bound; `ctx.locks` exists for tests only.
+  // Ruling 108: a locked section is NEVER rewritten from the input. An empty
+  // list (the panel posts blank for a locked section, since it renders it
+  // read-only) keeps the stored value; a NON-empty list that changes it is
+  // refused, naming the section and its unlock variable, so a scripted caller
+  // is told rather than silently ignored. Enforced here, not in the route, so
+  // every save path is bound; `ctx.locks` exists for tests only.
   const locks = ctx.locks ?? controllerSectionLocks();
   const sameSet = (a: string[], b: string[]) => {
     const bs = new Set(b);
@@ -224,35 +226,42 @@ export function saveControllerConfig(
       `The controller's ${CONTROLLER_SECTION_LABEL[section]} are locked on this deployment. Set ${CONTROLLER_UNLOCK_ENV[section]}=1 in the app environment and restart to edit them.`,
     );
   };
-  if (locks.skills && !sameSet(input.skills, existing.frontmatter.resources.skills)) {
-    lockedChange("skills");
-  }
-  if (locks.kb && !sameSet(input.kb, existing.frontmatter.resources.kb)) {
-    lockedChange("kb");
-  }
-  if (locks.mcps && !sameSet(input.mcps, existing.frontmatter.resources.mcps)) {
-    lockedChange("mcps");
-  }
-  // Blank has always meant "keep the current doctrine", so only a DIFFERENT
-  // non-blank body is a change. Compared against the same resolved doctrine
-  // the panel loaded (file body, or the baked fallback when the file is gone).
+  // A locked section writes the STORED list verbatim (order and duplicates
+  // included), so no save can perturb the on-disk grants — only an explicit,
+  // non-empty CHANGE is refused. An unlocked section writes the input as given.
+  const resolveGrant = (
+    section: "skills" | "kb" | "mcps",
+    stored: string[],
+  ): string[] => {
+    if (!locks[section]) return input[section];
+    if (input[section].length > 0 && !sameSet(input[section], stored)) {
+      lockedChange(section);
+    }
+    return stored;
+  };
+  const stored = existing.frontmatter.resources;
+  const resources = {
+    skills: resolveGrant("skills", stored.skills),
+    mcps: resolveGrant("mcps", stored.mcps),
+    kb: resolveGrant("kb", stored.kb),
+  };
+  // Blank has always meant "keep the current doctrine". Under an instructions
+  // lock a non-blank body that differs from the stored doctrine is refused;
+  // blank (what the panel posts when instructions are read-only) keeps it, and
+  // a locked save never rewrites the doctrine file.
   const definitionInput = input.definition.trim();
-  if (
-    locks.instructions &&
-    definitionInput &&
-    definitionInput !== readControllerDefinition(ctx.dataRoot)
-  ) {
-    lockedChange("instructions");
+  let writeDefinition = definitionInput.length > 0;
+  if (writeDefinition && locks.instructions) {
+    if (definitionInput !== readControllerDefinition(ctx.dataRoot)) {
+      lockedChange("instructions");
+    }
+    writeDefinition = false;
   }
   const merged: ParsedProfile = {
     frontmatter: {
       ...existing.frontmatter,
       model: input.model.trim(),
-      resources: {
-        skills: input.skills,
-        mcps: input.mcps,
-        kb: input.kb,
-      },
+      resources,
     },
     description: existing.description,
   };
@@ -265,8 +274,7 @@ export function saveControllerConfig(
     agentProfileFilePath(CONTROLLER_PROFILE_ID, ctx.dataRoot),
     serializeAgentProfile(merged),
   );
-  const definition = definitionInput;
-  if (definition && !locks.instructions) {
+  if (writeDefinition) {
     const file = definitionFilePath(ctx.dataRoot);
     const current = existsSync(file) ? readFileSync(file, "utf8") : "";
     const { data } = splitFrontmatter(current);
@@ -275,7 +283,7 @@ export function saveControllerConfig(
       current && yamlMappingSchema.safeParse(data).success
         ? current.slice(0, current.indexOf("\n---\n") + 5)
         : `---\nid: ${CONTROLLER_PROFILE_ID}\nname: Controller\nbackend: claude\n---\n`;
-    writeFileAtomic(file, `${head}\n${definition}\n`);
+    writeFileAtomic(file, `${head}\n${definitionInput}\n`);
   }
   recordAudit(db, {
     action: "org.controller.updated",
@@ -285,10 +293,12 @@ export function saveControllerConfig(
     details: {
       model: input.model.trim(),
       effort,
-      skills: input.skills.length,
-      kb: input.kb.length,
-      mcps: input.mcps.length,
-      definitionEdited: definition.length > 0,
+      skills: resources.skills.length,
+      kb: resources.kb.length,
+      mcps: resources.mcps.length,
+      // Honest: true only when the doctrine file was actually rewritten, never
+      // for a locked or blank save that left it untouched (review #12).
+      definitionEdited: writeDefinition,
     },
   });
   return resolveControllerConfig(ctx.dataRoot);

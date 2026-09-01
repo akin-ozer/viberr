@@ -120,11 +120,19 @@ function GrantChips({
   const missing = [...granted].filter(
     (id) => !options.some((o) => o.id === id),
   );
+  // A locked section is a read-only DISCLOSURE, not a picker: it lists only
+  // what is granted (an ungranted option under a lock is noise you cannot act
+  // on), so there is no granted/ungranted distinction for a screen reader to
+  // lose — the F19-5 `aria-pressed` need is specific to a toggle. Each granted
+  // resource keeps its display name; a dangling grant still shows, flagged.
+  const grantedOptions = locked
+    ? options.filter((o) => granted.has(o.id))
+    : options;
   return (
     <div className="ctx-group">
       <span className="ctx-lbl">
         {label}
-        {locked && <Icon name="lock" />}
+        {locked && <Icon name="lock" className="lbl-lock" />}
       </span>
       <div className="pick-chips">
         {pinned && (
@@ -139,16 +147,14 @@ function GrantChips({
             {pinned.display}
           </span>
         )}
-        {options.map((o) =>
+        {grantedOptions.map((o) =>
           locked ? (
             <span
               key={o.id}
-              className={
-                "pick-chip" + (mono ? " mono" : "") + (granted.has(o.id) ? " on" : "")
-              }
+              className={"pick-chip on" + (mono ? " mono" : "")}
               {...(o.title ? { title: o.title } : {})}
             >
-              {granted.has(o.id) && <Icon name="check" />}
+              <Icon name="check" />
               {o.display}
             </span>
           ) : (
@@ -182,7 +188,10 @@ function GrantChips({
         ) : (
           <MissingChips ids={missing} {...(mono ? { mono } : {})} onDrop={onToggle} />
         )}
-        {options.length === 0 && missing.length === 0 && !pinned && (
+        {locked && grantedOptions.length === 0 && missing.length === 0 && !pinned && (
+          <span className="ctx-none">none granted</span>
+        )}
+        {!locked && options.length === 0 && missing.length === 0 && !pinned && (
           <span className="ctx-none">none defined</span>
         )}
       </div>
@@ -214,17 +223,12 @@ export function ControllerAdminPanel({
   // P13-KM-01, same repair as the global-profile editor: a KB grant stored
   // under the display NAME is rewritten to its dir on open (so it renders
   // granted and the next save repairs the file); only an entry matching
-  // neither dir nor name stays raw and renders as a missing chip.
-  // Under a ruling-108 lock the repair is SKIPPED: it is an edit, and the
-  // next save would post it as a change the server refuses — a locked save
-  // must round-trip the stored grants byte-for-byte.
+  // neither dir nor name stays raw and renders as a missing chip. Done even
+  // under a lock — it is DISPLAY only now, because a locked save posts blank
+  // for this section rather than this repaired set (so the server keeps the
+  // stored grants byte-for-byte), so the repair can no longer become a write.
   const [grantKbs, setGrantKbs] = useState(
-    () =>
-      new Set(
-        locks.kb
-          ? config.kb
-          : [...kbDirsOf(config.kb, kbs), ...kbLegacyOf(config.kb, kbs)],
-      ),
+    () => new Set([...kbDirsOf(config.kb, kbs), ...kbLegacyOf(config.kb, kbs)]),
   );
   const [grantMcps, setGrantMcps] = useState(new Set(config.mcps));
 
@@ -268,10 +272,14 @@ export function ControllerAdminPanel({
       // A model without effort tiers submits none — the same rule the profile
       // editor's payload applies.
       effort: showEffort ? effort : "",
-      definition,
-      skills: [...grantSkills].join("\n"),
-      kb: [...grantKbs].join("\n"),
-      mcps: [...grantMcps].join("\n"),
+      // Ruling 108: a locked section posts BLANK, which the server reads as
+      // "keep the stored value". This is what makes a model/effort-only save
+      // succeed under a lock, and it means a stale grant/doctrine copy the
+      // panel is still holding can never be posted back as a change.
+      definition: locks.instructions ? "" : definition,
+      skills: locks.skills ? "" : [...grantSkills].join("\n"),
+      kb: locks.kb ? "" : [...grantKbs].join("\n"),
+      mcps: locks.mcps ? "" : [...grantMcps].join("\n"),
     });
   };
 
@@ -386,7 +394,7 @@ export function ControllerAdminPanel({
       <div className="field">
         <label className="flabel" htmlFor={`${uid}-instructions`}>
           Instructions
-          {locks.instructions && <Icon name="lock" />}
+          {locks.instructions && <Icon name="lock" className="lbl-lock" />}
           <span className="fhint">
             {locks.instructions
               ? "the controller's working doctrine · read-only, locked on this deployment"

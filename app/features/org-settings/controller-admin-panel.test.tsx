@@ -319,11 +319,16 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     expect(
       container.querySelectorAll(".ctx-group button.pick-chip"),
     ).toHaveLength(0);
-    // Granted state is still DISPLAYED on the span chips.
-    const granted = [...container.querySelectorAll(".ctx-group .pick-chip.on")];
-    expect(granted.some((c) => c.textContent?.includes("controller-guide"))).toBe(
+    // A locked section is a read-only disclosure: it lists ONLY what is
+    // granted (an ungranted option is noise you cannot act on), so there is
+    // no granted/ungranted ambiguity for a screen reader to lose.
+    const chips = [...container.querySelectorAll(".ctx-group .pick-chip")];
+    expect(chips.some((c) => c.textContent?.includes("controller-guide"))).toBe(
       true,
     );
+    expect(
+      chips.some((c) => c.textContent?.includes("developer-expertise")),
+    ).toBe(false);
     // The doctrine is visible but not editable.
     const ta = container.querySelector("textarea");
     expect(ta?.readOnly).toBe(true);
@@ -350,20 +355,29 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     );
   });
 
-  it("a locked save round-trips the STORED grants byte-for-byte", async () => {
-    // A display-name KB grant is normally repaired to its dir on open
-    // (P13-KM-01); under a lock the repair is an edit the server would
-    // refuse, so the seed keeps the stored value and the save posts it raw.
-    const { getByText } = renderPanel(
+  it("a locked save posts blank for every locked section (server keeps stored)", async () => {
+    // A locked section renders read-only and posts BLANK, which the server
+    // reads as "keep the stored value" — so a stale grant/doctrine copy the
+    // panel is holding can never be posted back as a change, and a
+    // model/effort-only save succeeds under the lock. Model still posts.
+    const { container, getByText } = renderPanel(
       { kb: ["Controller handbook"] },
       ["qa-echo"],
       LOCKED,
     );
+    await waitFor(() =>
+      expect(
+        container.querySelector<HTMLSelectElement>('select[aria-label="Model"]')
+          ?.value,
+      ).toBe("opus"),
+    );
     fireEvent.click(getByText("Save controller"));
     await waitFor(() => expect(lastForm).not.toBeNull());
-    expect(lastForm?.kb).toBe("Controller handbook");
-    expect(lastForm?.skills).toBe("controller-guide");
-    expect(lastForm?.definition).toBe("doctrine text");
+    expect(lastForm?.skills).toBe("");
+    expect(lastForm?.kb).toBe("");
+    expect(lastForm?.mcps).toBe("");
+    expect(lastForm?.definition).toBe("");
+    expect(lastForm?.model).toBe("opus");
   });
 
   it("locks sections independently: instructions locked, grants editable", () => {

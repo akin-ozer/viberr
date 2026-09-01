@@ -2261,6 +2261,19 @@ dialog[data-closing]::backdrop {
 }
 .field textarea { resize: vertical; min-height: 56px; line-height: 1.5; }
 .field input:focus, .field textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); outline: 0; }
+/* Ruling 108: a read-only field (the deployment-locked controller doctrine)
+   must READ read-only — muted fill, resting border on focus, no blue ring, no
+   resize grip. The only read-only field in the app, so this rule is its. */
+.field textarea[readonly], .field input[readonly] {
+  background: var(--tint-well); color: var(--muted); cursor: default; resize: none;
+}
+.field textarea[readonly]:focus, .field input[readonly]:focus {
+  border-color: var(--border-control); box-shadow: none;
+}
+/* Ruling 108: a lock glyph sized for a small-caps label (.flabel/.ctx-lbl are
+   ~.7rem), so it does not render at the 16px icon default flush against the
+   text. */
+.flabel .lbl-lock, .ctx-lbl .lbl-lock { width: 11px; height: 11px; margin-left: .3rem; vertical-align: -1px; color: var(--placeholder); }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 
 .pick-chips { display: flex; flex-wrap: wrap; gap: .5rem; }

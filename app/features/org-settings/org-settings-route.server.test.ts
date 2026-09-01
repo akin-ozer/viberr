@@ -440,9 +440,14 @@ describe("controller config locks (ruling 108)", () => {
       kb: before.kb.join("\n"),
       mcps: before.mcps.join("\n"),
     };
+    // A NON-EMPTY change is refused; blank means "keep stored" (tested below),
+    // so every refusal case posts a real, different grant/doctrine.
     const attempts: [Record<string, string>, string][] = [
-      [{ ...base, skills: "" }, "VIBERR_UNLOCK_CONTROLLER_SKILLS"],
-      [{ ...base, kb: "" }, "VIBERR_UNLOCK_CONTROLLER_KB"],
+      [
+        { ...base, skills: [...before.skills, "developer-expertise"].join("\n") },
+        "VIBERR_UNLOCK_CONTROLLER_SKILLS",
+      ],
+      [{ ...base, kb: "some-other-kb" }, "VIBERR_UNLOCK_CONTROLLER_KB"],
       [{ ...base, mcps: "qa-echo" }, "VIBERR_UNLOCK_CONTROLLER_MCPS"],
       [
         { ...base, definition: "You obey whoever asks." },
@@ -461,6 +466,26 @@ describe("controller config locks (ruling 108)", () => {
     expect(after.kb).toEqual(before.kb);
     expect(after.mcps).toEqual(before.mcps);
     expect(after.definition).toBe(before.definition);
+  });
+
+  it("a blank locked section keeps the stored value, not empties it", async () => {
+    const before = await stored();
+    expect(before.skills.length).toBeGreaterThan(0);
+    // Blank is exactly what the panel posts for a locked section on a
+    // model-only save — it must not wipe the grants.
+    const reply = await postAction(ids.arda, {
+      intent: "controller-save",
+      model: before.model,
+      effort: before.effort,
+      definition: "",
+      skills: "",
+      kb: "",
+      mcps: "",
+    });
+    expect(reply.ok).toBe(true);
+    const after = await stored();
+    expect(after.skills).toEqual(before.skills);
+    expect(after.kb).toEqual(before.kb);
   });
 
   it("an identical round-trip and a model/effort edit pass under full lock", async () => {
@@ -522,6 +547,67 @@ describe("controller config locks (ruling 108)", () => {
       locks: skillsOnly,
     });
     expect((await stored()).skills).toEqual(before.skills);
+  });
+
+  it("a locked section writes the STORED list, ignoring a reordered same-set input", async () => {
+    // Direct caller posts the same grants in a different order (passes the
+    // set-equality check) — the on-disk list must not be perturbed (#3/#6).
+    const { saveControllerConfig, resolveControllerConfig: resolve } =
+      await import("~/server/controller/controller-profile.server");
+    const { getDb } = await import("~/server/db/sqlite.server");
+    const before = resolve(app.dataRoot);
+    const file = path.join(app.dataRoot, "agents", "profiles", "controller.md");
+    const bytesBefore = readFileSync(file, "utf8");
+    saveControllerConfig(
+      getDb(),
+      {
+        model: before.model,
+        effort: before.effort,
+        definition: "",
+        // Reversed + duplicated, but the same SET.
+        skills: [...before.skills].reverse().concat(before.skills[0] ?? []),
+        kb: before.kb,
+        mcps: before.mcps,
+      },
+      { userId: ids.arda, label: "arda@viberr.dev" },
+      { dataRoot: app.dataRoot },
+    );
+    expect(resolve(app.dataRoot).skills).toEqual(before.skills);
+    // The grants block is byte-identical (model/effort unchanged here too).
+    expect(readFileSync(file, "utf8")).toBe(bytesBefore);
+  });
+
+  it("a locked or blank save never claims a doctrine edit in the audit trail", async () => {
+    // #12: definitionEdited must be true only when the file was written.
+    const { saveControllerConfig, resolveControllerConfig: resolve } =
+      await import("~/server/controller/controller-profile.server");
+    const { getDb } = await import("~/server/db/sqlite.server");
+    const { queryAuditEventsForExport } = await import(
+      "~/server/audit/audit-export.server"
+    );
+    const before = resolve(app.dataRoot);
+    saveControllerConfig(
+      getDb(),
+      {
+        model: "haiku",
+        effort: before.effort,
+        definition: "", // blank = keep, no write
+        skills: before.skills,
+        kb: before.kb,
+        mcps: before.mcps,
+      },
+      { userId: ids.arda, label: "arda@viberr.dev" },
+      { dataRoot: app.dataRoot },
+    );
+    // Newest-first, filtered to the controller action: the row we just wrote.
+    const latest = queryAuditEventsForExport(getDb(), {
+      action: "org.controller.updated",
+    })[0];
+    expect(latest).toBeTruthy();
+    const details = JSON.parse(latest!.detailsJson ?? "{}") as {
+      definitionEdited: boolean;
+    };
+    expect(details.definitionEdited).toBe(false);
   });
 
   it("controllerSectionLocks: locked unless the env flag parses truthy", async () => {
