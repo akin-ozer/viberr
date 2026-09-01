@@ -1516,6 +1516,39 @@ the quieter packet or the bare owner cell as drift.)*
     cap, auth redirect) reports the failure and drops Download — some browsers
     save a failed download's error body as a file bearing the real name.
 
+106. **Controller settings speak the agent-editor language, and stay admin-only
+    (owner, 2026-09-01).** The org-settings Controller tab had grown its own
+    dialect: a free-text model field (any typo silently ran the default via
+    `resolveRunModel`), checkbox `<ul>` grant lists, no effort control at all
+    (the run honored `config.effort`, but nothing in the app could set it),
+    and bespoke `ctladm-*` styling. The owner ruled it must match agent
+    settings both visually and functionally. It now uses the profile modal's
+    own model/effort catalog pickers (`ModelEffortFields` plus the
+    `useModelCatalog` hook extracted from it — one mechanism, both editors),
+    with the backend fixed to Claude because that is what controller runs
+    resolve; a stored model seeds to the catalog default ONLY when a run
+    would itself substitute it — a dated `claude-*` id or family alias the
+    served catalog does not list runs verbatim (`isKnownModel`'s static
+    half, now shared as `~/shared/model-ids`), so the picker preserves it
+    instead of silently repinning the model on the next save (this review's
+    D1, which also fixed the same latent rewrite in the profile modal).
+    Grants are pick-chip toggles like the global-profile editor's: KBs
+    displayed by name and stored by dir, with the editor's own
+    `kbDirsOf` display-name repair on open (P13-KM-01), and a grant the
+    store lost renders through the shared `MissingChips` — a removable red
+    chip instead of an unremovable "not in the store" row (P14-KM-10).
+    `effort` parses tolerantly (a hand-edited non-string value reads as
+    absent, never failing the whole profile — this review's D2, which
+    otherwise bricked the config as "profile missing from the store" with
+    no in-app repair). `effort` became a schema-level agent-profile
+    frontmatter key (carrying it is no longer drift); `controller-save`
+    persists it, and blank removes the key. Access was re-verified admin-only
+    end to end — `/org/settings` loader and action `requireRole(admin)`
+    (members 403, route-tested), and every nav entry into the tab is
+    admin-gated — matching the panel's own copy. One deliberate consequence:
+    opening the panel now shows the default model/effort where the stored
+    value was blank, so the first save makes them explicit.
+
 ## Route map
 
 ```

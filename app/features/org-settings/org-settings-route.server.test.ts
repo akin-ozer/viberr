@@ -345,6 +345,69 @@ describe("resource + store intents", () => {
 });
 
 /**
+ * Ruling 106 — controller-save persists the model AND the effort the panel's
+ * catalog pickers submit, as a first-class frontmatter key (no drift warning),
+ * and a blank effort removes the key rather than storing "".
+ */
+describe("controller-save (ruling 106)", () => {
+  it("round-trips model + effort through the profile file without drift", async () => {
+    const { resolveControllerConfig } = await import(
+      "~/server/controller/controller-profile.server"
+    );
+    const before = resolveControllerConfig(app.dataRoot);
+    expect(before.profilePresent).toBe(true);
+    const reply = await postAction(ids.arda, {
+      intent: "controller-save",
+      model: "opus",
+      effort: "max",
+      definition: "",
+      skills: "controller-guide",
+      kb: "",
+      mcps: "",
+    });
+    expect(reply.ok).toBe(true);
+    const after = resolveControllerConfig(app.dataRoot);
+    expect(after.model).toBe("opus");
+    expect(after.effort).toBe("max");
+    // A blank definition keeps the stored doctrine (the panel posts the body
+    // it loaded, so blank only happens when nothing was ever stored).
+    expect(after.definition).toBe(before.definition);
+    // `effort` is a schema-level key now: parsing the written file must not
+    // report it as unrecognized-frontmatter drift.
+    const { parseAgentProfileContent } = await import(
+      "~/server/files/agent-profile-file.server"
+    );
+    const file = path.join(app.dataRoot, "agents", "profiles", "controller.md");
+    const { diagnostics } = parseAgentProfileContent(
+      readFileSync(file, "utf8"),
+      { fallbackId: "controller" },
+    );
+    expect(
+      diagnostics.filter((d) => d.code === "agent_profile.unknown_field"),
+    ).toHaveLength(0);
+  });
+
+  it("a blank effort removes the key instead of storing an empty string", async () => {
+    const reply = await postAction(ids.arda, {
+      intent: "controller-save",
+      model: "sonnet",
+      effort: "",
+      definition: "",
+      skills: "controller-guide",
+      kb: "",
+      mcps: "",
+    });
+    expect(reply.ok).toBe(true);
+    const { resolveControllerConfig } = await import(
+      "~/server/controller/controller-profile.server"
+    );
+    expect(resolveControllerConfig(app.dataRoot).effort).toBe("");
+    const file = path.join(app.dataRoot, "agents", "profiles", "controller.md");
+    expect(readFileSync(file, "utf8")).not.toContain("effort:");
+  });
+});
+
+/**
  * R19-16 — the whole point of the Sign-in & SSO tab: an admin can turn GitHub
  * sign-in on WITHOUT touching the deployment env, and cannot turn it on with a
  * credential the provider never accepted.

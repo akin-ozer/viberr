@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { z } from "zod";
 import {
   recordAudit,
   type AuditActor,
@@ -105,12 +104,6 @@ function readControllerProfile(dataRoot?: string): ParsedProfile | null {
   return parsed;
 }
 
-/** The profile schema does not model `effort`; decode the round-tripped
- *  frontmatter key at this boundary (absent or non-string reads as ""). */
-const looseEffortSchema = z
-  .object({ effort: z.string().catch("") })
-  .catch({ effort: "" });
-
 /** Resolve the live controller configuration (profile + doctrine). Tolerant:
  *  a missing/invalid template degrades to defaults rather than downing the
  *  surface — the settings panel discloses `profilePresent: false`. */
@@ -120,7 +113,7 @@ export function resolveControllerConfig(dataRoot?: string): ControllerConfig {
   return {
     name: fm?.name || "Controller",
     model: fm?.model && fm.model !== "orchestration runtime" ? fm.model : "",
-    effort: looseEffortSchema.parse(fm).effort,
+    effort: fm?.effort ?? "",
     skills: fm?.resources.skills ?? ["controller-guide"],
     kb: fm?.resources.kb ?? [],
     mcps: fm?.resources.mcps ?? [],
@@ -131,6 +124,8 @@ export function resolveControllerConfig(dataRoot?: string): ControllerConfig {
 
 export interface SaveControllerConfigInput {
   model: string;
+  /** Reasoning effort ("" = the backend default; the key is then removed). */
+  effort: string;
   skills: string[];
   kb: string[];
   mcps: string[];
@@ -168,6 +163,11 @@ export function saveControllerConfig(
     },
     description: existing.description,
   };
+  // "" means "backend default": the key is removed rather than stored blank,
+  // so the file reads the same as one that never carried it.
+  const effort = input.effort.trim();
+  if (effort) merged.frontmatter.effort = effort;
+  else delete merged.frontmatter.effort;
   writeFileAtomic(
     agentProfileFilePath(CONTROLLER_PROFILE_ID, ctx.dataRoot),
     serializeAgentProfile(merged),
@@ -191,6 +191,7 @@ export function saveControllerConfig(
     subjectId: CONTROLLER_PROFILE_ID,
     details: {
       model: input.model.trim(),
+      effort,
       skills: input.skills.length,
       kb: input.kb.length,
       mcps: input.mcps.length,

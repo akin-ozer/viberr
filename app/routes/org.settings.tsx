@@ -433,6 +433,7 @@ export async function action({ request }: Route.ActionArgs) {
           db,
           {
             model: field("model"),
+            effort: field("effort"),
             definition: field("definition"),
             skills: splitNames(field("skills")),
             kb: splitNames(field("kb")),

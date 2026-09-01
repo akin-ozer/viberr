@@ -30,4 +30,29 @@ describe("parseAgentProfileContent — schema drift detection", () => {
       diagnostics.some((d) => d.code === "agent_profile.unknown_field"),
     ).toBe(false);
   });
+
+  it("effort is a known key and round-trips as a string", () => {
+    const { parsed, diagnostics } = parseAgentProfileContent(
+      base + "effort: max\n---\nA developer.",
+    );
+    expect(parsed?.frontmatter.effort).toBe("max");
+    expect(
+      diagnostics.some((d) => d.code === "agent_profile.unknown_field"),
+    ).toBe(false);
+  });
+
+  it("a junk effort value degrades to absent, never failing the whole profile", () => {
+    // Ruling 106 review D2: the pre-schema decoder read "absent or non-string
+    // as ''". A strict schema field turned `effort:` (YAML null) or
+    // `effort: 3` into parsed:null — the controller config then reported
+    // "profile missing from the store" over one hand-edited line, and
+    // saveControllerConfig refused to repair it. The field is tolerant.
+    for (const junk of ["effort:\n", "effort: 3\n", "effort: [a, b]\n"]) {
+      const { parsed } = parseAgentProfileContent(
+        base + junk + "---\nA developer.",
+      );
+      expect(parsed).not.toBeNull();
+      expect(parsed?.frontmatter.effort).toBeUndefined();
+    }
+  });
 });
