@@ -549,6 +549,37 @@ describe("skills", () => {
 });
 
 describe("mcp servers", () => {
+  it("refuses every name Viberr's own in-process servers own", async () => {
+    const { db } = setup();
+    // P13-KM-12 / ruling 107: a row under one of these names is unusable (every
+    // resolver skips it) AND shadows the mount key of a server the product
+    // attaches itself, so it is refused at save rather than accepted dead. The
+    // hyphen spellings are what a Codex run would see.
+    for (const name of [
+      "viberr",
+      "viberr_agent",
+      "viberr-agent",
+      "viberr_browser",
+      "viberr-browser",
+      "viberr_controller",
+      "viberr-controller",
+      "viberr_ops",
+      "viberr-ops",
+    ]) {
+      await expect(
+        saveMcpServer(
+          db,
+          { name, transport: "HTTP", target: "https://x.dev/mcp", cred: "" },
+          ACTOR,
+          { fetchImpl: mcpHttpFetch(9) },
+        ),
+        `"${name}" must be refused`,
+      ).rejects.toThrow(/reserved for Viberr/);
+    }
+    // The refusal is the whole story: nothing was written on the way out.
+    expect(listMcpServers(db)).toEqual([]);
+  });
+
   it("probe is honest: any HTTP response = up, network error = down, stdio = skipped", async () => {
     expect(
       await probeMcpTarget("HTTP", "https://mcp.internal:1/sse", {

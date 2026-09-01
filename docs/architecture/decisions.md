@@ -1549,6 +1549,41 @@ the quieter packet or the bare owner cell as drift.)*
     opening the panel now shows the default model/effort where the stored
     value was blank, so the first save makes them explicit.
 
+107. **The controller has a built-in diagnostics MCP, and no one can take it
+    away (owner, 2026-09-01).** The `viberr_controller` toolkit (ruling 99)
+    reads and changes the PRODUCT, and had zero reach into the ops layer that
+    already sits behind routes: per-run logs, subsystem health, backend
+    credential state, the run concurrency queue, store documents. Asked "why
+    did that run fail" or "is this instance healthy" the controller could only
+    guess or point at a page. `viberr_ops` is an in-process, READ-ONLY server
+    with three tools, each resolving the ASKING PERSON's authority live, per
+    call, and refusing in the toolkit's own voice:
+    `instance_health` (open to anyone: the same reading `/resources/health`
+    serves unauthenticated, plus per-backend credential health and the
+    cap/live/queued concurrency snapshot the admin card already shows),
+    `read_run_log` (a member of the run's project; a controller turn's log
+    follows conversation ownership with org-admin supervision, via
+    `canReadControllerRunLog` — the exact gate `/resources/run-log` applies,
+    and a missing run, a forbidden project and a forbidden conversation all
+    answer one not-visible sentence so a probe cannot walk run ids), and
+    `read_store_doc` (org admins only, like the store browser it comes from,
+    reporting `truncated` honestly). Nothing here writes, deletes or starts
+    anything: diagnostics that could change the instance would be a second
+    authority surface beside the toolkit, which is where changes are audited.
+    NOT REMOVABLE BY CONSTRUCTION, not by a guard: `buildControllerMounts`
+    attaches it on every turn with no config read and no grant row, so there is
+    nothing to clear and no toggle that could do nothing (P14-KM-14), and
+    `viberr_ops`/`viberr-ops` join `isReservedMcpName` so an org server can
+    never shadow the mount key. The Controller settings MCP group discloses it
+    as a pinned chip that is deliberately NOT a control (a disabled button
+    would be the toggle-with-no-effect this ruling avoids, and its `title`
+    would never open), and it never enters the save payload or `mountedMcps`.
+    Scope is CONTROLLER-ONLY: agents and the operator are untouched. The health
+    body assembly moved to `~/server/ops/health-snapshot.server` and the
+    controller's refusal machinery to `~/server/controller/controller-tool-guards.server`,
+    so route and tool read one derivation and both in-process servers refuse in
+    one voice.
+
 ## Route map
 
 ```
