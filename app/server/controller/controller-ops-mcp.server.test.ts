@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
 /**
@@ -162,12 +164,56 @@ async function call(
   return result.content[0]!.text;
 }
 
-/** A tool answer that is not a refusal, parsed back into data. */
-function parsed(reply: string): Record<string, JsonValue> {
+/**
+ * The answer shapes these tests read. Declared as schemas rather than asserted:
+ * a tool answer is a wire contract, and a cast would let a field quietly change
+ * shape under an assertion that still passed.
+ */
+const HEALTH_REPLY = z.object({
+  status: z.string(),
+  degraded: z.array(z.string()),
+  projections: z.object({ projects: z.number(), tasks: z.number() }),
+  watcher: z.boolean(),
+  kbWatcher: z.boolean(),
+  backends: z.object({ claude: z.string(), codex: z.string() }),
+  maintenance: z.object({ scheduled: z.boolean() }),
+  build: z.object({ version: z.string().nullable() }),
+  backendCredentials: z.array(
+    z.object({
+      backend: z.string(),
+      available: z.boolean(),
+      verification: z.string(),
+      detail: z.string().nullable(),
+    }),
+  ),
+  runs: z.object({ cap: z.number(), live: z.number(), queued: z.number() }),
+});
+
+const RUN_LOG_REPLY = z.object({
+  run: z.object({
+    id: z.string(),
+    kind: z.string(),
+    state: z.string(),
+    project: z.string(),
+    task: z.string(),
+  }),
+  headSeq: z.number(),
+  oldestSeq: z.number(),
+  hasMore: z.boolean(),
+  lines: z.array(z.object({ seq: z.number(), at: z.string() })),
+});
+
+const STORE_DOC_REPLY = z.object({
+  resource: z.object({ kind: z.string(), id: z.string(), name: z.string() }),
+  path: z.array(z.string()),
+  truncated: z.boolean(),
+  text: z.string(),
+});
+
+/** A tool answer that is not a refusal, read through its schema. */
+function parsed<T>(schema: z.ZodType<T>, reply: string): T {
   expect(reply.startsWith("["), `expected data, got: ${reply}`).toBe(false);
-  // SAFETY: every non-refusal answer here is built by the guards' `json`
-  // helper, which is `JSON.stringify` of an object literal.
-  return JSON.parse(reply) as Record<string, JsonValue>;
+  return schema.parse(JSON.parse(reply));
 }
 
 // ------------------------------------------------------------ tool surface
@@ -208,7 +254,10 @@ describe("the diagnostics surface is read-only and named for the mount", () => {
 
 describe("instance_health: aggregates, open to any signed-in person", () => {
   it("answers a member of nothing with the probe's own reading plus backends and the run queue", async () => {
-    const body = parsed(await call(ids.nonMember, "instance_health"));
+    const body = parsed(
+      HEALTH_REPLY,
+      await call(ids.nonMember, "instance_health"),
+    );
     // The health route's derivation, not a second one.
     const { healthSnapshot } = await import(
       "~/server/ops/health-snapshot.server"
@@ -220,18 +269,15 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     expect(body.backends).toEqual(snapshot.backends);
     expect(body.watcher).toBe(snapshot.watcher);
     expect(body.kbWatcher).toBe(snapshot.kbWatcher);
-    expect(body.maintenance).toBeTruthy();
-    expect(body.build).toBeTruthy();
     // Why a backend reads the way it does — the health probe reports env
     // presence only, and "unavailable" with no reason sends someone hunting.
-    const credentials = body.backendCredentials;
-    expect(Array.isArray(credentials)).toBe(true);
-    expect((credentials as JsonValue[]).length).toBe(2);
+    expect(body.backendCredentials.map((c) => c.backend)).toEqual([
+      "claude",
+      "codex",
+    ]);
     // The concurrency gate, live: a queued run is the usual answer to "why has
     // nothing started".
-    expect(body.runs).toEqual(
-      expect.objectContaining({ cap: expect.any(Number), live: expect.any(Number), queued: expect.any(Number) }),
-    );
+    expect(body.runs.cap).toBe(runConcurrencySnapshot(app.db).cap);
   });
 });
 
@@ -243,12 +289,13 @@ describe("read_run_log: the run-log route's gate, in one sentence", () => {
 
   it("a member of the run's project reads it", async () => {
     const body = parsed(
+      RUN_LOG_REPLY,
       await call(ids.projectAdmin, "read_run_log", { runId: PROJECT_RUN }),
     );
     expect(body.run).toEqual(
       expect.objectContaining({ id: PROJECT_RUN, project: SLUG, state: "finished" }),
     );
-    expect((body.lines as JsonValue[]).length).toBe(LOG_LINES);
+    expect(body.lines.length).toBe(LOG_LINES);
   });
 
   it("a non-member is refused, and a run that never existed reads identically", async () => {
@@ -268,13 +315,17 @@ describe("read_run_log: the run-log route's gate, in one sentence", () => {
 
   it("a controller turn is readable by its own person and by an org admin, nobody else", async () => {
     const owner = parsed(
+      RUN_LOG_REPLY,
       await call(ids.projectAdmin, "read_run_log", { runId: CONTROLLER_RUN }),
     );
     expect(owner.run).toEqual(
       expect.objectContaining({ id: CONTROLLER_RUN, kind: "controller" }),
     );
     // Org admins supervise.
-    parsed(await call(ids.orgAdmin, "read_run_log", { runId: CONTROLLER_RUN }));
+    parsed(
+      RUN_LOG_REPLY,
+      await call(ids.orgAdmin, "read_run_log", { runId: CONTROLLER_RUN }),
+    );
     // A project role buys nothing here: a transcript is scoped to the person
     // whose conversation it is (deniz is an org member of nothing, but so is
     // any other non-owner non-admin).
@@ -285,13 +336,15 @@ describe("read_run_log: the run-log route's gate, in one sentence", () => {
 
   it("clamps the page size instead of serving what paging exists to avoid", async () => {
     const huge = parsed(
+      RUN_LOG_REPLY,
       await call(ids.projectAdmin, "read_run_log", {
         runId: PROJECT_RUN,
         limit: 99_999,
       }),
     );
-    expect((huge.lines as JsonValue[]).length).toBe(LOG_LINES); // 500, capped by reality
+    expect(huge.lines.length).toBe(LOG_LINES); // 500, capped by reality
     const zero = parsed(
+      RUN_LOG_REPLY,
       await call(ids.projectAdmin, "read_run_log", {
         runId: PROJECT_RUN,
         before: 6,
@@ -299,14 +352,15 @@ describe("read_run_log: the run-log route's gate, in one sentence", () => {
       }),
     );
     // Clamped UP to 1, never down to "everything".
-    expect((zero.lines as JsonValue[]).length).toBe(1);
+    expect(zero.lines.length).toBe(1);
     const tail = parsed(
+      RUN_LOG_REPLY,
       await call(ids.projectAdmin, "read_run_log", {
         runId: PROJECT_RUN,
         since: 9,
       }),
     );
-    expect((tail.lines as JsonValue[]).length).toBe(2);
+    expect(tail.lines.length).toBe(2);
   });
 });
 
@@ -337,6 +391,7 @@ describe("read_store_doc: org admins only, like the store browser", () => {
 
   it("hands an org admin the document, and reports truncation honestly", async () => {
     const body = parsed(
+      STORE_DOC_REPLY,
       await call(ids.orgAdmin, "read_store_doc", {
         kind: "kb",
         id: kbId,
@@ -351,6 +406,7 @@ describe("read_store_doc: org admins only, like the store browser", () => {
     // this arm `truncated` could be the constant `false` and read identically —
     // which is how a model states half a file as the whole of it.
     const long = parsed(
+      STORE_DOC_REPLY,
       await call(ids.orgAdmin, "read_store_doc", {
         kind: "kb",
         id: kbId,
@@ -358,7 +414,7 @@ describe("read_store_doc: org admins only, like the store browser", () => {
       }),
     );
     expect(long.truncated).toBe(true);
-    expect((long.text as string).length).toBe(READ_DOC_BYTES);
+    expect(long.text.length).toBe(READ_DOC_BYTES);
   });
 
   it("says so when the target or the file is gone", async () => {

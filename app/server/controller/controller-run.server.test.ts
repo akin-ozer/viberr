@@ -3,6 +3,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import type { ControllerToolUser } from "./controller-tool-guards.server";
 
 /**
  * Ruling 107 — what a controller turn MOUNTS, and what it is told about it.
@@ -16,7 +17,7 @@ import {
  */
 
 let app: AppTestContext;
-let user: { id: string; email: string; name: string };
+let user: ControllerToolUser;
 
 beforeAll(async () => {
   app = await setupAppTest();
