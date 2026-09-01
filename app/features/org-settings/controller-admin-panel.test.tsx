@@ -194,6 +194,45 @@ describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
     expect(lastForm?.skills).toBe("controller-guide");
   });
 
+  it("keeps a stored dated Claude id the catalog does not list (review D1)", async () => {
+    // resolveRunModel passes a dated claude-* id through VERBATIM, so the
+    // picker must not rewrite it to the catalog default on open — that
+    // rewrite plus one Save silently repinned the controller's model.
+    const { container, getByText } = renderPanel({
+      model: "claude-opus-4-1-20250805",
+    });
+    const model = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Model"]',
+    );
+    // The description of a CATALOG model must not appear (nothing was
+    // substituted); the preserved option keeps the raw id selected.
+    await waitFor(() =>
+      expect(
+        model?.querySelectorAll("option").length,
+      ).toBeGreaterThanOrEqual(3),
+    );
+    expect(model?.value).toBe("claude-opus-4-1-20250805");
+    fireEvent.click(getByText("Save controller"));
+    await waitFor(() => expect(lastForm).not.toBeNull());
+    expect(lastForm?.model).toBe("claude-opus-4-1-20250805");
+  });
+
+  it("repairs a display-name KB grant to its dir on open (review D3)", async () => {
+    // P13-KM-01: KB grants resolve by store DIR at run time. A grant stored
+    // under the display name (hand-edit, pre-P13 file) must render GRANTED
+    // and save as the dir — not sit forever as a red "no longer in the
+    // store" chip about a KB that is right there.
+    const { container, getByRole, getByText } = renderPanel({
+      kb: ["Controller handbook"],
+    });
+    const kbChip = getByRole("button", { name: /Controller handbook/ });
+    expect(kbChip.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(".pick-chip.missing")).toBeNull();
+    fireEvent.click(getByText("Save controller"));
+    await waitFor(() => expect(lastForm).not.toBeNull());
+    expect(lastForm?.kb).toBe("controller-handbook");
+  });
+
   it("discloses a missing profile template with the shared warning treatment", () => {
     const { container } = renderPanel({ profilePresent: false });
     const warn = container.querySelector(".deny-note");

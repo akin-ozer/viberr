@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
+import { DATED_CLAUDE_ID_RE } from "~/shared/model-ids";
 import { resolveClaudeConfigDir } from "./claude-config.server";
 import { unavailableModels } from "./model-availability.server";
 import {
@@ -190,14 +191,10 @@ export function defaultEffortFor(backend: RealBackend): string {
   return (backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED).defaultEffort;
 }
 
-/**
- * A dated/versioned real Claude model id — `claude-` plus a digit somewhere,
- * e.g. `claude-sonnet-4-5`. Exactly what `resolveClaudeModel`
- * (claude-runtime) forwards to the SDK verbatim, and the shape a live
- * `supportedModels()` row can carry. Deliberately NOT matched by the seed
- * display labels this guard exists to reject (`claude-sonnet` has no digit).
- */
-const DATED_CLAUDE_ID_RE = /^claude-.*\d/;
+// The dated-id rule lives in ~/shared/model-ids (ruling 106 review, D1): the
+// client model pickers must ask the SAME "would a run execute this verbatim?"
+// question, or an unlisted-but-valid stored id gets silently rewritten to the
+// catalog default on open and repinned on the next save.
 
 /**
  * Is `model` a real, valid model id for `backend`?

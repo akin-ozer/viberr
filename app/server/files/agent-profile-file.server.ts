@@ -44,8 +44,13 @@ export const agentProfileFrontmatterSchema = z
     /** Reasoning effort. Only the controller profile is edited through this key
      *  today (ruling 106) — deployed specialists carry model+effort on their
      *  project.md `agents:` entry, not the template — but the key is schema
-     *  level so carrying it is never "drift". Absent = the backend default. */
-    effort: z.string().optional(),
+     *  level so carrying it is never "drift". Absent = the backend default.
+     *  TOLERANT like the pre-schema decoder it replaced: a hand-edited
+     *  non-string value (`effort:` blank = YAML null, `effort: 3`) reads as
+     *  absent rather than failing the WHOLE profile parse — a strict field
+     *  here bricked the controller config ("profile missing from the store")
+     *  over one junk line, with no in-app repair path (review D2). */
+    effort: z.string().optional().catch(undefined),
     scope: z.string().default(""),
     stages: z.array(z.string()).default([]),
     spanAll: z.boolean().default(false),

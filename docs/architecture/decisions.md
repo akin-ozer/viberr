@@ -1526,12 +1526,21 @@ the quieter packet or the bare owner cell as drift.)*
     own model/effort catalog pickers (`ModelEffortFields` plus the
     `useModelCatalog` hook extracted from it — one mechanism, both editors),
     with the backend fixed to Claude because that is what controller runs
-    resolve; an empty or unknown stored model seeds to the catalog default,
-    which is exactly what a run would substitute. Grants are pick-chip
-    toggles like the global-profile editor's: KBs displayed by name and
-    stored by dir (P13-KM-01), and a grant the store lost renders as a
-    removable red `missing` chip instead of an unremovable "not in the
-    store" row (P14-KM-10). `effort` became a schema-level agent-profile
+    resolve; a stored model seeds to the catalog default ONLY when a run
+    would itself substitute it — a dated `claude-*` id or family alias the
+    served catalog does not list runs verbatim (`isKnownModel`'s static
+    half, now shared as `~/shared/model-ids`), so the picker preserves it
+    instead of silently repinning the model on the next save (this review's
+    D1, which also fixed the same latent rewrite in the profile modal).
+    Grants are pick-chip toggles like the global-profile editor's: KBs
+    displayed by name and stored by dir, with the editor's own
+    `kbDirsOf` display-name repair on open (P13-KM-01), and a grant the
+    store lost renders through the shared `MissingChips` — a removable red
+    chip instead of an unremovable "not in the store" row (P14-KM-10).
+    `effort` parses tolerantly (a hand-edited non-string value reads as
+    absent, never failing the whole profile — this review's D2, which
+    otherwise bricked the config as "profile missing from the store" with
+    no in-app repair). `effort` became a schema-level agent-profile
     frontmatter key (carrying it is no longer drift); `controller-save`
     persists it, and blank removes the key. Access was re-verified admin-only
     end to end — `/org/settings` loader and action `requireRole(admin)`

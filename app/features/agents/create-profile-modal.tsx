@@ -8,6 +8,7 @@ import {
   GRANT_REQUIRED_CAPABILITY_IDS,
   WEB_EGRESS_CAP_ID,
 } from "~/shared/capabilities";
+import { claudeModelRunsVerbatim } from "~/shared/model-ids";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { rovingRadioKeyDown } from "~/ui/roving-radio";
@@ -108,9 +109,11 @@ export function effortLabel(id: string): string {
  *
  * The caller owns `model`/`effort` state (each editor seeds them from its own
  * stored config); this hook only writes them through the setters when the
- * loaded catalog says the current value can't stand (empty, or a model id the
- * catalog doesn't know — exactly what `resolveRunModel` would substitute at
- * run time, so the picker shows what would actually run).
+ * current value is one `resolveRunModel` would itself SUBSTITUTE at run time
+ * (empty, or unknown to both the served catalog and the shared
+ * always-runs-verbatim rule), so the picker shows what would actually run. A
+ * dated Claude id or family alias the catalog does not list is left standing
+ * — the select renders it via its preserve-a-seeded-value option.
  */
 export interface ModelCatalogState {
   catalog: ModelCatalog | null;
@@ -162,9 +165,18 @@ export function useModelCatalog(
 
   // Default the picks to the catalog defaults once it loads and no valid pick
   // is set (create mode, or a backend switch that invalidated the prior model).
+  // "Valid" mirrors the runtime's isKnownModel, not bare catalog membership
+  // (ruling 106 review, D1): a dated Claude id or family alias runs VERBATIM
+  // (`resolveRunModel` passes it through) even when the served catalog does
+  // not list it, so rewriting it here would be a silent model change the next
+  // save persists — the select keeps it via its preserve-a-seeded-value
+  // option instead. Only a value the runtime would itself substitute (empty,
+  // or truly unknown) seeds to the default the run would actually use.
   useEffect(() => {
     if (!catalog) return;
-    const known = catalog.models.some((m) => m.value === model);
+    const known =
+      catalog.models.some((m) => m.value === model) ||
+      (backend === "claude" && claudeModelRunsVerbatim(model));
     if (!model || !known) setModel(catalog.defaultModel);
     if (!effort) setEffort(catalog.defaultEffort);
     // eslint-disable-next-line react-hooks/exhaustive-deps

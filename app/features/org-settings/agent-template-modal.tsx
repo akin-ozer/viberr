@@ -27,9 +27,14 @@ const unmatched = (list: string[], names: string[]) => {
  * KB grants are stored by store DIR. Older profiles (and anything written by the
  * pre-P13-KM-01 editor) carry the DISPLAY NAME, which resolves to nothing at run
  * time. Rewrite what we can recognize, so opening and saving a profile repairs
- * it instead of preserving an unresolvable string forever.
+ * it instead of preserving an unresolvable string forever. Exported for the
+ * controller settings panel, whose KB grants follow the same dir/name split
+ * (ruling 106) — the param is the structural pick both callers have.
  */
-const kbDirsOf = (list: string[], kbs: KbView[]) => {
+export const kbDirsOf = (
+  list: string[],
+  kbs: readonly { dir: string; name: string }[],
+) => {
   const byDir = new Set(kbs.map((k) => k.dir));
   const nameToDir = new Map(kbs.map((k) => [k.name, k.dir]));
   const out: string[] = [];
@@ -41,7 +46,10 @@ const kbDirsOf = (list: string[], kbs: KbView[]) => {
 };
 
 /** Grants that match neither a dir nor a display name — preserved untouched. */
-const kbLegacyOf = (list: string[], kbs: KbView[]) => {
+export const kbLegacyOf = (
+  list: string[],
+  kbs: readonly { dir: string; name: string }[],
+) => {
   const known = new Set([...kbs.map((k) => k.dir), ...kbs.map((k) => k.name)]);
   return list.filter((x) => !known.has(x));
 };
@@ -50,13 +58,15 @@ const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
 
 /** Grants pointing at a resource this org no longer has, rendered removable —
  *  the same red `missing` chip the project profile modal uses (P14-KM-10).
+ *  Exported for the controller settings panel (ruling 106), so the missing
+ *  treatment — class, copy, a11y state — has ONE implementation here.
  *
  *  F19-5: a missing chip only renders BECAUSE the id is still in the grant list,
  *  so it is by construction a granted toggle — `aria-pressed` is hardcoded true.
  *  Without it a screen reader announced a dangling grant identically to an
  *  ungranted resource, while its six sibling chip groups in this file all
  *  reported their state. */
-function MissingChips({
+export function MissingChips({
   ids,
   mono,
   onDrop,

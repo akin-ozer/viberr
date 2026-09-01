@@ -5,6 +5,7 @@ import {
   useModelCatalog,
 } from "~/features/agents/create-profile-modal";
 import { Icon } from "~/ui/icon";
+import { kbDirsOf, kbLegacyOf, MissingChips } from "./agent-template-modal";
 import { useOrgAction } from "./use-org-action";
 
 /**
@@ -84,18 +85,7 @@ function GrantChips({
             {o.display}
           </button>
         ))}
-        {missing.map((id) => (
-          <button
-            type="button"
-            key={id}
-            className={"pick-chip missing on" + (mono ? " mono" : "")}
-            aria-pressed={true}
-            title="No longer in the store. Click to remove this grant"
-            onClick={() => onToggle(id)}
-          >
-            {id}
-          </button>
-        ))}
+        <MissingChips ids={missing} {...(mono ? { mono } : {})} onDrop={onToggle} />
         {options.length === 0 && missing.length === 0 && (
           <span className="ctx-none">none defined</span>
         )}
@@ -122,7 +112,13 @@ export function ControllerAdminPanel({
   const [effort, setEffort] = useState(config.effort);
   const [definition, setDefinition] = useState(config.definition);
   const [grantSkills, setGrantSkills] = useState(new Set(config.skills));
-  const [grantKbs, setGrantKbs] = useState(new Set(config.kb));
+  // P13-KM-01, same repair as the global-profile editor: a KB grant stored
+  // under the display NAME is rewritten to its dir on open (so it renders
+  // granted and the next save repairs the file); only an entry matching
+  // neither dir nor name stays raw and renders as a missing chip.
+  const [grantKbs, setGrantKbs] = useState(
+    () => new Set([...kbDirsOf(config.kb, kbs), ...kbLegacyOf(config.kb, kbs)]),
+  );
   const [grantMcps, setGrantMcps] = useState(new Set(config.mcps));
 
   // The controller always runs on Claude (controller-run resolves

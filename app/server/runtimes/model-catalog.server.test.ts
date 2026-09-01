@@ -99,6 +99,24 @@ describe("curated catalog", () => {
     expect(cat.defaultEffort).toBe("high");
   });
 
+  it("the shared always-valid alias list matches the curated values (ruling 106 D1)", async () => {
+    // The client pickers use CLAUDE_MODEL_ALIASES + DATED_CLAUDE_ID_RE to
+    // decide whether a stored model would run verbatim; if the curated values
+    // and the shared list drift, the pickers start rewriting valid models (or
+    // preserving invalid ones).
+    const { CLAUDE_MODEL_ALIASES, claudeModelRunsVerbatim } = await import(
+      "~/shared/model-ids"
+    );
+    expect(curatedCatalog("claude").models.map((m) => m.value)).toEqual([
+      ...CLAUDE_MODEL_ALIASES,
+    ]);
+    // And the shared predicate agrees with isKnownModel on its static half.
+    expect(claudeModelRunsVerbatim("claude-opus-4-1-20250805")).toBe(true);
+    expect(isKnownModel("claude", "claude-opus-4-1-20250805")).toBe(true);
+    expect(claudeModelRunsVerbatim("claude-sonnet")).toBe(false);
+    expect(claudeModelRunsVerbatim("gpt-5-codex")).toBe(false);
+  });
+
   it("codex curated: current subscription models + low…xhigh efforts", () => {
     const cat = curatedCatalog("codex");
     // F20-33: Terra is listed FIRST (so it is the fallback default) — Sol 400s
