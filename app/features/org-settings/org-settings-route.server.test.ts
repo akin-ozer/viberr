@@ -604,6 +604,8 @@ describe("controller config locks (ruling 108)", () => {
       action: "org.controller.updated",
     })[0];
     expect(latest).toBeTruthy();
+    // SAFETY: saveControllerConfig writes this row's details with a boolean
+    // `definitionEdited` (asserted below); the parse reads back that shape.
     const details = JSON.parse(latest!.detailsJson ?? "{}") as {
       definitionEdited: boolean;
     };

@@ -315,7 +315,7 @@ export function ControllerAdminPanel({
         <p className="pol-note">
           <Icon name="lock" />
           <span>
-            Locked on this deployment:{" "}
+            Locked here on this deployment:{" "}
             <strong>
               {lockedSections
                 .map(([section]) => SECTION_LABEL[section])
@@ -326,7 +326,9 @@ export function ControllerAdminPanel({
             {lockedSections
               .map(([section]) => CONTROLLER_UNLOCK_ENV_VIEW[section] + "=1")
               .join(" · ")}
-            .
+            . This locks the grant lists and the doctrine file edited on this
+            tab; a granted skill or knowledge base can still be edited from
+            Agent resources, which changes what the controller loads.
           </span>
         </p>
       )}

@@ -1624,6 +1624,16 @@ the quieter packet or the bare owner cell as drift.)*
     unaffected: it is not a section and stays non-removable under every flag
     combination (ruling 107). A dangling grant under a lock is still
     disclosed, just not removable in-app.
+    **Scope (owner, narrow reading, 2026-09-01):** the lock covers the
+    controller SETTINGS tab — the grant lists and the doctrine file edited
+    there. It is deliberately NOT airtight: deleting or renaming a resource on
+    the Agent resources tab still prunes the controller's grant (the shared
+    `resource-references` rewrite), and editing a granted skill's or KB's file
+    contents still changes what the controller loads as trusted context. Those
+    side doors were left open by owner decision, in favor of not freezing
+    org-resource management around whatever the controller happens to grant;
+    the panel note and this entry state the boundary rather than imply a
+    containment the ruling does not provide.
 
 ## Route map
 
