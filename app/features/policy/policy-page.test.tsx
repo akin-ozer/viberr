@@ -37,6 +37,7 @@ const PROFILES: PcapProfile[] = [
   {
     id: "operator", kind: "operator", name: "Operator", icon: "shield", role: "Task coordinator",
     backends: ["claude"],
+    capabilities: [],
     actions: {
       direct: [
         // Dynamic-dispatch rework (2026-08-29): the retired assign/summon slot
@@ -61,6 +62,7 @@ const PROFILES: PcapProfile[] = [
   {
     id: "developer", kind: "specialist", name: "Developer", icon: "branch", role: "Implementation",
     backends: ["claude"],
+    capabilities: [],
     actions: {
       direct: [
         "Post mid-run comments",

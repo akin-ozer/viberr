@@ -5,12 +5,49 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetEnvCacheForTests } from "~/server/config/env.server";
 import {
   closeDb,
+  ensureRunRowColumns,
   getDb,
   getProjectionDbPath,
   isDatabaseShuttingDown,
   openDatabase,
   shutdownDatabase,
 } from "./sqlite.server";
+
+describe("ensureRunRowColumns (pass 32, C02-R11 additive drift backstop)", () => {
+  it("adds the dispatched_by_* columns a pre-pass-32 root lacks, idempotently", () => {
+    // A data root that applied 0001 BEFORE the columns existed never re-runs
+    // the file (migrations stay squashed pre-prod), and `patchRun` naming a
+    // missing column would fail every agent completion on that root. The
+    // backstop applies the boot WARN's own remedy (ALTER TABLE … ADD COLUMN).
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-runrow-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(
+        `CREATE TABLE agent_runs (id TEXT PRIMARY KEY, outcome_key TEXT)`,
+      );
+      const columns = () =>
+        // SAFETY: PRAGMA table_info rows always carry a TEXT `name`.
+        (db.prepare(`PRAGMA table_info(agent_runs)`).all() as { name: string }[]).map(
+          (c) => c.name,
+        );
+      expect(columns()).toEqual(["id", "outcome_key"]);
+      ensureRunRowColumns(db);
+      expect(columns()).toEqual([
+        "id",
+        "outcome_key",
+        "dispatched_by_name",
+        "dispatched_by_user_id",
+      ]);
+      // Second boot: nothing to add, nothing thrown.
+      ensureRunRowColumns(db);
+      expect(columns()).toHaveLength(4);
+      db.prepare(`UPDATE agent_runs SET dispatched_by_name = ? WHERE id = ?`).run("x", "none");
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 /**
  * P13-D-43: nothing ever closed the database. `closeDb()` had no non-test

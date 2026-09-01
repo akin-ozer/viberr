@@ -68,6 +68,9 @@ interface CapturedOptions {
   strictMcpConfig?: boolean;
   disallowedTools?: string[];
   managedSettings?: { claudeMdExcludes?: string[] };
+  /** The system prompt as the adapter handed it over (preset+append for a
+   *  specialist) — read through a zod parse where a test needs its text. */
+  systemPrompt?: unknown;
 }
 
 /**
@@ -446,6 +449,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
       ...SPEC,
       workdir: bare,
       skills: ["conventional-commits"],
+      systemPrompt: "You are the Developer. Attached skills: conventional-commits.",
     });
 
     expect(captured.settingSources).toEqual([]);
@@ -454,6 +458,13 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // run listing no skill of its own must not keep the `Skill` tool, or the
     // SDK's ~16 bundled skills are invokable.
     expect(captured.disallowedTools).toContain("Skill");
+    // C02-R7 (pass 32): the persona was written on the mount's word, so the
+    // adapter corrects it in the same prompt — the agent is told which named
+    // skills are NOT available instead of invoking a name that never loads.
+    // Canary: drop the `droppedSkillsNotice` append.
+    const persona = z.object({ append: z.string() }).parse(captured.systemPrompt).append;
+    expect(persona).toContain("could NOT be enabled for this run");
+    expect(persona).toContain("conventional-commits");
   });
 
   it("V6: re-writes the excludes file when the mounted catalog is there without it", async () => {

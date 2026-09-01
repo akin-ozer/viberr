@@ -96,7 +96,14 @@ import {
   startRun,
   type RunReservation,
   type StartRunInput,
+  repoWriteWithheldFromDenylist,
+  webSearchWithheldFromDenylist,
 } from "~/server/runtimes/run-service.server";
+import { describeCodexSandbox } from "~/server/runtimes/codex-runtime.server";
+import {
+  refreshProjectMirror,
+  type ProjectMirrorRequest,
+} from "./repo-mirror.server";
 import { publishRunLogAppended } from "~/server/runtimes/run-events.server";
 import { createLineRedactor } from "~/server/runtimes/run-sink.server";
 import {
@@ -504,6 +511,8 @@ export function resolvedResourceInputs(input: {
   deniedTools: string[];
   /** The collaboration tools actually mounted (null → none). */
   toolkit: { comment: boolean; ask: boolean; verdict: boolean } | null;
+  /** See `RunInputs.sandbox` — computed by {@link runSandboxDisclosure}. */
+  sandbox: RunInputs["sandbox"];
 }): ResolvedResourceInputs {
   return {
     cwd: input.cwd,
@@ -533,7 +542,33 @@ export function resolvedResourceInputs(input: {
           ]
         : [],
     },
+    sandbox: input.sandbox,
   };
+}
+
+/**
+ * The run's OS-sandbox line for the inputs disclosure (pass 32, E32-3
+ * fallback): on Codex the mode `resolveCodexSandboxMode` will pick from the
+ * SAME derived flags `startRun` derives (withheld families from the denylist,
+ * the evidence carve-out from the attachments dir), with the honest note when
+ * the carve-out decided it. Null on Claude, where no OS sandbox exists and the
+ * denylist itself is the disclosure.
+ */
+export function runSandboxDisclosure(input: {
+  backend: RealBackend;
+  delivers: boolean;
+  disallowedTools: readonly string[];
+  attachmentsWritableDir: string | null;
+}): RunInputs["sandbox"] {
+  if (input.backend !== "codex") return null;
+  const spec: Parameters<typeof describeCodexSandbox>[0] = {
+    kind: input.delivers ? "primary" : "reviewer",
+    autonomous: true,
+  };
+  if (repoWriteWithheldFromDenylist(input.disallowedTools)) spec.repoWriteWithheld = true;
+  if (webSearchWithheldFromDenylist(input.disallowedTools)) spec.webSearchWithheld = true;
+  if (input.attachmentsWritableDir) spec.attachmentsWritableDir = input.attachmentsWritableDir;
+  return describeCodexSandbox(spec);
 }
 
 /** One-line console summary of `RunInputs` (the expandable detail is the rest). */
@@ -1254,8 +1289,9 @@ async function dispatchAgentRun(
   // dispatches used to start two runs in the SAME tasks/<KEY>/workspace clone —
   // two agent processes fighting over one git index/branch, risking a double
   // push. One live delivering run per task: refuse a second until the first
-  // finishes or is interrupted. Supporting agents are read-only for the repo by
-  // policy (Claude-enforced, advisory on Codex since R22) and run concurrently.
+  // finishes or is interrupted. Supporting agents run concurrently in their own
+  // isolated checkouts (P8); their write posture is grants-derived on BOTH
+  // backends (ruling 101: Claude's denylist, Codex's read-only sandbox).
   if (delivers) {
     const liveDelivering = listRunsForTaskRows(
       db,
@@ -1907,6 +1943,12 @@ async function dispatchAgentRun(
         unresolvedResources,
         deniedTools: disallowedTools,
         toolkit: toolkit ? collab : null,
+        sandbox: runSandboxDisclosure({
+          backend,
+          delivers,
+          disallowedTools,
+          attachmentsWritableDir: collab.evidence && realBackend ? attachmentsDir : null,
+        }),
       }),
       promptChars: prompt.length,
       anchor,
@@ -2265,6 +2307,26 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
       );
     }
   }
+  // F32-8 (pass 32): say when there are NONE. Live (VIB-1, VIB-2) a reviewer
+  // holding no MCP grant was told by the operator's brief to "re-call qa_echo
+  // yourself" and burned 20-30 turns hunting the tool (`find /`, grep of the
+  // workspace) because nothing in its context said the server was not there.
+  // The dispatch annotates such a directive too (operatorDispatchAgent); this
+  // is the run-side half, true on both backends.
+  if ((input.mcps ?? []).length === 0) {
+    parts.push(
+      "\n\n---\n# No external MCP servers on this run\n\n" +
+        "No org MCP servers are attached to this run, so there are no `mcp__*` " +
+        "tools from them" +
+        (input.backend === "claude"
+          ? " (Viberr's own collaboration tools, when listed above, are the exception)"
+          : "") +
+        ". If a directive names a tool or server you do not have — for example " +
+        "one another agent used — say so in your report and work from the " +
+        "evidence already on the task; do not search the filesystem or the " +
+        "workspace for it, and do not treat its absence as your own failure.",
+    );
+  }
   // P14-LV-09: a granted MCP server that resolves to nothing used to be
   // announced in the prompt and mounted nowhere — silent capability loss the
   // human never saw. Live, a scout reported `vm-memory` as "referenced but
@@ -2375,11 +2437,12 @@ export interface AnalyzePromptInput {
   cloneFailure?: PromptCloneFailure | null;
   /** Which delivery steps the profile's capabilities permit (XS-4). */
   delivery: DeliveryPermissions;
-  /** Whether this engagement DELIVERS. A supporting (non-delivering) run is
-   *  read-only for the repo (F10-12; Claude-enforced denylist, advisory on
-   *  Codex since R22) — its prompt must NOT instruct branch/commit work
-   *  regardless of the profile's capabilities, or it re-creates the
-   *  prompt-vs-enforcement contradiction (XS-4). */
+  /** Whether this engagement DELIVERS. A supporting (non-delivering) run never
+   *  ships anything (P8 isolation): its prompt must NOT instruct push/PR work
+   *  regardless of the profile's capabilities (XS-4). Its LOCAL write posture
+   *  follows `delivery` — grants-derived on both backends since ruling 101(b),
+   *  so a write-granted supporting run may edit and commit in its own checkout
+   *  and the prompt says so (C02-R4). */
   delivers: boolean;
   /** Owner ask 2026-08-20: the task's attachments folder (store-relative),
    *  when the profile holds `attach-evidence-references`. Rendered as the ONE
@@ -2464,20 +2527,27 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
               : "")
           : `- Clone \`https://github.com/${input.repo}\` INTO the current directory (\`git clone https://github.com/${input.repo}.git .\`) before making changes.\n`);
     if (!input.delivers) {
-      // F10-12: a SUPPORTING (reviewing) run is read-only for the repo (Claude
-      // write+git denylist; advisory on Codex since R22 removed the read-only
-      // sandbox). The prompt MUST match: never tell it to branch, edit, commit,
-      // or push — regardless of the profile's capabilities — or it obeys the
-      // contract into denied tool calls and wastes the run (the XS-4 failure).
-      // It reads and reports only.
+      // F10-12: a SUPPORTING (reviewing) run never ships: its prompt must not
+      // tell it to push or open a PR regardless of the profile's capabilities,
+      // or it obeys the contract into denied tool calls and wastes the run
+      // (the XS-4 failure).
       // F-P8 (pass 25): the claim used to be "the tool layer blocks these" —
       // true on Claude, FALSE on Codex (no OS sandbox). Now that a supporting run
       // gets its OWN isolated checkout (per-engagement isolation), the load-bearing
       // guarantee is delivery-isolation, not tool denial: nothing written here can
       // reach the delivered PR on EITHER backend. Say that instead of a mechanism
       // that only holds on one backend.
+      // C02-R4 (pass 32): the LOCAL write posture follows the grants (ruling
+      // 101(b): a write-GRANTED supporting agent may edit and commit in its own
+      // isolated checkout; Claude's supporting denylist narrowed to the delivery
+      // commands, Codex's sandbox is workspace-write for it). The old sentence
+      // forbade "edit files / git commit" for EVERY supporting run — a prompt
+      // stricter than the enforcement, the mirror image of XS-4 — so a granted
+      // reviewer asked to try a fix refused work its tools allowed.
       prompt +=
-        `- You are a SUPPORTING agent: this workspace is your OWN isolated checkout — nothing you write here reaches the delivered PR (the delivering agent's tree is separate). Do NOT create a branch, edit files, run \`git commit\`/\`git push\`, or open a PR — even if a directive says to; that is not a supporting agent's job and would not ship. Read the code and the change on the branch \`${input.branch}\` as needed, then reply.\n` +
+        (input.delivery.canCommitPush
+          ? `- You are a SUPPORTING agent: this workspace is your OWN isolated checkout — nothing you write here reaches the delivered PR (the delivering agent's tree is separate). Your repo-write grant lets you edit files and commit LOCALLY here (to reproduce, prototype or verify a fix), but that work does not ship: do NOT \`git push\`, do NOT open a PR, and do not describe local edits as delivered — put proposed changes in your reply for the delivering agent. Read the code and the change on the branch \`${input.branch}\` as needed, then reply.\n`
+          : `- You are a SUPPORTING agent: this workspace is your OWN isolated checkout — nothing you write here reaches the delivered PR (the delivering agent's tree is separate). Do NOT create a branch, edit files, run \`git commit\`/\`git push\`, or open a PR — even if a directive says to; that is not a supporting agent's job and would not ship. Read the code and the change on the branch \`${input.branch}\` as needed, then reply.\n`) +
         (input.reviewSubject
           ? `- The review subject is PINNED to the delivered revision \`${input.reviewSubject.headSha}\`` +
             (input.reviewSubject.prNumber
@@ -2682,9 +2752,10 @@ function taskCloneDir(
  * `git add -A` ships (push-workspace), the operator reads, and evidence paths
  * resolve against. Every SUPPORTING (non-delivering) engagement gets its OWN
  * checkout at `<workspaceRoot>/support/<profileId>/<repo>`, so a supporting run's
- * writes — only ADVISORY-blocked on Codex since R22 removed the read-only
- * sandbox — can NEVER reach the delivering tree or be swept into the delivered
- * PR (the F-P8 governance hole). Keyed by engagement (profileId), so it is
+ * writes — allowed there when its grants allow them (ruling 101(b)), bound by
+ * Claude's denylist or Codex's read-only sandbox when they do not — can NEVER
+ * reach the delivering tree or be swept into the delivered PR (the F-P8
+ * governance hole). Keyed by engagement (profileId), so it is
  * reused across that engagement's runs and stays bounded; retention removes it
  * with the rest of `workspace/` when the task reaches its terminal stage.
  */
@@ -2717,6 +2788,11 @@ export interface ResumeConfinement {
    *  fields (it composes the prompt) and passes the whole thing to
    *  `recordRunInputs` once `resumeRun` has minted the run id. */
   runInputs: ResolvedResourceInputs;
+  /** C02-R3 (pass 32): the task's attachments drop, when the profile holds
+   *  `attach-evidence-references` — re-armed on resume exactly as the fresh
+   *  run mounts it (the Codex sandbox's extra writable root; the evidence
+   *  carve-out keys off it). Absent when evidence is withheld. */
+  attachmentsWritableDir?: string;
 }
 
 /**
@@ -2846,6 +2922,16 @@ export async function resolveResumeConfinement(
         : resumeBrowser.refused
           ? { refusedReason: resumeBrowser.refused.reason }
           : null,
+      // C02-R3: the same drop section the fresh persona carries — a resumed
+      // evidence-granted run used to lose "how to post a file" mid-thread.
+      attachmentsDrop: collab.evidence
+        ? {
+            attachmentsRel: storeRelativePath(
+              taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot),
+              ctx.dataRoot,
+            ),
+          }
+        : null,
       // Same predicate as the fresh path. A resume is always a REAL backend
       // (an unavailable one fail-fasts before it ever mounts a toolkit), so the
       // realBackend term is `true` here — stated, not silently omitted.
@@ -2905,6 +2991,18 @@ export async function resolveResumeConfinement(
     const merged = { ...grantedServers, ...toolkit?.mcpServers };
     const cloneDir = taskCloneDir(ctx, input.projectSlug, input.taskKey, support);
     const disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
+    // C02-R3: the fresh path creates the drop BEFORE the run so a plain `cp`
+    // cannot fail on a missing path; a resume is a real backend by
+    // construction, so the same holds here.
+    let attachmentsWritableDir: string | undefined;
+    if (collab.evidence) {
+      attachmentsWritableDir = taskAttachmentsDir(
+        input.projectSlug,
+        input.taskKey,
+        ctx.dataRoot,
+      );
+      mkdirSync(attachmentsWritableDir, { recursive: true });
+    }
     const confinement: ResumeConfinement = {
       disallowedTools,
       env,
@@ -2923,8 +3021,17 @@ export async function resolveResumeConfinement(
         unresolvedResources: resumeUnresolved,
         deniedTools: disallowedTools,
         toolkit: toolkit ? collab : null,
+        sandbox: input.backend
+          ? runSandboxDisclosure({
+              backend: input.backend,
+              delivers: input.delivers === true,
+              disallowedTools,
+              attachmentsWritableDir: attachmentsWritableDir ?? null,
+            })
+          : null,
       }),
     };
+    if (attachmentsWritableDir) confinement.attachmentsWritableDir = attachmentsWritableDir;
     // Each key is set only when this resume really has that policy: the caller
     // spreads the result into the resume spec, where an ABSENT key means "keep
     // the adapter's default" and a present-but-undefined one would not.
@@ -2967,6 +3074,14 @@ export async function resolveResumeConfinement(
         ],
         deniedTools: withheld,
         toolkit: null,
+        sandbox: input.backend
+          ? runSandboxDisclosure({
+              backend: input.backend,
+              delivers: input.delivers === true,
+              disallowedTools: withheld,
+              attachmentsWritableDir: null,
+            })
+          : null,
       }),
     };
   }
@@ -3054,6 +3169,53 @@ interface CloneOutcome {
 // rule (Viberr owns the workspace catalog), and keeping them together is what
 // lets the mount guarantee "only Viberr content is discoverable" on its own.
 
+/**
+ * C32-2 (pass 32): a `--local` clone's `origin/*` are the DELIVERING checkout's
+ * local branches as they stood at ITS clone time — and that checkout's own
+ * `origin/main` is never fetched again after it is cut. So a reviewer's
+ * `git diff origin/main...HEAD` compared against a base that could be several
+ * merges behind the PR's real base (live: VIB-2's reviewer saw VIB-1's README
+ * as part of the change and found the right base only by reasoning). Refresh
+ * the support checkout's remote-tracking refs from the project MIRROR — the
+ * one store that is fetched against GitHub (when the network allows) with the
+ * project's credential, which never enters the checkout: the fetch here is a
+ * local path. Best-effort: no mirror (or a failed fetch) leaves the refs as
+ * cloned, and says so.
+ */
+async function refreshSupportBase(
+  db: DatabaseSync,
+  input: { projectSlug: string; repo: string; dataRoot?: string },
+  dir: string,
+): Promise<void> {
+  const cred = getProjectCredential(db, input.projectSlug);
+  const token = cred ? getPatToken(db, cred.id) : null;
+  const request: ProjectMirrorRequest = {
+    projectSlug: input.projectSlug,
+    repo: input.repo,
+    token,
+    create: false,
+  };
+  if (input.dataRoot) request.dataRoot = input.dataRoot;
+  const mirror = await refreshProjectMirror(request);
+  if (!mirror) return;
+  try {
+    await execFileAsync(
+      "git",
+      ["-C", dir, "fetch", "--quiet", mirror.dir, "+refs/heads/*:refs/remotes/origin/*"],
+      { timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
+    );
+  } catch (error) {
+    logger.warn(
+      "support checkout could not refresh its base refs from the project mirror — reviewing against the delivering checkout's clone-time base",
+      {
+        projectSlug: input.projectSlug,
+        repo: input.repo,
+        err: error instanceof Error ? error : new Error(String(error)),
+      },
+    );
+  }
+}
+
 async function cloneRepo(
   db: DatabaseSync,
   input: {
@@ -3122,6 +3284,7 @@ async function cloneRepo(
             githubRemoteSanitizationArgs(input.repo, dir),
             { timeout: 10_000 },
           );
+          await refreshSupportBase(db, input, dir);
           await setIdentity(dir);
           await stripUngovernedRepoCatalog(dir);
           return { dir };

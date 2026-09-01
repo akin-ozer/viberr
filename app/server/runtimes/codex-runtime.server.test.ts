@@ -11,6 +11,7 @@ import {
   createCodexAdapter,
   INTERRUPT_SETTLE_GRACE_MS,
   resolveCodexReasoningEffort,
+  describeCodexSandbox,
   resolveCodexSandboxMode,
   type CodexClient,
   type CodexThread,
@@ -1097,6 +1098,47 @@ describe("parity ruling (2026-08-31): grants decide the codex sandbox; egress-ga
         attachmentsWritableDir: "/data/projects/p/tasks/T-1/attachments",
       }),
     ).toBe("workspace-write");
+  });
+
+  it("C02-R8 (pass 32): only a DELIVERING run is a deliverer — a controller-kind run never reaches full access", () => {
+    // The old `kind !== "reviewer"` admitted `controller`; stated positively
+    // now. Canary: restore the negation and the controller reads full access.
+    expect(
+      resolveCodexSandboxMode({ ...SPEC, kind: "controller", autonomous: true }),
+    ).toBe("workspace-write");
+    expect(resolveCodexSandboxMode({ ...SPEC, kind: "primary", autonomous: true })).toBe(
+      "danger-full-access",
+    );
+  });
+
+  it("describeCodexSandbox names the evidence carve-out honestly (E32-3 fallback)", () => {
+    const carveOut = describeCodexSandbox({
+      kind: "reviewer",
+      autonomous: true,
+      repoWriteWithheld: true,
+      attachmentsWritableDir: "/data/projects/p/tasks/T-1/attachments",
+    });
+    expect(carveOut.mode).toBe("workspace-write");
+    expect(carveOut.note).toContain("advisory");
+    expect(carveOut.note).toContain("read-only-except-attachments");
+    // A plain withheld run is read-only with nothing to disclose…
+    expect(
+      describeCodexSandbox({ kind: "reviewer", autonomous: true, repoWriteWithheld: true }),
+    ).toEqual({ mode: "read-only", note: null });
+    // …and a granted run's workspace-write is what its grants say.
+    expect(describeCodexSandbox({ kind: "reviewer", autonomous: true })).toEqual({
+      mode: "workspace-write",
+      note: null,
+    });
+    // The operator is read-only by kind: an attachments dir on it is not a carve-out.
+    expect(
+      describeCodexSandbox({
+        kind: "operator",
+        autonomous: true,
+        repoWriteWithheld: true,
+        attachmentsWritableDir: "/x",
+      }),
+    ).toEqual({ mode: "read-only", note: null });
   });
 
   it("a write-GRANTED supporting run is workspace-write — never confined for its role's name (R22's core survives)", () => {

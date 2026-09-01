@@ -19,6 +19,7 @@ import {
   type RunSpec,
   type RuntimeAdapter,
 } from "./adapter.server";
+import { CODEX_REPO_WRITE_ADVISORY_NOTE } from "~/server/tasks/specialist-tool-policy";
 import { SESSION_MISSING_RE } from "./session-export.server";
 import { projectEnvelope } from "./wire-format.server";
 import { redactProviderText } from "~/server/secrets/git-output-redact.server";
@@ -358,7 +359,12 @@ function codexConfigForRun(
  * EVIDENCE-granted (`attachmentsWritableDir` set — its assignment includes
  * producing files for humans) keeps `workspace-write`, because this sandbox
  * cannot express "read-only except attachments/" and a read-only mode blocks
- * the copy-into-attachments flow (the F22-03 defect). Claude expresses the
+ * the copy-into-attachments flow (the F22-03 defect). Pass 32 re-asked the
+ * owner (E32-3) and VERIFIED the constraint against the pinned Codex 0.146
+ * sources: `SandboxPolicy::ReadOnly` has no writable roots and `--add-dir`
+ * widens `workspace-write` only — so the carve-out stands, disclosed as
+ * "advisory on Codex" wherever the enforcement is rendered
+ * (`codexRepoWriteAdvisory`, `describeCodexSandbox`). Claude expresses the
  * same intent more finely: file-write tools denied, the browser MCP's own
  * writes land in attachments/.
  *
@@ -374,7 +380,15 @@ function codexConfigForRun(
  * it also drives Claude's `permissionMode`, and flipping it to `"default"`
  * would hang a server run on an approval nobody can answer.
  */
-export function resolveCodexSandboxMode(spec: RunSpec): SandboxMode {
+/** The spec fields the sandbox decision reads — narrowed so a caller that
+ *  only wants to DESCRIBE a run's confinement (the run-inputs disclosure)
+ *  need not build a whole RunSpec. */
+export type CodexSandboxInputs = Pick<
+  RunSpec,
+  "kind" | "repoWriteWithheld" | "attachmentsWritableDir" | "autonomous" | "webSearchWithheld"
+>;
+
+export function resolveCodexSandboxMode(spec: CodexSandboxInputs): SandboxMode {
   // Coordination machinery: read-only, like the Claude operator's denylist.
   // (Its plan executes server-side; the run itself only reads the checkout.)
   if (spec.kind === "operator") return "read-only";
@@ -393,11 +407,34 @@ export function resolveCodexSandboxMode(spec: RunSpec): SandboxMode {
   // egress-gated runs must NOT use it. Operators (which also set
   // `autonomous: true`) never reach this line — the read-only early return
   // above already settled them.
-  const isDeliverer = spec.kind !== "reviewer";
+  // C02-R8 (pass 32): DELIVERING means `kind === "primary"` — stated
+  // positively. The old `!== "reviewer"` also admitted `controller`, so a
+  // controller run on Codex (forced to Claude today, controller-run.server)
+  // would have read as a deliverer and reached full access.
+  const isDeliverer = spec.kind === "primary";
   if (spec.autonomous && isDeliverer && !spec.webSearchWithheld) {
     return "danger-full-access";
   }
   return "workspace-write";
+}
+
+/**
+ * The run's OS sandbox for the run-inputs disclosure: the mode it got, plus
+ * the honest note when the evidence carve-out is what decided it (pass 32,
+ * E32-3 fallback — see `codexRepoWriteAdvisory`).
+ */
+/** The run-inputs disclosure of a Codex run's sandbox — the shape
+ *  `RunInputs.sandbox` carries. */
+export interface CodexSandboxDisclosure {
+  mode: SandboxMode;
+  note: string | null;
+}
+
+export function describeCodexSandbox(spec: CodexSandboxInputs): CodexSandboxDisclosure {
+  const mode = resolveCodexSandboxMode(spec);
+  const carveOut =
+    spec.kind !== "operator" && !!spec.repoWriteWithheld && !!spec.attachmentsWritableDir;
+  return { mode, note: carveOut ? CODEX_REPO_WRITE_ADVISORY_NOTE : null };
 }
 
 /** The idle (inactivity) timeout for a codex run in ms — the window a single

@@ -586,10 +586,11 @@ const REPO_WRITE_DENY_MARKERS = ["Edit", "Write", "NotebookEdit"] as const;
  * `resolveSpecialistDisallowedTools` policy, backend-agnostically — it just had
  * no effect on Codex, which has no denylist channel. Deriving the flag from it
  * means the spec records the withholding for exactly the profiles the matrix
- * already shows as withheld, with no second source of truth to drift. (It used
- * to drive the Codex read-only sandbox; R22 removed that sandbox, so on Codex
- * the withholding is advisory now.) Callers that know the grant directly may
- * still pass `repoWriteWithheld` explicitly.
+ * already shows as withheld, with no second source of truth to drift. It
+ * drives the Codex read-only sandbox again since ruling 101 (R22 had removed
+ * that sandbox; the parity ruling restored it for withheld runs, with the
+ * evidence carve-out disclosed as advisory). Callers that know the grant
+ * directly may still pass `repoWriteWithheld` explicitly.
  */
 export function repoWriteWithheldFromDenylist(
   disallowedTools?: readonly string[],
@@ -833,9 +834,10 @@ export async function startRun(
     spec.disallowedTools = input.disallowedTools;
   }
   if (input.skills && input.skills.length) spec.skills = input.skills;
-  // Records the withheld repo-write grant on the spec. It used to drive the
-  // Codex read-only sandbox (P13-RT-02); R22 removed that sandbox, so on Codex
-  // it is advisory (Claude's denylist binds). Explicit caller value wins.
+  // Records the withheld repo-write grant on the spec: Claude's denylist binds
+  // it, and since ruling 101 the Codex read-only sandbox does too
+  // (resolveCodexSandboxMode; the evidence carve-out is the disclosed
+  // exception). Explicit caller value wins.
   if (
     input.repoWriteWithheld ??
     repoWriteWithheldFromDenylist(input.disallowedTools)
@@ -1165,6 +1167,14 @@ export interface ResumeRunInput {
    *  ask_human can fire. Without it a resumed Codex reviewer silently lost
    *  its envelope, a fresh-vs-resume parity break (F7). */
   outputSchema?: unknown;
+  /** C02-R3 (pass 32): re-apply the task's attachments drop on resume. It is
+   *  the Codex sandbox's ONLY extra writable root (and the evidence carve-out
+   *  in `resolveCodexSandboxMode` keys off it): a resumed evidence-granted
+   *  Codex run used to lose `additionalDirectories` — its persona still said
+   *  "copy files into attachments/" while the sandbox blocked the copy — and a
+   *  write-withheld one dropped to read-only, the F22-03 defect back on the
+   *  @mention path. Same fresh-vs-resume parity class as XS-1/F7. */
+  attachmentsWritableDir?: string;
 }
 
 /**
@@ -1189,6 +1199,9 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
   if (input.mcpServers) target.mcpServers = input.mcpServers;
   if (input.systemPrompt) target.systemPrompt = input.systemPrompt;
   if (input.outputSchema) target.outputSchema = input.outputSchema;
+  if (input.attachmentsWritableDir) {
+    target.attachmentsWritableDir = input.attachmentsWritableDir;
+  }
 }
 
 /**
@@ -1643,6 +1656,12 @@ export interface RunLogQuery {
    *  group). A forward tail ignores it: it is already bounded by how far behind
    *  the consumer is. */
   limit?: number;
+  /** C02-R12 (pass 32): a bound for the FORWARD read, pushed into the SELECT.
+   *  The console's live tail never needs one (it is bounded by its own
+   *  cursor), but `viberr_ops.read_run_log` pages forward for a model and
+   *  used to materialize every line after `since` before slicing. Ignored in
+   *  backward mode (`limit` is that page's size). */
+  forwardLimit?: number;
 }
 
 /**
@@ -1666,7 +1685,7 @@ export function getRunLog(
     ? listRunLinesTail(db, runId, query.limit ?? RUN_LOG_PAGE_LINES, query.before).map(
         ({ seq, occurredAt, raw, display }) => ({ seq, occurredAt, raw, display }),
       )
-    : listRunLines(db, runId, query.since ?? -1);
+    : listRunLines(db, runId, query.since ?? -1, query.forwardLimit);
   const sinceSeq = query.since ?? -1;
   const head = lines.length ? lines[lines.length - 1]!.seq : sinceSeq;
   const oldestSeq = lines.length ? lines[0]!.seq : -1;

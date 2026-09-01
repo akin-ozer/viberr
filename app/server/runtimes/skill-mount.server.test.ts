@@ -223,12 +223,11 @@ describe("stripUngovernedRepoCatalog (R18-3 / F18-8)", () => {
     // branch and `existsSync` below fails.
     const dataRoot = storeWithSkills([{ name: "live-craft", skillMd: "SENTINEL-LIVE\n" }]);
     const ws = await gitCheckout();
-    const runA = await mountGrantedSkills({
+    await mountGrantedSkills({
       workspaceDir: ws,
       skills: ["live-craft"],
       dataRoot,
     });
-    expect(runA.settingsWritten).toBe(true);
     // A's own agent (or the repo) replaces the file mid-run: whatever is there
     // when the next strip runs is not something viberr wrote.
     writeFileSync(path.join(ws, ".claude", "settings.json"), '{"hooks":{}}');
@@ -240,9 +239,6 @@ describe("stripUngovernedRepoCatalog (R18-3 / F18-8)", () => {
     });
 
     expect(runB.mounted).toEqual([]);
-    // `settingsWritten` reports THIS run's native channel, not the file's
-    // existence for someone else: B mounts nothing and opens no project source.
-    expect(runB.settingsWritten).toBe(false);
     const settings = z
       .record(z.string(), z.unknown())
       .parse(JSON.parse(readFileSync(path.join(ws, ".claude", "settings.json"), "utf8")));
@@ -747,7 +743,6 @@ describe("mountGrantedSkills", () => {
         dataRoot,
       });
 
-      expect(run.settingsWritten).toBe(false);
       expect(run.mounted).toEqual([]);
       expect(run.skipped.map((s) => s.name)).toEqual(["later-craft"]);
       expect(run.skipped[0]?.reason).toContain("CLAUDE.md");

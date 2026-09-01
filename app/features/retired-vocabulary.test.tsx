@@ -247,6 +247,7 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
       name: "Operator",
       icon: "shield",
       backends: ["claude"],
+      capabilities: [],
       actions: {
         // The seeded operator's post-rework grant wording (dispatch-agents).
         direct: ["Select & run agents"],
@@ -260,6 +261,7 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
       name: "Developer",
       icon: "branch",
       backends: ["claude"],
+      capabilities: [],
       actions: {
         direct: ["Commit & push to the branch"],
         recommend: [],

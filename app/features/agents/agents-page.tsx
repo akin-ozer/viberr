@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useNavigate, useSearchParams } from "react-router";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { capabilityById, isClaudeOnlyEnforcedLabel } from "~/shared/capabilities";
+import {
+  CODEX_REPO_WRITE_ADVISORY_NOTE,
+  codexRepoWriteAdvisory,
+} from "~/server/tasks/specialist-tool-policy";
 import { resolveDeclaredStages } from "~/shared/workflow/stage-eligibility";
 import { countLabel } from "~/shared/text/plural";
 import {
@@ -241,6 +245,7 @@ function CapColumn({
   group,
   items,
   codexPrimary,
+  codexCarveOut,
 }: {
   group: keyof typeof CAP_META;
   items: string[];
@@ -248,8 +253,13 @@ function CapColumn({
    *  claude-only-enforced grant listed here binds only advisorily — the same
    *  caveat the capability matrix and editor already show per row. */
   codexPrimary?: boolean;
+  /** Pass 32 (E32-3 fallback): this Codex-first profile withholds repo-write
+   *  while granting evidence — the one shape the Codex sandbox cannot bind —
+   *  so the repo-write row in the withheld bucket gets the same caveat. */
+  codexCarveOut?: boolean;
 }) {
   const m = CAP_META[group];
+  const repoWriteLabel = capabilityById("execute-code-or-write-repo")?.label;
   return (
     <div className={"cap-col " + group}>
       <div className="cap-col-head">
@@ -258,15 +268,25 @@ function CapColumn({
       </div>
       <div className="cap-list">
         {items.map((x) => {
-          const advisoryOnCodex = codexPrimary && isClaudeOnlyEnforcedLabel(x);
+          const claudeOnly = codexPrimary && isClaudeOnlyEnforcedLabel(x);
+          const carveOut = codexCarveOut && x === repoWriteLabel;
           return (
             <div className="cap-item" key={x}>
               <Icon name={m.icon} />
               <span>{x}</span>
-              {advisoryOnCodex && (
+              {claudeOnly && (
                 <span
                   className="fhint"
                   title="Claude-enforced. On this profile's Codex runtime the tool layer does not bind it; the server-owned delivery gate is the real boundary."
+                >
+                  {" "}
+                  · advisory on Codex
+                </span>
+              )}
+              {carveOut && (
+                <span
+                  className="fhint"
+                  title={`On this profile's Codex runtime ${CODEX_REPO_WRITE_ADVISORY_NOTE}.`}
                 >
                   {" "}
                   · advisory on Codex
@@ -680,6 +700,7 @@ export function ProfileDetail({
   // F-P1 (pass 25): when a run would resolve to Codex, the claude-only-enforced
   // grants in these columns bind only advisorily — CapColumn shows the caveat.
   const codexPrimary = primaryBackend(a) === "codex";
+  const codexCarveOut = codexPrimary && codexRepoWriteAdvisory(a.capabilities);
   const governed = {
     direct: a.actions.direct.filter(isGoverned),
     recommend: a.actions.recommend.filter(isGoverned),
@@ -847,7 +868,12 @@ export function ProfileDetail({
         <div className="cap-cols">
           <CapColumn group="direct" items={governed.direct} codexPrimary={codexPrimary} />
           <CapColumn group="recommend" items={governed.recommend} codexPrimary={codexPrimary} />
-          <CapColumn group="forbidden" items={governed.forbidden} codexPrimary={codexPrimary} />
+          <CapColumn
+            group="forbidden"
+            items={governed.forbidden}
+            codexPrimary={codexPrimary}
+            codexCarveOut={codexCarveOut}
+          />
         </div>
         {advisory.length > 0 && (
           /* R15-12: these were disclosed inline, above the fold, next to the

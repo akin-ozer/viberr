@@ -21,7 +21,14 @@ import {
   resumeRun,
   startRun,
 } from "./run-service.server";
-import { getRun, listRunLines, listRunsForTaskRows, upsertRun } from "./run-store.server";
+import * as runServiceModule from "./run-service.server";
+import {
+  getRun,
+  insertRunLine,
+  listRunLines,
+  listRunsForTaskRows,
+  upsertRun,
+} from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import { RUN_PHASE } from "./adapter.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
@@ -634,6 +641,9 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
       env: { GIT_CEILING_DIRECTORIES: "/data/projects/x/tasks/VIB-1" },
       mcpServers: { viberr: sdkServerStub },
       systemPrompt: "You are the Developer.",
+      // C02-R3 (pass 32): the attachments drop is confinement too — the Codex
+      // sandbox's extra writable root, and what the evidence carve-out keys on.
+      attachmentsWritableDir: "/data/projects/x/tasks/VIB-1/attachments",
       dataRoot: store.dataRoot,
     });
     await settle();
@@ -646,6 +656,44 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
     );
     expect(resumeSpec.mcpServers).toEqual({ viberr: { type: "sdk" } });
     expect(resumeSpec.systemPrompt).toBe("You are the Developer.");
+    // Canary: drop the `attachmentsWritableDir` line from carryResumeOptions.
+    expect(resumeSpec.attachmentsWritableDir).toBe(
+      "/data/projects/x/tasks/VIB-1/attachments",
+    );
+  });
+
+  it("C02-R12 (pass 32): a forward read can be bounded in the SELECT itself", () => {
+    upsertRun(store.db, {
+      id: "run_fwd",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t-fwd",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "claude",
+      model: "m",
+      sdk: "s",
+      agentProfileId: "developer",
+      state: "finished",
+    });
+    for (let seq = 0; seq < 6; seq += 1) {
+      insertRunLine(store.db, {
+        runId: "run_fwd",
+        seq,
+        occurredAt: new Date().toISOString(),
+        raw: "{}",
+        display: { t: "1", ev: "text", tag: "assistant", text: `line ${seq}` },
+      });
+    }
+    // Unbounded stays the console's live tail…
+    expect(listRunLines(store.db, "run_fwd", 1).map((l) => l.seq)).toEqual([2, 3, 4, 5]);
+    // …and the bound is applied by SQL, ascending from the cursor.
+    expect(listRunLines(store.db, "run_fwd", 1, 2).map((l) => l.seq)).toEqual([2, 3]);
+    expect(listRunLines(store.db, "run_fwd", -1, 0)).toEqual([]);
+    // `getRunLog` threads it as `forwardLimit`, never as the backward `limit`.
+    const { getRunLog } = runServiceModule;
+    const page = getRunLog(store.db, "run_fwd", { since: 1, forwardLimit: 3 })!;
+    expect(page.lines.map((l) => l.seq)).toEqual([2, 3, 4]);
   });
 });
 

@@ -302,15 +302,17 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
             page = log.lines;
           } else {
             // Forward. `getRunLog` ignores `limit` in this mode BY DESIGN (the
-            // console's live tail is bounded by its own cursor), so the bound is
-            // applied here, on the ascending lines. The SELECT behind it is
-            // unbounded (`listRunLines` has no LIMIT, as run-store says) but
-            // local and fast; what this tool must keep bounded is the REPLY it
-            // puts in a model's context. If the SELECT ever bites, the fix is a
-            // LIMIT pushed down into `listRunLines`, never a bigger reply.
-            const log = getRunLog(db, args.runId, { since: args.since });
+            // console's live tail is bounded by its own cursor), so the bound
+            // travels as `forwardLimit` — pushed into the SELECT (C02-R12,
+            // pass 32) rather than applied on lines already materialized. What
+            // this tool must keep bounded is the REPLY it puts in a model's
+            // context; the SQL bound keeps the read proportional to it too.
+            const log = getRunLog(db, args.runId, {
+              since: args.since,
+              forwardLimit: limit,
+            });
             if (!log) throw new NotVisibleError(notVisibleRun(args.runId));
-            page = log.lines.slice(0, limit);
+            page = log.lines;
           }
 
           // Page position, computed against the RUN's real bounds. `getRunLog`'s

@@ -1596,6 +1596,12 @@ export async function commentToAgent(
     // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a
     // structured verdict/questions instead of falling back to the prose regex.
     if (confinement.outputSchema) resume.outputSchema = confinement.outputSchema;
+    // C02-R3: the attachments drop is part of the confinement too (the Codex
+    // sandbox's extra writable root) — dropped on resume, an evidence-granted
+    // Codex reviewer could not post the files its persona promised.
+    if (confinement.attachmentsWritableDir) {
+      resume.attachmentsWritableDir = confinement.attachmentsWritableDir;
+    }
     if (target.effort) resume.effort = target.effort;
     const resumed = await resumeRun(db, resume);
     runId = resumed.runId;
@@ -3088,9 +3094,9 @@ export async function registerAgentCompletion(
     /** Dispatch-completion contract (2026-08-29): display name of the human
      *  whose manual/scheduled dispatch started this run. Presence makes the
      *  final report always tag them + @operator (appended when the model forgot)
-     *  and always re-invokes the operator. Closure-only, like
-     *  `fromHumanDirective`: a run recovered after a crash degrades to the
-     *  react heuristic with no cc line — the documented recovery loss class. */
+     *  and always re-invokes the operator. PERSISTED on the run row (pass 32,
+     *  C02-R11) so a run recovered after a restart keeps the contract — it used
+     *  to be closure-only and degrade to the react heuristic with no cc line. */
     dispatchedByName?: string;
     /** The dispatcher's user id — what the cc-append verifies notification
      *  against (the mention ladder resolves people, not substrings). */
@@ -3099,12 +3105,17 @@ export async function registerAgentCompletion(
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
   },
 ): Promise<void> {
-  // Persist the staging key on the run row so boot recovery can re-find the
-  // staged report_outcome envelope after a restart (AO-1) — the in-process
-  // callback below holds it only in a closure that dies with the process.
-  if (input.outcomeKey) {
-    patchRun(db, input.runId, { outcomeKey: input.outcomeKey });
+  // Persist on the run row what boot recovery must re-find after a restart —
+  // the in-process callback below holds these only in a closure that dies
+  // with the process: the staging key for the staged report_outcome envelope
+  // (AO-1) and the dispatcher of the dispatch-completion contract (C02-R11).
+  const persisted: Parameters<typeof patchRun>[2] = {};
+  if (input.outcomeKey) persisted.outcomeKey = input.outcomeKey;
+  if (input.dispatchedByName) {
+    persisted.dispatchedByName = input.dispatchedByName;
+    if (input.dispatchedByUserId) persisted.dispatchedByUserId = input.dispatchedByUserId;
   }
+  if (Object.keys(persisted).length > 0) patchRun(db, input.runId, persisted);
   const { registerRunCompletion, noteCompletionEffectsLost } = await import(
     "~/server/runtimes/run-service.server"
   );
@@ -6857,7 +6868,11 @@ export async function resolvePacket(
   // this task's local work. Each step is best-effort AFTER the resolution
   // write (the decision stands even when GitHub misbehaves), and every
   // non-success lands on the timeline in plain words.
-  if (option.kind === "resolve_remote_collision" && actor.userId) {
+  // P07-F (pass 32): no `&& actor.userId` guard — a resolver without a user id
+  // used to resolve+clear the packet and then do NOTHING (no close, no delete,
+  // no note). `resolveRemoteBranchCollision` refuses that actor itself
+  // ("No acting user.") and the refusal lands on the timeline below.
+  if (option.kind === "resolve_remote_collision") {
     const { resolveRemoteBranchCollision } = await import(
       "~/server/github/github-reconciler.server"
     );

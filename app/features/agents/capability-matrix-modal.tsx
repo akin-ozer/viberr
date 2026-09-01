@@ -4,6 +4,10 @@ import { useDialog } from "~/ui/use-dialog";
 import type { MatrixProfile } from "./agent-types";
 import { CAP_MODAL_CATALOG } from "./capability-catalog";
 import { capabilityByLabel, capabilityEnforcement } from "~/shared/capabilities";
+import {
+  CODEX_REPO_WRITE_ADVISORY_NOTE,
+  codexRepoWriteAdvisory,
+} from "~/server/tasks/specialist-tool-policy";
 
 /**
  * CapabilityMatrixModal (agents.jsx §4.6) — THE shared read-only
@@ -162,6 +166,20 @@ export function CapabilityMatrixModal({
                     const capId = capabilityByLabel(label)?.id;
                     const claudeOnly =
                       capId && capabilityEnforcement(capId) === "claude-only";
+                    // Pass 32 (E32-3 fallback): the headline write family binds
+                    // on both backends EXCEPT for the evidence carve-out — a
+                    // Codex-first profile that withholds it while granting
+                    // evidence keeps workspace-write. Name those profiles on
+                    // the row so the matrix never reads "both" for a cell
+                    // where the withholding is advisory.
+                    const carveOut =
+                      capId === "execute-code-or-write-repo"
+                        ? profiles.filter(
+                            (p) =>
+                              p.backends[0] === "codex" &&
+                              codexRepoWriteAdvisory(p.capabilities),
+                          )
+                        : [];
                     return (
                     <tr key={label}>
                       <td className="rowlabel">
@@ -172,6 +190,14 @@ export function CapabilityMatrixModal({
                             title="Enforced on Claude runs (tool denylist). On Codex it is advisory only: the Codex SDK ignores tool allow/deny lists (S3)."
                           >
                             Claude-enforced
+                          </span>
+                        )}
+                        {carveOut.length > 0 && (
+                          <span
+                            className="mx-scope"
+                            title={`For ${carveOut.map((p) => p.name).join(", ")}: ${CODEX_REPO_WRITE_ADVISORY_NOTE}.`}
+                          >
+                            advisory on Codex
                           </span>
                         )}
                       </td>

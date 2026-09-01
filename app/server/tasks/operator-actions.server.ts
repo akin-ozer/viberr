@@ -2127,6 +2127,46 @@ function supportingRoleWord(
 // --------------------------------------------------- dispatch helpers
 
 /** Resolve a deployed specialist's role + backend for a prompt/run. */
+/** Org MCP names compared loosely: `qa_echo`, `qa-echo` and `QA-Echo` are
+ *  one server (the tool prefix a model sees is `mcp__<name>__…`). */
+function mcpNameKey(name: string): string {
+  return name.toLowerCase().replace(/_/g, "-");
+}
+
+/**
+ * F32-8 (pass 32): a directive that names an org MCP server the target profile
+ * does NOT hold gets a server-attributed note appended — on the hand-off
+ * comment AND the run's directive. Live (VIB-1, VIB-2) the operator's reviewer
+ * brief said "re-call qa_echo yourself" to a Reviewer with no MCP grant (KBs are
+ * inherited from the deliverer, R18-1; MCPs are not), and the reviewer burned
+ * 20-30 turns per task hunting the tool. The snapshot the operator plans from
+ * already carries `deployedSpecialists[].resources`; this makes the mismatch
+ * impossible to hand off silently. Names are matched as whole words against
+ * the instance registry, so ordinary prose never trips it.
+ */
+function annotateUngrantedMcps(
+  db: DatabaseSync,
+  agent: DeployedSpecialistView,
+  prompt: string | undefined,
+): string | undefined {
+  if (!prompt) return prompt;
+  const held = new Set(agent.resources.mcps.map(mcpNameKey));
+  const text = mcpNameKey(prompt);
+  const ungranted = listMcpServerNames(db).filter((name) => {
+    const key = mcpNameKey(name);
+    if (held.has(key)) return false;
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^a-z0-9-])${escaped}([^a-z0-9-]|$)`).test(text);
+  });
+  if (ungranted.length === 0) return prompt;
+  return (
+    `${prompt}\n\n(Note from Viberr: ${agent.name} holds no MCP grant for ` +
+    `${ungranted.map((n) => `\`${n}\``).join(", ")} on this project, so those ` +
+    `tools will not be available to it — any evidence from them is already on ` +
+    `the task timeline. Do not hunt for them.)`
+  );
+}
+
 function deployedAgent(
   ctx: TaskMutationContext,
   projectSlug: string,
@@ -2291,7 +2331,7 @@ export async function operatorDispatchAgent(
       message: `No deployed agent "${input.profileId}" to run. Pick a profile from get_task's deployedSpecialists.`,
     };
   }
-  const prompt = input.prompt?.trim() || undefined;
+  const prompt = annotateUngrantedMcps(db, agent, input.prompt?.trim() || undefined);
   // Hunt 2026-08-29: refuse the two CONTRADICTORY hints up front, before any
   // card or trace can announce a posture the dispatch would not install.
   // (1) `delivers: true` for a profile with no repo-write grant — the dispatch

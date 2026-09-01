@@ -48,6 +48,14 @@ export type AgentRunRow = {
    *  Persisted so boot recovery can re-find the envelope after a restart —
    *  see `recoverUnreactedAgentRuns`. */
   outcome_key: string | null;
+  /** Dispatch-completion contract (pass 32, C02-R11): the display name and
+   *  user id of the human whose manual/scheduled dispatch started this run.
+   *  Persisted (like `outcome_key`) so boot recovery re-supplies them — the
+   *  in-process closure that carried them dies with the process, and a run
+   *  recovered after a restart used to post its report with no cc line and
+   *  without the guaranteed operator re-invoke. Null on every other run. */
+  dispatched_by_name: string | null;
+  dispatched_by_user_id: string | null;
 };
 
 export interface InsertRunInput {
@@ -157,6 +165,9 @@ export interface RunPatch {
    *  `AgentRunRow` silently lied about the row shape. Patched like every other
    *  column now, so the exhaustiveness check below covers it too. */
   outcomeKey?: string | null;
+  /** See `AgentRunRow.dispatched_by_name` (pass 32, C02-R11). */
+  dispatchedByName?: string | null;
+  dispatchedByUserId?: string | null;
 }
 
 /** Patch selected fields on a run row; always bumps updated_at. */
@@ -179,6 +190,8 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     interruptedBy: ["interrupted_by", patch.interruptedBy],
     backend: ["backend", patch.backend],
     outcomeKey: ["outcome_key", patch.outcomeKey],
+    dispatchedByName: ["dispatched_by_name", patch.dispatchedByName],
+    dispatchedByUserId: ["dispatched_by_user_id", patch.dispatchedByUserId],
   } satisfies Record<keyof RunPatch, readonly [string, SQLInputValue | undefined]>;
 
   const cols: string[] = [];
@@ -265,15 +278,28 @@ export function listRunLines(
   db: DatabaseSync,
   runId: string,
   sinceSeq = -1,
+  /** C02-R12 (pass 32): an optional bound pushed into the SELECT — the
+   *  viberr_ops forward page. Absent ⇒ unbounded (the console's live tail). */
+  limit?: number,
 ): RunLogLine[] {
+  const bounded = limit !== undefined && Number.isFinite(limit) && limit >= 0;
   // SAFETY: `run_log_lines` declares all four selected columns NOT NULL — `seq`
   // INTEGER, the rest TEXT (0001_baseline.sql).
-  const rows = db
-    .prepare(
-      `SELECT seq, occurred_at, raw_json, display_json FROM run_log_lines
-       WHERE run_id = ? AND seq > ? ORDER BY seq ASC`,
-    )
-    .all(runId, sinceSeq) as {
+  const rows = (
+    bounded
+      ? db
+          .prepare(
+            `SELECT seq, occurred_at, raw_json, display_json FROM run_log_lines
+             WHERE run_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
+          )
+          .all(runId, sinceSeq, limit)
+      : db
+          .prepare(
+            `SELECT seq, occurred_at, raw_json, display_json FROM run_log_lines
+             WHERE run_id = ? AND seq > ? ORDER BY seq ASC`,
+          )
+          .all(runId, sinceSeq)
+  ) as {
     seq: number;
     occurred_at: string;
     raw_json: string;

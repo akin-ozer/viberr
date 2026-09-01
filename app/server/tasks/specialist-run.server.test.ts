@@ -1747,11 +1747,16 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain("do NOT run `git commit`");
   });
 
-  it("F10-12: a SUPPORTING run gets a READ-ONLY contract even with a write-capable profile", () => {
-    // A write-capable profile engaged as a reviewer (delivers:false) must NOT be
-    // told to branch/commit — the runtime physically denies those, so the prompt
-    // must match the read-only enforcement (no XS-4 prompt-vs-enforcement clash).
-    const prompt = buildAnalyzePrompt({
+  it("F10-12 / C02-R4: a SUPPORTING run's local write posture follows its grants (ruling 101(b)); it never ships either way", () => {
+    // Ruling 101(b): a write-GRANTED supporting agent may edit and commit in
+    // its OWN isolated checkout (Claude's supporting denylist narrowed to the
+    // delivery commands; Codex runs it workspace-write). The prompt used to
+    // forbid "edit files / git commit" for EVERY supporting run — stricter
+    // than the enforcement, the mirror image of XS-4 — so a granted reviewer
+    // asked to try a fix refused work its tools allowed.
+    // Canary: drop the `canCommitPush` branch in buildAnalyzePrompt and the
+    // granted prompt reads "Do NOT create a branch, edit files" again.
+    const granted = buildAnalyzePrompt({
       ...base,
       delivers: false,
       delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
@@ -1759,13 +1764,27 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     // P8 (pass 25): a supporting run gets its own isolated checkout, so the
     // load-bearing guarantee is delivery-isolation (true on both backends), not
     // the Claude-only "the tool layer blocks these".
-    expect(prompt).toContain("isolated checkout");
-    expect(prompt).toContain("nothing you write here reaches the delivered PR");
-    expect(prompt).not.toContain("The tool layer blocks these");
-    expect(prompt).toContain("Do NOT create a branch");
-    expect(prompt).not.toContain("git checkout -B");
-    expect(prompt).not.toContain("Commit your work locally");
-    expect(prompt).not.toContain("Make the changes in the workspace");
+    expect(granted).toContain("isolated checkout");
+    expect(granted).toContain("nothing you write here reaches the delivered PR");
+    expect(granted).not.toContain("The tool layer blocks these");
+    expect(granted).toContain("edit files and commit LOCALLY");
+    expect(granted).toContain("do NOT `git push`, do NOT open a PR");
+    expect(granted).not.toContain("Do NOT create a branch, edit files");
+    // The DELIVERY instructions stay off a supporting run regardless of grants.
+    expect(granted).not.toContain("git checkout -B");
+    expect(granted).not.toContain("Commit your work locally");
+    expect(granted).not.toContain("Make the changes in the workspace");
+
+    // A write-WITHHELD supporting run keeps the full read-only contract — its
+    // tools deny the edit on Claude and the sandbox is read-only on Codex.
+    const withheld = buildAnalyzePrompt({
+      ...base,
+      delivers: false,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+    });
+    expect(withheld).toContain("Do NOT create a branch, edit files");
+    expect(withheld).not.toContain("edit files and commit LOCALLY");
+    expect(withheld).toContain("isolated checkout");
   });
 
   it("F10-31: frames the turn directive as untrusted guidance the contract outranks", () => {
@@ -1866,6 +1885,32 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   // Live, renaming an org MCP orphaned every grant to it; the next run still
   // announced the old name and found zero tools under it, and only the agent's
   // own diligence surfaced the gap.
+  it("F32-8 (pass 32): the persona says which MCP servers are attached — and says when there are NONE", () => {
+    // Live (VIB-1, VIB-2): a reviewer holding no MCP grant was briefed to
+    // "re-call qa_echo yourself" and burned 20-30 turns hunting the tool,
+    // because nothing in its context said the server was not there.
+    // Canary: drop the `length === 0` section in buildSpecialistPersona.
+    const none = buildSpecialistPersona({ profileId: "reviewer", skills: [], mcps: [] });
+    expect(none).toContain("No external MCP servers on this run");
+    expect(none).toContain("do not search the filesystem or the workspace for it");
+    expect(none).not.toContain("You have tools from these attached MCP servers");
+    const some = buildSpecialistPersona({
+      profileId: "reviewer",
+      skills: [],
+      mcps: ["qa-echo"],
+    });
+    expect(some).toContain("You have tools from these attached MCP servers: qa-echo");
+    expect(some).not.toContain("No external MCP servers on this run");
+    // On Claude the line excepts Viberr's own collaboration tools by name.
+    const claude = buildSpecialistPersona({
+      profileId: "reviewer",
+      skills: [],
+      mcps: [],
+      backend: "claude",
+    });
+    expect(claude).toContain("Viberr's own collaboration tools");
+  });
+
   it("P14-LV-09: names an unresolvable MCP grant instead of advertising it", () => {
     const persona = buildSpecialistPersona({
       profileId: "scout",
@@ -2945,6 +2990,121 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     ).toBe(true);
   });
 
+  it("C02-R3 (pass 32): a RESUMED evidence-granted run keeps its attachments drop — dir, spec field and persona section", async () => {
+    // `dev` holds a verdict grant only: repo-write is absent (grant-required
+    // ⇒ withheld) and evidence absent (catalog default ⇒ granted) — the seeded
+    // Reviewer's shape, and on Codex the carve-out. A resume used to drop
+    // `attachmentsWritableDir` — the sandbox's only extra writable root —
+    // while the persona still said "copy files into attachments/". Canary:
+    // delete the `attachmentsWritableDir` block in resolveResumeConfinement.
+    await workspaceCheckout();
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: "acme/widgets",
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+          extras: [],
+          definition: {
+            kind: "specialist", name: "dev", role: "reviewer",
+            backends: ["codex"], model: "gpt-5-codex",
+            resources: { skills: [], mcps: [], kb: [] },
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const confinement = await resolveResumeConfinement(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "dev",
+        backend: "codex",
+        delivers: false,
+      },
+    );
+    const attachments = path.join(
+      store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "attachments",
+    );
+    expect(confinement.attachmentsWritableDir).toBe(attachments);
+    expect(existsSync(attachments)).toBe(true);
+    // The persona carries the same drop section the fresh run gets.
+    expect(confinement.systemPrompt ?? "").toContain("Posting files on the task thread");
+    // …and the disclosure names the sandbox this confinement yields on Codex:
+    // withheld write family + evidence ⇒ the carve-out, honestly labeled.
+    expect(confinement.runInputs.sandbox).toEqual({
+      mode: "workspace-write",
+      note: expect.stringContaining("advisory"),
+    });
+  });
+
+  it("C32-2 (pass 32): a SUPPORTING checkout's base refs are refreshed from the project mirror, not frozen at the delivering checkout's clone-time origin", async () => {
+    // Live (VIB-2): the reviewer's `git diff origin/main...HEAD` showed VIB-1's
+    // README because the support clone's origin/main was the delivering
+    // checkout's stale main. The mirror is the store fetched against GitHub;
+    // the support clone now fetches its remote-tracking refs from it.
+    // Canary: drop the `refreshSupportBase` call in cloneRepo's support arm.
+    const ws = await workspaceCheckout();
+    await exec("git", ["-C", ws, "branch", "-M", "main"]);
+    await exec("git", ["-C", ws, "checkout", "-q", "-b", "vib-1-work"]);
+    writeFileSync(path.join(ws, "feature.md"), "work\n");
+    await exec("git", ["-C", ws, "add", "-A"]);
+    await exec("git", ["-C", ws, "commit", "-q", "-m", "[VIB-1] work"]);
+    const staleMain = (await exec("git", ["-C", ws, "rev-parse", "main"])).stdout.trim();
+
+    // The project mirror, as GitHub would hold it: main ADVANCED by a merge the
+    // delivering checkout never fetched.
+    const { projectRepoMirrorDir } = await import("./repo-mirror.server");
+    const mirror = projectRepoMirrorDir(store.slug, "acme/widgets", store.dataRoot)!;
+    mkdirSync(path.dirname(mirror), { recursive: true });
+    await exec("git", ["clone", "-q", "--bare", ws, mirror]);
+    // Point it at GitHub like a real mirror (the refresh's network fetch fails
+    // offline and the mirror is served as it stands — the production shape
+    // when GitHub is unreachable) and give it the workspace-clone refspec.
+    await exec("git", ["-C", mirror, "config", "remote.origin.url", "https://github.com/acme/widgets.git"]);
+    await exec("git", ["-C", mirror, "config", "--replace-all", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"]);
+    const seed = mkdtempSync(path.join(tmpdir(), "viberr-mirror-seed-"));
+    await exec("git", ["clone", "-q", "-b", "main", mirror, seed]);
+    await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
+    await exec("git", ["-C", seed, "config", "user.name", "T"]);
+    writeFileSync(path.join(seed, "MERGED.md"), "another task landed\n");
+    await exec("git", ["-C", seed, "add", "-A"]);
+    await exec("git", ["-C", seed, "commit", "-q", "-m", "merge of another task"]);
+    await exec("git", ["-C", seed, "push", "-q", "origin", "HEAD:refs/heads/main"]);
+    const freshMain = (await exec("git", ["-C", mirror, "rev-parse", "main"])).stdout.trim();
+    expect(freshMain).not.toBe(staleMain);
+
+    // A supporting dispatch of `dev` (no grants ⇒ supporting) clones from the
+    // delivering checkout, then refreshes its base from the mirror.
+    deployWithSkills([]);
+    const run = await startAgentRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", delivers: false },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      actor(store.users.arda));
+    const support = path.join(
+      store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "workspace", "support", "dev", "widgets",
+    );
+    expect(existsSync(path.join(support, ".git"))).toBe(true);
+    const supportMain = (await exec("git", ["-C", support, "rev-parse", "origin/main"])).stdout.trim();
+    expect(supportMain).toBe(freshMain);
+    // The task branch from the delivering checkout is still there to review.
+    const supportWork = (await exec("git", ["-C", support, "rev-parse", "origin/vib-1-work"])).stdout.trim();
+    expect(supportWork).toBe(
+      (await exec("git", ["-C", ws, "rev-parse", "vib-1-work"])).stdout.trim(),
+    );
+    // The checkout's origin points at GitHub, never at the mirror path.
+    const originUrl = (await exec("git", ["-C", support, "config", "remote.origin.url"])).stdout.trim();
+    expect(originUrl).toContain("github.com/acme/widgets");
+  });
+
   /**
    * UC-15, the owner's question in full: "are the RIGHT skills loaded, and ONLY
    * those?"
@@ -3617,6 +3777,64 @@ describe("P19-G11 — the run records what it was given", () => {
       (l) => l.display.tag === RUN_INPUTS_TAG,
     )!.raw;
     expect(JSON.parse(raw)).toMatchObject({ type: "run_inputs", source: "viberr" });
+  });
+
+  it("pass 32 (E32-3 fallback): a Codex run discloses its sandbox, and the carve-out is labeled advisory", async () => {
+    // `dev` holds a verdict grant only: repo-write absent (grant-required ⇒
+    // withheld), evidence absent (catalog default ⇒ granted) — the seeded
+    // Reviewer's shape, which on Codex is the carve-out. The human reading the
+    // console sees the mode AND why it is not read-only. (An EMPTY grant list
+    // would run fully withheld — P13-AP-06 — and read back read-only.)
+    // Canary: return null from runSandboxDisclosure for codex.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    const verdictOnly = [{ capabilityId: "report-validation-verdict", mode: "direct" as const }];
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: verdictOnly,
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["codex"],
+            model: "gpt-5-codex",
+            resources: { skills: [], mcps: [], kb: [] },
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runId = await assignAndRun();
+    const inputs = inputsLine(runId);
+    expect(inputs!.sandbox).toEqual({
+      mode: "workspace-write",
+      note: expect.stringContaining("advisory"),
+    });
+    // The Claude run has no OS sandbox — the denylist is the disclosure.
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: verdictOnly,
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            resources: { skills: [], mcps: [], kb: [] },
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(inputsLine(await assignAndRun())!.sandbox).toBeNull();
   });
 
   it("names a knowledge-base grant whose content never reached the run", async () => {

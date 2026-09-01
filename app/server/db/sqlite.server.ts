@@ -92,6 +92,7 @@ export function getDb(): DatabaseSync {
     db = openDatabase(dbPath);
     const result = runMigrations(db);
     ensureSingleFlightIndexes(db);
+    ensureRunRowColumns(db);
     logger.info("sqlite ready", {
       dbPath,
       migrationsApplied: result.applied,
@@ -121,6 +122,45 @@ export function ensureSingleFlightIndexes(db: DatabaseSync): void {
   } catch (error) {
     logger.warn(
       "single-flight index for supporting runs could not be ensured — duplicate live rows may exist; it will be retried next boot",
+      { err: error instanceof Error ? error : new Error(String(error)) },
+    );
+  }
+}
+
+/**
+ * Columns the baseline gained AFTER a data root may already have applied it
+ * (migrations stay squashed into 0001 pre-prod by ruling, so an existing root
+ * never re-runs the file). Each is nullable and additive — exactly the
+ * "additive drift" the boot integrity WARN names `ALTER TABLE … ADD COLUMN` as
+ * the remedy for — so the remedy is applied here, idempotently, instead of
+ * being left to an operator: a missing column would otherwise fail every
+ * `patchRun` that names it ("no such column") and, with it, every agent
+ * completion on that root.
+ */
+const RUN_ROW_COLUMNS: readonly { name: string; ddl: string }[] = [
+  { name: "dispatched_by_name", ddl: "dispatched_by_name TEXT" },
+  { name: "dispatched_by_user_id", ddl: "dispatched_by_user_id TEXT" },
+];
+
+export function ensureRunRowColumns(db: DatabaseSync): void {
+  try {
+    // SAFETY: `PRAGMA table_info` always yields rows with a TEXT `name`.
+    const present = new Set(
+      (db.prepare(`PRAGMA table_info(agent_runs)`).all() as { name: string }[]).map(
+        (c) => c.name,
+      ),
+    );
+    for (const column of RUN_ROW_COLUMNS) {
+      if (present.has(column.name)) continue;
+      db.exec(`ALTER TABLE agent_runs ADD COLUMN ${column.ddl}`);
+      logger.info("added a baseline column this data root predated", {
+        table: "agent_runs",
+        column: column.name,
+      });
+    }
+  } catch (error) {
+    logger.warn(
+      "agent_runs baseline columns could not be ensured — completions that name them will fail until the root is re-baselined",
       { err: error instanceof Error ? error : new Error(String(error)) },
     );
   }

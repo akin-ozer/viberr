@@ -936,6 +936,72 @@ describe("operatorDispatchAgent — the prompt hand-off", () => {
     interruptRunningRuns("VIB-1");
   });
 
+  it("F32-8 (pass 32): a directive naming an org MCP server the target does NOT hold is annotated on the hand-off", async () => {
+    // Live (VIB-1, VIB-2): "re-call qa_echo yourself" went to a Reviewer with
+    // no MCP grant; it burned 20-30 turns hunting the tool. The note rides the
+    // comment AND the run's directive. Names match loosely (`qa_echo` is the
+    // tool prefix a model sees for the `qa-echo` server).
+    // Canary: return `prompt` unchanged from annotateUngrantedMcps.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const now = new Date().toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, created_at, updated_at)
+         VALUES ('mcp_qa', 'qa-echo', 'HTTP', 'https://mcp.example/qa', NULL, ?, ?)`,
+      )
+      .run(now, now);
+    const r = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "reviewer",
+        prompt: "review the change and re-run qa_echo yourself to compare outputs.",
+      },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("done");
+    const prompt = task().timeline.find(
+      (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
+    );
+    expect(prompt!.text).toContain("re-run qa_echo yourself");
+    expect(prompt!.text).toContain("Rev holds no MCP grant for `qa-echo`");
+    expect(prompt!.text).toContain("Do not hunt for them");
+    interruptRunningRuns("VIB-1");
+  });
+
+  it("F32-8 (pass 32): a directive that names no ungranted server is handed off verbatim", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const now = new Date().toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, created_at, updated_at)
+         VALUES ('mcp_qa', 'qa-echo', 'HTTP', 'https://mcp.example/qa', NULL, ?, ?)`,
+      )
+      .run(now, now);
+    const r = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        // Ordinary prose; "echo" alone is not the server's name.
+        prompt: "implement the auth guard; echo the config on start.",
+      },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("done");
+    const prompt = task().timeline.find(
+      (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
+    );
+    expect(prompt!.text).toBe("@Dev implement the auth guard; echo the config on start.");
+    interruptRunningRuns("VIB-1");
+  });
+
   it("direct WITHOUT a prompt starts a bare run and posts NO synthetic comment", async () => {
     // A bare re-dispatch re-anchors the agent on task.md; a manufactured
     // "@Dev …" comment would fake a hand-off nobody wrote.
