@@ -25,6 +25,8 @@ const SLUG = "viberr-core";
 const PROJECT_RUN = "run_ops_project";
 const CONTROLLER_RUN = "run_ops_controller";
 const LOG_LINES = 12;
+/** `readStoreDoc`'s own per-read ceiling, which the tool takes as its default. */
+const READ_DOC_BYTES = 256 * 1024;
 
 interface Actors {
   orgAdmin: string; // arda
@@ -112,13 +114,25 @@ beforeAll(async () => {
   const target = resolveStoreTarget(app.db, "kb", kb.id, {
     dataRoot: app.dataRoot,
   })!;
+  const storeActor = { userId: ids.orgAdmin, label: "arda@viberr.dev" };
   writeStoreDoc(
     app.db,
     target,
     [],
     "ops-note.md",
     "the disk is fine",
-    { userId: ids.orgAdmin, label: "arda@viberr.dev" },
+    storeActor,
+    { overwrite: true },
+  );
+  // A document that really is longer than one read: `truncated` has to be a
+  // measurement, not a constant nobody can tell apart from the honest answer.
+  writeStoreDoc(
+    app.db,
+    target,
+    [],
+    "ops-long.md",
+    "x".repeat(READ_DOC_BYTES + 4_096),
+    storeActor,
     { overwrite: true },
   );
 });
@@ -332,6 +346,19 @@ describe("read_store_doc: org admins only, like the store browser", () => {
     expect(body.text).toBe("the disk is fine");
     expect(body.truncated).toBe(false);
     expect(body.resource).toEqual(expect.objectContaining({ kind: "kb", id: kbId }));
+
+    // A document longer than one read comes back CLIPPED and says so. Without
+    // this arm `truncated` could be the constant `false` and read identically —
+    // which is how a model states half a file as the whole of it.
+    const long = parsed(
+      await call(ids.orgAdmin, "read_store_doc", {
+        kind: "kb",
+        id: kbId,
+        path: ["ops-long.md"],
+      }),
+    );
+    expect(long.truncated).toBe(true);
+    expect((long.text as string).length).toBe(READ_DOC_BYTES);
   });
 
   it("says so when the target or the file is gone", async () => {
