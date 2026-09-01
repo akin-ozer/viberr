@@ -1046,6 +1046,36 @@ export async function operatorOpenPacket(
       };
     }
   }
+  // Owner ruling (pass 32): an `accept_completion` option is only coherent at
+  // the acceptance boundary with a healthy verdict — everywhere else the
+  // acceptance gate refuses the very decision the option offers (ruling 20:
+  // verdict-gated; ruling 62: a no-change completion needs one too), and the
+  // human is left confirming a card that cannot succeed. Live (VIB-3): a triage
+  // packet offered "Accept as complete now" on a task at Triage with no
+  // verdict. Refuse the authoring, name the verbs that fit; the admin's own
+  // force-accept exists for "just close it".
+  if (rawOptions.some((o) => o.kind === "accept_completion")) {
+    const fm = existing.parsed.frontmatter;
+    const projectFile = readProjectFile({
+      projectSlug: input.projectSlug,
+      dataRoot: ctx.dataRoot,
+    });
+    const stages = projectFile?.parsed.frontmatter.stages ?? [];
+    const boundaryStageId = stages.length >= 2 ? stages[stages.length - 2]!.id : null;
+    const atBoundary = boundaryStageId !== null && fm.stage === boundaryStageId;
+    const verdictHealthy = fm.validation === "healthy";
+    if (!atBoundary || !verdictHealthy) {
+      return {
+        outcome: "noop",
+        message:
+          "accept_completion only fits a task AT the acceptance boundary with a healthy verdict — " +
+          (!atBoundary
+            ? `${input.taskKey} is at stage ${fm.stage}, not the stage before Done. `
+            : "its validation is not healthy, so acceptance would be refused. ") +
+          "Offer archive_task to close a task that needs no work, edit_goal to scope real work, or transition_stage / run_agent to move it toward review. Only a human admin can force-accept from here.",
+      };
+    }
+  }
   // B3: one open decision at a time, the same refusal every sibling packet
   // writer makes (`openStuckLoopPacket`, `openAgentQuestionPacket`). This
   // writer alone assigned `parsed.packet` unconditionally, so a second packet

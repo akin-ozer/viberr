@@ -4367,7 +4367,21 @@ export async function transitionStage(
   const fromStageId = existing.parsed.frontmatter.stage;
 
   if (fromStageId === input.toStageId) {
-    // Idempotent: already there.
+    // Idempotent: already there — but an idempotent SUCCESS is still a success
+    // and has to be earned (F32-10, pass 32; RBAC probe D1). This short-circuit
+    // used to sit above every guard, so a VIEWER posting `to=<current stage>`
+    // got HTTP 200, `ok: true` and a "Moved …" toast, no `project.authority
+    // .denied` row, and the archived-project freeze never ran. The operator's
+    // authority is gated upstream by its capability policy, exactly as on the
+    // real move below; every human door pays the same gate a real move would.
+    if (!ctx.operatorAuthorized) {
+      if (input.recommendationAuthorized) {
+        requireProjectMutable(project, "change the task stage");
+      } else {
+        requireProjectMutable(project, "change the task stage");
+        requireAction(db, project, actor, "approve-transition", "change the task stage");
+      }
+    }
     return summaryOrThrow(db, input.projectSlug, input.taskKey);
   }
 
@@ -6873,6 +6887,32 @@ export async function resolvePacket(
         noteText = `The stale remote branch was cleared, but the re-delivery did not complete: ${delivery.message} Deliver again from the task page when it is resolved.`;
       } else {
         delivered = true;
+        // F32-7 (pass 32): the follow-up after THIS delivery is owned by
+        // nobody unless it is claimed here. `manualDeliverForReview` is the
+        // human's door, and `performDelivery` deliberately records no next
+        // step for a human who just clicked Deliver (R18-2/R19-4) — but the
+        // person here confirmed a packet ceremony, not a delivery, and this
+        // kind sits in NO_REQUEUE on the promise that "the re-delivery's own
+        // machinery owns the follow-up". Live (VIB-1): the task sat at In
+        // Progress, `waiting: human`, an open PR and nothing to click. Under
+        // FULL autonomy `performDelivery` already re-queues the operator for
+        // any newly opened PR (R18-2 — that arm never looked at who
+        // delivered), so only the SUPERVISED half is missing: record the
+        // server-attributed "Move to <review>" card here, exactly the one an
+        // operator-authorized delivery would have recorded.
+        const { resolveOperatorAuthority } = await import(
+          "./operator-actions.server"
+        );
+        const autonomy = resolveOperatorAuthority(ctx, input.projectSlug).autonomy;
+        if (autonomy !== "full") {
+          await recordDeliveredNextStep(
+            db,
+            ctx,
+            input.projectSlug,
+            input.taskKey,
+            delivery.prNumber,
+          );
+        }
       }
     } else {
       noteText = `The branch collision was **not** cleared: ${collision.message} Nothing was re-delivered.`;

@@ -764,6 +764,12 @@ export async function action({ request, params }: Route.ActionArgs) {
           manual: true,
         };
         if (acceptsCompletion) move.ack = acceptanceAck(formData);
+        // F32-10 (pass 32): a no-op move must not be narrated as a move. The
+        // server's idempotent short-circuit now pays the same gate as a real
+        // move, so a refusal never reaches here; a permitted same-stage post
+        // simply reports that nothing changed (toast-honesty: never claim an
+        // event that did not happen).
+        const stageBefore = getTaskSummary(db, projectSlug, taskKey)?.stage;
         const task = await transitionStage(db, move, actor);
         const proj = getProject(db, projectSlug);
         const toName =
@@ -772,7 +778,10 @@ export async function action({ request, params }: Route.ActionArgs) {
           ok: true as const,
           intent,
           stage: task.stage,
-          toast: `Moved ${taskKey} to ${toName}`,
+          toast:
+            stageBefore === task.stage
+              ? `${taskKey} is already at ${toName} · nothing changed`
+              : `Moved ${taskKey} to ${toName}`,
         };
       }
       case "run-interrupt": {

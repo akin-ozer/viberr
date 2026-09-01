@@ -1907,6 +1907,62 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     );
   });
 
+  /**
+   * Owner ruling (pass 32): `accept_completion` is only coherent AT the
+   * acceptance boundary with a healthy verdict — anywhere else the gate refuses
+   * the decision the option offers (rulings 20/62). Live (VIB-3): a triage
+   * packet offered "Accept as complete now" on a task at Triage with no
+   * verdict. Authoring refuses it and names the verbs that fit.
+   */
+  it("refuses an accept_completion option off the acceptance boundary, and allows it on it", async () => {
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    const open = (stage: string, validation: "none" | "healthy") => {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage,
+          validation,
+          ownerUserId: store.users.arda.id,
+          operator: { assignedAtStageId: "triage" },
+        }),
+        goal: "Probe only.",
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      return operatorOpenPacket(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          packetType: "input",
+          title: "Nothing to do here",
+          body: "The goal names no deliverable.",
+          observations: [],
+          options: [
+            { kind: "accept_completion" as const, title: "Accept as complete now", recommended: true },
+            { kind: "archive_task" as const, title: "Archive this task" },
+          ],
+        },
+        authority("supervised"),
+      );
+    };
+    const atTriage = await open("triage", "none");
+    expect(atTriage.outcome).toBe("noop");
+    expect(atTriage.message).toContain("acceptance boundary");
+    expect(atTriage.message).toContain("archive_task");
+    expect(task().packet).toBeNull();
+
+    const atReviewUnverified = await open("review", "none");
+    expect(atReviewUnverified.outcome).toBe("noop");
+    expect(atReviewUnverified.message).toContain("validation is not healthy");
+
+    const atBoundary = await open("review", "healthy");
+    expect(atBoundary.outcome).toBe("done");
+    expect(task().packet!.options[0]!.kind).toBe("accept_completion");
+  });
+
   it("operatorResolvePacket withdraws a moot packet: cleared, blocked readiness lifted, timeline notes why", async () => {
     deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
     seedTask("triage");

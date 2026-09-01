@@ -601,6 +601,44 @@ describe("transitionStage boundary enforcement", () => {
     expect(getTaskDetail(store.db, store.slug, "VIB-1")!.timeline).toHaveLength(before);
   });
 
+  /**
+   * F32-10 (pass 32, RBAC probe D1): the idempotent short-circuit sat ABOVE
+   * every guard, so a viewer posting the task's current stage got `ok: true`
+   * and "Moved …" with no denial row — a deny that answered allow. An
+   * idempotent success is still a success and has to be earned: the same-stage
+   * move pays the same gate a real move would, and the refusal is audited.
+   */
+  it("refuses a same-stage move to a role that could not make the real move, and audits it", async () => {
+    const store = prepared();
+    withTask(store, { stage: "ready" });
+    const denialsBefore = listAuditEvents(store.db, {
+      action: "project.authority.denied",
+    }).length;
+    for (const who of [store.users.elif, store.users.selin]) {
+      await expect(
+        transitionStage(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
+          actor(who),
+          { dataRoot: store.dataRoot },
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+    }
+    expect(
+      listAuditEvents(store.db, { action: "project.authority.denied" }).length,
+    ).toBe(denialsBefore + 2);
+    // The maintainer's no-op still succeeds and still writes nothing.
+    const before = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.length;
+    const task = await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.stage).toBe("ready");
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")!.timeline).toHaveLength(before);
+  });
+
   it("marks the task's approval notifications read on transition", async () => {
     const store = prepared();
     withTask(store, { stage: "impl" });
