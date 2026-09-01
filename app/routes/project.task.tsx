@@ -5,6 +5,7 @@ import {
   useParams,
   useRouteLoaderData,
 } from "react-router";
+import { pageTitle } from "~/shared/page-title";
 import type { Route } from "./+types/project.task";
 import type { loader as projectLoader } from "./project";
 import {
@@ -1076,9 +1077,10 @@ export async function action({ request, params }: Route.ActionArgs) {
 export function meta({ loaderData, params }: Route.MetaArgs) {
   return [
     {
+      // D32-3: the product name closes every title.
       title: loaderData
-        ? `${loaderData.task.key} · ${loaderData.task.title}`
-        : params.key,
+        ? pageTitle(`${loaderData.task.key} · ${loaderData.task.title}`)
+        : pageTitle(params.key),
     },
   ];
 }

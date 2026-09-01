@@ -4,7 +4,8 @@
 > it sees, how its output is stored and streamed, and how the server recovers when it
 > dies. Source of truth: `app/server/runtimes/*`, `app/server/tasks/specialist-*.ts`,
 > `app/server/tasks/agent-*.ts`, `app/shared/capabilities.ts`, `app/server/seed/*`.
-> Verified against `main` @ `68b5480` (2026-09-01). The operator's own behaviour is in
+> Verified against `main` @ `68b5480` (2026-09-01); §2.5 and §4.3 re-verified
+> 2026-09-02 against `pass32/implementation` @ `478bed0`. The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -116,6 +117,10 @@ exhaustion expires after 6 h. Insights renders both; "no reading yet" is neutral
 - **Sandbox mode** (`resolveCodexSandboxMode`), in order: operator → `read-only`;
   repo-write withheld → `workspace-write` if an attachments dir exists else `read-only`;
   autonomous deliverer with egress → `danger-full-access`; otherwise `workspace-write`.
+  The second arm is ruling 101(c)'s carve-out and it is **not** a gap in the docs: the
+  pinned Codex 0.146 cannot express "read-only except `attachments/`" (`ReadOnly` admits
+  no writable root; `--add-dir` widens `workspace-write` only), so ruling 109 kept it and
+  made it visible instead — see §4.3.
   `approvalPolicy: "never"`, `skipGitRepoCheck: true`; operator threads have network
   off; withheld egress sets `webSearchMode: "disabled"`.
 - MCP servers are passed **without credentials** (argv exposure), and in-process SDK
@@ -264,13 +269,31 @@ markers become `repoWriteWithheld` (`Edit|Write|NotebookEdit` denied) and
 
 | Withheld capability | Claude denies | Codex |
 |---|---|---|
-| `execute-code-or-write-repo` (headline) | `Edit MultiEdit Write NotebookEdit Bash(git commit:*)` | read-only sandbox |
+| `execute-code-or-write-repo` (headline) | `Edit MultiEdit Write NotebookEdit Bash(git commit:*)` | read-only sandbox — **except** the ruling-109 carve-out below |
 | `create-task-branch` | `Bash(git checkout -b:*)`, `-B`, `git switch -c/-C` | advisory |
 | `commit-push-branch` | `Bash(git push:*) Bash(git commit:*)` | advisory |
 | `open-review-pr` | `Bash(gh pr create:*)` | advisory |
 | `merge-pull-request` (always human) | `Bash(gh pr merge:*)` | advisory |
 | `use-web-search-fetch` | `WebFetch WebSearch` | `webSearchMode: disabled` |
 | `comment-on-task`, `ask-human`, `report-validation-verdict`, `read-github-api` | the toolkit tool is not built | envelope field ignored / not requested |
+
+**The write family binds on BOTH backends** (ruling 101): Claude through the tool
+denylist, Codex through the read-only sandbox. There is exactly ONE disclosed exception,
+and it is labeled rather than hidden (ruling 109): a Codex run that withholds
+`execute-code-or-write-repo` while granting `attach-evidence-references` keeps
+`workspace-write`, because the pinned SDK has no "read-only plus one writable directory"
+sandbox and blocking the file-posting assignment was the F22-03 defect. That exact shape
+— and only it; a profile with an EMPTY grant list runs fully withheld and is not tagged
+— is what `codexRepoWriteAdvisory` (`app/server/tasks/specialist-tool-policy.ts`)
+answers true for, and every surface rendering the enforcement says **"advisory on
+Codex"**: the profile editor row, the capability matrix (naming the profiles), the agent
+card's withheld bucket, and the run console's `sandbox` inputs row. The scoped delivery
+commands in the rows below are a different story: they bind at the tool layer on Claude
+only (the sandbox is all-or-nothing), and what constrains either backend is the
+server-owned delivery gate plus credential-less agents — that is ruling 101(e), not an
+unenforced rule. *(Added 2026-09-02, pass 32 — C02-R2 / V11-1: several surfaces and
+comments still called Codex's file and command limits simply "advisory", which stopped
+being true at ruling 101.)*
 
 "Withheld" means: always-human ids always; absent grant when the id is in
 `GRANT_REQUIRED_CAPABILITY_IDS`; mode `human` or `off`. Specialists have no `recommend`
@@ -470,7 +493,9 @@ full` and the project-effective grants.
 4. Foreign-backend models are substituted silently at start.
 5. `RUN_STATE.error` is labelled "continuity error" for every error run.
 6. Several code comments still describe Codex repo-write as "advisory since R22"; the
-   sandbox mode enforces it since ruling 101.
+   sandbox mode enforces it since ruling 101. The one place "advisory on Codex" is still
+   the honest word is the evidence carve-out of ruling 109 (§4.3), which is now printed
+   on every surface that shows the grant.
 7. The `MANAGED_SETTINGS` SDK option is inert; `settings.json` from skill-mount is the
    real exclusion mechanism.
 8. The Dockerfile sets `CODEX_HOME` to the run home; combined with

@@ -30,7 +30,7 @@ POST.
 | `/projects/:slug/activity` | `project.activity.tsx` | member | activity feed with day groups; audit column (compacted, ruling 61) | |
 | `/projects/:slug/settings` | `project.settings.tsx` | member, form (admin for writes) | project profile, stages, members, repository, branch cleanup, archive/delete | `save-project`, `add-stage`, `rename-stage`, `remove-stage`, `reorder-stages`, `invite`, `remove-member`, `set-credential`, `clear-credential`, `grant-scope`, `repair-repo`, `set-branch-cleanup`, `archive-project`, `delete-project` |
 | `/projects/:slug/tasks/:key` | `project.task.tsx` | member, form | task detail: state, execution profile, packet, recommendations, timeline, runs, GitHub trace, diagnostics | `comment`, `transition`, `update-goal`, `set-task-metadata`, `owner-take`, `owner-release`, `owner-assign`, `run-agent`, `run-operator`, `run-interrupt`, `release-agent`, `resolve-packet`, `apply-recommendation`, `dismiss-recommendation`, `deliver-review`, `accept-completion`, `force-accept`, `complete-merge`, `request-maintainer-decision`, `schedule-action`, `cancel-schedule`, `archive-task`, `restore-task` |
-| `/projects/:slug/tasks/:key/attachments/:file` | `task-attachment.ts` | member | raw bytes, whitelist renders inline, `?download=1` | |
+| `/projects/:slug/tasks/:key/attachments/:file` | `task-attachment.ts` | member | raw bytes, whitelist renders inline, `?download=1` forces the save dialog (ruling 105) | |
 | `/org/settings` | `org.settings.tsx` | org admin | tabs: Users & access, GitHub connections, Sign-in & SSO, Agent resources, Controller settings; audit export card; concurrency | see §3 |
 | `/org/settings/audit-export` | `org.settings.audit-export.ts` | org admin | CSV/JSON download, 100 000-row cap | |
 | `/controller` | `controller.tsx` | user, form | instance controller conversation (per user) | `send` |
@@ -87,6 +87,19 @@ Intents behind `project.task.tsx` are explained in
 controller (`controller-save`), audit (`audit-export-s3`, `s3-config-save`,
 `s3-config-clear`), runtime (`set-concurrency`).
 
+The **Controller settings** tab is the one org-settings surface whose controls are not
+all live (rulings 106, 107, 108): model and effort use the agent profile editor's own
+catalog pickers and are always editable; the skills, knowledge-base and MCP grant lists
+and the doctrine body render read-only unless the matching
+`VIBERR_UNLOCK_CONTROLLER_*` variable is set at deploy time, with one note naming the
+locked sections and their variables; and the built-in `viberr_ops` diagnostics server
+appears in the MCP group as a **pinned, non-interactive chip** — deliberately not a
+disabled control, because a toggle that cannot do anything is worse than a statement.
+Details in
+[../domain/controller-and-goals.md §6](../domain/controller-and-goals.md#6-configuring-the-controller-rulings-106-and-108)
+and [../operations/configuration.md §2](../operations/configuration.md).
+*(Added 2026-09-02, pass 32 — A00-5.)*
+
 ## 4. Screen labels
 
 Every top-level surface and dialog carries `data-screen-label` so tests and agents can
@@ -115,6 +128,14 @@ comes from the shell model.
   36, 91).
 - A failure toast never renders the success tick: the kind is passed from the server
   result (`use-action-toast.ts`).
+- **Every attachment kind opens a card, and every card carries Download** (ruling 105):
+  images show the picture, text files (txt/log/md/json/yml/yaml/csv) a read-only
+  monospace reader, anything else an honest "no in-app preview" note. A body whose
+  fetch proved the file unservable (404 after the completion-time prune, 413 over the
+  50 MB cap, an auth redirect) reports the failure and drops Download rather than
+  saving an error body under the real filename. The `Attachment lightbox` screen label
+  covers all three. *(Added 2026-09-02, pass 32 — A00-3: the docs described the panel
+  as image thumbnails plus a lightbox, which was the pre-ruling-105 surface.)*
 - Timestamps render through `app/shared/dates/format.ts` only: zero-padded `HH:MM`,
   `{day} · {time}`, relative forms.
 - Settings headings name their scope: "Instance settings" versus "<project> · settings"

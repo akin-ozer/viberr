@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { Icon, storeIcon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
 import type { MatrixProfile } from "./agent-types";
-import { CAP_MODAL_CATALOG } from "./capability-catalog";
+import { CAP_MODAL_CATALOG, MODE_LABEL } from "./capability-catalog";
 import { capabilityByLabel, capabilityEnforcement } from "~/shared/capabilities";
 import {
   CODEX_REPO_WRITE_ADVISORY_NOTE,
@@ -35,11 +35,12 @@ function modeOf(profile: MatrixProfile, label: string): Mode {
   return "off";
 }
 
+// D32-9: the one vocabulary (capability-catalog MODE_LABEL).
 const MODE_TITLE = {
-  off: "Not granted",
-  human: "Reserved for humans",
-  recommend: "Recommends",
-  direct: "Acts directly",
+  off: MODE_LABEL.off,
+  human: MODE_LABEL.human,
+  recommend: MODE_LABEL.recommend,
+  direct: MODE_LABEL.direct,
 } satisfies Record<Mode, string>;
 
 export function CapabilityMatrixModal({
@@ -112,19 +113,19 @@ export function CapabilityMatrixModal({
       <div className="mx-legend">
         <span className="lg">
           <span className="d direct" />
-          Acts directly
+          {MODE_LABEL.direct}
         </span>
         <span className="lg">
           <span className="d recommend" />
-          Recommends
+          {MODE_LABEL.recommend}
         </span>
         <span className="lg">
           <span className="d human" />
-          Reserved for humans
+          {MODE_LABEL.human}
         </span>
         <span className="lg">
           <span className="d off" />
-          Not granted
+          {MODE_LABEL.off}
         </span>
         <span className="lg mx-scope-legend">
           <span className="mx-scope">Claude-enforced</span>

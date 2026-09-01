@@ -1,4 +1,5 @@
 import type { Route } from "./+types/insights";
+import { pageTitle } from "~/shared/page-title";
 import { getDb } from "~/server/db/sqlite.server";
 import { requireRole } from "~/server/auth/require-user.server";
 import { getInsightsSummary } from "~/server/insights/insights-query.server";
@@ -10,7 +11,7 @@ import { InsightsPage } from "~/features/insights/insights-page";
  * loader runs one aggregate query and the page formats it.
  */
 export function meta() {
-  return [{ title: "Insights · Viberr" }];
+  return [{ title: pageTitle("Insights") }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {

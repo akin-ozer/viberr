@@ -6,6 +6,11 @@ import type {
 } from "~/server/insights/insights-query.server";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
+import {
+  formatCalendarDate,
+  formatDayDotTime,
+  utcDayKey,
+} from "~/shared/dates/format";
 
 /**
  * Insights: a read-only analytics dashboard over agent runs — totals, outcomes,
@@ -287,10 +292,12 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                   <span
                     className="bar-cost"
                     title={
+                      // D32-2 (ruling 4): the app's ONE date formatter, never the
+                      // server locale's `toLocaleString`.
                       hydrated
-                        ? `run ${credentialRefused.runId} was refused ${new Date(
+                        ? `run ${credentialRefused.runId} was refused ${formatDayDotTime(
                             credentialRefused.observedAt,
-                          ).toLocaleString()}: ${credentialRefused.providerText}`
+                          )}: ${credentialRefused.providerText}`
                         : undefined
                     }
                   >
@@ -345,9 +352,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                     // timezone, and React re-renders rather than patching it.
                     title={
                       hydrated
-                        ? `run ${refusal.runId} was refused ${new Date(
-                            refusal.observedAt,
-                          ).toLocaleString()}: ${refusal.providerText}`
+                        ? `run ${refusal.runId} was refused $${formatDayDotTime(refusal.observedAt)}: ${refusal.providerText}`
                         : undefined
                     }
                   >
@@ -366,10 +371,10 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                       refusal.resetsAt != null
                         ? `retry after ${
                             hydrated && refusal.resetsAtPrecision === "exact"
-                              ? new Date(refusal.resetsAt * 1000).toLocaleString()
-                              : new Date(refusal.resetsAt * 1000)
-                                  .toISOString()
-                                  .slice(0, 10)
+                              ? formatDayDotTime(new Date(refusal.resetsAt * 1000).toISOString())
+                              : // P07-I: a prose-derived date is a UTC calendar
+                                // day, and says so — it can be a day off locally.
+                                `${utcDayKey(new Date(refusal.resetsAt * 1000).toISOString())} (UTC)`
                           }`
                         : null,
                     ]
@@ -387,7 +392,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                     // patches the mismatch (the app's local-time discipline).
                     title={
                       hydrated
-                        ? `observed ${new Date(reading.observedAt).toLocaleString()}`
+                        ? `observed ${formatDayDotTime(reading.observedAt)}`
                         : undefined
                     }
                   >
@@ -400,18 +405,18 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                         : null,
                       reading.isUsingOverage ? "overage" : null,
                       // Hydration-gated for the same reason the `title` above
-                      // is: `toLocaleDateString` renders in the SERVER's
+                      // is: a local calendar date renders in the SERVER's
                       // timezone during SSR and the viewer's on the client, and
                       // React never patches a text mismatch — it re-renders the
                       // whole page. The ungated form is the timezone-neutral
-                      // ISO day, so the first paint is honest either way.
+                      // UTC day, marked as such (P07-I), so the first paint is
+                      // honest either way. D32-2: the shared formatter, not
+                      // `toLocaleDateString`.
                       reading.resetsAt != null
                         ? `resets ${
                             hydrated
-                              ? new Date(reading.resetsAt * 1000).toLocaleDateString()
-                              : new Date(reading.resetsAt * 1000)
-                                  .toISOString()
-                                  .slice(0, 10)
+                              ? formatCalendarDate(new Date(reading.resetsAt * 1000).toISOString())
+                              : `${utcDayKey(new Date(reading.resetsAt * 1000).toISOString())} (UTC)`
                           }`
                         : null,
                     ]

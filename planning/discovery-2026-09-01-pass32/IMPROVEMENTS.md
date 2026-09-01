@@ -285,3 +285,147 @@ From the owner's docs pass (PR #267, docs/validation/2026-09-01-doc-validation.m
 - E32-6 (from C03-OC7) the 4 anti-noise guardrails have no UI. Options: (a) build a small Guardrails card under Policy (toggle + threshold), (b) declare them file-only in the PRD. Recommendation: (a), small scope, restores the PRD promise.
 - E32-2 Host disk: the Mac's disk (bind-mounted as /data) has ~3.7 GB free — a container
   rebuild (`docker compose up -d --build`) may fail. Informational.
+
+### Docs sub-batch dispositions (2026-09-02)
+
+Every item below was RE-VERIFIED against the rebuilt `docs/` tree (owner commit `a86ec080`,
+"docs: rebuild the documentation set from code truth") and the working tree at
+`pass32/implementation` @ `478bed0` before anything was written. Several findings were
+already moot; those cite where the rebuild fixed them. Gate after the edits:
+`npx vitest run app/shared/docs app/features/shell/nav.test.ts app/server/config/env.server.test.ts`
+→ 4 files / 25 tests passed.
+
+1. **A00-3 attachments retention + viewer** — PARTLY MOOT, rest FIXED. No page in `docs/`
+   ever said "there is no retention machinery" (that sentence lives in the stale
+   `planning/planning-artifacts/architecture.md:869`, which `decisions.md`'s header and
+   `docs/README.md` already disown as superseded by the code-verified set), and
+   `docs/domain/agents-and-runtime.md` §4.4 step 4 already documented the prune. Fixed the
+   three places that still described the pre-105 surface: `docs/product/glossary.md`
+   (Attachments entry), `docs/architecture/data-model.md` §5 (the retention row said
+   "none"), `docs/ui/surfaces.md` §5 (new copy rule: every kind opens a card with Download;
+   text reader; unservable body drops Download) and the attachments route row; added the
+   attachments paragraph to `docs/domain/task-lifecycle.md` §13, which had no mention at
+   all. PRD FR17 handled under item 4.
+2. **A00-4 Safari/Firefox + mobile vocabulary** — ALREADY FIXED BY THE REBUILD. `design/prd.md:160`
+   declares Chromium-only with the strike recorded as history, `docs/product/overview.md:68`
+   states ruling 103, `docs/development/testing.md` §4 says "Chromium is the whole declared
+   browser matrix (ruling 103)". No doc instructs testing another engine. The surviving
+   "mobile" words are not targets: `04-palette-mobile.spec.ts` is a real Chromium spec name
+   and `surfaces.md`'s "the rail collapses at ≤ 720 px … there is no review-first mobile
+   mode" describes shipped reflow plus the retirement. No change.
+3. **A00-5 rulings 106/107/108 on the surfaces** — PARTLY MOOT, rest FIXED.
+   `docs/domain/controller-and-goals.md` §5–§6 and `docs/operations/configuration.md` §2
+   already covered all three completely. `docs/ui/surfaces.md` did not: added a paragraph
+   under §3 (model/effort always editable via the agent-editor pickers; grant lists and
+   doctrine read-only unless the `VIBERR_UNLOCK_CONTROLLER_*` variable is set; `viberr_ops`
+   as a pinned, non-interactive chip) with links to both.
+4. **A00-11 PRD FR17 / FR40** — FIXED, in the CANON copy first. FR17 gained a ruling-105
+   amendment (completion-time prune of machine-stamped non-visual artifacts unless cited;
+   universal card + Download + text viewer); FR40 gained a ruling-108 amendment (grants and
+   instructions are a deployment decision, locked for org admins too, unlocked per section
+   by env at deploy time, with the narrow-scope caveat stated). Edited
+   `planning/planning-artifacts/prd.md` and copied it over `design/prd.md` — ruling 27's
+   `prd-sync.test.ts` pins them byte-identical, so the mirror is a mechanical follow-up, and
+   editing the mirror alone would have broken the gate.
+5. **A00-1 ruling 77 "the tenth"** — ALREADY FIXED BY THE REBUILD. `decisions.md:988-991`
+   carries an `**Amended** (pass 28 F28-L1 and pass 31 F31-6, noted 2026-09-01)` note ending
+   `"Ruling 7's tenth" is historical`, and ruling 7 itself now says ELEVEN and names
+   `PACKET_OPTION_KINDS` as the source of truth. Rulings are amended, never rewritten, so the
+   original phrase correctly stays. Swept for other counts: the only remaining "ten" is
+   ruling 7's own chronology ("count nine→ten … count ten→eleven"), which is history.
+   `file-formats.md` says eleven and is test-pinned.
+6. **Promote the pass-32 owner decisions** — FIXED. Added **rulings 109–116** to
+   `docs/architecture/decisions.md` after 108, in house style: 109 Codex parity (the ruling,
+   the source-level verification that Codex 0.146 cannot express read-only + writable extra
+   dir, and the shipped fallback labeling, amending 101(c)); 110 the collision ceremony's
+   fixed order, the 403 → `pull_request:write` scope violation, the branch cleanup with
+   `vib-5` kept as fixture, and the never-strands follow-up (supervised card / full re-queue);
+   111 one `controller.ops.read` row per successful `viberr_ops` read; 112 the Guardrails card
+   under Policy (marked ruled 2026-09-02, implementation in cluster E); 113 the one capability-
+   mode vocabulary, file ids unchanged (same marking); 114 the board owner cell keeps both
+   labels (DECIDED-NO-CHANGE); 115 `accept_completion` refused at authoring off the acceptance
+   boundary; 116 no per-run HOME/XDG cache, disclosed residual. Added the closing line to
+   "Owner decisions recorded outside this file" pointing at 109–116, and bumped
+   `docs/README.md`'s "108 numbered owner rulings" to 116.
+7. **P07-E / C05-E lock semantics for scripted callers** — FIXED. `docs/operations/configuration.md`
+   §2 gained a three-row table under the lock section: empty/absent = keep the stored value
+   (blank means keep, never clear); non-empty and different = refused naming the section and
+   its unlock variable; same members as displayed = passes (set comparison against the
+   displayed list, stored list still written verbatim). States plainly that a scripted caller
+   **cannot clear a locked list**, and that the instructions body follows the same rule.
+8. **Build stamps + `.env.example` ↔ schema** — FIXED (docs) / already done (env). `.env.example`
+   already carried `VIBERR_BROWSER_EXECUTABLE`, the ops-knobs block and all three
+   `VIBERR_BUILD_*` stamps. `configuration.md` was the stale one: it still listed
+   `VIBERR_MAINTENANCE_INTERVAL_MS`, `VIBERR_DISK_CHECK_INTERVAL_MS`, `VIBERR_DISK_LOW_FREE_MB`,
+   `VIBERR_DISK_CRITICAL_FREE_MB` and `VIBERR_GITHUB_WRITE_PROBE` as raw `process.env` reads
+   (they are in the schema now) and said "the Dockerfile does not set them" of the build
+   stamps. Moved the five into §2, added a **Build identity** subsection covering all three
+   stamps with the real `ARG`→`ENV` and the `docker compose build --build-arg …` invocation,
+   and corrected the §3 preamble (it claimed these were undocumented in `.env.example`).
+   **Mismatch report (env.server.ts NOT edited):** every one of the 43 schema keys appears in
+   `.env.example`; exactly two `.env.example` names sit outside the schema — `LOG_LEVEL` (read
+   by the dependency-free logger) and `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` (deliberately
+   operational, never in an error message). Both are documented as such in both files, and
+   `env.server.test.ts` passes. No undeclared `VIBERR_*` reads remain.
+9. **Runbook + deployment** — FIXED, all three parts. (a) `audit-exports/` is in
+   `BACKED_UP_STORE_DIRS` (`app/server/db/backup.server.ts:78`) and in `DATA_ROOT_SUBDIRS`
+   (`app/server/files/file-store-root.server.ts:26`): said so in `runbook.md` (retention +
+   backup sections), `deployment.md` (backup bullet; "nine `DATA_ROOT_SUBDIRS`" → ten) and
+   `docs/development/scripts.md` (table row + the `npm run backup` detail).
+   (b) `ensureRunRowColumns` (`app/server/db/sqlite.server.ts:145`) ALTERs `agent_runs` for
+   `dispatched_by_name` / `dispatched_by_user_id` at open: documented as the additive-drift
+   path in `runbook.md` (under the boot integrity WARN), `deployment.md` (a "check whether you
+   need a remedy at all" lead-in to the re-baseline) and `data-model.md` §6, and wrote the
+   **preserve-copy** re-baseline as the preferred general remedy — fresh file + migrations,
+   then a foreign-keys-off column-intersection copy skipping the rebuilt-from-files tables,
+   which is the shape `selfHealProjectionDbIfCorrupt` already implements — with the delete-and-
+   rebuild recipe kept and relabelled as the lossy one. (c) the export files' unboundedness is
+   now stated as deliberate (ruling 102's durable record, nothing rotates them) alongside the
+   backup fact. Also corrected, in passing: the runbook's health table said `disk` is `null`
+   "when `statfs` failed" — the reading is `df -kP` primary since F32-1, with statfs as the
+   fallback.
+10. **Scripts / testing drift** — MOSTLY ALREADY FIXED BY THE REBUILD. `README.md`'s table
+    lists all 14 `package.json` scripts and `docs/development/scripts.md` agrees with it and
+    with `package.json`; neither claims a `db/` vitest glob (`vitest.config.ts` includes
+    `app/**/*.test.{ts,tsx}` only and `testing.md` §2 says `db/` and `scripts/` are not
+    collected); `scripts.md` §1 and `runbook.md` already state that
+    `docker compose exec app npm run seed` is refused (`scripts/seed.ts:14-20`), and the
+    runbook's lock table matches `scripts/restore.ts:56` (whole-root restore takes the lock,
+    `--file` does not) and `scripts/secret-keys.ts:55` (`reseal` takes it, `status` does not).
+    One real gap fixed: `testing.md` §4 never said where the e2e data root comes from — it is
+    the `x-e2e-env` anchor in `compose.e2e.yml` (`VIBERR_DATA_ROOT: /data`, shared by the seed
+    one-shot and the app), and nothing in `playwright.config.ts` or `scripts/e2e.ts` sets it.
+11. **`.gitignore` / `test-artifacts/`** — FIXED + reported. Removed the dead
+    `/e2e/.tmp-data/` line: the e2e stack uses the project-scoped named volume `e2e-data`
+    (`compose.e2e.yml`), and the only other references to that path are pass ledgers.
+    `test-artifacts/` holds **12 TRACKED files** (`git ls-files test-artifacts`): six
+    `controller-live/*.png` screenshots and six `pass20-*.txt` payloads. Committed evidence,
+    not build output — nothing deleted, nothing gitignored.
+12. **`scripts/measure-routes.mjs`** — ALREADY FIXED BY THE REBUILD:
+    `docs/development/scripts.md:39` documents it (route asset closure, raw + gzip, from a
+    prior `npm run build`, "not in `package.json`") and `README.md:243` lists it in the
+    `scripts/` tree. Nothing to add; nothing deleted.
+13. **Codex asymmetries** — FIXED. `docs/domain/agents-and-runtime.md` §4.3 gained the explicit
+    statement that the write family binds on BOTH backends since ruling 101 with exactly one
+    disclosed carve-out (repo-write withheld + evidence granted, an EMPTY grant list not
+    tagged), that `codexRepoWriteAdvisory` names that shape, and that every surface prints
+    "advisory on Codex" (ruling 109) — plus why the scoped delivery rows legitimately still
+    read "advisory" (ruling 101(e): claude-only at the tool layer, bounded by the server-owned
+    delivery gate). §2.5's sandbox-mode list now says why the carve-out arm exists, and
+    gotcha 6 points at it. `capability-matrix-modal.tsx` (V11-1) was already corrected in
+    cluster C, so no `app/` change was needed or made.
+14. **`file-formats.md`** — ALREADY CORRECT, verified not assumed. §2's `task.md` example
+    carries `priority`, `labels`, `dueDate`, `acceptance` and `goalRef`; the profile block
+    carries an `effort:` line; the data-root list already said ten subdirs including
+    `audit-exports`. Nothing added there (the new `agent_runs` columns are DB, not file).
+    `npx vitest run app/shared/docs app/features/shell/nav.test.ts` passes, and the
+    `codebase-map.md` nav sentence the nav test pins is untouched.
+
+**Files changed by this sub-batch:** `docs/README.md`, `docs/architecture/decisions.md`,
+`docs/architecture/data-model.md`, `docs/domain/agents-and-runtime.md`,
+`docs/domain/task-lifecycle.md`, `docs/development/scripts.md`, `docs/development/testing.md`,
+`docs/operations/configuration.md`, `docs/operations/deployment.md`, `docs/operations/runbook.md`,
+`docs/product/glossary.md`, `docs/product/requirements-status.md`, `docs/ui/surfaces.md`,
+`planning/planning-artifacts/prd.md` + `design/prd.md` (byte-identical mirror), `.gitignore`,
+and this file. No file under `app/`, `db/`, `scripts/`, `e2e/`, `test-support/` or `tools/` was
+touched.

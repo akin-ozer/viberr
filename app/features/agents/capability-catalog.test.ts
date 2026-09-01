@@ -98,7 +98,7 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
       "off",
     ]);
     expect(SPECIALIST_CAP_MODES.map((m) => m.label)).toEqual([
-      "Allowed",
+      "Acts directly",
       "Human-only",
       "Off",
     ]);

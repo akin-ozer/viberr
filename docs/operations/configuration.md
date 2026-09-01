@@ -3,7 +3,8 @@
 > Every knob the running app reads, where it is read, and what the default is.
 > Source of truth: `app/server/config/env.server.ts` (the validated schema),
 > plus the raw `process.env` reads listed in §3. `.env.example` documents the
-> operator-facing subset. Verified against `main` @ `68b5480` (2026-09-01).
+> operator-facing subset. Verified against `main` @ `68b5480` (2026-09-01);
+> §2 and §3 re-verified 2026-09-02 against `pass32/implementation` @ `478bed0`.
 
 Viberr is configured almost entirely through environment variables, validated
 once at boot by `parseEnv` in `app/server/config/env.server.ts`. The process
@@ -77,6 +78,45 @@ and fallback.
 | `VIBERR_GIT_CLONE_TIMEOUT_MS` | `900000` (15 min) | Ceiling on one `git clone` / mirror fetch (`cloneTimeoutMs` in `git-clone-auth.server.ts`); the schedule claim lease is sized against it. Ignored unless a positive integer. |
 | `VIBERR_TRANSCRIPT_RETENTION_DAYS` | `30` | Age at which `runtimes/<backend>/<runId>.jsonl` is pruned. `0` keeps forever. Aligned with the 30-day `run_log_lines` window. |
 | `VIBERR_SESSION_HOME_RETENTION_DAYS` | `30` | Same window for the provider session homes (`claude-home/projects/`, `codex-home/sessions/`). `0` keeps forever. |
+| `VIBERR_MAINTENANCE_INTERVAL_MS` | `21600000` (6 h) | Cadence of the periodic store-maintenance pass (`app/server/ops/maintenance.server.ts`). |
+| `VIBERR_DISK_CHECK_INTERVAL_MS` | `300000` (5 min) | Cadence of the free-space check on the data root. |
+| `VIBERR_DISK_LOW_FREE_MB` | `2048` | Free-space threshold below which the data root reads `low` (`app/server/ops/disk-space.server.ts`). |
+| `VIBERR_DISK_CRITICAL_FREE_MB` | `512` | Threshold for `critical`. Either state marks health `degraded` and triggers an out-of-band maintenance pass at most every 30 minutes. |
+| `VIBERR_GITHUB_WRITE_PROBE` | unset | `1`/`true`/`yes` opts the PAT validator into an empty-payload write probe; by default write access is proved read-only from the repo `permissions` block (`pat-validator.server.ts`). |
+
+*(Corrected 2026-09-02, pass 32 — C01-A6: the five knobs above were raw `process.env`
+reads listed in §3. They are declared in the schema and documented in `.env.example`
+now; each call site still applies its own coercion and fallback and reads the live
+environment, so a value can be changed without the process-lifetime `getEnv()` cache
+pinning the old answer.)*
+
+### Build identity
+
+Baked at image-build time and read by `app/server/ops/build-info.server.ts`, which
+reports them on the boot integrity line and `/resources/health` → `build`. All three
+are optional and nothing is ever guessed: an unstamped build reports `null`, which is a
+true statement rather than a placeholder version.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `VIBERR_BUILD_VERSION` | unset → `package.json` `version` | Semver of the build. |
+| `VIBERR_BUILD_SHA` | unset → the checkout's `.git` (file reads only), else `null` | Full commit sha; reported shortened to 12 chars, with `revisionSource: env` when it came from here and `git` when it came from a checkout. |
+| `VIBERR_BUILD_TIME` | unset → `builtAt: null` | ISO timestamp of the build. |
+
+The `Dockerfile` declares all three as `ARG` and re-exports them as `ENV`, so a stamped
+image is one build flag away:
+
+```bash
+docker compose build \
+  --build-arg VIBERR_BUILD_SHA=$(git rev-parse HEAD) \
+  --build-arg VIBERR_BUILD_TIME=$(date -u +%FT%TZ)
+```
+
+Left unset, the image still builds and reports `version` from `package.json` with a
+`null` revision (`.git` is not copied into the image). *(Corrected 2026-09-02, pass 32 —
+V11-9: `build-info.server.ts` described an image-build ARG the Dockerfile did not
+declare, so `build.revision` was unconditionally `null` in the image and the deployment
+doc's "redeploy the previous image" instructions were unverifiable at runtime.)*
 
 ### Controller configuration locks (ruling 108)
 
@@ -90,21 +130,37 @@ and fallback.
 Model and effort stay editable regardless. Compose passes all four through with
 `disabled` as the default. Restart to apply.
 
+**What a save does under a lock** (`resolveGrant` / `saveControllerConfig` in
+`app/server/controller/controller-profile.server.ts`) — this matters to anything that
+posts the form other than the panel:
+
+| Posted for a locked section | Result |
+|---|---|
+| nothing, or an EMPTY list | **keep the stored value.** Blank means keep, never clear. The panel relies on this: under a lock it posts blank for the locked sections so the stored grants round-trip byte-for-byte |
+| a NON-empty list that differs from what is stored | **refused**, naming the section and its unlock variable |
+| a list holding the same members as the one it was SHOWN | passes — an identical round-trip is not a change. The comparison is set-based against the *displayed* list (for skills that is the stored list, or `CONTROLLER_DEFAULT_SKILLS` when the stored one is empty), and the stored list is still written back verbatim, order and duplicates included |
+
+The same rule holds for the instructions body: blank keeps the file, a differing
+non-blank body is refused. The consequence worth stating plainly is that **a scripted
+caller cannot clear a locked list** — there is no posted value that empties one, because
+the value that would mean "empty" means "keep". Clearing requires unlocking the section
+at deploy time and restarting.
+*(Added 2026-09-02, pass 32 — P07-E / C05-E: the behaviour was deliberate for blank-keeps
+and undocumented for every other caller.)*
+
 ## 3. Raw `process.env` reads outside the schema
 
-These are honoured but are neither validated nor documented in `.env.example`.
-They are listed here so the configurable surface is complete.
+What is left here is honoured but not validated by the schema. `env.server.test.ts`
+gates the rest: a raw `process.env.VIBERR_*` read that neither the schema nor
+`.env.example` admits exists fails the suite. *(Corrected 2026-09-02, pass 32 — this
+section used to say these were undocumented in `.env.example` too;
+`VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` is documented there, and the five tuning knobs
+that were here moved into the schema.)*
 
 | Variable | Default | Where |
 |---|---|---|
 | `LOG_LEVEL` | `info` in production, `debug` otherwise | `app/server/logging/logger.server.ts`. Values `debug \| info \| warn \| error`. |
 | `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` | unset | Comma-separated retired keys, newest first, for a rotation window (`app/server/secrets/secret-box.server.ts`). Reads only; a malformed entry is skipped silently so a key list never reaches an error message. |
-| `VIBERR_MAINTENANCE_INTERVAL_MS` | `21600000` (6 h) | Cadence of the periodic store-maintenance pass (`app/server/ops/maintenance.server.ts`). |
-| `VIBERR_DISK_CHECK_INTERVAL_MS` | `300000` (5 min) | Cadence of the free-space check on the data root. |
-| `VIBERR_DISK_LOW_FREE_MB` | `2048` | Free-space threshold below which the data root reads `low` (`app/server/ops/disk-space.server.ts`). |
-| `VIBERR_DISK_CRITICAL_FREE_MB` | `512` | Threshold for `critical`. Either state marks health `degraded` and triggers an out-of-band maintenance pass at most every 30 minutes. |
-| `VIBERR_BUILD_SHA` / `VIBERR_BUILD_VERSION` | unset | Optional image-build stamps surfaced by `app/server/ops/build-info.server.ts` in the boot log and `/resources/health`. The Dockerfile does not set them; `package.json` `version` is the fallback. |
-| `VIBERR_GITHUB_WRITE_PROBE` | unset | `1` opts the PAT validator into an empty-payload write probe; by default write access is proved read-only from the repo `permissions` block (`pat-validator.server.ts`). |
 | `VIBERR_E2E_KEEP` | unset | `1` keeps the e2e compose stack up after `npm run e2e` (`scripts/e2e.ts`). |
 | `VIBERR_E2E_BASE_URL` | set by `scripts/e2e.ts` | The Playwright base URL; `playwright.config.ts` refuses to run without it. |
 | `CODEX_CLI_HOME` | `~/.codex` | Compose-only: the host directory mounted read-only at `/host-codex` for the one-time `auth.json` seed. |

@@ -3,7 +3,8 @@
 Quick reference for the common operational tasks and failure modes. All commands run
 from the repo root (or `docker compose exec app …` inside the container, for the
 read-only ones; the writing CLIs refuse against a running app, see below).
-Rewritten 2026-09-01 against `main` @ `68b5480`; the earlier text's stale claims are
+Rewritten 2026-09-01 against `main` @ `68b5480` and re-verified 2026-09-02 against
+`pass32/implementation` @ `478bed0`; the earlier text's stale claims are
 listed in [`../validation/2026-09-01-doc-validation.md`](../validation/2026-09-01-doc-validation.md).
 Every environment variable named here is documented in
 [`configuration.md`](configuration.md).
@@ -43,7 +44,7 @@ Key order is part of the contract:
 | `lock` | `{ pid, hostname, startedAt }` of the single-writer holder, `null` if none |
 | `backends` | `{ claude, codex }` → `real` \| `unavailable`, credential presence only, re-probed on every call, never a validity check |
 | `browser` | `{ status: "ready" }` or `{ status: "unavailable", reason }` for the governed browser |
-| `disk` | `{ freeBytes, totalBytes, usedPercent, status: ok\|low\|critical, lowThresholdBytes, criticalThresholdBytes }` or `null` when `statfs` failed (not degraded); 5 s cache |
+| `disk` | `{ freeBytes, totalBytes, usedPercent, status: ok\|low\|critical, lowThresholdBytes, criticalThresholdBytes }` or `null` when neither source could measure the root (not degraded); 5 s cache. The reading comes from POSIX `df -kP` (fragment-size aware), with `statfs(2)` only as the fallback — Node exposes `bsize` alone, and on Docker Desktop's virtiofs `f_bsize` ≠ `f_frsize`, which reported a near-full 229 GB volume as 62 TB with 1 TB free (F32-1, pass 32) |
 | `maintenance` | `{ intervalMs, diskCheckIntervalMs, lastPassAt, lastPassReason: boot\|interval\|disk-pressure, lastFreedBytes, scheduled }` |
 | `build` | `{ version, revision, revisionSource: env\|git\|null, builtAt }`; `revision` is `null` in the stock image |
 
@@ -59,6 +60,18 @@ root and dirs, applied migrations, projection counts, user count, build, disk, a
 separate WARN `projection schema drift` when the live `task_projections` CHECK lags the
 shipped baseline (see [deployment.md](./deployment.md#re-baselining-the-projection-database)).
 Grep for it after a deploy.
+
+**One drift shape self-repairs and needs no remedy.** A baseline column ADDED after a
+data root was created is applied at open by `ensureRunRowColumns`
+(`app/server/db/sqlite.server.ts`), which `ALTER TABLE agent_runs ADD COLUMN`s each
+missing entry of `RUN_ROW_COLUMNS` — today `dispatched_by_name` and
+`dispatched_by_user_id` — idempotently, logging `added a baseline column this data root
+predated`. So the re-baseline below is **not** the remedy for those two: without the
+backstop every `patchRun` naming them would fail "no such column" and take every agent
+completion on that root with it. A failure to ALTER is warned, not fatal, and retried
+next boot. The re-baseline remains the remedy for the shape that cannot be patched
+additively — a CHECK constraint that refuses a value the running build now produces.
+*(Added 2026-09-02, pass 32.)*
 
 ## Files are canonical; the DB holds projections plus primary app data
 
@@ -225,6 +238,16 @@ settings → Audit export downloads CSV/JSON (cap 100 000 rows) or pushes to a c
 S3 target; the same card browses the newest 150 org-scoped rows. Task-scoped history also
 lives in `task.md` indefinitely.
 
+**Those export files are deliberately unbounded and belong in your backups.** They are
+ruling 102's durable long-term record — the whole point is that they outlive the 90-day
+window the database enforces — so nothing rotates, ages out or size-caps them; the only
+supported way to shrink the directory is to move files off the box yourself, having
+decided you no longer need that history. `audit-exports/` is created at boot with the
+rest of the data root (`DATA_ROOT_SUBDIRS`) and is one of `npm run backup`'s
+`BACKED_UP_STORE_DIRS`, so a standard backup carries it. *(Corrected 2026-09-02, pass 32
+— C01-A3 / A00-6: the directory used to appear only on a root that had already purged,
+and `npm run backup` silently dropped it.)*
+
 **Tables with no retention:** `provenance` (append-only observation ledger, the one that
 grows fastest; prune by hand with the app stopped: `DELETE FROM provenance WHERE
 observed_at < …; VACUUM;`), better-auth `session`, `agent_runs`, `goal_projections`,
@@ -276,8 +299,9 @@ stop it first. Do **not** wipe `state/` while the app runs.
 ## Backup / restore
 
 `npm run backup [-- --out <dir>]` writes a consistent point-in-time artefact (`VACUUM
-INTO` from a read-only connection plus the store tree and a manifest) **without** taking
-the lock, so it works on a live instance. `npm run restore -- --from <artefact>` takes the
+INTO` from a read-only connection plus the store tree — `projects/`, `agents/`, `kb/`,
+`skills/` and `audit-exports/` — and a manifest) **without** taking the lock, so it works
+on a live instance. `npm run restore -- --from <artefact>` takes the
 lock, needs `--force` on an occupied root and moves displaced data to
 `<dataRoot>.replaced-<ts>/`; `--file <store path>` restores one canonical file without
 touching the database. Back up `VIBERR_SECRET_ENCRYPTION_KEY` separately: without it every

@@ -186,8 +186,8 @@ describe("AgentCapability", () => {
     expect(getByText("2 profiles")).toBeTruthy();
     // Both fixtures now count 4 governed direct labels (the operator's
     // collapsed `dispatch-agents` grant took its slot pair down to one row).
-    expect(getAllByText("4 direct")).toHaveLength(2);
-    expect(getAllByText("3 human")).toHaveLength(2); // operator + developer
+    expect(getAllByText("4 acts directly")).toHaveLength(2);
+    expect(getAllByText("3 human-only")).toHaveLength(2); // operator + developer
     // Always-human list comes from the server invariant catalog (ruling 2).
     expect(getByText("Merge a pull request")).toBeTruthy();
     expect(getByText("Transition a task to Done")).toBeTruthy();
@@ -213,7 +213,7 @@ describe("AgentCapability", () => {
         onMatrix={() => {}}
       />,
     );
-    expect(getAllByText("· some grants advisory on Codex")).toHaveLength(1);
+    expect(getAllByText("advisory on Codex")).toHaveLength(1);
     expect(container.textContent).toContain("advisory on Codex");
   });
 

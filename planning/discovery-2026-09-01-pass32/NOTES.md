@@ -136,3 +136,17 @@ PENDING: UC-12/13/14/15/23 (RBAC probe agent running) · UC-20 schedule · UC-25
 - C32-2 support clones refresh `origin/*` from the project mirror after the `--local` clone.
 - C32-1 decided NOT to change: a per-run HOME/XDG cache for Claude would also move npm/git/ssh state and CLAUDE_CONFIG_DIR is already explicit; MCP stdio logs stay per container user. Recorded as a disclosed residual (docs, cluster D).
 - P07-F: the `&& actor.userId` guard is gone; an anonymous resolver is refused by `resolveRemoteBranchCollision` and the refusal lands on the timeline.
+
+## Implementation log — cluster D code (2026-09-02, branch pass32/implementation)
+- F32-2: `resource.updated` SSE event (broadcast, reference-only) published by every org KB/skill/MCP mutator, the manual re-scan and the watcher's by-dir re-index; the org Settings page now holds a user-scoped stream (`useLiveUpdates`) so the resources tab revalidates without a reload. Locks: kb-watch publish count, Settings-page EventSource open.
+- C01-A2: ONE `write-cache.server` (VirtioFS read-your-own-writes repair) shared by task/project/goal writers; the goal writer had none. Locks: stale-read repaired + external edit wins.
+- C01-A3 / A00-6: `audit-exports/` is in BACKED_UP_STORE_DIRS and DATA_ROOT_SUBDIRS; file-formats.md count corrected; backup fixture carries an export.
+- C03-OC1: `postAgentComment` takes an `auditActor`; the controller's comment audit row names the asker ("<email> · via controller").
+- C03-OC3: ONE rule for the controller's skills — an empty stored list resolves to `controller-guide` in `resolveControllerConfig`; the runtime injects exactly the resolved list; a locked save posting the displayed guide is a same-set save.
+- C01-A9 `NO_MODEL_PLACEHOLDER`; C01-A10 junk `effort:` is warned at read before the next save drops it; C01-A11 `agentDefinitionsDir`/`agentDefinitionFilePath`; C01-A12 `deleteProjectNotifications`; C01-A13 doc-key locks for TASK_FRONTMATTER_KEYS and AGENT_PROFILE_KNOWN_KEYS (+ five task keys and the `effort:` line added to file-formats.md).
+- P07-C: `~/shared/provider-marker` is the one source (five sites); drift pin greps the tree for the escape sequence.
+- P07-G: `~/shared/controller-locks` holds the lock vocabulary for server + panel (mirrors and their drift test removed). P07-E/C05-E: the clear-reads-as-keep rule is stated at the enforcer (docs note pending in the docs sub-batch).
+- F32-11: the accept/force ceremony renders a WITHDRAWS row naming the open decision; the acceptance write posts a policy-engine note and a `task.packet.withdrawn` audit row (by: accept|force-accept).
+- A00-9 nav-order lock (+ routes.ts comment); C03-OC6 comment; C05-G run-log docstring; C05-H `github.pr.closed_unowned` in the coverage table; C05-I alias removed; V11-3/4/6/9 (comments, ERROR_CODES.UNAUTHORIZED, DEFAULT_COMPACTION 40, Dockerfile build ARGs).
+- Not changed, with reasons: C02-R5 (see cluster C); V11-5 MANAGED_SETTINGS already documented as belt-and-braces; `github.delivery.next_step` stays locked in delivery-actionable (its writer is a private helper on the delivery path — noted for the coverage file).
+- Docs sub-batch (A00-3/4/5/11 re-verified against the 2026-09-01 rebuilt docs tree, rulings 109+, configuration/runbook/deployment/README/testing/.gitignore items) delegated to an opus-max subagent; results recorded when it reports.

@@ -17,7 +17,7 @@ import {
 /** The Agent-capability rows need the matrix shape plus the role sub-line. */
 export type PcapProfile = MatrixProfile & { role: string };
 import { CapabilityMatrixModal } from "~/features/agents/capability-matrix-modal";
-import { GOVERNED_CAP_LABELS } from "~/features/agents/capability-catalog";
+import { GOVERNED_CAP_LABELS, MODE_LABEL } from "~/features/agents/capability-catalog";
 import type { MembershipView } from "~/features/project-settings/membership.server";
 import type { PolicyViewData, TransitionView } from "./policy-query.server";
 import {
@@ -351,24 +351,27 @@ export function AgentCapability({
                 </span>
               ) : (
                 <>
+                  {/* D32-9: the one vocabulary, lower-cased inline. D32-11: the
+                      advisory note is a chip so the line wraps under the name
+                      instead of squeezing the name column. */}
                   <span className="cs">
                     <span className="d direct"></span>
-                    {direct.length} direct
+                    {direct.length} {MODE_LABEL.direct.toLowerCase()}
                   </span>
                   <span className="cs">
                     <span className="d recommend"></span>
-                    {recommend.length} recommend
+                    {recommend.length} {MODE_LABEL.recommend.toLowerCase()}
                   </span>
                   <span className="cs">
                     <span className="d human"></span>
-                    {human.length} human
+                    {human.length} {MODE_LABEL.human.toLowerCase()}
                   </span>
                   {advisoryOnCodex && (
                     <span
-                      className="fhint"
-                      title="Claude-enforced. On this profile's Codex runtime the tool layer does not bind it: the server-owned delivery gate is the real boundary."
+                      className="mx-scope"
+                      title="Claude-enforced grants. On this profile's Codex runtime the tool layer does not bind them: the server-owned delivery gate is the real boundary."
                     >
-                      · some grants advisory on Codex
+                      advisory on Codex
                     </span>
                   )}
                 </>

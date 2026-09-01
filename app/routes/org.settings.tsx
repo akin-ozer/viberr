@@ -1,4 +1,5 @@
 import { data } from "react-router";
+import { pageTitle } from "~/shared/page-title";
 import { z } from "zod";
 import type { Route } from "./+types/org.settings";
 import { OrgSettingsPage } from "~/features/org-settings/org-settings-page";
@@ -102,7 +103,7 @@ import {
  */
 
 export function meta() {
-  return [{ title: "Instance settings" }];
+  return [{ title: pageTitle("Instance settings") }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {

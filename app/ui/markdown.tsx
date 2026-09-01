@@ -167,7 +167,10 @@ function repairAttachmentHref(
   if (!href || !attachments || attachments.size === 0 || !base) return href;
   if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(href)) return href; // absolute / protocol
   const segments = href.split("/");
-  const name = decodeURIComponent(segments[segments.length - 1] ?? "");
+  // F32-5 (pass 32): a malformed percent-escape in a hand-written link
+  // ("%zz") threw here mid-render and dropped the WHOLE task page to the error
+  // boundary. An undecodable name is simply not an attachment reference.
+  const name = safeDecodeName(segments[segments.length - 1] ?? "");
   if (!name || !attachments.has(name)) return href;
   const dir = segments[segments.length - 2];
   const citesTaskAttachment = segments.length === 1 || dir === "attachments";
@@ -224,7 +227,8 @@ function MarkdownImg({
   // broken-image glyph. An external image stays as the browser renders it (the
   // author's own link, out of scope).
   if (isTaskAttachment && failed) {
-    const name = decodeURIComponent(url.slice(base.length + 1));
+    // F32-5: the label falls back to the raw tail when the escape is malformed.
+    const name = safeDecodeName(url.slice(base.length + 1)) ?? url.slice(base.length + 1);
     return (
       <span
         className="attach-broken md-img-broken"
@@ -245,7 +249,7 @@ function MarkdownImg({
     />
   );
   if (!isTaskAttachment || insideLink) return image;
-  const name = decodeURIComponent(url.slice(base.length + 1));
+  const name = safeDecodeName(url.slice(base.length + 1)) ?? url.slice(base.length + 1);
   return (
     <button
       type="button"

@@ -1,4 +1,5 @@
 import { useLocation, useNavigate, useFetcher } from "react-router";
+import { pageTitle } from "~/shared/page-title";
 import { z } from "zod";
 import type { Route } from "./+types/notifications";
 import { requireUser } from "~/server/auth/require-user.server";
@@ -28,7 +29,7 @@ import type { NotificationPageItem } from "~/features/notifications/notification
  */
 
 export function meta() {
-  return [{ title: "Notifications · Viberr" }];
+  return [{ title: pageTitle("Notifications") }];
 }
 
 /** Overlay routes are opened from the shell with the path to return to in

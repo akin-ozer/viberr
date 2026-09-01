@@ -1,5 +1,6 @@
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.policy";
+import { pageTitle } from "~/shared/page-title";
 import { requireVisibleProject } from "./project-visibility.server";
 import type { loader as projectLoader } from "./project";
 import {
@@ -24,6 +25,12 @@ import { PolicyPage } from "~/features/policy/policy-page";
  * (review→done hard-locked human). Both admin-gated inside the action
  * functions; toast copy is computed server-side (phase-5 pattern).
  */
+
+/** D32-3: "<Page> · <project> · Viberr" — this view used to inherit the bare
+ *  project title from the workspace layout. */
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: pageTitle("Policy", params.slug) }];
+}
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   // R15-4 on THIS loader, not only the layout's (F19-28): single-fetch honors a

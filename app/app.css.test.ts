@@ -2700,3 +2700,35 @@ describe("app.css spacing scale (pass 30)", () => {
     expect(unused).toEqual([]);
   });
 });
+
+describe("D32-5 (pass 32): a SELECTED segment keeps its text color under hover", () => {
+  // `.mini-seg button:hover:not(:disabled)` carries higher specificity than
+  // `.mini-seg button.on` (the `:not()` argument counts), so the hover color
+  // won on the selected segment: --fg on --fg, invisible. The contrast gate
+  // is hover-blind (it composites declared pairs, not pseudo-class cascades),
+  // so the restoring rule is pinned here for every segment family that has a
+  // hover color AND a selected background.
+  it("every segment family with a hover color restores the selected color under hover, or orders `.on` after the hover rule", () => {
+    const families = ["seg", "mini-seg", "cap-seg"];
+    for (const f of families) {
+      const hover = CODE.match(new RegExp(`\\.${f} button:hover:not\\(:disabled\\)\\s*\\{([^}]*)\\}`));
+      if (!hover) continue; // no hover color rule → nothing to outrank
+      const onRule = CODE.match(new RegExp(`\\.${f} button(?:\\.[a-z-]+)*\\.on\\s*\\{([^}]*)\\}`));
+      expect(onRule, `.${f} button.on must exist`).toBeTruthy();
+      const restored = CODE.match(
+        new RegExp(`\\.${f} button\\.on:hover:not\\(:disabled\\)\\s*\\{([^}]*)\\}`),
+      );
+      const onAfterHover = CODE.indexOf(onRule![0]) > CODE.indexOf(hover[0]);
+      const onSpecificityWins = /button\.[a-z-]+\.on/.test(onRule![0]); // two classes ⇒ equal specificity, order decides
+      expect(
+        restored !== null || (onAfterHover && onSpecificityWins),
+        `.${f}: the selected segment's color must survive hover`,
+      ).toBe(true);
+      if (restored) {
+        // The restored color is the selected color, not the hover color.
+        const selectedColor = /color:\s*([^;]+);/.exec(onRule![1])?.[1]?.trim();
+        expect(restored[1]).toContain(`color: ${selectedColor}`);
+      }
+    }
+  });
+});

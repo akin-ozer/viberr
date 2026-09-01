@@ -2472,6 +2472,11 @@ dialog[data-closing]::backdrop {
 }
 .mini-seg button:hover:not(:disabled) { color: var(--fg); }
 .mini-seg button.on { background: var(--fg); color: var(--surface); }
+/* D32-5 (pass 32): the hover rule above outranks `.on` (its `:not(:disabled)`
+   adds specificity), so a SELECTED segment under the pointer painted --fg on
+   --fg — invisible text on the Policy role radios and the Add-MCP transport
+   segment. The selected color wins under hover too. */
+.mini-seg button.on:hover:not(:disabled) { background: var(--fg); color: var(--surface); }
 
 /* rbac matrix */
 .rbac-scroll { overflow-x: auto; }

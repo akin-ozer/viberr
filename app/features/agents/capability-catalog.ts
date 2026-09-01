@@ -132,31 +132,46 @@ export const GOVERNED_CAP_LABELS: ReadonlySet<string> = new Set(
   UNIFIED_CAP_CATALOG.filter((e) => e.group !== null).map((e) => e.label),
 );
 
+/**
+ * D32-9 (owner ruling, pass 32): ONE vocabulary for capability modes on every
+ * surface — the editor radios, the matrix cells and legend, the agent card
+ * columns and the Policy counts. The file ids (direct | recommend | human |
+ * off) are unchanged; only the words are. Before: "Allowed" (project editor),
+ * "ACTS DIRECTLY" (card), "direct" (policy counts), "Reserved for humans" /
+ * "Not granted" (matrix) all named the same four states.
+ */
+export const MODE_LABEL = {
+  direct: "Acts directly",
+  recommend: "Recommends only",
+  human: "Human-only",
+  off: "Off",
+} as const satisfies Record<CapMode, string>;
+
 /** The OPERATOR capability picker's modes — all 4, because `recommend`
  * (propose a card a human applies) has real semantics for the operator. */
 export const OPERATOR_CAP_MODES: readonly { id: CapMode; label: string }[] = [
-  { id: "direct", label: "Direct" },
-  { id: "recommend", label: "Recommend" },
-  { id: "human", label: "Human" },
-  { id: "off", label: "Off" },
+  { id: "direct", label: MODE_LABEL.direct },
+  { id: "recommend", label: MODE_LABEL.recommend },
+  { id: "human", label: MODE_LABEL.human },
+  { id: "off", label: MODE_LABEL.off },
 ];
 
 /** The SPECIALIST capability picker's modes — 3 HONEST values (R7-5).
  * `recommend` is omitted: it is an operator-only concept, and at runtime a
- * specialist `recommend` grant is identical to `direct` (F7-CAP1). Labels are
- * chosen for a specialist's mental model — "Allowed" persists `direct`,
- * "Human-only" persists `human`, "Off" persists `off`. */
+ * specialist `recommend` grant is identical to `direct` (F7-CAP1). Same words
+ * as every other surface (D32-9). */
 export const SPECIALIST_CAP_MODES: readonly { id: CapMode; label: string }[] = [
-  { id: "direct", label: "Allowed" },
-  { id: "human", label: "Human-only" },
-  { id: "off", label: "Off" },
+  { id: "direct", label: MODE_LABEL.direct },
+  { id: "human", label: MODE_LABEL.human },
+  { id: "off", label: MODE_LABEL.off },
 ];
 
-/** Capability-policy column meta (mock CAP_META — icon repeats per row). */
+/** Capability-policy column meta (mock CAP_META — icon repeats per row). The
+ *  `forbidden` bucket is the `human` mode under its column name. */
 export const CAP_META = {
-  direct: { label: "Acts directly", icon: "check" },
-  recommend: { label: "Recommends only", icon: "arrow" },
-  forbidden: { label: "Reserved for humans", icon: "lock" },
+  direct: { label: MODE_LABEL.direct, icon: "check" },
+  recommend: { label: MODE_LABEL.recommend, icon: "arrow" },
+  forbidden: { label: MODE_LABEL.human, icon: "lock" },
 } as const;
 
 // ------------------------------------------------------- context resources
