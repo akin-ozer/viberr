@@ -11,10 +11,14 @@ import { resolveStoreTarget } from "~/server/org/resources.server";
 import { readStoreDoc } from "~/server/org/store-files.server";
 import { healthSnapshot } from "~/server/ops/health-snapshot.server";
 import { getRunLog, runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
-import type { RunLogQuery } from "~/server/runtimes/run-service.server";
-import { getRun } from "~/server/runtimes/run-store.server";
+import type { RunLog, RunLogQuery } from "~/server/runtimes/run-service.server";
+import { getRun, runLineStats } from "~/server/runtimes/run-store.server";
 import type { AgentRunRow } from "~/server/runtimes/run-store.server";
-import { backendCredentialHealth } from "~/server/runtimes/runtime-registry.server";
+import {
+  backendCredentialHealth,
+  type BackendCredentialHealth,
+  type RealBackend,
+} from "~/server/runtimes/runtime-registry.server";
 import { canReadControllerRunLog } from "./controller-conversations.server";
 import {
   controllerToolGuards,
@@ -36,8 +40,10 @@ import {
  * `controller-run.server` on EVERY controller run: no config is read, no grant
  * row exists, and nothing in the UI can drop it. That is deliberate rather than
  * a missing feature — a stored grant for machinery the run mounts anyway would
- * be a toggle with no effect (P14-KM-14), and the name is reserved in
- * `saveMcpServer` so an org row can never shadow the mount key.
+ * be a toggle with no effect (P14-KM-14). The mount key is reserved at all
+ * three layers (`~/shared/mcp-reserved`): no org row can be created under it,
+ * the picker never offers one, and the resolver refuses to resolve one that
+ * reached the registry some other way.
  *
  * READ-ONLY: nothing here writes, deletes, or starts anything. Diagnostics that
  * could change the instance would be a second authority surface beside the
@@ -74,8 +80,22 @@ export const CONTROLLER_OPS_INSTRUCTIONS =
   "it with its reason. Use these to answer questions about how the instance and its runs are " +
   "actually doing, and quote what you read rather than inferring it.";
 
-/** The route's own clamp (P13-D-11): a client-named page size is bounded, so a
- *  tool call cannot ask for the payload paging exists to avoid. */
+/**
+ * Page size for `read_run_log`, bounded on EVERY path.
+ *
+ * The route this tool descends from can afford an unbounded default (`since=-1`
+ * = the whole log) because its caller is the console, which holds a live cursor
+ * and never asks for everything. A model holds no cursor: `read_run_log({runId})`
+ * is the natural shape for "why did that run fail", and a run's `display` bodies
+ * run to kilobytes each (run-projection measured ~2.2 KB/line), so an unbounded
+ * default is megabytes of tool result in a context window. Bounded by DEFAULT,
+ * like `inspect_audit_log` (`?? 50`) and `read_store_doc` (256 KB + `truncated`)
+ * — a max the caller has to opt into protects the call nobody makes.
+ *
+ * 200 is `RUN_LOG_PAGE_LINES`, the same page the console takes when it names no
+ * size, for the same reason: it is a readable page rather than a history.
+ */
+const DEFAULT_LOG_LINES = 200;
 const MAX_LOG_LINES = 500;
 
 /** Uniform not-visible copy for a run: a run that does not exist and one the
@@ -85,11 +105,29 @@ function notVisibleRun(runId: string): string {
   return `[denied] No run "${runId}" is visible to you.`;
 }
 
+/** What `instance_health` says about one backend, cut to the asker's authority.
+ *  Everyone learns WHETHER a backend can run; only an org admin learns the
+ *  sentence that says why, because it names the deployment's config paths.
+ *  `verification` rides with it: alone it is unactionable, and it is the same
+ *  configuration answer one word shorter. */
+type BackendCredentialReport =
+  | { backend: RealBackend; available: boolean }
+  | BackendCredentialHealth;
+
+function backendCredential(
+  backend: RealBackend,
+  orgAdmin: boolean,
+): BackendCredentialReport {
+  const health = backendCredentialHealth(backend);
+  if (orgAdmin) return health;
+  return { backend: health.backend, available: health.available };
+}
+
 /** Build the diagnostics server for one controller turn. */
 export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp {
   const { db, ctx, user } = deps;
   const dataRoot = ctx.dataRoot;
-  const { requireOrgAdmin, requireVisible, run, runWith, json } =
+  const { orgAdmin, requireOrgAdmin, requireVisible, run, runWith, json } =
     controllerToolGuards(db, user, dataRoot);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -123,17 +161,21 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "instance_health",
-      "How this Viberr instance is doing right now: overall status and which subsystems are degraded, the store watchers and the single-writer lock, disk space, the maintenance pass, build identity, per-backend credential health, and the run concurrency queue. Open to anyone; it reports aggregates, never anyone's data.",
+      "How this Viberr instance is doing right now: overall status and which subsystems are degraded, the store watchers and the single-writer lock, disk space, the maintenance pass, build identity, whether each model backend has a usable credential, and the run concurrency queue. The reading is open to anyone; the sentence explaining a backend's credential state names deployment configuration, so only org admins get that.",
       {},
       run(() => {
-        // No gate, deliberately. The snapshot is what `/resources/health`
-        // already serves UNAUTHENTICATED (aggregate counts, the lock holder,
-        // free bytes, build identity), and per-backend credential health is
-        // what the project agents page already shows any member. The
-        // concurrency numbers are the one reading a page keeps to admins, and
-        // they are three integers about instance load with no name or project
-        // in them — strictly less than the probe hands an anonymous caller, so
-        // gating this tool would perform secrecy rather than keep any.
+        // The READING is ungated: it is what `/resources/health` already serves
+        // UNAUTHENTICATED (aggregate counts, the lock holder's pid and host,
+        // free bytes, build identity), plus availability booleans and three
+        // integers about run load that carry no name, project or run in them.
+        //
+        // The credential DETAIL is not: `backendCredentialHealth` explains an
+        // unusable credential by naming the config directory it looked in
+        // (`/Users/<owner>/.claude` under the CLI-auth opt-in) and what to set
+        // instead. That is deployment configuration, and the org-settings bar
+        // is where this product keeps configuration — so `detail` follows it,
+        // and everyone else gets the availability answer without the host path.
+        const admin = orgAdmin();
         const snapshot = healthSnapshot(db);
         return json({
           ...snapshot,
@@ -141,8 +183,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           // `backends` is env presence only, and "unavailable" with no reason
           // is the answer that sends someone hunting through the deployment.
           backendCredentials: [
-            backendCredentialHealth("claude"),
-            backendCredentialHealth("codex"),
+            backendCredential("claude", admin),
+            backendCredential("codex", admin),
           ],
           // What the concurrency cap is doing this second: a queued run is the
           // usual answer to "why has nothing started".
@@ -156,24 +198,30 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "read_run_log",
-      "A page of one agent run's raw log lines. Readable by a member of the run's project; a controller conversation's own turns are readable by the person whose conversation it is (and by org admins). Use `since` to read forward from a sequence number, or `before` with `limit` to page backwards through history.",
+      `One PAGE of an agent run's log lines, newest page by default (which is where a failure is). Readable by a member of the run's project; a controller conversation's own turns are readable by the person whose conversation it is (and by org admins). Two ways to move: \`before\` pages BACKWARD (the lines older than that sequence number) and \`since\` pages FORWARD (the lines after it). Name only one of them. Every call returns at most \`limit\` lines (${DEFAULT_LOG_LINES} by default, ${MAX_LOG_LINES} at most), so read \`page\` to see where you are: it reports whether older or newer lines exist and hands you the exact argument for the next call. \`run.logLines\` is the run's total.`,
       {
         runId: z.string().describe("The run id, e.g. from a task's console."),
         since: z
           .number()
           .int()
           .optional()
-          .describe("Forward tail: lines after this sequence number (default -1 = all)."),
+          .describe(
+            "Read FORWARD: the page of lines after this sequence number. Omit to read the newest page.",
+          ),
         before: z
           .number()
           .int()
           .optional()
-          .describe("Backward page: the newest lines OLDER than this sequence number."),
+          .describe(
+            "Read BACKWARD: the page of lines older than this sequence number. Cannot be combined with `since`.",
+          ),
         limit: z
           .number()
           .int()
           .optional()
-          .describe(`Page size, clamped to 1..${MAX_LOG_LINES}.`),
+          .describe(
+            `Lines per page, clamped to 1..${MAX_LOG_LINES} (default ${DEFAULT_LOG_LINES}).`,
+          ),
       },
       runWith(
         (args: {
@@ -188,21 +236,53 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           // back.
           if (!row) throw new NotVisibleError(notVisibleRun(args.runId));
           requireRunVisible(row);
-
-          // Backward mode is selected by the PRESENCE of before/limit, so an
-          // absent argument must leave its key off rather than carry undefined.
-          let query: RunLogQuery;
-          if (args.before !== undefined || args.limit !== undefined) {
-            query = {};
-            if (args.before !== undefined) query.before = args.before;
-            if (args.limit !== undefined) {
-              query.limit = Math.min(Math.max(args.limit, 1), MAX_LOG_LINES);
-            }
-          } else {
-            query = { since: args.since ?? -1 };
+          if (args.since !== undefined && args.before !== undefined) {
+            // The two cursors move opposite ways, and the underlying query
+            // silently lets one win. Refusing is the only answer that cannot
+            // hand back a window the caller did not ask for.
+            throw AppError.validation(
+              "Name either since (a forward page) or before (a backward page), not both.",
+            );
           }
-          const log = getRunLog(db, args.runId, query);
-          if (!log) throw new NotVisibleError(notVisibleRun(args.runId));
+          const limit = Math.min(
+            Math.max(args.limit ?? DEFAULT_LOG_LINES, 1),
+            MAX_LOG_LINES,
+          );
+
+          let page: RunLog["lines"];
+          if (args.since === undefined) {
+            // Backward: the newest page, or the page older than `before`. An
+            // absent cursor must leave its key OFF rather than carry undefined,
+            // which is how `getRunLog` selects its mode.
+            const query: RunLogQuery = { limit };
+            if (args.before !== undefined) query.before = args.before;
+            const log = getRunLog(db, args.runId, query);
+            if (!log) throw new NotVisibleError(notVisibleRun(args.runId));
+            page = log.lines;
+          } else {
+            // Forward. `getRunLog` ignores `limit` in this mode BY DESIGN (the
+            // console's live tail is bounded by its own cursor), so the bound is
+            // applied here, on the ascending lines. The SELECT behind it is
+            // unbounded (`listRunLines` has no LIMIT, as run-store says) but
+            // local and fast; what this tool must keep bounded is the REPLY it
+            // puts in a model's context. If the SELECT ever bites, the fix is a
+            // LIMIT pushed down into `listRunLines`, never a bigger reply.
+            const log = getRunLog(db, args.runId, { since: args.since });
+            if (!log) throw new NotVisibleError(notVisibleRun(args.runId));
+            page = log.lines.slice(0, limit);
+          }
+
+          // Page position, computed against the RUN's real bounds. `getRunLog`'s
+          // own headSeq/oldestSeq/hasMore are page-local cursors for a stateful
+          // console (headSeq is this page's last line, hasMore means "older
+          // lines exist"), and a model with no second source reads them as facts
+          // about the run — so they are not relayed at all.
+          const stats = runLineStats(db, args.runId);
+          const firstSeq = page.length ? page[0]!.seq : null;
+          const lastSeq = page.length ? page[page.length - 1]!.seq : null;
+          const olderExist = firstSeq !== null && firstSeq > stats.minSeq;
+          const newerExist = lastSeq !== null && lastSeq < stats.maxSeq;
+
           return json({
             run: {
               id: row.id,
@@ -216,11 +296,23 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
               startedAt: row.started_at,
               finishedAt: row.finished_at,
               turns: row.turns,
+              // The run's TRUE total, so an empty page reads as "your cursor is
+              // past the end", never as "this run logged nothing".
+              logLines: stats.count,
             },
-            headSeq: log.headSeq,
-            oldestSeq: log.oldestSeq,
-            hasMore: log.hasMore,
-            lines: log.lines.map((line) => ({
+            page: {
+              firstSeq,
+              lastSeq,
+              olderExist,
+              newerExist,
+              // The exact argument for the follow-up call, so continuing is not
+              // arithmetic the model has to get right.
+              next: {
+                older: olderExist ? { before: firstSeq } : null,
+                newer: newerExist ? { since: lastSeq } : null,
+              },
+            },
+            lines: page.map((line) => ({
               seq: line.seq,
               at: line.occurredAt,
               display: line.display,

@@ -27,6 +27,17 @@ const SLUG = "viberr-core";
 const PROJECT_RUN = "run_ops_project";
 const CONTROLLER_RUN = "run_ops_controller";
 const LOG_LINES = 12;
+/**
+ * A run LONGER than both page bounds, because a fixture smaller than the clamp
+ * cannot tell a working clamp from a missing one: the first version of this
+ * suite proved its 500-line ceiling against a 12-line run, and the unbounded
+ * default path it was meant to cover shipped anyway.
+ */
+const LONG_RUN = "run_ops_long";
+const LONG_LINES = 620;
+/** The tool's own page bounds, restated so the arithmetic below is readable. */
+const DEFAULT_PAGE = 200;
+const MAX_PAGE = 500;
 /** `readStoreDoc`'s own per-read ceiling, which the tool takes as its default. */
 const READ_DOC_BYTES = 256 * 1024;
 
@@ -95,8 +106,26 @@ beforeAll(async () => {
     sdk: "claude-agent-sdk",
     state: "finished",
   });
-  for (const runId of [PROJECT_RUN, CONTROLLER_RUN]) {
-    for (let i = 0; i < LOG_LINES; i += 1) {
+  upsertRun(app.db, {
+    id: LONG_RUN,
+    projectSlug: SLUG,
+    taskKey: "VIB-142",
+    threadId: "thread_ops_long",
+    role: "developer",
+    kind: "primary",
+    agentProfileId: "developer",
+    agentName: "dev",
+    backend: "claude",
+    model: "claude-opus-4-8",
+    sdk: "claude-agent-sdk",
+    state: "error",
+  });
+  for (const [runId, count] of [
+    [PROJECT_RUN, LOG_LINES],
+    [CONTROLLER_RUN, LOG_LINES],
+    [LONG_RUN, LONG_LINES],
+  ] as const) {
+    for (let i = 0; i < count; i += 1) {
       insertRunLine(app.db, {
         runId,
         seq: i,
@@ -178,28 +207,46 @@ const HEALTH_REPLY = z.object({
   backends: z.object({ claude: z.string(), codex: z.string() }),
   maintenance: z.object({ scheduled: z.boolean() }),
   build: z.object({ version: z.string().nullable() }),
+  // Strict, and the two authority-gated keys are OPTIONAL: a member's row must
+  // carry neither, and the key-set assertions below read what actually came
+  // back rather than what a tolerant schema would let through.
   backendCredentials: z.array(
-    z.object({
+    z.strictObject({
       backend: z.string(),
       available: z.boolean(),
-      verification: z.string(),
-      detail: z.string().nullable(),
+      verification: z.string().optional(),
+      detail: z.string().nullable().optional(),
     }),
   ),
   runs: z.object({ cap: z.number(), live: z.number(), queued: z.number() }),
 });
 
-const RUN_LOG_REPLY = z.object({
+const RUN_LOG_REPLY = z.strictObject({
   run: z.object({
     id: z.string(),
     kind: z.string(),
     state: z.string(),
     project: z.string(),
     task: z.string(),
+    /** The run's TRUE line count, so an empty page is never read as "no log". */
+    logLines: z.number(),
   }),
-  headSeq: z.number(),
-  oldestSeq: z.number(),
-  hasMore: z.boolean(),
+  /**
+   * Page position stated in full. `getRunLog`'s own headSeq/oldestSeq/hasMore
+   * are page-local cursors for a stateful console — the schema refuses them, so
+   * relaying them again would fail here rather than reach a model that has no
+   * second source to check them against.
+   */
+  page: z.strictObject({
+    firstSeq: z.number().nullable(),
+    lastSeq: z.number().nullable(),
+    olderExist: z.boolean(),
+    newerExist: z.boolean(),
+    next: z.object({
+      older: z.object({ before: z.number() }).nullable(),
+      newer: z.object({ since: z.number() }).nullable(),
+    }),
+  }),
   lines: z.array(z.object({ seq: z.number(), at: z.string() })),
 });
 
@@ -269,8 +316,8 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     expect(body.backends).toEqual(snapshot.backends);
     expect(body.watcher).toBe(snapshot.watcher);
     expect(body.kbWatcher).toBe(snapshot.kbWatcher);
-    // Why a backend reads the way it does — the health probe reports env
-    // presence only, and "unavailable" with no reason sends someone hunting.
+    // Whether each backend can run at all — the availability answer to "why has
+    // nothing started".
     expect(body.backendCredentials.map((c) => c.backend)).toEqual([
       "claude",
       "codex",
@@ -278,6 +325,37 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     // The concurrency gate, live: a queued run is the usual answer to "why has
     // nothing started".
     expect(body.runs.cap).toBe(runConcurrencySnapshot(app.db).cap);
+  });
+
+  it("keeps the credential EXPLANATION for org admins: it names deployment paths", async () => {
+    // `backendCredentialHealth`'s detail sentence interpolates the config
+    // directory it looked in (`/Users/<owner>/.claude` under the CLI-auth
+    // opt-in) and what to set instead. That is configuration, and configuration
+    // is org-admin territory — a member of no project reached it here before
+    // this, through a tool with no gate at all.
+    const member = parsed(
+      HEALTH_REPLY,
+      await call(ids.nonMember, "instance_health"),
+    );
+    for (const row of member.backendCredentials) {
+      expect(Object.keys(row).sort()).toEqual(["available", "backend"]);
+    }
+    const admin = parsed(
+      HEALTH_REPLY,
+      await call(ids.orgAdmin, "instance_health"),
+    );
+    for (const row of admin.backendCredentials) {
+      expect(Object.keys(row).sort()).toEqual([
+        "available",
+        "backend",
+        "detail",
+        "verification",
+      ]);
+    }
+    // Same availability either way: the fact is open, only the explanation moves.
+    expect(member.backendCredentials.map((c) => c.available)).toEqual(
+      admin.backendCredentials.map((c) => c.available),
+    );
   });
 });
 
@@ -334,33 +412,97 @@ describe("read_run_log: the run-log route's gate, in one sentence", () => {
     ).toBe(invisible(CONTROLLER_RUN));
   });
 
-  it("clamps the page size instead of serving what paging exists to avoid", async () => {
-    const huge = parsed(
+});
+
+/**
+ * Paging, on a run LONGER than both bounds (620 lines). The first version of
+ * this suite proved its clamp against a 12-line fixture, so "limit: 99999
+ * returned 12" was indistinguishable from no clamp at all — and the default
+ * call, which named no page size, returned the whole log unbounded into a model
+ * context (measured at 2.5 MB on a 1,500-line run).
+ */
+describe("read_run_log: every page is bounded, and says where it sits", () => {
+  const page = (args: Record<string, JsonValue>) =>
+    call(ids.projectAdmin, "read_run_log", { runId: LONG_RUN, ...args });
+
+  it("defaults to the NEWEST page, bounded, with a cursor for the rest", async () => {
+    const body = parsed(RUN_LOG_REPLY, await page({}));
+    // Bounded by DEFAULT, not only by a limit the caller has to think to send.
+    expect(body.lines.length).toBe(DEFAULT_PAGE);
+    // The NEWEST page: "why did this run fail" is answered at the end of a log.
+    expect(body.page.lastSeq).toBe(LONG_LINES - 1);
+    expect(body.page.firstSeq).toBe(LONG_LINES - DEFAULT_PAGE);
+    // And it says so: older lines exist, newer ones do not, and the argument
+    // for the next call is handed over rather than left as arithmetic.
+    expect(body.page.olderExist).toBe(true);
+    expect(body.page.newerExist).toBe(false);
+    expect(body.page.next.older).toEqual({ before: LONG_LINES - DEFAULT_PAGE });
+    expect(body.page.next.newer).toBeNull();
+    // The run's true size, so a page is never mistaken for the whole log.
+    expect(body.run.logLines).toBe(LONG_LINES);
+  });
+
+  it("the handed-back older cursor really continues the read", async () => {
+    const first = parsed(RUN_LOG_REPLY, await page({}));
+    const older = parsed(
       RUN_LOG_REPLY,
-      await call(ids.projectAdmin, "read_run_log", {
-        runId: PROJECT_RUN,
-        limit: 99_999,
-      }),
+      await page({ before: first.page.next.older!.before }),
     );
-    expect(huge.lines.length).toBe(LOG_LINES); // 500, capped by reality
-    const zero = parsed(
+    // Contiguous, no gap and no overlap with the page it followed.
+    expect(older.page.lastSeq).toBe(first.page.firstSeq! - 1);
+    expect(older.lines.length).toBe(DEFAULT_PAGE);
+    expect(older.page.newerExist).toBe(true);
+    expect(older.page.next.newer).toEqual({ since: older.page.lastSeq });
+  });
+
+  it("`since` reads FORWARD from the cursor, bounded — never the tail", async () => {
+    const forward = parsed(RUN_LOG_REPLY, await page({ since: 10, limit: 5 }));
+    expect(forward.lines.map((l) => l.seq)).toEqual([11, 12, 13, 14, 15]);
+    expect(forward.page.newerExist).toBe(true);
+    expect(forward.page.next.newer).toEqual({ since: 15 });
+    expect(forward.page.olderExist).toBe(true);
+    // The forward path is bounded even when no limit is named: `getRunLog`
+    // ignores `limit` in forward mode by design, so the bound is the tool's.
+    const unbounded = parsed(RUN_LOG_REPLY, await page({ since: 10 }));
+    expect(unbounded.lines.length).toBe(DEFAULT_PAGE);
+    expect(unbounded.page.firstSeq).toBe(11);
+  });
+
+  it("refuses the two cursors together instead of silently picking one", async () => {
+    // They move opposite ways and the underlying query lets one win in silence,
+    // which handed back a window the caller never asked for.
+    expect(await page({ since: 10, before: 100 })).toBe(
+      "[error] Name either since (a forward page) or before (a backward page), not both.",
+    );
+  });
+
+  it("clamps a hostile page size at both ends, on both paths", async () => {
+    const huge = parsed(RUN_LOG_REPLY, await page({ limit: 99_999 }));
+    expect(huge.lines.length).toBe(MAX_PAGE); // the fixture is longer, so this bites
+    const hugeForward = parsed(
       RUN_LOG_REPLY,
-      await call(ids.projectAdmin, "read_run_log", {
-        runId: PROJECT_RUN,
-        before: 6,
-        limit: 0,
-      }),
+      await page({ since: 0, limit: 99_999 }),
     );
+    expect(hugeForward.lines.length).toBe(MAX_PAGE);
     // Clamped UP to 1, never down to "everything".
+    const zero = parsed(RUN_LOG_REPLY, await page({ before: 6, limit: 0 }));
     expect(zero.lines.length).toBe(1);
-    const tail = parsed(
-      RUN_LOG_REPLY,
-      await call(ids.projectAdmin, "read_run_log", {
-        runId: PROJECT_RUN,
-        since: 9,
-      }),
-    );
-    expect(tail.lines.length).toBe(2);
+    const zeroForward = parsed(RUN_LOG_REPLY, await page({ since: 6, limit: 0 }));
+    expect(zeroForward.lines.length).toBe(1);
+  });
+
+  it("an empty page says it is empty without inventing a sequence number", async () => {
+    // Past the end of the run: `getRunLog` would answer headSeq = the cursor
+    // the caller sent, a number that exists nowhere in the run.
+    const body = parsed(RUN_LOG_REPLY, await page({ since: 10_000 }));
+    expect(body.lines).toEqual([]);
+    expect(body.page.firstSeq).toBeNull();
+    expect(body.page.lastSeq).toBeNull();
+    expect(body.page.next.older).toBeNull();
+    expect(body.page.next.newer).toBeNull();
+    // …and the run's real size is still on the reply, so an empty page cannot
+    // be read as "this run logged nothing".
+    expect(body.run.logLines).toBe(LONG_LINES);
   });
 });
 

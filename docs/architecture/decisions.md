@@ -1558,12 +1558,13 @@ the quieter packet or the bare owner cell as drift.)*
     guess or point at a page. `viberr_ops` is an in-process, READ-ONLY server
     with three tools, each resolving the ASKING PERSON's authority live, per
     call, and refusing in the toolkit's own voice:
-    `instance_health` (open to anyone: the same reading `/resources/health`
-    serves unauthenticated, plus the per-backend credential health the project
-    agents page already shows any member, plus the cap/live/queued concurrency
-    snapshot — three load integers carrying no name or project, and strictly
-    less than the probe hands an anonymous caller, so a gate here would perform
-    secrecy rather than keep any),
+    `instance_health` (the READING is open to anyone: what `/resources/health`
+    serves unauthenticated, availability per backend, and the cap/live/queued
+    concurrency snapshot, three load integers carrying no name or project. The
+    credential DETAIL is org-admin only, because `backendCredentialHealth`
+    explains an unusable credential by naming the config directory it looked in
+    and what to set instead: that is deployment configuration, and this review
+    found a member of no project reading a host path through an ungated tool),
     `read_run_log` (a member of the run's project; a controller turn's log
     follows conversation ownership with org-admin supervision, via
     `canReadControllerRunLog` — the exact gate `/resources/run-log` applies,
@@ -1573,11 +1574,26 @@ the quieter packet or the bare owner cell as drift.)*
     reporting `truncated` honestly). Nothing here writes, deletes or starts
     anything: diagnostics that could change the instance would be a second
     authority surface beside the toolkit, which is where changes are audited.
+    **Every page is bounded and says where it sits.** `read_run_log` defaults to
+    the NEWEST 200 lines (500 max) on BOTH directions, refuses `since` together
+    with `before` instead of silently letting one win, and reports
+    `page.{firstSeq,lastSeq,olderExist,newerExist,next}` computed against the
+    run's real bounds plus `run.logLines` — never `getRunLog`'s headSeq /
+    oldestSeq / hasMore, which are page-local cursors for a stateful console
+    that a model with no second source reads as facts about the run. The route
+    can afford an unbounded `since=-1` default because its caller holds a live
+    cursor; a model holds none, and the measured cost of that default was a
+    2.5 MB reply on a 1,500-line run.
     NOT REMOVABLE BY CONSTRUCTION, not by a guard: `buildControllerMounts`
     attaches it on every turn with no config read and no grant row, so there is
-    nothing to clear and no toggle that could do nothing (P14-KM-14), and
-    `viberr_ops`/`viberr-ops` join `isReservedMcpName` so an org server can
-    never shadow the mount key. The Controller settings MCP group discloses it
+    nothing to clear and no toggle that could do nothing (P14-KM-14). The
+    reserved names live in ONE list (`~/shared/mcp-reserved`) that the writer,
+    the picker AND the run-time resolver all read: the resolver kept a private
+    copy that never learned the controller's servers, so a row reaching the
+    registry any way but `saveMcpServer` (hand-written, restored backup, created
+    before the name was reserved) resolved and, because org servers mount LAST,
+    replaced the built-in diagnostics under their own key. The Controller
+    settings MCP group discloses it
     as a pinned chip that is deliberately NOT a control (a disabled button
     would be the toggle-with-no-effect this ruling avoids, and its `title`
     would never open), and it never enters the save payload or `mountedMcps`.

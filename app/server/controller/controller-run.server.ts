@@ -140,8 +140,12 @@ export interface ControllerMounts {
  * by anyone" — there is no grant row to clear and no toggle to flip, so no
  * surface can offer one that does nothing (P14-KM-14).
  *
- * Org grants land last and cannot shadow either: their names are refused at
- * save (`isReservedMcpName`).
+ * Org grants land last and cannot shadow either, because the RESOLVER refuses
+ * to resolve a reserved name (`~/shared/mcp-reserved`, applied in
+ * `resolveSpecialistMcpServersDetailed`). The save-time refusal only ever
+ * governed new rows; a row written straight into SQLite or restored from a
+ * backup reaches this spread, so the layer that decides what a run mounts is
+ * the one that has to hold.
  */
 export function buildControllerMounts(
   db: DatabaseSync,
@@ -655,9 +659,13 @@ export function buildControllerSystemPrompt(
       "You are the instance controller, running on the Claude backend" +
       (input.config.model ? `, model \`${input.config.model}\`` : "") +
       ".\n" +
+      // "org" is load-bearing in both arms: `mountedMcps` is ORG grants only,
+      // and the flat negation used to sit one line above the built-in
+      // diagnostics sentence, telling the model in consecutive breaths that it
+      // has no MCP servers and that it has one (ruling 107's review).
       (input.mountedMcps.length
-        ? `Attached MCP servers: ${input.mountedMcps.join(", ")}. Their tools widen no authority: never use one to bypass a permission, merge, accept, or delete anything.\n`
-        : "No MCP servers are attached to you.\n") +
+        ? `Attached org MCP servers: ${input.mountedMcps.join(", ")}. Their tools widen no authority: never use one to bypass a permission, merge, accept, or delete anything.\n`
+        : "No org MCP servers are attached to you.\n") +
       (input.unresolvedMcps.length
         ? `These granted MCP servers did NOT mount this turn and their tools will not appear: ${input.unresolvedMcps.join(", ")}. Say so if asked.\n`
         : "") +
