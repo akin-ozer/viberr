@@ -24,6 +24,13 @@ import { useOrgAction } from "./use-org-action";
  * has no backend choice (its runs resolve Claude) and no capability matrix
  * (its authority is the asking user's own permission level), so those editor
  * sections rightly have no counterpart here.
+ *
+ * Ruling 108: the grant sections and the instructions are LOCKED by default,
+ * org admins included — a deployment decision, unlocked per section by an
+ * environment variable and a restart. A locked section renders read-only
+ * here and `saveControllerConfig` refuses a change to it server-side, so the
+ * panel and any other caller are bound by the same rule. Model and effort
+ * stay editable either way.
  */
 
 export interface ControllerConfigView {
@@ -47,6 +54,35 @@ export interface ControllerKbOption {
   uri: string;
 }
 
+/** Ruling 108: which sections this deployment allows editing (true = locked).
+ *  A client mirror of the server's `ControllerSectionLocks` — the loader
+ *  derives it from the environment; nothing in the app can change it. */
+export interface ControllerSectionLocks {
+  skills: boolean;
+  kb: boolean;
+  mcps: boolean;
+  instructions: boolean;
+}
+
+/** The unlock variable each locked section names in the note below. Mirrors
+ *  the server's `CONTROLLER_UNLOCK_ENV` (a test pins the two together — the
+ *  server module cannot be imported from client code). */
+export const CONTROLLER_UNLOCK_ENV_VIEW = {
+  skills: "VIBERR_UNLOCK_CONTROLLER_SKILLS",
+  kb: "VIBERR_UNLOCK_CONTROLLER_KB",
+  mcps: "VIBERR_UNLOCK_CONTROLLER_MCPS",
+  instructions: "VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS",
+} as const;
+
+/** Section names for the lock note — mirrors the server's
+ *  CONTROLLER_SECTION_LABEL (pinned together by test). */
+const SECTION_LABEL = {
+  skills: "skill grants",
+  kb: "knowledge base grants",
+  mcps: "MCP server grants",
+  instructions: "instructions",
+} as const;
+
 /** A resource the controller mounts by construction, shown so an admin can see
  *  what is attached. Ruling 107: it is NOT a control, because there is no
  *  grant row behind it and nothing to toggle. */
@@ -67,6 +103,7 @@ function GrantChips({
   onToggle,
   mono,
   pinned,
+  locked,
 }: {
   label: string;
   options: { id: string; display: string; title?: string }[];
@@ -74,13 +111,29 @@ function GrantChips({
   onToggle: (id: string) => void;
   mono?: boolean;
   pinned?: PinnedChip;
+  /** Ruling 108: the section is deployment-locked — every chip renders as a
+   *  non-interactive span (the ruling-107 pinned treatment: a disabled button
+   *  would be a toggle that does nothing and its title would never open), and
+   *  the lock note above the groups says how to unlock. */
+  locked?: boolean;
 }) {
   const missing = [...granted].filter(
     (id) => !options.some((o) => o.id === id),
   );
+  // A locked section is a read-only DISCLOSURE, not a picker: it lists only
+  // what is granted (an ungranted option under a lock is noise you cannot act
+  // on), so there is no granted/ungranted distinction for a screen reader to
+  // lose — the F19-5 `aria-pressed` need is specific to a toggle. Each granted
+  // resource keeps its display name; a dangling grant still shows, flagged.
+  const grantedOptions = locked
+    ? options.filter((o) => granted.has(o.id))
+    : options;
   return (
     <div className="ctx-group">
-      <span className="ctx-lbl">{label}</span>
+      <span className="ctx-lbl">
+        {label}
+        {locked && <Icon name="lock" className="lbl-lock" />}
+      </span>
       <div className="pick-chips">
         {pinned && (
           // A span, not a disabled button: a disabled control is a toggle that
@@ -94,23 +147,51 @@ function GrantChips({
             {pinned.display}
           </span>
         )}
-        {options.map((o) => (
-          <button
-            type="button"
-            key={o.id}
-            className={
-              "pick-chip" + (mono ? " mono" : "") + (granted.has(o.id) ? " on" : "")
-            }
-            aria-pressed={granted.has(o.id)}
-            {...(o.title ? { title: o.title } : {})}
-            onClick={() => onToggle(o.id)}
-          >
-            {granted.has(o.id) && <Icon name="check" />}
-            {o.display}
-          </button>
-        ))}
-        <MissingChips ids={missing} {...(mono ? { mono } : {})} onDrop={onToggle} />
-        {options.length === 0 && missing.length === 0 && !pinned && (
+        {grantedOptions.map((o) =>
+          locked ? (
+            <span
+              key={o.id}
+              className={"pick-chip on" + (mono ? " mono" : "")}
+              {...(o.title ? { title: o.title } : {})}
+            >
+              <Icon name="check" />
+              {o.display}
+            </span>
+          ) : (
+            <button
+              type="button"
+              key={o.id}
+              className={
+                "pick-chip" + (mono ? " mono" : "") + (granted.has(o.id) ? " on" : "")
+              }
+              aria-pressed={granted.has(o.id)}
+              {...(o.title ? { title: o.title } : {})}
+              onClick={() => onToggle(o.id)}
+            >
+              {granted.has(o.id) && <Icon name="check" />}
+              {o.display}
+            </button>
+          ),
+        )}
+        {locked ? (
+          // A dangling grant under a lock is still DISCLOSED (it reaches no
+          // run), it just cannot be removed here — the note says what unlocks.
+          missing.map((id) => (
+            <span
+              key={id}
+              className={"pick-chip missing on" + (mono ? " mono" : "")}
+              title="No longer in the store, so this grant reaches no run. The section is locked on this deployment."
+            >
+              {id}
+            </span>
+          ))
+        ) : (
+          <MissingChips ids={missing} {...(mono ? { mono } : {})} onDrop={onToggle} />
+        )}
+        {locked && grantedOptions.length === 0 && missing.length === 0 && !pinned && (
+          <span className="ctx-none">none granted</span>
+        )}
+        {!locked && options.length === 0 && missing.length === 0 && !pinned && (
           <span className="ctx-none">none defined</span>
         )}
       </div>
@@ -120,11 +201,14 @@ function GrantChips({
 
 export function ControllerAdminPanel({
   config,
+  locks,
   kbs,
   skills,
   mcps,
 }: {
   config: ControllerConfigView;
+  /** Ruling 108: which sections this deployment allows editing. */
+  locks: ControllerSectionLocks;
   /** The org resource catalogs the grant pickers offer. */
   kbs: ControllerKbOption[];
   skills: string[];
@@ -139,11 +223,23 @@ export function ControllerAdminPanel({
   // P13-KM-01, same repair as the global-profile editor: a KB grant stored
   // under the display NAME is rewritten to its dir on open (so it renders
   // granted and the next save repairs the file); only an entry matching
-  // neither dir nor name stays raw and renders as a missing chip.
+  // neither dir nor name stays raw and renders as a missing chip. Done even
+  // under a lock — it is DISPLAY only now, because a locked save posts blank
+  // for this section rather than this repaired set (so the server keeps the
+  // stored grants byte-for-byte), so the repair can no longer become a write.
   const [grantKbs, setGrantKbs] = useState(
     () => new Set([...kbDirsOf(config.kb, kbs), ...kbLegacyOf(config.kb, kbs)]),
   );
   const [grantMcps, setGrantMcps] = useState(new Set(config.mcps));
+
+  const lockedSections = (
+    [
+      ["skills", locks.skills],
+      ["mcps", locks.mcps],
+      ["kb", locks.kb],
+      ["instructions", locks.instructions],
+    ] as const
+  ).filter(([, locked]) => locked);
 
   // The controller always runs on Claude (controller-run resolves
   // `resolveRunModel("claude", …)`), so the catalog backend is fixed — no
@@ -176,10 +272,14 @@ export function ControllerAdminPanel({
       // A model without effort tiers submits none — the same rule the profile
       // editor's payload applies.
       effort: showEffort ? effort : "",
-      definition,
-      skills: [...grantSkills].join("\n"),
-      kb: [...grantKbs].join("\n"),
-      mcps: [...grantMcps].join("\n"),
+      // Ruling 108: a locked section posts BLANK, which the server reads as
+      // "keep the stored value". This is what makes a model/effort-only save
+      // succeed under a lock, and it means a stale grant/doctrine copy the
+      // panel is still holding can never be posted back as a change.
+      definition: locks.instructions ? "" : definition,
+      skills: locks.skills ? "" : [...grantSkills].join("\n"),
+      kb: locks.kb ? "" : [...grantKbs].join("\n"),
+      mcps: locks.mcps ? "" : [...grantMcps].join("\n"),
     });
   };
 
@@ -208,6 +308,27 @@ export function ControllerAdminPanel({
               apply.
             </strong>{" "}
             Restart the app to restore the shipped one.
+          </span>
+        </p>
+      )}
+      {lockedSections.length > 0 && (
+        <p className="pol-note">
+          <Icon name="lock" />
+          <span>
+            Locked here on this deployment:{" "}
+            <strong>
+              {lockedSections
+                .map(([section]) => SECTION_LABEL[section])
+                .join(", ")}
+            </strong>
+            . Model and effort stay editable. To unlock a section, set its
+            variable in the app environment and restart:{" "}
+            {lockedSections
+              .map(([section]) => CONTROLLER_UNLOCK_ENV_VIEW[section] + "=1")
+              .join(" · ")}
+            . This locks the grant lists and the doctrine file edited on this
+            tab; a granted skill or knowledge base can still be edited from
+            Agent resources, which changes what the controller loads.
           </span>
         </p>
       )}
@@ -241,6 +362,7 @@ export function ControllerAdminPanel({
             granted={grantSkills}
             onToggle={(id) => toggle(grantSkills, setGrantSkills, id)}
             mono
+            locked={locks.skills}
           />
           <GrantChips
             label="MCP servers"
@@ -256,6 +378,7 @@ export function ControllerAdminPanel({
               title:
                 "Built-in diagnostics (instance health, run logs, store documents). Part of the controller: mounted on every run and not removable.",
             }}
+            locked={locks.mcps}
           />
           <GrantChips
             label="Knowledge bases"
@@ -266,15 +389,18 @@ export function ControllerAdminPanel({
             }))}
             granted={grantKbs}
             onToggle={(id) => toggle(grantKbs, setGrantKbs, id)}
+            locked={locks.kb}
           />
         </div>
       </div>
       <div className="field">
         <label className="flabel" htmlFor={`${uid}-instructions`}>
           Instructions
+          {locks.instructions && <Icon name="lock" className="lbl-lock" />}
           <span className="fhint">
-            the controller's working doctrine, injected as its system prompt on
-            every turn; markdown ok
+            {locks.instructions
+              ? "the controller's working doctrine · read-only, locked on this deployment"
+              : "the controller's working doctrine, injected as its system prompt on every turn; markdown ok"}
           </span>
         </label>
         <textarea
@@ -285,6 +411,7 @@ export function ControllerAdminPanel({
           // the height).
           rows={12}
           value={definition}
+          readOnly={locks.instructions}
           onChange={(e) => setDefinition(e.target.value)}
         />
       </div>

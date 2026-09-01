@@ -52,6 +52,7 @@ import {
 import { putObjectToS3 } from "~/server/audit/s3-put.server";
 import { listRecentAuditEvents } from "~/server/audit/audit-browse.server";
 import {
+  controllerSectionLocks,
   resolveControllerConfig,
   saveControllerConfig,
 } from "~/server/controller/controller-profile.server";
@@ -124,6 +125,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     auditEvents: listRecentAuditEvents(getDb()),
     // Ruling 99: the controller configuration the admin tab edits.
     controllerConfig: resolveControllerConfig(),
+    // Ruling 108: which of its sections this DEPLOYMENT allows editing.
+    controllerLocks: controllerSectionLocks(),
   };
 }
 
@@ -721,6 +724,7 @@ export default function OrgSettings({ loaderData }: Route.ComponentProps) {
       s3Audit={loaderData.s3Audit}
       auditEvents={loaderData.auditEvents}
       controllerConfig={loaderData.controllerConfig}
+      controllerLocks={loaderData.controllerLocks}
     />
   );
 }

@@ -7,7 +7,9 @@ import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import { ToastProvider } from "~/ui/toast";
 import {
   ControllerAdminPanel,
+  CONTROLLER_UNLOCK_ENV_VIEW,
   type ControllerConfigView,
+  type ControllerSectionLocks,
 } from "./controller-admin-panel";
 
 /**
@@ -65,9 +67,25 @@ let lastForm: Record<string, string> | null = null;
 /** A posted form field the panel sets (text only — the page-test rule). */
 const textField = z.string();
 
+/** All-unlocked, so the edit-flow tests keep exercising the editors; the
+ *  PRODUCT default is all-locked and has its own describe below. */
+const UNLOCKED: ControllerSectionLocks = {
+  skills: false,
+  kb: false,
+  mcps: false,
+  instructions: false,
+};
+const LOCKED: ControllerSectionLocks = {
+  skills: true,
+  kb: true,
+  mcps: true,
+  instructions: true,
+};
+
 function renderPanel(
   overrides: Partial<ControllerConfigView> = {},
   mcps: string[] = ["qa-echo"],
+  locks: ControllerSectionLocks = UNLOCKED,
 ) {
   lastForm = null;
   const config = { ...CONFIG, ...overrides };
@@ -78,6 +96,7 @@ function renderPanel(
         <ToastProvider>
           <ControllerAdminPanel
             config={config}
+            locks={locks}
             kbs={KBS}
             skills={["controller-guide", "developer-expertise"]}
             mcps={mcps}
@@ -288,5 +307,127 @@ describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
     expect(warn?.textContent).toContain(
       "The controller profile file is missing from the store",
     );
+  });
+});
+
+describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
+  it("renders every locked section read-only, with the unlock note", async () => {
+    const { container, getByText } = renderPanel({}, ["qa-echo"], LOCKED);
+    // No grant chip is a control any more: the groups hold spans only (the
+    // pinned viberr_ops chip was already a span), so there is nothing to
+    // toggle and nothing announcing pressable state.
+    expect(
+      container.querySelectorAll(".ctx-group button.pick-chip"),
+    ).toHaveLength(0);
+    // A locked section is a read-only disclosure: it lists ONLY what is
+    // granted (an ungranted option is noise you cannot act on), so there is
+    // no granted/ungranted ambiguity for a screen reader to lose.
+    const chips = [...container.querySelectorAll(".ctx-group .pick-chip")];
+    expect(chips.some((c) => c.textContent?.includes("controller-guide"))).toBe(
+      true,
+    );
+    expect(
+      chips.some((c) => c.textContent?.includes("developer-expertise")),
+    ).toBe(false);
+    // The doctrine is visible but not editable.
+    const ta = container.querySelector("textarea");
+    expect(ta?.readOnly).toBe(true);
+    // The note names every locked section and its exact unlock variable.
+    const note = container.querySelector(".pol-note");
+    for (const label of [
+      "skill grants",
+      "MCP server grants",
+      "knowledge base grants",
+      "instructions",
+    ]) {
+      expect(note?.textContent).toContain(label);
+    }
+    for (const envVar of Object.values(CONTROLLER_UNLOCK_ENV_VIEW)) {
+      expect(note?.textContent).toContain(`${envVar}=1`);
+    }
+    // Model stays editable: once the catalog answers, the select is a real
+    // control (it is disabled only during the load, lock or no lock).
+    expect(getByText("Save controller")).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        container.querySelector('select[aria-label="Model"]:disabled'),
+      ).toBeNull(),
+    );
+  });
+
+  it("a locked save posts blank for every locked section (server keeps stored)", async () => {
+    // A locked section renders read-only and posts BLANK, which the server
+    // reads as "keep the stored value" — so a stale grant/doctrine copy the
+    // panel is holding can never be posted back as a change, and a
+    // model/effort-only save succeeds under the lock. Model still posts.
+    const { container, getByText } = renderPanel(
+      { kb: ["Controller handbook"] },
+      ["qa-echo"],
+      LOCKED,
+    );
+    await waitFor(() =>
+      expect(
+        container.querySelector<HTMLSelectElement>('select[aria-label="Model"]')
+          ?.value,
+      ).toBe("opus"),
+    );
+    fireEvent.click(getByText("Save controller"));
+    await waitFor(() => expect(lastForm).not.toBeNull());
+    expect(lastForm?.skills).toBe("");
+    expect(lastForm?.kb).toBe("");
+    expect(lastForm?.mcps).toBe("");
+    expect(lastForm?.definition).toBe("");
+    expect(lastForm?.model).toBe("opus");
+  });
+
+  it("locks sections independently: instructions locked, grants editable", () => {
+    const { container } = renderPanel({}, ["qa-echo"], {
+      ...UNLOCKED,
+      instructions: true,
+    });
+    // Grant chips are still toggles.
+    expect(
+      container.querySelectorAll(".ctx-group button.pick-chip").length,
+    ).toBeGreaterThan(0);
+    expect(container.querySelector("textarea")?.readOnly).toBe(true);
+    const note = container.querySelector(".pol-note");
+    expect(note?.textContent).toContain("instructions");
+    expect(note?.textContent).toContain(
+      "VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS=1",
+    );
+    expect(note?.textContent).not.toContain("skill grants");
+  });
+
+  it("no note and full editability when the deployment unlocked everything", () => {
+    const { container } = renderPanel({}, ["qa-echo"], UNLOCKED);
+    expect(container.querySelector(".pol-note")).toBeNull();
+    expect(container.querySelector("textarea")?.readOnly).toBe(false);
+  });
+
+  it("a dangling grant under a lock is disclosed but not removable", () => {
+    const { container } = renderPanel(
+      { skills: ["controller-guide", "ghost-skill"] },
+      ["qa-echo"],
+      LOCKED,
+    );
+    const ghost = container.querySelector(".pick-chip.missing");
+    expect(ghost?.tagName).toBe("SPAN");
+    expect(ghost?.textContent).toContain("ghost-skill");
+    expect(ghost?.getAttribute("title")).toContain("locked on this deployment");
+  });
+
+  it("the view's env-var and label maps match the server's (drift pin)", async () => {
+    const server = await import(
+      "~/server/controller/controller-profile.server"
+    );
+    expect(CONTROLLER_UNLOCK_ENV_VIEW).toEqual(server.CONTROLLER_UNLOCK_ENV);
+    // The note's section names come from the panel's own map; the refusal
+    // sentences use the server's. One vocabulary.
+    expect(server.CONTROLLER_SECTION_LABEL).toEqual({
+      skills: "skill grants",
+      kb: "knowledge base grants",
+      mcps: "MCP server grants",
+      instructions: "instructions",
+    });
   });
 });

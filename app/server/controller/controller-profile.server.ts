@@ -5,6 +5,7 @@ import {
   recordAudit,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
+import { getEnv, type Env } from "~/server/config/env.server";
 import { AppError } from "~/server/errors/app-error.server";
 import {
   parseAgentProfileContent,
@@ -36,6 +37,64 @@ import {
  */
 
 export const CONTROLLER_PROFILE_ID = "controller";
+
+/**
+ * Ruling 108 — the controller's configuration sections are LOCKED by default,
+ * org admins included: which skills, knowledge bases and org MCP servers it
+ * loads, and its instructions, are a DEPLOYMENT decision, unlocked per section
+ * by an environment variable at deploy time. `true` = locked. Model and effort
+ * are deliberately not sections: picking the model tier is day-to-day admin
+ * work, while rewriting what the controller IS operates above the org.
+ */
+export interface ControllerSectionLocks {
+  skills: boolean;
+  kb: boolean;
+  mcps: boolean;
+  instructions: boolean;
+}
+
+/** The unlock variable per section — named in refusals and in the settings
+ *  panel, so the operator is told exactly what to set. */
+export const CONTROLLER_UNLOCK_ENV = {
+  skills: "VIBERR_UNLOCK_CONTROLLER_SKILLS",
+  kb: "VIBERR_UNLOCK_CONTROLLER_KB",
+  mcps: "VIBERR_UNLOCK_CONTROLLER_MCPS",
+  instructions: "VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS",
+} as const;
+
+/** Human names for the sections, shared by the refusal sentence and the
+ *  settings panel's lock note so they can never call one thing two names. */
+export const CONTROLLER_SECTION_LABEL = {
+  skills: "skill grants",
+  kb: "knowledge base grants",
+  mcps: "MCP server grants",
+  instructions: "instructions",
+} as const;
+
+/** The house flag parse (`forceDataRootTakeover`'s): 1/true/yes unlocks. */
+function unlockFlag(raw: string | undefined): boolean {
+  const value = raw?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+}
+
+/** Resolve the live lock state from the deployment environment. Absent flag =
+ *  locked; there is no in-app override anywhere, which is the point. */
+export function controllerSectionLocks(
+  env: Pick<
+    Env,
+    | "VIBERR_UNLOCK_CONTROLLER_SKILLS"
+    | "VIBERR_UNLOCK_CONTROLLER_KB"
+    | "VIBERR_UNLOCK_CONTROLLER_MCPS"
+    | "VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS"
+  > = getEnv(),
+): ControllerSectionLocks {
+  return {
+    skills: !unlockFlag(env.VIBERR_UNLOCK_CONTROLLER_SKILLS),
+    kb: !unlockFlag(env.VIBERR_UNLOCK_CONTROLLER_KB),
+    mcps: !unlockFlag(env.VIBERR_UNLOCK_CONTROLLER_MCPS),
+    instructions: !unlockFlag(env.VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS),
+  };
+}
 
 export interface ControllerConfig {
   name: string;
@@ -143,7 +202,7 @@ export function saveControllerConfig(
   db: DatabaseSync,
   input: SaveControllerConfigInput,
   actor: AuditActor,
-  ctx: { dataRoot?: string } = {},
+  ctx: { dataRoot?: string; locks?: ControllerSectionLocks } = {},
 ): ControllerConfig {
   const existing = readControllerProfile(ctx.dataRoot);
   if (!existing) {
@@ -151,15 +210,58 @@ export function saveControllerConfig(
       "The controller profile is missing from the store. Restart the app to restore the shipped one, then edit it.",
     );
   }
+  // Ruling 108: a locked section is NEVER rewritten from the input. An empty
+  // list (the panel posts blank for a locked section, since it renders it
+  // read-only) keeps the stored value; a NON-empty list that changes it is
+  // refused, naming the section and its unlock variable, so a scripted caller
+  // is told rather than silently ignored. Enforced here, not in the route, so
+  // every save path is bound; `ctx.locks` exists for tests only.
+  const locks = ctx.locks ?? controllerSectionLocks();
+  const sameSet = (a: string[], b: string[]) => {
+    const bs = new Set(b);
+    return new Set(a).size === bs.size && a.every((x) => bs.has(x));
+  };
+  const lockedChange = (section: keyof ControllerSectionLocks): void => {
+    throw AppError.forbidden(
+      `The controller's ${CONTROLLER_SECTION_LABEL[section]} are locked on this deployment. Set ${CONTROLLER_UNLOCK_ENV[section]}=1 in the app environment and restart to edit them.`,
+    );
+  };
+  // A locked section writes the STORED list verbatim (order and duplicates
+  // included), so no save can perturb the on-disk grants — only an explicit,
+  // non-empty CHANGE is refused. An unlocked section writes the input as given.
+  const resolveGrant = (
+    section: "skills" | "kb" | "mcps",
+    stored: string[],
+  ): string[] => {
+    if (!locks[section]) return input[section];
+    if (input[section].length > 0 && !sameSet(input[section], stored)) {
+      lockedChange(section);
+    }
+    return stored;
+  };
+  const stored = existing.frontmatter.resources;
+  const resources = {
+    skills: resolveGrant("skills", stored.skills),
+    mcps: resolveGrant("mcps", stored.mcps),
+    kb: resolveGrant("kb", stored.kb),
+  };
+  // Blank has always meant "keep the current doctrine". Under an instructions
+  // lock a non-blank body that differs from the stored doctrine is refused;
+  // blank (what the panel posts when instructions are read-only) keeps it, and
+  // a locked save never rewrites the doctrine file.
+  const definitionInput = input.definition.trim();
+  let writeDefinition = definitionInput.length > 0;
+  if (writeDefinition && locks.instructions) {
+    if (definitionInput !== readControllerDefinition(ctx.dataRoot)) {
+      lockedChange("instructions");
+    }
+    writeDefinition = false;
+  }
   const merged: ParsedProfile = {
     frontmatter: {
       ...existing.frontmatter,
       model: input.model.trim(),
-      resources: {
-        skills: input.skills,
-        mcps: input.mcps,
-        kb: input.kb,
-      },
+      resources,
     },
     description: existing.description,
   };
@@ -172,8 +274,7 @@ export function saveControllerConfig(
     agentProfileFilePath(CONTROLLER_PROFILE_ID, ctx.dataRoot),
     serializeAgentProfile(merged),
   );
-  const definition = input.definition.trim();
-  if (definition) {
+  if (writeDefinition) {
     const file = definitionFilePath(ctx.dataRoot);
     const current = existsSync(file) ? readFileSync(file, "utf8") : "";
     const { data } = splitFrontmatter(current);
@@ -182,7 +283,7 @@ export function saveControllerConfig(
       current && yamlMappingSchema.safeParse(data).success
         ? current.slice(0, current.indexOf("\n---\n") + 5)
         : `---\nid: ${CONTROLLER_PROFILE_ID}\nname: Controller\nbackend: claude\n---\n`;
-    writeFileAtomic(file, `${head}\n${definition}\n`);
+    writeFileAtomic(file, `${head}\n${definitionInput}\n`);
   }
   recordAudit(db, {
     action: "org.controller.updated",
@@ -192,10 +293,12 @@ export function saveControllerConfig(
     details: {
       model: input.model.trim(),
       effort,
-      skills: input.skills.length,
-      kb: input.kb.length,
-      mcps: input.mcps.length,
-      definitionEdited: definition.length > 0,
+      skills: resources.skills.length,
+      kb: resources.kb.length,
+      mcps: resources.mcps.length,
+      // Honest: true only when the doctrine file was actually rewritten, never
+      // for a locked or blank save that left it untouched (review #12).
+      definitionEdited: writeDefinition,
     },
   });
   return resolveControllerConfig(ctx.dataRoot);

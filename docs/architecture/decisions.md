@@ -1603,6 +1603,38 @@ the quieter packet or the bare owner cell as drift.)*
     so route and tool read one derivation and both in-process servers refuse in
     one voice.
 
+108. **The controller's configuration is deployment-locked by default (owner,
+    2026-09-01).** Which skills, knowledge bases and org MCP servers the
+    controller loads, and its instructions, are locked out of in-app editing
+    for EVERYONE, org admins included: they are a deployment decision. Four
+    environment variables unlock one section each at deploy time
+    (`VIBERR_UNLOCK_CONTROLLER_SKILLS` / `_KB` / `_MCPS` / `_INSTRUCTIONS`,
+    `=1`, restart to apply; documented in `.env.example` and the env schema);
+    absent means locked, and there is no in-app override anywhere — that is
+    the point. Enforcement is server-side in `saveControllerConfig`
+    (`controllerSectionLocks` reads the env; a change to a locked section is
+    refused with the section and its unlock variable named, while an
+    identical round-trip passes so model and effort stay editable — those two
+    are deliberately not sections: picking the tier is day-to-day admin work,
+    rewriting what the controller IS operates above the org). The settings
+    panel renders locked sections read-only (span chips, read-only doctrine,
+    one note listing the locked sections and their variables), and under a
+    lock it skips the P13-KM-01 display-name repair so a locked save
+    round-trips the stored grants byte-for-byte. The `viberr_ops` mount is
+    unaffected: it is not a section and stays non-removable under every flag
+    combination (ruling 107). A dangling grant under a lock is still
+    disclosed, just not removable in-app.
+    **Scope (owner, narrow reading, 2026-09-01):** the lock covers the
+    controller SETTINGS tab — the grant lists and the doctrine file edited
+    there. It is deliberately NOT airtight: deleting or renaming a resource on
+    the Agent resources tab still prunes the controller's grant (the shared
+    `resource-references` rewrite), and editing a granted skill's or KB's file
+    contents still changes what the controller loads as trusted context. Those
+    side doors were left open by owner decision, in favor of not freezing
+    org-resource management around whatever the controller happens to grant;
+    the panel note and this entry state the boundary rather than imply a
+    containment the ruling does not provide.
+
 ## Route map
 
 ```

@@ -163,6 +163,16 @@ const envSchema = z.object({
   VIBERR_GIT_CLONE_TIMEOUT_MS: z.string().optional(),
   VIBERR_TRANSCRIPT_RETENTION_DAYS: z.string().optional(),
   VIBERR_SESSION_HOME_RETENTION_DAYS: z.string().optional(),
+  // Ruling 108: the controller's configuration sections are LOCKED by default
+  // — the Controller settings tab shows them read-only and `saveControllerConfig`
+  // refuses a change, org admins included. Each flag (1/true/yes) unlocks ONE
+  // section for in-app editing; set them in the deployment environment and
+  // restart. Model and effort stay editable either way, and the built-in
+  // `viberr_ops` diagnostics mount is not a section: it is never removable.
+  VIBERR_UNLOCK_CONTROLLER_SKILLS: z.string().optional(),
+  VIBERR_UNLOCK_CONTROLLER_KB: z.string().optional(),
+  VIBERR_UNLOCK_CONTROLLER_MCPS: z.string().optional(),
+  VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: z.string().optional(),
   // Number of trusted reverse proxies in front of the app (default 0 = none).
   // Only when set does the login throttle read X-Forwarded-For, and then as the
   // Nth hop from the right — the ip the outermost trusted proxy saw. Left unset
