@@ -453,6 +453,15 @@ describe("read_run_log: every page is bounded, and says where it sits", () => {
     expect(older.lines.length).toBe(DEFAULT_PAGE);
     expect(older.page.newerExist).toBe(true);
     expect(older.page.next.newer).toEqual({ since: older.page.lastSeq });
+
+    // The END of the walk, where the flag has to be computed against the RUN's
+    // own first line rather than any page-local floor: the page that starts at
+    // seq 0 must say there is nothing older and hand back no cursor.
+    const oldest = parsed(RUN_LOG_REPLY, await page({ before: DEFAULT_PAGE }));
+    expect(oldest.page.firstSeq).toBe(0);
+    expect(oldest.page.olderExist).toBe(false);
+    expect(oldest.page.next.older).toBeNull();
+    expect(oldest.page.newerExist).toBe(true);
   });
 
   it("`since` reads FORWARD from the cursor, bounded — never the tail", async () => {
