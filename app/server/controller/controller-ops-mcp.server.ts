@@ -126,10 +126,14 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
       "How this Viberr instance is doing right now: overall status and which subsystems are degraded, the store watchers and the single-writer lock, disk space, the maintenance pass, build identity, per-backend credential health, and the run concurrency queue. Open to anyone; it reports aggregates, never anyone's data.",
       {},
       run(() => {
-        // No gate: the same aggregate the unauthenticated /resources/health
-        // probe already serves, plus two readings the agents page and the
-        // admin concurrency card already show a member. A tighter gate here
-        // would only pretend the numbers are secret.
+        // No gate, deliberately. The snapshot is what `/resources/health`
+        // already serves UNAUTHENTICATED (aggregate counts, the lock holder,
+        // free bytes, build identity), and per-backend credential health is
+        // what the project agents page already shows any member. The
+        // concurrency numbers are the one reading a page keeps to admins, and
+        // they are three integers about instance load with no name or project
+        // in them — strictly less than the probe hands an anonymous caller, so
+        // gating this tool would perform secrecy rather than keep any.
         const snapshot = healthSnapshot(db);
         return json({
           ...snapshot,

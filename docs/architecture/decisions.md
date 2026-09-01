@@ -1559,8 +1559,11 @@ the quieter packet or the bare owner cell as drift.)*
     with three tools, each resolving the ASKING PERSON's authority live, per
     call, and refusing in the toolkit's own voice:
     `instance_health` (open to anyone: the same reading `/resources/health`
-    serves unauthenticated, plus per-backend credential health and the
-    cap/live/queued concurrency snapshot the admin card already shows),
+    serves unauthenticated, plus the per-backend credential health the project
+    agents page already shows any member, plus the cap/live/queued concurrency
+    snapshot — three load integers carrying no name or project, and strictly
+    less than the probe hands an anonymous caller, so a gate here would perform
+    secrecy rather than keep any),
     `read_run_log` (a member of the run's project; a controller turn's log
     follows conversation ownership with org-admin supervision, via
     `canReadControllerRunLog` — the exact gate `/resources/run-log` applies,
