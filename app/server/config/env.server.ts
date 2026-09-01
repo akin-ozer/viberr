@@ -165,10 +165,11 @@ const envSchema = z.object({
   VIBERR_SESSION_HOME_RETENTION_DAYS: z.string().optional(),
   // Ruling 108: the controller's configuration sections are LOCKED by default
   // — the Controller settings tab shows them read-only and `saveControllerConfig`
-  // refuses a change, org admins included. Each flag (1/true/yes) unlocks ONE
-  // section for in-app editing; set them in the deployment environment and
-  // restart. Model and effort stay editable either way, and the built-in
-  // `viberr_ops` diagnostics mount is not a section: it is never removable.
+  // refuses a change, org admins included. A variable set to `enabled` unlocks
+  // ONE section for in-app editing; `disabled` (or any other value, or unset)
+  // keeps it locked. Set them in the deployment environment and restart. Model
+  // and effort stay editable either way, and the built-in `viberr_ops`
+  // diagnostics mount is not a section: it is never removable.
   VIBERR_UNLOCK_CONTROLLER_SKILLS: z.string().optional(),
   VIBERR_UNLOCK_CONTROLLER_KB: z.string().optional(),
   VIBERR_UNLOCK_CONTROLLER_MCPS: z.string().optional(),

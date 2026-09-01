@@ -44,14 +44,15 @@ services:
       # The controller's skill / knowledge-base / MCP grants and its
       # instructions are LOCKED by default: the Controller settings tab shows
       # them read-only and a save that changes them is refused, org admins
-      # included. Flip a section to "1" (here or in .env) and recreate the
-      # container to allow editing it in-app. "0" = locked (the default shown).
+      # included. Set a section to "enabled" (here or in .env) and recreate
+      # the container to allow editing it in-app. "disabled" = locked (the
+      # default shown); any value other than "enabled" keeps it locked.
       # Model and effort stay editable regardless, and the built-in viberr_ops
       # diagnostics server stays mounted and non-removable under every value.
-      VIBERR_UNLOCK_CONTROLLER_SKILLS: "${VIBERR_UNLOCK_CONTROLLER_SKILLS:-0}"
-      VIBERR_UNLOCK_CONTROLLER_KB: "${VIBERR_UNLOCK_CONTROLLER_KB:-0}"
-      VIBERR_UNLOCK_CONTROLLER_MCPS: "${VIBERR_UNLOCK_CONTROLLER_MCPS:-0}"
-      VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "${VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS:-0}"
+      VIBERR_UNLOCK_CONTROLLER_SKILLS: "${VIBERR_UNLOCK_CONTROLLER_SKILLS:-disabled}"
+      VIBERR_UNLOCK_CONTROLLER_KB: "${VIBERR_UNLOCK_CONTROLLER_KB:-disabled}"
+      VIBERR_UNLOCK_CONTROLLER_MCPS: "${VIBERR_UNLOCK_CONTROLLER_MCPS:-disabled}"
+      VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "${VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS:-disabled}"
     ports:
       # Compose interpolates ${PORT} from the same .env it injects into the
       # container, so the mapping always matches what the server listens on.

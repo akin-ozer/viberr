@@ -458,7 +458,7 @@ describe("controller config locks (ruling 108)", () => {
       const reply = await postAction(ids.arda, fields);
       expect(reply.ok).toBe(false);
       expect(String(reply.error)).toContain("locked on this deployment");
-      expect(String(reply.error)).toContain(`${envVar}=1`);
+      expect(String(reply.error)).toContain(`${envVar}=enabled`);
     }
     // Nothing moved.
     const after = await stored();
@@ -540,7 +540,7 @@ describe("controller config locks (ruling 108)", () => {
         actor,
         { dataRoot: app.dataRoot, locks: skillsOnly },
       ),
-    ).toThrowError(/VIBERR_UNLOCK_CONTROLLER_KB=1/);
+    ).toThrowError(/VIBERR_UNLOCK_CONTROLLER_KB=enabled/);
     // Restore.
     saveControllerConfig(getDb(), base, actor, {
       dataRoot: app.dataRoot,
@@ -622,14 +622,16 @@ describe("controller config locks (ruling 108)", () => {
       mcps: true,
       instructions: true,
     });
+    // Only `enabled` unlocks (case-insensitive, trimmed); `disabled`, a stale
+    // `1`, and anything unexpected keep the section locked — a typo fails safe.
     expect(
       controllerSectionLocks({
-        VIBERR_UNLOCK_CONTROLLER_KB: "1",
-        VIBERR_UNLOCK_CONTROLLER_SKILLS: "true",
-        VIBERR_UNLOCK_CONTROLLER_MCPS: " YES ",
-        VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "0",
+        VIBERR_UNLOCK_CONTROLLER_KB: "enabled",
+        VIBERR_UNLOCK_CONTROLLER_SKILLS: " ENABLED ",
+        VIBERR_UNLOCK_CONTROLLER_MCPS: "disabled",
+        VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "1",
       }),
-    ).toEqual({ skills: false, kb: false, mcps: false, instructions: true });
+    ).toEqual({ skills: false, kb: false, mcps: true, instructions: true });
   });
 });
 

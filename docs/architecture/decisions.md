@@ -1609,8 +1609,10 @@ the quieter packet or the bare owner cell as drift.)*
     for EVERYONE, org admins included: they are a deployment decision. Four
     environment variables unlock one section each at deploy time
     (`VIBERR_UNLOCK_CONTROLLER_SKILLS` / `_KB` / `_MCPS` / `_INSTRUCTIONS`,
-    `=1`, restart to apply; documented in `.env.example` and the env schema);
-    absent means locked, and there is no in-app override anywhere — that is
+    set to `enabled` to unlock; `disabled`, any other value, or unset keeps it
+    locked; restart to apply; documented in `.env.example`, `compose.yml` and
+    the env schema); the default is locked, and there is no in-app override
+    anywhere — that is
     the point. Enforcement is server-side in `saveControllerConfig`
     (`controllerSectionLocks` reads the env; a change to a locked section is
     refused with the section and its unlock variable named, while an
