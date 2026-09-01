@@ -8,16 +8,11 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { GOAL_ON_FAILURE_VALUES } from "~/schemas/goal-file.schema";
 import { PROJECT_ROLES } from "~/schemas/project-file.schema";
-import {
-  recordAudit,
-  type AuditActor,
-} from "~/server/audit/audit-recorder.server";
+import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import {
   queryAuditEventsForExport,
   type AuditExportFilters,
 } from "~/server/audit/audit-export.server";
-import { isOrgAdmin } from "~/server/auth/project-authority.server";
-import { assertProjectAction } from "~/server/auth/project-authority.server";
 import {
   createLocalAccount,
   listOrgUsers,
@@ -101,7 +96,11 @@ import type { StartAgentRunInput } from "~/server/tasks/specialist-run.server";
 import { canRunAgents } from "~/server/auth/project-authority.server";
 import { listUsers } from "~/server/auth/user-store.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
-import { logger } from "~/server/logging/logger.server";
+import {
+  controllerToolGuards,
+  NotVisibleError,
+  notVisible,
+} from "./controller-tool-guards.server";
 
 /**
  * The controller's in-process toolkit (ruling 99) — a Claude Agent SDK MCP
@@ -149,60 +148,19 @@ export const CONTROLLER_TOOLKIT_INSTRUCTIONS =
   "are your ground truth; call them before asserting state. Nothing here deletes, merges, " +
   "accepts completions, resolves decision packets, or moves a task into its final stage.";
 
-function textResult(text: string) {
-  return { content: [{ type: "text" as const, text }] };
-}
-
 const prose = normalizeEscapedNewlines;
-
-/** Uniform not-visible copy — missing and forbidden projects read identically. */
-function notVisible(slug: string): string {
-  return `[denied] No project "${slug}" is visible to you.`;
-}
-
-/** Thrown wherever a project read must answer the uniform not-visible
- *  sentence; `run` relays its message verbatim. */
-class ProjectNotVisibleError extends Error {}
 
 /** Build the toolkit for one controller turn. */
 export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerToolkit {
   const { db, ctx, user } = deps;
   const dataRoot = ctx.dataRoot;
 
-  /** The authority + audit actor every mutation runs under: the human's id
-   *  (guards bind to it) with the instrument disclosed in the label. */
-  const actor = { userId: user.id, label: `${user.email} · via controller` };
+  // The refusal voice, the live-authority gates and the audit actor are shared
+  // with the controller's other in-process server (`viberr_ops`, ruling 107):
+  // one definition, so a reworded refusal cannot drift between them.
+  const { actor, orgAdmin, requireOrgAdmin, requireVisible, run, runWith, json } =
+    controllerToolGuards(db, user, dataRoot);
   const auditActor: AuditActor = actor;
-
-  /** LIVE org role — never snapshotted at conversation start. */
-  const orgAdmin = () => isOrgAdmin(db, user.id);
-
-  /** Org-scope gate: refuses with an audited denial row (P13-D-8 parity —
-   *  project denials are audited; instance denials must not read cleaner). */
-  function requireOrgAdmin(what: string): void {
-    if (orgAdmin()) return;
-    recordAudit(db, {
-      action: "controller.authority.denied",
-      actor: auditActor,
-      details: { scope: "instance", what },
-    });
-    throw AppError.forbidden(
-      `Only org admins can ${what}. Your org role is member.`,
-    );
-  }
-
-  /** Membership gate for project READS: missing and forbidden both throw the
-   *  same not-visible shape (R15-4). Org admins pass via the audited override. */
-  function requireVisible(slug: string, what: string): void {
-    try {
-      assertProjectAction(db, "any-member", slug, actor, what, {
-        dataRoot,
-        allowArchived: true,
-      });
-    } catch {
-      throw new ProjectNotVisibleError(notVisible(slug));
-    }
-  }
 
   const boundSlug = deps.projectSlug ?? null;
   /** Resolve the tool's project argument against the conversation binding. */
@@ -215,39 +173,6 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     }
     return slug;
   }
-
-  /** Wrap a handler: AppError → [denied]/[error] text the model relays. */
-  function run(fn: () => Promise<string> | string) {
-    return async () => {
-      try {
-        return textResult(await fn());
-      } catch (error) {
-        if (error instanceof AppError) {
-          const denied = error.status === 403 || error.status === 401;
-          return textResult(`[${denied ? "denied" : "error"}] ${error.userMessage}`);
-        }
-        if (error instanceof ProjectNotVisibleError) {
-          return textResult(error.message);
-        }
-        logger.error("controller tool failed", {
-          err: error instanceof Error ? error : new Error(String(error)),
-        });
-        return textResult(
-          "[error] That action failed unexpectedly. The details are in the server log; nothing was partially hidden from the audit trail.",
-        );
-      }
-    };
-  }
-
-  /** Same wrapper for handlers that take validated args. */
-  function runWith<A>(fn: (args: A) => Promise<string> | string) {
-    return async (args: A) => {
-      const wrapped = run(() => fn(args));
-      return wrapped();
-    };
-  }
-
-  const json = <T>(value: T) => JSON.stringify(value, null, 1);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: SdkMcpToolDefinition<any>[] = [];
@@ -845,7 +770,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         requireVisible(slug, "read this project");
         const project = getProject(db, slug);
         const file = readProjectFile({ projectSlug: slug, dataRoot });
-        if (!project || !file) throw new ProjectNotVisibleError(notVisible(slug));
+        if (!project || !file) throw new NotVisibleError(notVisible(slug));
         const tasks = listProjectTasks(db, slug, { dataRoot });
         const users = new Map(listUsers(db).map((u) => [u.id, u]));
         const counts = new Map<string, number>();
@@ -1012,7 +937,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "move tasks");
         const project = getProject(db, slug);
-        if (!project) throw new ProjectNotVisibleError(notVisible(slug));
+        if (!project) throw new NotVisibleError(notVisible(slug));
         const terminal = project.stages[project.stages.length - 1];
         if (terminal && args.toStageId === terminal.id) {
           return (
@@ -1139,7 +1064,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "run agents");
           const file = readProjectFile({ projectSlug: slug, dataRoot });
-          if (!file) throw new ProjectNotVisibleError(notVisible(slug));
+          if (!file) throw new NotVisibleError(notVisible(slug));
           const authority = {
             slug,
             memberRoles: new Map(
@@ -1209,7 +1134,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "read this project's GitHub state");
         const data = await getGithubViewData(db, slug);
-        if (!data) throw new ProjectNotVisibleError(notVisible(slug));
+        if (!data) throw new NotVisibleError(notVisible(slug));
         return json({
           repo: data.project.repo,
           defaultBranch: data.project.defaultBranch,
@@ -1250,7 +1175,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "read this project");
           const project = getProject(db, slug);
-          if (!project) throw new ProjectNotVisibleError(notVisible(slug));
+          if (!project) throw new NotVisibleError(notVisible(slug));
           const result = await updateProjectIdentity(
             db,
             {

@@ -1,0 +1,369 @@
+import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
+import {
+  createSdkMcpServer,
+  tool,
+  type McpSdkServerConfigWithInstance,
+  type SdkMcpToolDefinition,
+} from "@anthropic-ai/claude-agent-sdk";
+import { AppError } from "~/server/errors/app-error.server";
+import { resolveStoreTarget } from "~/server/org/resources.server";
+import { readStoreDoc } from "~/server/org/store-files.server";
+import { healthSnapshot } from "~/server/ops/health-snapshot.server";
+import { getRunLog, runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
+import type { RunLog, RunLogQuery } from "~/server/runtimes/run-service.server";
+import { getRun, runLineStats } from "~/server/runtimes/run-store.server";
+import type { AgentRunRow } from "~/server/runtimes/run-store.server";
+import {
+  backendCredentialHealth,
+  type BackendCredentialHealth,
+  type RealBackend,
+} from "~/server/runtimes/runtime-registry.server";
+import { canReadControllerRunLog } from "./controller-conversations.server";
+import {
+  controllerToolGuards,
+  NotVisibleError,
+  type ControllerToolUser,
+} from "./controller-tool-guards.server";
+
+/**
+ * `viberr_ops` — the controller's built-in diagnostics server (ruling 107).
+ *
+ * The `viberr_controller` toolkit reads and changes the PRODUCT: projects,
+ * tasks, agents, goals, org resources. It has no reach at all into the ops
+ * layer that already sits behind routes — per-run logs, subsystem health,
+ * backend credential state, the run concurrency queue, store documents — so
+ * asked "why did that run fail" or "is the instance healthy" the controller
+ * could only guess or send the person to a page.
+ *
+ * NOT REMOVABLE BY CONSTRUCTION. This server is mounted by
+ * `controller-run.server` on EVERY controller run: no config is read, no grant
+ * row exists, and nothing in the UI can drop it. That is deliberate rather than
+ * a missing feature — a stored grant for machinery the run mounts anyway would
+ * be a toggle with no effect (P14-KM-14). The mount key is reserved at all
+ * three layers (`~/shared/mcp-reserved`): no org row can be created under it,
+ * the picker never offers one, and the resolver refuses to resolve one that
+ * reached the registry some other way.
+ *
+ * READ-ONLY: nothing here writes, deletes, or starts anything. Diagnostics that
+ * could change the instance would be a second authority surface beside the
+ * toolkit, and the toolkit is where changes are audited.
+ *
+ * AUTHORITY is the asking person's own, resolved LIVE per call through the
+ * shared controller guards: instance health is aggregate (what
+ * `/resources/health` already answers unauthenticated), a run log follows the
+ * exact gate `/resources/run-log` applies, and store documents are org-admin
+ * only, like the store browser they come from.
+ */
+
+export interface ControllerOpsDeps {
+  db: DatabaseSync;
+  ctx: { dataRoot?: string };
+  /** The asking user — the only authority anything here runs under. */
+  user: ControllerToolUser;
+}
+
+export interface ControllerOpsMcp {
+  mcpServers: Record<string, McpSdkServerConfigWithInstance>;
+  allowedTools: string[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools: SdkMcpToolDefinition<any>[];
+}
+
+/** The mount key, exported so the run assembly and the reserved-name guard
+ *  can never disagree about what this server is called. */
+export const CONTROLLER_OPS_MCP_NAME = "viberr_ops";
+
+export const CONTROLLER_OPS_INSTRUCTIONS =
+  "Viberr built-in diagnostics. READ-ONLY: nothing here changes the instance. Every call is " +
+  "checked against the ASKING PERSON's own permissions, so a [denied] answer is final — relay " +
+  "it with its reason. Use these to answer questions about how the instance and its runs are " +
+  "actually doing, and quote what you read rather than inferring it.";
+
+/**
+ * Page size for `read_run_log`, bounded on EVERY path.
+ *
+ * The route this tool descends from can afford an unbounded default (`since=-1`
+ * = the whole log) because its caller is the console, which holds a live cursor
+ * and never asks for everything. A model holds no cursor: `read_run_log({runId})`
+ * is the natural shape for "why did that run fail", and a run's `display` bodies
+ * run to kilobytes each (run-projection measured ~2.2 KB/line), so an unbounded
+ * default is megabytes of tool result in a context window. Bounded by DEFAULT,
+ * like `inspect_audit_log` (`?? 50`) and `read_store_doc` (256 KB + `truncated`)
+ * — a max the caller has to opt into protects the call nobody makes.
+ *
+ * 200 is `RUN_LOG_PAGE_LINES`, the same page the console takes when it names no
+ * size, for the same reason: it is a readable page rather than a history.
+ */
+const DEFAULT_LOG_LINES = 200;
+const MAX_LOG_LINES = 500;
+
+/** Uniform not-visible copy for a run: a run that does not exist and one the
+ *  asker may not read answer identically, so a probe cannot walk run ids
+ *  (the R15-4 posture the toolkit applies to projects). */
+function notVisibleRun(runId: string): string {
+  return `[denied] No run "${runId}" is visible to you.`;
+}
+
+/** What `instance_health` says about one backend, cut to the asker's authority.
+ *  Everyone learns WHETHER a backend can run; only an org admin learns the
+ *  sentence that says why, because it names the deployment's config paths.
+ *  `verification` rides with it: alone it is unactionable, and it is the same
+ *  configuration answer one word shorter. */
+type BackendCredentialReport =
+  | { backend: RealBackend; available: boolean }
+  | BackendCredentialHealth;
+
+function backendCredential(
+  backend: RealBackend,
+  orgAdmin: boolean,
+): BackendCredentialReport {
+  const health = backendCredentialHealth(backend);
+  if (orgAdmin) return health;
+  return { backend: health.backend, available: health.available };
+}
+
+/** Build the diagnostics server for one controller turn. */
+export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp {
+  const { db, ctx, user } = deps;
+  const dataRoot = ctx.dataRoot;
+  const { orgAdmin, requireOrgAdmin, requireVisible, run, runWith, json } =
+    controllerToolGuards(db, user, dataRoot);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tools: SdkMcpToolDefinition<any>[] = [];
+  const allowed: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const add = (t: SdkMcpToolDefinition<any>, name: string) => {
+    tools.push(t);
+    allowed.push(`mcp__${CONTROLLER_OPS_MCP_NAME}__${name}`);
+  };
+
+  /**
+   * The run-log gate, exactly as `/resources/run-log` applies it: a controller
+   * turn is scoped to its conversation's owner (org admins supervise), and
+   * every other run to membership of its project. Both refusals — and a run id
+   * that matches nothing — answer the same sentence, so the reply never
+   * discloses that a run exists or which project it belongs to.
+   */
+  function requireRunVisible(row: AgentRunRow): void {
+    if (row.kind === "controller") {
+      if (canReadControllerRunLog(db, row, { id: user.id })) return;
+      throw new NotVisibleError(notVisibleRun(row.id));
+    }
+    try {
+      requireVisible(row.project_slug, "read this run's log");
+    } catch {
+      throw new NotVisibleError(notVisibleRun(row.id));
+    }
+  }
+
+  add(
+    tool(
+      "instance_health",
+      "How this Viberr instance is doing right now: overall status and which subsystems are degraded, the store watchers and the single-writer lock, disk space, the maintenance pass, build identity, whether each model backend has a usable credential, and the run concurrency queue. The reading is open to anyone; the sentence explaining a backend's credential state names deployment configuration, so only org admins get that.",
+      {},
+      run(() => {
+        // The READING is ungated: it is what `/resources/health` already serves
+        // UNAUTHENTICATED (aggregate counts, the lock holder's pid and host,
+        // free bytes, build identity), plus availability booleans and three
+        // integers about run load that carry no name, project or run in them.
+        //
+        // The credential DETAIL is not: `backendCredentialHealth` explains an
+        // unusable credential by naming the config directory it looked in
+        // (`/Users/<owner>/.claude` under the CLI-auth opt-in) and what to set
+        // instead. That is deployment configuration, and the org-settings bar
+        // is where this product keeps configuration — so `detail` follows it,
+        // and everyone else gets the availability answer without the host path.
+        const admin = orgAdmin();
+        const snapshot = healthSnapshot(db);
+        return json({
+          ...snapshot,
+          // WHY a backend reads available or not — the health probe's
+          // `backends` is env presence only, and "unavailable" with no reason
+          // is the answer that sends someone hunting through the deployment.
+          backendCredentials: [
+            backendCredential("claude", admin),
+            backendCredential("codex", admin),
+          ],
+          // What the concurrency cap is doing this second: a queued run is the
+          // usual answer to "why has nothing started".
+          runs: runConcurrencySnapshot(db),
+        });
+      }),
+    ),
+    "instance_health",
+  );
+
+  add(
+    tool(
+      "read_run_log",
+      `One PAGE of an agent run's log lines, newest page by default (which is where a failure is). Readable by a member of the run's project; a controller conversation's own turns are readable by the person whose conversation it is (and by org admins). Two ways to move: \`before\` pages BACKWARD (the lines older than that sequence number) and \`since\` pages FORWARD (the lines after it). Name only one of them. Every call returns at most \`limit\` lines (${DEFAULT_LOG_LINES} by default, ${MAX_LOG_LINES} at most), so read \`page\` to see where you are: it reports whether older or newer lines exist and hands you the exact argument for the next call. \`run.logLines\` is the run's total.`,
+      {
+        runId: z.string().describe("The run id, e.g. from a task's console."),
+        since: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            "Read FORWARD: the page of lines after this sequence number. Omit to read the newest page.",
+          ),
+        before: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            "Read BACKWARD: the page of lines older than this sequence number. Cannot be combined with `since`.",
+          ),
+        limit: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            `Lines per page, clamped to 1..${MAX_LOG_LINES} (default ${DEFAULT_LOG_LINES}).`,
+          ),
+      },
+      runWith(
+        (args: {
+          runId: string;
+          since?: number;
+          before?: number;
+          limit?: number;
+        }) => {
+          const row = getRun(db, args.runId);
+          // A missing run answers the not-visible sentence rather than "no such
+          // run": the gate below must not be inferable from which reply came
+          // back.
+          if (!row) throw new NotVisibleError(notVisibleRun(args.runId));
+          requireRunVisible(row);
+          if (args.since !== undefined && args.before !== undefined) {
+            // The two cursors move opposite ways, and the underlying query
+            // silently lets one win. Refusing is the only answer that cannot
+            // hand back a window the caller did not ask for.
+            throw AppError.validation(
+              "Name either since (a forward page) or before (a backward page), not both.",
+            );
+          }
+          const limit = Math.min(
+            Math.max(args.limit ?? DEFAULT_LOG_LINES, 1),
+            MAX_LOG_LINES,
+          );
+
+          let page: RunLog["lines"];
+          if (args.since === undefined) {
+            // Backward: the newest page, or the page older than `before`. An
+            // absent cursor must leave its key OFF rather than carry undefined,
+            // which is how `getRunLog` selects its mode.
+            const query: RunLogQuery = { limit };
+            if (args.before !== undefined) query.before = args.before;
+            const log = getRunLog(db, args.runId, query);
+            if (!log) throw new NotVisibleError(notVisibleRun(args.runId));
+            page = log.lines;
+          } else {
+            // Forward. `getRunLog` ignores `limit` in this mode BY DESIGN (the
+            // console's live tail is bounded by its own cursor), so the bound is
+            // applied here, on the ascending lines. The SELECT behind it is
+            // unbounded (`listRunLines` has no LIMIT, as run-store says) but
+            // local and fast; what this tool must keep bounded is the REPLY it
+            // puts in a model's context. If the SELECT ever bites, the fix is a
+            // LIMIT pushed down into `listRunLines`, never a bigger reply.
+            const log = getRunLog(db, args.runId, { since: args.since });
+            if (!log) throw new NotVisibleError(notVisibleRun(args.runId));
+            page = log.lines.slice(0, limit);
+          }
+
+          // Page position, computed against the RUN's real bounds. `getRunLog`'s
+          // own headSeq/oldestSeq/hasMore are page-local cursors for a stateful
+          // console (headSeq is this page's last line, hasMore means "older
+          // lines exist"), and a model with no second source reads them as facts
+          // about the run — so they are not relayed at all.
+          const stats = runLineStats(db, args.runId);
+          const firstSeq = page.length ? page[0]!.seq : null;
+          const lastSeq = page.length ? page[page.length - 1]!.seq : null;
+          const olderExist = firstSeq !== null && firstSeq > stats.minSeq;
+          const newerExist = lastSeq !== null && lastSeq < stats.maxSeq;
+
+          return json({
+            run: {
+              id: row.id,
+              kind: row.kind,
+              state: row.state,
+              backend: row.backend,
+              model: row.model,
+              agent: row.agent_name,
+              project: row.project_slug,
+              task: row.task_key,
+              startedAt: row.started_at,
+              finishedAt: row.finished_at,
+              turns: row.turns,
+              // The run's TRUE total, so an empty page reads as "your cursor is
+              // past the end", never as "this run logged nothing".
+              logLines: stats.count,
+            },
+            page: {
+              firstSeq,
+              lastSeq,
+              olderExist,
+              newerExist,
+              // The exact argument for the follow-up call, so continuing is not
+              // arithmetic the model has to get right.
+              next: {
+                older: olderExist ? { before: firstSeq } : null,
+                newer: newerExist ? { since: lastSeq } : null,
+              },
+            },
+            lines: page.map((line) => ({
+              seq: line.seq,
+              at: line.occurredAt,
+              display: line.display,
+            })),
+          });
+        },
+      ),
+    ),
+    "read_run_log",
+  );
+
+  add(
+    tool(
+      "read_store_doc",
+      "Read one text document out of a knowledge base or skill folder in the org store. Org admins only, like the store browser itself. Give the resource kind and id, then the file path as its segments, e.g. [\"notes\", \"api.md\"].",
+      {
+        kind: z.enum(["kb", "skill"]).describe("Which store the document lives in."),
+        id: z.string().describe("The knowledge base or skill id."),
+        path: z
+          .array(z.string())
+          .describe("Path segments inside the folder, file name last."),
+      },
+      runWith((args: { kind: "kb" | "skill"; id: string; path: string[] }) => {
+        requireOrgAdmin("read store documents");
+        const target = resolveStoreTarget(db, args.kind, args.id, { dataRoot });
+        if (!target) throw AppError.notFound("That resource no longer exists.");
+        const doc = readStoreDoc(target, args.path);
+        if (!doc) throw AppError.notFound("That file no longer exists.");
+        return json({
+          resource: { kind: target.kind, id: target.id, name: target.name },
+          path: args.path,
+          // Reported, never hidden: a clipped document that reads as complete
+          // is how a model states a half-read file as fact.
+          truncated: doc.truncated,
+          text: doc.text,
+        });
+      }),
+    ),
+    "read_store_doc",
+  );
+
+  const server = createSdkMcpServer({
+    name: CONTROLLER_OPS_MCP_NAME,
+    version: "1.0.0",
+    instructions: CONTROLLER_OPS_INSTRUCTIONS,
+    tools,
+  });
+
+  return {
+    mcpServers: { [CONTROLLER_OPS_MCP_NAME]: server },
+    allowedTools: allowed,
+    tools,
+  };
+}

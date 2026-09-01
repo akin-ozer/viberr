@@ -73,7 +73,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   // project membership.
   if (run.kind === "controller") {
     const { canReadControllerRunLog } = await import(
-      "~/server/controller/controller-run.server"
+      "~/server/controller/controller-conversations.server"
     );
     if (!canReadControllerRunLog(db, run, { id: user.id })) {
       return Response.json(

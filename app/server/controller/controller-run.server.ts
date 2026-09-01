@@ -5,7 +5,6 @@ import { KB_INJECTION_BUDGET, KB_PRECEDENCE_NOTE, readKbBodies } from "~/server/
 import { readSkillBodies } from "~/server/files/skill-body.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   fullReplyTextForRun,
@@ -43,6 +42,8 @@ import {
   readControllerDefinition,
   resolveControllerConfig,
 } from "./controller-profile.server";
+import { buildControllerOpsMcp } from "./controller-ops-mcp.server";
+import type { ControllerToolUser } from "./controller-tool-guards.server";
 import { buildControllerToolkit } from "./controller-toolkit.server";
 
 /**
@@ -113,6 +114,64 @@ export type ControllerTurnResult =
   | { state: "started"; runId: string; messageId: string }
   | { state: "queued"; messageId: string }
   | { state: "refused"; reason: string };
+
+export interface ControllerMountInput {
+  /** The asking user — the authority every in-process tool call resolves. */
+  user: ControllerToolUser;
+  /** The conversation's bound project, when it has one (tool default). */
+  projectSlug: string | null;
+  /** The ORG MCP grants that resolved and pre-flighted for this turn. */
+  orgServers: RunMcpServers;
+  dataRoot?: string;
+}
+
+export interface ControllerMounts {
+  mcpServers: RunMcpServers;
+  allowedTools: string[];
+}
+
+/**
+ * Everything one controller turn mounts, assembled in one place.
+ *
+ * The two IN-PROCESS servers are machinery, not grants: `viberr_controller`
+ * (ruling 99) is how the controller reads and changes the product, and
+ * `viberr_ops` (ruling 107) is how it reads this instance's ops layer. Both go
+ * on EVERY turn with no config consulted, which is the whole of "not removable
+ * by anyone" — there is no grant row to clear and no toggle to flip, so no
+ * surface can offer one that does nothing (P14-KM-14).
+ *
+ * Org grants land last and cannot shadow either, because the RESOLVER refuses
+ * to resolve a reserved name (`~/shared/mcp-reserved`, applied in
+ * `resolveSpecialistMcpServersDetailed`). The save-time refusal only ever
+ * governed new rows; a row written straight into SQLite or restored from a
+ * backup reaches this spread, so the layer that decides what a run mounts is
+ * the one that has to hold.
+ */
+export function buildControllerMounts(
+  db: DatabaseSync,
+  input: ControllerMountInput,
+): ControllerMounts {
+  const ctx = input.dataRoot ? { dataRoot: input.dataRoot } : {};
+  const toolkit = buildControllerToolkit({
+    db,
+    ctx,
+    user: input.user,
+    projectSlug: input.projectSlug,
+  });
+  const ops = buildControllerOpsMcp({ db, ctx, user: input.user });
+  return {
+    mcpServers: {
+      ...toolkit.mcpServers,
+      ...ops.mcpServers,
+      ...input.orgServers,
+    },
+    allowedTools: [
+      ...toolkit.allowedTools,
+      ...ops.allowedTools,
+      ...Object.keys(input.orgServers).map((name) => `mcp__${name}`),
+    ],
+  };
+}
 
 /**
  * Drive one conversation turn. The user message is ALWAYS recorded first;
@@ -220,20 +279,12 @@ async function startTurnRun(
     { backend: "claude" },
   );
 
-  const toolkit = buildControllerToolkit({
-    db,
-    ctx: dataRoot ? { dataRoot } : {},
+  const { mcpServers, allowedTools } = buildControllerMounts(db, {
     user: { id: input.user.id, email: input.user.email, name: input.user.name },
     projectSlug: conversation.projectSlug,
+    orgServers,
+    dataRoot,
   });
-  const mcpServers: RunMcpServers = {
-    ...toolkit.mcpServers,
-    ...orgServers,
-  };
-  const allowedTools = [
-    ...toolkit.allowedTools,
-    ...Object.keys(orgServers).map((name) => `mcp__${name}`),
-  ];
 
   const systemPrompt = buildControllerSystemPrompt(db, {
     conversation,
@@ -432,21 +483,6 @@ export function conversationTurnState(
   return { working: true, runId: entry.runId };
 }
 
-/** May this user read this run's log? Controller runs authorize by
- *  conversation ownership (or live org-admin supervision), never by project
- *  membership — a transcript is scoped to what ITS user was entitled to hear. */
-export function canReadControllerRunLog(
-  db: DatabaseSync,
-  run: { kind: string; task_key: string },
-  user: { id: string },
-): boolean {
-  if (run.kind !== "controller") return false;
-  const conversation = getConversation(db, run.task_key);
-  if (!conversation) return false;
-  if (conversation.userId === user.id) return true;
-  return isOrgAdmin(db, user.id);
-}
-
 /**
  * Boot catch-up: a restart orphans the in-process completion callback, so a
  * conversation whose newest message is the user's and whose turn run died
@@ -623,12 +659,22 @@ export function buildControllerSystemPrompt(
       "You are the instance controller, running on the Claude backend" +
       (input.config.model ? `, model \`${input.config.model}\`` : "") +
       ".\n" +
+      // "org" is load-bearing in both arms: `mountedMcps` is ORG grants only,
+      // and the flat negation used to sit one line above the built-in
+      // diagnostics sentence, telling the model in consecutive breaths that it
+      // has no MCP servers and that it has one (ruling 107's review).
       (input.mountedMcps.length
-        ? `Attached MCP servers: ${input.mountedMcps.join(", ")}. Their tools widen no authority: never use one to bypass a permission, merge, accept, or delete anything.\n`
-        : "No MCP servers are attached to you.\n") +
+        ? `Attached org MCP servers: ${input.mountedMcps.join(", ")}. Their tools widen no authority: never use one to bypass a permission, merge, accept, or delete anything.\n`
+        : "No org MCP servers are attached to you.\n") +
       (input.unresolvedMcps.length
         ? `These granted MCP servers did NOT mount this turn and their tools will not appear: ${input.unresolvedMcps.join(", ")}. Say so if asked.\n`
         : "") +
+      // Ruling 107: this line is true on every turn by construction — the mount
+      // reads no config, so the model is never told about tools it does not have.
+      "Built-in diagnostics (viberr_ops) are always attached: instance health, run logs, store " +
+      "documents. They are read-only, and every call is checked against the asking person's own " +
+      "permission level, so use them to answer how this instance and its runs are really doing " +
+      "instead of guessing.\n" +
       "You have no filesystem or shell: the viberr_controller tools are how you read and change anything.",
   );
 

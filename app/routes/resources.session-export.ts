@@ -46,7 +46,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     const { requireUser } = await import("~/server/auth/require-user.server");
     const user = await requireUser(request);
     const { canReadControllerRunLog } = await import(
-      "~/server/controller/controller-run.server"
+      "~/server/controller/controller-conversations.server"
     );
     if (!canReadControllerRunLog(db, run, { id: user.id })) {
       return new Response("Run not found.", { status: 404 });

@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { logger } from "~/server/logging/logger.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { RESERVED_MCP_NAMES } from "~/shared/mcp-reserved";
 import {
   discoverStdioMcpTools,
   getMcpCredentialState,
@@ -76,19 +77,13 @@ export type SpecialistMcpServerConfig =
   | StdioMcpServerConfig
   | HttpMcpServerConfig;
 
-/** Viberr's own servers. They are built by the toolkit/browser builders, are
- *  refused as registry names at save (P13-KM-12), and must never be resolved
- *  from the registry even if a hand-edited row carries one — on Claude a row
- *  would shadow the real toolkit, on Codex it would not, so the two backends
- *  would disagree about what the agent can do (P14-KM-15). `viberr_browser`
- *  joins for R19-19: the browser is capability-mounted, never an org row. */
-const RESERVED_MCP_NAMES = new Set([
-  "viberr",
-  "viberr_agent",
-  "viberr-agent",
-  "viberr_browser",
-  "viberr-browser",
-]);
+// Viberr's own servers are built by the toolkit/browser/controller builders and
+// must never be resolved from the registry even if a row carries one — on
+// Claude a row would shadow the real server, on Codex it would not, so the two
+// backends would disagree about what the agent can do (P14-KM-15). The list is
+// `~/shared/mcp-reserved`, shared with the writer and the picker: the private
+// copy that used to live here fell two rulings behind and stopped covering the
+// controller's own servers (ruling 107).
 
 /** A declared MCP grant that reached no run, or that is known to be down. */
 export interface UnresolvedMcpGrant {

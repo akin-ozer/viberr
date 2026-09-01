@@ -114,6 +114,26 @@ export function canAccessConversation(
   return actor.orgRole === "admin" && isOrgAdmin(db, actor.userId);
 }
 
+/** May this user read this run's log? Controller runs authorize by conversation
+ *  ownership (or live org-admin supervision), never by project membership — a
+ *  transcript is scoped to what ITS user was entitled to hear.
+ *
+ *  It lives beside `canAccessConversation` rather than in the run engine
+ *  (ruling 107): the run-log route, the session export and the controller's own
+ *  `viberr_ops` diagnostics all ask it, and importing the engine to answer a
+ *  conversation-access question made a cycle out of a lookup. */
+export function canReadControllerRunLog(
+  db: DatabaseSync,
+  run: { kind: string; task_key: string },
+  user: { id: string },
+): boolean {
+  if (run.kind !== "controller") return false;
+  const conversation = getConversation(db, run.task_key);
+  if (!conversation) return false;
+  if (conversation.userId === user.id) return true;
+  return isOrgAdmin(db, user.id);
+}
+
 export function getConversation(
   db: DatabaseSync,
   id: string,

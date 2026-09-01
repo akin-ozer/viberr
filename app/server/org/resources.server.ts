@@ -39,6 +39,7 @@ import { isInjectableKbDoc } from "~/server/files/kb-injection.server";
 import { resolveContainedSkillFile } from "~/server/files/skill-body.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { slugify } from "~/shared/ids/slugify";
+import { isReservedMcpName } from "~/shared/mcp-reserved";
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
 import { updateResourceReferences } from "./resource-references.server";
 
@@ -1336,30 +1337,6 @@ export async function probeMcpTarget(
   }
 }
 
-
-/**
- * Every name Viberr's own in-process tooling owns: `viberr` is the operator's
- * governance server, `viberr_agent` the specialist toolkit (and `viberr-agent`
- * the hyphen spelling a Codex run would see), `viberr_browser` the R19-19
- * browser server (`viberr-browser` likewise). `saveMcpServer` refuses them all,
- * but a row created before that guard — or written straight into the DB — is
- * still on disk, and the catalog only skipped the first. It would then be
- * offered in the picker while every resolver skipped it: a grant that resolves
- * to nothing, which is the silent-resource class this pass exists to close.
- * One predicate so the writer and the picker can never disagree again.
- */
-export function isReservedMcpName(name: string): boolean {
-  return (
-    name === "viberr" ||
-    name === "viberr_agent" ||
-    name === "viberr-agent" ||
-    name === "viberr_browser" ||
-    name === "viberr-browser" ||
-    // Ruling 99: the controller's in-process toolkit.
-    name === "viberr_controller" ||
-    name === "viberr-controller"
-  );
-}
 
 /**
  * Real tool discovery over Streamable HTTP (P13-LV-10).

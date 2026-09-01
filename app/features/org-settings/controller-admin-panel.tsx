@@ -47,21 +47,33 @@ export interface ControllerKbOption {
   uri: string;
 }
 
-/** One grant chip-group (Skills / MCP servers / Knowledge bases): live catalog
- *  entries as toggle chips, then any granted id the store no longer holds as a
- *  removable red `missing` chip — never an unremovable ghost (P14-KM-10). */
+/** A resource the controller mounts by construction, shown so an admin can see
+ *  what is attached. Ruling 107: it is NOT a control, because there is no
+ *  grant row behind it and nothing to toggle. */
+export interface PinnedChip {
+  display: string;
+  /** Why it is there and why it cannot be taken away. */
+  title: string;
+}
+
+/** One grant chip-group (Skills / MCP servers / Knowledge bases): a pinned
+ *  built-in first when the group has one, then live catalog entries as toggle
+ *  chips, then any granted id the store no longer holds as a removable red
+ *  `missing` chip — never an unremovable ghost (P14-KM-10). */
 function GrantChips({
   label,
   options,
   granted,
   onToggle,
   mono,
+  pinned,
 }: {
   label: string;
   options: { id: string; display: string; title?: string }[];
   granted: ReadonlySet<string>;
   onToggle: (id: string) => void;
   mono?: boolean;
+  pinned?: PinnedChip;
 }) {
   const missing = [...granted].filter(
     (id) => !options.some((o) => o.id === id),
@@ -70,6 +82,18 @@ function GrantChips({
     <div className="ctx-group">
       <span className="ctx-lbl">{label}</span>
       <div className="pick-chips">
+        {pinned && (
+          // A span, not a disabled button: a disabled control is a toggle that
+          // does nothing, and its `title` never opens (no pointer events reach
+          // it), so the one sentence explaining the chip would be unreadable.
+          <span
+            className={"pick-chip on" + (mono ? " mono" : "")}
+            title={pinned.title}
+          >
+            <Icon name="lock" />
+            {pinned.display}
+          </span>
+        )}
         {options.map((o) => (
           <button
             type="button"
@@ -86,7 +110,7 @@ function GrantChips({
           </button>
         ))}
         <MissingChips ids={missing} {...(mono ? { mono } : {})} onDrop={onToggle} />
-        {options.length === 0 && missing.length === 0 && (
+        {options.length === 0 && missing.length === 0 && !pinned && (
           <span className="ctx-none">none defined</span>
         )}
       </div>
@@ -224,6 +248,14 @@ export function ControllerAdminPanel({
             granted={grantMcps}
             onToggle={(id) => toggle(grantMcps, setGrantMcps, id)}
             mono
+            // Ruling 107: the controller's own diagnostics server. It is part
+            // of the controller, mounted with no config read, so it is
+            // disclosed here rather than offered as a grant nobody can change.
+            pinned={{
+              display: "viberr_ops",
+              title:
+                "Built-in diagnostics (instance health, run logs, store documents). Part of the controller: mounted on every run and not removable.",
+            }}
           />
           <GrantChips
             label="Knowledge bases"

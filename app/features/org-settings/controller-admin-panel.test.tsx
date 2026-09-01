@@ -65,7 +65,10 @@ let lastForm: Record<string, string> | null = null;
 /** A posted form field the panel sets (text only — the page-test rule). */
 const textField = z.string();
 
-function renderPanel(overrides: Partial<ControllerConfigView> = {}) {
+function renderPanel(
+  overrides: Partial<ControllerConfigView> = {},
+  mcps: string[] = ["qa-echo"],
+) {
   lastForm = null;
   const config = { ...CONFIG, ...overrides };
   const Stub = createRoutesStub([
@@ -77,7 +80,7 @@ function renderPanel(overrides: Partial<ControllerConfigView> = {}) {
             config={config}
             kbs={KBS}
             skills={["controller-guide", "developer-expertise"]}
-            mcps={["qa-echo"]}
+            mcps={mcps}
           />
         </ToastProvider>
       ),
@@ -231,6 +234,52 @@ describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
     fireEvent.click(getByText("Save controller"));
     await waitFor(() => expect(lastForm).not.toBeNull());
     expect(lastForm?.kb).toBe("controller-handbook");
+  });
+
+  /**
+   * Ruling 107: the built-in diagnostics server is disclosed in the MCP group
+   * as a pinned chip. It is NOT a control — there is no grant row behind it and
+   * nothing a save could change — so the panel must show it without offering a
+   * toggle, and without letting it leak into the payload as a grant.
+   */
+  it("pins viberr_ops in the MCP group as a chip nobody can toggle off", async () => {
+    const { container, getByText, getByTitle } = renderPanel();
+    const pinned = getByTitle(
+      "Built-in diagnostics (instance health, run logs, store documents). Part of the controller: mounted on every run and not removable.",
+    );
+    expect(pinned.textContent).toContain("viberr_ops");
+    // Not a button: a disabled toggle is a control that does nothing, and its
+    // title never opens, so the one sentence explaining it would be unreadable.
+    expect(pinned.tagName).toBe("SPAN");
+    expect(pinned.className).toContain("pick-chip");
+    expect(pinned.className).toContain("on");
+    // It renders FIRST in its group, ahead of the org servers.
+    const group = pinned.closest(".ctx-group");
+    expect(group?.querySelector(".pick-chips")?.firstElementChild).toBe(pinned);
+    expect(group?.textContent).toContain("MCP servers");
+    // The org MCP chip still toggles beside it …
+    const orgChip = getByText("qa-echo");
+    expect(orgChip.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(orgChip);
+    expect(orgChip.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(getByText("Save controller"));
+    await waitFor(() => expect(lastForm).not.toBeNull());
+    // … and the pinned chip is ABSENT from the save payload: writing it into
+    // the grants would be storing a row for something the run mounts anyway.
+    expect(lastForm?.mcps).toBe("qa-echo");
+    expect(container.querySelectorAll(".pick-chip.missing")).toHaveLength(0);
+  });
+
+  it("keeps the pinned chip when the org has no MCP servers at all", async () => {
+    // The "none defined" empty state would be a lie next to a mounted server.
+    const { container, getByText } = renderPanel({}, []);
+    expect(getByText("viberr_ops")).toBeTruthy();
+    const group = getByText("MCP servers").closest(".ctx-group");
+    expect(group?.querySelector(".ctx-none")).toBeNull();
+    fireEvent.click(getByText("Save controller"));
+    await waitFor(() => expect(lastForm).not.toBeNull());
+    expect(lastForm?.mcps).toBe("");
+    expect(container.querySelector(".pick-chip.missing")).toBeNull();
   });
 
   it("discloses a missing profile template with the shared warning treatment", () => {

@@ -6,6 +6,10 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
 import { listMcpServers, type McpSpawn } from "~/server/org/resources.server";
 import {
+  isReservedMcpName,
+  RESERVED_MCP_NAMES,
+} from "~/shared/mcp-reserved";
+import {
   resolveSpecialistMcpServers,
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
@@ -114,6 +118,47 @@ describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
   it("skips the operator's in-process `viberr` server and unknown names", () => {
     const store = setupTestStore(ctx);
     expect(resolveSpecialistMcpServers(store.db, ["viberr", "does-not-exist"])).toEqual({});
+  });
+
+  it("ruling 107: ONE reserved list guards the writer, the picker and this resolver", () => {
+    const store = setupTestStore(ctx);
+    // Every name Viberr's own tooling owns, written STRAIGHT into SQLite — the
+    // path the save-time refusal cannot reach: a hand-written row, a restored
+    // backup, or a row created back when the name was still legal. This layer
+    // kept a private copy of the list and fell two rulings behind it, so a
+    // `viberr_ops` row resolved normally and, because org servers mount LAST,
+    // replaced the instance's own diagnostics under its own mount key while the
+    // persona still promised read-only built-in tools.
+    const names = [...RESERVED_MCP_NAMES];
+    for (const name of names) {
+      addMcp(store.db, name, "HTTP", `https://evil.example/${name}`);
+    }
+    const resolved = resolveSpecialistMcpServersDetailed(store.db, names);
+    expect(resolved.servers).toEqual({});
+    // Reserved names are BUILT in-process, not broken grants — nothing to
+    // report to the run, and nothing for the persona to contradict itself over.
+    expect(resolved.unresolved).toEqual([]);
+    // The rows really are in the registry: the refusal above is a refusal, not
+    // an empty database.
+    expect(listMcpServers(store.db).map((m) => m.name).sort()).toEqual(
+      [...names].sort(),
+    );
+    // The writer refuses exactly the same set — one source, so the three layers
+    // cannot disagree again.
+    for (const name of names) expect(isReservedMcpName(name)).toBe(true);
+    expect([...names].sort()).toEqual(
+      [
+        "viberr",
+        "viberr-agent",
+        "viberr-browser",
+        "viberr-controller",
+        "viberr-ops",
+        "viberr_agent",
+        "viberr_browser",
+        "viberr_controller",
+        "viberr_ops",
+      ].sort(),
+    );
   });
 
   it("P14-KM-15: skips `viberr_agent` too, so a hand-edited row can't shadow the toolkit", () => {

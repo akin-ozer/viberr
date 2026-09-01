@@ -1,8 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { ResCatalogGroup } from "~/features/agents/capability-catalog";
 import { kbRootDir, skillsRootDir } from "~/server/files/file-store-root.server";
+import { isReservedMcpName } from "~/shared/mcp-reserved";
 import {
-  isReservedMcpName,
   listMcpServers,
   listSkills,
   // The ONE store-folder lister. The private copy here used `statSync`, which
