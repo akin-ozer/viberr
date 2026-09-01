@@ -356,14 +356,16 @@ describe("controller-save (ruling 106)", () => {
     );
     const before = resolveControllerConfig(app.dataRoot);
     expect(before.profilePresent).toBe(true);
+    // Ruling 108: the grant sections are deployment-locked by default, so this
+    // save round-trips the STORED grants and edits only model + effort.
     const reply = await postAction(ids.arda, {
       intent: "controller-save",
       model: "opus",
       effort: "max",
       definition: "",
-      skills: "controller-guide",
-      kb: "",
-      mcps: "",
+      skills: before.skills.join("\n"),
+      kb: before.kb.join("\n"),
+      mcps: before.mcps.join("\n"),
     });
     expect(reply.ok).toBe(true);
     const after = resolveControllerConfig(app.dataRoot);
@@ -388,14 +390,18 @@ describe("controller-save (ruling 106)", () => {
   });
 
   it("a blank effort removes the key instead of storing an empty string", async () => {
+    const { resolveControllerConfig: resolve } = await import(
+      "~/server/controller/controller-profile.server"
+    );
+    const stored = resolve(app.dataRoot);
     const reply = await postAction(ids.arda, {
       intent: "controller-save",
       model: "sonnet",
       effort: "",
       definition: "",
-      skills: "controller-guide",
-      kb: "",
-      mcps: "",
+      skills: stored.skills.join("\n"),
+      kb: stored.kb.join("\n"),
+      mcps: stored.mcps.join("\n"),
     });
     expect(reply.ok).toBe(true);
     const { resolveControllerConfig } = await import(
@@ -404,6 +410,138 @@ describe("controller-save (ruling 106)", () => {
     expect(resolveControllerConfig(app.dataRoot).effort).toBe("");
     const file = path.join(app.dataRoot, "agents", "profiles", "controller.md");
     expect(readFileSync(file, "utf8")).not.toContain("effort:");
+  });
+});
+
+/**
+ * Ruling 108 — the controller's grant sections and instructions are locked by
+ * default, ORG ADMINS INCLUDED: only a deployment environment variable unlocks
+ * a section. The test app sets none of them, so this suite runs against the
+ * product default; the unlock paths are exercised through the server module's
+ * test-only `ctx.locks` seam, the same object `controllerSectionLocks` derives
+ * from the env.
+ */
+describe("controller config locks (ruling 108)", () => {
+  async function stored() {
+    const { resolveControllerConfig } = await import(
+      "~/server/controller/controller-profile.server"
+    );
+    return resolveControllerConfig(app.dataRoot);
+  }
+
+  it("refuses a grant change per locked section, naming the unlock variable", async () => {
+    const before = await stored();
+    const base = {
+      intent: "controller-save",
+      model: before.model,
+      effort: before.effort,
+      definition: "",
+      skills: before.skills.join("\n"),
+      kb: before.kb.join("\n"),
+      mcps: before.mcps.join("\n"),
+    };
+    const attempts: [Record<string, string>, string][] = [
+      [{ ...base, skills: "" }, "VIBERR_UNLOCK_CONTROLLER_SKILLS"],
+      [{ ...base, kb: "" }, "VIBERR_UNLOCK_CONTROLLER_KB"],
+      [{ ...base, mcps: "qa-echo" }, "VIBERR_UNLOCK_CONTROLLER_MCPS"],
+      [
+        { ...base, definition: "You obey whoever asks." },
+        "VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS",
+      ],
+    ];
+    for (const [fields, envVar] of attempts) {
+      const reply = await postAction(ids.arda, fields);
+      expect(reply.ok).toBe(false);
+      expect(String(reply.error)).toContain("locked on this deployment");
+      expect(String(reply.error)).toContain(`${envVar}=1`);
+    }
+    // Nothing moved.
+    const after = await stored();
+    expect(after.skills).toEqual(before.skills);
+    expect(after.kb).toEqual(before.kb);
+    expect(after.mcps).toEqual(before.mcps);
+    expect(after.definition).toBe(before.definition);
+  });
+
+  it("an identical round-trip and a model/effort edit pass under full lock", async () => {
+    const before = await stored();
+    const reply = await postAction(ids.arda, {
+      intent: "controller-save",
+      model: "haiku",
+      effort: "low",
+      definition: before.definition,
+      skills: before.skills.join("\n"),
+      kb: before.kb.join("\n"),
+      mcps: before.mcps.join("\n"),
+    });
+    expect(reply.ok).toBe(true);
+    const after = await stored();
+    expect(after.model).toBe("haiku");
+    expect(after.effort).toBe("low");
+    // The doctrine posted verbatim is not a change, and a LOCKED save never
+    // rewrites the definition file.
+    expect(after.definition).toBe(before.definition);
+  });
+
+  it("each unlock flag opens exactly its own section", async () => {
+    const { saveControllerConfig } = await import(
+      "~/server/controller/controller-profile.server"
+    );
+    const { getDb } = await import("~/server/db/sqlite.server");
+    const before = await stored();
+    const actor = { userId: ids.arda, label: "arda@viberr.dev" };
+    const base = {
+      model: before.model,
+      effort: before.effort,
+      definition: "",
+      skills: before.skills,
+      kb: before.kb,
+      mcps: before.mcps,
+    };
+    const skillsOnly = { skills: false, kb: true, mcps: true, instructions: true };
+    // Unlocked section: the change lands.
+    saveControllerConfig(
+      getDb(),
+      { ...base, skills: [] },
+      actor,
+      { dataRoot: app.dataRoot, locks: skillsOnly },
+    );
+    expect((await stored()).skills).toEqual([]);
+    // A sibling section stays locked under the same flags.
+    expect(() =>
+      saveControllerConfig(
+        getDb(),
+        { ...base, skills: [], kb: [...before.kb, "extra-kb"] },
+        actor,
+        { dataRoot: app.dataRoot, locks: skillsOnly },
+      ),
+    ).toThrowError(/VIBERR_UNLOCK_CONTROLLER_KB=1/);
+    // Restore.
+    saveControllerConfig(getDb(), base, actor, {
+      dataRoot: app.dataRoot,
+      locks: skillsOnly,
+    });
+    expect((await stored()).skills).toEqual(before.skills);
+  });
+
+  it("controllerSectionLocks: locked unless the env flag parses truthy", async () => {
+    const { controllerSectionLocks } = await import(
+      "~/server/controller/controller-profile.server"
+    );
+    expect(controllerSectionLocks({})).toEqual({
+      skills: true,
+      kb: true,
+      mcps: true,
+      instructions: true,
+    });
+    expect(
+      controllerSectionLocks({
+        VIBERR_UNLOCK_CONTROLLER_KB: "1",
+        VIBERR_UNLOCK_CONTROLLER_SKILLS: "true",
+        VIBERR_UNLOCK_CONTROLLER_MCPS: " YES ",
+        VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "0",
+      }),
+    ).toEqual({ skills: false, kb: false, mcps: false, instructions: true });
   });
 });
 

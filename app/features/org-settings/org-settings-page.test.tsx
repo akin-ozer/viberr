@@ -30,6 +30,14 @@ const CONTROLLER_CONFIG = {
   profilePresent: true,
 };
 
+/** Ruling 108: the PRODUCT default — every section locked (no unlock vars). */
+const CONTROLLER_LOCKS = {
+  skills: true,
+  kb: true,
+  mcps: true,
+  instructions: true,
+};
+
 
 /**
  * jsdom smokes for the three org-settings tabs: mock markup/copy fidelity,
@@ -1081,6 +1089,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
       />,
     );
@@ -1136,6 +1145,7 @@ describe("C9: instance storage line", () => {
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
       />,
     );
@@ -1164,6 +1174,7 @@ describe("C9: instance storage line", () => {
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
       />,
     );
@@ -1197,6 +1208,7 @@ describe("run concurrency control", () => {
         runConcurrency={{ cap: 2, live: 2, queued: 1 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
       />,
     );
@@ -1213,6 +1225,7 @@ describe("run concurrency control", () => {
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
       />,
     );
@@ -1232,6 +1245,7 @@ describe("run concurrency control", () => {
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[
           {
             id: "a1",
@@ -1272,6 +1286,7 @@ describe("run concurrency control", () => {
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
       />,
     );
@@ -1315,6 +1330,7 @@ describe("FR33: the audit card discloses the export-before-purge record", () => 
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
         auditEvents={[]}
       />,
     );
@@ -1360,6 +1376,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
         runConcurrency={{ cap: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
       />,
     );

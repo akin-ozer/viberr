@@ -14,6 +14,7 @@ import { UsersPanel } from "./users-panel";
 import {
   ControllerAdminPanel,
   type ControllerConfigView,
+  type ControllerSectionLocks,
 } from "./controller-admin-panel";
 
 /**
@@ -69,6 +70,7 @@ export function OrgSettingsPage({
   s3Audit,
   auditEvents,
   controllerConfig,
+  controllerLocks,
 }: {
   view: OrgSettingsView;
   meId: string;
@@ -81,6 +83,8 @@ export function OrgSettingsPage({
   auditEvents: AuditBrowseRow[];
   /** Ruling 99: the live controller configuration this admin surface edits. */
   controllerConfig: ControllerConfigView;
+  /** Ruling 108: per-section deployment locks the panel renders read-only. */
+  controllerLocks: ControllerSectionLocks;
 }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -188,6 +192,7 @@ export function OrgSettingsPage({
           {tab === "controller" && (
             <ControllerAdminPanel
               config={controllerConfig}
+              locks={controllerLocks}
               // KB grants are stored and resolved by store DIR; the picker
               // shows the display name, like the global-profile editor.
               kbs={view.kbs.map((k) => ({ dir: k.dir, name: k.name, uri: k.uri }))}
