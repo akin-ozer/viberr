@@ -40,6 +40,7 @@ import {
   updateTaskGoal,
 } from "./task-actions.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { resolveRemoteBranchCollision } from "~/server/github/github-reconciler.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -1471,11 +1472,17 @@ describe("resolvePacket kind matrix", () => {
       { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
     );
 
-    // Both GitHub writes went out, in intent-first order: close, then delete.
+    // Both GitHub writes went out, and the DELETE went FIRST (C05-B): a
+    // refused delete then leaves GitHub untouched, instead of having closed a
+    // PR the refusal text went on to say nothing about.
     expect(github.callsTo("PATCH /repos/akin-ozer/viberr/pulls/232")).toHaveLength(1);
     expect(
       github.callsTo("DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work"),
     ).toHaveLength(1);
+    const order = github.calls.map((c) => `${c.method} ${c.url.pathname}`);
+    expect(
+      order.indexOf("DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work"),
+    ).toBeLessThan(order.indexOf("PATCH /repos/akin-ozer/viberr/pulls/232"));
 
     const fm = readTaskFile({
       projectSlug: store.slug,
@@ -1506,6 +1513,187 @@ describe("resolvePacket kind matrix", () => {
     expect(
       listAuditEvents(store.db, { action: "github.branch.deleted" }),
     ).toHaveLength(1);
+  });
+
+  /** The collision tests' GitHub credential: a PAT on the project so the
+   *  reconciler's writes reach the fake. */
+  async function collisionCredential(store: TestStore): Promise<void> {
+    const { createPat, setProjectCredential } = await import(
+      "~/server/secrets/pat-store.server"
+    );
+    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_collision00000000000000000000002" },
+      patActor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+  }
+
+  const COLLISION_REVISION: WorkRevision = {
+    id: "rev_collision4",
+    headSha: "1".repeat(40),
+    treeSha: "2".repeat(40),
+    branch: "vib-1-work",
+    createdAt: new Date().toISOString(),
+    sourceProfileId: "developer",
+    kind: "delivered",
+  };
+
+  it("resolve_remote_collision: a refused branch delete closes NOTHING — GitHub is left exactly as it was (C05-B)", async () => {
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    await collisionCredential(store);
+    const github = fakeGithubFetch({
+      "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
+    });
+    // The task's OWN review PR is still open on the branch, so the ref delete
+    // refuses (deleting it would silently close that PR). Before C05-B the
+    // unrelated PR #232 was already closed by the time the refusal was written,
+    // and the refusal text said nothing about it.
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        readiness: "blocked",
+        branch: "vib-1-work",
+        workRevision: COLLISION_REVISION,
+        pr: { number: 5, state: "review", title: "VIB-1: own review PR" },
+        github: { commits: [], changed: null, unownedPr: 232 },
+      },
+      COLLISION_PACKET,
+    );
+
+    const { task } = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+    );
+    expect(task.packet).toBeNull();
+    // Canary: swap the order back (close, then delete) and the PATCH goes out.
+    expect(github.callsTo("PATCH /repos/akin-ozer/viberr/pulls/232")).toHaveLength(0);
+    expect(
+      github.callsTo("DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work"),
+    ).toHaveLength(0);
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // The collision record stands: nothing was cleared.
+    expect(fm.github?.unownedPr).toBe(232);
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(
+      texts.some(
+        (t) =>
+          t.includes("The branch collision was **not** cleared") &&
+          t.includes("PR #5 is still open") &&
+          t.includes("Nothing was re-delivered"),
+      ),
+    ).toBe(true);
+    expect(texts.some((t) => t.includes("Closed unrelated PR"))).toBe(false);
+    expect(listAuditEvents(store.db, { action: "github.pr.closed_unowned" })).toHaveLength(0);
+  });
+
+  it("resolve_remote_collision: a 403 on the PR close opens the pull_request:write scope violation instead of vanishing (C05-D)", async () => {
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    await collisionCredential(store);
+    const github = fakeGithubFetch({
+      "PATCH /repos/akin-ozer/viberr/pulls/232": {
+        status: 403,
+        body: { message: "Resource not accessible by personal access token" },
+      },
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
+    });
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        readiness: "blocked",
+        branch: "vib-1-work",
+        workRevision: COLLISION_REVISION,
+        github: { commits: [], changed: null, unownedPr: 232 },
+      },
+      COLLISION_PACKET,
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+    );
+
+    // The half-remedy is honest: the ref is gone (GitHub closes the PR on its
+    // side), the collision record is cleared, and NO close is claimed.
+    expect(
+      github.callsTo("DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work"),
+    ).toHaveLength(1);
+    expect(github.callsTo("PATCH /repos/akin-ozer/viberr/pulls/232")).toHaveLength(1);
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.github?.unownedPr ?? null).toBeNull();
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.includes("Deleted branch `vib-1-work`"))).toBe(true);
+    expect(texts.some((t) => t.includes("Closed unrelated PR"))).toBe(false);
+    expect(listAuditEvents(store.db, { action: "github.pr.closed_unowned" })).toHaveLength(0);
+    // …and the missing scope is the SAME fact openTaskPr/mergeTaskPr flag —
+    // a violation with its policy event, not best-effort silence. Canary:
+    // drop the 403 arm in resolveRemoteBranchCollision.
+    const opened = listAuditEvents(store.db, { action: "github.scope_violation.opened" });
+    expect(opened).toHaveLength(1);
+    expect(opened[0]!.details).toMatchObject({ scope: "pull_request:write" });
+    expect(opened[0]!.taskKey).toBe("VIB-1");
+    expect(
+      texts.some((t) => t.includes("pull_request:write") && t.includes("#232")),
+    ).toBe(true);
+  });
+
+  it("resolveRemoteBranchCollision: a system actor is refused before any GitHub write (C05-C)", async () => {
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    await collisionCredential(store);
+    const github = fakeGithubFetch({
+      "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
+    });
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        branch: "vib-1-work",
+        workRevision: COLLISION_REVISION,
+        github: { commits: [], changed: null, unownedPr: 232 },
+      },
+      COLLISION_PACKET,
+    );
+    // Closing someone else's PR and deleting a remote ref are HUMAN decisions;
+    // the exported function refuses an anonymous actor itself (the ref delete's
+    // own guard is the second line), and no write leaves the process.
+    const result = await resolveRemoteBranchCollision(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      { userId: null, label: "system" },
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+    );
+    expect(result).toEqual({ status: "refused", message: "No acting user." });
+    expect(github.calls).toHaveLength(0);
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.github?.unownedPr).toBe(232);
   });
 
   // F20-6 (R20-2): the operator's discard option now EXECUTES on confirm.

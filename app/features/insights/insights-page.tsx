@@ -280,7 +280,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                   {backend}
                 </span>
                 <span className="bar-track">
-                  <span className="bar-fill" style={{ width: "100%" }} />
+                  <span className="bar-fill full" />
                 </span>
                 <span className="bar-val">
                   credential refused

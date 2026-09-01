@@ -212,7 +212,7 @@ export type Env = z.infer<typeof envSchema>;
  * against, so a knob cannot ship that neither this file nor `.env.example`
  * admits exists (C3, pass 31; C01-A6, pass 32).
  */
-export const ENV_KEYS: readonly string[] = Object.keys(envSchema.shape);
+export const ENV_KEYS: readonly string[] = envSchema.keyof().options;
 
 function formatEnvError(error: z.ZodError): string {
   const lines = error.issues.map(

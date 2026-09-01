@@ -1590,6 +1590,14 @@ export async function resolveRemoteBranchCollision(
     return { status: "refused", message: "The task has no workspace branch." };
   }
   const unowned = file.parsed.frontmatter.github?.unownedPr ?? null;
+  // C05-C (pass 32): closing someone else's PR is a HUMAN decision, exactly as
+  // `deleteTaskRemoteBranch` says of the ref below — enforced here rather than
+  // asserted (`actor.userId!`), so a system actor reaching this exported
+  // function is refused before any GitHub write, not after one.
+  const userId = actor.userId;
+  if (!userId) {
+    return { status: "refused", message: "No acting user." };
+  }
 
   const gh = getProjectGithubContext(db, input.projectSlug, githubOptionsOf(ctx));
   if (gh.status !== "ok") {
@@ -1599,42 +1607,68 @@ export async function resolveRemoteBranchCollision(
     };
   }
 
-  let closedUnownedPr: number | null = null;
-  if (unowned !== null) {
-    const close = await gh.client.request(
-      "PATCH",
-      `/repos/${gh.repo}/pulls/${unowned}`,
-      z.unknown(),
-      { body: { state: "closed" } },
-    );
-    // Best-effort by design: a PR that is already closed answers 200, and one
-    // GitHub refuses to close still disappears when its head branch does. Only
-    // a SUCCESS is recorded — a failure is not a stop, the branch delete is.
-    if (close.ok) {
-      closedUnownedPr = unowned;
-      await appendTimelineEvent(ref, {
-        occurredAt: new Date().toISOString(),
-        type: "github",
-        actor: { kind: "human", userId: actor.userId!, nameHint: userName(db, actor.userId!) },
-        title: null,
-        text: `Closed unrelated PR #${unowned} that stood on branch \`${branch}\` (it was not ${input.taskKey}'s review PR).`,
-        toAgent: false,
-        evidence: null,
-      });
-      recordAudit(db, {
-        action: "github.pr.closed_unowned",
-        actor,
-        subjectKind: "pull_request",
-        subjectId: `${gh.repo}#${unowned}`,
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        details: { repo: gh.repo, branch, prNumber: unowned },
-      });
-    }
-  }
-
+  // C05-B (pass 32): the DELETE goes first. The old order closed the unowned
+  // PR and then, when the branch delete refused (default branch, own PR open on
+  // it, a non-422 answer), reported "the branch collision was not cleared …
+  // nothing was re-delivered" — true words that said nothing about the PR it
+  // had just closed. Deleting the head ref first means a refusal leaves
+  // GitHub exactly as it was; and a deleted head branch closes its PR on
+  // GitHub's side anyway, so the explicit close below is the audited record of
+  // an outcome the delete already produced.
   const del = await deleteTaskRemoteBranch(db, input, actor, ctx);
   if (del.status === "deleted" || del.status === "already_gone") {
+    let closedUnownedPr: number | null = null;
+    if (unowned !== null) {
+      const close = await gh.client.request(
+        "PATCH",
+        `/repos/${gh.repo}/pulls/${unowned}`,
+        z.unknown(),
+        { body: { state: "closed" } },
+      );
+      // Best-effort by design: a PR that is already closed (which the ref
+      // delete just did) answers 200. Only a SUCCESS is recorded.
+      if (close.ok) {
+        closedUnownedPr = unowned;
+        await appendTimelineEvent(ref, {
+          occurredAt: new Date().toISOString(),
+          type: "github",
+          actor: { kind: "human", userId, nameHint: userName(db, userId) },
+          title: null,
+          text: `Closed unrelated PR #${unowned} that stood on branch \`${branch}\` (it was not ${input.taskKey}'s review PR).`,
+          toAgent: false,
+          evidence: null,
+        });
+        recordAudit(db, {
+          action: "github.pr.closed_unowned",
+          actor,
+          subjectKind: "pull_request",
+          subjectId: `${gh.repo}#${unowned}`,
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          details: { repo: gh.repo, branch, prNumber: unowned },
+        });
+      } else if (close.kind === "http" && close.status === 403) {
+        // C05-D (pass 32): a 403 here is the SAME fact `openTaskPr` and
+        // `mergeTaskPr` flag — the credential lacks pull_request:write — and
+        // it used to vanish into the best-effort silence. The half-remedy
+        // (ref gone, PR left to GitHub's auto-close) is honest; the missing
+        // scope is what the human has to fix, so it gets its chip.
+        await flagScopeViolation(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            scope: "pull_request:write",
+            detail: policyViolationText(
+              "pull_request:write",
+              `closing the unrelated pull request #${unowned} that stood on branch \`${branch}\``,
+            ),
+            actor,
+          },
+          { dataRoot: ctx.dataRoot },
+        );
+      }
+    }
     // The R15-15 record is stale the moment the ref is gone — clear it so the
     // GitHub card and the policy engine stop reporting a collision that no
     // longer exists (the next reconcile would clear it too; this is sooner).

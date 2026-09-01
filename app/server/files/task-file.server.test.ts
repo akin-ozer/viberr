@@ -193,6 +193,28 @@ describe("packet option tolerance (F31-C5)", () => {
     // Nothing else was harmed by the salvage.
     expect(parsed.packet!.title).toBe(FULL.packet!.title);
   });
+
+  it("C01-A1: one malformed observation drops only itself — the sibling list has the same tolerance", () => {
+    // The identical durable-loss shape one key over: `observations` stayed a
+    // plain z.array after the C5 fix, so `v: 9` (a YAML number where a string
+    // was meant) voided the ENTIRE packet, and the next write serialized the
+    // open decision away. Canary: revert the observations probe in
+    // parsePacketSection and the packet below parses to null.
+    const text = serializeTaskFile(FULL).replace(
+      "observations:",
+      "observations:\n  - k: Odd\n    v: 9",
+    );
+    const { parsed, diagnostics } = parseTaskFileContent(text, {
+      fallbackKey: "VIB-142",
+    });
+    expect(parsed.packet, "the packet must survive one bad observation").not.toBeNull();
+    expect(parsed.packet!.observations).toEqual(FULL.packet!.observations);
+    expect(parsed.packet!.options.length).toBe(FULL.packet!.options.length);
+    expect(
+      diagnostics.some((d) => d.code === "packet.invalid_observation"),
+    ).toBe(true);
+    expect(diagnostics.some((d) => d.code === "packet.invalid_option")).toBe(false);
+  });
 });
 
 describe("task.md event-body escaping (structure-like text)", () => {

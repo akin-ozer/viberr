@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { insecureAuthOriginWarning, parseEnv } from "./env.server";
 
@@ -232,8 +234,6 @@ describe("no undeclared VIBERR_* env reads (C01-A6)", () => {
   ]);
 
   function rawReads(): Map<string, string[]> {
-    const { readdirSync, readFileSync, statSync } = require("node:fs") as typeof import("node:fs");
-    const { join } = require("node:path") as typeof import("node:path");
     const root = join(process.cwd(), "app");
     const found = new Map<string, string[]>();
     const walk = (dir: string) => {
@@ -267,7 +267,6 @@ describe("no undeclared VIBERR_* env reads (C01-A6)", () => {
   });
 
   it("documents every raw process.env.VIBERR_* read in .env.example", () => {
-    const { readFileSync } = require("node:fs") as typeof import("node:fs");
     const example = readFileSync(`${process.cwd()}/.env.example`, "utf8");
     // Documented only in the secret-key rotation runbook, on purpose: it is a
     // one-shot migration variable, not a knob to leave in a template.

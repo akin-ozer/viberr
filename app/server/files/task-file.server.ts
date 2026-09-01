@@ -8,6 +8,7 @@ import {
   type FileDiagnostic,
 } from "~/schemas/file-diagnostics";
 import {
+  packetObservationSchema,
   packetOptionSchema,
   parseTaskFrontmatter,
   taskPacketSchema,
@@ -401,6 +402,29 @@ function parsePacketSection(
       }),
     );
     raw = optionsProbe.data;
+  }
+  // C01-A1 (pass 32): the same per-row tolerance for `observations` — the
+  // sibling the C5 fix left behind. One hand-edited `v: 9` (a YAML number
+  // where a string was meant) failed the whole packet parse with a diagError,
+  // not a hardStop, so the write guard let the next `updateTaskFile` serialize
+  // the `## Packet` section away: the identical durable-loss shape.
+  const observationsProbe = z
+    .object({ observations: z.array(z.unknown()) })
+    .loose()
+    .safeParse(raw);
+  if (observationsProbe.success) {
+    observationsProbe.data.observations = tolerantRowsOf(
+      diagnostics,
+      observationsProbe.data.observations,
+      packetObservationSchema,
+      "packet.invalid_observation",
+      (i) => ({
+        subject: `Packet observation [${i}]`,
+        noun: "observation",
+        path: "packet.observations",
+      }),
+    );
+    raw = observationsProbe.data;
   }
   const result = taskPacketSchema.safeParse(raw);
   if (result.success) {
