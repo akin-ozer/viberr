@@ -36,8 +36,12 @@ export interface CompactionOptions {
   keepRecent: number;
 }
 
+/** The fallback when a project carries no `compression-threshold` guardrail
+ *  row. V11-6 (pass 32): aligned with the template guardrail's own default
+ *  (`app/shared/workflow/templates.ts`, 40 events) — it was 60, so a project
+ *  whose row was hand-deleted compacted later than one that kept the default. */
 export const DEFAULT_COMPACTION: CompactionOptions = {
-  threshold: 60,
+  threshold: 40,
   keepRecent: 24,
 };
 

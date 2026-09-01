@@ -84,6 +84,18 @@ ENV VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium
 # use, which is also why a system python3 is deliberately NOT installed.
 COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /usr/local/bin/
 
+# V11-9 (pass 32): build stamps for /resources/health and the boot integrity
+# line (`build-info.server.ts` reads these first). Pass them at build time —
+#   docker compose build --build-arg VIBERR_BUILD_SHA=$(git rev-parse HEAD) \
+#     --build-arg VIBERR_BUILD_TIME=$(date -u +%FT%TZ)
+# — or leave them empty: the image then falls back to package.json's version and
+# reports a null revision, which the health endpoint says plainly.
+ARG VIBERR_BUILD_VERSION=""
+ARG VIBERR_BUILD_SHA=""
+ARG VIBERR_BUILD_TIME=""
+ENV VIBERR_BUILD_VERSION=$VIBERR_BUILD_VERSION
+ENV VIBERR_BUILD_SHA=$VIBERR_BUILD_SHA
+ENV VIBERR_BUILD_TIME=$VIBERR_BUILD_TIME
 ENV NODE_ENV=production
 # Canonical file store + SQLite projections live here; compose mounts a
 # host directory (or named volume) at this path.

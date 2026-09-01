@@ -14,8 +14,9 @@ import {
  * Bell button + notifications popover — ONE implementation for both the
  * workspace topbar and the Home header (ruling 14). Fed from the per-user
  * notifications table; item clicks mark the row read and navigate for real,
- * including cross-project rows (the prototype "isn't built" toast is gone —
- * ruling 9 seeds the stub projects so navigation works).
+ * including cross-project rows (the prototype "isn't built" toast is gone;
+ * navigation resolves against the projects the store actually holds — the
+ * ruling-9 stub projects exist only in the demo seed).
  *
  * Additions over the mock (sanctioned): Escape closes the popover.
  */

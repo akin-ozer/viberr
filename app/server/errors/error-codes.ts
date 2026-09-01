@@ -20,6 +20,9 @@ export const ERROR_CODES = {
   /** Ruling 88 (F21-2): the acknowledgment describes a task state that is no
    *  longer live — the ceremony has to be re-opened against what is true now. */
   ACCEPT_DISCLOSURE_STALE: "accept_disclosure_stale",
+  /** V11-4 (pass 32): the SSE subscribe route answers an unauthenticated
+   *  caller with this — it used to emit a literal outside this catalog. */
+  UNAUTHORIZED: "unauthorized",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

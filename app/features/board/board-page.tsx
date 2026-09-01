@@ -1082,6 +1082,8 @@ function AcceptOnBoardConfirm({
       workRevisionSha={task.workRevisionSha ?? null}
       noChanges={false}
       noPullRequest={false}
+      // F32-11: the board summary carries the open packet too.
+      openPacketTitle={task.packet?.title ?? null}
       defaultBranch={defaultBranch}
       // The STAGE gate the summary CAN answer (F19-27). The board never
       // force-accepts, so this jumps no stage on its own — the off-boundary

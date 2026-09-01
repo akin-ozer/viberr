@@ -28,6 +28,10 @@ export const SSE_EVENT_NAMES = [
   "notification.created",
   "notification.read",
   "violation.updated",
+  // F32-2 (pass 32): an org resource changed — a KB re-indexed (the file
+  // watcher or a manual re-scan), a KB/skill/MCP saved or deleted. Broadcast,
+  // reference-only: the Settings page revalidates its own loader.
+  "resource.updated",
   // Phase 8 — high-frequency runtime stream. Published STRAIGHT to the
   // broker from the run-service (NOT the projection emitter): reference-only
   // payloads (runId + seq); the dedicated logs consumer fetches content.
@@ -156,6 +160,15 @@ export const sseEventSchema = z.discriminatedUnion("type", [
     entityId,
     occurredAt,
     data: z.object({ projectSlug: slug, goalId: z.string().min(1) }),
+  }),
+  z.object({
+    type: z.literal("resource.updated"),
+    entityId,
+    occurredAt,
+    data: z.object({
+      kind: z.enum(["kb", "skill", "mcp"]),
+      id: z.string().min(1),
+    }),
   }),
   z.object({
     type: z.literal("stream.open"),

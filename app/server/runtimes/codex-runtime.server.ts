@@ -20,6 +20,7 @@ import {
   type RuntimeAdapter,
 } from "./adapter.server";
 import { CODEX_REPO_WRITE_ADVISORY_NOTE } from "~/server/tasks/specialist-tool-policy";
+import { withProviderText } from "~/shared/provider-marker";
 import { SESSION_MISSING_RE } from "./session-export.server";
 import { projectEnvelope } from "./wire-format.server";
 import { redactProviderText } from "~/server/secrets/git-output-redact.server";
@@ -719,7 +720,7 @@ export function createCodexAdapter(
         // line's text is what `runFailureReason` reads and splits on the marker.
         const fullMessage =
           providerText && !message.includes(providerText)
-            ? `${message}\n\nThe provider reported: ${providerText}`
+            ? withProviderText(message, providerText)
             : message;
         const event = {
           type: "error",

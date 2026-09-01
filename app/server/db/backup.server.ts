@@ -70,8 +70,18 @@ const README_NAME = "README.txt";
 const PROJECTION_NAME = "projection.sqlite";
 const STORE_DIR = "store";
 
-/** The file-native store directories a backup carries by default. */
-export const BACKED_UP_STORE_DIRS = ["projects", "agents", "kb", "skills"] as const;
+/** The file-native store directories a backup carries by default.
+ *  C01-A3 (pass 32): `audit-exports/` joined the list — ruling 102's purge
+ *  writes the expiring audit rows there as the DURABLE record, and `npm run
+ *  backup` silently dropped it. A directory that does not exist yet (a root
+ *  that never purged) is skipped, as every entry here is. */
+export const BACKED_UP_STORE_DIRS = [
+  "projects",
+  "agents",
+  "kb",
+  "skills",
+  "audit-exports",
+] as const;
 
 /**
  * `runtimes/` holds LIVE agent credentials (`codex-home/auth.json`) and run

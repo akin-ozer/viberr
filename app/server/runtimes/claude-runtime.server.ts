@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { withProviderText } from "~/shared/provider-marker";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -749,7 +750,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               text:
                 failure.providerText &&
                 !failure.message.includes(failure.providerText)
-                  ? `${failure.message}\n\nThe provider reported: ${failure.providerText}`
+                  ? withProviderText(failure.message, failure.providerText)
                   : failure.message,
             },
             facts: {},
@@ -1065,7 +1066,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               text:
                 failure.providerText &&
                 !failure.message.includes(failure.providerText)
-                  ? `${failure.message}\n\nThe provider reported: ${failure.providerText}`
+                  ? withProviderText(failure.message, failure.providerText)
                   : failure.message,
             },
             facts: {},

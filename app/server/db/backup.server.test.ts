@@ -52,6 +52,12 @@ function fixture(): Fixture {
   writeFileSync(path.join(dataRoot, "kb", "handbook", "style.md"), "# Style\n");
   // A half-written atomic write in flight — never content.
   writeFileSync(path.join(taskDir, "task.md.abcd.tmp"), "half written");
+  // Ruling 102's durable record of purged audit rows (C01-A3).
+  mkdirSync(path.join(dataRoot, "audit-exports"), { recursive: true });
+  writeFileSync(
+    path.join(dataRoot, "audit-exports", "audit-events-2026-08-01.jsonl"),
+    '{"id":"ae_1","action":"task.created"}\n',
+  );
   return { dataRoot, db, out: ctx.makeTempDir() };
 }
 
@@ -121,7 +127,13 @@ describe("createBackup", () => {
         path.join(backup.dir, "store", "projects", "viberr-core", "tasks", "VIB-1", "task.md.abcd.tmp"),
       ),
     ).toBe(false);
-    expect(backup.manifest.store.dirs).toEqual(["projects", "kb"]);
+    // C01-A3 (pass 32): the audit export rides along — it is the only
+    // long-term record of purged audit rows. Canary: drop "audit-exports"
+    // from BACKED_UP_STORE_DIRS.
+    expect(
+      existsSync(path.join(backup.dir, "store", "audit-exports", "audit-events-2026-08-01.jsonl")),
+    ).toBe(true);
+    expect(backup.manifest.store.dirs).toEqual(["projects", "kb", "audit-exports"]);
   });
 
   it("states what the artefact contains and what it does NOT", () => {

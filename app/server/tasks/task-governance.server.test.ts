@@ -354,6 +354,49 @@ describe("P3.7 governance & lifecycle fixes", () => {
     expect(fm.acceptance).toBe("forced");
     // And it is projected for the read models (C-VOCAB reads it).
     expect(res.task.acceptance).toBe("forced");
+    // F32-11 (pass 32): the open decision (PACKET) died with this acceptance —
+    // said on the timeline and in the audit trail, never silently. Live
+    // (VIB-3) a force-accept at Triage cleared a packet with no trace.
+    // Canary: drop the `withdrawn` block in applyAcceptanceWrite.
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1")!;
+    expect(detail.packet).toBeNull();
+    expect(
+      detail.timeline.some(
+        (e) => e.type === "note" && e.text.includes(`Withdrew the open decision "${PACKET.title}"`),
+      ),
+    ).toBe(true);
+    const withdrawn = listAuditEvents(store.db, { action: "task.packet.withdrawn" });
+    expect(withdrawn).toHaveLength(1);
+    expect(withdrawn[0]!.details).toMatchObject({
+      title: PACKET.title,
+      kind: PACKET.kind,
+      by: "force-accept",
+    });
+  });
+
+  it("forceAcceptCompletion on a task with NO open decision records no withdrawal (F32-11)", async () => {
+    const store = prepared();
+    withTask(store, {
+      stage: "review",
+      ownerUserId: store.users.arda.id,
+      branch: "vib-1-work",
+      engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      workRevision: workRev("rev_1"),
+      verdicts: [rejectionVerdict("rev_1")],
+      validation: "failing",
+    });
+    await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(listAuditEvents(store.db, { action: "task.packet.withdrawn" })).toHaveLength(0);
+    expect(
+      getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.some((e) =>
+        e.text.includes("Withdrew the open decision"),
+      ),
+    ).toBe(false);
   });
 
   it("forceAcceptCompletion on an already-Done task is a no-op — no misleading audit (DG-2)", async () => {

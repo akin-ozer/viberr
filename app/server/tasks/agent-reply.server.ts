@@ -543,9 +543,11 @@ export function fullReplyTextForRun(
 }
 
 /** R20-3 (F20-4): the marker both runtimes append the provider's redacted
- *  sentence behind, so `runFailureReason` can split it back off. Kept in one
- *  place; the runtimes write the same literal string. */
-export const PROVIDER_TEXT_MARKER = "\n\nThe provider reported: ";
+ *  sentence behind, so `runFailureReason` can split it back off. ONE source
+ *  since pass 32 (P07-C): `~/shared/provider-marker`, re-exported here for
+ *  the task layer's existing importers. */
+import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
+export { PROVIDER_TEXT_MARKER };
 
 /** Classified failure classes for an errored run (F8 + R7-2 fail-fast). */
 export type RunFailureKind =

@@ -137,11 +137,17 @@ export function AcceptConfirm({
    *  packet mode the page passes `blockedReasonViaPacket` here — the refusal a
    *  packet resolution would hit, never the open packet it clears (F19-7). */
   blockedReason,
+  /** F32-11 (pass 32): the OPEN decision packet this acceptance withdraws
+   *  (its title), or null. Accepting a task with an open packet used to clear
+   *  it silently — no row here, no timeline note, no audit — so the human
+   *  never learned a question died with the acceptance. */
+  openPacketTitle = null,
   busy,
   onCancel,
   onConfirm,
 }: {
   task: AcceptConfirmTask;
+  openPacketTitle?: string | null;
   /** The delivered revision's head sha (task file), or null before delivery. */
   workRevisionSha: string | null;
   /** R17-2: a verified no-change completion. TWO shapes reach this, and the
@@ -432,6 +438,18 @@ export function AcceptConfirm({
                   saying "Bypassing" there would promise an override nobody has. */}
               <span className="k">{force ? "Bypassing" : "Blocked"}</span>
               <span>{blockedReason}</span>
+            </div>
+          )}
+          {openPacketTitle && (
+            <div className="obs warn">
+              {/* F32-11: the acceptance closes the task, so the open decision is
+                  withdrawn unanswered — said here, and recorded on the timeline
+                  and in the audit trail when it happens. */}
+              <span className="k">Withdraws</span>
+              <span>
+                the open decision "{openPacketTitle}". It closes unanswered with the
+                task; a timeline note and an audit row record the withdrawal.
+              </span>
             </div>
           )}
         </div>

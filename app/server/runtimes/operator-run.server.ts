@@ -1572,7 +1572,7 @@ type OperatorPlanTool = (typeof OPERATOR_PLAN_TOOLS)[number];
  * The capability each plan tool needs — the exact mapping the Claude toolkit
  * uses to decide whether to BUILD a tool (`operator-toolkit.server.ts`). On
  * Claude a denied capability's tool never exists, so the model cannot reach it;
- * the Codex plan schema advertised all nine regardless of policy.
+ * the Codex plan schema used to advertise every plan tool regardless of policy.
  */
 const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   post_comment: ["append-typed-events"],
@@ -1623,14 +1623,11 @@ export function operatorPlanToolsFor(
   // VISIBLY by narrateRefusedActions rather than silently.
   //
   // A4: except `deliver_for_review` and `update_branch_from_base`. Reaching the
-  // fallback means the grant was either explicitly withheld or (with no
+  // fallback means their grant was either explicitly withheld or (with no
   // operator deployed) never made, and these are the plan actions with effects
-  // OUTSIDE Viberr — a pushed branch, an opened PR. Delivery was
-  // either explicitly withheld or (with no operator deployed) not granted at
-  // all, and it is the one plan action with effects OUTSIDE Viberr — a pushed
-  // branch, an opened PR. `operatorDeliverForReview` refuses it either way, so
-  // advertising it only buys a billed turn spent planning a push that cannot
-  // happen.
+  // OUTSIDE Viberr — a pushed branch, an opened PR. `operatorDeliverForReview`
+  // refuses either way, so advertising them only buys a billed turn spent
+  // planning a push that cannot happen.
   return permitted.length
     ? [...permitted]
     : OPERATOR_PLAN_TOOLS.filter(

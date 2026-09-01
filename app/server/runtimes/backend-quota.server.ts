@@ -152,15 +152,11 @@ export interface BackendQuotaRow {
 const USAGE_LIMIT_RE =
   /usage limit|usage quota|\bquota\b|weekly limit|monthly limit|subscription limit|plan limit|out of credits|credit balance/i;
 
-/**
- * The marker both adapters append the provider's own redacted sentence behind
- * (`PROVIDER_TEXT_MARKER` in agent-reply.server, written as this literal by
- * each runtime). Matched here rather than imported: this module rides the
- * run-line persist path, and a static edge into the task layer would close an
- * import cycle (agent-reply → task-actions → operator-run → run-service → the
- * sink → here).
- */
-const PROVIDER_TEXT_MARKER = "\n\nThe provider reported: ";
+// The marker both adapters append the provider's own redacted sentence behind.
+// P07-C (pass 32): imported from the leaf `~/shared/provider-marker` module —
+// no edge into the task layer (the import cycle the old private copy avoided),
+// and no second literal to drift.
+import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 
 /**
  * The provider's OWN sentence inside a failure line, or the whole line when the

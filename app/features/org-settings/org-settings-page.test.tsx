@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { createRoutesStub } from "react-router";
@@ -1064,6 +1064,64 @@ const STORAGE: OrgSettingsView["storage"] = {
     scheduled: true,
   },
 };
+
+describe("F32-2 (pass 32): the Settings page holds a live stream", () => {
+  it("opens a user-scoped EventSource on mount, so a KB re-index (resource.updated) revalidates the page", () => {
+    // Live: a host-side file drop re-indexed the KB (log: docCount 1) while the
+    // Agent resources tab kept "0 docs · re-scanned just now" until a manual
+    // reload — this page had no stream at all. Broadcast events reach every
+    // connection, so the `user` scope is enough.
+    // Canary: drop the `useLiveUpdates` call from OrgSettingsPage.
+    const opened: string[] = [];
+    class FakeEventSource {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSED = 2;
+      readyState = 1;
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(url: string) {
+        opened.push(url);
+      }
+      addEventListener() {}
+      close() {}
+    }
+    vi.stubGlobal("EventSource", FakeEventSource);
+    try {
+      renderPanel(
+        <OrgSettingsPage
+          view={{
+            connections: CONNECTIONS,
+            users: [ME],
+            domains: DOMAINS,
+            kbs: KBS,
+            mcps: MCPS,
+            skills: SKILLS,
+            gagents: GAGENTS,
+            projectGrants: { kbs: {}, mcps: {}, skills: {} },
+            templateGrants: { kbs: {}, mcps: {}, skills: {} },
+            stages: STAGES,
+            providers: { github: false, google: false },
+            authProviders: AUTH_PROVIDERS,
+            storage: STORAGE,
+          }}
+          meId={ME.id}
+          callbackOrigin="http://localhost:5173"
+          runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+          s3Audit={null}
+          controllerConfig={CONTROLLER_CONFIG}
+          controllerLocks={CONTROLLER_LOCKS}
+          auditEvents={[]}
+        />,
+      );
+      expect(opened).toHaveLength(1);
+      expect(opened[0]).toContain("/resources/events");
+      expect(opened[0]).toContain("scope=user");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe("resources tab badge counts resources, not resources+templates", () => {
   it("shows the resource count and discloses profiles in the tooltip", () => {

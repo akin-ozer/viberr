@@ -843,6 +843,8 @@ export function TaskDetailPage({
           task={task}
           workRevisionSha={workRevisionSha}
           noChanges={noChanges}
+          // F32-11: the open decision this acceptance withdraws, if any.
+          openPacketTitle={task.packet?.title ?? null}
           // F20-6 (R20-2): no PR + the completion never claimed no-change → the
           // accept path auto-detects it by re-probing the branch. The dialog
           // states that instead of promising a merge. `noChanges` (the flagged

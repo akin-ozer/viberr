@@ -240,6 +240,19 @@ export function listNotifications(
   });
 }
 
+/**
+ * Drop every notification that pointed into a project (C01-A12, pass 32 —
+ * the project-delete action used to run this DELETE inline, the one write to
+ * this table outside the module that owns it). Notifications are app-owned
+ * (no FK cascade to projects), so a deleted project would otherwise leave
+ * orphaned "waiting on you" rows that dead-end on a 404 when opened (F2).
+ */
+export function deleteProjectNotifications(db: DatabaseSync, projectSlug: string): number {
+  return Number(
+    db.prepare(`DELETE FROM notifications WHERE project_slug = ?`).run(projectSlug).changes,
+  );
+}
+
 export function countUnreadNotifications(
   db: DatabaseSync,
   userId: string,

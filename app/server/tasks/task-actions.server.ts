@@ -54,6 +54,7 @@ import {
   OPERATOR_AUDIT_ACTOR,
   recordAudit,
   type AuditEventInput,
+  SYSTEM_ACTOR,
 } from "~/server/audit/audit-recorder.server";
 import {
   agentRoleDisplay,
@@ -7821,6 +7822,17 @@ function assertAcceptanceDisclosure(
  * on a PR carrying content its task never delivered. Callers that already
  * verified pass their `headCheck` through rather than paying a second read.
  */
+/** F32-11: the open decision an acceptance closed unanswered, captured inside
+ *  the file lock (a ref, because the capture happens in the write callback). */
+interface WithdrawnPacket {
+  title: string;
+  kind: string;
+  type: TaskPacket["type"];
+}
+interface WithdrawnPacketRef {
+  current: WithdrawnPacket | null;
+}
+
 export async function applyAcceptanceWrite(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -7864,6 +7876,10 @@ export async function applyAcceptanceWrite(
     throw AppError.conflict(noChange.refusal);
   }
   let accepted = false;
+  // F32-11 (pass 32): the open decision this acceptance closes unanswered —
+  // captured inside the lock so the note and the audit row name the packet
+  // that was actually there, not the one the caller read before waiting.
+  const withdrawn: WithdrawnPacketRef = { current: null };
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     // U3 (NFR16) — the callers' "already Done → return" check reads the file
     // OUTSIDE this lock, so two concurrent acceptances of one task both passed
@@ -7954,6 +7970,27 @@ export async function applyAcceptanceWrite(
     // Done task); acceptance consumes every open offer, matching the packet
     // resolution path's long-standing behavior.
     parsed.frontmatter.recommendations = [];
+    if (parsed.packet) {
+      withdrawn.current = {
+        title: parsed.packet.title,
+        kind: parsed.packet.kind,
+        type: parsed.packet.type,
+      };
+      // Live (VIB-3): force-accepting a task at Triage with an open decision
+      // cleared it with no trace — the question simply vanished. The note is
+      // the human-readable record; the audit row below is the durable one.
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text:
+          `Withdrew the open decision "${parsed.packet.title}" — this acceptance closed the task, ` +
+          `so the decision was never answered.`,
+        toAgent: false,
+        evidence: null,
+      });
+    }
     parsed.packet = null;
     // A9 (pass 23): the PR head could NOT be verified against the delivered
     // revision (GitHub unreachable / the compare failed), yet an irreversible
@@ -7978,6 +8015,24 @@ export async function applyAcceptanceWrite(
     accepted = true;
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  if (accepted && withdrawn.current) {
+    // The acceptance's own audit row (forced or not) names the human; this one
+    // records that a decision died with it, and which.
+    recordAudit(db, {
+      action: "task.packet.withdrawn",
+      actor: SYSTEM_ACTOR,
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: {
+        title: withdrawn.current.title,
+        kind: withdrawn.current.kind,
+        type: withdrawn.current.type,
+        by: input.forced ? "force-accept" : "accept",
+      },
+    });
+  }
   // Ruling 99: an acceptance that closed a goal-chain link advances its chain
   // (the next link's task is created under the goal creator's re-proven
   // authority). Fire-and-forget; the engine converges.

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
+import { sseScopes } from "~/features/live-updates/event-types";
 import { useNavigate, useSearchParams } from "react-router";
 import type { OrgSettingsView } from "~/server/org/org-view.server";
 import type { S3AuditConfigView } from "~/server/audit/s3-config.server";
@@ -86,6 +88,11 @@ export function OrgSettingsPage({
   /** Ruling 108: per-section deployment locks the panel renders read-only. */
   controllerLocks: ControllerSectionLocks;
 }) {
+  // F32-2 (pass 32): a `user`-scoped stream also receives broadcasts — the
+  // `resource.updated` fact a KB re-index (watcher or manual), a skill/MCP
+  // save or delete publishes — so this page revalidates instead of showing a
+  // stale "re-scanned just now" until a manual reload.
+  useLiveUpdates([sseScopes.user()]);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = resolveOrgTab(searchParams.get("tab"));

@@ -10,7 +10,7 @@ import {
   normalizeEvidenceRows,
   type FileActorRef,
 } from "~/schemas/task-file.schema";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import { runAgentGithubRead } from "~/server/github/agent-github-read.server";
 import { encodeActorRef, agentRoleDisplay } from "~/server/files/actor-ref.server";
 import {
@@ -119,6 +119,12 @@ export async function postAgentComment(
     taskKey: string;
     actorRef: FileActorRef;
     text: string;
+    /** C03-OC1 (pass 32): the AUDIT actor when the comment is posted on a
+     *  person's behalf — the controller's `comment_on_task` was the one
+     *  controller mutation whose audit row did not name the asking human
+     *  (every other tool binds "<email> · via controller"). The timeline
+     *  actor stays `actorRef`; only the audit attribution changes. */
+    auditActor?: AuditActor;
   },
 ): Promise<void> {
   // S5-G3: an @handle that matches several people notifies nobody. A mid-run
@@ -143,7 +149,7 @@ export async function postAgentComment(
   // the agent identity was only buried in `details.actorRef`.
   recordAudit(db, {
     action: "task.agent.commented",
-    actor: { userId: null, label: encodeActorRef(input.actorRef) },
+    actor: input.auditActor ?? { userId: null, label: encodeActorRef(input.actorRef) },
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,

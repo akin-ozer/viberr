@@ -715,7 +715,7 @@ describe("appendComment", () => {
 
   it("with the compression-threshold guardrail OFF, a human comment compacts nothing", async () => {
     const store = prepared();
-    // Long enough that the built-in DEFAULT_COMPACTION (60) would fold it —
+    // Long enough that the built-in DEFAULT_COMPACTION (40) would fold it —
     // so "nothing happened" means the guardrail gate held, not that the
     // timeline was too short to notice.
     const flood = operatorFlood(65);

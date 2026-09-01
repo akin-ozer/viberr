@@ -999,6 +999,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           taskKey: args.taskKey,
           actorRef: { kind: "controller" },
           text,
+          // C03-OC1: the audit row names the asker, like every other tool.
+          auditActor: actor,
         });
         return `[done] Comment posted on ${args.taskKey}.`;
       }),

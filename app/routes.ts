@@ -64,7 +64,8 @@ export default [
 
   // Bare /projects → home (the project list lives at `/`), not a 404 (N5).
   route("projects", "routes/projects.tsx"),
-  // Workspace shell (rail + topbar) with the seven project views + task.
+  // Workspace shell (rail + topbar) with the eight project views + task (the
+  // rail order lives in features/shell/nav.ts and is pinned by nav.test.ts).
   route("projects/:slug", "routes/project.tsx", [
     index("routes/project._index.tsx"),
     route("board", "routes/project.board.tsx"),

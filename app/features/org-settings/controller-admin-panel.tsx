@@ -54,38 +54,17 @@ export interface ControllerKbOption {
   uri: string;
 }
 
-/** Ruling 108: which sections this deployment allows editing (true = locked).
- *  A client mirror of the server's `ControllerSectionLocks` — the loader
- *  derives it from the environment; nothing in the app can change it. */
-export interface ControllerSectionLocks {
-  skills: boolean;
-  kb: boolean;
-  mcps: boolean;
-  instructions: boolean;
-}
-
-/** The unlock variable each locked section names in the note below. Mirrors
- *  the server's `CONTROLLER_UNLOCK_ENV` (a test pins the two together — the
- *  server module cannot be imported from client code). */
-export const CONTROLLER_UNLOCK_ENV_VIEW = {
-  skills: "VIBERR_UNLOCK_CONTROLLER_SKILLS",
-  kb: "VIBERR_UNLOCK_CONTROLLER_KB",
-  mcps: "VIBERR_UNLOCK_CONTROLLER_MCPS",
-  instructions: "VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS",
-} as const;
-
-/** The value that unlocks a section, mirrored for the note (pinned to the
- *  server's `CONTROLLER_UNLOCK_VALUE` by the same drift test). */
-export const CONTROLLER_UNLOCK_VALUE_VIEW = "enabled";
-
-/** Section names for the lock note — mirrors the server's
- *  CONTROLLER_SECTION_LABEL (pinned together by test). */
-const SECTION_LABEL = {
-  skills: "skill grants",
-  kb: "knowledge base grants",
-  mcps: "MCP server grants",
-  instructions: "instructions",
-} as const;
+// Ruling 108: the lock vocabulary (sections, unlock variables, the unlock
+// value) is shared with the server through `~/shared/controller-locks`
+// (P07-G, pass 32) — the panel used to carry hand-copied mirrors with a drift
+// test standing between them. Re-exported for the route's loader typing.
+export type { ControllerSectionLocks } from "~/shared/controller-locks";
+import type { ControllerSectionLocks } from "~/shared/controller-locks";
+import {
+  CONTROLLER_SECTION_LABEL,
+  CONTROLLER_UNLOCK_ENV,
+  CONTROLLER_UNLOCK_VALUE,
+} from "~/shared/controller-locks";
 
 /** A resource the controller mounts by construction, shown so an admin can see
  *  what is attached. Ruling 107: it is NOT a control, because there is no
@@ -322,7 +301,7 @@ export function ControllerAdminPanel({
             Locked here on this deployment:{" "}
             <strong>
               {lockedSections
-                .map(([section]) => SECTION_LABEL[section])
+                .map(([section]) => CONTROLLER_SECTION_LABEL[section])
                 .join(", ")}
             </strong>
             . Model and effort stay editable. To unlock a section, set its
@@ -330,9 +309,9 @@ export function ControllerAdminPanel({
             {lockedSections
               .map(
                 ([section]) =>
-                  CONTROLLER_UNLOCK_ENV_VIEW[section] +
+                  CONTROLLER_UNLOCK_ENV[section] +
                   "=" +
-                  CONTROLLER_UNLOCK_VALUE_VIEW,
+                  CONTROLLER_UNLOCK_VALUE,
               )
               .join(" · ")}
             . This locks the grant lists and the doctrine file edited on this

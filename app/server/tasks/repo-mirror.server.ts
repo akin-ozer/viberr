@@ -194,10 +194,6 @@ function withMirrorLock<T>(key: string, work: () => Promise<T>): Promise<T> {
   return next;
 }
 
-/** How long the mirror's own network step may run. The first one is a full
- *  clone, so it gets the clone budget; a refresh finishes in seconds. */
-const mirrorTimeoutMs = (): number => cloneTimeoutMs();
-
 /**
  * The refresh gets its OWN, much shorter budget (R21-4b).
  *
@@ -341,7 +337,8 @@ async function ensureProjectMirror(input: {
     // failure path below (and its redaction) is unchanged.
     await runGitCloneWithProgress(
       ["clone", "--bare", "--progress", remoteUrl, mirrorDir],
-      { timeout: mirrorTimeoutMs(), env },
+      // The first mirror build is a full clone, so it gets the clone budget.
+      { timeout: cloneTimeoutMs(), env },
       input.onCloneProgress,
     );
     // `--bare` writes `remote.origin.url` but NO fetch refspec, so a later

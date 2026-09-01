@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
+import { PACKET_OPTION_KINDS, TASK_FRONTMATTER_KEYS } from "~/schemas/task-file.schema";
+import { AGENT_PROFILE_KNOWN_KEYS } from "~/server/files/agent-profile-file.server";
 
 /**
  * N19-3 — `docs/architecture/file-formats.md` enumerates the packet-option
@@ -79,6 +80,41 @@ function documentedKinds(section: string): string[] {
     .map((s) => s.trim())
     .filter(Boolean);
 }
+
+/** The section between `## <heading>` and the next `## `. */
+function section(heading: string): string {
+  const start = MD.indexOf(`\n## ${heading}`);
+  expect(start, `${DOC_REL} must still have a "## ${heading}" section`).toBeGreaterThan(-1);
+  const rest = MD.slice(start + 1);
+  const end = rest.indexOf("\n## ", 1);
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** A key counts as documented when the section shows it as a YAML key line or
+ *  names it in prose as \`key\` / \`key:\`. */
+function documentsKey(text: string, key: string): boolean {
+  return (
+    new RegExp(`^\\s*${key}:`, "m").test(text) ||
+    text.includes(`\`${key}\``) ||
+    text.includes(`\`${key}:`)
+  );
+}
+
+describe("C01-A13 (pass 32): file-formats.md documents every frontmatter key the schema reads", () => {
+  it("task.md — every TASK_FRONTMATTER_KEYS entry appears in section 2", () => {
+    // Only PACKET_OPTION_KINDS was doc-locked; a key added to the schema could
+    // ship undocumented for passes (\`acceptance\`, \`goalRef\` did).
+    const text = section("2. `projects/<slug>/tasks/<KEY>/task.md`");
+    const missing = TASK_FRONTMATTER_KEYS.filter((key) => !documentsKey(text, key));
+    expect(missing, `${DOC_REL} §2 does not document these task frontmatter keys`).toEqual([]);
+  });
+
+  it("agents/profiles — every AGENT_PROFILE_KNOWN_KEYS entry appears in section 4", () => {
+    const text = section("4. `agents/profiles/<id>.md` (org templates)");
+    const missing = [...AGENT_PROFILE_KNOWN_KEYS].filter((key) => !documentsKey(text, key));
+    expect(missing, `${DOC_REL} §4 does not document these profile keys`).toEqual([]);
+  });
+});
 
 describe("N19-3: file-formats.md mirrors PACKET_OPTION_KINDS", () => {
   it("enumerates exactly the schema's kinds, in the schema's order", () => {

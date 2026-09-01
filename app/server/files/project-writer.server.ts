@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { freshestContent, rememberWrite } from "./write-cache.server";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import type {
   ParsedProjectFile,
@@ -6,7 +7,6 @@ import type {
 } from "~/schemas/project-file.schema";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
-import { logger } from "~/server/logging/logger.server";
 import { writeFileAtomic } from "./atomic-file.server";
 import { withFileLock } from "./file-mutex.server";
 import { projectDir, projectFilePath } from "./file-store-root.server";
@@ -60,41 +60,22 @@ export function readProjectFile(
  * mtime has not advanced past our write (no EXTERNAL writer since), trust our
  * own write. An external edit bumps mtime and wins as before.
  */
-const lastWritten = new Map<string, { content: string; wroteAtMs: number }>();
-const LAST_WRITTEN_MAX_ENTRIES = 500;
-
 function rememberProjectWrite(absPath: string, content: string): void {
-  if (lastWritten.size >= LAST_WRITTEN_MAX_ENTRIES && !lastWritten.has(absPath)) {
-    const oldest = lastWritten.keys().next().value;
-    if (oldest !== undefined) lastWritten.delete(oldest);
-  }
-  lastWritten.delete(absPath);
-  lastWritten.set(absPath, { content, wroteAtMs: Date.now() });
+  rememberWrite(absPath, content);
 }
 
+/** See write-cache.server — the shared VirtioFS read-your-own-writes repair. */
 function repairStaleProjectRead(
   absPath: string,
   current: ProjectFileReadResult,
   ref: ProjectFileRef,
 ): ParsedProjectFile {
-  const remembered = lastWritten.get(absPath);
-  if (!remembered || current.content === remembered.content) {
-    return current.parsed;
-  }
-  let mtimeMs: number;
-  try {
-    mtimeMs = statSync(absPath).mtimeMs;
-  } catch {
-    return current.parsed;
-  }
-  if (mtimeMs > remembered.wroteAtMs + 100) return current.parsed;
-  logger.warn("stale project-file read repaired from the in-process write cache", {
-    projectSlug: ref.projectSlug,
-    absPath,
+  const content = freshestContent(absPath, current.content, {
+    kind: "project-file",
+    id: ref.projectSlug,
   });
-  return parseProjectFileContent(remembered.content, {
-    fallbackSlug: ref.projectSlug,
-  }).parsed;
+  if (content === current.content) return current.parsed;
+  return parseProjectFileContent(content, { fallbackSlug: ref.projectSlug }).parsed;
 }
 
 export async function updateProjectFile(

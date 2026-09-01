@@ -90,11 +90,14 @@ export function CapabilityMatrixModal({
             Every profile's permissions for each action in {projectName}.
             Delivery (push · open/merge PR) is <b>server-owned</b> and gated
             server-side on the delivering profile's grant, enforced on both
-            backends. On Claude, a supporting agent's read-only tool limits bind.
-            On Codex the file and command limits are advisory (its runs are not
-            process-sandboxed), so the <b>server-side delivery gate</b> is what
-            actually constrains what ships. Web egress stays gated on both. Agent
-            processes share the host, not an OS sandbox.
+            backends. Withholding <b>Execute code or write to the repo</b> binds on
+            both too: Claude drops the write tools, Codex runs a read-only sandbox
+            (ruling 101). The one exception is a Codex profile that withholds it
+            while granting <b>Attach evidence references</b>: its runs keep a
+            writable checkout, tagged "advisory on Codex" below. The scoped delivery
+            commands bind only on Claude, and the <b>server-side delivery gate</b>
+            is what constrains what ships on either backend. Web egress stays gated
+            on both.
           </div>
         </div>
         <button
