@@ -200,7 +200,10 @@ export async function action({ request, params }: Route.ActionArgs) {
       );
       const updated: ProfileMutationSuccess = {
         ok: true,
-        toast: `Profile "${result.name}" updated · changes apply to future assignments`,
+        // D32-12 (pass 32, live VIB-2): a run RESUMED after the save mounts the new
+        // grants at once, so "future assignments" under-promised; the truthful
+        // boundary is the next run (fresh or resumed).
+        toast: `Profile "${result.name}" updated · changes apply from the next run`,
         profileId: result.profileId,
       };
       if (result.notices) updated.notices = result.notices;

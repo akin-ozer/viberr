@@ -788,7 +788,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "run-interrupt": {
         // Real governed action (runs spec §5.1): RBAC admin|maintainer,
         // writes interrupted state + audit event. Idempotent-safe.
-        const result = interruptRun(
+        const result = await interruptRun(
           db,
           { projectSlug, taskKey, runId: String(formData.get("runId") ?? "") },
           actor,

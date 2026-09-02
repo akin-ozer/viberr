@@ -334,6 +334,21 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     expect(ta?.readOnly).toBe(true);
     // The note names every locked section and its exact unlock variable.
     const note = container.querySelector(".pol-note");
+    // D04-U9 (pass 32): a locked group is a NAMED read-only group that points
+    // at the note, so assistive tech learns both that the chips are not
+    // toggles and why. Canary: drop `aria-describedby` and this goes red.
+    expect(note?.id).toBe("controller-lock-note");
+    const skillGroup = getByText("Skills").closest(".ctx-group")!;
+    expect(skillGroup.getAttribute("role")).toBe("group");
+    expect(skillGroup.getAttribute("aria-label")).toBe(
+      "Skills (locked on this deployment)",
+    );
+    expect(skillGroup.getAttribute("aria-describedby")).toBe("controller-lock-note");
+    // D04-U8: the lead, read before the note, no longer promises an editable
+    // tab over locked sections.
+    expect(container.textContent).toContain(
+      "which only org admins can do, and this deployment locks some sections (named below).",
+    );
     for (const label of [
       "skill grants",
       "MCP server grants",
@@ -389,6 +404,7 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     expect(
       container.querySelectorAll(".ctx-group button.pick-chip").length,
     ).toBeGreaterThan(0);
+
     expect(container.querySelector("textarea")?.readOnly).toBe(true);
     const note = container.querySelector(".pol-note");
     expect(note?.textContent).toContain("instructions");
@@ -399,9 +415,15 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
   });
 
   it("no note and full editability when the deployment unlocked everything", () => {
-    const { container } = renderPanel({}, ["qa-echo"], UNLOCKED);
+    const { container, getByText } = renderPanel({}, ["qa-echo"], UNLOCKED);
     expect(container.querySelector(".pol-note")).toBeNull();
     expect(container.querySelector("textarea")?.readOnly).toBe(false);
+    // D04-U8/U9: no lock, no lock clause in the lead and a plainly named group.
+    expect(container.textContent).toContain("which only org admins can do.");
+    const skillGroup = getByText("Skills").closest(".ctx-group")!;
+    expect(skillGroup.getAttribute("role")).toBe("group");
+    expect(skillGroup.getAttribute("aria-label")).toBe("Skills");
+    expect(skillGroup.getAttribute("aria-describedby")).toBeNull();
   });
 
   it("a dangling grant under a lock is disclosed but not removable", () => {

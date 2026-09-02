@@ -142,14 +142,11 @@ describe("app.css custom properties (P13-D-18)", () => {
     // The panel that D-18 found rendering completely unstyled.
     // `.sched-controls select` used to be checked here too; P16-UI-05 folded it
     // into the one app-wide `select` rule, which the next test locks instead.
-    // Pass 30 split the pin: .sched-note is a textarea, so its resting
-    // boundary is EXACTLY the 3:1 --border-control token (a 3-way alternation
-    // would let it silently fall back to the decorative 1.64:1 --border); the
-    // row/form frames stay decorative.
+    // D04-U5 (pass 32): the schedule FORM (`.sched-form`, `.sched-note`) is
+    // gone from the markup, so its rules went with it — only the pending-row
+    // frame remains to pin.
     for (const [selector, borderRe] of [
       [".sched-row", /border(-top)?:\s*1px solid var\(--(hairline|border)\)/],
-      [".sched-form", /border(-top)?:\s*1px solid var\(--(hairline|border)\)/],
-      [".sched-note", /border:\s*1px solid var\(--border-control\)/],
     ] as const) {
       const rule = CODE.match(
         new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
@@ -179,6 +176,17 @@ describe("app.css utility classes (P13-D-19)", () => {
     // The stylesheet is the source of truth for the vocabulary: if these ever
     // appear, the TSX assertion in task-detail-components.test.tsx is moot.
     expect(CODE).not.toMatch(/\.btn-(primary|ghost|danger)\b/);
+  });
+
+  it("keeps the retired schedule-form and owner-role rules out (D04-U5)", () => {
+    // The class-coverage gate below is one-directional (markup → rule), so a
+    // rule whose emitter was deleted lingers unnoticed: `.sched-form`,
+    // `.sched-controls`, `.sched-note(-inline)` and `.own-role` outlived the
+    // schedule form and the owner-role tag by several passes. Pinned by name
+    // rather than by a reverse gate, because the sheet legitimately styles
+    // states no static markup names (`.on`, `.leaving`, runtime-composed
+    // prefixes).
+    expect(CODE).not.toMatch(/\.(sched-form|sched-controls|sched-note|sched-note-inline|own-role)\b/);
   });
 });
 

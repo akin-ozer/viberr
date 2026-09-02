@@ -209,7 +209,7 @@ svg.ico { width: 16px; height: 16px; flex: none; }
    <select> — the one treatment (P16-UI-05).
 
    The design system shipped without a select rule, so four ad-hoc ones grew:
-   `.op-sel`, `.sched-controls select`, `.fm-toolbar select`, plus an inline
+   `.op-sel`, the (since removed) schedule form's select, `.fm-toolbar select`, plus an inline
    `selectStyle` in create-profile-modal.tsx that says so in a comment. This is
    the missing base, and it deliberately mirrors `.field input` — same border
    token, same radius, same surface, same focus ring — so a select reads as a
@@ -1742,29 +1742,18 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .composer-foot { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; }
 
-/* O-3 — scheduled operator re-runs
-   P13-D-18: this whole panel referenced var(--line) and var(--panel), neither of
-   which exists, so every declaration below was dropped and the rows, the form
-   divider, the three selects and the note input rendered with no border and no
-   background in both themes. --line -> --hairline for the row/divider (the
-   app's divider token, cf. .kv-row/.stg-row) and --border + --surface for the
-   form controls, matching `.field input`. */
+/* O-3 — scheduled operator re-runs (the pending-schedule rows; the old
+   schedule form, its selects and note input were removed — D04-U5).
+   P13-D-18: this panel referenced var(--line) and var(--panel), neither of
+   which exists, so every declaration was dropped and the rows rendered with no
+   border in both themes. --line -> --hairline (the app's divider token, cf.
+   .kv-row/.stg-row). */
 .sched-list { list-style: none; margin: 0 0 .5rem; padding: 0; display: flex; flex-direction: column; gap: .375rem; }
 .sched-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .5rem .75rem; padding: .5rem .5rem; border: 1px solid var(--hairline); border-radius: var(--radius-button); }
 .sched-when { display: inline-flex; align-items: center; gap: .375rem; font-family: var(--font-mono); font-size: .8rem; font-weight: 600; }
 .sched-when .ico, .sched-when svg { width: 13px; height: 13px; color: var(--agent-dark); }
 .sched-meta { grid-column: 1 / -1; font-size: .74rem; color: var(--placeholder); }
 .sched-cancel { grid-row: 1; grid-column: 3; }
-.sched-form { display: flex; flex-direction: column; gap: .5rem; border-top: 1px solid var(--hairline); padding-top: .5rem; }
-.sched-controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
-.sched-controls .flabel { display: inline-flex; flex-direction: column; gap: .25rem; }
-/* R22: the scheduled run follows the deployed operator profile — a quiet note
-   in place of the removed backend/autonomy pickers. */
-.sched-note-inline { margin: 0; color: var(--muted); font-size: .86rem; }
-/* P16-UI-05: the three selects in this panel are the base `select` rule now —
-   the border/surface pair D-18 restored here is declared once, at the top. */
-.sched-note { padding: .375rem .5rem; border-radius: var(--radius-button); border: 1px solid var(--border-control); background: var(--surface); color: inherit; }
-.sched-note::placeholder { color: var(--placeholder); }
 .mention { color: var(--agent-dark); font-weight: 700; background: var(--agent-soft); padding: .02rem .25rem; border-radius: var(--radius-small); }
 /* P16-UI-20: the chip carries its meaning in COLOUR alone — in a comment body
    read aloud, "@Selin" was indistinguishable from the word "Selin". The
@@ -2444,8 +2433,33 @@ dialog[data-closing]::backdrop {
 .pol-note {
   display: flex; gap: .5rem; align-items: flex-start;
   font-size: .8rem; color: var(--faint); line-height: 1.5;
-  margin-bottom: 1rem;
+  /* D04-U4: the shorthand, not `margin-bottom` — one emitter is a <p>
+     (controller-admin-panel.tsx) and would otherwise keep the UA top margin
+     inside its flex column. */
+  margin: 0 0 1rem;
 }
+/* D32-10: the Policy page's cross-role rules as a short list, not a nine-line
+   paragraph. Lives under .pol-note so it inherits its size and colour. */
+.pol-note .pol-rules { margin: .375rem 0 0; padding-left: 1.1rem; display: grid; gap: .3rem; }
+
+/* E32-6 — Policy → Guardrails card. One row per project.md guardrail: the
+   label + sentence on the left, the control (toggle, number field, or an
+   inert pointer) on the right; the same divider rhythm as .trans-row. */
+.guard-list { display: flex; flex-direction: column; }
+.guard-row {
+  display: flex; align-items: center; gap: 1rem;
+  padding: .75rem 0;
+  border-bottom: 1px solid var(--hairline);
+  flex-wrap: wrap;
+}
+.guard-row:last-child { border-bottom: 0; }
+.guard-main { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: .2rem; }
+.guard-name { font-family: var(--font-display); font-weight: 800; font-size: .86rem; display: inline-flex; align-items: center; gap: .5rem; }
+.guard-desc { font-size: .8rem; color: var(--faint); line-height: 1.4; }
+.guard-ctl { display: inline-flex; align-items: center; gap: .5rem; font-size: .8rem; color: var(--muted); }
+.guard-ctl input[type="number"] { width: 5.5rem; }
+.guard-toggle { display: inline-flex; align-items: center; gap: .5rem; font-family: var(--font-body); font-size: .8rem; color: var(--muted); }
+.guard-row.inert .guard-name, .guard-row.inert .guard-desc { color: var(--placeholder); }
 .pol-note .ico { width: 14px; height: 14px; flex: none; margin-top: .125rem; color: var(--placeholder); }
 .pol-note strong { color: var(--fg); }
 .pol-actions { display: flex; gap: .5rem; margin-top: 1rem; }
@@ -3356,7 +3370,6 @@ dialog[data-closing]::backdrop {
 .own-menu .menu-item { width: 100%; border-radius: var(--radius-button); }
 .own-menu .avatar { width: 22px; height: 22px; font-size: .62rem; flex: none; }
 .own-lbl { font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); padding: .5rem .5rem .25rem; }
-.own-role { margin-left: auto; font-size: .68rem; font-weight: 600; color: var(--faint); }
 .own-x {
   display: grid; place-items: center;
   width: 20px; height: 20px; margin-left: .25rem;

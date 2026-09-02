@@ -19,7 +19,8 @@ export type PcapProfile = MatrixProfile & { role: string };
 import { CapabilityMatrixModal } from "~/features/agents/capability-matrix-modal";
 import { GOVERNED_CAP_LABELS, MODE_LABEL } from "~/features/agents/capability-catalog";
 import type { MembershipView } from "~/features/project-settings/membership.server";
-import type { PolicyViewData, TransitionView } from "./policy-query.server";
+import type { GuardrailView, PolicyViewData, TransitionView } from "./policy-query.server";
+import type { GuardrailOp } from "./policy-actions.server";
 import {
   ALWAYS_HUMAN_ROWS,
   BCLS,
@@ -233,32 +234,50 @@ export function HumanAccess({
           </tbody>
         </table>
       </div>
+      {/* D32-10 (pass 32): four rules, four items — this was one nine-line
+          paragraph. Same facts, same emphasis; only the shape changed. */}
       <div className="pol-note after">
         <Icon name="message" />
         <span>
-          Rules that reach beyond project roles:{" "}
-          <strong>this project is members-only</strong>. The table above says
-          what a member may do, and someone who is not a member is not merely
-          refused: every page and every action, comments included, answers as if
-          the project did not exist, so even its existence stays private.{" "}
-          <strong>Contributors and above</strong> may{" "}
-          <strong>take or release their own task ownership</strong> (viewers are
-          read + comment only; the owner is the task's human reviewer and
-          acceptance authority, scoped to that task: a contributor who owns a
-          task <strong>may accept its completion</strong>, and{" "}
-          {/* N20-7: the owner exception covered acceptance but not the operator's
-              other packet options — task-actions.server.ts lets an owner resolve
-              the non-acceptance options too, an authority no surface stated. */}
-          <strong>
-            may resolve the non-acceptance options on a decision packet the
-            operator raises on that task
-          </strong>
-          , even though the table reserves those columns for maintainers).{" "}
-          <strong>Admins may release any owner</strong> (recorded in the audit
-          trail). And <strong>org admins hold emergency project-admin
-          authority on every project</strong>, even without membership, with
-          every override recorded in the audit trail as{" "}
-          <em>org-admin override</em>.
+          Rules that reach beyond project roles:
+          <ul className="pol-rules">
+            <li>
+              <strong>This project is members-only</strong>. The table above
+              says what a member may do; someone who is not a member is not
+              merely refused: every page and every action, comments included,
+              answers as if the project did not exist, so even its existence
+              stays private.
+            </li>
+            <li>
+              <strong>Contributors and above</strong> may{" "}
+              <strong>take or release their own task ownership</strong>{" "}
+              (viewers are read + comment only). The owner is the task&apos;s
+              human reviewer and acceptance authority, scoped to that task: a
+              contributor who owns a task{" "}
+              <strong>may accept its completion</strong>, and{" "}
+              {/* N20-7: the owner exception covered acceptance but not the
+                  operator's other packet options — task-actions.server.ts lets
+                  an owner resolve the non-acceptance options too, an authority
+                  no surface stated. */}
+              <strong>
+                may resolve the non-acceptance options on a decision packet
+                the operator raises on that task
+              </strong>
+              , even though the table reserves those columns for maintainers.
+            </li>
+            <li>
+              <strong>Admins may release any owner</strong> (recorded in the
+              audit trail).
+            </li>
+            <li>
+              <strong>
+                Org admins hold emergency project-admin authority on every
+                project
+              </strong>
+              , even without membership, with every override recorded in the
+              audit trail as <em>org-admin override</em>.
+            </li>
+          </ul>
         </span>
       </div>
     </div>
@@ -620,6 +639,154 @@ export function WorkflowRules({
   );
 }
 
+// -------------------------------------------------------------- guardrails
+
+/** The set-guardrail form fields (project.policy.tsx action). A type alias,
+ *  not an interface: the fetcher's SubmitTarget wants an index-signature-
+ *  compatible object literal type. */
+type GuardrailSubmit = {
+  intent: "set-guardrail";
+  _csrf: string;
+  id: string;
+  op: GuardrailOp;
+  value?: string;
+};
+
+/**
+ * E32-6 (pass 32, owner ruling): the anti-noise guardrails (project.md
+ * `guardrails`, enforced live by comment-guardrails.server.ts and the
+ * compaction pass) get their in-app surface here. One row per guardrail: a
+ * toggle for the enforced set, a number field for the one carrying a unit
+ * (compression-threshold), and inert rows for what this card does not own —
+ * the branch-cleanup row (Settings → GitHub) and any retired/unknown id,
+ * which is removable so a stale hand edit does not linger as a phantom rule.
+ */
+export function Guardrails({
+  guardrails,
+  canManage,
+  busy,
+  onSet,
+}: {
+  guardrails: GuardrailView[];
+  canManage: boolean;
+  busy: boolean;
+  onSet: (id: string, op: GuardrailOp, value?: number) => void;
+}) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const enforced = guardrails.filter((g) => g.kind === "default");
+  const on = enforced.filter((g) => g.on).length;
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="shield" />
+        <h2>Guardrails</h2>
+        <span className="right sub fine">
+          {on} of {enforced.length} enforced guardrails on
+        </span>
+      </div>
+      <div className="pol-note">
+        <Icon name="message" />
+        <span>
+          Anti-noise rules the timeline enforces on agent writes: a rejected
+          comment never reaches the record, and compaction keeps every typed
+          event. Changes apply from the next agent comment or compaction pass.
+        </span>
+      </div>
+      {!canManage && (
+        <p className="deny-note before">
+          <Icon name="lock" />
+          Read-only: changing a guardrail needs the{" "}
+          <strong>Edit workflow &amp; policy</strong> grant (project admin).
+        </p>
+      )}
+      <div className="guard-list">
+        {guardrails.map((g) => {
+          const inert = g.kind !== "default";
+          const draft = drafts[g.id] ?? (g.value === null ? "" : String(g.value));
+          const draftValue = Number(draft);
+          const valueChanged =
+            draft.trim() !== "" && Number.isInteger(draftValue) && draftValue > 0 && draftValue !== g.value;
+          return (
+            <div className={"guard-row" + (inert ? " inert" : "")} key={g.id}>
+              <div className="guard-main">
+                <span className="guard-name">
+                  {g.label}
+                  {!g.present && (
+                    <Pill kind="neutral" sm>
+                      not in project.md
+                    </Pill>
+                  )}
+                  {g.kind === "unknown" && (
+                    <Pill kind="neutral" sm>
+                      nothing reads this
+                    </Pill>
+                  )}
+                </span>
+                <span className="guard-desc">
+                  {g.desc || (g.kind === "unknown" ? "A guardrail id the runtime does not know." : "")}
+                </span>
+              </div>
+              {g.kind === "default" && (
+                <label className="guard-toggle">
+                  <input
+                    type="checkbox"
+                    checked={g.on}
+                    disabled={!canManage || busy}
+                    aria-label={`${g.label} guardrail`}
+                    onChange={(e) => onSet(g.id, e.target.checked ? "on" : "off")}
+                  />
+                  {g.on ? "on" : "off"}
+                </label>
+              )}
+              {g.kind === "default" && g.unit !== null && (
+                <span className="guard-ctl">
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={draft}
+                    disabled={!canManage || busy}
+                    aria-label={`${g.label} value (${g.unit})`}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [g.id]: e.target.value }))}
+                  />
+                  {g.unit}
+                  <button
+                    type="button"
+                    className="btn sm"
+                    disabled={!canManage || busy || !valueChanged}
+                    onClick={() => onSet(g.id, "value", draftValue)}
+                  >
+                    Apply
+                  </button>
+                </span>
+              )}
+              {g.kind === "github" && (
+                <span className="guard-ctl">
+                  {g.on ? "on" : "off"} · managed on Settings → GitHub
+                </span>
+              )}
+              {g.kind === "unknown" && (
+                <span className="guard-ctl">
+                  {g.on ? "on" : "off"}
+                  <button
+                    type="button"
+                    className="btn ghost sm danger"
+                    disabled={!canManage || busy}
+                    onClick={() => onSet(g.id, "remove")}
+                  >
+                    <Icon name="x" />
+                    Remove
+                  </button>
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------- page
 
 export function PolicyPage({
@@ -635,8 +802,10 @@ export function PolicyPage({
   const csrf = useCsrfToken();
   const roleFetcher = useFetcher<ActionResult>();
   const boundaryFetcher = useFetcher<ActionResult>();
+  const guardFetcher = useFetcher<ActionResult>();
   useActionToast(roleFetcher);
   useActionToast(boundaryFetcher);
+  useActionToast(guardFetcher);
   const [matrixOpen, setMatrixOpen] = useState(false);
 
   // P14-UI-58: ONE `canManage` gated both segs on `edit-policy`, but the two
@@ -648,7 +817,9 @@ export function PolicyPage({
   const canSetRole = roleCan(myRole, "manage-members");
   const canEditPolicy = roleCan(myRole, "edit-policy");
   const busy =
-    roleFetcher.state !== "idle" || boundaryFetcher.state !== "idle";
+    roleFetcher.state !== "idle" ||
+    boundaryFetcher.state !== "idle" ||
+    guardFetcher.state !== "idle";
 
   const onSetRole = (member: MembershipView, role: ProjectRole) => {
     roleFetcher.submit(
@@ -664,6 +835,11 @@ export function PolicyPage({
       { intent: "set-boundary", _csrf: csrf, from: t.from, to: t.to, boundary },
       { method: "post" },
     );
+  };
+  const onSetGuardrail = (id: string, op: GuardrailOp, value?: number) => {
+    const fields: GuardrailSubmit = { intent: "set-guardrail", _csrf: csrf, id, op };
+    if (value !== undefined) fields.value = String(value);
+    guardFetcher.submit(fields, { method: "post" });
   };
 
   return (
@@ -717,6 +893,13 @@ export function PolicyPage({
           busy={busy}
           onSetBoundary={onSetBoundary}
           operator={operatorAutonomyState(data.profiles)}
+        />
+
+        <Guardrails
+          guardrails={data.guardrails}
+          canManage={canEditPolicy}
+          busy={busy}
+          onSet={onSetGuardrail}
         />
       </div>
 

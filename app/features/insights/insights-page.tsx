@@ -224,7 +224,9 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         icon="shield"
         sub={
           g.coordination.totalCostUsd > 0
-            ? `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)} reported`
+            ? // D04-U12 (pass 32): name the denominator — cost-REPORTING runs
+              // only, the way "Total cost" above discloses its subset.
+              `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)} reported by cost-reporting runs`
             : "no run has reported a cost yet"
         }
       />
@@ -352,7 +354,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                     // timezone, and React re-renders rather than patching it.
                     title={
                       hydrated
-                        ? `run ${refusal.runId} was refused $${formatDayDotTime(refusal.observedAt)}: ${refusal.providerText}`
+                        ? `run ${refusal.runId} was refused ${formatDayDotTime(refusal.observedAt)}: ${refusal.providerText}`
                         : undefined
                     }
                   >

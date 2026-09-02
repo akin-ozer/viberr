@@ -42,7 +42,7 @@
 
 **Goal (chained goal)** — one outcome decomposed into an ordered chain of tasks, canonical at `projects/<slug>/goals/<id>.md` (`status` `active | paused | attention | completed | cancelled`, `onFailure` `pause | continue`, links with `pending | active | done | failed | skipped`). Tasks are created lazily as links complete; each task carries `goalRef`.
 
-**Guardrails** — per-project anti-noise rows in `project.md`: `meaningful-comment`, `no-duplicate-summary`, `compression-threshold` (default 40 events), `evidence-separation`; plus the `delete-branch-after-merge` row the branch-cleanup policy reads. `operator-brevity` was removed (ruling 104).
+**Guardrails** — per-project anti-noise rows in `project.md`: `meaningful-comment`, `no-duplicate-summary`, `compression-threshold` (default 40 events), `evidence-separation`; plus the `delete-branch-after-merge` row the branch-cleanup policy reads. `operator-brevity` was removed (ruling 104). Edited on Policy → Guardrails (toggle, threshold value, removal of retired rows; ruling 112); the branch-cleanup row is edited on Settings → GitHub.
 
 **Guest** — a registered user who is not a member of the surrounding project. Renders as a pill on their comments.
 

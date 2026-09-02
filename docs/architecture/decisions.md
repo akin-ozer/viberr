@@ -1791,8 +1791,16 @@ the quieter packet or the bare owner cell as drift.)*
     a hand edit of `project.md`. They get a **Guardrails card under Policy**: a toggle
     per guardrail, a number field for the compression threshold, an audit row on every
     change, and retired or unknown rows (the inert pre-104 `operator-brevity` row, for
-    instance) shown inert and removable rather than hidden. Ruled 2026-09-02;
-    implementation lands in the pass-32 cluster E work.
+    instance) shown inert and removable rather than hidden. Ruled 2026-09-02; landed
+    in pass 32 cluster E: one row per `guardrails` entry — a toggle for an enforced row,
+    a number field for the one carrying a `unit`, inert rows for what the card does not
+    own (the `delete-branch-after-merge` row stays on Settings → GitHub and is refused
+    here, one fact one editor; a retired/unknown id reads "nothing reads this" and is
+    removable). An enforced row the file lacks renders OFF with "not in project.md" and
+    turning it on writes the shipped row. `edit-policy` tier, audited as
+    `project.policy.guardrail_changed` (before/after in the details), reprojected, and
+    rendered as a sentence in the Activity audit panel. (`setGuardrail` in
+    `app/features/policy/policy-actions.server.ts`, `Guardrails` in `policy-page.tsx`.)
 
 113. **ONE UI vocabulary for capability modes (owner, 2026-09-02).** The same stored
     mode was rendered three ways — "Allowed" on the project profile editor's radios,

@@ -112,7 +112,15 @@ function GrantChips({
     ? options.filter((o) => granted.has(o.id))
     : options;
   return (
-    <div className="ctx-group">
+    // D04-U9 (pass 32): a locked group rendered its granted chips as bare
+    // spans — nothing told a screen reader these are not toggles, or why.
+    // The group is named, and a locked one points at the lock note.
+    <div
+      className="ctx-group"
+      role="group"
+      aria-label={locked ? `${label} (locked on this deployment)` : label}
+      aria-describedby={locked ? LOCK_NOTE_ID : undefined}
+    >
       <span className="ctx-lbl">
         {label}
         {locked && <Icon name="lock" className="lbl-lock" />}
@@ -181,6 +189,9 @@ function GrantChips({
     </div>
   );
 }
+
+/** The lock note's element id — locked grant groups point at it (D04-U9). */
+const LOCK_NOTE_ID = "controller-lock-note";
 
 export function ControllerAdminPanel({
   config,
@@ -280,7 +291,13 @@ export function ControllerAdminPanel({
       <p className="fine dim">
         One controller manages this instance. Anyone can talk to it; every
         action it takes runs under the asking person's own permissions. This
-        tab configures the controller itself, which only org admins can do.
+        tab configures the controller itself, which only org admins can do
+        {/* D04-U8 (pass 32): the lead is read first; when a deployment locks
+            sections, say so here instead of promising an editable tab and
+            walking it back in the note below. */}
+        {lockedSections.length > 0
+          ? ", and this deployment locks some sections (named below)."
+          : "."}
       </p>
       {!config.profilePresent && (
         <p className="deny-note">
@@ -295,7 +312,7 @@ export function ControllerAdminPanel({
         </p>
       )}
       {lockedSections.length > 0 && (
-        <p className="pol-note">
+        <p className="pol-note" id={LOCK_NOTE_ID}>
           <Icon name="lock" />
           <span>
             Locked here on this deployment:{" "}

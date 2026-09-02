@@ -101,7 +101,8 @@ ctx.cleanup();
 - Operator narration is stored **verbatim** (no write-time length cap, ruling 104);
   length is handled view-side by `CollapsibleComment`. The other guardrails
   (`meaningful-comment`, `evidence-separation`, `no-duplicate-summary`,
-  `compression-threshold`) are enforced per project through `project.md` `guardrails`.
+  `compression-threshold`) are enforced per project through `project.md` `guardrails`,
+  edited on the Policy page's Guardrails card (ruling 112).
 - Never mutate `node_modules` while `vitest run` is in flight (it once produced 688
   phantom failures).
 

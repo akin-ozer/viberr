@@ -135,13 +135,13 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
   for (const run of listRunsForTaskRows(store.db, store.slug, "VIB-1")) {
     if (run.state === "running" || run.state === "queued") {
       try {
-        interruptRun(
+        await interruptRun(
           store.db,
-          { projectSlug: store.slug, taskKey: "VIB-1", runId: run.id },
+          { projectSlug: store.slug, taskKey: "VIB-1", runId: run.id, dataRoot: store.dataRoot },
           { userId: store.users.arda.id, label: store.users.arda.email },
         );
       } catch {

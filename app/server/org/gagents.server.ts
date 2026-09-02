@@ -48,6 +48,11 @@ export interface GagentView {
    * actually reads never changed.
    */
   summary: string;
+  /** The role line (frontmatter `role`) a deployed copy renders under its name.
+   *  D32-7 (pass 32): this editor had no role field, so every template saved
+   *  here carried its NAME as its role and read as the generic "Agent profile"
+   *  on every card, while seeded templates showed a real role. */
+  role: string;
   /** The markdown body — the agent's persona / system-prompt material. */
   persona: string;
   stages: string[];
@@ -149,6 +154,7 @@ function toView(
     // `desc` is the blurb; the body is the persona. Fall back to the body only
     // when a legacy template carries no `desc` at all.
     summary: fm.desc.trim() || parsed.description,
+    role: fm.role,
     persona: parsed.description,
     stages: fm.stages,
     skills: fm.resources.skills,
@@ -200,6 +206,10 @@ export interface SaveGagentInput {
   backend: "codex" | "claude";
   /** Short operator-facing blurb → frontmatter `desc`. */
   summary: string;
+  /** Role line → frontmatter `role` (D32-7). Blank keeps the stored role on an
+   *  edit and falls back to the name on create — the pre-pass-32 behaviour,
+   *  kept for scripted callers; the modal always sends one. */
+  role?: string;
   /** Persona / system-prompt material → the markdown body. */
   persona: string;
   stages: string[];
@@ -246,7 +256,7 @@ export function saveGlobalAgentProfile(
       frontmatter: {
         ...existing.frontmatter,
         name,
-        role: existing.frontmatter.role || name,
+        role: input.role?.trim() || existing.frontmatter.role || name,
         desc: input.summary.trim(),
         backends: [backend],
         stages: input.stages,
@@ -290,7 +300,7 @@ export function saveGlobalAgentProfile(
       id,
       kind: "specialist",
       name,
-      role: name,
+      role: input.role?.trim() || name,
       // Short scannable description for operator selection.
       desc: input.summary.trim(),
       icon: "cpu",

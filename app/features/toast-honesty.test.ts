@@ -8,8 +8,9 @@ import { describe, expect, it } from "vitest";
  *
  * decisions.md §UI porting rules, stated as a rule: *"A failure toast must not
  * render the success tick — pass the toast kind explicitly."* The toast icon is
- * the WHOLE signal (both kinds paint `var(--fg)`; only the glyph differs —
- * `app/ui/toast.tsx`), so a refusal pushed with the default `"success"` kind
+ * the WHOLE signal (the message text is the same for both kinds; the glyph
+ * and, since P13-D-10, its colour differ — `app/ui/toast.tsx`, the `.toast`
+ * icon rules in app.css), so a refusal pushed with the default `"success"` kind
  * renders a green check over a message that says the action was refused.
  *
  * The rule existed and was written down, and ~10 client-side `push(...)` sites

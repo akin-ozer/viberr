@@ -350,7 +350,7 @@ function ModalHead({
             ? "A reusable agent the operator can assign to tasks."
             : forksTemplate
               ? `Saving forks this profile for ${projectName}: it keeps its own copy and stops tracking later changes to the global profile.`
-              : "Update this project's copy. Changes apply to future assignments."}
+              : "Update this project's copy. Changes apply from the next run."}
         </div>
       </div>
       <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">

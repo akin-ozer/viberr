@@ -274,9 +274,11 @@ describe("governed actions record audit rows (table-driven)", () => {
             dataRoot: store.dataRoot,
           });
           for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
-          interruptRun(
+          // D32-18: interruptRun also notes the interrupt on the task timeline,
+          // so it is async and needs the store's data root.
+          await interruptRun(
             store.db,
-            { projectSlug: store.slug, taskKey: "VIB-1", runId },
+            { projectSlug: store.slug, taskKey: "VIB-1", runId, dataRoot: store.dataRoot },
             actorArda(),
           );
         },

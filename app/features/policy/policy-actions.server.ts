@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { DEFAULT_GUARDRAILS } from "~/shared/workflow/templates";
+import { guardrailKind, guardrailLabel } from "~/shared/workflow/guardrail-labels";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { PROJECT_ROLES, BOUNDARY_VALUES } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
@@ -252,6 +254,154 @@ export async function setTransitionBoundary(
     subjectId: `${input.from}>${input.to}`,
     projectSlug: input.projectSlug,
     details: { from: fromName, to: toName, boundary },
+  });
+  return { toast, changed: true };
+}
+
+// ---------------------------------------------------------------- guardrails
+
+/** What the Guardrails card can do to one project.md `guardrails` row. */
+export const GUARDRAIL_OPS = ["on", "off", "value", "remove"] as const;
+export type GuardrailOp = (typeof GUARDRAIL_OPS)[number];
+
+interface GuardrailBefore {
+  on: boolean;
+  value: number | null;
+}
+interface GuardrailBeforeRef {
+  current: GuardrailBefore | null;
+}
+
+export interface SetGuardrailInput {
+  projectSlug: string;
+  id: string;
+  op: string;
+  /** `value` op only: the new numeric setting (e.g. the compression threshold). */
+  value?: string;
+}
+
+/**
+ * E32-6 (pass 32, owner ruling): the anti-noise guardrails (`app/shared/
+ * workflow/templates.ts` DEFAULT_GUARDRAILS; read live by
+ * comment-guardrails.server.ts) had NO in-app surface — the only way to
+ * toggle one, or change the compression threshold, was a hand edit of
+ * project.md. This is the one write behind the Policy → Guardrails card.
+ *
+ * `edit-policy` tier, like the boundary editor: what the timeline keeps is
+ * policy. Rules:
+ *  - `on`/`off` on a DEFAULT id whose row the file lacks ADDS the shipped row
+ *    (projects created before the defaults, or a hand edit that dropped one).
+ *  - `value` needs a positive integer and a row that carries a `unit`
+ *    (today: compression-threshold); it never turns a row on or off.
+ *  - `remove` is for retired/unknown ids only — a default row is toggled,
+ *    never deleted, so the card can always show the full enforced set.
+ *  - The branch-cleanup row is owned by Settings → GitHub (setBranchCleanup)
+ *    and refused here, so one fact has one editor.
+ */
+export async function setGuardrail(
+  db: DatabaseSync,
+  input: SetGuardrailInput,
+  actor: PolicyActor,
+  ctx: PolicyMutationContext = {},
+): Promise<{ toast: string; changed: boolean }> {
+  requirePolicyAction(db, ctx, "edit-policy", input.projectSlug, actor, "edit workflow & policy");
+  const parsedOp = z.enum(GUARDRAIL_OPS).safeParse(input.op);
+  if (!parsedOp.success) throw AppError.validation("Unknown guardrail action.");
+  const op = parsedOp.data;
+  const id = input.id.trim();
+  if (!id) throw AppError.validation("Which guardrail?");
+  const label = guardrailLabel(id);
+  const kind = guardrailKind(id);
+  if (kind === "github") {
+    throw AppError.validation(
+      `${label} is managed on Settings → GitHub, not here.`,
+    );
+  }
+  if (op === "remove" && kind === "default") {
+    throw AppError.validation(
+      `${label} is one of the enforced guardrails: turn it off, it cannot be removed.`,
+    );
+  }
+  let value: number | null = null;
+  if (op === "value") {
+    const parsedValue = z.coerce.number().int().positive().safeParse(input.value);
+    if (!parsedValue.success) {
+      throw AppError.validation(`${label} needs a whole number above zero.`);
+    }
+    value = parsedValue.data;
+  }
+
+  const ref = { projectSlug: input.projectSlug, dataRoot: ctx.dataRoot };
+  let changed = false;
+  // A ref, not a `let`: TypeScript narrows a closure-assigned local to its
+  // initialiser at the read below (the WithdrawnPacketRef lesson).
+  const before: GuardrailBeforeRef = { current: null };
+  await updateProjectFile(ref, (parsed) => {
+    const rows = parsed.frontmatter.guardrails;
+    const at = rows.findIndex((g) => g.id === id);
+    const row = at === -1 ? null : rows[at]!;
+    if (row) before.current = { on: row.on, value: row.value ?? null };
+    if (op === "remove") {
+      if (!row) return; // already gone — no-op
+      rows.splice(at, 1);
+      changed = true;
+      return;
+    }
+    if (!row) {
+      const shipped = DEFAULT_GUARDRAILS.find((d) => d.id === id);
+      if (!shipped) {
+        throw AppError.validation(`No guardrail named ${id} on this project.`);
+      }
+      if (op === "value" && shipped.unit === undefined) {
+        throw AppError.validation(`${label} has no numeric setting.`);
+      }
+      rows.push(
+        op === "value"
+          ? { ...shipped, value: value! }
+          : { ...shipped, on: op === "on" },
+      );
+      changed = true;
+      return;
+    }
+    if (op === "value") {
+      if (row.unit === undefined) {
+        throw AppError.validation(`${label} has no numeric setting.`);
+      }
+      if (row.value === value) return; // no-op
+      row.value = value!;
+      changed = true;
+      return;
+    }
+    const on = op === "on";
+    if (row.on === on) return; // no-op
+    row.on = on;
+    changed = true;
+  });
+
+  const unit = DEFAULT_GUARDRAILS.find((d) => d.id === id)?.unit ?? "";
+  const toast =
+    op === "remove"
+      ? `${label} removed from this project's guardrails`
+      : op === "value"
+        ? `${label}: ${value} ${unit} · applies to the next compaction pass`
+        : `${label}: ${op} · applies from the next agent comment`;
+  if (!changed) return { toast: `${toast.split(" · ")[0]} · already so, nothing changed`, changed: false };
+
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.policy.guardrail_changed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "guardrail",
+    subjectId: id,
+    projectSlug: input.projectSlug,
+    details: {
+      id,
+      label,
+      op,
+      value,
+      beforeOn: before.current?.on ?? null,
+      beforeValue: before.current?.value ?? null,
+    },
   });
   return { toast, changed: true };
 }

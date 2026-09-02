@@ -429,3 +429,104 @@ already moot; those cite where the rebuild fixed them. Gate after the edits:
 `planning/planning-artifacts/prd.md` + `design/prd.md` (byte-identical mirror), `.gitignore`,
 and this file. No file under `app/`, `db/`, `scripts/`, `e2e/`, `test-support/` or `tools/` was
 touched.
+
+
+## Cluster E + F dispositions (implementation, 2026-09-02)
+
+Branch `pass32/implementation`, on top of clusters A–D. Every FIXED item carries a lock; the
+ones marked *canaried* were reverted once to prove the lock goes red.
+
+### Cluster E — UI/UX coherence
+- D32-1 FIXED: "Automatic cleanup runs every 6h…" opens a sentence after the disk line's full stop
+  (org-settings StorageLine); locks retargeted.
+- D32-2 / P07-I FIXED (cluster E part 1): insights dates through `formatDayDotTime` /
+  `formatCalendarDate` / `utcDayKey(...) + " (UTC)"`. A `$${…}` template slip in the first edit
+  rendered "was refused $<date>" — caught on re-read, fixed, and the refusal title is locked
+  (`insights-page.test.tsx`, regex over the formatter's real shapes).
+- D32-3 FIXED (part 1): `pageTitle(...)` + `meta` on every route, locked by
+  `app/routes/page-titles.test.ts`.
+- D32-5 FIXED (part 1): `.mini-seg button.on:hover` restores the selected colour; gate + canary.
+- D32-6 FIXED: MCP row counts its noun ("1 tool"); lock.
+- D32-7 FIXED end to end: the global template editor gets a required **Role** field
+  (`agent-template-modal.tsx`), `GagentView.role`, `SaveGagentInput.role` (blank keeps the stored
+  role on edit, falls back to the name on create — the pre-pass-32 behaviour, kept for scripted
+  callers), route field, and `gagents.server.test.ts` round-trip + blank-keeps canary. A stored
+  role that merely repeats the name prefills EMPTY so an admin is invited to give a real one.
+- D32-8 FIXED: an empty capability bucket says "None" under its header (mirrors ResGroup).
+- D32-9 / D32-11 FIXED (part 1): ONE vocabulary (`MODE_LABEL`: Acts directly · Recommends only ·
+  Human-only · Off) on editor radios, cards, matrix and policy counts; the "advisory on Codex"
+  chip is an `mx-scope` chip, not part of the stats sentence.
+- D32-10 FIXED: the cross-role rules are a four-item `.pol-rules` list; lock counts the items.
+- D32-12 FIXED: profile-save toast and editor hint say "from the next run" (a resumed run mounts
+  new grants at once, live VIB-2); locks updated.
+- D32-13 DECIDED-NO-CHANGE (owner): board owner cell keeps its two labels.
+- D32-14 FIXED: `task_events.actor_ref` for agents is `agent/<profileId>` (backend-agnostic), so a
+  fork that ran one leg per backend is ONE actor option and one filter matches both legs; feed
+  locks updated; *canaried*.
+- D32-15 FIXED: the root ErrorBoundary reads `requireRole`'s JSON envelope
+  (`{ error: { message } }`) as page copy, so a non-admin on /org/settings or /insights reads
+  "This area requires the admin role." instead of "Forbidden"; `root.test.tsx` lock, *canaried*.
+- D32-16 FIXED: an archived task's owner seat is frozen — `setOwner` refuses (validation, restore
+  first) and both "Assign me" affordances are withheld when `archived`; server lock *canaried*.
+- D32-18 FIXED: a human interrupt writes a timeline `note` AUTHORED BY the interrupter naming the
+  run and backend ("The thread stays resumable; re-run the agent to continue"). `interruptRun`
+  became async (best-effort note, like the continuity note; controller runs have no task file);
+  every caller awaits (route, 5 test sites, coverage table). Lock in
+  `task-runtime-route.server.test.ts`, *canaried*.
+- D04-U4 FIXED: `.pol-note` uses the `margin` shorthand so the one `<p>` emitter has no UA top
+  margin.
+- D04-U5 FIXED: `.sched-form`, `.sched-controls(.flabel)`, `.sched-note(-inline|::placeholder)`
+  and `.own-role` deleted with their orphaned comments; the P13-D-18 pin now covers the surviving
+  `.sched-row`; a named retired-selector lock added (the coverage gate stays one-directional on
+  purpose — the sheet legitimately styles runtime states no markup names).
+- D04-U6 FIXED: "Retry on {backend}" is `.btn.sm` (secondary), matching pass 30's demotion of
+  every sibling run-start.
+- D04-U7 FIXED: the S3 target form folds behind a summary line + "Edit target" once a target is
+  on file, and "Save target" is secondary either way; two locks.
+- D04-U8 FIXED: the controller tab lead names the lock clause when sections are locked; lock.
+- D04-U9 FIXED: every grant group is `role="group"` with an `aria-label`; a locked one is named
+  "(locked on this deployment)" and `aria-describedby` the lock note (`#controller-lock-note`);
+  locks for both states.
+- D04-U10 = A00-5: handled by the docs sub-batch (ux spec).
+- D04-U11 FIXED: `attachmentDownloadHref(url)` joins the `download=1` flag for any URL shape;
+  the lightbox uses it; unit test covers query and fragment.
+- D04-U12 FIXED: the Coordination overhead sub-text names its denominator ("reported by
+  cost-reporting runs"); lock.
+- A11Y-2 FIXED: the four resource "New"/"Add" buttons carry panel-scoped accessible names.
+- A11Y-1, A11Y-3, A11Y-4, A11Y-5, A11Y-6, A11Y-7, A11Y-8, A11Y-9 VERIFIED-NOT-A-DEFECT: each
+  control's accessible name is computed from its visible content (Local sign-in method, Codex /
+  Claude segment, KB chips by display name with the store path as `title`, library rows, Agents
+  rail rows, Settings tiles, packet option radios, stage `menuitemradio`s, editor accordion
+  headers). The Browser pane's accessibility tree under-reports names built from nested spans
+  (a known tool trap, see memory) — so each is now pinned by an RTL `getByRole(..., { name })`
+  lock in the owning test file, which computes names the way assistive tech does.
+- E32-6 FIXED (owner ruling, recorded under ruling 112 as landed): Policy → **Guardrails** card.
+  `GuardrailView` in the policy view (defaults in shipped order, present or not, then extra file
+  rows), `setGuardrail` (`on|off|value|remove`; adds a missing default row on toggle; `value`
+  needs a positive integer AND a row with a `unit`; `remove` only for unknown ids; the
+  GitHub-owned `delete-branch-after-merge` row refused — one fact, one editor), route intent
+  `set-guardrail`, audit `project.policy.guardrail_changed` (before/after) rendered as a sentence
+  in the Activity audit panel and counted for the "last change" chip, CSS `.guard-*`. Locks:
+  route (RBAC 403, toggle round trip file→projection→audit→toast, idempotent no-op, threshold
+  value + two refusals, remove rules), card (per-kind controls, not-in-project.md pill, read-only
+  note), feed sentences; audit row *canaried*.
+
+### Cluster F — tests & gates
+- P32-T20 FIXED: `testTimeout: 20_000` in `vitest.config.ts`, locked by
+  `app/shared/docs/vitest-config.test.ts`.
+- B06-T3 FIXED — root cause, not a dismissal: the test simulated the VirtioFS stale read as
+  "old content, NEW mtime", which the write-cache repair correctly treats as an external edit
+  (disk wins) whenever the completion's bookkeeping exceeded the 100 ms mtime slack — i.e. a
+  slow CI, not a data-loss race. The simulation now restores the pre-write mtime too (as
+  `task-writer.server.test.ts` always did). The repair heuristic itself is unchanged.
+- B06-T10 FIXED: toast-honesty docblock says the glyph AND its colour differ per kind.
+- B06-T11 FIXED: `app/shared/docs/anti-slop-vendor-sync.test.ts` pins `tools/oxlint/anti-slop/`
+  byte-identical to the skill assets (skipped where `.claude/skills/` is absent, e.g. CI — the
+  assets are not in the repository).
+- B06-T16 FIXED: `liftOver` docblock no longer documents the deleted aim modes.
+- P07-H FIXED: the org-settings audit list's `tabindex=0` + `aria-label` are locked.
+- V11-7 DECIDED-NO-CHANGE: `effect/no-service-constructor-imports` is vendored whole but stays
+  unregistered — Viberr has no Effect services; the vendor-sync test states and asserts this.
+- V11-8 FIXED: `.claude/launch.json` uses `$PWD/docker-data`.
+- Housekeeping from D32-18: `run-service.server.test.ts` interrupt calls pass the store's
+  `dataRoot` so the new note lands instead of logging "task file not found".

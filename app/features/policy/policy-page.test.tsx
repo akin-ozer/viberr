@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { MembershipView } from "~/features/project-settings/membership.server";
 import type { TransitionView } from "./policy-query.server";
-import { AgentCapability, HumanAccess, WorkflowRules, type PcapProfile } from "./policy-page";
+import { AgentCapability, Guardrails, HumanAccess, WorkflowRules, type PcapProfile } from "./policy-page";
+import type { GuardrailView } from "./policy-query.server";
 import { ROLE_IDS, operatorAutonomyState } from "./policy-data";
 
 afterEach(cleanup);
@@ -123,7 +124,10 @@ describe("HumanAccess", () => {
     // anywhere on the surface — cell copy or footnote.
     expect(container.textContent).not.toContain("membership not required");
     expect(container.textContent).not.toContain("member or not");
-    expect(container.textContent).toContain("this project is members-only");
+    // D32-10 (pass 32): the cross-role rules are a four-item list, not a
+    // paragraph — same facts, scannable.
+    expect(container.textContent).toContain("This project is members-only");
+    expect(container.querySelectorAll(".pol-rules li")).toHaveLength(4);
     // N20-7: the owner authority footnote now also documents that an owner may
     // resolve the operator's non-acceptance packet options, not just accept.
     expect(container.textContent).toContain(
@@ -597,5 +601,61 @@ describe("policy panel heads take their count styling from the sheet (F19-33)", 
       />,
     );
     expectSheetStyledCount(container);
+  });
+});
+
+describe("Guardrails card (E32-6, pass 32)", () => {
+  const rows: GuardrailView[] = [
+    { id: "meaningful-comment", label: "Meaningful comments", desc: "Chatter is rejected.", on: true, value: null, unit: null, kind: "default", present: true },
+    { id: "compression-threshold", label: "Compression threshold", desc: "Long timelines compress.", on: true, value: 40, unit: "events", kind: "default", present: true },
+    { id: "evidence-separation", label: "Evidence separation", desc: "Raw output stays in evidence.", on: false, value: null, unit: null, kind: "default", present: false },
+    { id: "delete-branch-after-merge", label: "Delete the task branch after merge", desc: "", on: true, value: null, unit: null, kind: "github", present: true },
+    { id: "operator-brevity", label: "operator-brevity", desc: "", on: true, value: null, unit: null, kind: "unknown", present: true },
+  ];
+
+  it("renders one row per guardrail with the right control per kind", () => {
+    const onSet = vi.fn();
+    const { container, getByText, getByLabelText } = render(
+      <Guardrails guardrails={rows} canManage busy={false} onSet={onSet} />,
+    );
+    expect(getByText("2 of 3 enforced guardrails on")).toBeTruthy();
+    expect(container.querySelectorAll(".guard-row")).toHaveLength(5);
+    // Enforced rows toggle; the one with a unit also carries a number field.
+    // SAFETY: the card renders the enforced-row toggle as an <input type="checkbox">
+    // with exactly this aria-label.
+    const toggle = getByLabelText("Meaningful comments guardrail") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(toggle);
+    expect(onSet).toHaveBeenCalledWith("meaningful-comment", "off");
+    // SAFETY: the unit-carrying row renders an <input type="number"> with this label.
+    const value = getByLabelText("Compression threshold value (events)") as HTMLInputElement;
+    expect(value.value).toBe("40");
+    // Apply is inert until the draft differs and is a positive whole number.
+    const apply = getByText("Apply").closest("button")!;
+    expect(apply.disabled).toBe(true);
+    fireEvent.change(value, { target: { value: "60" } });
+    expect(apply.disabled).toBe(false);
+    fireEvent.click(apply);
+    expect(onSet).toHaveBeenCalledWith("compression-threshold", "value", 60);
+    // A default the file lacks says so and reads OFF.
+    expect(getByText("not in project.md")).toBeTruthy();
+    // SAFETY: same checkbox contract as the toggle above.
+    expect((getByLabelText("Evidence separation guardrail") as HTMLInputElement).checked).toBe(false);
+    // The GitHub-owned row is inert with a pointer; the unknown row is removable.
+    expect(getByText(/managed on Settings → GitHub/)).toBeTruthy();
+    expect(getByText("nothing reads this")).toBeTruthy();
+    fireEvent.click(getByText("Remove").closest("button")!);
+    expect(onSet).toHaveBeenCalledWith("operator-brevity", "remove");
+    expect(container.querySelectorAll(".guard-row.inert")).toHaveLength(2);
+  });
+
+  it("a non-manager gets every control disabled AND a visible reason", () => {
+    const { container, getByText } = render(
+      <Guardrails guardrails={rows} canManage={false} busy={false} onSet={() => {}} />,
+    );
+    expect(getByText(/Read-only: changing a guardrail needs the/)).toBeTruthy();
+    for (const ctl of container.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button")) {
+      expect(ctl.disabled).toBe(true);
+    }
   });
 });

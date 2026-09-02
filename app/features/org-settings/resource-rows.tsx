@@ -40,7 +40,10 @@ export function KbPanel({
         <Icon name="memory" />
         <h2>Knowledge bases</h2>
         <span className="right">
-          <button type="button" className="btn sm" onClick={onNew}>
+          {/* A11Y-2 (pass 32): the tab shows four add buttons whose visible
+              text is "New"/"Add"; a screen reader's button list read "New, New,
+              New, Add". Each carries its panel in its accessible name. */}
+          <button type="button" className="btn sm" onClick={onNew} aria-label="New knowledge base">
             <Icon name="plus" />
             New
           </button>
@@ -173,7 +176,7 @@ export function McpPanel({
         <Icon name="cpu" />
         <h2>MCP servers</h2>
         <span className="right">
-          <button type="button" className="btn sm" onClick={onNew}>
+          <button type="button" className="btn sm" onClick={onNew} aria-label="Add MCP server">
             <Icon name="plus" />
             Add
           </button>
@@ -230,7 +233,10 @@ export function McpPanel({
                 {m.warmingSince !== null
                   ? "first run, installing in the background"
                   : m.up === true
-                  ? (m.tools !== null ? m.tools + " tools · " : "reachable · ") +
+                  ? (m.tools !== null
+                      ? // D32-6 (pass 32): "1 tools" — count its noun.
+                        `${m.tools} ${m.tools === 1 ? "tool" : "tools"} · `
+                      : "reachable · ") +
                     "checked " + rel(m.lastCheckedAt) +
                     (isStaleCheck(m.lastCheckedAt) ? " · stale, retest" : "")
                   : m.up === false
@@ -342,7 +348,7 @@ export function SkillPanel({
         <Icon name="bolt" />
         <h2>Skills</h2>
         <span className="right">
-          <button type="button" className="btn sm" onClick={onNew}>
+          <button type="button" className="btn sm" onClick={onNew} aria-label="New skill">
             <Icon name="plus" />
             New
           </button>
@@ -438,7 +444,7 @@ export function AgentPanel({
         <Icon name="agents" />
         <h2>Global agent profiles</h2>
         <span className="right">
-          <button type="button" className="btn sm" onClick={onNew}>
+          <button type="button" className="btn sm" onClick={onNew} aria-label="New global agent profile">
             <Icon name="plus" />
             New
           </button>

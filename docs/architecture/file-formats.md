@@ -116,7 +116,9 @@ guardrails:                       # four defaults (shared/workflow/templates.ts)
                                   # meaningful-comment, no-duplicate-summary,
                                   # compression-threshold (value 40), evidence-separation;
                                   # delete-branch-after-merge is a fifth row whose
-                                  # ABSENCE means on (ruling 24)
+                                  # ABSENCE means on (ruling 24). The four defaults are
+                                  # edited on Policy → Guardrails (ruling 112), the fifth
+                                  # on Settings → GitHub
   - id: compression-threshold
     desc: Long timelines compress once routine events pass the threshold; typed events are always kept.
     on: true

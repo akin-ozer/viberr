@@ -1652,12 +1652,26 @@ describe("P13-AP-07 — the edit modal states that saving FORKS a library profil
     ).toBeTruthy();
   });
 
+  it("A11Y-9 (pass 32): every collapsible section header is a named, state-carrying button", () => {
+    const { container } = renderModal({
+      initial: mkProfile({ source: "project", name: "Migrations" }),
+    });
+    const heads = [...container.querySelectorAll<HTMLButtonElement>("button.cap-mghead")];
+    expect(heads.length).toBeGreaterThan(0);
+    for (const head of heads) {
+      // Named by the group label it contains; the live tree tool reported
+      // these unnamed, so the computed name is what this pins.
+      expect(head.textContent!.trim().length).toBeGreaterThan(0);
+      expect(head.getAttribute("aria-expanded")).toMatch(/^(true|false)$/);
+    }
+  });
+
   it("a project-created profile has nothing to fork and says so plainly", () => {
     const { getByText, queryByText } = renderModal({
       initial: mkProfile({ source: "project", name: "Migrations" }),
     });
     expect(
-      getByText("Update this project's copy. Changes apply to future assignments."),
+      getByText("Update this project's copy. Changes apply from the next run."),
     ).toBeTruthy();
     expect(queryByText(/forks/)).toBeNull();
   });
@@ -1714,7 +1728,7 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
 
   it("lists undeployed templates and adds the picked one by id", () => {
     const onAdd = vi.fn();
-    const { getByText } = render(
+    const { getByText, getByRole } = render(
       <LibraryPicker
         library={TEMPLATES}
         stages={STAGES}
@@ -1730,6 +1744,9 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
       getByText("Reviews IAM, secrets handling and supply-chain risk."),
     ).toBeTruthy();
     expect(getByText("1 stage here")).toBeTruthy();
+    // A11Y-5 (pass 32): the row is a button NAMED by its content; the live
+    // tree tool reported it unnamed.
+    expect(getByRole("button", { name: /Security reviewer/ })).toBeTruthy();
     fireEvent.click(getByText("Security reviewer"));
     expect(onAdd).toHaveBeenCalledWith("security-reviewer");
   });

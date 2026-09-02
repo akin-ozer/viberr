@@ -50,7 +50,9 @@ export const ACTIVITY_STREAM_LIMIT = 200;
 export interface StreamFilters {
   /** Substring over the event text, title and task key (case-insensitive). */
   q?: string;
-  /** Exact `actor_ref` — the stable identity behind a display name. */
+  /** Exact `actor_ref` — the stable identity behind a display name: a user
+   *  id, `agent/<profileId>` (backend-agnostic, D32-14), a system id, or the
+   *  bare `operator` / `controller`. */
   actorRef?: string;
   /** Exact event type (one of the timeline vocabulary, tolerated unknown). */
   type?: string;
@@ -234,6 +236,7 @@ export const AUDIT_LOG_LIMIT = 60;
  * that land here before a bespoke sentence does. */
 const AUDIT_ACTION_KINDS = {
   "project.policy.boundary_changed": "change",
+  "project.policy.guardrail_changed": "change",
   "project.member.role_changed": "change",
   "project.member.invited": "change",
   "project.member.removed": "change",
@@ -328,6 +331,11 @@ const auditDetailsSchema = z.object({
   bypassed: detailText,
   what: detailText,
   memberRole: detailText,
+  // E32-6: guardrail changes (Policy → Guardrails card).
+  id: detailText,
+  label: detailText,
+  op: detailText,
+  value: z.number().optional().catch(undefined),
 });
 
 /** A blob that is not an object at all — never written by `recordAudit`, but
@@ -352,6 +360,13 @@ function auditText(
       const boundary =
         BOUNDARY_LABEL.get(d.boundary ?? "") ?? d.boundary ?? "?";
       return `${actor} set **${from} → ${to}** to ${boundary}.`;
+    }
+    case "project.policy.guardrail_changed": {
+      // E32-6: label + op from the details (the row id is the subject).
+      const label = d.label ?? d.id ?? row.subject_id;
+      if (d.op === "remove") return `${actor} removed the **${label}** guardrail.`;
+      if (d.op === "value") return `${actor} set **${label}** to ${d.value ?? "?"}.`;
+      return `${actor} turned **${label}** ${d.op === "on" ? "on" : "off"}.`;
     }
     case "project.member.role_changed": {
       const target = resolveUserName(d.targetUserId) ?? "a member";

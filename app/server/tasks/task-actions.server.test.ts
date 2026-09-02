@@ -1210,6 +1210,23 @@ describe("ownership", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
   }
 
+  it("D32-16: an archived task refuses ownership changes (restore first)", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { archived: true }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // Canary: drop the `archived` guard in setOwner and the take succeeds.
+    await expect(
+      setOwner(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/archived — restore it before changing its owner/);
+  });
+
   it("take (unowned) — exact assign-event copy", async () => {
     const store = prepared();
     withTask(store);

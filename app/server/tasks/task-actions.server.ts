@@ -4090,6 +4090,16 @@ export async function setOwner(
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const currentOwnerId = existing.parsed.frontmatter.ownerUserId;
 
+  // D32-16 (pass 32): an archived task is out of the flow (F15-11) and its
+  // planning metadata is frozen (F26-13); the owner seat — the task's human
+  // reviewer and acceptance authority — is frozen the same way. The panels
+  // hide "Assign me" on an archived task; this fails CLOSED if one does not.
+  if (existing.parsed.frontmatter.archived) {
+    throw AppError.validation(
+      `${input.taskKey} is archived — restore it before changing its owner.`,
+    );
+  }
+
   const isTake = input.targetUserId === actor.userId;
   // A TAKEOVER of an OCCUPIED seat (claiming a task another member owns) is the
   // governance hole: ownership carries the owner-exception

@@ -25,7 +25,7 @@ POST.
 | `/projects/:slug/review` | `project.review.tsx` | member | review queue split into "Waiting on your acceptance" and "Still in review" | |
 | `/projects/:slug/controller` | `project.controller.tsx` | member, form | the instance controller addressed inside this project; goal chain controls | `send`, `goal-op` (`pause`, `resume`, `cancel`, `skip_link`, `retry_link`) |
 | `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail, capability matrix modal | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile` |
-| `/projects/:slug/policy` | `project.policy.tsx` | member, form | role matrix (rendered from `rbac.ts`), member roles, transition boundaries | `set-role`, `set-boundary` |
+| `/projects/:slug/policy` | `project.policy.tsx` | member, form | role matrix (rendered from `rbac.ts`), member roles, transition boundaries, guardrails (ruling 112) | `set-role`, `set-boundary`, `set-guardrail` |
 | `/projects/:slug/github` | `project.github.tsx` | member, form | credential card, repo state, branched tasks, scope violations, update status | `set-credential`, `clear-credential`, `grant-scope`, `reconcile` |
 | `/projects/:slug/activity` | `project.activity.tsx` | member | activity feed with day groups; audit column (compacted, ruling 61) | |
 | `/projects/:slug/settings` | `project.settings.tsx` | member, form (admin for writes) | project profile, stages, members, repository, branch cleanup, archive/delete | `save-project`, `add-stage`, `rename-stage`, `remove-stage`, `reorder-stages`, `invite`, `remove-member`, `set-credential`, `clear-credential`, `grant-scope`, `repair-repo`, `set-branch-cleanup`, `archive-project`, `delete-project` |

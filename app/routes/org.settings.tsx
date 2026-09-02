@@ -579,6 +579,7 @@ export async function action({ request }: Route.ActionArgs) {
             name: field("name"),
             backend: field("backend") === "claude" ? "claude" : "codex",
             summary: field("summary"),
+            role: field("role"),
             persona: field("persona"),
             stages: parseJsonStringArray(field("stages")),
             skills: parseJsonStringArray(field("skills")),

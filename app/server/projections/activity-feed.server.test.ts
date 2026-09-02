@@ -214,6 +214,19 @@ describe("listAuditLog", () => {
       projectSlug: store.slug,
       details: { from: "contributor", to: "viewer", targetUserId: store.users.selin.id },
     });
+    // E32-6: the three guardrail-change shapes the Policy card writes.
+    for (const details of [
+      { id: "meaningful-comment", label: "Meaningful comments", op: "off" },
+      { id: "compression-threshold", label: "Compression threshold", op: "value", value: 60 },
+      { id: "old-rule", label: "old-rule", op: "remove" },
+    ]) {
+      recordAudit(store.db, {
+        action: "project.policy.guardrail_changed",
+        actor: { userId: arda.id, label: arda.email },
+        projectSlug: store.slug,
+        details,
+      });
+    }
     recordAudit(store.db, {
       action: "github.pr.merge_refused",
       actor: { userId: arda.id, label: arda.email },
@@ -247,6 +260,9 @@ describe("listAuditLog", () => {
       expect.arrayContaining([
         `${arda.name} set **impl → review** to auto-advance.`,
         `${arda.name} set ${store.users.selin.name} to **viewer**.`,
+        `${arda.name} turned **Meaningful comments** off.`,
+        `${arda.name} set **Compression threshold** to 60.`,
+        `${arda.name} removed the **old-rule** guardrail.`,
       ]),
     );
 
@@ -453,8 +469,10 @@ describe("feed filters (P21 — owner request: search + filters per panel)", () 
     expect(comments[0]?.taskKey).toBe("VIB-202");
     expect(countActivityStream(store.db, store.slug, type)).toBe(1);
 
-    // actorRef — the stable ref behind the display name (backend/profileId).
-    const actor = { actorRef: "codex/developer" };
+    // actorRef — the stable ref behind the display name (`agent/<profileId>`;
+    // D32-14: the backend is NOT part of the key, so one profile's Codex and
+    // Claude legs are one actor).
+    const actor = { actorRef: "agent/developer" };
     expect(listActivityStream(store.db, store.slug, { filters: actor })).toHaveLength(1);
 
     // task — case-insensitive exact key.
@@ -481,7 +499,7 @@ describe("feed filters (P21 — owner request: search + filters per panel)", () 
     const options = streamFilterOptions(store.db, store.slug);
     expect(options.types.sort()).toEqual(["comment", "completion", "policy"]);
     const refs = options.actors.map((a) => a.ref);
-    expect(refs).toContain("codex/developer");
+    expect(refs).toContain("agent/developer");
     expect(refs).toContain("policy-engine");
     expect(refs).toContain(store.users.arda.id);
     // The human's label is the CURRENT users-table name, not the baked ref.

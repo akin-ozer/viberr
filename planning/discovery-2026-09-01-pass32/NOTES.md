@@ -150,3 +150,10 @@ PENDING: UC-12/13/14/15/23 (RBAC probe agent running) · UC-20 schedule · UC-25
 - A00-9 nav-order lock (+ routes.ts comment); C03-OC6 comment; C05-G run-log docstring; C05-H `github.pr.closed_unowned` in the coverage table; C05-I alias removed; V11-3/4/6/9 (comments, ERROR_CODES.UNAUTHORIZED, DEFAULT_COMPACTION 40, Dockerfile build ARGs).
 - Not changed, with reasons: C02-R5 (see cluster C); V11-5 MANAGED_SETTINGS already documented as belt-and-braces; `github.delivery.next_step` stays locked in delivery-actionable (its writer is a private helper on the delivery path — noted for the coverage file).
 - Docs sub-batch (A00-3/4/5/11 re-verified against the 2026-09-01 rebuilt docs tree, rulings 109+, configuration/runbook/deployment/README/testing/.gitignore items) delegated to an opus-max subagent; results recorded when it reports.
+
+- 2026-09-02 ~00:10 Cluster E + F implemented on `pass32/implementation` (see IMPROVEMENTS.md
+  "Cluster E + F dispositions"): 27 UI/UX items, 8 a11y verifications with RTL name locks,
+  Guardrails card (ruling 112 landed), 8 test/gate items. Self-caught: the D32-2 edit had
+  shipped a `$${…}` slip ("was refused $<date>"); the B06-T3 "flake" was an unfaithful
+  simulation (fresh mtime on stale content). `interruptRun` is async now — every caller awaits.
+  Lint + tsc clean; targeted suites green; full suite running.

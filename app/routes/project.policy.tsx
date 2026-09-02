@@ -12,6 +12,7 @@ import { getDb } from "~/server/db/sqlite.server";
 import {
   setMemberRole,
   setTransitionBoundary,
+  setGuardrail,
 } from "~/features/policy/policy-actions.server";
 import { getPolicyViewData } from "~/features/policy/policy-query.server";
 import { PolicyPage } from "~/features/policy/policy-page";
@@ -76,6 +77,20 @@ export async function action({ request, params }: Route.ActionArgs) {
           from: String(formData.get("from") ?? ""),
           to: String(formData.get("to") ?? ""),
           boundary: String(formData.get("boundary") ?? ""),
+        },
+        actor,
+      );
+      return { ok: true as const, toast: result.toast };
+    }
+    if (intent === "set-guardrail") {
+      // E32-6: the Guardrails card's one write (toggle / value / remove).
+      const result = await setGuardrail(
+        db,
+        {
+          projectSlug: params.slug,
+          id: String(formData.get("id") ?? ""),
+          op: String(formData.get("op") ?? ""),
+          value: String(formData.get("value") ?? ""),
         },
         actor,
       );

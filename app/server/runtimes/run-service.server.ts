@@ -1532,11 +1532,11 @@ export interface InterruptResult {
  * event. Idempotent-safe: interrupting a non-running run returns a friendly
  * `already-terminal`, never an error.
  */
-export function interruptRun(
+export async function interruptRun(
   db: DatabaseSync,
-  input: { projectSlug: string; taskKey: string; runId: string },
+  input: { projectSlug: string; taskKey: string; runId: string; dataRoot?: string },
   actor: { userId: string; label: string },
-): InterruptResult {
+): Promise<InterruptResult> {
   const run = getRun(db, input.runId);
   if (!run || run.project_slug !== input.projectSlug || run.task_key !== input.taskKey) {
     throw AppError.notFound(`Run ${input.runId} not found on ${input.taskKey}.`);
@@ -1615,9 +1615,50 @@ export function interruptRun(
     details: { threadId: run.thread_id, backend: run.backend, role: run.role },
   });
   logger.info("run interrupted", { runId: input.runId, by: actor.userId });
+  await noteInterrupt(db, run, actor, input.dataRoot);
 
   const after = getRun(db, input.runId);
   return { outcome: "interrupted", run: after ? projectOne(db, after) : null };
+}
+
+/**
+ * D32-18 (pass 32): a human interrupt wrote the audit row and the run row, and
+ * NOTHING on the task's timeline — the record showed the transition, then
+ * silence, and the next reader could not tell the run was stopped by a person.
+ * A note authored by that person, naming the run, is the canonical trace.
+ * Best-effort like the continuity note: a task file we cannot write never
+ * masks the interrupt itself. Controller runs have no task file (ruling 99).
+ */
+async function noteInterrupt(
+  db: DatabaseSync,
+  run: AgentRunRow,
+  actor: { userId: string; label: string },
+  dataRoot?: string,
+): Promise<void> {
+  if (run.kind === "controller") return;
+  const ref: TaskFileRef = { projectSlug: run.project_slug, taskKey: run.task_key };
+  if (dataRoot) ref.dataRoot = dataRoot;
+  const backend = run.backend === "claude" ? "Claude" : "Codex";
+  try {
+    await updateTaskFile(ref, (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "human", userId: actor.userId, nameHint: actor.label },
+        title: null,
+        text: `Interrupted the ${backend} run \`${run.id}\` (${run.agent_name ?? run.role}). The thread stays resumable; re-run the agent to continue.`,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
+  } catch (error) {
+    logger.error("interrupt timeline note failed", {
+      runId: run.id,
+      taskKey: run.task_key,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 }
 
 // ---------------------------------------------- reads

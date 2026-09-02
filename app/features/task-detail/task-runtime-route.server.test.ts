@@ -234,6 +234,16 @@ describe("action — run-interrupt RBAC + audit", () => {
     const audits = listAuditEvents(app.db, { action: "runtime.run.interrupted" });
     expect(audits[0]?.actorUserId).toBe(ids.arda);
     expect(audits[0]?.taskKey).toBe("VIB-151");
+    // D32-18 (pass 32): the task's own record says a PERSON stopped the run —
+    // a note authored by the interrupter, naming the run. Before, the audit
+    // row and the run row knew and the timeline showed silence. Canary: drop
+    // the `noteInterrupt` call in interruptRun.
+    const note = after.task.timeline.find(
+      (e) => e.type === "note" && e.text.includes(`Interrupted the`) && e.text.includes(runningRunId),
+    );
+    expect(note, "the interrupt must leave a timeline note").toBeTruthy();
+    expect(note!.actor).toMatchObject({ kind: "human", userId: ids.arda });
+    expect(note!.text).toContain("The thread stays resumable");
   });
 
   it("interrupting an already-terminal run is a friendly no-op", async () => {

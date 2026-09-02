@@ -121,6 +121,15 @@ export function AgentModal({
     initial ? initial.backend : "codex",
   );
   const [summary, setSummary] = useState(initial ? initial.summary : "");
+  // D32-7 (pass 32): the role line, the way the project editor asks for it.
+  // A stored role that merely repeats the name is the pre-pass-32 default, so
+  // it prefills EMPTY to invite a real one (the card falls back to "Agent
+  // profile" for such a role either way — agent-types.ts profileRoleLabel).
+  const [role, setRole] = useState(
+    initial && initial.role.trim().toLowerCase() !== initial.name.trim().toLowerCase()
+      ? initial.role
+      : "",
+  );
   // P13-AP-01: the persona (the agent's system prompt) is edited on its own,
   // separately from the one-line blurb the operator reads. Editing the blurb no
   // longer flattens the persona.
@@ -165,7 +174,8 @@ export function AgentModal({
   const { action, err, setErr } = useModalAction(() => onClose());
 
   const stageOpts = stages.filter((s) => s.id !== "done");
-  const canSave = !action.busy && name.trim().length > 1 && selStages.length > 0;
+  const canSave =
+    !action.busy && name.trim().length > 1 && role.trim().length > 0 && selStages.length > 0;
   const selStageSet = new Set(selStages);
   const selSkillSet = new Set(selSkills);
   const selMcpSet = new Set(selMcps);
@@ -196,6 +206,7 @@ export function AgentModal({
           name: name.trim(),
           backend,
           summary: summary.trim(),
+          role: role.trim(),
           persona: persona.trim(),
           stages: JSON.stringify(selStages),
           skills: JSON.stringify([...selSkills, ...legacySkills]),
@@ -223,6 +234,19 @@ export function AgentModal({
             setErr(null);
           }}
           data-autofocus=""
+        />
+      </div>
+      <div className="field">
+        <label className="flabel" htmlFor="ga-role">
+          Role<span className="req">*</span>{" "}
+          <span className="fhint">the line under the name on every card</span>
+        </label>
+        <input
+          id="ga-role"
+          type="text"
+          value={role}
+          placeholder="e.g. Schema changes"
+          onChange={(e) => setRole(e.target.value)}
         />
       </div>
       <div className="field">

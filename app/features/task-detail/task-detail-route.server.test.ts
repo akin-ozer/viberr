@@ -256,7 +256,7 @@ describe("comment action — @agent routing detection", () => {
     for (const run of listRunsForTaskRows(app.db, "viberr-core", key)) {
       if (run.state === "running" || run.state === "queued") {
         try {
-          interruptRun(
+          await interruptRun(
             app.db,
             { projectSlug: "viberr-core", taskKey: key, runId: run.id },
             { userId, label: "test" },
@@ -808,7 +808,7 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
     // and write to the DB after afterAll() closes it (the sink guards this,
     // but interrupting keeps the run registry + logs clean).
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(
+    await interruptRun(
       app.db,
       { projectSlug: "viberr-core", taskKey: "VIB-166", runId: primary!.serverRunId },
       { userId: ids.arda, label: "arda@viberr.dev" },
@@ -847,7 +847,7 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
       (r) => r.kind === "primary" && (r.state === "running" || r.state === "idle"),
     );
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(
+    await interruptRun(
       app.db,
       { projectSlug: "viberr-core", taskKey: "VIB-166", runId: primary!.serverRunId },
       { userId: ids.arda, label: "arda@viberr.dev" },
@@ -1248,7 +1248,7 @@ describe("run-agent auto-engage — reviewer vs supporting agent, and release-ag
     for (const run of listRunsForTaskRows(app.db, "viberr-core", key)) {
       if (run.state === "running" || run.state === "queued") {
         try {
-          interruptRun(
+          await interruptRun(
             app.db,
             { projectSlug: "viberr-core", taskKey: key, runId: run.id },
             { userId: ids.arda, label: "test" },

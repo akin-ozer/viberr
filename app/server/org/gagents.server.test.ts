@@ -151,6 +151,55 @@ describe("global agent profiles", () => {
     ).toThrowError(/already exists/);
   });
 
+  it("D32-7: a role given here lands in the file; a blank one keeps the stored role", () => {
+    const { db, dataRoot, ctx } = setup();
+    const { profile } = saveGlobalAgentProfile(
+      db,
+      {
+        name: "Docs writer",
+        backend: "claude",
+        summary: "Writes the docs.",
+        role: "Documentation",
+        persona: "",
+        stages: ["impl"],
+        skills: [],
+        mcps: [],
+        kbs: [],
+      },
+      ACTOR,
+      ctx,
+    );
+    // The view carries the role the modal prefills from (a role that merely
+    // repeats the name is the pre-pass-32 default and prefills empty there).
+    expect(profile.role).toBe("Documentation");
+    const read = () =>
+      parseAgentProfileContent(
+        readFileSync(agentProfileFilePath("docs-writer", dataRoot), "utf8"),
+        { fallbackId: "docs-writer" },
+      ).parsed!.frontmatter.role;
+    expect(read()).toBe("Documentation");
+    // Canary: drop the `input.role?.trim() ||` half on the edit branch and the
+    // blank edit below rewrites the role to the name.
+    saveGlobalAgentProfile(
+      db,
+      {
+        id: "docs-writer",
+        name: "Docs writer",
+        backend: "claude",
+        summary: "Writes the docs.",
+        role: "",
+        persona: "",
+        stages: ["impl"],
+        skills: [],
+        mcps: [],
+        kbs: [],
+      },
+      ACTOR,
+      ctx,
+    );
+    expect(read()).toBe("Documentation");
+  });
+
   it("edit preserves capability policy + extras (fields the modal doesn't own)", () => {
     const { db, dataRoot, ctx } = setup();
     writeTemplate(dataRoot, "developer", "specialist");

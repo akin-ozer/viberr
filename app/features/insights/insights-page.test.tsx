@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import type { InsightsSummary } from "~/server/insights/insights-query.server";
 import { InsightsPage } from "./insights-page";
@@ -131,8 +131,9 @@ describe("InsightsPage", () => {
     expect(getByText("Coordination overhead")).toBeTruthy();
     // CANARY: put "operator runs spent" back and the card credits the whole
     // coordination figure to one of the two kinds that produced it.
+    // D04-U12: the denominator is named — cost-reporting runs only.
     expect(
-      getByText("operator and controller runs spent $0.60 of $1.20 reported"),
+      getByText("operator and controller runs spent $0.60 of $1.20 reported by cost-reporting runs"),
     ).toBeTruthy();
   });
 
@@ -190,8 +191,8 @@ describe("InsightsPage", () => {
     observedAt: "2026-08-31T09:00:00.000Z",
   };
 
-  it("says the window is exhausted when a run was refused, and names that as its source", () => {
-    const { getByText, queryByText } = renderPage({
+  it("says the window is exhausted when a run was refused, and names that as its source", async () => {
+    const { getByText, queryByText, container } = renderPage({
       ...FULL,
       backendQuota: [
         { backend: "claude", reading: null, credentialRefused: null, exhausted: null },
@@ -201,6 +202,19 @@ describe("InsightsPage", () => {
     expect(getByText("usage limit reached")).toBeTruthy();
     // Honest about its provenance: this is not a utilization reading.
     expect(getByText(/from a refused run/)).toBeTruthy();
+    // D32-2 (ruling 4): the refusal's hover title dates the run with the app's
+    // ONE formatter ("<day> · <clock>"), never the server locale's
+    // toLocaleString ("9/1/2026, 9:00:00 AM") — and with no stray "$" before
+    // the date (a template-literal slip the first D32-2 edit shipped).
+    await waitFor(() => {
+      const bar = container.querySelector(".bar-cost[title^='run run_abc was refused ']")!;
+      expect(bar).toBeTruthy();
+      // formatDayDotTime: "HH:MM" today, else "<Yesterday | Mar 30> · HH:MM".
+      expect(bar.getAttribute("title")).toMatch(
+        /^run run_abc was refused (?:\d\d:\d\d|(?:Yesterday|[A-Z][a-z]{2} \d{1,2}) · \d\d:\d\d): You've hit your usage limit/,
+      );
+      expect(bar.getAttribute("title")).not.toContain("refused $");
+    });
     expect(getByText(/retry after/)).toBeTruthy();
     // …and the contradiction this replaced is gone from the exhausted row
     // ("no reading yet" now belongs only to the genuinely silent claude row).

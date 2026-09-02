@@ -29,9 +29,8 @@ function reorderPost(page: Page, match: (body: string) => boolean) {
   );
 }
 
-/** Lift `key`'s card and hold it over `target` without releasing. `bottom`
- *  aims at the blank space under a column's cards (append), `center` at the
- *  middle (which may be a card — insert before it). */
+/** Lift `key`'s card and hold it over the centre of `target` without
+ *  releasing (the old `bottom`/`center` aim modes are gone). */
 async function liftOver(
   page: Page,
   key: string,

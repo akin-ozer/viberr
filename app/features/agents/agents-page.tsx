@@ -267,6 +267,10 @@ function CapColumn({
         {m.label}
       </div>
       <div className="cap-list">
+        {/* D32-8 (pass 32): an empty bucket kept its header over nothing, so
+            "RECOMMENDS ONLY" with no rows read as a rendering gap rather than
+            as a fact. Say it, the way ResGroup below says "None". */}
+        {items.length === 0 && <span className="sub fine md dim">None</span>}
         {items.map((x) => {
           const claudeOnly = codexPrimary && isClaudeOnlyEnforcedLabel(x);
           const carveOut = codexCarveOut && x === repoWriteLabel;

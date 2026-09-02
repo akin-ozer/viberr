@@ -838,10 +838,12 @@ export function CurrentStatePanel({
                   </button>
                 )}
               </span>
-            ) : canOwn ? (
+            ) : canOwn && !archived ? (
               // Q5 clean tiering: only contributor+ may hold the owner seat
               // (setOwner enforces `own-task`). Viewers are read + comment, so
               // hide "Assign me" rather than render a button that 403s.
+              // D32-16: an archived task's owner seat is frozen server-side
+              // (restore first), so the affordance goes with it.
               <button
                 type="button"
                 className="rev-add sm"
