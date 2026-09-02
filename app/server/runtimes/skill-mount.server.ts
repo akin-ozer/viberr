@@ -251,17 +251,6 @@ export interface SkillMount {
   /** Granted skills that did NOT mount, with the reason (they fall back to
    *  prompt-text injection, so this is diagnostic, not capability loss). */
   skipped: { name: string; reason: string }[];
-  /** Whether THIS mount established the CLAUDE.md excludes file
-   *  ({@link CATALOG_SETTINGS}) — the precondition for opening
-   *  `settingSources: ['project']` at all, and therefore reported rather than
-   *  left to a log line. `mounted` non-empty implies `true`: a failed write
-   *  empties `mounted` instead of handing the adapter skills it would open the
-   *  ingress for. A run that mounts nothing reports `false` even when the file
-   *  is present for a co-engaged run's mounts, because this run opens no
-   *  project source either way. `mountGrantedSkills` always sets it; the field
-   *  is optional only so a caller can build the zero value
-   *  (`{ mounted: [], skipped: [] }`) for a run that never mounts. */
-  settingsWritten?: boolean;
 }
 
 /** No checkout ⇒ no project source we control ⇒ no native skills (see below). */
@@ -305,14 +294,13 @@ export async function mountGrantedSkills(input: {
 }): Promise<SkillMount> {
   const names = [...new Set(input.skills)];
   if (names.length === 0) {
-    return { mounted: [], skipped: [], settingsWritten: false };
+    return { mounted: [], skipped: [] };
   }
   const dir = input.workspaceDir;
   if (!dir || !isPlainGitCheckout(dir)) {
     return {
       mounted: [],
       skipped: names.map((name) => ({ name, reason: NO_WORKSPACE_REASON })),
-      settingsWritten: false,
     };
   }
 
@@ -344,15 +332,15 @@ export async function mountGrantedSkills(input: {
   // one's. They are inert for THIS run — with `mounted` empty the caller passes
   // no `skills`, so the adapter keeps `settingSources: []` and the `Skill` tool
   // denied, and an unlisted skill is unreachable either way.
-  let settingsWritten = false;
-  if (mounted.length > 0) {
-    settingsWritten = writeCatalogSettings(dir);
-    if (!settingsWritten) {
-      skipped.push(
-        ...mounted.map((name) => ({ name, reason: NO_CATALOG_SETTINGS_REASON })),
-      );
-      mounted.length = 0;
-    }
+  // The CLAUDE.md excludes file is the precondition for opening
+  // `settingSources: ['project']` at all: a failed write EMPTIES `mounted`
+  // (C02-R6, pass 32: `mounted` is the one seam the adapter and the persona
+  // read — a separate `settingsWritten` flag said nothing `mounted` did not).
+  if (mounted.length > 0 && !writeCatalogSettings(dir)) {
+    skipped.push(
+      ...mounted.map((name) => ({ name, reason: NO_CATALOG_SETTINGS_REASON })),
+    );
+    mounted.length = 0;
   }
   if (mounted.length === 0) {
     // Leave the workspace exactly as a skill-less run would find it — but go
@@ -369,7 +357,7 @@ export async function mountGrantedSkills(input: {
       skipped,
     });
   }
-  return { mounted, skipped, settingsWritten };
+  return { mounted, skipped };
 }
 
 /**

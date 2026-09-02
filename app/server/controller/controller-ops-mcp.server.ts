@@ -6,10 +6,17 @@ import {
   type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
+import {
+  recordAudit,
+  type AuditDetails,
+} from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { resolveStoreTarget } from "~/server/org/resources.server";
 import { readStoreDoc } from "~/server/org/store-files.server";
-import { healthSnapshot } from "~/server/ops/health-snapshot.server";
+import {
+  healthSnapshot,
+  type HealthSnapshot,
+} from "~/server/ops/health-snapshot.server";
 import { getRunLog, runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
 import type { RunLog, RunLogQuery } from "~/server/runtimes/run-service.server";
 import { getRun, runLineStats } from "~/server/runtimes/run-store.server";
@@ -19,6 +26,7 @@ import {
   type BackendCredentialHealth,
   type RealBackend,
 } from "~/server/runtimes/runtime-registry.server";
+import { browserRuntimeStatus } from "~/server/tasks/specialist-browser-mcp.server";
 import { canReadControllerRunLog } from "./controller-conversations.server";
 import {
   controllerToolGuards,
@@ -127,8 +135,30 @@ function backendCredential(
 export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp {
   const { db, ctx, user } = deps;
   const dataRoot = ctx.dataRoot;
-  const { orgAdmin, requireOrgAdmin, requireVisible, run, runWith, json } =
+  const { actor, orgAdmin, requireOrgAdmin, requireVisible, run, runWith, json } =
     controllerToolGuards(db, user, dataRoot);
+
+  /**
+   * Owner ruling (pass 32, E32-5): every SUCCESSFUL diagnostics read leaves one
+   * audit row naming the tool, its target and the asking person. These are the
+   * first tools that let a MODEL read run logs and store documents on someone's
+   * behalf; "who read what through the controller" has to be answerable from
+   * the audit trail, not reconstructed from run transcripts. Denials keep
+   * writing `controller.authority.denied` through the guards.
+   */
+  function auditRead(
+    toolName: string,
+    target: string,
+    extra: AuditDetails = {},
+  ): void {
+    recordAudit(db, {
+      action: "controller.ops.read",
+      actor,
+      subjectKind: "controller",
+      subjectId: target,
+      details: { tool: toolName, ...extra },
+    });
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: SdkMcpToolDefinition<any>[] = [];
@@ -177,7 +207,12 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         // and everyone else gets the availability answer without the host path.
         const admin = orgAdmin();
         const snapshot = healthSnapshot(db);
-        return json({
+        auditRead("instance_health", "instance");
+        const body: HealthSnapshot & {
+          backendCredentials: BackendCredentialReport[];
+          runs: ReturnType<typeof runConcurrencySnapshot>;
+          browserDetail?: string;
+        } = {
           ...snapshot,
           // WHY a backend reads available or not — the health probe's
           // `backends` is env presence only, and "unavailable" with no reason
@@ -189,7 +224,13 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           // What the concurrency cap is doing this second: a queued run is the
           // usual answer to "why has nothing started".
           runs: runConcurrencySnapshot(db),
-        });
+        };
+        // C05-A: the browser's configured executable PATH is deployment
+        // configuration, gated exactly like the credential detail above — the
+        // key is present only for an org admin, never carried empty.
+        const browserDetail = admin ? browserRuntimeStatus().detail : undefined;
+        if (browserDetail) body.browserDetail = browserDetail;
+        return json(body);
       }),
     ),
     "instance_health",
@@ -261,15 +302,17 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
             page = log.lines;
           } else {
             // Forward. `getRunLog` ignores `limit` in this mode BY DESIGN (the
-            // console's live tail is bounded by its own cursor), so the bound is
-            // applied here, on the ascending lines. The SELECT behind it is
-            // unbounded (`listRunLines` has no LIMIT, as run-store says) but
-            // local and fast; what this tool must keep bounded is the REPLY it
-            // puts in a model's context. If the SELECT ever bites, the fix is a
-            // LIMIT pushed down into `listRunLines`, never a bigger reply.
-            const log = getRunLog(db, args.runId, { since: args.since });
+            // console's live tail is bounded by its own cursor), so the bound
+            // travels as `forwardLimit` — pushed into the SELECT (C02-R12,
+            // pass 32) rather than applied on lines already materialized. What
+            // this tool must keep bounded is the REPLY it puts in a model's
+            // context; the SQL bound keeps the read proportional to it too.
+            const log = getRunLog(db, args.runId, {
+              since: args.since,
+              forwardLimit: limit,
+            });
             if (!log) throw new NotVisibleError(notVisibleRun(args.runId));
-            page = log.lines.slice(0, limit);
+            page = log.lines;
           }
 
           // Page position, computed against the RUN's real bounds. `getRunLog`'s
@@ -280,9 +323,27 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           const stats = runLineStats(db, args.runId);
           const firstSeq = page.length ? page[0]!.seq : null;
           const lastSeq = page.length ? page[page.length - 1]!.seq : null;
-          const olderExist = firstSeq !== null && firstSeq > stats.minSeq;
-          const newerExist = lastSeq !== null && lastSeq < stats.maxSeq;
+          // C03-OC2 (pass 32): an EMPTY page is a cursor that overshot, and
+          // the flags still have to tell the truth about the RUN. A `since`
+          // past the end means every logged line is older than the cursor; a
+          // `before` at or below the first line means every line is newer.
+          // Answering `olderExist: false` there told a model "nothing older
+          // exists" about a run with thousands of lines, and handed it no
+          // cursor to recover with.
+          const overshotForward = page.length === 0 && stats.count > 0 && args.since !== undefined;
+          const overshotBackward = page.length === 0 && stats.count > 0 && args.before !== undefined;
+          const olderExist =
+            firstSeq !== null ? firstSeq > stats.minSeq : overshotForward;
+          const newerExist =
+            lastSeq !== null ? lastSeq < stats.maxSeq : overshotBackward;
+          const olderCursor = firstSeq !== null ? firstSeq : stats.maxSeq + 1;
+          const newerCursor = lastSeq !== null ? lastSeq : stats.minSeq - 1;
 
+          auditRead("read_run_log", row.id, {
+            project: row.project_slug,
+            task: row.task_key,
+            lines: page.length,
+          });
           return json({
             run: {
               id: row.id,
@@ -308,8 +369,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
               // The exact argument for the follow-up call, so continuing is not
               // arithmetic the model has to get right.
               next: {
-                older: olderExist ? { before: firstSeq } : null,
-                newer: newerExist ? { since: lastSeq } : null,
+                older: olderExist ? { before: olderCursor } : null,
+                newer: newerExist ? { since: newerCursor } : null,
               },
             },
             lines: page.map((line) => ({
@@ -341,6 +402,10 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         if (!target) throw AppError.notFound("That resource no longer exists.");
         const doc = readStoreDoc(target, args.path);
         if (!doc) throw AppError.notFound("That file no longer exists.");
+        auditRead("read_store_doc", `${target.kind}/${target.id}`, {
+          path: args.path.join("/"),
+          truncated: doc.truncated,
+        });
         return json({
           resource: { kind: target.kind, id: target.id, name: target.name },
           path: args.path,

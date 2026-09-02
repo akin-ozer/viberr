@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { DEFAULT_GUARDRAILS } from "~/shared/workflow/templates";
+import { guardrailKind, guardrailLabel } from "~/shared/workflow/guardrail-labels";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { PROJECT_ROLES, BOUNDARY_VALUES } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
@@ -252,6 +254,177 @@ export async function setTransitionBoundary(
     subjectId: `${input.from}>${input.to}`,
     projectSlug: input.projectSlug,
     details: { from: fromName, to: toName, boundary },
+  });
+  return { toast, changed: true };
+}
+
+// ---------------------------------------------------------------- guardrails
+
+/** What the Guardrails card can do to one project.md `guardrails` row. */
+export const GUARDRAIL_OPS = ["on", "off", "value", "remove"] as const;
+export type GuardrailOp = (typeof GUARDRAIL_OPS)[number];
+
+interface GuardrailBefore {
+  on: boolean;
+  value: number | null;
+}
+interface GuardrailBeforeRef {
+  current: GuardrailBefore | null;
+}
+interface GuardrailOnRef {
+  current: boolean | null;
+}
+
+export interface SetGuardrailInput {
+  projectSlug: string;
+  id: string;
+  op: string;
+  /** `value` op only: the new numeric setting (e.g. the compression threshold). */
+  value?: string;
+}
+
+/**
+ * E32-6 (pass 32, owner ruling): the anti-noise guardrails (`app/shared/
+ * workflow/templates.ts` DEFAULT_GUARDRAILS; read live by
+ * comment-guardrails.server.ts) had NO in-app surface — the only way to
+ * toggle one, or change the compression threshold, was a hand edit of
+ * project.md. This is the one write behind the Policy → Guardrails card.
+ *
+ * `edit-policy` tier, like the boundary editor: what the timeline keeps is
+ * policy. Rules:
+ *  - `on`/`off` on a DEFAULT id whose row the file lacks ADDS the shipped row
+ *    (projects created before the defaults, or a hand edit that dropped one).
+ *  - `value` needs a positive integer and a row that carries a `unit`
+ *    (today: compression-threshold); it never turns a row on or off.
+ *  - `remove` is for retired/unknown ids only — a default row is toggled,
+ *    never deleted, so the card can always show the full enforced set.
+ *  - The branch-cleanup row is owned by Settings → GitHub (setBranchCleanup)
+ *    and refused here, so one fact has one editor.
+ */
+export async function setGuardrail(
+  db: DatabaseSync,
+  input: SetGuardrailInput,
+  actor: PolicyActor,
+  ctx: PolicyMutationContext = {},
+): Promise<{ toast: string; changed: boolean }> {
+  requirePolicyAction(db, ctx, "edit-policy", input.projectSlug, actor, "edit workflow & policy");
+  const parsedOp = z.enum(GUARDRAIL_OPS).safeParse(input.op);
+  if (!parsedOp.success) throw AppError.validation("Unknown guardrail action.");
+  const op = parsedOp.data;
+  const id = input.id.trim();
+  if (!id) throw AppError.validation("Which guardrail?");
+  const label = guardrailLabel(id);
+  const kind = guardrailKind(id);
+  if (kind === "github") {
+    throw AppError.validation(
+      `${label} is managed on Settings → GitHub, not here.`,
+    );
+  }
+  if (op === "remove" && kind === "default") {
+    throw AppError.validation(
+      `${label} is one of the enforced guardrails: turn it off, it cannot be removed.`,
+    );
+  }
+  let value: number | null = null;
+  if (op === "value") {
+    const parsedValue = z.coerce.number().int().positive().safeParse(input.value);
+    if (!parsedValue.success) {
+      throw AppError.validation(`${label} needs a whole number above zero.`);
+    }
+    value = parsedValue.data;
+  }
+
+  const ref = { projectSlug: input.projectSlug, dataRoot: ctx.dataRoot };
+  let changed = false;
+  // A ref, not a `let`: TypeScript narrows a closure-assigned local to its
+  // initialiser at the read below (the WithdrawnPacketRef lesson).
+  const before: GuardrailBeforeRef = { current: null };
+  /** The row's `on` after a `value` write — the toast says when the number was
+   *  saved onto a guardrail that is OFF, so nobody expects compaction to start. */
+  const onAfter: GuardrailOnRef = { current: null };
+  await updateProjectFile(ref, (parsed) => {
+    const rows = parsed.frontmatter.guardrails;
+    const at = rows.findIndex((g) => g.id === id);
+    const row = at === -1 ? null : rows[at]!;
+    if (row) before.current = { on: row.on, value: row.value ?? null };
+    if (op === "remove") {
+      if (!row) return; // already gone — no-op
+      rows.splice(at, 1);
+      changed = true;
+      return;
+    }
+    if (!row) {
+      const shipped = DEFAULT_GUARDRAILS.find((d) => d.id === id);
+      if (!shipped) {
+        throw AppError.validation(`No guardrail named ${id} on this project.`);
+      }
+      if (op === "value" && shipped.unit === undefined) {
+        throw AppError.validation(`${label} has no numeric setting.`);
+      }
+      // Review F1 (pass 32): the card showed this row OFF ("not in project.md"),
+      // so a `value` write keeps it off — `value` never toggles, as the
+      // contract above says; the shipped row's `on: true` must not leak in.
+      rows.push(
+        op === "value"
+          ? { ...shipped, on: false, value: value! }
+          : { ...shipped, on: op === "on" },
+      );
+      onAfter.current = op === "value" ? false : op === "on";
+      changed = true;
+      return;
+    }
+    if (op === "value") {
+      if (row.unit === undefined) {
+        throw AppError.validation(`${label} has no numeric setting.`);
+      }
+      onAfter.current = row.on;
+      if (row.value === value) return; // no-op
+      row.value = value!;
+      changed = true;
+      return;
+    }
+    const on = op === "on";
+    if (row.on === on) return; // no-op
+    row.on = on;
+    changed = true;
+  });
+
+  const unit = DEFAULT_GUARDRAILS.find((d) => d.id === id)?.unit ?? "";
+  if (!changed) {
+    // Review F8 (pass 32): a no-op says what did NOT happen, never a success
+    // sentence with a suffix (the remove copy claimed a removal it never did).
+    const noop =
+      op === "remove"
+        ? `${label} is not on this project's guardrails · nothing changed`
+        : op === "value"
+          ? `${label} is already ${value} ${unit} · nothing changed`
+          : `${label} is already ${op} · nothing changed`;
+    return { toast: noop, changed: false };
+  }
+  const toast =
+    op === "remove"
+      ? `${label} removed from this project's guardrails`
+      : op === "value"
+        ? onAfter.current === false
+          ? `${label}: ${value} ${unit} · saved; the guardrail is off, so it applies once you turn it on`
+          : `${label}: ${value} ${unit} · applies to the next compaction pass`
+        : `${label}: ${op} · applies from the next agent comment`;
+
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.policy.guardrail_changed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "guardrail",
+    subjectId: id,
+    projectSlug: input.projectSlug,
+    details: {
+      id,
+      label,
+      op,
+      value,
+      beforeOn: before.current?.on ?? null,
+      beforeValue: before.current?.value ?? null,
+    },
   });
   return { toast, changed: true };
 }

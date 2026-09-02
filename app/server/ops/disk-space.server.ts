@@ -1,4 +1,5 @@
-import { statfsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, statfsSync } from "node:fs";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 
 /**
@@ -99,10 +100,63 @@ export function classifyFreeBytes(
  * measured (path gone, platform without statfs) — the caller reports "not
  * measured", never "0 bytes free".
  */
-export function measureDataRootSpace(dataRoot?: string): DiskSpace | null {
+/** Raw bytes from one measurement source, before thresholds are applied. */
+export interface RawDiskReading {
+  freeBytes: number;
+  totalBytes: number;
+}
+
+/**
+ * The two ways the volume can be measured, injectable so a test can hand in
+ * the exact shape a virtiofs bind mount produces without owning one.
+ */
+export interface DiskProbes {
+  /** POSIX `df -kP`: counts in 1024-byte blocks, fragment-size aware. */
+  df: (path: string) => RawDiskReading | null;
+  /** `statfs(2)` as Node exposes it: `bsize` only, no `frsize`. */
+  statfs: (path: string) => RawDiskReading | null;
+}
+
+/**
+ * `df -kP` is the PRIMARY source, not a fallback (F32-1, pass 32). Node's
+ * `statfsSync` reports `bsize` — the "optimal transfer size" — and never
+ * `frsize`, the unit `blocks`/`bavail` are actually counted in. On every
+ * ordinary Linux filesystem the two are equal, so nobody noticed; on a Docker
+ * Desktop virtiofs bind mount `bsize` is ~1 MiB while `frsize` is 4 KiB, and the
+ * product told the owner "1 TiB free of 62 TiB" while the host disk had 3.7 GB
+ * left. `df` reads `frsize` (that is what `-k` normalizes), so its answer is
+ * the volume's, on Linux and macOS alike; `statfs` stays as the fallback for a
+ * platform without `df` on PATH, where its arithmetic is at least the right
+ * order of magnitude.
+ */
+export function dfReading(path: string): RawDiskReading | null {
+  let out: string;
+  try {
+    out = execFileSync("df", ["-kP", "--", path], {
+      encoding: "utf8",
+      timeout: 2_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+  const lines = out.trim().split("\n");
+  const last = lines[lines.length - 1]?.trim();
+  if (!last || lines.length < 2) return null;
+  // `-P` pins the POSIX layout: Filesystem 1024-blocks Used Available Capacity Mounted-on.
+  // Split from the RIGHT: a filesystem name can carry spaces, the numbers cannot.
+  const cols = last.split(/\s+/);
+  if (cols.length < 6) return null;
+  const totalKb = Number(cols[cols.length - 5]);
+  const availKb = Number(cols[cols.length - 3]);
+  if (!Number.isFinite(totalKb) || !Number.isFinite(availKb) || totalKb <= 0) return null;
+  return { totalBytes: totalKb * 1024, freeBytes: Math.max(0, availKb) * 1024 };
+}
+
+export function statfsReading(path: string): RawDiskReading | null {
   let stats;
   try {
-    stats = statfsSync(getDataRoot(dataRoot));
+    stats = statfsSync(path);
   } catch {
     return null;
   }
@@ -110,6 +164,27 @@ export function measureDataRootSpace(dataRoot?: string): DiskSpace | null {
   const totalBytes = Number(stats.blocks) * blockSize;
   const freeBytes = Number(stats.bavail) * blockSize;
   if (!Number.isFinite(totalBytes) || !Number.isFinite(freeBytes)) return null;
+  return { totalBytes, freeBytes };
+}
+
+const DEFAULT_PROBES: DiskProbes = { df: dfReading, statfs: statfsReading };
+
+/**
+ * One measurement of the data root. Returns null when the filesystem cannot be
+ * measured by either source (path gone, platform without statfs) — the caller
+ * reports "not measured", never "0 bytes free".
+ */
+export function measureDataRootSpace(
+  dataRoot?: string,
+  probes: DiskProbes = DEFAULT_PROBES,
+): DiskSpace | null {
+  const path = getDataRoot(dataRoot);
+  // A path that does not exist measures as nothing, whichever source answers:
+  // `df` would happily report the parent volume of a typo'd root.
+  if (!existsSync(path)) return null;
+  const raw = probes.df(path) ?? probes.statfs(path);
+  if (!raw) return null;
+  const { freeBytes, totalBytes } = raw;
   const thresholds = diskThresholds();
   return {
     freeBytes,

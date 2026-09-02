@@ -1,4 +1,5 @@
 import { spawn, type SpawnOptions } from "node:child_process";
+import { publishResourceUpdated } from "./resource-events.server";
 import {
   existsSync,
   lstatSync,
@@ -392,6 +393,7 @@ export async function saveKnowledgeBase(
       subjectId: existing.id,
       details: { name, dir, refresh, renamed: dir !== oldDir },
     });
+    publishResourceUpdated("kb", existing.id);
     await rewriteReferences();
     return {
       kb: getKnowledgeBase(db, existing.id, ctx)!,
@@ -452,6 +454,7 @@ export async function deleteKnowledgeBase(
     subjectId: kb.id,
     details: { name: kb.name, dir: kb.dir, files: kb.fileCount },
   });
+  publishResourceUpdated("kb", kb.id);
   return { toast: `${kb.name} deleted. Agents lose it on next context load` };
 }
 
@@ -497,6 +500,7 @@ export function reindexKnowledgeBase(
     subjectId: existing?.id ?? kb.dir,
     details: { docCount: kb.injectableCount, files: kb.fileCount },
   });
+  publishResourceUpdated("kb", existing?.id ?? kb.dir);
   // P14-KM-13: "N docs" used to be every file in the folder, so re-scanning a
   // KB of PDFs cheerfully reported docs no run can read. Count what injects, and
   // name the rest rather than folding it in.
@@ -555,6 +559,8 @@ export function reindexKnowledgeBaseByDir(
   const tree = scanStoreTree(abs);
   // P14-KM-13: the watcher's log line reports the same number the row does —
   // docs a run can actually read, not every file that landed in the folder.
+  // F32-2: the watcher's re-index reaches every open Settings tab.
+  publishResourceUpdated("kb", row.id);
   return { name: row.name, docCount: countInjectableDocs(tree) };
 }
 
@@ -1631,6 +1637,7 @@ export async function saveMcpServer(
       subjectId: id,
       details: { name, transport, renamed: existing.name !== name },
     });
+    publishResourceUpdated("mcp", id);
   } else {
     id = newId("mcp");
     db.prepare(
@@ -1651,6 +1658,7 @@ export async function saveMcpServer(
       subjectId: id,
       details: { name, transport },
     });
+    publishResourceUpdated("mcp", id);
   }
 
   if (warmable && transport === "stdio") {
@@ -1774,6 +1782,7 @@ export async function deleteMcpServer(
     subjectId: id,
     details: { name: existing.name },
   });
+  publishResourceUpdated("mcp", id);
   return { toast: `${existing.name} removed` };
 }
 
@@ -2121,6 +2130,7 @@ export async function saveSkill(
       subjectId: existing.id,
       details: { name, renamed: name !== oldName, bodyKept: keepExistingBody },
     });
+    publishResourceUpdated("skill", existing.id);
     return {
       skill: getSkill(db, existing.id, ctx)!,
       toast: updatedToast,
@@ -2181,6 +2191,7 @@ export async function deleteSkill(
     subjectId: skill.id,
     details: { name: skill.name },
   });
+  publishResourceUpdated("skill", skill.id);
   return { toast: `Skill ${skill.name} deleted` };
 }
 

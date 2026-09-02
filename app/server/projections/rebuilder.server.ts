@@ -657,7 +657,11 @@ export function rebuildTaskFile(
       event.actor.kind === "human"
         ? event.actor.userId
         : event.actor.kind === "agent"
-          ? `${event.actor.backend}/${event.actor.profileId}`
+          // D32-14 (pass 32): keyed by PROFILE, not by (backend, profile). A
+          // fork that ran one leg on Codex and one on Claude is ONE actor to a
+          // reader; keying on the backend listed "Docs Writer" twice in the
+          // Activity actor filter, each option finding half the events.
+          ? `agent/${event.actor.profileId}`
           : event.actor.kind === "system"
             ? event.actor.systemId
             : event.actor.kind === "unknown"

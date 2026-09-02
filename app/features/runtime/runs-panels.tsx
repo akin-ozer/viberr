@@ -596,9 +596,12 @@ export function AgentLogsPanel({
         </span>
         <span className="spacer" />
         {canRetryBackend && (
+          // D04-U6 (pass 32): a run-start is a secondary control here, like
+          // every sibling run-start demoted in pass 30 (execution-profile.tsx);
+          // the page keeps ONE primary.
           <button
             type="button"
-            className="btn primary sm"
+            className="btn sm"
             disabled={retrying}
             onClick={() => onRetryBackend!(cur!.altBackend!, cur!)}
             title={`Re-run the ${cur!.kind === "reviewer" ? "reviewer" : "specialist"} on ${altLabel}. The current backend was unavailable`}

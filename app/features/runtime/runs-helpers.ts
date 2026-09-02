@@ -240,6 +240,18 @@ export function runInputRows(
     ].join(" · "),
   });
 
+  // Pass 32 (E32-3 fallback): the OS sandbox a Codex run got, with the honest
+  // note when the evidence carve-out decided it. Absent on Claude (no OS
+  // sandbox; the denied list above is the confinement).
+  if (inputs.sandbox) {
+    rows.push({
+      tag: "sandbox",
+      text: inputs.sandbox.note
+        ? `${inputs.sandbox.mode} · ${inputs.sandbox.note}`
+        : inputs.sandbox.mode,
+    });
+  }
+
   rows.push({
     tag: "directive",
     text: inputs.directive

@@ -1,4 +1,5 @@
 import { data } from "react-router";
+import { pageTitle } from "~/shared/page-title";
 import type { Route } from "./+types/controller";
 import {
   appErrorResponse,
@@ -19,7 +20,7 @@ import { getControllerSurface } from "~/features/controller/controller-query.ser
  */
 
 export function meta() {
-  return [{ title: "Controller · Viberr" }];
+  return [{ title: pageTitle("Controller") }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {

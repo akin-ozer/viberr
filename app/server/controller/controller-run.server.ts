@@ -1,4 +1,5 @@
 import path from "node:path";
+import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { KB_INJECTION_BUDGET, KB_PRECEDENCE_NOTE, readKbBodies } from "~/server/files/kb-injection.server";
@@ -419,8 +420,10 @@ async function settleTurn(
               : "the run did not complete";
         reply =
           `I could not finish this turn: ${detail}.` +
+          // P07-C: the same marker words as every run-failure line (one
+          // source), inlined into a chat sentence rather than a log line.
           (failure?.providerText
-            ? ` The provider reported: ${failure.providerText}`
+            ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}`
             : "") +
           " Say it again to retry.";
       }
@@ -630,10 +633,10 @@ export function buildControllerSystemPrompt(
   const parts: string[] = [readControllerDefinition(input.dataRoot)];
 
   const resourceParts: string[] = [];
-  const skillSet = readSkillBodies(
-    input.config.skills.length ? input.config.skills : ["controller-guide"],
-    input.dataRoot,
-  );
+  // C03-OC3: `resolveControllerConfig` already applied the one rule (an empty
+  // stored list ⇒ the controller guide), so the prompt injects exactly what
+  // the settings panel shows — no private fallback here.
+  const skillSet = readSkillBodies(input.config.skills, input.dataRoot);
   for (const part of skillSet.parts) {
     resourceParts.push(`\n\n---\n# ${part.name} (skill)\n\n${part.body}`);
   }

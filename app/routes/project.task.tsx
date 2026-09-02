@@ -5,6 +5,7 @@ import {
   useParams,
   useRouteLoaderData,
 } from "react-router";
+import { pageTitle } from "~/shared/page-title";
 import type { Route } from "./+types/project.task";
 import type { loader as projectLoader } from "./project";
 import {
@@ -764,6 +765,12 @@ export async function action({ request, params }: Route.ActionArgs) {
           manual: true,
         };
         if (acceptsCompletion) move.ack = acceptanceAck(formData);
+        // F32-10 (pass 32): a no-op move must not be narrated as a move. The
+        // server's idempotent short-circuit now pays the same gate as a real
+        // move, so a refusal never reaches here; a permitted same-stage post
+        // simply reports that nothing changed (toast-honesty: never claim an
+        // event that did not happen).
+        const stageBefore = getTaskSummary(db, projectSlug, taskKey)?.stage;
         const task = await transitionStage(db, move, actor);
         const proj = getProject(db, projectSlug);
         const toName =
@@ -772,13 +779,16 @@ export async function action({ request, params }: Route.ActionArgs) {
           ok: true as const,
           intent,
           stage: task.stage,
-          toast: `Moved ${taskKey} to ${toName}`,
+          toast:
+            stageBefore === task.stage
+              ? `${taskKey} is already at ${toName} · nothing changed`
+              : `Moved ${taskKey} to ${toName}`,
         };
       }
       case "run-interrupt": {
         // Real governed action (runs spec §5.1): RBAC admin|maintainer,
         // writes interrupted state + audit event. Idempotent-safe.
-        const result = interruptRun(
+        const result = await interruptRun(
           db,
           { projectSlug, taskKey, runId: String(formData.get("runId") ?? "") },
           actor,
@@ -1067,9 +1077,10 @@ export async function action({ request, params }: Route.ActionArgs) {
 export function meta({ loaderData, params }: Route.MetaArgs) {
   return [
     {
+      // D32-3: the product name closes every title.
       title: loaderData
-        ? `${loaderData.task.key} · ${loaderData.task.title}`
-        : params.key,
+        ? pageTitle(`${loaderData.task.key} · ${loaderData.task.title}`)
+        : pageTitle(params.key),
     },
   ];
 }

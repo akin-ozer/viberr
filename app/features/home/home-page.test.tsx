@@ -254,9 +254,17 @@ describe("LV-07: the New-project modal explains itself", () => {
 
 describe("B-FD4: the Settings tiles are admin-only links", () => {
   it("an org admin gets the Manage links", () => {
-    const { getAllByText, container } = renderHome(baseData([card()]));
+    const { getAllByText, getAllByRole, container } = renderHome(baseData([card()]));
     expect(getAllByText("Manage").length).toBe(3);
     expect(container.querySelectorAll('a[href^="/org/settings"]').length).toBe(3);
+    // A11Y-6 (pass 32): each tile link is NAMED by its content (heading +
+    // count + "Manage"); the live tree tool reported them unnamed, so the
+    // computed accessible name is pinned here.
+    const tiles = getAllByRole("link", { name: /Manage/ });
+    expect(tiles).toHaveLength(3);
+    for (const tile of tiles) {
+      expect(tile.textContent!.replace("Manage", "").trim().length).toBeGreaterThan(0);
+    }
   });
 
   it("a member keeps the counts but gets no link into an admin-403 route", () => {

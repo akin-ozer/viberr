@@ -1,4 +1,5 @@
 import type { Route } from "./+types/resources.events";
+import { ERROR_CODES } from "~/server/errors/error-codes";
 import { authenticate } from "~/server/auth/require-user.server";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -65,7 +66,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const ctx = await authenticate(request);
   if (!ctx || ctx.pwresetRequired) {
     return Response.json(
-      { error: { code: "unauthorized", message: "Sign in to subscribe." } },
+      { error: { code: ERROR_CODES.UNAUTHORIZED, message: "Sign in to subscribe." } },
       { status: 401 },
     );
   }
@@ -79,7 +80,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       return Response.json(
         {
           error: {
-            code: "validation",
+            code: ERROR_CODES.VALIDATION_FAILED,
             message: `Invalid scope "${raw}". Expected project:<slug>, task:<slug>/<key>, projects or user.`,
           },
         },
@@ -92,7 +93,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     return Response.json(
       {
         error: {
-          code: "validation",
+          code: ERROR_CODES.VALIDATION_FAILED,
           message: "At least one scope query param is required.",
         },
       },

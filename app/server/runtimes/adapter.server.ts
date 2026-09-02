@@ -107,13 +107,12 @@ export interface RunSpec {
    *  prompt as text and this stays empty. */
   skills?: string[];
   /** The run's `execute-code-or-write-repo` grant is WITHHELD (mode `off` or
-   *  `human`). Claude enforces it via the tool denylist; on Codex it is
-   *  ADVISORY since R22 removed the read-only sandbox (the server-owned
-   *  delivery gate is the real boundary) — no runtime consumes this flag for
-   *  enforcement anymore; it rides the spec as the run's stated confinement.
-   *  Deliberately NOT folded into `autonomous`, which also drives Claude's
-   *  `permissionMode` (flipping that would hang a server run on an
-   *  unanswerable approval). */
+   *  `human`). Claude enforces it via the tool denylist; Codex through the
+   *  read-only sandbox `resolveCodexSandboxMode` derives from this flag
+   *  (ruling 101 — the one disclosed exception is an evidence-granted run,
+   *  which keeps workspace-write and is labeled advisory). Deliberately NOT
+   *  folded into `autonomous`, which also drives Claude's `permissionMode`
+   *  (flipping that would hang a server run on an unanswerable approval). */
   repoWriteWithheld?: boolean;
   /** The run's `use-web-search-fetch` grant is WITHHELD. Claude removes the
    *  WebFetch/WebSearch tools via `disallowedTools`; Codex, which has no

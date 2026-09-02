@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { insecureAuthOriginWarning, parseEnv } from "./env.server";
 
@@ -212,5 +214,69 @@ describe("insecureAuthOriginWarning (U8)", () => {
     // The UNSET case has its own boot warning (OAuth + no BETTER_AUTH_URL);
     // this rule must not double up on it.
     expect(at("production")).toBeNull();
+  });
+});
+
+/**
+ * C3 (pass 31) / C01-A6 (pass 32): the schema and `.env.example` are the two
+ * places an operator looks for "what can I configure". Twice now a knob shipped
+ * that both denied existed — read straight off `process.env` in a module far
+ * from here. This gate walks every non-test source file for a raw
+ * `process.env.VIBERR_*` read and insists the name is declared in BOTH places.
+ * Test-only hooks are the sole allowlist, named here so an addition is a
+ * reviewed decision, not a silent one.
+ */
+describe("no undeclared VIBERR_* env reads (C01-A6)", () => {
+  const TEST_ONLY_HOOKS = new Set([
+    "VIBERR_CATALOG_PROBE_MARKER",
+    "VIBERR_CLAUDE_TEST_MARKER",
+    "VIBERR_CODEX_TEST_MARKER",
+  ]);
+
+  function rawReads(): Map<string, string[]> {
+    const root = join(process.cwd(), "app");
+    const found = new Map<string, string[]>();
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!/\.(ts|tsx)$/.test(entry) || /\.test\.tsx?$/.test(entry)) continue;
+        const text = readFileSync(full, "utf8");
+        for (const m of text.matchAll(/process\.env\.(VIBERR_[A-Z0-9_]+)/g)) {
+          const name = m[1]!;
+          const list = found.get(name) ?? [];
+          list.push(full.slice(process.cwd().length + 1));
+          found.set(name, list);
+        }
+      }
+    };
+    walk(root);
+    return found;
+  }
+
+  it("declares every raw process.env.VIBERR_* read in the schema", async () => {
+    const { ENV_KEYS } = await import("./env.server");
+    const declared = new Set(ENV_KEYS);
+    const undeclared = [...rawReads()]
+      .filter(([name]) => !declared.has(name) && !TEST_ONLY_HOOKS.has(name))
+      .map(([name, files]) => `${name} (${files.join(", ")})`);
+    expect(undeclared).toEqual([]);
+  });
+
+  it("documents every raw process.env.VIBERR_* read in .env.example", () => {
+    const example = readFileSync(`${process.cwd()}/.env.example`, "utf8");
+    // Documented only in the secret-key rotation runbook, on purpose: it is a
+    // one-shot migration variable, not a knob to leave in a template.
+    const RUNBOOK_ONLY = new Set(["VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS"]);
+    const missing = [...rawReads().keys()].filter(
+      (name) =>
+        !TEST_ONLY_HOOKS.has(name) &&
+        !RUNBOOK_ONLY.has(name) &&
+        !new RegExp(`^#?${name}=`, "m").test(example),
+    );
+    expect(missing).toEqual([]);
   });
 });

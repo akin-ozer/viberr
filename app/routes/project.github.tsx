@@ -1,5 +1,6 @@
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.github";
+import { pageTitle } from "~/shared/page-title";
 import type { loader as projectLoader } from "./project";
 import {
   appErrorResponse,
@@ -40,6 +41,12 @@ import type { RbacAction } from "~/shared/rbac";
  * revalidateProjectCredential. Every degraded GitHub state is a typed value
  * rendered as honest copy — never a crash.
  */
+
+/** D32-3: "<Page> · <project> · Viberr" — this view used to inherit the bare
+ *  project title from the workspace layout. */
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: pageTitle("GitHub", params.slug) }];
+}
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   // R15-4 on THIS loader, not only the layout's (F19-28): single-fetch honors a

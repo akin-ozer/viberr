@@ -74,7 +74,9 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // never rebase or force-push. An absent grant follows the DELIVERY gate
   // (updateBranchGate) — the capability postdates every deployment.
   cap("update-task-branch", "Bring the task branch up to date", ["operator"], "Permissions"),
-  // Agent repository/execution toggles (bind via the Claude tool denylist)
+  // Agent repository/execution toggles (bind via the Claude tool denylist; the
+  // headline write family also binds on Codex through the read-only sandbox —
+  // ruling 101 — with the evidence carve-out disclosed by codexRepoWriteAdvisory)
   cap("execute-code-or-write-repo", "Execute code or write to the repo", ["agent"], "Repository & execution"),
   cap("create-task-branch", "Create the task-key branch", ["agent"], "Repository & execution"),
   cap("commit-push-branch", "Commit & push to the branch", ["agent"], "Repository & execution"),
@@ -225,7 +227,6 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "commit-push-branch",
   "open-review-pr",
   "merge-pull-request",
-  "execute-code-or-write-repo",
   "dispatch-agents",
   "generate-packets",
   "append-typed-events",
@@ -255,7 +256,11 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   // sandbox a withheld run gets back (resolveCodexSandboxMode; the P13-RT-02
   // shape R22 had removed). One disclosed nuance: an evidence-granted Codex
   // run keeps workspace-write so its file-posting assignment stays honest
-  // (the sandbox cannot express "read-only except attachments/").
+  // (the sandbox cannot express "read-only except attachments/" — VERIFIED
+  // against Codex 0.146 in pass 32; `codexRepoWriteAdvisory` tags exactly that
+  // shape "advisory on Codex" on the editor, the matrix, the card and the run
+  // console). One entry: A00-8 found this id listed twice in this Set, so a
+  // future edit could delete the wrong copy — the disjointness test pins it.
   "execute-code-or-write-repo",
   // R19-19: withheld ⇒ the browser MCP server is not mounted into the run, on
   // both backends — the strongest enforcement shape the runtime has (the tool

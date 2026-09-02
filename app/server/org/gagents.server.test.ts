@@ -151,6 +151,77 @@ describe("global agent profiles", () => {
     ).toThrowError(/already exists/);
   });
 
+  it("D32-7: a role given here lands in the file; a blank one keeps the stored role", () => {
+    const { db, dataRoot, ctx } = setup();
+    const { profile } = saveGlobalAgentProfile(
+      db,
+      {
+        name: "Docs writer",
+        backend: "claude",
+        summary: "Writes the docs.",
+        role: "Documentation",
+        persona: "",
+        stages: ["impl"],
+        skills: [],
+        mcps: [],
+        kbs: [],
+      },
+      ACTOR,
+      ctx,
+    );
+    // The view carries the role the modal prefills from (a role that merely
+    // repeats the name is the pre-pass-32 default and prefills empty there).
+    expect(profile.role).toBe("Documentation");
+    const read = () =>
+      parseAgentProfileContent(
+        readFileSync(agentProfileFilePath("docs-writer", dataRoot), "utf8"),
+        { fallbackId: "docs-writer" },
+      ).parsed!.frontmatter.role;
+    expect(read()).toBe("Documentation");
+    // Blank keeps the stored role (canary: replace the edit branch's
+    // `input.role?.trim() || existing.frontmatter.role || name` with a bare
+    // `name` and this reads "Docs writer").
+    saveGlobalAgentProfile(
+      db,
+      {
+        id: "docs-writer",
+        name: "Docs writer",
+        backend: "claude",
+        summary: "Writes the docs.",
+        role: "",
+        persona: "",
+        stages: ["impl"],
+        skills: [],
+        mcps: [],
+        kbs: [],
+      },
+      ACTOR,
+      ctx,
+    );
+    expect(read()).toBe("Documentation");
+    // A NEW role on edit lands (review F9a: this is the half the blank-edit
+    // assertion alone could not lock — canary: drop `input.role?.trim() ||`
+    // on the edit branch and this still reads "Documentation").
+    saveGlobalAgentProfile(
+      db,
+      {
+        id: "docs-writer",
+        name: "Docs writer",
+        backend: "claude",
+        summary: "Writes the docs.",
+        role: "Docs lead",
+        persona: "",
+        stages: ["impl"],
+        skills: [],
+        mcps: [],
+        kbs: [],
+      },
+      ACTOR,
+      ctx,
+    );
+    expect(read()).toBe("Docs lead");
+  });
+
   it("edit preserves capability policy + extras (fields the modal doesn't own)", () => {
     const { db, dataRoot, ctx } = setup();
     writeTemplate(dataRoot, "developer", "specialist");

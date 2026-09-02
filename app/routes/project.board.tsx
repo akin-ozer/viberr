@@ -1,5 +1,6 @@
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.board";
+import { pageTitle } from "~/shared/page-title";
 import type { loader as projectLoader } from "./project";
 import { requireVisibleProject } from "./project-visibility.server";
 import {
@@ -40,6 +41,12 @@ import { BoardPage } from "~/features/board/board-page";
  */
 function acceptanceAck(formData: FormData) {
   return parseAcceptanceDisclosure((field) => String(formData.get(field) ?? ""));
+}
+
+/** D32-3: "<Page> · <project> · Viberr" — this view used to inherit the bare
+ *  project title from the workspace layout. */
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: pageTitle("Board", params.slug) }];
 }
 
 export async function action({ request, params }: Route.ActionArgs) {

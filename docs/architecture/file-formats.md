@@ -34,8 +34,9 @@ ${VIBERR_DATA_ROOT}/
   state/writer.lock  state/shipped-assets.json
 ```
 
-`DATA_ROOT_SUBDIRS` creates nine of these at boot (`projects`, `agents`, `agents/profiles`,
-`runtimes`, `runtimes/claude-home`, `runtimes/codex-home`, `kb`, `skills`, `state`); the rest
+`DATA_ROOT_SUBDIRS` creates ten of these at boot (`projects`, `agents`, `agents/profiles`,
+`runtimes`, `runtimes/claude-home`, `runtimes/codex-home`, `kb`, `skills`, `audit-exports`,
+`state`); the rest
 appear when first written. There is no `cache/`, `auth/` or `logs/` directory — they were
 removed on purpose (P11-56); application logs are structured JSON on stdout, and secrets live
 encrypted in SQLite (the container image additionally keeps `runtimes/uv-cache` and
@@ -115,7 +116,9 @@ guardrails:                       # four defaults (shared/workflow/templates.ts)
                                   # meaningful-comment, no-duplicate-summary,
                                   # compression-threshold (value 40), evidence-separation;
                                   # delete-branch-after-merge is a fifth row whose
-                                  # ABSENCE means on (ruling 24)
+                                  # ABSENCE means on (ruling 24). The four defaults are
+                                  # edited on Policy → Guardrails (ruling 112), the fifth
+                                  # on Settings → GitHub
   - id: compression-threshold
     desc: Long timelines compress once routine events pass the threshold; typed events are always kept.
     on: true
@@ -221,6 +224,12 @@ pr:                               # GitHub projection mirrored into the file
 github:                           # more GitHub cache: commits + change stats
   commits: [{ sha: a91f7c2, msg: "[VIB-142] …" }]
   changed: { files: 9, add: 412, del: 87 }
+priority: normal                  # R26-1: normal | high | urgent-ish metadata the OPERATOR
+                                  # reads (advisory); never in the specialist prompt
+labels: []                        # R26-2: free-text labels, searchable on the board and ⌘K
+dueDate: null                     # R26-1: ISO date or null — advisory metadata
+acceptance: forced                # optional; N20-14 — set when an admin force-accepted
+goalRef: null                     # ruling 99: { goalId, linkIndex } for a chained-goal task
 createdAt: 2026-07-03T06:00:00.000Z
 updatedAt: 2026-07-04T06:58:00.000Z
 boardRank: 300                    # sparse rank for drag-to-reorder; null falls
@@ -454,7 +463,8 @@ icon: branch                      # ui.jsx Icon name
 backends: [codex, claude]
 model: sonnet                     # ONE catalog id for the first backend (see
                                   # docs/domain/agents-and-runtime.md §2.3);
-                                  # `effort:` is optional (controller today, ruling 106)
+effort: high                      # optional reasoning effort (controller today, ruling 106;
+                                  # specialists carry model+effort per deployment)
 scope: Global base · customized for Viberr Core
 stages: [ready, impl]             # eligible stages
 spanAll: false                    # operator only

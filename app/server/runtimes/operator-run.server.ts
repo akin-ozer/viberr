@@ -1094,9 +1094,10 @@ function operatorCheckoutTarget(input: TaskFileRef): {
  *
  * The Claude operator physically cannot write: `Bash`/`Edit`/`Write`/`MultiEdit`/
  * `NotebookEdit` are removed from its context. The Codex operator has no such
- * denylist channel, and since R22 removed the read-only sandbox it runs
- * `workspace-write` — writable and shell-capable, with its CWD as the one
- * writable root. Left at the task folder (the default), that writable root would
+ * denylist channel; since ruling 101(d) it runs `read-only` again
+ * (resolveCodexSandboxMode — coordination machinery, no write assignment), and
+ * this scratch CWD is defense in depth for the mode R22 briefly widened it to.
+ * Left at the task folder (the default), a writable root would
  * contain `task.md` (the canonical governance record — stage, verdicts, packet)
  * and the shared deliverer checkout below it, so a Codex operator could `sed`
  * the governance file or `git commit` into the delivery clone. Root it instead
@@ -1571,7 +1572,7 @@ type OperatorPlanTool = (typeof OPERATOR_PLAN_TOOLS)[number];
  * The capability each plan tool needs — the exact mapping the Claude toolkit
  * uses to decide whether to BUILD a tool (`operator-toolkit.server.ts`). On
  * Claude a denied capability's tool never exists, so the model cannot reach it;
- * the Codex plan schema advertised all nine regardless of policy.
+ * the Codex plan schema used to advertise every plan tool regardless of policy.
  */
 const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   post_comment: ["append-typed-events"],
@@ -1622,14 +1623,11 @@ export function operatorPlanToolsFor(
   // VISIBLY by narrateRefusedActions rather than silently.
   //
   // A4: except `deliver_for_review` and `update_branch_from_base`. Reaching the
-  // fallback means the grant was either explicitly withheld or (with no
+  // fallback means their grant was either explicitly withheld or (with no
   // operator deployed) never made, and these are the plan actions with effects
-  // OUTSIDE Viberr — a pushed branch, an opened PR. Delivery was
-  // either explicitly withheld or (with no operator deployed) not granted at
-  // all, and it is the one plan action with effects OUTSIDE Viberr — a pushed
-  // branch, an opened PR. `operatorDeliverForReview` refuses it either way, so
-  // advertising it only buys a billed turn spent planning a push that cannot
-  // happen.
+  // OUTSIDE Viberr — a pushed branch, an opened PR. `operatorDeliverForReview`
+  // refuses either way, so advertising them only buys a billed turn spent
+  // planning a push that cannot happen.
   return permitted.length
     ? [...permitted]
     : OPERATOR_PLAN_TOOLS.filter(
@@ -1873,9 +1871,9 @@ async function startCodexOperatorRun(
   // was real on one backend and decorative on the other — a Codex operator could
   // not call the read tools that would inform its plan. The CLI translation
   // drops credentials and stamps approve-mode (codex-runtime); the operator's
-  // own sandbox is workspace-write with the network off (R22 removed
-  // read-only), which does not affect MCP servers — the CLI, not the sandboxed
-  // shell, connects to them.
+  // own sandbox is read-only with the network off (ruling 101(d)), which does
+  // not affect MCP servers — the CLI, not the sandboxed shell, connects to
+  // them.
   // Resolved BEFORE the persona (B8) so the prompt describes what MOUNTS.
   // F21-3: that resolve now pre-flights the stdio mounts, so "what mounts" is
   // what actually starts, not what the registry row remembers.
@@ -1922,10 +1920,10 @@ async function startCodexOperatorRun(
     // read-only to a workspace-write Codex run.
     workdir: scratchDir,
     // R19-1: the same read-only policy the Claude operator carries. Codex has no
-    // denylist channel — since R22 removed the read-only sandbox the policy is
-    // advisory there (workspace-write, network off; the server-owned delivery
-    // gate is the boundary) — but the spec must still STATE the run's
-    // confinement rather than leaving it implicit in the runtime's kind lookup.
+    // denylist channel — its operator binds through the read-only sandbox
+    // (ruling 101(d), resolveCodexSandboxMode) — but the spec must still STATE
+    // the run's confinement rather than leaving it implicit in the runtime's
+    // kind lookup.
     disallowedTools: operatorDisallowedTools(authority),
     // P13-RT-03: advertise only the actions this operator's policy permits.
     outputSchema: buildOperatorPlanSchema(operatorPlanToolsFor(authority)),
@@ -2803,8 +2801,8 @@ const NO_OPERATOR_MCPS: OperatorMcpResolution = {
  * description of the run's actual denylist, not a request: `Bash`/`Edit`/
  * `Write`/`MultiEdit`/`NotebookEdit` are removed from its context
  * (`operatorDisallowedTools`), so it cannot write there even if a task tells it
- * to. (That binding is Claude's; on Codex the denylist has no channel and,
- * since R22 removed the read-only sandbox, the statement is advisory there.)
+ * to. (That binding is Claude's; on Codex the denylist has no channel and the
+ * read-only sandbox binds the same statement — ruling 101(d).)
  *
  * The delivery carve-out is deliberate. "You cannot push" would be the third
  * channel in this run's context to make a claim about the repository, and it

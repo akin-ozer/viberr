@@ -524,14 +524,16 @@ describe("controller config locks (ruling 108)", () => {
       mcps: before.mcps,
     };
     const skillsOnly = { skills: false, kb: true, mcps: true, instructions: true };
-    // Unlocked section: the change lands.
+    // Unlocked section: the change lands on disk — and the RESOLVED config
+    // reports the controller guide for an empty list (C03-OC3, pass 32: the
+    // one rule the panel and the runtime share; the file itself holds `[]`).
     saveControllerConfig(
       getDb(),
       { ...base, skills: [] },
       actor,
       { dataRoot: app.dataRoot, locks: skillsOnly },
     );
-    expect((await stored()).skills).toEqual([]);
+    expect((await stored()).skills).toEqual(["controller-guide"]);
     // A sibling section stays locked under the same flags.
     expect(() =>
       saveControllerConfig(

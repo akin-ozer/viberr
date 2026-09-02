@@ -586,10 +586,11 @@ const REPO_WRITE_DENY_MARKERS = ["Edit", "Write", "NotebookEdit"] as const;
  * `resolveSpecialistDisallowedTools` policy, backend-agnostically — it just had
  * no effect on Codex, which has no denylist channel. Deriving the flag from it
  * means the spec records the withholding for exactly the profiles the matrix
- * already shows as withheld, with no second source of truth to drift. (It used
- * to drive the Codex read-only sandbox; R22 removed that sandbox, so on Codex
- * the withholding is advisory now.) Callers that know the grant directly may
- * still pass `repoWriteWithheld` explicitly.
+ * already shows as withheld, with no second source of truth to drift. It
+ * drives the Codex read-only sandbox again since ruling 101 (R22 had removed
+ * that sandbox; the parity ruling restored it for withheld runs, with the
+ * evidence carve-out disclosed as advisory). Callers that know the grant
+ * directly may still pass `repoWriteWithheld` explicitly.
  */
 export function repoWriteWithheldFromDenylist(
   disallowedTools?: readonly string[],
@@ -833,9 +834,10 @@ export async function startRun(
     spec.disallowedTools = input.disallowedTools;
   }
   if (input.skills && input.skills.length) spec.skills = input.skills;
-  // Records the withheld repo-write grant on the spec. It used to drive the
-  // Codex read-only sandbox (P13-RT-02); R22 removed that sandbox, so on Codex
-  // it is advisory (Claude's denylist binds). Explicit caller value wins.
+  // Records the withheld repo-write grant on the spec: Claude's denylist binds
+  // it, and since ruling 101 the Codex read-only sandbox does too
+  // (resolveCodexSandboxMode; the evidence carve-out is the disclosed
+  // exception). Explicit caller value wins.
   if (
     input.repoWriteWithheld ??
     repoWriteWithheldFromDenylist(input.disallowedTools)
@@ -1165,6 +1167,14 @@ export interface ResumeRunInput {
    *  ask_human can fire. Without it a resumed Codex reviewer silently lost
    *  its envelope, a fresh-vs-resume parity break (F7). */
   outputSchema?: unknown;
+  /** C02-R3 (pass 32): re-apply the task's attachments drop on resume. It is
+   *  the Codex sandbox's ONLY extra writable root (and the evidence carve-out
+   *  in `resolveCodexSandboxMode` keys off it): a resumed evidence-granted
+   *  Codex run used to lose `additionalDirectories` — its persona still said
+   *  "copy files into attachments/" while the sandbox blocked the copy — and a
+   *  write-withheld one dropped to read-only, the F22-03 defect back on the
+   *  @mention path. Same fresh-vs-resume parity class as XS-1/F7. */
+  attachmentsWritableDir?: string;
 }
 
 /**
@@ -1189,6 +1199,9 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
   if (input.mcpServers) target.mcpServers = input.mcpServers;
   if (input.systemPrompt) target.systemPrompt = input.systemPrompt;
   if (input.outputSchema) target.outputSchema = input.outputSchema;
+  if (input.attachmentsWritableDir) {
+    target.attachmentsWritableDir = input.attachmentsWritableDir;
+  }
 }
 
 /**
@@ -1519,11 +1532,11 @@ export interface InterruptResult {
  * event. Idempotent-safe: interrupting a non-running run returns a friendly
  * `already-terminal`, never an error.
  */
-export function interruptRun(
+export async function interruptRun(
   db: DatabaseSync,
-  input: { projectSlug: string; taskKey: string; runId: string },
+  input: { projectSlug: string; taskKey: string; runId: string; dataRoot?: string },
   actor: { userId: string; label: string },
-): InterruptResult {
+): Promise<InterruptResult> {
   const run = getRun(db, input.runId);
   if (!run || run.project_slug !== input.projectSlug || run.task_key !== input.taskKey) {
     throw AppError.notFound(`Run ${input.runId} not found on ${input.taskKey}.`);
@@ -1550,6 +1563,13 @@ export function interruptRun(
 
   if (run.state !== "running" && run.state !== "queued") {
     // Idempotent no-op — the run already reached a terminal state.
+    return { outcome: "already-terminal", run: projectOne(db, run) };
+  }
+  // Review F6 (pass 32): the live-handle arm below stamps `interrupted_by` at
+  // once but leaves `state = running` until the adapter's onExit lands. A
+  // second click in that window (the button re-enables as soon as the action
+  // returns) must not write a second audit row and a second timeline note.
+  if (run.interrupted_by) {
     return { outcome: "already-terminal", run: projectOne(db, run) };
   }
 
@@ -1603,8 +1623,57 @@ export function interruptRun(
   });
   logger.info("run interrupted", { runId: input.runId, by: actor.userId });
 
+  // The response is complete BEFORE the best-effort note: every DB read for the
+  // result happens here, so a caller that does not await (test cleanup after
+  // its DB closed) can never surface "database is not open" as an unhandled
+  // rejection from the tail — `noteInterrupt` catches its own failures.
   const after = getRun(db, input.runId);
-  return { outcome: "interrupted", run: after ? projectOne(db, after) : null };
+  const result: InterruptResult = {
+    outcome: "interrupted",
+    run: after ? projectOne(db, after) : null,
+  };
+  await noteInterrupt(db, run, actor, input.dataRoot);
+  return result;
+}
+
+/**
+ * D32-18 (pass 32): a human interrupt wrote the audit row and the run row, and
+ * NOTHING on the task's timeline — the record showed the transition, then
+ * silence, and the next reader could not tell the run was stopped by a person.
+ * A note authored by that person, naming the run, is the canonical trace.
+ * Best-effort like the continuity note: a task file we cannot write never
+ * masks the interrupt itself. Controller runs have no task file (ruling 99).
+ */
+async function noteInterrupt(
+  db: DatabaseSync,
+  run: AgentRunRow,
+  actor: { userId: string; label: string },
+  dataRoot?: string,
+): Promise<void> {
+  if (run.kind === "controller") return;
+  const ref: TaskFileRef = { projectSlug: run.project_slug, taskKey: run.task_key };
+  if (dataRoot) ref.dataRoot = dataRoot;
+  const backend = run.backend === "claude" ? "Claude" : "Codex";
+  try {
+    await updateTaskFile(ref, (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "human", userId: actor.userId, nameHint: actor.label },
+        title: null,
+        text: `Interrupted the ${backend} run \`${run.id}\` (${run.agent_name ?? run.role}). The thread stays resumable; re-run the agent to continue.`,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
+  } catch (error) {
+    logger.error("interrupt timeline note failed", {
+      runId: run.id,
+      taskKey: run.task_key,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 }
 
 // ---------------------------------------------- reads
@@ -1643,6 +1712,12 @@ export interface RunLogQuery {
    *  group). A forward tail ignores it: it is already bounded by how far behind
    *  the consumer is. */
   limit?: number;
+  /** C02-R12 (pass 32): a bound for the FORWARD read, pushed into the SELECT.
+   *  The console's live tail never needs one (it is bounded by its own
+   *  cursor), but `viberr_ops.read_run_log` pages forward for a model and
+   *  used to materialize every line after `since` before slicing. Ignored in
+   *  backward mode (`limit` is that page's size). */
+  forwardLimit?: number;
 }
 
 /**
@@ -1666,7 +1741,7 @@ export function getRunLog(
     ? listRunLinesTail(db, runId, query.limit ?? RUN_LOG_PAGE_LINES, query.before).map(
         ({ seq, occurredAt, raw, display }) => ({ seq, occurredAt, raw, display }),
       )
-    : listRunLines(db, runId, query.since ?? -1);
+    : listRunLines(db, runId, query.since ?? -1, query.forwardLimit);
   const sinceSeq = query.since ?? -1;
   const head = lines.length ? lines[lines.length - 1]!.seq : sinceSeq;
   const oldestSeq = lines.length ? lines[0]!.seq : -1;

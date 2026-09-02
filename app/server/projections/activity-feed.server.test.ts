@@ -17,6 +17,8 @@ import {
   listActivityStream,
   listAuditLog,
   streamFilterOptions,
+  auditFilterActors,
+  displayAuditActorLabel,
 } from "./activity-feed.server";
 
 const ctx = createTestDbContext();
@@ -214,6 +216,19 @@ describe("listAuditLog", () => {
       projectSlug: store.slug,
       details: { from: "contributor", to: "viewer", targetUserId: store.users.selin.id },
     });
+    // E32-6: the three guardrail-change shapes the Policy card writes.
+    for (const details of [
+      { id: "meaningful-comment", label: "Meaningful comments", op: "off" },
+      { id: "compression-threshold", label: "Compression threshold", op: "value", value: 60 },
+      { id: "old-rule", label: "old-rule", op: "remove" },
+    ]) {
+      recordAudit(store.db, {
+        action: "project.policy.guardrail_changed",
+        actor: { userId: arda.id, label: arda.email },
+        projectSlug: store.slug,
+        details,
+      });
+    }
     recordAudit(store.db, {
       action: "github.pr.merge_refused",
       actor: { userId: arda.id, label: arda.email },
@@ -247,6 +262,9 @@ describe("listAuditLog", () => {
       expect.arrayContaining([
         `${arda.name} set **impl → review** to auto-advance.`,
         `${arda.name} set ${store.users.selin.name} to **viewer**.`,
+        `${arda.name} turned **Meaningful comments** off.`,
+        `${arda.name} set **Compression threshold** to 60.`,
+        `${arda.name} removed the **old-rule** guardrail.`,
       ]),
     );
 
@@ -453,8 +471,10 @@ describe("feed filters (P21 — owner request: search + filters per panel)", () 
     expect(comments[0]?.taskKey).toBe("VIB-202");
     expect(countActivityStream(store.db, store.slug, type)).toBe(1);
 
-    // actorRef — the stable ref behind the display name (backend/profileId).
-    const actor = { actorRef: "codex/developer" };
+    // actorRef — the stable ref behind the display name (`agent/<profileId>`;
+    // D32-14: the backend is NOT part of the key, so one profile's Codex and
+    // Claude legs are one actor).
+    const actor = { actorRef: "agent/developer" };
     expect(listActivityStream(store.db, store.slug, { filters: actor })).toHaveLength(1);
 
     // task — case-insensitive exact key.
@@ -481,7 +501,7 @@ describe("feed filters (P21 — owner request: search + filters per panel)", () 
     const options = streamFilterOptions(store.db, store.slug);
     expect(options.types.sort()).toEqual(["comment", "completion", "policy"]);
     const refs = options.actors.map((a) => a.ref);
-    expect(refs).toContain("codex/developer");
+    expect(refs).toContain("agent/developer");
     expect(refs).toContain("policy-engine");
     expect(refs).toContain(store.users.arda.id);
     // The human's label is the CURRENT users-table name, not the baked ref.
@@ -543,5 +563,69 @@ describe("feed filters (P21 — owner request: search + filters per panel)", () 
 
     // The unfiltered count keeps its cheap aggregate path.
     expect(countAuditLog(store.db, store.slug)).toBe(3);
+  });
+});
+
+describe("audit-panel actor names (E32-8, pass 32)", () => {
+  it("decodes agent and system labels to the Stream's display names, humans by users-table name", () => {
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    // A whitelisted action an AGENT writes (the session-open row).
+    recordAudit(store.db, {
+      action: "runtime.run.started",
+      actor: { userId: null, label: "agent:claude/developer (Implementation)" },
+      projectSlug: store.slug,
+      taskKey: "VIB-201",
+      details: { role: "Reviewer", backend: "claude", kind: "reviewer" },
+    });
+    recordAudit(store.db, {
+      action: "github.reconcile",
+      actor: { userId: null, label: "system:workspace-reconcile" },
+      projectSlug: store.slug,
+    });
+    recordAudit(store.db, {
+      action: "project.policy.boundary_changed",
+      actor: { userId: arda.id, label: arda.email },
+      projectSlug: store.slug,
+      details: { from: "impl", to: "review", boundary: "auto" },
+    });
+    const options = auditFilterActors(store.db, store.slug);
+    // The VALUE stays the stored label (what the filter matches on); the LABEL
+    // is what a reader sees.
+    expect(options).toEqual(
+      expect.arrayContaining([
+        { value: "agent:claude/developer (Implementation)", label: "Developer (Implementation) · Claude" },
+        { value: "system:workspace-reconcile", label: "Workspace reconcile" },
+        { value: arda.name, label: arda.name },
+      ]),
+    );
+    // One option per PERSON: a second row recorded under the user's name (not
+    // the email) must not add a second "Arda".
+    recordAudit(store.db, {
+      action: "project.member.role_changed",
+      actor: { userId: arda.id, label: arda.name },
+      projectSlug: store.slug,
+      details: { from: "contributor", to: "viewer", targetUserId: store.users.selin.id },
+    });
+    expect(
+      auditFilterActors(store.db, store.slug).filter((o) => o.label === arda.name),
+    ).toHaveLength(1);
+    // The value is what the panel's filter matches on (COALESCE(name, label)).
+    expect(
+      listAuditLog(store.db, store.slug, { filters: { actor: arda.name } }).length,
+    ).toBeGreaterThan(0);
+    expect(displayAuditActorLabel("delivery")).toBe("Delivery");
+    expect(displayAuditActorLabel("operator")).toBe("Operator");
+    // The rendered sentence uses the same name for a human (the users-table
+    // row wins either way — the NON-human sentence path is the one that
+    // exercises displayAuditActorLabel, locked below and in
+    // activity-feed-phase10.server.test.ts "Operator opened …").
+    const entries = listAuditLog(store.db, store.slug);
+    const change = entries.find((e) => e.text.includes("impl → review"))!;
+    expect(change.text.startsWith(`${arda.name} set`)).toBe(true);
+    // Review F9b: an agent-authored row renders its decoded name (canary: put
+    // `row.actor_label` back at the `actor` derivation in auditText).
+    const agentRow = entries.find((e) => e.text.startsWith("Developer (Implementation) · Claude opened the Reviewer runtime session"));
+    expect(agentRow, "agent audit rows must render the decoded actor name").toBeTruthy();
   });
 });

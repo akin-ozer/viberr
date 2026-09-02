@@ -1,5 +1,6 @@
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.agents";
+import { pageTitle } from "~/shared/page-title";
 import type { loader as projectLoader } from "./project";
 import {
   appErrorResponse,
@@ -36,6 +37,12 @@ import { AgentsPage } from "~/features/agents/agents-page";
  * revalidates this loader on project.updated / task.updated /
  * run.state-changed — roster and Live tab stay live with no wiring here.
  */
+
+/** D32-3: "<Page> · <project> · Viberr" — this view used to inherit the bare
+ *  project title from the workspace layout. */
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: pageTitle("Agents", params.slug) }];
+}
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   // R15-4 on THIS loader, not only the layout's (F19-28): single-fetch honors a
@@ -193,7 +200,10 @@ export async function action({ request, params }: Route.ActionArgs) {
       );
       const updated: ProfileMutationSuccess = {
         ok: true,
-        toast: `Profile "${result.name}" updated · changes apply to future assignments`,
+        // D32-12 (pass 32, live VIB-2): a run RESUMED after the save mounts the new
+        // grants at once, so "future assignments" under-promised; the truthful
+        // boundary is the next run (fresh or resumed).
+        toast: `Profile "${result.name}" updated · changes apply from the next run`,
         profileId: result.profileId,
       };
       if (result.notices) updated.notices = result.notices;

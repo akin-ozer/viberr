@@ -87,7 +87,7 @@ export type AgentProfileFrontmatter = z.infer<
 >;
 
 /** Recognized top-level frontmatter keys — anything else is drift (seed #3). */
-const AGENT_PROFILE_KNOWN_KEYS = new Set<string>([
+export const AGENT_PROFILE_KNOWN_KEYS = new Set<string>([
   "id",
   "kind",
   "name",

@@ -247,6 +247,7 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
       name: "Operator",
       icon: "shield",
       backends: ["claude"],
+      capabilities: [],
       actions: {
         // The seeded operator's post-rework grant wording (dispatch-agents).
         direct: ["Select & run agents"],
@@ -260,6 +261,7 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
       name: "Developer",
       icon: "branch",
       backends: ["claude"],
+      capabilities: [],
       actions: {
         direct: ["Commit & push to the branch"],
         recommend: [],
@@ -283,7 +285,12 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
     expect(html).toContain("What differs between the two runtimes");
     expect(html).toContain("An agent profile running on");
     expect(html).toContain("gets the persona alone");
-    expect(html).toContain("processes share the host, not an OS sandbox");
+    // V11-1 (pass 32): the intro states ruling 101 — the write family binds on
+    // both backends (Codex via the read-only sandbox) with the one disclosed
+    // carve-out; "not process-sandboxed" was pre-parity copy.
+    expect(html).toContain("Codex runs a read-only sandbox");
+    expect(html).toContain("advisory on Codex");
+    expect(html).not.toContain("not process-sandboxed");
     expect(
       BARE_SPECIALIST.test(html),
       `the capability matrix still renders "specialist" — its own rows are the ` +

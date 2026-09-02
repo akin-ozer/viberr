@@ -108,7 +108,21 @@ function OwnerControl({
     // Only contributor+ may take ownership (Q5) — hide from viewers/non-members.
     // F19-11: the eligibility sentence lives in the cell's VALUE, stated once
     // for every role — this control renders the affordance or nothing.
-    return canOwn ? (
+    // D32-16: an archived task's owner seat is frozen (setOwner refuses), so
+    // the control is withheld like every other runtime action on it. E32-9:
+    // a CLOSED task's seat is frozen the same way.
+    const closed =
+      task.displayReadiness === "accepted" ||
+      task.displayReadiness === "merged" ||
+      task.archived;
+    // Ruling 118: an admin may still reassign a CLOSED (not archived) seat for
+    // the record — the same tier that releases any owner.
+    // SAFETY: same invariant as `canOwn` above — `myRole` is the layout loader's
+    // own project role (or "admin"/null), widened to `string` by the prop chain;
+    // `roleCan` denies any other value, so the widening can only under-grant.
+    const adminSeat =
+      !task.archived && roleCan(myRole as ProjectRole | null, "release-any-ownership");
+    return canOwn && (!closed || adminSeat) ? (
       <button
         type="button"
         className="rev-add"

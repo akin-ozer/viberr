@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { pageTitle } from "~/shared/page-title";
 import {
   data,
   useFetcher,
@@ -45,7 +46,7 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
  */
 
 export function meta() {
-  return [{ title: "Profile & preferences · Viberr" }];
+  return [{ title: pageTitle("Profile & preferences") }];
 }
 
 /** Overlay routes are opened from the shell with the path to return to in

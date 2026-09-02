@@ -4,7 +4,8 @@
 > what each touches and whether it takes the data-root writer lock. Source of truth:
 > `package.json`, `scripts/*`, `app/server/db/cli-lock.server.ts`,
 > `app/server/db/backup.server.ts`, `app/server/seed/*`, `app/server/org/org-seed.server.ts`.
-> Verified against `main` @ `68b5480` (2026-09-01).
+> Verified against `main` @ `68b5480` (2026-09-01); the table and the backup contents
+> re-verified 2026-09-02 against `pass32/implementation` @ `478bed0`.
 
 ## 1. The writer lock rule
 
@@ -24,6 +25,7 @@ container starts or stop it first.
 | `npm run dev` | app | Vite dev server on `PORT` (default 5173); boots the whole server, including watchers and background timers |
 | `npm run build` / `npm run start` | app | production build / `react-router-serve ./build/server/index.js` |
 | `npm run lint` | none | `oxlint` with the vendored anti-slop plugin; must exit 0 |
+| `node scripts/anti-slop-manifest.mjs` | none | re-pins `tools/oxlint/anti-slop/` to `tools/oxlint/anti-slop.manifest.json` after the install-anti-slop skill refreshes it (the vendor-sync test holds the tree to that manifest on CI) |
 | `npm run typecheck` | none | `react-router typegen` + `tsc` |
 | `npm test` | none | vitest over `app/**/*.test.{ts,tsx}` |
 | `npm run e2e [-- <playwright args>]` | n/a (Docker) | production-image Playwright run, see [testing.md](testing.md#4-end-to-end-suite-playwright) |
@@ -31,7 +33,7 @@ container starts or stop it first.
 | `npm run seed:demo [-- --reset]` | **writer** | test/dev fixture: five users, three projects, twelve tasks, notifications, one scope violation; refuses in the production image (no `test-support/`) |
 | `npm run rescan [-- --force]` | **writer** | `rescanProjections` (hash short-circuit unless `--force`) and a report of untrusted files from the `diagnostics` table |
 | `npm run store:check` | none, no DB | parses every `project.md`, `tasks/*/task.md`, `goals/*.md`; exit 1 when any file is untrusted |
-| `npm run backup [-- --out <dir>] [--include-runtimes]` | none (read-only DB) | `VACUUM INTO` snapshot + store tree copy + manifest |
+| `npm run backup [-- --out <dir>] [--include-runtimes]` | none (read-only DB) | `VACUUM INTO` snapshot + store tree copy (incl. `audit-exports/`, ruling 102) + manifest |
 | `npm run restore -- --from <artefact> [--force]` | **writer** | whole-root restore; occupied roots need `--force` and are moved aside, never deleted |
 | `npm run restore -- --from <artefact> --file <store path>` | none | single canonical file restore; the displaced file is kept as `<file>.broken-<ts>` |
 | `npm run keys -- status` | none (read-only DB) | how many sealed secrets still open only under a retired `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` key |
@@ -84,9 +86,10 @@ for Arda; one open scope violation on VIB-142; audit `seed.demo_dataset`; then
 
 Writes `<--out ?? ./backups>/viberr-backup-<timestamp>/` (refuses an existing dir and
 any path inside the data root): `projection.sqlite` via `VACUUM INTO` from a read-only
-connection (WAL folded in, no sidecars), `projects/`, `agents/`, `kb/`, `skills/` (and
-`runtimes/` only with `--include-runtimes`; treat that artefact as a secret), skipping
-`*.tmp`; `MANIFEST.json` (`viberr-backup/1`, sha256, row counts for users, sessions,
+connection (WAL folded in, no sidecars), `projects/`, `agents/`, `kb/`, `skills/`,
+`audit-exports/` (`BACKED_UP_STORE_DIRS`; a directory that does not exist yet is
+skipped) — and `runtimes/` only with `--include-runtimes`; treat that artefact as a
+secret — skipping `*.tmp`; `MANIFEST.json` (`viberr-backup/1`, sha256, row counts for users, sessions,
 accounts, PATs, audit, notifications, MCP servers) and `README.txt`. Always excluded:
 `state/writer.lock`, the encryption key (back up `VIBERR_SECRET_ENCRYPTION_KEY`
 separately or the sealed columns are unreadable), `*.tmp`.

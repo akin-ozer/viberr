@@ -4,6 +4,7 @@ import {
   classifyFreeBytes,
   DEFAULT_DISK_CRITICAL_FREE_BYTES,
   DEFAULT_DISK_LOW_FREE_BYTES,
+  dfReading,
   diskThresholds,
   formatBytes,
   measureDataRootSpace,
@@ -45,6 +46,84 @@ describe("measureDataRootSpace (gap 16)", () => {
   it("returns null — not a fabricated zero — when the path cannot be measured", () => {
     const missing = `${ctx.makeTempDir()}/definitely/not/here`;
     expect(measureDataRootSpace(missing)).toBeNull();
+  });
+
+  // F32-1 (pass 32): on a Docker Desktop virtiofs bind mount `statfs` reports
+  // `bsize` ≈ 1 MiB while the block counts are in 4 KiB fragments, so the
+  // bsize arithmetic inflates the volume ~274× ("1 TiB free" on a host with
+  // 3.7 GB left). `df -kP` reads the fragment size and is the primary source.
+  const virtiofsStatfs = () => ({
+    // 229 GB volume counted in 4 KiB fragments, multiplied by a 1 MiB bsize.
+    totalBytes: 55_900_000 * 1_048_576,
+    freeBytes: 903_000 * 1_048_576,
+  });
+  const dfTruth = () => ({
+    totalBytes: 55_900_000 * 4096,
+    freeBytes: 903_000 * 4096,
+  });
+
+  it("prefers df's fragment-aware reading over statfs's bsize arithmetic", () => {
+    const dataRoot = ctx.makeTempDir();
+    const space = measureDataRootSpace(dataRoot, {
+      df: dfTruth,
+      statfs: virtiofsStatfs,
+    });
+    expect(space).not.toBeNull();
+    expect(space!.totalBytes).toBe(55_900_000 * 4096);
+    expect(space!.freeBytes).toBe(903_000 * 4096);
+    // 3.7 GB free is genuinely above the 2 GB "low" line — but the inflated
+    // reading would have said ~925 GB and could never have gone red.
+    expect(space!.status).toBe("ok");
+    expect(space!.usedPercent).toBe(98.4);
+  });
+
+  it("falls back to statfs only when df cannot answer", () => {
+    const dataRoot = ctx.makeTempDir();
+    const space = measureDataRootSpace(dataRoot, {
+      df: () => null,
+      statfs: () => ({ totalBytes: 10 * 1024 ** 3, freeBytes: 1024 ** 3 }),
+    });
+    expect(space).toEqual(
+      expect.objectContaining({
+        totalBytes: 10 * 1024 ** 3,
+        freeBytes: 1024 ** 3,
+        status: "low",
+      }),
+    );
+  });
+
+  it("classifies the corrected reading, so a nearly full host can go critical", () => {
+    const dataRoot = ctx.makeTempDir();
+    const space = measureDataRootSpace(dataRoot, {
+      df: () => ({ totalBytes: 229 * 1024 ** 3, freeBytes: 400 * 1024 ** 2 }),
+      statfs: virtiofsStatfs,
+    });
+    expect(space!.status).toBe("critical");
+  });
+
+  it("reports null when neither source can measure the volume", () => {
+    const dataRoot = ctx.makeTempDir();
+    expect(
+      measureDataRootSpace(dataRoot, { df: () => null, statfs: () => null }),
+    ).toBeNull();
+  });
+
+  it("does not measure a missing root even though df would report its parent volume", () => {
+    const missing = `${ctx.makeTempDir()}/gone`;
+    expect(
+      measureDataRootSpace(missing, { df: dfTruth, statfs: virtiofsStatfs }),
+    ).toBeNull();
+  });
+});
+
+describe("dfReading", () => {
+  it("parses the POSIX df layout from the right so spaced filesystem names survive", () => {
+    const dataRoot = ctx.makeTempDir();
+    const reading = dfReading(dataRoot);
+    // Real df on the test host: a positive total, free within it.
+    expect(reading).not.toBeNull();
+    expect(reading!.totalBytes).toBeGreaterThan(0);
+    expect(reading!.freeBytes).toBeLessThanOrEqual(reading!.totalBytes);
   });
 });
 

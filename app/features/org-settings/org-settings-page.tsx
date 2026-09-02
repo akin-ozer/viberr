@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
+import { sseScopes } from "~/features/live-updates/event-types";
 import { useNavigate, useSearchParams } from "react-router";
 import type { OrgSettingsView } from "~/server/org/org-view.server";
 import type { S3AuditConfigView } from "~/server/audit/s3-config.server";
@@ -86,6 +88,11 @@ export function OrgSettingsPage({
   /** Ruling 108: per-section deployment locks the panel renders read-only. */
   controllerLocks: ControllerSectionLocks;
 }) {
+  // F32-2 (pass 32): a `user`-scoped stream also receives broadcasts — the
+  // `resource.updated` fact a KB re-index (watcher or manual), a skill/MCP
+  // save or delete publishes — so this page revalidates instead of showing a
+  // stale "re-scanned just now" until a manual reload.
+  useLiveUpdates([sseScopes.user()]);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = resolveOrgTab(searchParams.get("tab"));
@@ -203,7 +210,15 @@ export function OrgSettingsPage({
         </div>
       </div>
       <RunConcurrencyControl runConcurrency={runConcurrency} />
-      <AuditExportCard s3Audit={s3Audit} events={auditEvents} />
+      {/* Review F7 (pass 32): the card's `editing` and field state are seeded
+          from the target once; keying it on the stored target resets both when a
+          save or clear lands, so the form folds after a save and never shows a
+          cleared target's values. */}
+      <AuditExportCard
+        key={s3Audit ? `${s3Audit.bucket}|${s3Audit.region}|${s3Audit.prefix}|${s3Audit.endpoint}|${s3Audit.accessKeyId}` : "none"}
+        s3Audit={s3Audit}
+        events={auditEvents}
+      />
       <StorageLine storage={view.storage} />
     </main>
   );
@@ -321,6 +336,12 @@ function AuditExportCard({
   const [accessKeyId, setAccessKeyId] = useState(s3Audit?.accessKeyId ?? "");
   const [secret, setSecret] = useState("");
   const configured = s3Audit !== null;
+  // D04-U7 (pass 32): with a target on file the five-field form stays folded
+  // behind a summary line — the page then shows ONE solid primary (the active
+  // tab's own), not this card's "Save target" beside it. An unconfigured
+  // instance still opens on the form, since there is nothing to summarise.
+  const [editing, setEditing] = useState(false);
+  const formOpen = !configured || editing;
   const canSave = bucket.trim() && region.trim() && accessKeyId.trim() &&
     (configured || secret.trim());
   return (
@@ -364,6 +385,25 @@ function AuditExportCard({
       </div>
       <div className="audit-s3">
         <h3>S3 export target</h3>
+        {configured && !editing && (
+          <div className="kv-row">
+            <span className="k">Target</span>
+            <span className="v mono">
+              s3://{s3Audit.bucket}/{s3Audit.prefix}
+              {s3Audit.region ? ` · ${s3Audit.region}` : ""}
+              {s3Audit.endpoint ? ` · ${s3Audit.endpoint}` : ""} · key {s3Audit.accessKeyId}
+            </span>
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={() => setEditing(true)}
+            >
+              <Icon name="sliders" />
+              Edit target
+            </button>
+          </div>
+        )}
+        {formOpen && (
         <div className="audit-s3-grid">
           <label className="field">
             <span className="flabel">Bucket</span>
@@ -421,10 +461,13 @@ function AuditExportCard({
             />
           </label>
         </div>
+        )}
         <div className="audit-s3-actions">
+          {formOpen && (
           <button
             type="button"
-            className="btn primary sm"
+            // D04-U7: secondary — the tab's own action keeps the one primary.
+            className="btn sm"
             disabled={busy || !canSave}
             onClick={() =>
               submit({
@@ -440,6 +483,12 @@ function AuditExportCard({
           >
             Save target
           </button>
+          )}
+          {configured && editing && (
+            <button type="button" className="btn ghost sm" onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          )}
           <button
             type="button"
             className="btn sm"
@@ -554,11 +603,13 @@ function StorageLine({
   storage: OrgSettingsView["storage"];
 }) {
   const { disk, maintenance } = storage;
+  // D32-1 (pass 32): this fragment follows a full stop ("… · low. Automatic
+  // cleanup …"), so it opens a sentence and is capitalised like one.
   const cleanup = maintenance.scheduled
     ? maintenance.lastPassAt
-      ? `automatic cleanup runs every ${Math.round(maintenance.intervalMs / 3_600_000)}h; last freed ${fmtBytes(maintenance.lastFreedBytes)}`
-      : `automatic cleanup runs every ${Math.round(maintenance.intervalMs / 3_600_000)}h`
-    : "automatic cleanup is not scheduled";
+      ? `Automatic cleanup runs every ${Math.round(maintenance.intervalMs / 3_600_000)}h; last freed ${fmtBytes(maintenance.lastFreedBytes)}`
+      : `Automatic cleanup runs every ${Math.round(maintenance.intervalMs / 3_600_000)}h`
+    : "Automatic cleanup is not scheduled";
   return (
     <div className="pol-note after last">
       <Icon name="memory" />

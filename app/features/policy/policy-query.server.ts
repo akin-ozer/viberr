@@ -1,4 +1,13 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { Guardrail } from "~/schemas/project-file.schema";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { DEFAULT_GUARDRAILS } from "~/shared/workflow/templates";
+import {
+  DEFAULT_GUARDRAIL_IDS,
+  guardrailKind,
+  guardrailLabel,
+  type GuardrailKind,
+} from "~/shared/workflow/guardrail-labels";
 import type { AgentProfileView } from "~/features/agents/agent-types";
 import { assembleAgentRoster } from "~/features/agents/agents-query.server";
 import {
@@ -23,12 +32,34 @@ export interface TransitionView {
   locked: boolean;
 }
 
+/**
+ * E32-6 (pass 32): one project.md `guardrails` row as the Policy card shows
+ * it. `kind` decides the control: a `default` row is the runtime-enforced
+ * anti-noise set (toggle; `value` field when it carries a `unit`), a `github`
+ * row is owned by Settings → GitHub (inert, with a pointer), an `unknown` row
+ * is a retired or hand-written id nothing reads (inert, removable).
+ * `present` is false for a default the file does not carry (a project created
+ * before the defaults shipped, or a hand edit that dropped it): rendered OFF
+ * with that said, and toggling it on writes the row.
+ */
+export interface GuardrailView {
+  id: string;
+  label: string;
+  desc: string;
+  on: boolean;
+  value: number | null;
+  unit: string | null;
+  kind: GuardrailKind;
+  present: boolean;
+}
+
 export interface PolicyViewData {
   projectName: string;
   members: MembershipView[];
   stages: { id: string; name: string; color: string }[];
   transitions: TransitionView[];
   profiles: AgentProfileView[];
+  guardrails: GuardrailView[];
   /** Null until a policy change has been audited (fresh seed) — the mock's
    * "Elif Demir · Mar 30" was fixture data; the chip hides when unknown. */
   /** UXA-16: the raw timestamp — the DISPLAY form is the client's job. This
@@ -43,6 +74,7 @@ export interface PolicyViewData {
 export const POLICY_AUDIT_ACTIONS = [
   "project.member.role_changed",
   "project.policy.boundary_changed",
+  "project.policy.guardrail_changed",
   "project.agent_profile.created",
   "project.agent_profile.updated",
   "project.agent_profile.deleted",
@@ -101,6 +133,41 @@ export function getPolicyViewData(
       locked: w.locked,
     })),
     profiles: assembleAgentRoster(db, projectSlug, ctx),
+    guardrails: listGuardrailViews(projectSlug, ctx),
     edited: latestPolicyChange(db, projectSlug),
   };
+}
+
+/** Every default guardrail (present or not) in shipped order, then whatever
+ *  else project.md carries, in file order. */
+export function listGuardrailViews(
+  projectSlug: string,
+  ctx: { dataRoot?: string } = {},
+): GuardrailView[] {
+  const stored =
+    readProjectFile({ projectSlug, dataRoot: ctx.dataRoot })?.parsed.frontmatter
+      .guardrails ?? [];
+  // Review F13 (pass 32): FIRST occurrence wins, the same row `setGuardrail`'s
+  // `findIndex` mutates — a hand-edited file carrying an id twice must not show
+  // one row's state while the toggle writes the other.
+  const byId = new Map<string, Guardrail>();
+  for (const g of stored) if (!byId.has(g.id)) byId.set(g.id, g);
+  const view = (g: Guardrail, present: boolean): GuardrailView => ({
+    id: g.id,
+    label: guardrailLabel(g.id),
+    desc: g.desc,
+    on: g.on,
+    value: g.value ?? null,
+    unit: g.unit ?? null,
+    kind: guardrailKind(g.id),
+    present,
+  });
+  const defaults = DEFAULT_GUARDRAILS.map((d) => {
+    const row = byId.get(d.id);
+    return row ? view(row, true) : view({ ...d, on: false }, false);
+  });
+  const extras = stored
+    .filter((g) => !DEFAULT_GUARDRAIL_IDS.includes(g.id))
+    .map((g) => view(g, true));
+  return [...defaults, ...extras];
 }

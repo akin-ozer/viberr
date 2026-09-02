@@ -63,6 +63,49 @@ function open(props: {
  * shape there is no branch to be empty, said on the dialog that authorizes the
  * close. (Same copy class as F19-23, one dialog over.)
  */
+describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", () => {
+  function withPacket(title: string | null, force = false): string {
+    const { container } = render(
+      <AcceptConfirm
+        task={detail({ stage: force ? "triage" : "review" })}
+        workRevisionSha={null}
+        noChanges={false}
+        defaultBranch="main"
+        ceremony={{ mode: force ? "force" : "accept" }}
+        atBoundary={!force}
+        blockedReason={force ? "An open blocked decision is holding this task." : null}
+        openPacketTitle={title}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    // Two dialogs render in one test; read the one THIS call mounted.
+    const dialogs = container.ownerDocument.querySelectorAll(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    );
+    return dialogs[dialogs.length - 1]?.textContent ?? "";
+  }
+
+  it("renders a Withdraws row naming the packet, on accept and on force-accept", () => {
+    // Live (VIB-3): force-accepting at Triage cleared the open decision with
+    // no word anywhere — the ceremony listed MERGES/REVISION/VERDICT/SKIPS/
+    // BYPASSING and never the question that died. Canary: drop the
+    // `openPacketTitle` row from AcceptConfirm.
+    const accept = withPacket("Which environment should the smoke suite target?");
+    expect(accept).toContain("Withdraws");
+    expect(accept).toContain("Which environment should the smoke suite target?");
+    expect(accept).toContain("closes unanswered");
+    const force = withPacket("Which environment should the smoke suite target?", true);
+    expect(force).toContain("Withdraws");
+    expect(force).toContain("Bypassing");
+  });
+
+  it("shows NO Withdraws row when there is no open decision", () => {
+    expect(withPacket(null)).not.toContain("Withdraws");
+  });
+});
+
 describe("the no-change row states what is true of THIS task", () => {
   it("names the empty branch when there is one (the R17-2/F17-L9 shape)", () => {
     const text = open({ noChanges: true, task: { branch: "vib-151" } });

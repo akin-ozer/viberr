@@ -54,6 +54,7 @@ import {
   OPERATOR_AUDIT_ACTOR,
   recordAudit,
   type AuditEventInput,
+  SYSTEM_ACTOR,
 } from "~/server/audit/audit-recorder.server";
 import {
   agentRoleDisplay,
@@ -1596,6 +1597,12 @@ export async function commentToAgent(
     // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a
     // structured verdict/questions instead of falling back to the prose regex.
     if (confinement.outputSchema) resume.outputSchema = confinement.outputSchema;
+    // C02-R3: the attachments drop is part of the confinement too (the Codex
+    // sandbox's extra writable root) — dropped on resume, an evidence-granted
+    // Codex reviewer could not post the files its persona promised.
+    if (confinement.attachmentsWritableDir) {
+      resume.attachmentsWritableDir = confinement.attachmentsWritableDir;
+    }
     if (target.effort) resume.effort = target.effort;
     const resumed = await resumeRun(db, resume);
     runId = resumed.runId;
@@ -3088,9 +3095,9 @@ export async function registerAgentCompletion(
     /** Dispatch-completion contract (2026-08-29): display name of the human
      *  whose manual/scheduled dispatch started this run. Presence makes the
      *  final report always tag them + @operator (appended when the model forgot)
-     *  and always re-invokes the operator. Closure-only, like
-     *  `fromHumanDirective`: a run recovered after a crash degrades to the
-     *  react heuristic with no cc line — the documented recovery loss class. */
+     *  and always re-invokes the operator. PERSISTED on the run row (pass 32,
+     *  C02-R11) so a run recovered after a restart keeps the contract — it used
+     *  to be closure-only and degrade to the react heuristic with no cc line. */
     dispatchedByName?: string;
     /** The dispatcher's user id — what the cc-append verifies notification
      *  against (the mention ladder resolves people, not substrings). */
@@ -3099,12 +3106,17 @@ export async function registerAgentCompletion(
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
   },
 ): Promise<void> {
-  // Persist the staging key on the run row so boot recovery can re-find the
-  // staged report_outcome envelope after a restart (AO-1) — the in-process
-  // callback below holds it only in a closure that dies with the process.
-  if (input.outcomeKey) {
-    patchRun(db, input.runId, { outcomeKey: input.outcomeKey });
+  // Persist on the run row what boot recovery must re-find after a restart —
+  // the in-process callback below holds these only in a closure that dies
+  // with the process: the staging key for the staged report_outcome envelope
+  // (AO-1) and the dispatcher of the dispatch-completion contract (C02-R11).
+  const persisted: Parameters<typeof patchRun>[2] = {};
+  if (input.outcomeKey) persisted.outcomeKey = input.outcomeKey;
+  if (input.dispatchedByName) {
+    persisted.dispatchedByName = input.dispatchedByName;
+    if (input.dispatchedByUserId) persisted.dispatchedByUserId = input.dispatchedByUserId;
   }
+  if (Object.keys(persisted).length > 0) patchRun(db, input.runId, persisted);
   const { registerRunCompletion, noteCompletionEffectsLost } = await import(
     "~/server/runtimes/run-service.server"
   );
@@ -4078,6 +4090,32 @@ export async function setOwner(
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const currentOwnerId = existing.parsed.frontmatter.ownerUserId;
 
+  // D32-16 (pass 32): an archived task is out of the flow (F15-11) and its
+  // planning metadata is frozen (F26-13); the owner seat — the task's human
+  // reviewer and acceptance authority — is frozen the same way. The panels
+  // hide "Assign me" on an archived task; this fails CLOSED if one does not.
+  if (existing.parsed.frontmatter.archived) {
+    throw AppError.validation(
+      `${input.taskKey} is archived — restore it before changing its owner.`,
+    );
+  }
+  // E32-9 / ruling 118 (owner, 2026-09-02): a task at the terminal stage is
+  // CLOSED — every runtime control on its page says so (G9) — and the owner
+  // seat's authority (review, acceptance, packet resolution) has nothing left
+  // to act on. Contributors and maintainers cannot take it; a project ADMIN may
+  // still reassign it for the record (the same tier that releases any owner).
+  // A reopened task (moved back to an open stage) takes owners again.
+  const terminalId = terminalStageIdOf(project);
+  if (
+    terminalId !== null &&
+    existing.parsed.frontmatter.stage === terminalId &&
+    !roleCan(actorRole, "release-any-ownership")
+  ) {
+    throw AppError.validation(
+      `${input.taskKey} is closed — move it back to an open stage before changing its owner (an admin can still reassign it for the record).`,
+    );
+  }
+
   const isTake = input.targetUserId === actor.userId;
   // A TAKEOVER of an OCCUPIED seat (claiming a task another member owns) is the
   // governance hole: ownership carries the owner-exception
@@ -4367,7 +4405,21 @@ export async function transitionStage(
   const fromStageId = existing.parsed.frontmatter.stage;
 
   if (fromStageId === input.toStageId) {
-    // Idempotent: already there.
+    // Idempotent: already there — but an idempotent SUCCESS is still a success
+    // and has to be earned (F32-10, pass 32; RBAC probe D1). This short-circuit
+    // used to sit above every guard, so a VIEWER posting `to=<current stage>`
+    // got HTTP 200, `ok: true` and a "Moved …" toast, no `project.authority
+    // .denied` row, and the archived-project freeze never ran. The operator's
+    // authority is gated upstream by its capability policy, exactly as on the
+    // real move below; every human door pays the same gate a real move would.
+    if (!ctx.operatorAuthorized) {
+      if (input.recommendationAuthorized) {
+        requireProjectMutable(project, "change the task stage");
+      } else {
+        requireProjectMutable(project, "change the task stage");
+        requireAction(db, project, actor, "approve-transition", "change the task stage");
+      }
+    }
     return summaryOrThrow(db, input.projectSlug, input.taskKey);
   }
 
@@ -6843,7 +6895,11 @@ export async function resolvePacket(
   // this task's local work. Each step is best-effort AFTER the resolution
   // write (the decision stands even when GitHub misbehaves), and every
   // non-success lands on the timeline in plain words.
-  if (option.kind === "resolve_remote_collision" && actor.userId) {
+  // P07-F (pass 32): no `&& actor.userId` guard — a resolver without a user id
+  // used to resolve+clear the packet and then do NOTHING (no close, no delete,
+  // no note). `resolveRemoteBranchCollision` refuses that actor itself
+  // ("No acting user.") and the refusal lands on the timeline below.
+  if (option.kind === "resolve_remote_collision") {
     const { resolveRemoteBranchCollision } = await import(
       "~/server/github/github-reconciler.server"
     );
@@ -6873,6 +6929,32 @@ export async function resolvePacket(
         noteText = `The stale remote branch was cleared, but the re-delivery did not complete: ${delivery.message} Deliver again from the task page when it is resolved.`;
       } else {
         delivered = true;
+        // F32-7 (pass 32): the follow-up after THIS delivery is owned by
+        // nobody unless it is claimed here. `manualDeliverForReview` is the
+        // human's door, and `performDelivery` deliberately records no next
+        // step for a human who just clicked Deliver (R18-2/R19-4) — but the
+        // person here confirmed a packet ceremony, not a delivery, and this
+        // kind sits in NO_REQUEUE on the promise that "the re-delivery's own
+        // machinery owns the follow-up". Live (VIB-1): the task sat at In
+        // Progress, `waiting: human`, an open PR and nothing to click. Under
+        // FULL autonomy `performDelivery` already re-queues the operator for
+        // any newly opened PR (R18-2 — that arm never looked at who
+        // delivered), so only the SUPERVISED half is missing: record the
+        // server-attributed "Move to <review>" card here, exactly the one an
+        // operator-authorized delivery would have recorded.
+        const { resolveOperatorAuthority } = await import(
+          "./operator-actions.server"
+        );
+        const autonomy = resolveOperatorAuthority(ctx, input.projectSlug).autonomy;
+        if (autonomy !== "full") {
+          await recordDeliveredNextStep(
+            db,
+            ctx,
+            input.projectSlug,
+            input.taskKey,
+            delivery.prNumber,
+          );
+        }
       }
     } else {
       noteText = `The branch collision was **not** cleared: ${collision.message} Nothing was re-delivered.`;
@@ -7766,6 +7848,17 @@ function assertAcceptanceDisclosure(
  * on a PR carrying content its task never delivered. Callers that already
  * verified pass their `headCheck` through rather than paying a second read.
  */
+/** F32-11: the open decision an acceptance closed unanswered, captured inside
+ *  the file lock (a ref, because the capture happens in the write callback). */
+interface WithdrawnPacket {
+  title: string;
+  kind: string;
+  type: TaskPacket["type"];
+}
+interface WithdrawnPacketRef {
+  current: WithdrawnPacket | null;
+}
+
 export async function applyAcceptanceWrite(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -7809,6 +7902,10 @@ export async function applyAcceptanceWrite(
     throw AppError.conflict(noChange.refusal);
   }
   let accepted = false;
+  // F32-11 (pass 32): the open decision this acceptance closes unanswered —
+  // captured inside the lock so the note and the audit row name the packet
+  // that was actually there, not the one the caller read before waiting.
+  const withdrawn: WithdrawnPacketRef = { current: null };
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     // U3 (NFR16) — the callers' "already Done → return" check reads the file
     // OUTSIDE this lock, so two concurrent acceptances of one task both passed
@@ -7899,6 +7996,27 @@ export async function applyAcceptanceWrite(
     // Done task); acceptance consumes every open offer, matching the packet
     // resolution path's long-standing behavior.
     parsed.frontmatter.recommendations = [];
+    if (parsed.packet) {
+      withdrawn.current = {
+        title: parsed.packet.title,
+        kind: parsed.packet.kind,
+        type: parsed.packet.type,
+      };
+      // Live (VIB-3): force-accepting a task at Triage with an open decision
+      // cleared it with no trace — the question simply vanished. The note is
+      // the human-readable record; the audit row below is the durable one.
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text:
+          `Withdrew the open decision "${parsed.packet.title}" — this acceptance closed the task, ` +
+          `so the decision was never answered.`,
+        toAgent: false,
+        evidence: null,
+      });
+    }
     parsed.packet = null;
     // A9 (pass 23): the PR head could NOT be verified against the delivered
     // revision (GitHub unreachable / the compare failed), yet an irreversible
@@ -7923,6 +8041,24 @@ export async function applyAcceptanceWrite(
     accepted = true;
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  if (accepted && withdrawn.current) {
+    // The acceptance's own audit row (forced or not) names the human; this one
+    // records that a decision died with it, and which.
+    recordAudit(db, {
+      action: "task.packet.withdrawn",
+      actor: SYSTEM_ACTOR,
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: {
+        title: withdrawn.current.title,
+        kind: withdrawn.current.kind,
+        type: withdrawn.current.type,
+        by: input.forced ? "force-accept" : "accept",
+      },
+    });
+  }
   // Ruling 99: an acceptance that closed a goal-chain link advances its chain
   // (the next link's task is created under the goal creator's re-proven
   // authority). Fire-and-forget; the engine converges.

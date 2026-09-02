@@ -21,7 +21,15 @@ import {
   resumeRun,
   startRun,
 } from "./run-service.server";
-import { getRun, listRunLines, listRunsForTaskRows, upsertRun } from "./run-store.server";
+import * as runServiceModule from "./run-service.server";
+import {
+  getRun,
+  insertRunLine,
+  listRunLines,
+  listRunsForTaskRows,
+  upsertRun,
+  patchRun,
+} from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import { RUN_PHASE } from "./adapter.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
@@ -179,9 +187,9 @@ describe("run-service lifecycle", () => {
       threadId: "r0-a",
     });
     expect(reviewer.runId).toBeTruthy();
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: first.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId: first.runId },
       { userId: store.users.arda.id, label: store.users.arda.email },
     );
     await settle();
@@ -230,9 +238,9 @@ describe("run-service lifecycle", () => {
       threadId: "r1-a",
     });
     expect(other.runId).toBeTruthy();
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: first.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId: first.runId },
       { userId: store.users.arda.id, label: store.users.arda.email },
     );
     await settle();
@@ -481,7 +489,7 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
   it("admin interrupts → interrupted state + interrupted_by + audit event", async () => {
     const runId = await startRunning();
     expect(getRun(store.db, runId)!.state).toBe("running");
-    const result = interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", runId }, { userId: store.users.arda.id, label: store.users.arda.email });
+    const result = await interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId }, { userId: store.users.arda.id, label: store.users.arda.email });
     await settle();
     expect(result.outcome).toBe("interrupted");
     const run = getRun(store.db, runId)!;
@@ -493,16 +501,16 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
 
   it("maintainer may interrupt", async () => {
     const runId = await startRunning();
-    const result = interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", runId }, { userId: store.users.murat.id, label: store.users.murat.email });
+    const result = await interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId }, { userId: store.users.murat.id, label: store.users.murat.email });
     expect(result.outcome).toBe("interrupted");
   });
 
   it("reviewer / viewer / non-member cannot interrupt (403)", async () => {
     const runId = await startRunning();
     for (const u of [store.users.selin, store.users.elif, store.users.deniz]) {
-      expect(() =>
-        interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", runId }, { userId: u.id, label: u.email }),
-      ).toThrow(AppError);
+      await expect(
+        interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId }, { userId: u.id, label: u.email }),
+      ).rejects.toThrow(AppError);
     }
   });
 
@@ -532,9 +540,9 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
     });
     await settle();
 
-    const result = interruptRun(
+    const result = await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: older.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId: older.runId },
       { userId: store.users.arda.id, label: store.users.arda.email },
     );
     expect(result.outcome).toBe("already-terminal");
@@ -545,6 +553,24 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
     expect(result.run!.serverRunId).toBe(newer.runId);
   });
 
+  it("review F6: a second interrupt in the adapter's exit window is a no-op", async () => {
+    // The live-handle arm stamps `interrupted_by` at once but leaves the row
+    // `running` until the adapter's onExit; the button re-enables as soon as
+    // the action returns. Simulate that window and click again.
+    const runId = await startRunning();
+    patchRun(store.db, runId, { interruptedBy: store.users.arda.id });
+    const before = listAuditEvents(store.db, { action: "runtime.run.interrupted" }).length;
+    const result = await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
+    // Canary: drop the `run.interrupted_by` guard in interruptRun and this
+    // writes a second audit row (and a second timeline note).
+    expect(result.outcome).toBe("already-terminal");
+    expect(listAuditEvents(store.db, { action: "runtime.run.interrupted" })).toHaveLength(before);
+  });
+
   it("interrupting a finished run is an idempotent no-op (not an error)", async () => {
     const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
@@ -553,7 +579,7 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
     });
     await settle();
     expect(getRun(store.db, runId)!.state).toBe("finished");
-    const result = interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", runId }, { userId: store.users.arda.id, label: store.users.arda.email });
+    const result = await interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId }, { userId: store.users.arda.id, label: store.users.arda.email });
     expect(result.outcome).toBe("already-terminal");
     expect(getRun(store.db, runId)!.state).toBe("finished");
   });
@@ -634,6 +660,9 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
       env: { GIT_CEILING_DIRECTORIES: "/data/projects/x/tasks/VIB-1" },
       mcpServers: { viberr: sdkServerStub },
       systemPrompt: "You are the Developer.",
+      // C02-R3 (pass 32): the attachments drop is confinement too — the Codex
+      // sandbox's extra writable root, and what the evidence carve-out keys on.
+      attachmentsWritableDir: "/data/projects/x/tasks/VIB-1/attachments",
       dataRoot: store.dataRoot,
     });
     await settle();
@@ -646,6 +675,44 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
     );
     expect(resumeSpec.mcpServers).toEqual({ viberr: { type: "sdk" } });
     expect(resumeSpec.systemPrompt).toBe("You are the Developer.");
+    // Canary: drop the `attachmentsWritableDir` line from carryResumeOptions.
+    expect(resumeSpec.attachmentsWritableDir).toBe(
+      "/data/projects/x/tasks/VIB-1/attachments",
+    );
+  });
+
+  it("C02-R12 (pass 32): a forward read can be bounded in the SELECT itself", () => {
+    upsertRun(store.db, {
+      id: "run_fwd",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t-fwd",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "claude",
+      model: "m",
+      sdk: "s",
+      agentProfileId: "developer",
+      state: "finished",
+    });
+    for (let seq = 0; seq < 6; seq += 1) {
+      insertRunLine(store.db, {
+        runId: "run_fwd",
+        seq,
+        occurredAt: new Date().toISOString(),
+        raw: "{}",
+        display: { t: "1", ev: "text", tag: "assistant", text: `line ${seq}` },
+      });
+    }
+    // Unbounded stays the console's live tail…
+    expect(listRunLines(store.db, "run_fwd", 1).map((l) => l.seq)).toEqual([2, 3, 4, 5]);
+    // …and the bound is applied by SQL, ascending from the cursor.
+    expect(listRunLines(store.db, "run_fwd", 1, 2).map((l) => l.seq)).toEqual([2, 3]);
+    expect(listRunLines(store.db, "run_fwd", -1, 0)).toEqual([]);
+    // `getRunLog` threads it as `forwardLimit`, never as the backward `limit`.
+    const { getRunLog } = runServiceModule;
+    const page = getRunLog(store.db, "run_fwd", { since: 1, forwardLimit: 3 })!;
+    expect(page.lines.map((l) => l.seq)).toEqual([2, 3, 4]);
   });
 });
 
@@ -1275,10 +1342,10 @@ describe("a reservation interrupted while the workspace is prepared", () => {
     })!;
   }
 
-  const stop = (runId: string) =>
-    interruptRun(
+  const stop = async (runId: string) =>
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId },
       { userId: store.users.arda.id, label: store.users.arda.email },
     );
 
@@ -1286,7 +1353,7 @@ describe("a reservation interrupted while the workspace is prepared", () => {
     // Canary: drop `assertRunReservationLive` from startRun and this goes green
     // on a run that is `running` again with a live adapter behind it.
     const reservation = reserve();
-    expect(stop(reservation.runId).outcome).toBe("interrupted");
+    expect((await stop(reservation.runId)).outcome).toBe("interrupted");
 
     queueFakeRun(instantScript([{ t: "1", ev: "text", tag: "assistant", text: "hi" }]));
     await expect(
@@ -1313,13 +1380,13 @@ describe("a reservation interrupted while the workspace is prepared", () => {
     expect(listRunsForTaskRows(store.db, store.slug, "VIB-1")).toHaveLength(1);
   });
 
-  it("abandon() leaves the recorded interrupt alone", () => {
+  it("abandon() leaves the recorded interrupt alone", async () => {
     // The wrapper's catch releases the reservation when preparation throws —
     // and the refusal above IS such a throw. Stamping `error` over `interrupted`
     // would erase the one fact a human put there.
     // Canary: drop the terminal check in `abandon` and the state reads "error".
     const reservation = reserve();
-    stop(reservation.runId);
+    await stop(reservation.runId);
 
     reservation.abandon("preparation stopped");
 
@@ -1496,9 +1563,9 @@ describe("run phase throttling (R21-4)", () => {
     cb.onPhase?.("Finishing", null);
     expect(getRun(store.db, runId)).toMatchObject({ phase: "Finishing", step: null });
 
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId },
       { userId: store.users.arda.id, label: store.users.arda.email },
     );
     await settle();

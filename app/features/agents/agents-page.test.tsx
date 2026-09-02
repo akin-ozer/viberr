@@ -208,7 +208,7 @@ describe("ProfileDetail", () => {
     expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(2);
     expect(container.querySelectorAll(".cap-col")).toHaveLength(3);
     expect(getByText("Acts directly")).toBeTruthy();
-    expect(getByText("Reserved for humans")).toBeTruthy();
+    expect(getByText("Human-only")).toBeTruthy();
     // The default deployment is `running: false` (waiting on human), so the hero
     // reports it as ENGAGED, not running — the fix for the false "running on N".
     expect(getByText("idle · engaged on 1 task")).toBeTruthy();
@@ -410,6 +410,9 @@ describe("ProfileDetail", () => {
     expect(
       container.querySelector(".cap-col.forbidden")!.textContent,
     ).toContain("Merge a pull request");
+    // D32-8 (pass 32): the empty RECOMMENDS ONLY bucket says "None" under its
+    // header instead of rendering a header over nothing.
+    expect(container.querySelector(".cap-col.recommend")!.textContent).toContain("None");
     // Nothing was granted as a context resource — all three groups say None.
     expect(container.querySelectorAll(".res-group").length).toBe(3);
     expect(queryByText("reviewer-expertise")).toBeNull();
@@ -450,7 +453,7 @@ describe("ProfileDetail", () => {
       ...container.querySelectorAll(".cap-advisory-body li"),
     ].map((li) => li.textContent!);
     expect(items).toContain("Read the repository & diff (acts directly)");
-    expect(items).toContain("Approve the review (reserved for humans)");
+    expect(items).toContain("Approve the review (human-only)");
     // Collapsed by DEFAULT — the whole point is that it stops competing with
     // the grants that actually bind. Canary: add `open` to the <details>.
     expect(
@@ -784,9 +787,9 @@ describe("CapabilityMatrixModal", () => {
       getByText(/Every profile's permissions for each action in Viberr Core\./),
     ).toBeTruthy();
     expect(getByText("Repository & execution")).toBeTruthy();
-    // "Reserved for humans" appears both as a group header and as the mode
+    // "Human-only" appears both as a group header and as the mode
     // legend label (CAP_META.forbidden), so match at least one.
-    expect(getAllByText("Reserved for humans").length).toBeGreaterThan(0);
+    expect(getAllByText("Human-only").length).toBeGreaterThan(0);
     // Off-catalog actions (operator coordination + the pruned advisory review
     // caps a seed profile still carries) land in "Other actions".
     expect(getByText("Other actions")).toBeTruthy();
@@ -1153,17 +1156,17 @@ describe("CreateProfileModal", () => {
     ).toBeTruthy();
   });
 
-  it("R7-5 — a specialist cap row offers 3 honest modes (Allowed/Human-only/Off), no Recommend", () => {
+  it("R7-5 — a specialist cap row offers 3 honest modes (Acts directly/Human-only/Off), no Recommend", () => {
     // Create mode ⇒ a specialist profile: the picker collapses to 3 modes.
     const { container } = renderModal({ initial: null });
     const seg = container.querySelector(".cap-seg")!;
     const labels = Array.from(seg.querySelectorAll("button")).map(
       (b) => b.textContent,
     );
-    expect(labels).toEqual(["Allowed", "Human-only", "Off"]);
+    expect(labels).toEqual(["Acts directly", "Human-only", "Off"]);
     // `recommend` is operator-only and never shown to a specialist.
     expect(container.querySelector(".cap-matrix")!.textContent).not.toContain(
-      "Recommend",
+      "Recommends only",
     );
     expect(
       container.querySelector(".cap-seg button.recommend"),
@@ -1188,7 +1191,7 @@ describe("CreateProfileModal", () => {
     const labels = Array.from(seg.querySelectorAll("button")).map(
       (b) => b.textContent,
     );
-    expect(labels).toEqual(["Direct", "Recommend", "Human", "Off"]);
+    expect(labels).toEqual(["Acts directly", "Recommends only", "Human-only", "Off"]);
     expect(container.querySelector(".cap-seg button.recommend")).not.toBeNull();
   });
 
@@ -1217,19 +1220,19 @@ describe("CreateProfileModal", () => {
     // default for egress is already Allowed, which would mask a dead
     // coupling).
     const egressBefore = rowFor("Search & fetch from the web");
-    expect(modeBtn(egressBefore, "Allowed").disabled).toBe(false);
+    expect(modeBtn(egressBefore, "Acts directly").disabled).toBe(false);
     fireEvent.click(modeBtn(egressBefore, "Off"));
     expect(modeBtn(egressBefore, "Off").getAttribute("aria-checked")).toBe(
       "true",
     );
 
-    fireEvent.click(modeBtn(rowFor("Drive a live web browser"), "Allowed"));
+    fireEvent.click(modeBtn(rowFor("Drive a live web browser"), "Acts directly"));
 
     const egress = rowFor("Search & fetch from the web");
     expect(egress.getAttribute("aria-label")).toContain(
       "required by Drive a live web browser",
     );
-    expect(modeBtn(egress, "Allowed").getAttribute("aria-checked")).toBe(
+    expect(modeBtn(egress, "Acts directly").getAttribute("aria-checked")).toBe(
       "true",
     );
     // SAFETY: the radiogroup renders only <button> children (the rowModes
@@ -1251,7 +1254,7 @@ describe("CreateProfileModal", () => {
     expect(released.getAttribute("aria-label")).not.toContain("required by");
     // …and the pinned-reason copy is gone with it.
     expect(released.closest(".cap-mrow")!.querySelector(".cap-mnote")).toBeNull();
-    expect(modeBtn(released, "Allowed").getAttribute("aria-checked")).toBe(
+    expect(modeBtn(released, "Acts directly").getAttribute("aria-checked")).toBe(
       "true",
     );
     expect(modeBtn(released, "Off").disabled).toBe(false);
@@ -1277,7 +1280,7 @@ describe("CreateProfileModal", () => {
     );
     expect(
       Array.from(egress.querySelectorAll("button"))
-        .find((b) => b.textContent === "Allowed")!
+        .find((b) => b.textContent === "Acts directly")!
         .getAttribute("aria-checked"),
     ).toBe("true");
   });
@@ -1459,7 +1462,7 @@ describe("CreateProfileModal", () => {
     expect(
       getByText(/They stay reserved for humans on every profile/),
     ).toBeTruthy();
-    // And "Allowed" no longer takes a click whose result the server discards:
+    // And "Acts directly" no longer takes a click whose result the server discards:
     // the row stays Human-only, which is what a save would store.
     fireEvent.click(seg.querySelector("button.direct")!);
     expect(
@@ -1490,7 +1493,7 @@ describe("CreateProfileModal", () => {
     )!;
     expect(seg).toBeTruthy();
     expect([...seg.querySelectorAll("button")].map((b) => b.textContent)).toEqual(
-      ["Allowed", "Off"],
+      ["Acts directly", "Off"],
     );
     // Seeded to what the next save actually stores, not to the discarded mode.
     expect(seg.querySelector("button.off")!.getAttribute("aria-checked")).toBe(
@@ -1501,7 +1504,7 @@ describe("CreateProfileModal", () => {
       '[aria-label="Policy for Ask the human a question"]',
     )!;
     expect([...sibling.querySelectorAll("button")].map((b) => b.textContent)).toEqual(
-      ["Allowed", "Human-only", "Off"],
+      ["Acts directly", "Human-only", "Off"],
     );
   });
 
@@ -1534,7 +1537,7 @@ describe("CreateProfileModal", () => {
     };
     // Non-grant-required, catalog default `direct` → the runtime leaves WebFetch
     // on for an absent grant, so the editor seeds Allowed (was Off — the bug).
-    expect(checkedMode("Search & fetch from the web")).toBe("Allowed");
+    expect(checkedMode("Search & fetch from the web")).toBe("Acts directly");
     // A GRANT-REQUIRED capability (the verdict) stays Off when absent — the
     // runtime withholds it, preserving the F10-07/F10-14 verdict-safety invariant.
     expect(checkedMode("Report a validation verdict")).toBe("Off");
@@ -1652,12 +1655,26 @@ describe("P13-AP-07 — the edit modal states that saving FORKS a library profil
     ).toBeTruthy();
   });
 
+  it("A11Y-9 (pass 32): every collapsible section header is a named, state-carrying button", () => {
+    const { container } = renderModal({
+      initial: mkProfile({ source: "project", name: "Migrations" }),
+    });
+    const heads = [...container.querySelectorAll<HTMLButtonElement>("button.cap-mghead")];
+    expect(heads.length).toBeGreaterThan(0);
+    for (const head of heads) {
+      // Named by the group label it contains; the live tree tool reported
+      // these unnamed, so the computed name is what this pins.
+      expect(head.textContent!.trim().length).toBeGreaterThan(0);
+      expect(head.getAttribute("aria-expanded")).toMatch(/^(true|false)$/);
+    }
+  });
+
   it("a project-created profile has nothing to fork and says so plainly", () => {
     const { getByText, queryByText } = renderModal({
       initial: mkProfile({ source: "project", name: "Migrations" }),
     });
     expect(
-      getByText("Update this project's copy. Changes apply to future assignments."),
+      getByText("Update this project's copy. Changes apply from the next run."),
     ).toBeTruthy();
     expect(queryByText(/forks/)).toBeNull();
   });
@@ -1714,7 +1731,7 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
 
   it("lists undeployed templates and adds the picked one by id", () => {
     const onAdd = vi.fn();
-    const { getByText } = render(
+    const { getByText, getByRole } = render(
       <LibraryPicker
         library={TEMPLATES}
         stages={STAGES}
@@ -1730,6 +1747,9 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
       getByText("Reviews IAM, secrets handling and supply-chain risk."),
     ).toBeTruthy();
     expect(getByText("1 stage here")).toBeTruthy();
+    // A11Y-5 (pass 32): the row is a button NAMED by its content; the live
+    // tree tool reported it unnamed.
+    expect(getByRole("button", { name: /Security reviewer/ })).toBeTruthy();
     fireEvent.click(getByText("Security reviewer"));
     expect(onAdd).toHaveBeenCalledWith("security-reviewer");
   });

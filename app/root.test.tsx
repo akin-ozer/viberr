@@ -7,7 +7,10 @@ afterEach(cleanup);
 
 /** What a guard can throw as a route error's `data`: user-facing page copy, the
  *  router's own null for an unmatched URL, or a JSON error body. */
-type ThrownErrorData = string | null | { error?: { code: string } };
+type ThrownErrorData =
+  | string
+  | null
+  | { error?: { code: string; message?: string } };
 
 /**
  * Shape-matches react-router's ErrorResponse — what `isRouteErrorResponse`
@@ -68,8 +71,25 @@ describe("root ErrorBoundary (route error responses)", () => {
     );
   });
 
+  it("D32-15: shows the reason from requireRole's JSON envelope, not 'Forbidden'", () => {
+    // requireRole answers page requests with the API envelope; a non-admin
+    // opening /org/settings used to learn THAT they were refused, never WHY.
+    // Canary: make `thrownMessage` a bare `z.string()` again and this reads
+    // "Forbidden".
+    const { container } = renderBoundary(
+      routeError(
+        403,
+        { error: { code: "forbidden", message: "This area requires the admin role." } },
+        "Forbidden",
+      ),
+    );
+    expect(container.querySelector(".detail-line")!.textContent).toBe(
+      "This area requires the admin role.",
+    );
+  });
+
   it("falls back to statusText, then generic copy, for non-string data", () => {
-    // requireRole throws a JSON body ({ error: {...} }) — not page copy.
+    // An envelope WITHOUT a message is transport noise, not page copy.
     const { container: withStatusText } = renderBoundary(
       routeError(403, { error: { code: "forbidden" } }, "Forbidden"),
     );

@@ -1,5 +1,6 @@
 import { data } from "react-router";
 import type { Route } from "./+types/project.controller";
+import { pageTitle } from "~/shared/page-title";
 import {
   appErrorResponse,
   requireFormAction,
@@ -24,6 +25,12 @@ import { getControllerSurface } from "~/features/controller/controller-query.ser
  * (ruling 99): the same conversation machinery bound to this board, plus the
  * Goals panel where a human sees and redirects every chain.
  */
+
+/** D32-3: "<Page> · <project> · Viberr" — this view used to inherit the bare
+ *  project title from the workspace layout. */
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: pageTitle("Controller", params.slug) }];
+}
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   // R15-4 on THIS loader, not only the layout's (the F19-28 single-fetch

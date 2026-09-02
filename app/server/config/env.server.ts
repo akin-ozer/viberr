@@ -163,6 +163,28 @@ const envSchema = z.object({
   VIBERR_GIT_CLONE_TIMEOUT_MS: z.string().optional(),
   VIBERR_TRANSCRIPT_RETENTION_DAYS: z.string().optional(),
   VIBERR_SESSION_HOME_RETENTION_DAYS: z.string().optional(),
+  // C01-A6 (pass 32): the remaining raw `process.env` readers, declared so the
+  // schema and `.env.example` stop denying they exist. Each module keeps its
+  // own coercion + fallback (and reads the live env so an operator can flip
+  // it without the process-lifetime cache pinning the old answer):
+  //  - VIBERR_MAINTENANCE_INTERVAL_MS: period of the maintenance pass
+  //    (retention, transcript pruning; default 6 h).
+  //  - VIBERR_DISK_CHECK_INTERVAL_MS: period of the free-space check
+  //    (default 5 minutes).
+  //  - VIBERR_DISK_LOW_FREE_MB / VIBERR_DISK_CRITICAL_FREE_MB: the free-space
+  //    thresholds behind health's `disk.status` (defaults 2048 / 512).
+  //  - VIBERR_GITHUB_WRITE_PROBE: `1`/`true`/`yes` opts PAT validation into the
+  //    empty-payload write dry-run (ruling 18).
+  //  - VIBERR_BUILD_VERSION / VIBERR_BUILD_SHA / VIBERR_BUILD_TIME: build
+  //    identity baked into the image (build-info.server.ts); null when unset.
+  VIBERR_MAINTENANCE_INTERVAL_MS: z.string().optional(),
+  VIBERR_DISK_CHECK_INTERVAL_MS: z.string().optional(),
+  VIBERR_DISK_LOW_FREE_MB: z.string().optional(),
+  VIBERR_DISK_CRITICAL_FREE_MB: z.string().optional(),
+  VIBERR_GITHUB_WRITE_PROBE: z.string().optional(),
+  VIBERR_BUILD_VERSION: z.string().optional(),
+  VIBERR_BUILD_SHA: z.string().optional(),
+  VIBERR_BUILD_TIME: z.string().optional(),
   // Ruling 108: the controller's configuration sections are LOCKED by default
   // — the Controller settings tab shows them read-only and `saveControllerConfig`
   // refuses a change, org admins included. A variable set to `enabled` unlocks
@@ -183,6 +205,14 @@ const envSchema = z.object({
 });
 
 export type Env = z.infer<typeof envSchema>;
+
+/**
+ * Every variable the schema declares — the list the "no undeclared env reads"
+ * gate (`env.server.test.ts`) compares raw `process.env.VIBERR_*` reads
+ * against, so a knob cannot ship that neither this file nor `.env.example`
+ * admits exists (C3, pass 31; C01-A6, pass 32).
+ */
+export const ENV_KEYS: readonly string[] = envSchema.keyof().options;
 
 function formatEnvError(error: z.ZodError): string {
   const lines = error.issues.map(

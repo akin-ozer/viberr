@@ -172,7 +172,12 @@ export function resolveSpecialistMcpServersDetailed(
   };
 
   for (const name of mcpNames) {
-    if (RESERVED_MCP_NAMES.has(name)) continue; // built in-process, not a grant
+    // Built in-process, not a grant: the toolkit/browser/controller servers
+    // mount by capability, so a grant naming one changes nothing in either
+    // direction and is NOT reported as unresolved — the persona's "unavailable
+    // servers" copy ("no such server in the org registry") would be false for
+    // a server that IS mounted (C02-R5, pass 32: deliberate, pinned in tests).
+    if (RESERVED_MCP_NAMES.has(name)) continue;
     const row = byName.get(name);
     if (!row || !row.target) {
       drop(name, "no MCP server by that name in the org registry");

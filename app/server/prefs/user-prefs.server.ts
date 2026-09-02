@@ -6,8 +6,9 @@ import { z } from "zod";
  * under string keys. Personal UI state only (Home pins, grid/list view) —
  * never governed state, so callers may update it optimistically.
  *
- * Phase 9's profile preferences (notification routing, nudge, motion,
- * timeline default) are expected to live under their own keys here.
+ * Phase 9's profile preferences (notification routing, motion, timeline
+ * default) live under their own keys here. (The "nudge" preference was
+ * retired with the metadata-nudge rework — pass 27; nothing reads it.)
  */
 
 export const HOME_PREFS_KEY = "home";

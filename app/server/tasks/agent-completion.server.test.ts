@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
@@ -768,7 +768,15 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
     // VirtioFS serves the PRE-completion content to the next reader: revert
     // the on-disk file (the completion's write "hasn't landed" for readers).
+    // B06-T3 (pass 32): a stale cache serves the OLD mtime too, so set it —
+    // without this the simulation was "old content, NEW mtime", which the
+    // write-cache repair correctly reads as an external edit (disk wins)
+    // whenever the completion's bookkeeping took longer than the 100 ms mtime
+    // slack. That is the intermittent CI red this test had: not a data-loss
+    // race, an unfaithful simulation. task-writer.server.test.ts does the same.
     writeFileSync(absPath, preCompletion);
+    const past = (Date.now() - 10_000) / 1000;
+    utimesSync(absPath, past, past);
 
     // The operator reacts — a locked read-modify-write appending its comment.
     const operatorComment: TaskFileEvent = {

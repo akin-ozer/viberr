@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render, fireEvent, waitFor } from "@testing-library/react";
+import { CONTROLLER_UNLOCK_ENV } from "~/shared/controller-locks";
 import { createRoutesStub } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -7,8 +8,6 @@ import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import { ToastProvider } from "~/ui/toast";
 import {
   ControllerAdminPanel,
-  CONTROLLER_UNLOCK_ENV_VIEW,
-  CONTROLLER_UNLOCK_VALUE_VIEW,
   type ControllerConfigView,
   type ControllerSectionLocks,
 } from "./controller-admin-panel";
@@ -335,6 +334,21 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     expect(ta?.readOnly).toBe(true);
     // The note names every locked section and its exact unlock variable.
     const note = container.querySelector(".pol-note");
+    // D04-U9 (pass 32): a locked group is a NAMED read-only group that points
+    // at the note, so assistive tech learns both that the chips are not
+    // toggles and why. Canary: drop `aria-describedby` and this goes red.
+    expect(note?.id).toBe("controller-lock-note");
+    const skillGroup = getByText("Skills").closest(".ctx-group")!;
+    expect(skillGroup.getAttribute("role")).toBe("group");
+    expect(skillGroup.getAttribute("aria-label")).toBe(
+      "Skills (locked on this deployment)",
+    );
+    expect(skillGroup.getAttribute("aria-describedby")).toBe("controller-lock-note");
+    // D04-U8: the lead, read before the note, no longer promises an editable
+    // tab over locked sections.
+    expect(container.textContent).toContain(
+      "which only org admins can do, and this deployment locks some sections (named below).",
+    );
     for (const label of [
       "skill grants",
       "MCP server grants",
@@ -343,7 +357,7 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     ]) {
       expect(note?.textContent).toContain(label);
     }
-    for (const envVar of Object.values(CONTROLLER_UNLOCK_ENV_VIEW)) {
+    for (const envVar of Object.values(CONTROLLER_UNLOCK_ENV)) {
       expect(note?.textContent).toContain(`${envVar}=enabled`);
     }
     // Model stays editable: once the catalog answers, the select is a real
@@ -390,6 +404,7 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     expect(
       container.querySelectorAll(".ctx-group button.pick-chip").length,
     ).toBeGreaterThan(0);
+
     expect(container.querySelector("textarea")?.readOnly).toBe(true);
     const note = container.querySelector(".pol-note");
     expect(note?.textContent).toContain("instructions");
@@ -400,9 +415,15 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
   });
 
   it("no note and full editability when the deployment unlocked everything", () => {
-    const { container } = renderPanel({}, ["qa-echo"], UNLOCKED);
+    const { container, getByText } = renderPanel({}, ["qa-echo"], UNLOCKED);
     expect(container.querySelector(".pol-note")).toBeNull();
     expect(container.querySelector("textarea")?.readOnly).toBe(false);
+    // D04-U8/U9: no lock, no lock clause in the lead and a plainly named group.
+    expect(container.textContent).toContain("which only org admins can do.");
+    const skillGroup = getByText("Skills").closest(".ctx-group")!;
+    expect(skillGroup.getAttribute("role")).toBe("group");
+    expect(skillGroup.getAttribute("aria-label")).toBe("Skills");
+    expect(skillGroup.getAttribute("aria-describedby")).toBeNull();
   });
 
   it("a dangling grant under a lock is disclosed but not removable", () => {
@@ -417,17 +438,17 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     expect(ghost?.getAttribute("title")).toContain("locked on this deployment");
   });
 
-  it("the view's env-var and label maps match the server's (drift pin)", async () => {
+  it("P07-G (pass 32): the panel and the server read ONE lock vocabulary", async () => {
+    // The panel used to carry hand-copied mirrors of the server's maps with a
+    // drift test between them; both now import `~/shared/controller-locks`.
+    const shared = await import("~/shared/controller-locks");
     const server = await import(
       "~/server/controller/controller-profile.server"
     );
-    expect(CONTROLLER_UNLOCK_ENV_VIEW).toEqual(server.CONTROLLER_UNLOCK_ENV);
-    // The note prints "<VAR>=<value>"; the server refusal names the same
-    // value, so the two must agree on what unlocks a section.
-    expect(CONTROLLER_UNLOCK_VALUE_VIEW).toBe(server.CONTROLLER_UNLOCK_VALUE);
-    // The note's section names come from the panel's own map; the refusal
-    // sentences use the server's. One vocabulary.
-    expect(server.CONTROLLER_SECTION_LABEL).toEqual({
+    expect(server.CONTROLLER_UNLOCK_ENV).toBe(shared.CONTROLLER_UNLOCK_ENV);
+    expect(server.CONTROLLER_UNLOCK_VALUE).toBe(shared.CONTROLLER_UNLOCK_VALUE);
+    expect(server.CONTROLLER_SECTION_LABEL).toBe(shared.CONTROLLER_SECTION_LABEL);
+    expect(shared.CONTROLLER_SECTION_LABEL).toEqual({
       skills: "skill grants",
       kb: "knowledge base grants",
       mcps: "MCP server grants",

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { pageTitle } from "~/shared/page-title";
 import { data, Form, redirect, useNavigation } from "react-router";
 import { z } from "zod";
 import type { Route } from "./+types/login";
@@ -28,7 +29,7 @@ import { Icon } from "~/ui/icon";
  */
 
 export function meta() {
-  return [{ title: "Viberr · Sign in" }];
+  return [{ title: pageTitle("Sign in") }];
 }
 
 /** A form field that must be text: `FormData.get` also yields a `File` for a

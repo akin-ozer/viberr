@@ -6,7 +6,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-c",
-        "if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^viberr-app-1$'; then echo 'REFUSED: viberr-app-1 is running on docker-data, and SQLite WAL over a bind mount tolerates ONE writer per data root (host+container dual writers have eaten PATs and run logs before). Stop the container first, or use viberr-dev-hermetic.'; exit 1; fi; export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm use >/dev/null 2>&1; export VIBERR_DATA_ROOT=/Users/akinozer/projects/viberr/docker-data; exec npm run dev"
+        "if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^viberr-app-1$'; then echo 'REFUSED: viberr-app-1 is running on docker-data, and SQLite WAL over a bind mount tolerates ONE writer per data root (host+container dual writers have eaten PATs and run logs before). Stop the container first, or use viberr-dev-hermetic.'; exit 1; fi; export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm use >/dev/null 2>&1; export VIBERR_DATA_ROOT=\"$PWD/docker-data\"; exec npm run dev"
       ],
       "port": 5173,
       "autoPort": true

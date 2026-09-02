@@ -702,6 +702,10 @@ export function CurrentStatePanel({
   /** An accept / archive / restore submission is in flight. */
   dispositionBusy: boolean;
 }) {
+  // E32-9: the owner seat follows the task's closed state (accepted or merged),
+  // the same predicate the runtime controls read (execution-profile.tsx).
+  const closed =
+    task.displayReadiness === "accepted" || task.displayReadiness === "merged";
   // Manual stage change from the Current-state dropdown (admin|maintainer; the
   // server re-checks). Goes through the same governed transition that an applied
   // operator recommendation does, so it posts the **Transition:** timeline
@@ -838,10 +842,16 @@ export function CurrentStatePanel({
                   </button>
                 )}
               </span>
-            ) : canOwn ? (
+            ) : canOwn && !archived && (!closed || canReleaseAnyOwner) ? (
               // Q5 clean tiering: only contributor+ may hold the owner seat
               // (setOwner enforces `own-task`). Viewers are read + comment, so
               // hide "Assign me" rather than render a button that 403s.
+              // D32-16: an archived task's owner seat is frozen server-side
+              // (restore first), so the affordance goes with it. E32-9 /
+              // ruling 118: so is a CLOSED (accepted/merged) task's — live, a
+              // Done task whose every other control read "task closed" still
+              // offered it — except to an ADMIN, who may reassign for the
+              // record (the release-any-ownership tier).
               <button
                 type="button"
                 className="rev-add sm"

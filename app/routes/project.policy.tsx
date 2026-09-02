@@ -1,5 +1,6 @@
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.policy";
+import { pageTitle } from "~/shared/page-title";
 import { requireVisibleProject } from "./project-visibility.server";
 import type { loader as projectLoader } from "./project";
 import {
@@ -11,6 +12,7 @@ import { getDb } from "~/server/db/sqlite.server";
 import {
   setMemberRole,
   setTransitionBoundary,
+  setGuardrail,
 } from "~/features/policy/policy-actions.server";
 import { getPolicyViewData } from "~/features/policy/policy-query.server";
 import { PolicyPage } from "~/features/policy/policy-page";
@@ -24,6 +26,12 @@ import { PolicyPage } from "~/features/policy/policy-page";
  * (review→done hard-locked human). Both admin-gated inside the action
  * functions; toast copy is computed server-side (phase-5 pattern).
  */
+
+/** D32-3: "<Page> · <project> · Viberr" — this view used to inherit the bare
+ *  project title from the workspace layout. */
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: pageTitle("Policy", params.slug) }];
+}
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   // R15-4 on THIS loader, not only the layout's (F19-28): single-fetch honors a
@@ -69,6 +77,20 @@ export async function action({ request, params }: Route.ActionArgs) {
           from: String(formData.get("from") ?? ""),
           to: String(formData.get("to") ?? ""),
           boundary: String(formData.get("boundary") ?? ""),
+        },
+        actor,
+      );
+      return { ok: true as const, toast: result.toast };
+    }
+    if (intent === "set-guardrail") {
+      // E32-6: the Guardrails card's one write (toggle / value / remove).
+      const result = await setGuardrail(
+        db,
+        {
+          projectSlug: params.slug,
+          id: String(formData.get("id") ?? ""),
+          op: String(formData.get("op") ?? ""),
+          value: String(formData.get("value") ?? ""),
         },
         actor,
       );

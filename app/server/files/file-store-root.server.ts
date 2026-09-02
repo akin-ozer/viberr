@@ -36,6 +36,10 @@ export const DATA_ROOT_SUBDIRS = [
   "runtimes/codex-home",
   "kb",
   "skills",
+  // Ruling 102: the purge's durable export of expiring audit rows (A00-6,
+  // pass 32 — created here so every root shows the folder the runbook, the
+  // backup and file-formats.md all name, not only roots that already purged).
+  "audit-exports",
   "state",
 ] as const;
 
@@ -109,6 +113,18 @@ export function goalFilePath(
 
 export function agentProfilesDir(dataRoot?: string): string {
   return path.join(getDataRoot(dataRoot), "agents", "profiles");
+}
+
+/** `agents/definitions/` — the shipped doctrine files (operator, controller).
+ *  C01-A11 (pass 32): built here like every other store path, not by walking
+ *  `..` out of the profiles dir. */
+export function agentDefinitionsDir(dataRoot?: string): string {
+  return path.join(getDataRoot(dataRoot), "agents", "definitions");
+}
+
+/** One doctrine file, with the same traversal guard as a profile id. */
+export function agentDefinitionFilePath(id: string, dataRoot?: string): string {
+  return `${resolveStoreSegment(agentDefinitionsDir(dataRoot), id)}.md`;
 }
 
 /**

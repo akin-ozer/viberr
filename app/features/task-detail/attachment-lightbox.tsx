@@ -54,6 +54,20 @@ const LightboxContext = createContext<((img: LightboxImage) => void) | null>(
 );
 
 /**
+ * The serving-route URL with the save-dialog flag. D04-U11 (pass 32): the
+ * "every call site passes a query-less URL" invariant lived in a comment here
+ * and in the markdown gate only; a fifth caller passing `…?x=1` would have
+ * produced `…?x=1?download=1`. One function joins the flag correctly for any
+ * URL shape (query or not, fragment kept last), so no caller has to know.
+ */
+export function attachmentDownloadHref(url: string): string {
+  const hashAt = url.indexOf("#");
+  const base = hashAt === -1 ? url : url.slice(0, hashAt);
+  const hash = hashAt === -1 ? "" : url.slice(hashAt);
+  return `${base}${base.includes("?") ? "&" : "?"}download=1${hash}`;
+}
+
+/**
  * Click-handler factory for an attachment link — every kind opens the card
  * (ruling 105 addendum); modified clicks keep the plain anchor. Usage:
  *   const lightbox = useAttachmentLightbox();
@@ -263,16 +277,16 @@ function Lightbox({
         <span className="nm">{img.name}</span>
         {/* Every kind gets the button (ruling 105 addendum) — unless a fetch
             proved the file unservable, see `fetchFailed`. The serving route
-            forces a save dialog on `?download=1` — the raw URL renders inline
-            where the type allows (that is what the viewer itself fetches);
-            every call site passes a query-less serving-route URL (the
-            markdown gate rejects anything else), so plain concatenation is
-            safe. The `download` attribute keeps a failed response from
-            replacing the task page with an error body. */}
+            forces a save dialog on `download=1` — the raw URL renders inline
+            where the type allows (that is what the viewer itself fetches).
+            `attachmentDownloadHref` joins the flag for any URL shape, so a
+            caller passing a query cannot corrupt it. The `download` attribute
+            keeps a failed response from replacing the task page with an error
+            body. */}
         {!fetchFailed && (
           <a
             className="btn ghost sm"
-            href={`${img.url}?download=1`}
+            href={attachmentDownloadHref(img.url)}
             download={img.name}
             rel="noreferrer"
           >

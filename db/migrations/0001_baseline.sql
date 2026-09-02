@@ -496,7 +496,13 @@ CREATE TABLE "agent_runs" (
   -- so boot recovery (recoverUnreactedAgentRuns) can look the staged outcome up
   -- after a restart — the in-process completion callback that held this key is
   -- gone, so without it a recovered Claude verdict falls back to the prose regex.
-  outcome_key TEXT
+  outcome_key TEXT,
+  -- Dispatch-completion contract (pass 32, C02-R11): who dispatched this run.
+  -- Persisted for the same reason as outcome_key — boot recovery must re-supply
+  -- them so a run recovered after a restart still cc-tags its dispatcher and
+  -- always re-invokes the operator. NULL on runs nobody dispatched by hand.
+  dispatched_by_name TEXT,
+  dispatched_by_user_id TEXT
 );
 CREATE TABLE run_log_lines (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

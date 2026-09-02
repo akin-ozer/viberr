@@ -119,6 +119,19 @@ describe("runMaintenancePass (gaps 15 + 20)", () => {
     expect(existsSync(workspace)).toBe(false);
   });
 
+  it("C02-R10 (pass 32): the injected data root scopes EVERY sweep — a sibling root's aged transcript is untouched", () => {
+    // The retention windows are process-global (env), the root is injected:
+    // pin that the pass never sweeps a root it was not handed.
+    const store = storeWithTerminalTask();
+    const other = storeWithTerminalTask();
+    const mine = agedTranscript(store, "run_mine.jsonl", 40);
+    const theirs = agedTranscript(other, "run_theirs.jsonl", 40);
+    const result = runMaintenancePass(store.db, { reason: "interval", dataRoot: store.dataRoot });
+    expect(result.transcripts.transcripts).toBe(1);
+    expect(existsSync(mine)).toBe(false);
+    expect(existsSync(theirs)).toBe(true);
+  });
+
   it("SKIPS the workspace reclaim while any run is queued or running (P14-RT-09)", () => {
     const store = storeWithTerminalTask();
     const workspace = seedWorkspace(store, "VIB-1");

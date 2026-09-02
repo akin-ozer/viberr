@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { useState } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { createRoutesStub } from "react-router";
@@ -334,7 +335,7 @@ describe("UsersPanel", () => {
   });
 
   it("invite modal switches idp fields and gates the save button", () => {
-    const { getByText, getByPlaceholderText } = renderPanel(
+    const { getByText, getByPlaceholderText, getByRole } = renderPanel(
       // F18-3: with GitHub configured the modal leads with GitHub, as before.
       <UsersPanel
         users={USERS}
@@ -348,6 +349,11 @@ describe("UsersPanel", () => {
     const whitelistBtn = getByText("Whitelist user").closest("button")!;
     expect(whitelistBtn.disabled).toBe(true);
 
+    // A11Y-1 (pass 32): every sign-in method button carries its accessible
+    // name from its visible label — the live tree tool under-reported the
+    // nested span, so this pins the computed name rather than the markup.
+    expect(getByRole("button", { name: "Local" })).toBeTruthy();
+    expect(getByRole("button", { name: /^GitHub/ })).toBeTruthy();
     fireEvent.click(getByText("Local", { selector: ".bnm" }).closest("button")!);
     expect(getByPlaceholderText("Full name")).toBeTruthy();
     const createBtn = getByText("Create account").closest("button")!;
@@ -387,10 +393,11 @@ const SKILLS: SkillView[] = [
 ];
 const GAGENTS: GagentView[] = [
   { id: "developer", name: "Developer", backend: "codex",
-    summary: "Primary implementation specialist.",
+    summary: "Primary implementation specialist.", role: "Implementation",
     persona: "", stages: ["ready", "impl"],
     skills: ["terraform-review"], mcps: ["github-mcp"], kbs: [], used: 4 },
   { id: "spare", name: "Spare", backend: "claude", summary: "Unused.",
+    role: "Spare hands",
     persona: "", stages: ["impl"], skills: [], mcps: [], kbs: [], used: 0 },
 ];
 const STAGES = [
@@ -593,7 +600,8 @@ describe("ResourcesPanel", () => {
     expect(dot.classList.contains("up")).toBe(false);
     // And the line flags it as stale + prompts a retest.
     expect(container.textContent).toContain("· stale, retest");
-    expect(container.textContent).toContain("1 tools · checked");
+    // D32-6: one tool is "1 tool", not "1 tools".
+    expect(container.textContent).toContain("1 tool · checked");
   });
 
   it("kb delete confirms with the spec copy; deployed profile delete is guarded", async () => {
@@ -615,9 +623,21 @@ describe("ResourcesPanel", () => {
   });
 
   it("agent modal: stage chips exclude Done; context chips list org resources", () => {
-    const { getByText, getByLabelText } = renderResources();
+    const { getByText, getByLabelText, getByRole, getAllByRole } = renderResources();
     fireEvent.click(getByLabelText("Edit Developer"));
     expect(getByText("Edit agent profile")).toBeTruthy();
+    // A11Y-3/A11Y-4 (pass 32): the backend segment buttons and the KB chips
+    // are named by their visible text (backend name; KB DISPLAY name, with the
+    // store path only as the description) — the live tree tool showed them
+    // unnamed / path-named, so the computed names are pinned here.
+    expect(getByRole("button", { name: "Codex" })).toBeTruthy();
+    expect(getByRole("button", { name: "Claude" })).toBeTruthy();
+    // (The KB row's own name button shares the name; the chip is the one
+    // carrying the store path as its description.)
+    const kbChip = getAllByRole("button", { name: "Architecture notes" }).find(
+      (b) => b.classList.contains("pick-chip"),
+    )!;
+    expect(kbChip.getAttribute("title")).toBe("store://kb/architecture-notes/");
     // P13-D-9: "always" was an over-promise — a project's operator can close a
     // task under the auto preset. No AGENT profile ever can, which is the
     // guarantee this org-scoped editor is actually in a position to make.
@@ -635,6 +655,28 @@ describe("ResourcesPanel", () => {
     expect(document.querySelectorAll(".ctx-group")).toHaveLength(3);
     const skillChip = chips.find((c) => c.textContent === "terraform-review")!;
     expect(skillChip.className).toContain(" on");
+  });
+
+  it("review F10: a legacy template whose role repeats its name explains the greyed Save", () => {
+    const legacy: GagentView[] = [{ ...GAGENTS[1]!, role: GAGENTS[1]!.name }];
+    const { getByText, getByLabelText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={legacy}
+        templateGrants={TEMPLATE_GRANTS}
+        stages={STAGES}
+      />,
+    );
+    fireEvent.click(getByLabelText("Edit Spare"));
+    const save = getByText("Save changes").closest("button")!;
+    expect(save.disabled).toBe(true);
+    expect(
+      getByText(/This template's stored role repeated its name; give it a real role to save\./),
+    ).toBeTruthy();
+    fireEvent.change(document.getElementById("ga-role")!, { target: { value: "Spare hands" } });
+    expect(save.disabled).toBe(false);
   });
 
   it("kb name opens the StoreBrowser over the real tree", () => {
@@ -1065,6 +1107,64 @@ const STORAGE: OrgSettingsView["storage"] = {
   },
 };
 
+describe("F32-2 (pass 32): the Settings page holds a live stream", () => {
+  it("opens a user-scoped EventSource on mount, so a KB re-index (resource.updated) revalidates the page", () => {
+    // Live: a host-side file drop re-indexed the KB (log: docCount 1) while the
+    // Agent resources tab kept "0 docs · re-scanned just now" until a manual
+    // reload — this page had no stream at all. Broadcast events reach every
+    // connection, so the `user` scope is enough.
+    // Canary: drop the `useLiveUpdates` call from OrgSettingsPage.
+    const opened: string[] = [];
+    class FakeEventSource {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSED = 2;
+      readyState = 1;
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(url: string) {
+        opened.push(url);
+      }
+      addEventListener() {}
+      close() {}
+    }
+    vi.stubGlobal("EventSource", FakeEventSource);
+    try {
+      renderPanel(
+        <OrgSettingsPage
+          view={{
+            connections: CONNECTIONS,
+            users: [ME],
+            domains: DOMAINS,
+            kbs: KBS,
+            mcps: MCPS,
+            skills: SKILLS,
+            gagents: GAGENTS,
+            projectGrants: { kbs: {}, mcps: {}, skills: {} },
+            templateGrants: { kbs: {}, mcps: {}, skills: {} },
+            stages: STAGES,
+            providers: { github: false, google: false },
+            authProviders: AUTH_PROVIDERS,
+            storage: STORAGE,
+          }}
+          meId={ME.id}
+          callbackOrigin="http://localhost:5173"
+          runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+          s3Audit={null}
+          controllerConfig={CONTROLLER_CONFIG}
+          controllerLocks={CONTROLLER_LOCKS}
+          auditEvents={[]}
+        />,
+      );
+      expect(opened).toHaveLength(1);
+      expect(opened[0]).toContain("/resources/events");
+      expect(opened[0]).toContain("scope=user");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("resources tab badge counts resources, not resources+templates", () => {
   it("shows the resource count and discloses profiles in the tooltip", () => {
     const { getByRole } = renderPanel(
@@ -1152,7 +1252,8 @@ describe("C9: instance storage line", () => {
     // Free-of-total with the usage percent, the low flag, and the cleanup cadence.
     expect(getByText(/free of 20\.0 GB on the data volume \(95\.5% used\)/)).toBeTruthy();
     expect(getByText(/· low/)).toBeTruthy();
-    expect(getByText(/automatic cleanup runs every 6h/)).toBeTruthy();
+    // D32-1: opens a sentence after the disk line's full stop, so it is capitalised.
+    expect(getByText(/Automatic cleanup runs every 6h/)).toBeTruthy();
   });
 
   it("says cleanup is not scheduled when the maintenance timer is not live", () => {
@@ -1178,7 +1279,7 @@ describe("C9: instance storage line", () => {
       auditEvents={[]}
       />,
     );
-    expect(getByText(/automatic cleanup is not scheduled/)).toBeTruthy();
+    expect(getByText(/Automatic cleanup is not scheduled/)).toBeTruthy();
   });
 });
 
@@ -1271,6 +1372,12 @@ describe("run concurrency control", () => {
     // Both events render by default.
     expect(getByText("github.pat.created")).toBeTruthy();
     expect(getByText("task.metadata.updated")).toBeTruthy();
+    // P07-H (pass 32): the list caps at 15rem and scrolls, so it must be
+    // reachable by keyboard and named (WCAG 2.1.1 / axe
+    // scrollable-region-focusable). The fix had no lock; this is it.
+    const list = document.querySelector("ul.audit-list")!;
+    expect(list.getAttribute("tabindex")).toBe("0");
+    expect(list.getAttribute("aria-label")).toBe("Recent audit events");
     // Toggling "Org-scoped" hides the project-scoped event, keeps the org one.
     fireEvent.click(getByText("Org-scoped"));
     expect(getByText("github.pat.created")).toBeTruthy();
@@ -1306,6 +1413,96 @@ describe("run concurrency control", () => {
  * for ANY record past the window, which is now false, so the disclosure has to
  * name where the rows actually land and when.
  */
+describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", () => {
+  const S3 = {
+    bucket: "audit-bkt",
+    region: "eu-west-1",
+    prefix: "viberr/",
+    endpoint: "",
+    accessKeyId: "AKIAEXAMPLE",
+    hasSecret: true,
+  };
+  const page = (s3Audit: typeof S3 | null) => (
+    <OrgSettingsPage
+      view={{
+        connections: CONNECTIONS,
+        users: [ME],
+        domains: DOMAINS,
+        kbs: KBS,
+        mcps: MCPS,
+        skills: SKILLS,
+        gagents: GAGENTS,
+        projectGrants: { kbs: {}, mcps: {}, skills: {} },
+        templateGrants: { kbs: {}, mcps: {}, skills: {} },
+        stages: STAGES,
+        providers: { github: false, google: false },
+        authProviders: AUTH_PROVIDERS,
+        storage: STORAGE,
+      }}
+      meId={ME.id}
+      callbackOrigin="http://localhost:5173"
+      runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+      s3Audit={s3Audit}
+      controllerConfig={CONTROLLER_CONFIG}
+      controllerLocks={CONTROLLER_LOCKS}
+      auditEvents={[]}
+    />
+  );
+
+  it("unconfigured: the form is open and Save target is a SECONDARY button", () => {
+    const { getByText } = renderPanel(page(null));
+    const save = getByText("Save target").closest("button")!;
+    expect(save.className).toContain("btn");
+    expect(save.className).not.toContain("primary");
+    expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
+  });
+
+  it("review F7: a saved target folds the form again (state follows the stored target)", () => {
+    // The page re-renders with a NEW stored target after a save (loader
+    // revalidation); a harness stands in for the loader so the render stays
+    // inside renderPanel's router.
+    function Harness() {
+      const [s3, setS3] = useState<typeof S3 | null>(S3);
+      return (
+        <>
+          <button type="button" onClick={() => setS3({ ...S3, region: "eu-west-2" })}>
+            harness: saved
+          </button>
+          <button type="button" onClick={() => setS3(null)}>
+            harness: cleared
+          </button>
+          {page(s3)}
+        </>
+      );
+    }
+    const { getByText } = renderPanel(<Harness />);
+    fireEvent.click(getByText("Edit target"));
+    expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
+    // Canary: drop the `key` on <AuditExportCard> and the form stays open forever.
+    fireEvent.click(getByText("harness: saved"));
+    expect(document.querySelector(".audit-s3-grid")).toBeNull();
+    expect(getByText(/eu-west-2/)).toBeTruthy();
+    // Clearing the target opens the form on EMPTY fields, not the cleared values.
+    fireEvent.click(getByText("harness: cleared"));
+    expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
+    expect(
+      [...document.querySelectorAll<HTMLInputElement>(".audit-s3-grid input")].every((i) => i.value === ""),
+    ).toBe(true);
+  });
+
+  it("configured: the form folds behind a summary line until Edit target", () => {
+    const { getByText, queryByText } = renderPanel(page(S3));
+    expect(getByText(/s3:\/\/audit-bkt\/viberr\//)).toBeTruthy();
+    expect(document.querySelector(".audit-s3-grid")).toBeNull();
+    expect(queryByText("Save target")).toBeNull();
+    fireEvent.click(getByText("Edit target"));
+    expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
+    expect(getByText("Save target")).toBeTruthy();
+    fireEvent.click(getByText("Cancel"));
+    expect(document.querySelector(".audit-s3-grid")).toBeNull();
+  });
+});
+
 describe("FR33: the audit card discloses the export-before-purge record", () => {
   it("names the folder, the shape, and that the write precedes the delete", () => {
     const { getByText } = renderPanel(

@@ -19,5 +19,11 @@ export default defineConfig({
     // runner's own test lives at app/server/db/migration-runner.server.test.ts,
     // and schema behaviour belongs to the projection suites that own the tables.
     include: ["app/**/*.test.{ts,tsx}"],
+    // P32-T20 (pass 32): the fs-heavy suites (self-heal, store-check, the
+    // route harnesses that seed a whole data root) ran within the 5 s default
+    // on a warm laptop and flaked on CI's cold disks. One budget, stated here,
+    // locked by app/shared/docs/vitest-config.test.ts — raise it here, never
+    // per-test.
+    testTimeout: 20_000,
   },
 });

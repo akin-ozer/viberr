@@ -815,6 +815,51 @@ describe("parseTaskFrontmatter — per-entry engagement tolerance", () => {
   });
 });
 
+describe("parseTaskFrontmatter — per-row github.commits tolerance (C01-A8)", () => {
+  it("one malformed commit row drops only itself; unownedPr and changed survive", () => {
+    // Canary: revert githubWithCleanCommits and the whole `github` object
+    // parses to null — the R15-15 collision fact vanishes with the bad row.
+    const { frontmatter, diagnostics } = parseTaskFrontmatter(
+      {
+        key: "VIB-1",
+        github: {
+          commits: [
+            { sha: "a91f7c2", msg: "[VIB-1] first" },
+            // Malformed: a hand-edited sha that YAML read as a number.
+            { sha: 1234567, msg: "[VIB-1] second" },
+            { sha: "c0ffee1", msg: "[VIB-1] third" },
+          ],
+          changed: { files: 2, add: 10, del: 1 },
+          unownedPr: 232,
+        },
+      },
+      { fallbackKey: "VIB-1" },
+    );
+    expect(frontmatter.github).not.toBeNull();
+    expect(frontmatter.github!.commits.map((c) => c.sha)).toEqual([
+      "a91f7c2",
+      "c0ffee1",
+    ]);
+    expect(frontmatter.github!.unownedPr).toBe(232);
+    expect(frontmatter.github!.changed).toEqual({ files: 2, add: 10, del: 1 });
+    expect(
+      diagnostics.some(
+        (d) => d.code === "github.invalid_commit" && d.path === "github.commits[1]",
+      ),
+    ).toBe(true);
+    expect(diagnostics.some((d) => d.path === "github")).toBe(false);
+  });
+
+  it("a `github` value that is not a mapping still degrades to null with the field diagnostic", () => {
+    const { frontmatter, diagnostics } = parseTaskFrontmatter(
+      { key: "VIB-1", github: "not-a-mapping" },
+      { fallbackKey: "VIB-1" },
+    );
+    expect(frontmatter.github).toBeNull();
+    expect(diagnostics.some((d) => d.path === "github")).toBe(true);
+  });
+});
+
 describe("parseTaskFrontmatter — per-entry verdict/schedule tolerance", () => {
   // A whole-array wipe of these lists PERSISTS: the diagnostic is a warning, so
   // the file stays writable and the next updateTaskFile serializes `[]` back.

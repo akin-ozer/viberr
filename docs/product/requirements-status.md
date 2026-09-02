@@ -103,6 +103,9 @@ the PRD's last note and are not yet reflected in it (§5).
 | 2026-08-29 | FR14, FR39 | ruling 98 dynamic dispatch |
 | 2026-08-30 | FR11, FR40, FR41 | ruling 99 controller and chained goals |
 | 2026-08-31 | FR33, browser matrix, phase 1 | ruling 102 export-before-purge; ruling 103 Chromium-only; ruling 104 no operator write cap |
+| 2026-08-31 | FR17 | ruling 105 browser working-artifact prune + universal attachment card with Download and a text viewer |
+| 2026-09-01 | FR40 | rulings 106 controller settings at agent-editor parity, 107 built-in `viberr_ops` diagnostics, 108 controller grants and instructions deployment-locked by default |
+| 2026-09-02 | FR19/FR21, FR26, FR40 | rulings 109–116 (pass 32): Codex parity carve-out labeled "advisory on Codex"; the collision ceremony's order and its follow-up; audited `viberr_ops` reads; a Guardrails card under Policy; one capability-mode vocabulary; `accept_completion` refused at authoring off the acceptance boundary; the shared Claude MCP-log cache as a disclosed residual |
 
 ## 5. Drift the PRD does not record
 
@@ -122,7 +125,8 @@ the PRD's last note and are not yet reflected in it (§5).
    maintenance, transcript retention).
 10. **FR40/FR41** post-dated rulings 100, 105–108; ruling 108 narrows "only org admins
     modify the controller" to "org admins change model and effort; skills, KBs, MCPs and
-    instructions are deployment-locked unless unlocked at deploy time".
+    instructions are deployment-locked unless unlocked at deploy time". *(FR17 and FR40
+    now carry those amendments in the PRD itself — 2026-09-02, pass 32.)*
 11. **Project classification** says "single-page"; the app is server-rendered with
     hydration.
 

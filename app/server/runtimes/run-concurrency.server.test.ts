@@ -118,9 +118,9 @@ describe("run concurrency cap", () => {
     expect(getRun(store.db, b)?.state).toBe("queued");
 
     // Interrupt a → its slot frees → b promotes and launches.
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: a },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: a, dataRoot: store.dataRoot },
       { userId: store.users.arda.id, label: store.users.arda.email },
     );
     await settle();
@@ -139,18 +139,18 @@ describe("run concurrency cap", () => {
     expect(getRun(store.db, c)?.state).toBe("queued");
 
     // Interrupt b while it waits — it has no live adapter, just a queued row.
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: b },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: b, dataRoot: store.dataRoot },
       { userId: store.users.arda.id, label: store.users.arda.email },
     );
     expect(getRun(store.db, b)?.state).toBe("interrupted");
 
     // Now free the live slot: a finishes → the drain skips the interrupted b and
     // promotes c instead.
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: a },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: a, dataRoot: store.dataRoot },
       { userId: store.users.arda.id, label: store.users.arda.email },
     );
     await settle();
@@ -169,9 +169,9 @@ describe("run concurrency cap", () => {
 
     // Raise the cap to 3, then free a slot: the drain promotes BOTH waiters.
     setMaxConcurrentRuns(store.db, 3);
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: a },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: a, dataRoot: store.dataRoot },
       { userId: store.users.arda.id, label: store.users.arda.email },
     );
     await settle();
@@ -301,9 +301,9 @@ describe("run concurrency cap — a real specialist dispatch", () => {
     await settle();
     expect(getRun(store.db, dispatched.runId)?.state).toBe("running");
 
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: dispatched.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: dispatched.runId, dataRoot: store.dataRoot },
       { userId: store.users.arda.id, label: store.users.arda.email },
     );
   });
@@ -407,9 +407,9 @@ describe("run concurrency cap — reserved (specialist) runs", () => {
     // — before the reservation ever adopts an adapter. Before F28-R1 interruptRun
     // marked the row `interrupted` but LEFT it in `state.reserved`, so the queued
     // run stayed parked until the abandoned clone finished on its own (~15 min).
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: res!.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: res!.runId, dataRoot: store.dataRoot },
       { userId: store.users.arda.id, label: store.users.arda.email },
     );
     await settle();

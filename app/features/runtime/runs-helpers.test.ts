@@ -108,6 +108,7 @@ const emptyInputs: RunInputs = {
   unresolvedResources: [],
   tools: { denied: [], toolkit: [] },
   directive: null,
+  sandbox: null,
 };
 
 const inputsLine = (inputs: RunInputs): LogLine => ({
@@ -175,6 +176,21 @@ describe("runInputRows (P19-G11)", () => {
     expect(byTag.skills).toBe("none granted");
     expect(byTag.anchor).toContain("No canonical task state was sent");
     expect(byTag.persona).toContain("no persona was sent");
+  });
+
+  it("pass 32: renders a Codex run's sandbox row, with the carve-out note, and none for Claude", () => {
+    const codex = runInputRows(
+      {
+        ...emptyInputs,
+        sandbox: { mode: "workspace-write", note: "repo-write is withheld but evidence is granted" },
+      },
+      "codex",
+    );
+    const row = codex.find((r) => r.tag === "sandbox")!;
+    expect(row.text).toBe("workspace-write · repo-write is withheld but evidence is granted");
+    const plain = runInputRows({ ...emptyInputs, sandbox: { mode: "read-only", note: null } }, "codex");
+    expect(plain.find((r) => r.tag === "sandbox")!.text).toBe("read-only");
+    expect(runInputRows(emptyInputs, "claude").some((r) => r.tag === "sandbox")).toBe(false);
   });
 
   it("carries the canonical anchor verbatim, with its line breaks intact", () => {

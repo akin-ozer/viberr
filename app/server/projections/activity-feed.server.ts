@@ -1,4 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
+import {
+  agentBackendName,
+  agentRoleDisplay,
+  decodeActorRef,
+  slugToRole,
+  systemIdToName,
+} from "~/server/files/actor-ref.server";
 import { z } from "zod";
 import {
   createActorRenderOverlay,
@@ -50,7 +57,9 @@ export const ACTIVITY_STREAM_LIMIT = 200;
 export interface StreamFilters {
   /** Substring over the event text, title and task key (case-insensitive). */
   q?: string;
-  /** Exact `actor_ref` — the stable identity behind a display name. */
+  /** Exact `actor_ref` — the stable identity behind a display name: a user
+   *  id, `agent/<profileId>` (backend-agnostic, D32-14), a system id, or the
+   *  bare `operator` / `controller`. */
   actorRef?: string;
   /** Exact event type (one of the timeline vocabulary, tolerated unknown). */
   type?: string;
@@ -234,6 +243,7 @@ export const AUDIT_LOG_LIMIT = 60;
  * that land here before a bespoke sentence does. */
 const AUDIT_ACTION_KINDS = {
   "project.policy.boundary_changed": "change",
+  "project.policy.guardrail_changed": "change",
   "project.member.role_changed": "change",
   "project.member.invited": "change",
   "project.member.removed": "change",
@@ -328,6 +338,11 @@ const auditDetailsSchema = z.object({
   bypassed: detailText,
   what: detailText,
   memberRole: detailText,
+  // E32-6: guardrail changes (Policy → Guardrails card).
+  id: detailText,
+  label: detailText,
+  op: detailText,
+  value: z.number().optional().catch(undefined),
 });
 
 /** A blob that is not an object at all — never written by `recordAudit`, but
@@ -340,7 +355,7 @@ function auditText(
   row: AuditRow,
   resolveUserName: (userId: string | null | undefined) => string | null,
 ): string {
-  const actor = row.actor_name ?? row.actor_label;
+  const actor = row.actor_name ?? displayAuditActorLabel(row.actor_label);
   const d = auditDetails.parse(
     row.details_json ? JSON.parse(row.details_json) : {},
   );
@@ -352,6 +367,13 @@ function auditText(
       const boundary =
         BOUNDARY_LABEL.get(d.boundary ?? "") ?? d.boundary ?? "?";
       return `${actor} set **${from} → ${to}** to ${boundary}.`;
+    }
+    case "project.policy.guardrail_changed": {
+      // E32-6: label + op from the details (the row id is the subject).
+      const label = d.label ?? d.id ?? row.subject_id;
+      if (d.op === "remove") return `${actor} removed the **${label}** guardrail.`;
+      if (d.op === "value") return `${actor} set **${label}** to ${d.value ?? "?"}.`;
+      return `${actor} turned **${label}** ${d.op === "on" ? "on" : "off"}.`;
     }
     case "project.member.role_changed": {
       const target = resolveUserName(d.targetUserId) ?? "a member";
@@ -539,17 +561,67 @@ function auditFiltersActive(f: AuditFilters): boolean {
 
 /** The audit panel's actor vocabulary: everyone who ever wrote an audit row,
  *  by current display name (label fallback). */
-export function auditFilterActors(db: DatabaseSync, slug: string): string[] {
+/** One audit-panel actor filter option: `value` is the stored label the
+ *  filter matches on, `label` what a reader sees. */
+export interface AuditActorOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * E32-8 (pass 32, live): an audit row's `actor_label` is whatever `recordAudit`
+ * was handed — a human's email, a system id (`delivery`, `system:workspace-
+ * reconcile`) or an agent's ENCODED ref (`agent:claude/developer
+ * (Implementation)`). The Stream names every actor; the Audit panel printed the
+ * raw token in its filter and in every sentence ("agent:claude/developer
+ * (Implementation) set …"). Humans resolve through the users table (below);
+ * this turns the other two families into the same display names the timeline
+ * uses (`actor-ref.server.ts`), so one actor reads one way on both panels.
+ */
+export function displayAuditActorLabel(raw: string): string {
+  const ref = decodeActorRef(raw);
+  switch (ref.kind) {
+    case "agent":
+      return `${slugToRole(ref.profileId)} (${agentRoleDisplay(ref)}) · ${agentBackendName(ref.backend)}`;
+    case "system":
+      return systemIdToName(ref.systemId);
+    case "operator":
+      return "Operator";
+    case "controller":
+      return "Controller";
+    case "human":
+      return ref.nameHint ?? raw;
+    case "unknown":
+      // Bare system words (`delivery`, `system`) and anything else: capitalise.
+      return raw ? raw[0]!.toUpperCase() + raw.slice(1) : raw;
+  }
+}
+
+export function auditFilterActors(db: DatabaseSync, slug: string): AuditActorOption[] {
   // SAFETY: `actor_label` is NOT NULL; `name` is NOT NULL on users, null only
   // when the LEFT JOIN finds no row.
   const rows = db
     .prepare(
-      `SELECT DISTINCT COALESCE(u.name, a.actor_label) AS label
+      `SELECT DISTINCT a.actor_label AS label, u.name AS name
        FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
-       WHERE a.project_slug = ? ORDER BY label`,
+       WHERE a.project_slug = ?`,
     )
-    .all(slug) as Array<{ label: string }>;
-  return rows.map((row) => row.label);
+    .all(slug) as Array<{ label: string; name: string | null }>;
+  // The filter compiles to `COALESCE(u.name, a.actor_label) = ?` (below), so a
+  // human's VALUE is their current name — one option per person even when
+  // callers recorded them under different labels (email on one path, name on
+  // another; live the panel listed "Arda" twice) — and everyone else's is the
+  // stored label, displayed decoded.
+  const byValue = new Map<string, AuditActorOption>();
+  for (const row of rows) {
+    const value = row.name ?? row.label;
+    if (byValue.has(value)) continue;
+    byValue.set(value, {
+      value,
+      label: row.name ?? displayAuditActorLabel(row.label),
+    });
+  }
+  return [...byValue.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /** Every audit-panel entry matching the filters, newest first, both legs

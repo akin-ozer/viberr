@@ -111,6 +111,62 @@ function renderPanel(patch: Partial<TaskDetail> = {}) {
   return render(<Stub initialEntries={["/"]} />);
 }
 
+/** Same panel, as a CONTRIBUTOR (the tier that may take the owner seat) — or
+ *  any role passed in. */
+function renderAsContributor(patch: Partial<TaskDetail> = {}, myRole = "contributor") {
+  const task = detail(patch);
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: () => (
+        <CurrentStatePanel
+          task={task}
+          stage={STAGES[1]}
+          meId="u-arda"
+          myRole={myRole}
+          archived={task.archived === true}
+          acceptance={ACCEPTANCE}
+          ownerBusy={false}
+          onOwner={() => {}}
+          onRelease={() => {}}
+          onArchive={() => {}}
+          onAccept={() => {}}
+          onTransition={() => {}}
+          transitionBusy={false}
+          acceptBusy={false}
+          dispositionBusy={false}
+        />
+      ),
+    },
+  ]);
+  return render(<Stub initialEntries={["/"]} />);
+}
+
+describe("owner seat on closed and archived tasks (D32-16 / E32-9)", () => {
+  it("offers Assign me on an open unowned task, withholds it once closed or archived", () => {
+    const open = renderAsContributor({ owner: null });
+    expect(open.queryByText("Assign me")).not.toBeNull();
+    open.unmount();
+    // Canary: drop `!closed` from the owner cell and the accepted task offers it.
+    const accepted = renderAsContributor({ owner: null, displayReadiness: "accepted" });
+    expect(accepted.queryByText("Assign me")).toBeNull();
+    accepted.unmount();
+    const merged = renderAsContributor({ owner: null, displayReadiness: "merged" });
+    expect(merged.queryByText("Assign me")).toBeNull();
+    merged.unmount();
+    const archived = renderAsContributor({ owner: null, archived: true });
+    expect(archived.queryByText("Assign me")).toBeNull();
+  });
+
+  it("ruling 118: an ADMIN may still take a closed seat for the record, never an archived one", () => {
+    const closedAsAdmin = renderAsContributor({ owner: null, displayReadiness: "accepted" }, "admin");
+    expect(closedAsAdmin.queryByText("Assign me")).not.toBeNull();
+    closedAsAdmin.unmount();
+    const archivedAsAdmin = renderAsContributor({ owner: null, archived: true }, "admin");
+    expect(archivedAsAdmin.queryByText("Assign me")).toBeNull();
+  });
+});
+
 /** The kv-row value for a given label. */
 function kv(container: HTMLElement, label: string): string {
   const row = [...container.querySelectorAll(".kv-row")].find(

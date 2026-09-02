@@ -219,13 +219,15 @@ export async function recoverUnreactedAgentRuns(
   db: DatabaseSync,
   ctx: TaskMutationContext = {},
 ): Promise<{ recovered: number; capped: number }> {
-  // SAFETY: every selected column but `outcome_key` is NOT NULL on `agent_runs`,
-  // and `backend` carries `CHECK (backend IN ('claude', 'codex'))` — the two
-  // members of `RealBackend` (db/migrations/0001_baseline.sql).
+  // SAFETY: every selected column but `outcome_key` and the two `dispatched_by_*`
+  // columns is NOT NULL on `agent_runs`, and `backend` carries
+  // `CHECK (backend IN ('claude', 'codex'))` — the two members of `RealBackend`
+  // (db/migrations/0001_baseline.sql).
   const rows = db
     .prepare(
       `SELECT r.id, r.project_slug, r.task_key, r.backend, r.role, r.kind,
-              r.agent_profile_id, r.outcome_key
+              r.agent_profile_id, r.outcome_key,
+              r.dispatched_by_name, r.dispatched_by_user_id
          FROM agent_runs r
          JOIN task_projections t
            ON t.project_slug = r.project_slug AND t.task_key = r.task_key
@@ -248,6 +250,8 @@ export async function recoverUnreactedAgentRuns(
     kind: string;
     agent_profile_id: string;
     outcome_key: string | null;
+    dispatched_by_name: string | null;
+    dispatched_by_user_id: string | null;
   }[];
 
   if (rows.length === 0) return { recovered: 0, capped: 0 };
@@ -335,6 +339,16 @@ export async function recoverUnreactedAgentRuns(
       // verdict survives a restart instead of falling back to the prose regex.
       // Left ABSENT, not undefined, when the run stored none.
       if (row.outcome_key) completion.outcomeKey = row.outcome_key;
+      // C02-R11 (pass 32): the dispatch-completion contract survives the
+      // restart too — the dispatcher is re-supplied from the row, so the
+      // recovered report still carries its cc line and the operator is
+      // re-invoked exactly as the lost in-process callback would have done.
+      if (row.dispatched_by_name) {
+        completion.dispatchedByName = row.dispatched_by_name;
+        if (row.dispatched_by_user_id) {
+          completion.dispatchedByUserId = row.dispatched_by_user_id;
+        }
+      }
       await applyAgentCompletionEffects(db, ctx, completion, {
         id: row.id,
         state: "finished",

@@ -1412,6 +1412,14 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
     };
   };
 
+  it("A11Y-7 (pass 32): each option radio is named by its title", () => {
+    const { getByRole } = renderPacket(false, undefined, () => {});
+    // The live tree tool announced "radio, 1 of 2" with no text; the
+    // computed accessible name is the option title, pinned here.
+    expect(getByRole("radio", { name: /Archive the task/ })).toBeTruthy();
+    expect(getByRole("radio", { name: /Write your own directive/ })).toBeTruthy();
+  });
+
   const archiveDialog = (container: HTMLElement) =>
     container.ownerDocument.querySelector(
       'dialog[data-screen-label="Packet archive dialog"]',

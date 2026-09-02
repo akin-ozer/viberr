@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { freshestContent, rememberWrite } from "./write-cache.server";
 import { diagError, type FileDiagnostic } from "~/schemas/file-diagnostics";
 import {
   GOAL_FRONTMATTER_KEYS,
@@ -271,7 +272,13 @@ export async function updateGoalFile(
     if (!existsSync(abs)) {
       throw AppError.notFound(`Goal ${ref.goalId} not found.`);
     }
-    const raw = readFileSync(abs, "utf8");
+    // C01-A2 (pass 32): the same VirtioFS read-your-own-writes repair the task
+    // and project writers carry — two back-to-back link-status writes on a
+    // cached bind mount could lose the first one (pass-31 gotcha 10).
+    const raw = freshestContent(abs, readFileSync(abs, "utf8"), {
+      kind: "goal-file",
+      id: ref.goalId,
+    });
     const parsed = parseGoalFileContent(raw);
     if (!parsed) {
       throw AppError.conflict(
@@ -289,7 +296,9 @@ export async function updateGoalFile(
     // substance of the file and not the timestamp we are about to set.
     if (serializeGoalFile(parsed) === raw) return parsed;
     parsed.frontmatter.updatedAt = new Date().toISOString();
-    writeFileAtomic(abs, serializeGoalFile(parsed));
+    const serialized = serializeGoalFile(parsed);
+    writeFileAtomic(abs, serialized);
+    rememberWrite(abs, serialized);
     return parsed;
   });
 }

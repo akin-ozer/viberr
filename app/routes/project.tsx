@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { pageTitle } from "~/shared/page-title";
 import {
   data,
   Outlet,
@@ -63,7 +64,7 @@ import { Topbar } from "~/features/shell/topbar";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   return [
-    { title: loaderData ? `${loaderData.board.project.name} · Viberr` : "Viberr" },
+    { title: pageTitle(loaderData?.board.project.name) },
   ];
 }
 

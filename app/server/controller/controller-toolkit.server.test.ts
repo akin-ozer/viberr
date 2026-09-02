@@ -467,6 +467,12 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     expect(top.actor).toEqual({ kind: "controller" });
     expect(top.text).toContain("Status note published");
     expect(top.text).toContain("Posted by the controller for");
+    // C03-OC1 (pass 32): the audit row names the asking human, like every
+    // other controller tool — it used to read `userId: null · controller`.
+    // Canary: drop `auditActor` from the comment_on_task call.
+    const audit = listAuditEvents(app.db, { action: "task.agent.commented" })[0]!;
+    expect(audit.actorUserId).toBe(ids.viewer);
+    expect(audit.actorLabel).toContain("via controller");
     const denied = await call(ids.nonMember, "comment_on_task", {
       taskKey: "VIB-142",
       text: "Should not land.",

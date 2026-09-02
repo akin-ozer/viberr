@@ -1,6 +1,5 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { AppError } from "~/server/errors/app-error.server";
-import { logger } from "~/server/logging/logger.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import type {
@@ -9,6 +8,7 @@ import type {
   TaskFrontmatter,
   TaskPacket,
 } from "~/schemas/task-file.schema";
+import { freshestContent, rememberWrite } from "./write-cache.server";
 import { writeFileAtomic } from "./atomic-file.server";
 import { withFileLock } from "./file-mutex.server";
 import { taskFilePath } from "./file-store-root.server";
@@ -54,31 +54,6 @@ export function readTaskFile(ref: TaskFileRef): TaskFileReadResult | null {
   return { parsed, diagnostics, content, absPath };
 }
 
-/**
- * Read-your-own-writes repair for cached bind mounts. On Docker Desktop
- * (VirtioFS), a read milliseconds after this process's own atomic rename can
- * return the PREVIOUS file content — observed live (VIB-1, 2026-07-17): the
- * reviewer's reply comment landed on disk, the next locked read-modify-write
- * (the verdict, 2 ms later) read the stale pre-comment content, and its write
- * erased the comment permanently. Remember the last content THIS process
- * wrote per path; when a locked read disagrees and the file's mtime has not
- * advanced past our write (i.e. no EXTERNAL writer touched it since), trust
- * our own write. An external edit (human editing task.md, another process)
- * bumps mtime past the recorded write time and wins as before.
- */
-const lastWritten = new Map<string, { content: string; wroteAtMs: number }>();
-const LAST_WRITTEN_MAX_ENTRIES = 500;
-
-function rememberWrite(absPath: string, content: string): void {
-  if (lastWritten.size >= LAST_WRITTEN_MAX_ENTRIES && !lastWritten.has(absPath)) {
-    // Crude bound: drop the oldest entry (Map preserves insertion order).
-    const oldest = lastWritten.keys().next().value;
-    if (oldest !== undefined) lastWritten.delete(oldest);
-  }
-  lastWritten.delete(absPath); // re-insert at the tail (freshest last)
-  lastWritten.set(absPath, { content, wroteAtMs: Date.now() });
-}
-
 /** The content a locked read-modify-write acts on, with the diagnostics of
  *  whichever content won — the write guard below judges THAT content. */
 interface FreshTaskFile {
@@ -87,32 +62,21 @@ interface FreshTaskFile {
 }
 
 /** The freshest content for a locked read: disk, unless it is provably a
- *  stale cache of our own earlier write. */
+ *  stale cache of our own earlier write (write-cache.server — the VirtioFS
+ *  read-your-own-writes repair, shared by every canonical file writer). */
 function repairStaleRead(
   absPath: string,
   current: TaskFileReadResult,
   ref: TaskFileRef,
 ): FreshTaskFile {
-  const disk = { parsed: current.parsed, diagnostics: current.diagnostics };
-  const remembered = lastWritten.get(absPath);
-  if (!remembered || current.content === remembered.content) return disk;
-  let mtimeMs: number;
-  try {
-    mtimeMs = statSync(absPath).mtimeMs;
-  } catch {
-    return disk;
+  const content = freshestContent(absPath, current.content, {
+    kind: "task-file",
+    id: ref.taskKey,
+  });
+  if (content === current.content) {
+    return { parsed: current.parsed, diagnostics: current.diagnostics };
   }
-  // 100 ms slack for mtime granularity/clock skew between the write and the
-  // rename's recorded time. An external writer lands AFTER our write, so its
-  // mtime exceeds wroteAtMs + slack and disk wins.
-  if (mtimeMs > remembered.wroteAtMs + 100) return disk;
-  logger.warn("stale task-file read repaired from the in-process write cache", {
-    taskKey: ref.taskKey,
-    absPath,
-  });
-  const reparsed = parseTaskFileContent(remembered.content, {
-    fallbackKey: ref.taskKey,
-  });
+  const reparsed = parseTaskFileContent(content, { fallbackKey: ref.taskKey });
   return { parsed: reparsed.parsed, diagnostics: reparsed.diagnostics };
 }
 

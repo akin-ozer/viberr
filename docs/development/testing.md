@@ -3,7 +3,8 @@
 > The gates, what each one actually runs, the harnesses under `test-support/`, and how
 > test state is built. Source of truth: `vitest.config.ts`, `playwright.config.ts`,
 > `scripts/e2e.ts`, `compose.e2e.yml`, `.github/workflows/ci.yml`, `test-support/*`.
-> Verified against `main` @ `68b5480` (2026-09-01). Requires Node 26+ and `npm ci`.
+> Verified against `main` @ `68b5480` (2026-09-01); §2 and §4 re-verified 2026-09-02
+> against `pass32/implementation` @ `478bed0`. Requires Node 26+ and `npm ci`.
 
 ## 1. The five gates
 
@@ -100,7 +101,8 @@ ctx.cleanup();
 - Operator narration is stored **verbatim** (no write-time length cap, ruling 104);
   length is handled view-side by `CollapsibleComment`. The other guardrails
   (`meaningful-comment`, `evidence-separation`, `no-duplicate-summary`,
-  `compression-threshold`) are enforced per project through `project.md` `guardrails`.
+  `compression-threshold`) are enforced per project through `project.md` `guardrails`,
+  edited on the Policy page's Guardrails card (ruling 112).
 - Never mutate `node_modules` while `vitest run` is in flight (it once produced 688
   phantom failures).
 
@@ -137,7 +139,11 @@ to a separate, manual tool, not to the lint gate.
 2. `up --build --detach --wait` (300 s): the `seed` service builds the Dockerfile's
    `build` stage (which still contains `test-support/`) and runs `npm run seed:demo` on
    the named volume `e2e-data`; then `app` (the production image, `hostname:
-   viberr-e2e`, `init: true`, random host port) starts once seeding succeeded.
+   viberr-e2e`, `init: true`, random host port) starts once seeding succeeded. Both
+   services read one `x-e2e-env` anchor in `compose.e2e.yml`, which is where the e2e
+   **data root is set** (`VIBERR_DATA_ROOT: /data`) along with the two synthetic
+   secrets — seed and app must share them or the app cannot read what the seed wrote.
+   Nothing in `playwright.config.ts` or `scripts/e2e.ts` sets the data root.
 3. Reads the mapped port, polls `/resources/health` for `200` + `ok:true` up to 60 s.
 4. `npx playwright test <args>` with `VIBERR_E2E_BASE_URL`; on failure prints the last
    100 app log lines.

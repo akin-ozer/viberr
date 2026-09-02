@@ -132,7 +132,7 @@ export function specialistGrantModes(
   return modes;
 }
 
-function isWithheld(
+export function isWithheld(
   modeById: Map<string, string>,
   capabilityId: string,
 ): boolean {
@@ -176,6 +176,41 @@ export function resolveUndeployedDisallowedTools(): string[] {
     CAP_DENY_RULES.map((r) => ({ capabilityId: r.capabilityId, mode: "off" })),
   );
 }
+
+/**
+ * Pass 32 (owner ruling E32-3, VERIFIED 2026-09-02 against the pinned Codex
+ * 0.146 sources): the `read-only` sandbox admits NO writable root at all —
+ * `SandboxPolicy::ReadOnly` answers `get_writable_roots_with_cwd` with an
+ * empty list, and `--add-dir` only widens `workspace-write` ("Additional
+ * directories that should be writable alongside the primary workspace") — so
+ * "read-only except attachments/" cannot be expressed and the ruling's stated
+ * fallback applies: the evidence carve-out in `resolveCodexSandboxMode` stays,
+ * and EVERY surface that renders the repo-write enforcement says so.
+ *
+ * True exactly for the carve-out shape: the headline write family withheld AND
+ * `attach-evidence-references` granted (absent counts as granted — it is not a
+ * grant-required capability). Such a profile on Codex runs `workspace-write`
+ * with the withholding advisory; on Claude the tool denylist binds regardless.
+ */
+export function codexRepoWriteAdvisory(
+  grants: readonly CapabilityGrant[],
+): boolean {
+  // P13-AP-06 parity: a deployment with NO grants runs FULLY withheld
+  // (`deploymentGrants` → `withheldAgentGrants()`, evidence included), so it
+  // is read-only on Codex — not the carve-out. Mirror that here or the editor
+  // would tag a row "advisory" for a run that is in fact bound.
+  if (grants.length === 0) return false;
+  const modeById = specialistGrantModes(grants);
+  return (
+    isWithheld(modeById, "execute-code-or-write-repo") &&
+    !isWithheld(modeById, "attach-evidence-references")
+  );
+}
+
+/** The one sentence every surface uses for the carve-out (see
+ *  {@link codexRepoWriteAdvisory}). */
+export const CODEX_REPO_WRITE_ADVISORY_NOTE =
+  "repo-write is withheld but evidence is granted, and Codex's sandbox cannot express read-only-except-attachments — so on Codex this run keeps workspace-write and the withholding is advisory; the server-owned delivery gate is the real boundary";
 
 export interface DeliveryPermissions {
   canBranch: boolean;

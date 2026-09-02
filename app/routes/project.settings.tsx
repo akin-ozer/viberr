@@ -1,5 +1,6 @@
 import { data, redirect, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.settings";
+import { pageTitle } from "~/shared/page-title";
 import type { loader as projectLoader } from "./project";
 import {
   appErrorResponse,
@@ -46,6 +47,12 @@ import { SettingsPage } from "~/features/project-settings/settings-page";
  * project.md → reproject → audit, and the shell's project-scope SSE
  * subscription revalidates open Boards (columns follow stage edits live).
  */
+
+/** D32-3: "<Page> · <project> · Viberr" — this view used to inherit the bare
+ *  project title from the workspace layout. */
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: pageTitle("Settings", params.slug) }];
+}
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   // R15-4 on THIS loader, not only the layout's (F19-28): single-fetch honors a

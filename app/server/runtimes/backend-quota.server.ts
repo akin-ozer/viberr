@@ -49,6 +49,7 @@ import {
 
 const KEY_PREFIX = "backendRateLimit.";
 const EXHAUSTED_KEY_PREFIX = "backendQuotaExhausted.";
+const CREDENTIAL_REFUSED_KEY_PREFIX = "backendCredentialRefused.";
 
 export const BACKENDS = ["claude", "codex"] as const;
 export type QuotaBackend = (typeof BACKENDS)[number];
@@ -92,10 +93,37 @@ const exhaustionSchema = z.object({
 });
 export type BackendQuotaExhaustion = z.infer<typeof exhaustionSchema>;
 
+/**
+ * F32-4 (pass 32): the provider REFUSED a run on this backend for its
+ * CREDENTIAL — an expired refresh token, a revoked key, a 401. `backends` on
+ * the health probe and `backendCredentialHealth` judge env/file PRESENCE only
+ * (ruling 78: no synthetic token probe), so after a real refusal both kept
+ * answering "real · usable via file" and the controller told the admin the
+ * credential was fine ten minutes after a run had died on it. Same shape as
+ * exhaustion: derived from the failed run, carrying its id and the provider's
+ * own sentence; retired by the next run that COMPLETES on the backend (the real
+ * run is the re-probe) and by nothing else — a dead credential does not heal
+ * with time.
+ */
+const credentialRefusalSchema = z.object({
+  /** The provider's own already-redacted sentence — the whole evidence. */
+  providerText: z.string(),
+  /** The failed run this was read off. */
+  runId: z.string(),
+  /** ISO instant of the failure line that carried it. */
+  observedAt: z.string(),
+});
+export type BackendCredentialRefusal = z.infer<typeof credentialRefusalSchema>;
+
 export interface BackendQuotaRow {
   backend: QuotaBackend;
   /** Null until a run on this backend has ever reported a reading. */
   reading: BackendRateLimitReading | null;
+  /**
+   * F32-4: set while the last thing this backend told us was "your credential
+   * is not accepted". Cleared only by a run that completes on the backend.
+   */
+  credentialRefused: BackendCredentialRefusal | null;
   /**
    * D5: set while the last thing this backend told us was "you are over your
    * limit". Cleared by the only honest re-probe there is — a real run that
@@ -124,15 +152,11 @@ export interface BackendQuotaRow {
 const USAGE_LIMIT_RE =
   /usage limit|usage quota|\bquota\b|weekly limit|monthly limit|subscription limit|plan limit|out of credits|credit balance/i;
 
-/**
- * The marker both adapters append the provider's own redacted sentence behind
- * (`PROVIDER_TEXT_MARKER` in agent-reply.server, written as this literal by
- * each runtime). Matched here rather than imported: this module rides the
- * run-line persist path, and a static edge into the task layer would close an
- * import cycle (agent-reply → task-actions → operator-run → run-service → the
- * sink → here).
- */
-const PROVIDER_TEXT_MARKER = "\n\nThe provider reported: ";
+// The marker both adapters append the provider's own redacted sentence behind.
+// P07-C (pass 32): imported from the leaf `~/shared/provider-marker` module —
+// no edge into the task layer (the import cycle the old private copy avoided),
+// and no second literal to drift.
+import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 
 /**
  * The provider's OWN sentence inside a failure line, or the whole line when the
@@ -330,6 +354,39 @@ export function clearBackendQuotaExhaustion(
   }
 }
 
+/** F32-4: a run on this backend was REFUSED for its credential. Best-effort,
+ *  exactly like the quota writers — this rides the run-line persist path. */
+export function recordBackendCredentialRefusal(
+  db: DatabaseSync,
+  backend: QuotaBackend,
+  refusal: BackendCredentialRefusal,
+): void {
+  try {
+    setSetting(db, `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`, refusal);
+  } catch (error) {
+    logger.warn("backend credential refusal not recorded", {
+      backend,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/** F32-4: a run COMPLETED on this backend, so its credential is demonstrably
+ *  accepted again. Best-effort. */
+export function clearBackendCredentialRefusal(
+  db: DatabaseSync,
+  backend: QuotaBackend,
+): void {
+  try {
+    deleteSetting(db, `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`);
+  } catch (error) {
+    logger.warn("backend credential refusal not cleared", {
+      backend,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
 /**
  * How long a PROSE-derived reset instant is trusted past the moment it names.
  *
@@ -395,6 +452,16 @@ export function latestBackendRateLimits(
       exhaustionSchema,
     );
     const expired = stored != null && exhaustionExpired(stored, nowMs);
-    return { backend, reading, exhausted: expired ? null : stored };
+    const credentialRefused = getSetting(
+      db,
+      `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`,
+      credentialRefusalSchema,
+    );
+    return {
+      backend,
+      reading,
+      credentialRefused,
+      exhausted: expired ? null : stored,
+    };
   });
 }

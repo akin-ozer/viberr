@@ -1,4 +1,5 @@
 import { data } from "react-router";
+import { pageTitle } from "~/shared/page-title";
 import type { Route } from "./+types/project.review";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -16,7 +17,7 @@ import { ReviewQueuePage } from "~/features/review/review-page";
  */
 
 export function meta({ params }: Route.MetaArgs) {
-  return [{ title: `Review queue · ${params.slug} · Viberr` }];
+  return [{ title: pageTitle("Review queue", params.slug) }];
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {

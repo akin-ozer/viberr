@@ -1,4 +1,5 @@
 import { existsSync, rmSync } from "node:fs";
+import { deleteProjectNotifications } from "~/server/projections/notifications.server";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
@@ -1023,10 +1024,9 @@ export async function deleteProject(
   });
   // Notifications are app-owned (no FK cascade to projects), so a deleted
   // project used to leave orphaned "waiting on you" rows that dead-ended on a
-  // 404 when opened (F2). Clean them up with the project.
-  db.prepare(`DELETE FROM notifications WHERE project_slug = ?`).run(
-    input.projectSlug,
-  );
+  // 404 when opened (F2). Clean them up with the project — through the store
+  // module that owns the table (C01-A12).
+  deleteProjectNotifications(db, input.projectSlug);
 
   recordAudit(db, {
     action: "project.deleted",

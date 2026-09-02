@@ -176,6 +176,211 @@ describe("loader", () => {
     ]);
     // Fresh seed: no policy-change audit yet → the chip hides.
     expect(view.edited).toBeNull();
+    // E32-6: the four enforced guardrails, in shipped order, present and on.
+    expect(view.guardrails.filter((g) => g.kind === "default").map((g) => [g.id, g.on, g.present])).toEqual([
+      ["meaningful-comment", true, true],
+      ["no-duplicate-summary", true, true],
+      ["compression-threshold", true, true],
+      ["evidence-separation", true, true],
+    ]);
+    expect(view.guardrails.find((g) => g.id === "compression-threshold")).toMatchObject({
+      value: 40,
+      unit: "events",
+      label: "Compression threshold",
+    });
+  });
+});
+
+describe("set-guardrail (E32-6, pass 32)", () => {
+  it("rejects a contributor (Edit workflow & policy is admin-only)", async () => {
+    // SAFETY: selin is a contributor; the admin-only capability check raises
+    // an AppError the action answers through `appErrorResponse`.
+    // SAFETY: this call is refused (a capability or validation AppError the
+    // action answers through `appErrorResponse`), so the data is the refusal shape.
+    const result = (await postAction(ids.selin, {
+      intent: "set-guardrail",
+      id: "meaningful-comment",
+      op: "off",
+    })) as PolicyRefusal;
+    expect(result.init?.status).toBe(403);
+  });
+
+  it("toggles an enforced guardrail: project.md → projection → audit → toast", async () => {
+    // SAFETY: an admin toggling a known row, so `setGuardrail` runs to its
+    // accept arm.
+    // SAFETY: an admin on a valid input, so `setGuardrail` reaches its accept arm
+    // and the action returns the accepted shape.
+    const off = (await postAction(ids.arda, {
+      intent: "set-guardrail",
+      id: "meaningful-comment",
+      op: "off",
+    })) as PolicyAccepted;
+    expect(off).toEqual({
+      ok: true,
+      toast: "Meaningful comments: off · applies from the next agent comment",
+    });
+    const { view } = await runLoader(ids.arda);
+    expect(view.guardrails.find((g) => g.id === "meaningful-comment")?.on).toBe(false);
+    // The file is the truth the runtime reads (comment-guardrails.server.ts).
+    const raw = readFileSync(
+      path.join(app.dataRoot, "projects", "viberr-core", "project.md"),
+      "utf8",
+    );
+    expect(raw).toMatch(/id: meaningful-comment[\s\S]*?on: false/);
+    const audit = listAuditEvents(app.db, { action: "project.policy.guardrail_changed" });
+    expect(audit[0]).toMatchObject({
+      subjectId: "meaningful-comment",
+      details: { id: "meaningful-comment", label: "Meaningful comments", op: "off", beforeOn: true },
+    });
+    // Idempotent: the same state again changes nothing and says so.
+    // SAFETY: an admin on a valid input, so `setGuardrail` reaches its accept arm
+    // and the action returns the accepted shape.
+    const again = (await postAction(ids.arda, {
+      intent: "set-guardrail",
+      id: "meaningful-comment",
+      op: "off",
+    })) as PolicyAccepted;
+    expect(again.toast).toBe("Meaningful comments is already off · nothing changed");
+    expect(listAuditEvents(app.db, { action: "project.policy.guardrail_changed" })).toHaveLength(1);
+
+    // Restore.
+    await postAction(ids.arda, { intent: "set-guardrail", id: "meaningful-comment", op: "on" });
+    expect((await runLoader(ids.arda)).view.guardrails.find((g) => g.id === "meaningful-comment")?.on).toBe(true);
+  });
+
+  it("sets the compression threshold; refuses a non-number and a unitless row", async () => {
+    // SAFETY: an admin on a valid input, so `setGuardrail` reaches its accept arm
+    // and the action returns the accepted shape.
+    const set = (await postAction(ids.arda, {
+      intent: "set-guardrail",
+      id: "compression-threshold",
+      op: "value",
+      value: "60",
+    })) as PolicyAccepted;
+    expect(set.toast).toBe("Compression threshold: 60 events · applies to the next compaction pass");
+    expect((await runLoader(ids.arda)).view.guardrails.find((g) => g.id === "compression-threshold")?.value).toBe(60);
+
+    // SAFETY: this call is refused (a capability or validation AppError the
+    // action answers through `appErrorResponse`), so the data is the refusal shape.
+    const junk = (await postAction(ids.arda, {
+      intent: "set-guardrail",
+      id: "compression-threshold",
+      op: "value",
+      value: "lots",
+    })) as PolicyRefusal;
+    expect(junk.init?.status).toBe(400);
+
+    // SAFETY: this call is refused (a capability or validation AppError the
+    // action answers through `appErrorResponse`), so the data is the refusal shape.
+    const unitless = (await postAction(ids.arda, {
+      intent: "set-guardrail",
+      id: "evidence-separation",
+      op: "value",
+      value: "5",
+    })) as PolicyRefusal;
+    expect(unitless.init?.status).toBe(400);
+
+    // Restore.
+    await postAction(ids.arda, { intent: "set-guardrail", id: "compression-threshold", op: "value", value: "40" });
+  });
+
+  it("review F1: a value written onto an ABSENT row keeps it off and says so", async () => {
+    // A project whose file lacks the row: the card shows it OFF ("not in
+    // project.md") with the shipped number prefilled. Typing a number must
+    // save the number without switching compaction on behind the reader's back.
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    await updateProjectFile({ projectSlug: "viberr-core", dataRoot: app.dataRoot }, (parsed) => {
+      parsed.frontmatter.guardrails = parsed.frontmatter.guardrails.filter(
+        (g) => g.id !== "compression-threshold",
+      );
+    });
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const { projectFilePath } = await import("~/server/files/file-store-root.server");
+    rebuildPath(app.db, projectFilePath("viberr-core", app.dataRoot), { dataRoot: app.dataRoot });
+    expect(
+      (await runLoader(ids.arda)).view.guardrails.find((g) => g.id === "compression-threshold"),
+    ).toMatchObject({ present: false, on: false, value: 40 });
+
+    // SAFETY: an admin on a valid input, so `setGuardrail` reaches its accept arm
+    // and the action returns the accepted shape.
+    const set = (await postAction(ids.arda, {
+      intent: "set-guardrail",
+      id: "compression-threshold",
+      op: "value",
+      value: "50",
+    })) as PolicyAccepted;
+    expect(set.toast).toBe(
+      "Compression threshold: 50 events · saved; the guardrail is off, so it applies once you turn it on",
+    );
+    // Canary: push `{ ...shipped, value }` without `on: false` and this reads on:true.
+    expect(
+      (await runLoader(ids.arda)).view.guardrails.find((g) => g.id === "compression-threshold"),
+    ).toMatchObject({ present: true, on: false, value: 50 });
+
+    // Restore: on, at the shipped value.
+    await postAction(ids.arda, { intent: "set-guardrail", id: "compression-threshold", op: "on" });
+    await postAction(ids.arda, { intent: "set-guardrail", id: "compression-threshold", op: "value", value: "40" });
+    expect(
+      (await runLoader(ids.arda)).view.guardrails.find((g) => g.id === "compression-threshold"),
+    ).toMatchObject({ present: true, on: true, value: 40 });
+  });
+
+  it("review F8: removing an id that is not there says so and records nothing", async () => {
+    const before = listAuditEvents(app.db, { action: "project.policy.guardrail_changed" }).length;
+    // SAFETY: an admin on a valid input, so `setGuardrail` reaches its accept arm
+    // and the action returns the accepted shape.
+    const gone = (await postAction(ids.arda, {
+      intent: "set-guardrail",
+      id: "never-existed",
+      op: "remove",
+    })) as PolicyAccepted;
+    // Canary: rebuild the no-op copy by splitting the success toast and this
+    // claims "removed … · already so".
+    expect(gone.toast).toBe("never-existed is not on this project's guardrails · nothing changed");
+    expect(listAuditEvents(app.db, { action: "project.policy.guardrail_changed" })).toHaveLength(before);
+  });
+
+  it("never removes an enforced row, never touches the GitHub-owned row, removes an unknown one", async () => {
+    // SAFETY: this call is refused (a capability or validation AppError the
+    // action answers through `appErrorResponse`), so the data is the refusal shape.
+    const keep = (await postAction(ids.arda, {
+      intent: "set-guardrail",
+      id: "evidence-separation",
+      op: "remove",
+    })) as PolicyRefusal;
+    expect(keep.init?.status).toBe(400);
+
+    // SAFETY: this call is refused (a capability or validation AppError the
+    // action answers through `appErrorResponse`), so the data is the refusal shape.
+    const github = (await postAction(ids.arda, {
+      intent: "set-guardrail",
+      id: "delete-branch-after-merge",
+      op: "off",
+    })) as PolicyRefusal;
+    expect(github.init?.status).toBe(400);
+
+    // A retired id a hand edit left behind: listed inert, removable here.
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    await updateProjectFile({ projectSlug: "viberr-core", dataRoot: app.dataRoot }, (parsed) => {
+      parsed.frontmatter.guardrails.push({ id: "operator-brevity", desc: "retired", on: true });
+    });
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const { projectFilePath } = await import("~/server/files/file-store-root.server");
+    rebuildPath(app.db, projectFilePath("viberr-core", app.dataRoot), { dataRoot: app.dataRoot });
+    expect((await runLoader(ids.arda)).view.guardrails.find((g) => g.id === "operator-brevity")).toMatchObject({
+      kind: "unknown",
+      present: true,
+      label: "operator-brevity",
+    });
+    // SAFETY: an admin on a valid input, so `setGuardrail` reaches its accept arm
+    // and the action returns the accepted shape.
+    const removed = (await postAction(ids.arda, {
+      intent: "set-guardrail",
+      id: "operator-brevity",
+      op: "remove",
+    })) as PolicyAccepted;
+    expect(removed.toast).toBe("operator-brevity removed from this project's guardrails");
+    expect((await runLoader(ids.arda)).view.guardrails.some((g) => g.id === "operator-brevity")).toBe(false);
   });
 });
 
@@ -183,6 +388,8 @@ describe("set-role", () => {
   it("rejects a maintainer (Manage members & roles is admin-only)", async () => {
     // SAFETY: a maintainer fails the admin-only capability check, which raises
     // an AppError the action answers through `appErrorResponse`.
+    // SAFETY: this call is refused (a capability or validation AppError the
+    // action answers through `appErrorResponse`), so the data is the refusal shape.
     const result = (await postAction(ids.murat, {
       intent: "set-role",
       userId: ids.selin,
@@ -194,6 +401,8 @@ describe("set-role", () => {
   it("round trip: project.md → projection → audit → toast, chip appears", async () => {
     // SAFETY: arda is a project admin demoting someone else, so `setMemberRole`
     // runs to completion and the action returns its accept arm.
+    // SAFETY: an admin on a valid input, so `setGuardrail` reaches its accept arm
+    // and the action returns the accepted shape.
     const result = (await postAction(ids.arda, {
       intent: "set-role",
       userId: ids.selin,
@@ -254,6 +463,8 @@ describe("set-role", () => {
     // Two seeded admins — demote elif first (allowed, arda remains).
     // SAFETY: a second admin remains, so the last-admin guard passes and the
     // action returns its accept arm.
+    // SAFETY: an admin on a valid input, so `setGuardrail` reaches its accept arm
+    // and the action returns the accepted shape.
     const demoteElif = (await postAction(ids.arda, {
       intent: "set-role",
       userId: ids.elif,
@@ -264,6 +475,8 @@ describe("set-role", () => {
     // Now arda is the only admin — self-demotion must be refused.
     // SAFETY: the last-admin guard raises an AppError here, which the action
     // answers through `appErrorResponse`.
+    // SAFETY: this call is refused (a capability or validation AppError the
+    // action answers through `appErrorResponse`), so the data is the refusal shape.
     const demoteArda = (await postAction(ids.arda, {
       intent: "set-role",
       userId: ids.arda,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { withProviderText } from "~/shared/provider-marker";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -363,20 +364,47 @@ export function nativeSkillNames(skills?: readonly string[]): string[] {
  * grant as prompt text — the same fallback a run with no checkout gets. When the
  * file goes missing AFTER the mount (this seam's own case, and only if the
  * repair also fails), the persona has already been written on the assumption the
- * skills mounted, so they are announced to the agent and not enabled: a real
- * capability loss for that run. Closing it means threading
- * `SkillMount.settingsWritten` into `buildSpecialistPersona`; losing craft is
- * the lesser harm against the repository under review writing the system prompt.
+ * skills mounted, so they are announced to the agent and not enabled. C02-R7
+ * (pass 32) closes that last gap where it can be closed — in the adapter, at
+ * start: the persona was written on the mount's word, so the adapter appends a
+ * correction to the system prompt naming the skills it could not enable
+ * (`droppedSkillsNotice`). The agent then treats them as unavailable instead
+ * of invoking a name that never loads; losing craft stays the lesser harm
+ * against the repository under review writing the system prompt.
  */
-export function nativeSkillsForRun(spec: RunSpec): string[] {
+/** What the start could enable natively, and what it had to drop. */
+export interface NativeSkillsOutcome {
+  native: string[];
+  dropped: string[];
+}
+
+export function nativeSkillsOutcome(spec: RunSpec): NativeSkillsOutcome {
   const granted = nativeSkillNames(spec.skills);
-  if (granted.length === 0) return [];
-  if (ensureCatalogSettings(spec.workdir)) return granted;
+  if (granted.length === 0) return { native: [], dropped: [] };
+  if (ensureCatalogSettings(spec.workdir)) return { native: granted, dropped: [] };
   logger.warn(
     "no CLAUDE.md excludes in the run workspace — starting with NO native skills so the project settings source stays closed",
     { runId: spec.runId, workdir: spec.workdir, skills: granted },
   );
-  return [];
+  return { native: [], dropped: granted };
+}
+
+export function nativeSkillsForRun(spec: RunSpec): string[] {
+  return nativeSkillsOutcome(spec).native;
+}
+
+/** The system-prompt correction for skills the persona announced as installed
+ *  but the adapter could not enable (see `nativeSkillsOutcome`). */
+export function droppedSkillsNotice(dropped: readonly string[]): string {
+  return (
+    "\n\n---\n# Attached skills could NOT be enabled on this run\n\n" +
+    `The skills named above as installed in your workspace (${dropped.join(", ")}) ` +
+    "could NOT be enabled for this run: the workspace settings that keep the " +
+    "repository's own CLAUDE.md out of your context could not be established, " +
+    "and Viberr keeps that source closed rather than open it on faith. Treat " +
+    "them as unavailable — do not invoke them by name — and say so in your " +
+    "report if the work needed them."
+  );
 }
 
 /**
@@ -722,7 +750,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               text:
                 failure.providerText &&
                 !failure.message.includes(failure.providerText)
-                  ? `${failure.message}\n\nThe provider reported: ${failure.providerText}`
+                  ? withProviderText(failure.message, failure.providerText)
                   : failure.message,
             },
             facts: {},
@@ -780,8 +808,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         const resolvedModel = resolveClaudeModel(spec.model);
         // The granted skills Viberr MOUNTED into this run's workspace (empty for
         // a run with no grants, no checkout, or a Codex profile — see below —
-        // and for one whose workspace lost the CLAUDE.md excludes file).
-        const nativeSkills = nativeSkillsForRun(spec);
+        // and for one whose workspace lost the CLAUDE.md excludes file; those
+        // are `dropped`, and the persona is corrected below).
+        const { native: nativeSkills, dropped: droppedSkills } = nativeSkillsOutcome(spec);
         const options: ClaudeQueryOptions = {
           cwd: spec.workdir,
           // Fully autonomous: bypass ALL permission prompts so a
@@ -861,16 +890,22 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         //    Replacing it (the old behavior) stripped the scaffolding and made a
         //    coding agent run on persona prose alone.
         if (spec.systemPrompt) {
+          // C02-R7: the persona announced the mounted skills; when the start
+          // could not enable them, the correction rides the same prompt.
+          const persona =
+            droppedSkills.length > 0
+              ? spec.systemPrompt + droppedSkillsNotice(droppedSkills)
+              : spec.systemPrompt;
           // The controller (ruling 99) is coordination machinery like the
           // operator: its persona REPLACES the coding harness, and it works
           // only through its in-process toolkit.
           if (spec.kind === "operator" || spec.kind === "controller") {
-            options.systemPrompt = spec.systemPrompt;
+            options.systemPrompt = persona;
           } else {
             options.systemPrompt = {
               type: "preset",
               preset: "claude_code",
-              append: spec.systemPrompt,
+              append: persona,
             };
           }
         }
@@ -1031,7 +1066,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               text:
                 failure.providerText &&
                 !failure.message.includes(failure.providerText)
-                  ? `${failure.message}\n\nThe provider reported: ${failure.providerText}`
+                  ? withProviderText(failure.message, failure.providerText)
                   : failure.message,
             },
             facts: {},

@@ -175,6 +175,11 @@ describe("browserRuntimeStatus — the same gates as the mount, before a run is 
     const s = browserRuntimeStatus();
     expect(s.available).toBe(false);
     expect(s.reason).toContain("VIBERR_BROWSER_EXECUTABLE");
+    // C05-A (pass 32): the reason is served unauthenticated on the health
+    // probe — it names the variable, never the configured host path. The path
+    // rides on `detail`, which only org-admin surfaces relay.
+    expect(s.reason).not.toContain("/nonexistent");
+    expect(s.detail).toContain("/nonexistent/chromium-not-installed");
   });
 });
 

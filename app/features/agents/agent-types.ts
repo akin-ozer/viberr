@@ -161,7 +161,7 @@ export function profileRoleLabel(
  * (the matrix modal) only read the fields they already destructured. */
 export type MatrixProfile = Pick<
   AgentProfileView,
-  "id" | "kind" | "name" | "icon" | "actions" | "backends"
+  "id" | "kind" | "name" | "icon" | "actions" | "backends" | "capabilities"
 >;
 
 /** Mock statusKind (agents.jsx): status string → pill kind. */

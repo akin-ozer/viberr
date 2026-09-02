@@ -2,6 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { heldDataRootLock } from "~/server/db/data-root-lock.server";
 import { isFileWatcherAlive } from "~/server/files/file-watch.service.server";
 import { isKbWatcherAlive } from "~/server/files/kb-watch.service.server";
+import {
+  latestBackendRateLimits,
+  type BackendQuotaRow,
+} from "~/server/runtimes/backend-quota.server";
 import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
 import { browserRuntimeStatus } from "~/server/tasks/specialist-browser-mcp.server";
 import { getBuildInfo, type BuildInfo } from "./build-info.server";
@@ -49,6 +53,16 @@ export interface HealthSnapshot {
   disk: DiskSpace | null;
   maintenance: MaintenanceState;
   build: BuildInfo;
+  /**
+   * F32-9 (pass 32): what each backend last TOLD us — the latest rate-limit
+   * reading, a quota exhaustion read off a refused run, a credential refusal.
+   * `backends` above is env presence only; without this the controller's
+   * `instance_health` answered "codex usable, no quota exhaustion flagged"
+   * ten minutes after a codex run had been refused for quota, while the
+   * Insights page (which reads the same store) showed "usage limit reached".
+   * One store, every reader.
+   */
+  quota: BackendQuotaRow[];
 }
 
 /**
@@ -85,6 +99,16 @@ export function healthSnapshot(db: DatabaseSync): HealthSnapshot {
   if (!kbWatcher) degraded.push("kbWatcher");
   if (!lock) degraded.push("lock");
   if (disk && disk.status !== "ok") degraded.push("disk");
+  // F32-4/F32-9: a backend whose last word was "refused" cannot run work until
+  // the credential is fixed or the window reopens — that is degraded in the
+  // plain sense, and the entry names which fact so the reader is not sent
+  // hunting. An unconfigured backend stays NOT degraded (R17-5); this is only
+  // ever a configured backend that answered a real run with a refusal.
+  const quota = latestBackendRateLimits(db);
+  for (const row of quota) {
+    if (row.credentialRefused) degraded.push(`credential:${row.backend}`);
+    if (row.exhausted) degraded.push(`quota:${row.backend}`);
+  }
 
   const browser = browserRuntimeStatus();
 
@@ -111,5 +135,6 @@ export function healthSnapshot(db: DatabaseSync): HealthSnapshot {
     disk,
     maintenance: maintenanceState(),
     build: getBuildInfo(),
+    quota,
   };
 }

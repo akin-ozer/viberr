@@ -9,11 +9,16 @@ import {
   WEB_EGRESS_CAP_ID,
 } from "~/shared/capabilities";
 import { claudeModelRunsVerbatim } from "~/shared/model-ids";
+import {
+  CODEX_REPO_WRITE_ADVISORY_NOTE,
+  codexRepoWriteAdvisory,
+} from "~/server/tasks/specialist-tool-policy";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { rovingRadioKeyDown } from "~/ui/roving-radio";
 import { useDialog } from "~/ui/use-dialog";
 import type { AgentProfileView } from "./agent-types";
+import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
   CAP_MODAL_CATALOG,
   CAP_MODAL_DEFAULTS,
@@ -44,6 +49,19 @@ import {
  * outside it are preserved server-side rather than represented here. */
 export interface CapSelection {
   [capabilityId: string]: CapMode;
+}
+
+/** The editor's live selection as the id-based grant list the runtime reads
+ *  (only the four runtime modes; anything else the picker holds is not a
+ *  grant the runtime would see). */
+function grantsOf(caps: CapSelection): { capabilityId: string; mode: CapabilityGrant["mode"] }[] {
+  const out: { capabilityId: string; mode: CapabilityGrant["mode"] }[] = [];
+  for (const [capabilityId, mode] of Object.entries(caps)) {
+    if (mode === "direct" || mode === "recommend" || mode === "human" || mode === "off") {
+      out.push({ capabilityId, mode });
+    }
+  }
+  return out;
 }
 
 export interface ProfileFormPayload {
@@ -332,7 +350,7 @@ function ModalHead({
             ? "A reusable agent the operator can assign to tasks."
             : forksTemplate
               ? `Saving forks this profile for ${projectName}: it keeps its own copy and stops tracking later changes to the global profile.`
-              : "Update this project's copy. Changes apply to future assignments."}
+              : "Update this project's copy. Changes apply from the next run."}
         </div>
       </div>
       <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
@@ -874,6 +892,15 @@ function CapabilityGrants({
                       !locked &&
                       capabilityEnforcement(capDef.id) === "claude-only";
                     const codexInert = codexAdvisory && capDef.id === "read-github-api";
+                    // Pass 32 (E32-3 fallback): the headline write family binds
+                    // on Codex through the read-only sandbox — EXCEPT when this
+                    // very selection withholds it while granting evidence, the
+                    // shape the sandbox cannot express. Tag the row from the
+                    // live selection so the admin sees the caveat as they make it.
+                    const codexCarveOut =
+                      backend === "codex" &&
+                      capDef.id === "execute-code-or-write-repo" &&
+                      codexRepoWriteAdvisory(grantsOf(caps));
                     return (
                       <div className="cap-mrow" key={capDef.id}>
                         <span className="cap-mname">
@@ -888,6 +915,14 @@ function CapabilityGrants({
                               }
                             >
                               {codexInert ? "inert on Codex" : "advisory on Codex"}
+                            </span>
+                          )}
+                          {codexCarveOut && (
+                            <span
+                              className="mx-scope"
+                              title={`On this Codex profile ${CODEX_REPO_WRITE_ADVISORY_NOTE}. Withhold "Attach evidence references" too, or run the profile on Claude, to make the withholding bind.`}
+                            >
+                              advisory on Codex
                             </span>
                           )}
                         </span>

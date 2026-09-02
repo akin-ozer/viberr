@@ -199,6 +199,113 @@ afterEach(() => {
   ctx.cleanup();
 });
 
+/**
+ * F32-7 (pass 32). The `resolve_remote_collision` decision re-delivers through
+ * `manualDeliverForReview` — the HUMAN door — and `performDelivery` records no
+ * next step for a human who just clicked Deliver (R18-2/R19-4); the packet kind
+ * sits in NO_REQUEUE on the promise that the re-delivery owns the follow-up.
+ * Live (VIB-1): after the ceremony the task sat at In Progress, `waiting:
+ * human`, an open PR, and nothing to click. The collision arm now mirrors the
+ * operator-delivery split: supervised records the server-attributed card,
+ * full autonomy re-queues the operator with the `delivered` trigger.
+ */
+describe("F32-7 — a collision resolution's redelivery leaves a next step", () => {
+  const COLLISION_PACKET: TaskPacket = {
+    type: "blocked",
+    kind: "Blocked decision",
+    from: "operator",
+    title: "Branch vib-1 collides with an unrelated remote branch",
+    body: "deliver_for_review push-conflicted: the remote branch holds unrelated commits.",
+    observations: [],
+    options: [
+      {
+        kind: "resolve_remote_collision",
+        t: "Delete the stale remote branch, then redeliver",
+        d: "",
+        rec: true,
+      },
+      { kind: "custom", t: "Something else", d: "", rec: false },
+    ],
+  };
+
+  async function resolveCollision(): Promise<void> {
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const { createPat, setProjectCredential } = await import(
+      "~/server/secrets/pat-store.server"
+    );
+    const { resolvePacket } = await import("./task-actions.server");
+    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_collision00000000000000000000009" },
+      patActor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    const github = fakeGithubFetch({
+      "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 204, body: "" },
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        waiting: "human",
+        readiness: "blocked",
+        branch: "vib-1",
+        operator: { assignedAtStageId: "ready" },
+        workRevision: {
+          id: "rev_collision9",
+          headSha: "e".repeat(40),
+          treeSha: "f".repeat(40),
+          branch: "vib-1",
+          createdAt: new Date().toISOString(),
+          sourceProfileId: "developer",
+          kind: "delivered",
+        },
+        github: { commits: [], changed: null, unownedPr: 232 },
+      }),
+      packet: COLLISION_PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl, deps: DEPS },
+    );
+    // The redelivery really went out through the injected doors.
+    expect(openTaskPrMock).toHaveBeenCalled();
+  }
+
+  it("supervised: the server records the Move-to-Review card after the redelivery", async () => {
+    deployOperator("supervised");
+    await resolveCollision();
+    const pending = recs();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ kind: "transition", toStageId: "review" });
+    expect(pending[0]!.detail).toContain("Recorded by Viberr");
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    // The lift stays delivery-gated (V11) and the block is gone.
+    expect(file.parsed.frontmatter.readiness).toBe("ready");
+    expect(file.parsed.packet).toBeNull();
+  });
+
+  it("full autonomy: the operator is re-queued with the delivered trigger — exactly once, no card", async () => {
+    deployOperator("full");
+    await resolveCollision();
+    await waitFor(() => runOp.mock.calls.length > 0, "the delivered re-queue");
+    expect(runOp.mock.calls[0]![1]).toMatchObject({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      trigger: "delivered",
+    });
+    // `performDelivery`'s own R18-2 arm is the ONE re-queue; the collision arm
+    // must not add a second operator run on top of it.
+    await flush();
+    expect(runOp).toHaveBeenCalledTimes(1);
+    expect(recs()).toHaveLength(0);
+  });
+});
+
 describe("F19-1 — a successful delivery leaves an actionable next step", () => {
   it("A. the VC-1 strand: a supervised delivery records exactly one transition recommendation to Review", async () => {
     deployOperator("supervised");

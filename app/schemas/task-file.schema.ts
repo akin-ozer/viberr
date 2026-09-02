@@ -453,11 +453,12 @@ export type PrRef = z.infer<typeof prRefSchema>;
 
 /** GitHub projection cache mirrored into the file by the Phase-7
  * reconciler — commits + change stats. Not human-edited truth. */
+export const githubCommitSchema = z
+  .object({ sha: z.string(), msg: z.string() })
+  .loose();
 export const githubCacheSchema = z
   .object({
-    commits: z
-      .array(z.object({ sha: z.string(), msg: z.string() }).loose())
-      .default([]),
+    commits: z.array(githubCommitSchema).default([]),
     changed: z
       .object({
         files: z.number().int(),
@@ -1071,6 +1072,38 @@ function tolerant<T>(
  * over the rows that had been fine — a durable, silent loss. Any list whose
  * loss would persist (verdicts, schedules, engagements, …) parses through here.
  */
+/**
+ * C01-A8 (pass 32): `github.commits` gets the per-row tolerance every other
+ * list has. The cache is reconciler-written, but ONE odd row (`sha: 1234` as a
+ * YAML number after a hand edit, a half-written line) failed the WHOLE
+ * `github` object to null — and took `unownedPr` (R15-15, the branch-collision
+ * fact) and `changed` down with it. The GitHub card then stopped reporting a
+ * collision that still existed, and the next write serialized `github: null`
+ * back for good. Returns `data` untouched when there is nothing to clean.
+ */
+function githubWithCleanCommits(
+  diagnostics: FileDiagnostic[],
+  data: RawFrontmatter,
+): RawFrontmatter {
+  const probe = z
+    .object({ commits: z.array(z.unknown()) })
+    .loose()
+    .safeParse(data.github);
+  if (!probe.success) return data;
+  const commits = tolerantRowsOf(
+    diagnostics,
+    probe.data.commits,
+    githubCommitSchema,
+    "github.invalid_commit",
+    (i) => ({
+      subject: `GitHub commit row [${i}]`,
+      noun: "commit row",
+      path: `github.commits[${i}]`,
+    }),
+  );
+  return { ...data, github: { ...probe.data, commits } };
+}
+
 function tolerantRows<T>(
   diagnostics: FileDiagnostic[],
   data: RawFrontmatter,
@@ -1411,7 +1444,7 @@ export function parseTaskFrontmatter(
     ),
     github: tolerant(
       diagnostics,
-      data,
+      githubWithCleanCommits(diagnostics, data),
       "github",
       taskFrontmatterFields.github,
       null,

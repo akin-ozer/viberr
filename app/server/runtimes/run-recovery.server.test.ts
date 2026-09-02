@@ -219,6 +219,33 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     expect(remaining.n).toBe(0);
   });
 
+  it("C02-R11 (pass 32): the dispatch-completion contract survives a restart — the recovered reply carries its cc line", async () => {
+    // The dispatcher used to live only in the in-process closure, so a run
+    // recovered after a crash posted its report with no cc line and without
+    // the guaranteed operator re-invoke. Persisted on the row now (the same
+    // shape as outcome_key). Canary: drop the `dispatched_by_*` re-supply in
+    // recoverUnreactedAgentRuns and the cc line vanishes.
+    seedDroppedReplyRun("run_dispatched");
+    patchRun(store.db, "run_dispatched", {
+      dispatchedByName: "Arda Kaya",
+      dispatchedByUserId: store.users.arda.id,
+    });
+    expect(getRun(store.db, "run_dispatched")).toMatchObject({
+      dispatched_by_name: "Arda Kaya",
+      dispatched_by_user_id: store.users.arda.id,
+    });
+
+    const res = await recoverUnreactedAgentRuns(store.db, { dataRoot: store.dataRoot });
+    expect(res.recovered).toBe(1);
+    const reply = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.type === "comment" && e.actor.kind === "agent");
+    expect(reply?.text).toContain("done: delivered the change");
+    expect(reply?.text).toContain("cc @Arda Kaya @operator");
+  });
+
   it("does not reprocess a run after a successful recovery (idempotent)", async () => {
     seedDroppedReplyRun("run_dropped");
     expect((await recoverUnreactedAgentRuns(store.db, { dataRoot: store.dataRoot })).recovered).toBe(1);

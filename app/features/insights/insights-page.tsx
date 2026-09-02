@@ -6,6 +6,11 @@ import type {
 } from "~/server/insights/insights-query.server";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
+import {
+  formatCalendarDate,
+  formatDayDotTime,
+  utcDayKey,
+} from "~/shared/dates/format";
 
 /**
  * Insights: a read-only analytics dashboard over agent runs — totals, outcomes,
@@ -219,7 +224,9 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         icon="shield"
         sub={
           g.coordination.totalCostUsd > 0
-            ? `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)} reported`
+            ? // D04-U12 (pass 32): name the denominator — cost-REPORTING runs
+              // only, the way "Total cost" above discloses its subset.
+              `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)} reported by cost-reporting runs`
             : "no run has reported a cost yet"
         }
       />
@@ -257,7 +264,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
         <h2>Backend quota</h2>
       </div>
       <ul className="bar-list">
-        {quota.map(({ backend, reading, exhausted }) => {
+        {quota.map(({ backend, reading, exhausted, credentialRefused }) => {
           const pct = reading ? pctOf(reading.utilization) : null;
           // V4 (pass 31): an exhaustion record is a claim about ONE moment. A
           // utilization reading this backend reported AFTER that moment is
@@ -268,6 +275,40 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
             exhausted && !observedAfter(reading?.observedAt, exhausted.observedAt)
               ? exhausted
               : null;
+          // F32-4 (pass 32): a REJECTED CREDENTIAL outranks every other state —
+          // no run on this backend can start until someone fixes it, whatever
+          // the utilization window says. It is its own record (the failed run
+          // + the provider's sentence) and is cleared only by a run that
+          // completes on the backend; the row says exactly that.
+          if (credentialRefused) {
+            return (
+              <li key={backend} className="bar-row">
+                <span className="bar-label" title={backend}>
+                  {backend}
+                </span>
+                <span className="bar-track">
+                  <span className="bar-fill full" />
+                </span>
+                <span className="bar-val">
+                  credential refused
+                  <span
+                    className="bar-cost"
+                    title={
+                      // D32-2 (ruling 4): the app's ONE date formatter, never the
+                      // server locale's `toLocaleString`.
+                      hydrated
+                        ? `run ${credentialRefused.runId} was refused ${formatDayDotTime(
+                            credentialRefused.observedAt,
+                          )}: ${credentialRefused.providerText}`
+                        : undefined
+                    }
+                  >
+                    from a refused run · clears when a run on this backend completes
+                  </span>
+                </span>
+              </li>
+            );
+          }
           return (
             <li key={backend} className="bar-row">
               <span className="bar-label" title={backend}>
@@ -313,9 +354,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                     // timezone, and React re-renders rather than patching it.
                     title={
                       hydrated
-                        ? `run ${refusal.runId} was refused ${new Date(
-                            refusal.observedAt,
-                          ).toLocaleString()}: ${refusal.providerText}`
+                        ? `run ${refusal.runId} was refused ${formatDayDotTime(refusal.observedAt)}: ${refusal.providerText}`
                         : undefined
                     }
                   >
@@ -334,10 +373,10 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                       refusal.resetsAt != null
                         ? `retry after ${
                             hydrated && refusal.resetsAtPrecision === "exact"
-                              ? new Date(refusal.resetsAt * 1000).toLocaleString()
-                              : new Date(refusal.resetsAt * 1000)
-                                  .toISOString()
-                                  .slice(0, 10)
+                              ? formatDayDotTime(new Date(refusal.resetsAt * 1000).toISOString())
+                              : // P07-I: a prose-derived date is a UTC calendar
+                                // day, and says so — it can be a day off locally.
+                                `${utcDayKey(new Date(refusal.resetsAt * 1000).toISOString())} (UTC)`
                           }`
                         : null,
                     ]
@@ -355,7 +394,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                     // patches the mismatch (the app's local-time discipline).
                     title={
                       hydrated
-                        ? `observed ${new Date(reading.observedAt).toLocaleString()}`
+                        ? `observed ${formatDayDotTime(reading.observedAt)}`
                         : undefined
                     }
                   >
@@ -368,18 +407,18 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                         : null,
                       reading.isUsingOverage ? "overage" : null,
                       // Hydration-gated for the same reason the `title` above
-                      // is: `toLocaleDateString` renders in the SERVER's
+                      // is: a local calendar date renders in the SERVER's
                       // timezone during SSR and the viewer's on the client, and
                       // React never patches a text mismatch — it re-renders the
                       // whole page. The ungated form is the timezone-neutral
-                      // ISO day, so the first paint is honest either way.
+                      // UTC day, marked as such (P07-I), so the first paint is
+                      // honest either way. D32-2: the shared formatter, not
+                      // `toLocaleDateString`.
                       reading.resetsAt != null
                         ? `resets ${
                             hydrated
-                              ? new Date(reading.resetsAt * 1000).toLocaleDateString()
-                              : new Date(reading.resetsAt * 1000)
-                                  .toISOString()
-                                  .slice(0, 10)
+                              ? formatCalendarDate(new Date(reading.resetsAt * 1000).toISOString())
+                              : `${utcDayKey(new Date(reading.resetsAt * 1000).toISOString())} (UTC)`
                           }`
                         : null,
                     ]

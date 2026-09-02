@@ -2,8 +2,12 @@ import { Fragment } from "react";
 import { Icon, storeIcon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
 import type { MatrixProfile } from "./agent-types";
-import { CAP_MODAL_CATALOG } from "./capability-catalog";
+import { CAP_MODAL_CATALOG, MODE_LABEL } from "./capability-catalog";
 import { capabilityByLabel, capabilityEnforcement } from "~/shared/capabilities";
+import {
+  CODEX_REPO_WRITE_ADVISORY_NOTE,
+  codexRepoWriteAdvisory,
+} from "~/server/tasks/specialist-tool-policy";
 
 /**
  * CapabilityMatrixModal (agents.jsx §4.6) — THE shared read-only
@@ -31,11 +35,12 @@ function modeOf(profile: MatrixProfile, label: string): Mode {
   return "off";
 }
 
+// D32-9: the one vocabulary (capability-catalog MODE_LABEL).
 const MODE_TITLE = {
-  off: "Not granted",
-  human: "Reserved for humans",
-  recommend: "Recommends",
-  direct: "Acts directly",
+  off: MODE_LABEL.off,
+  human: MODE_LABEL.human,
+  recommend: MODE_LABEL.recommend,
+  direct: MODE_LABEL.direct,
 } satisfies Record<Mode, string>;
 
 export function CapabilityMatrixModal({
@@ -86,11 +91,14 @@ export function CapabilityMatrixModal({
             Every profile's permissions for each action in {projectName}.
             Delivery (push · open/merge PR) is <b>server-owned</b> and gated
             server-side on the delivering profile's grant, enforced on both
-            backends. On Claude, a supporting agent's read-only tool limits bind.
-            On Codex the file and command limits are advisory (its runs are not
-            process-sandboxed), so the <b>server-side delivery gate</b> is what
-            actually constrains what ships. Web egress stays gated on both. Agent
-            processes share the host, not an OS sandbox.
+            backends. Withholding <b>Execute code or write to the repo</b> binds on
+            both too: Claude drops the write tools, Codex runs a read-only sandbox
+            (ruling 101). The one exception is a Codex profile that withholds it
+            while granting <b>Attach evidence references</b>: its runs keep a
+            writable checkout, tagged "advisory on Codex" below. The scoped delivery
+            commands bind only on Claude, and the <b>server-side delivery gate</b>
+            is what constrains what ships on either backend. Web egress stays gated
+            on both.
           </div>
         </div>
         <button
@@ -105,19 +113,19 @@ export function CapabilityMatrixModal({
       <div className="mx-legend">
         <span className="lg">
           <span className="d direct" />
-          Acts directly
+          {MODE_LABEL.direct}
         </span>
         <span className="lg">
           <span className="d recommend" />
-          Recommends
+          {MODE_LABEL.recommend}
         </span>
         <span className="lg">
           <span className="d human" />
-          Reserved for humans
+          {MODE_LABEL.human}
         </span>
         <span className="lg">
           <span className="d off" />
-          Not granted
+          {MODE_LABEL.off}
         </span>
         <span className="lg mx-scope-legend">
           <span className="mx-scope">Claude-enforced</span>
@@ -162,6 +170,20 @@ export function CapabilityMatrixModal({
                     const capId = capabilityByLabel(label)?.id;
                     const claudeOnly =
                       capId && capabilityEnforcement(capId) === "claude-only";
+                    // Pass 32 (E32-3 fallback): the headline write family binds
+                    // on both backends EXCEPT for the evidence carve-out — a
+                    // Codex-first profile that withholds it while granting
+                    // evidence keeps workspace-write. Name those profiles on
+                    // the row so the matrix never reads "both" for a cell
+                    // where the withholding is advisory.
+                    const carveOut =
+                      capId === "execute-code-or-write-repo"
+                        ? profiles.filter(
+                            (p) =>
+                              p.backends[0] === "codex" &&
+                              codexRepoWriteAdvisory(p.capabilities),
+                          )
+                        : [];
                     return (
                     <tr key={label}>
                       <td className="rowlabel">
@@ -172,6 +194,14 @@ export function CapabilityMatrixModal({
                             title="Enforced on Claude runs (tool denylist). On Codex it is advisory only: the Codex SDK ignores tool allow/deny lists (S3)."
                           >
                             Claude-enforced
+                          </span>
+                        )}
+                        {carveOut.length > 0 && (
+                          <span
+                            className="mx-scope"
+                            title={`For ${carveOut.map((p) => p.name).join(", ")}: ${CODEX_REPO_WRITE_ADVISORY_NOTE}.`}
+                          >
+                            advisory on Codex
                           </span>
                         )}
                       </td>

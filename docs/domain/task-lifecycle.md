@@ -263,6 +263,14 @@ newest-first slice and the page asks for older events on demand (NFR5). The
 compaction guardrail collapses old routine comments into one marker once the
 configured threshold is passed, keeping every typed governance event.
 
+Files a run posted ride on its event as `attachments`, and the attachments panel lists
+the whole directory. What a human sees there is not everything the run wrote: at
+completion the browser MCP's machine-stamped working artifacts are pruned unless the
+run cited the exact filename, and what survives opens in an in-app card with Download
+(ruling 105 — [ui/surfaces.md §5](../ui/surfaces.md#5-copy-rules-that-tests-enforce),
+retention in
+[architecture/data-model.md §5](../architecture/data-model.md#5-retention-and-growth)).
+
 ## 14. Notifications a task produces
 
 Kinds: `packet` (a decision waits, `ptype` `input | blocked`), `approval` (a stage

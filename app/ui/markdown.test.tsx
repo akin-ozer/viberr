@@ -168,6 +168,23 @@ describe("attachment link repair (owner ask 2026-08-20)", () => {
     attachmentsBase: BASE,
   };
 
+  it("F32-5 (pass 32): a malformed percent-escape never throws mid-render — links, images and the broken-image label", () => {
+    // Live: one hand-typed "%zz" in an attachments link dropped the WHOLE task
+    // page to the error boundary. Canary: put `decodeURIComponent` back at any
+    // of the three call sites in markdown.tsx.
+    const text =
+      "before [bad](attachments/sh%zzot.png) " +
+      `![img](${BASE}/sh%zzot.png) ` +
+      "[ok](attachments/notes.yml) after";
+    const { container } = render(<Markdown text={text} {...props} />);
+    expect(container.textContent).toContain("before");
+    expect(container.textContent).toContain("after");
+    // The undecodable name is NOT an attachment reference: the href stays as written.
+    const hrefs = [...container.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    expect(hrefs).toContain("attachments/sh%zzot.png");
+    expect(hrefs).toContain(`${BASE}/notes.yml`);
+  });
+
   it("rewrites attachment-shaped relative hrefs whose filename is real", () => {
     const { container } = render(
       <Markdown

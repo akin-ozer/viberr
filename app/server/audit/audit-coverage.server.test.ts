@@ -274,9 +274,11 @@ describe("governed actions record audit rows (table-driven)", () => {
             dataRoot: store.dataRoot,
           });
           for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
-          interruptRun(
+          // D32-18: interruptRun also notes the interrupt on the task timeline,
+          // so it is async and needs the store's data root.
+          await interruptRun(
             store.db,
-            { projectSlug: store.slug, taskKey: "VIB-1", runId },
+            { projectSlug: store.slug, taskKey: "VIB-1", runId, dataRoot: store.dataRoot },
             actorArda(),
           );
         },
@@ -304,6 +306,47 @@ describe("governed actions record audit rows (table-driven)", () => {
             actor: actorArda(),
           });
           resolveScopeViolation(store.db, violation.id, actorArda());
+        },
+      },
+      {
+        // C05-H (pass 32): the collision remedy's PR close was locked only in
+        // task-governance; the designated coverage file names it too.
+        name: "resolveRemoteBranchCollision (closes the unowned PR)",
+        action: "github.pr.closed_unowned",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+          const { createPat, setProjectCredential } = await import(
+            "~/server/secrets/pat-store.server"
+          );
+          const { resolveRemoteBranchCollision } = await import(
+            "~/server/github/github-reconciler.server"
+          );
+          const patActor = { userId: store.users.arda.id, label: store.users.arda.email };
+          const pat = createPat(
+            store.db,
+            { userId: store.users.arda.id, label: "bot", token: "ghp_coverage000000000000000000000001" },
+            patActor,
+          );
+          setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+          writeTask(store.dataRoot, store.slug, {
+            frontmatter: baseTaskFrontmatter("VIB-1", {
+              stage: "review",
+              branch: "vib-1-work",
+              github: { commits: [], changed: null, unownedPr: 232 },
+            }),
+          });
+          rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+          const github = fakeGithubFetch({
+            "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
+            "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
+          });
+          await resolveRemoteBranchCollision(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1" },
+            actorArda(),
+            { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+          );
         },
       },
       {

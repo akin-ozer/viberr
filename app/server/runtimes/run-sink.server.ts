@@ -7,7 +7,9 @@ import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
 import {
   clearBackendQuotaExhaustion,
   parseQuotaResetAt,
+  clearBackendCredentialRefusal,
   quotaExhaustionEvidence,
+  recordBackendCredentialRefusal,
   recordBackendQuotaExhaustion,
   recordBackendRateLimit,
 } from "./backend-quota.server";
@@ -408,6 +410,18 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
             });
           }
         }
+        // F32-4 (pass 32): the credential half. Both classifiers tag a
+        // rejected key/token/refresh-token as `·auth`; the presence-only
+        // availability signals (`backends`, `backendCredentialHealth`) cannot
+        // see it, so the refusal is recorded off the same structured class the
+        // quota flag rides, with the provider's sentence as its evidence.
+        if (display?.tag?.endsWith("·auth") && display.text) {
+          recordBackendCredentialRefusal(db, effectiveBackend, {
+            providerText: display.text,
+            runId: spec.runId,
+            observedAt: line.occurredAt,
+          });
+        }
 
         // 1. Raw truth (append-only .jsonl).
         appendRawLine(effectiveBackend, spec.runId, raw);
@@ -504,6 +518,8 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
       // Only on `finished`: an interrupted or errored run proves nothing.
       if (written && state === "finished") {
         clearBackendQuotaExhaustion(db, effectiveBackend);
+        // F32-4: the same completed run proves the credential is accepted.
+        clearBackendCredentialRefusal(db, effectiveBackend);
       }
       if (written) publishState(state);
     },

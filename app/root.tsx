@@ -177,8 +177,20 @@ export default function App() {
 }
 
 /** Guards throw `data("<user message>", { status })`, so a route error's `data`
- *  is user-facing copy when — and only when — it came through as a string. */
-const thrownMessage = z.string().catch("");
+ *  is user-facing copy when it came through as a string. D32-15 (pass 32): the
+ *  role guard (`requireRole`) answers page and API requests alike with the JSON
+ *  envelope `{ error: { code, message } }`, and a non-admin opening
+ *  /org/settings or /insights read only "Forbidden" — the WHY ("This area
+ *  requires the admin role.") was in the payload the boundary threw away. Both
+ *  shapes are copy; anything else is transport noise. */
+const thrownMessage = z
+  .union([
+    z.string(),
+    z
+      .object({ error: z.object({ message: z.string() }) })
+      .transform((v) => v.error.message),
+  ])
+  .catch("");
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   let title = "Something went wrong";

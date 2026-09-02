@@ -192,9 +192,12 @@ state/          projection.sqlite (users, sessions, projections, audit, PATs, no
                 writer.lock, shipped-assets.json
 ```
 
-Boot creates the nine `DATA_ROOT_SUBDIRS` (`projects`, `agents`, `agents/profiles`,
-`runtimes`, `runtimes/claude-home`, `runtimes/codex-home`, `kb`, `skills`, `state`); the rest
-appear when first written. There is no `auth/`, `cache/` or `logs/` directory; application
+Boot creates the ten `DATA_ROOT_SUBDIRS` (`projects`, `agents`, `agents/profiles`,
+`runtimes`, `runtimes/claude-home`, `runtimes/codex-home`, `kb`, `skills`,
+`audit-exports`, `state`); the rest
+appear when first written. *(Corrected 2026-09-02, pass 32 — A00-6: `audit-exports/`
+joined the list, so the folder the runbook, the backup and `file-formats.md` all name
+exists on every root instead of only on one that has already purged.)* There is no `auth/`, `cache/` or `logs/` directory; application
 logs are structured JSON on stdout. Full layout with retention:
 [`../architecture/data-model.md`](../architecture/data-model.md#2-data-root-layout).
 *(Corrected 2026-09-01.)*
@@ -202,8 +205,13 @@ logs are structured JSON on stdout. Full layout with retention:
 - **Backup** = `npm run backup` (add `--out <dir>`). It writes a timestamped artefact
   containing a genuine point-in-time `projection.sqlite` — taken with `VACUUM INTO` from a
   read-only connection, so it folds in WAL content and lands as ONE file with no sidecars —
-  plus the canonical markdown tree, and a `MANIFEST.json` recording byte size, sha256 and
-  the row counts read back out of the artefact. It does **not** take the writer lock: a
+  plus the canonical markdown tree — `projects/`, `agents/`, `kb/`, `skills/` and
+  `audit-exports/` (`BACKED_UP_STORE_DIRS`; a directory that does not exist yet is
+  skipped) — and a `MANIFEST.json` recording byte size, sha256 and the row counts read
+  back out of the artefact. `audit-exports/` is in that list because ruling 102 makes it
+  the durable record that outlives the 90-day `audit_events` window: a backup without it
+  would drop exactly the history the purge was designed to preserve. *(Corrected
+  2026-09-02, pass 32 — C01-A3.)* It does **not** take the writer lock: a
   backup that refused to run on a live instance would be no backup at all.
 
   Read the artefact's own README for what it excludes. Two exclusions matter most:
@@ -247,7 +255,34 @@ build produces (F21-1). It names what the CHECK `refuses`. Migrations are squash
 constraint it was created with, and every task whose derived value lands on a refused
 member stops projecting behind a generic `projection rebuild failed`.
 
-The remedy is to recreate the file:
+**First, check whether you need a remedy at all.** The WARN covers two shapes, and one
+of them repairs itself: a baseline COLUMN added after this root was created is applied
+at open by `ensureRunRowColumns` (`app/server/db/sqlite.server.ts`), which `ALTER TABLE
+agent_runs ADD COLUMN`s each missing entry of `RUN_ROW_COLUMNS` — `dispatched_by_name`
+and `dispatched_by_user_id` today — and logs `added a baseline column this data root
+predated`. Additive drift on those columns needs nothing below. What follows is for the
+shape no ALTER can fix: a CHECK constraint that refuses a value the running build now
+produces. *(Added 2026-09-02, pass 32.)*
+
+Two remedies, and the lossy one is not the only one:
+
+**Preferred — preserve-copy.** Recreate the schema and carry the non-rebuildable rows
+across, which is exactly the shape `selfHealProjectionDbIfCorrupt`
+(`app/server/db/self-heal.server.ts`) already performs on a corruption verdict: open a
+FRESH file, run the migrations into it, then with `PRAGMA foreign_keys = OFF` copy every
+table across on the intersection of the columns both sides have, skipping the ones the
+rescan rebuilds from files (`provenance`, `schema_migrations`, `projects`,
+`project_members`, `task_projections`, `task_events`, `diagnostics` — leaving those
+EMPTY is what makes the boot rescan re-project every file rather than trust a stale
+content hash). Move the old file aside rather than deleting it, then start the app: the
+rescan refills the projection tables from `projects/`. Users, sessions, sealed PATs,
+audit, notifications, org resources and run history survive. There is no CLI for this
+today — the self-heal path runs it only for a corrupt file — so it is a scripted
+one-off; write it against that module's table list rather than inventing one, and take
+`npm run backup` first either way.
+
+**Lossy — delete and rebuild.** Simpler, and acceptable on a throwaway or freshly seeded
+root:
 
 ```bash
 npm run backup                       # FIRST — see the cost below
@@ -271,10 +306,23 @@ New app version → rebuild the image and `docker compose up -d`. Migrations app
 the data-root volume carries state across deploys. Roll back by redeploying the previous
 image against the same volume (migrations are additive and forward-only — take a data-root
 backup before a major upgrade). Verify what is running from `/resources/health` → `build`:
-`version` comes from `package.json`; `revision` is `null` in the image because the
-Dockerfile declares no build ARG and `.git` is not copied. Set `VIBERR_BUILD_SHA` (and
-optionally `VIBERR_BUILD_VERSION`, `VIBERR_BUILD_TIME`) in the container environment if
-you want each deploy identifiable from the probe. *(Noted 2026-09-01.)*
+`version` comes from `VIBERR_BUILD_VERSION` or `package.json`; `revision` from
+`VIBERR_BUILD_SHA`, or from the checkout's `.git` when there is one (there is not, in
+the image). Stamp the build so every deploy is identifiable from the probe:
+
+```bash
+docker compose build \
+  --build-arg VIBERR_BUILD_SHA=$(git rev-parse HEAD) \
+  --build-arg VIBERR_BUILD_TIME=$(date -u +%FT%TZ)
+docker compose up -d
+```
+
+The `Dockerfile` declares `VIBERR_BUILD_VERSION`, `VIBERR_BUILD_SHA` and
+`VIBERR_BUILD_TIME` as `ARG` and re-exports each as `ENV`; setting them in the container
+environment works too. Left unstamped the image reports a `null` revision, which the
+probe says plainly rather than guessing. *(Noted 2026-09-01; corrected 2026-09-02, pass
+32 — V11-9: the Dockerfile declared no ARG at all, so `revision` could not be anything
+but `null` in the image.)*
 
 ## Scaling note
 

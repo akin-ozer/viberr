@@ -1721,6 +1721,125 @@ the quieter packet or the bare owner cell as drift.)*
     the panel note and this entry state the boundary rather than imply a
     containment the ruling does not provide.
 
+109. **Codex parity is a read-only workspace plus a writable attachments dir — and the
+    pinned SDK cannot express it (owner, 2026-09-01; verified and shipped 2026-09-02).
+    Amends ruling 101(c).** The owner ruled the disclosed carve-out closed with a real
+    sandbox rather than a disclosure: a write-withheld Codex run gets
+    `sandboxMode: read-only` with ONLY the task's `attachments/` writable — conditional
+    on the Codex SDK supporting read-only together with additional writable
+    directories, and falling back to honest "advisory on Codex" labeling on every
+    surface if it cannot. **It cannot.** Verified against the pinned Codex 0.146
+    sources: `SandboxPolicy::ReadOnly`'s `get_writable_roots_with_cwd()` returns an
+    empty list, and `--add-dir` ("Additional directories that should be writable
+    alongside the primary workspace") only widens `workspace-write` —
+    `additional_writable_roots` is folded into `workspace_roots`, the legacy read-only
+    profile carries no write entries, and the `codex sandbox` subcommand takes no
+    `--add-dir` at all. The SDK's `additionalDirectories` maps 1:1 to `--add-dir`. A
+    live `codex exec` probe was impossible (provider quota blocked until Sep 18 2026),
+    so the verification is source-level on the exact pinned version and is recorded as
+    such rather than as a runtime proof.
+    The ruling's stated fallback therefore shipped. The carve-out stays in
+    `resolveCodexSandboxMode`, and `codexRepoWriteAdvisory(grants)`
+    (`app/server/tasks/specialist-tool-policy.ts`) names exactly its shape — the
+    headline write family withheld AND `attach-evidence-references` granted; an EMPTY
+    grant list runs fully withheld and is deliberately NOT tagged, matching
+    `withheldAgentGrants()` — so every surface that renders the enforcement says
+    "advisory on Codex": the profile editor row, the capability-matrix row (naming the
+    profiles it applies to), the agent card's withheld bucket, and the run console's
+    `sandbox` inputs row (`RunInputs.sandbox`, filled by `describeCodexSandbox`).
+    Claude binds regardless through the tool denylist, so the label is a Codex-only
+    statement, not a weakening of ruling 101(a).
+
+110. **`resolve_remote_collision` is a full ceremony in a fixed order, and a resolved
+    collision never strands (owner, 2026-09-01).** The remedy has three steps and the
+    order is load-bearing: **delete the stale remote ref FIRST**, then close the
+    unowned PR, then re-deliver. The old order closed someone else's PR and, when the
+    ref delete then refused (default branch, own PR open on it, a non-422 answer),
+    reported "the branch collision was not cleared … nothing was re-delivered" — true
+    words about an operation that had already closed a PR. Deleting the head ref first
+    means a refusal leaves GitHub exactly as it was, and a deleted head branch closes
+    its PR on GitHub's side anyway, so the explicit close is the audited record of an
+    outcome the delete already produced (`github.pr.closed_unowned`). A **403** on that
+    close is the same fact `openTaskPr` and `mergeTaskPr` flag — the credential lacks
+    `pull_request:write` — so it opens a scope violation instead of vanishing into
+    best-effort silence. The whole remedy refuses without an acting user rather than
+    asserting one: closing a third party's PR is a human decision.
+    **And it never strands.** `resolve_remote_collision` stays in `NO_REQUEUE`, but the
+    re-delivery it owns now actually records the follow-up: under **full** autonomy
+    `performDelivery` re-queues the operator for the newly opened PR, and under
+    **supervised** autonomy the server-attributed "Move to \<review\>" card is recorded
+    here, exactly the one an operator-authorized delivery would have written (R18-2 /
+    R19-4 left that half owned by nobody; live on VIB-1 the task sat at In Progress,
+    `waiting: human`, with an open PR and nothing to click). Housekeeping recorded with
+    the ruling: the stale task-key branches earlier instances left on the origin were
+    deleted during pass 32; **`vib-5` is kept deliberately as the collision fixture.**
+
+111. **Every `viberr_ops` read is audited (owner, 2026-09-02).** The three read-only
+    diagnostics tools of ruling 107 (`instance_health`, `read_run_log`,
+    `read_store_doc`) previously audited only their refusals, which made them the first
+    tools that let a MODEL enumerate store documents and run logs on a person's behalf
+    with no record of a successful read. Each successful call now writes exactly ONE
+    `controller.ops.read` audit row naming the tool, the target id and the asking user
+    (the same `"<email> · via controller"` binding every other controller mutation
+    carries). One row per call — the cost is a row, and the record is the only trace
+    that a model read a document for someone.
+
+112. **The anti-noise guardrails get a surface (owner, 2026-09-02).** The four
+    surviving guardrails (`meaningful-comment`, `evidence-separation`,
+    `no-duplicate-summary`, `compression-threshold`) are framed by the PRD and by
+    ruling 15's project model as per-project knobs, but the only way to change one was
+    a hand edit of `project.md`. They get a **Guardrails card under Policy**: a toggle
+    per guardrail, a number field for the compression threshold, an audit row on every
+    change, and retired or unknown rows (the inert pre-104 `operator-brevity` row, for
+    instance) shown inert and removable rather than hidden. Ruled 2026-09-02; landed
+    in pass 32 cluster E: one row per `guardrails` entry — a toggle for an enforced row,
+    a number field for the one carrying a `unit`, inert rows for what the card does not
+    own (the `delete-branch-after-merge` row stays on Settings → GitHub and is refused
+    here, one fact one editor; a retired/unknown id reads "nothing reads this" and is
+    removable). An enforced row the file lacks renders OFF with "not in project.md" and
+    turning it on writes the shipped row. `edit-policy` tier, audited as
+    `project.policy.guardrail_changed` (before/after in the details), reprojected, and
+    rendered as a sentence in the Activity audit panel. A number written onto a row the
+    file lacks keeps that row OFF and the toast says so — a value never toggles a
+    guardrail (owner, 2026-09-02). (`setGuardrail` in
+    `app/features/policy/policy-actions.server.ts`, `Guardrails` in `policy-page.tsx`.)
+
+113. **ONE UI vocabulary for capability modes (owner, 2026-09-02).** The same stored
+    mode was rendered three ways — "Allowed" on the project profile editor's radios,
+    "ACTS DIRECTLY" on the agent card, "direct" in the policy summary counts — so a
+    reader could not tell whether they were looking at one concept or three. Every
+    surface renders the four modes as **"Acts directly · Recommends only · Human-only ·
+    Off"**; the file and schema ids (`direct | recommend | human | off`) are unchanged,
+    because they are cited by code and stored in `project.md`. Ruled 2026-09-02;
+    implementation lands in the pass-32 cluster E work.
+
+114. **The board owner cell keeps its two labels (owner, 2026-09-02).** An unowned task
+    reads "unassigned" at the entry stage and "awaiting owner" once work has started.
+    Raised as a copy inconsistency (one unowned state, two words); the owner ruled the
+    two labels intended — the second says something the first does not, namely that
+    work is moving with nobody accountable for it. DECIDED-NO-CHANGE, recorded so the
+    next pass does not re-file it.
+
+115. **`accept_completion` is refused at packet AUTHORING off the acceptance boundary
+    (owner, 2026-09-02).** An operator could author a decision packet offering
+    "accept completion" on a task nowhere near the acceptance boundary, and the option
+    then failed at resolution time in front of the human who chose it. Authoring now
+    refuses the option unless the task sits AT the acceptance boundary with a healthy
+    validation — the same shape as ruling 77's `discard_branch` authoring refusal — and
+    the refusal tells the operator to offer archive or edit-goal instead. Humans keep
+    force-accept, which is the deliberate, audited bypass and is unaffected.
+    (`operatorOpenPacket` in `app/server/tasks/operator-actions.server.ts`.)
+
+116. **No per-run HOME/XDG cache for Claude runs; the sharing is a disclosed residual
+    (owner, 2026-09-02, C32-1).** Runs share the container user's
+    `~/.cache/claude-cli-nodejs`, so a reviewer run located and read the deliverer
+    run's `mcp-logs-<server>/*.jsonl` through a plain `find /`. The owner ruled against
+    a per-run HOME: the cache is shared across the runs of ONE instance, that is the
+    isolation boundary the product already claims (P8 isolates workspaces, not the
+    provider CLI's cache), and the real requirement is upstream — **MCP servers must
+    not log secrets**, the same rule the credential-less Codex MCP mount already applies
+    to their argv. Recorded as a residual so it is not re-discovered as a defect.
+
 ## Owner decisions recorded outside this file (2026-08-20 → 2026-09-01)
 
 *(Added 2026-09-01 by the documentation validation pass. Each item below is an owner decision
@@ -1772,6 +1891,36 @@ ruling 44 says every one should be. Where recorded today is named per item.)*
 13. **Owner ruling "A8"**: the Codex idle timeout is an inactivity timeout, default 15 min
     (`VIBERR_CODEX_IDLE_TIMEOUT_MS`); cited as an owner ruling in `codex-runtime.server.ts` and
     `task-activity.server.ts`.
+
+118. **A closed task's owner seat is frozen for contributors and maintainers; a project
+    admin may reassign it for the record (owner, 2026-09-02, E32-9).** A task at the
+    terminal stage is closed — every runtime control on its page says so (G9) — and the
+    owner's authority (review, acceptance, packet resolution) has nothing left to act on.
+    Live, a Done + merged task still offered "Assign me" in both owner cells and the server
+    accepted the take. `setOwner` now refuses at the terminal stage unless the actor holds
+    `release-any-ownership` (the admin tier that already releases any owner); both panels
+    withhold the affordance below that tier. Archived seats stay frozen for everyone
+    (D32-16); a task moved back to an open stage takes owners again.
+
+119. **Stream actor refs are keyed by profile, and a projection derivation-version stamp
+    self-applies rule changes (owner, 2026-09-02, D32-14).** `task_events.actor_ref` for an
+    agent is `agent/<profileId>` — a profile that ran a Codex leg and a Claude leg is ONE
+    actor in the Activity filter. Because the boot rescan is a content-hash short-circuit
+    and the store has no migrations, `instance_settings.projection.derivationVersion`
+    records the rule set the projections were derived under; a stamp behind
+    `PROJECTION_DERIVATION_VERSION` forces one full rebuild at boot (withheld when a file
+    fails to project, so the next boot retries). Bump the constant for every future change
+    to how a projected column is derived.
+
+120. **Global templates carry a required Role; legacy templates explain the empty prefill
+    (owner, 2026-09-02, D32-7).** The instance template editor stored the name as the role,
+    so every template saved there read as the generic "Agent profile". Role is required, as
+    in the project editor; a template whose stored role repeats its name prefills empty
+    with an inline hint, so the one-time cost is a typed role, never a mystery grey Save.
+
+*(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
+on this list: they are **rulings 109–120** above. Everything still listed here predates
+that pass and remains unnumbered.)*
 
 ## Route map
 

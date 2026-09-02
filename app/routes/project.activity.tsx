@@ -1,4 +1,5 @@
 import { data } from "react-router";
+import { pageTitle } from "~/shared/page-title";
 import type { Route } from "./+types/project.activity";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -32,7 +33,7 @@ import {
  */
 
 export function meta({ params }: Route.MetaArgs) {
-  return [{ title: `Activity · ${params.slug} · Viberr` }];
+  return [{ title: pageTitle("Activity", params.slug) }];
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {

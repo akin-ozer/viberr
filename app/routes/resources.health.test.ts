@@ -211,6 +211,10 @@ describe("/resources/health — honest status (gap 17)", () => {
       const { body, status } = await probe();
       expect(body.browser?.status).toBe("unavailable");
       expect(body.browser?.reason).toContain("VIBERR_BROWSER_EXECUTABLE");
+      // C05-A (pass 32): this body is unauthenticated, so the configured host
+      // path never appears in it — the variable's NAME is the whole reason.
+      expect(body.browser?.reason).not.toContain("/nonexistent");
+      expect(JSON.stringify(body)).not.toContain("/nonexistent");
       expect(body.status).toBe("ok");
       expect(body.degraded).toEqual([]);
       expect(status).toBe(200);

@@ -1,10 +1,61 @@
 import { describe, expect, it } from "vitest";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
+  codexRepoWriteAdvisory,
   resolveDeliveryPermissions,
   resolveSpecialistDisallowedTools,
   resolveUndeployedDisallowedTools,
 } from "./specialist-tool-policy";
+
+describe("codexRepoWriteAdvisory (pass 32, E32-3 fallback)", () => {
+  // Verified against Codex 0.146: `read-only` has no writable roots and
+  // `--add-dir` widens workspace-write only, so "read-only except attachments/"
+  // is not expressible. The carve-out shape is exactly: repo-write withheld AND
+  // evidence granted (absent = granted; evidence is not grant-required).
+  const g = (capabilityId: string, mode: "direct" | "recommend" | "human" | "off"): CapabilityGrant => ({
+    capabilityId,
+    mode,
+  });
+
+  it("is TRUE for a withheld write family with evidence granted (explicitly or by default)", () => {
+    expect(codexRepoWriteAdvisory([g("execute-code-or-write-repo", "off")])).toBe(true);
+    expect(codexRepoWriteAdvisory([g("execute-code-or-write-repo", "human")])).toBe(true);
+    expect(
+      codexRepoWriteAdvisory([
+        g("execute-code-or-write-repo", "off"),
+        g("attach-evidence-references", "direct"),
+      ]),
+    ).toBe(true);
+    // The seeded Reviewer shape: no headline grant at all (grant-required ⇒
+    // withheld), evidence left at its default.
+    expect(codexRepoWriteAdvisory([g("report-validation-verdict", "direct")])).toBe(true);
+  });
+
+  it("is FALSE when evidence is withheld too — the sandbox then binds read-only", () => {
+    expect(
+      codexRepoWriteAdvisory([
+        g("execute-code-or-write-repo", "off"),
+        g("attach-evidence-references", "off"),
+      ]),
+    ).toBe(false);
+    expect(
+      codexRepoWriteAdvisory([
+        g("execute-code-or-write-repo", "human"),
+        g("attach-evidence-references", "human"),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is FALSE for an EMPTY grant list — such a deployment runs fully withheld (P13-AP-06), evidence included", () => {
+    expect(codexRepoWriteAdvisory([])).toBe(false);
+  });
+
+  it("is FALSE for a write-GRANTED profile — nothing is withheld to be advisory about", () => {
+    expect(codexRepoWriteAdvisory([g("execute-code-or-write-repo", "direct")])).toBe(false);
+    // A scoped delivery grant repairs the absent headline (specialistGrantModes).
+    expect(codexRepoWriteAdvisory([g("commit-push-branch", "direct")])).toBe(false);
+  });
+});
 
 /**
  * The specialist capability → tool confinement mapping. These are the deny

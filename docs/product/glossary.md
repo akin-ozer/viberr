@@ -12,7 +12,7 @@
 
 **Always-human capabilities** — `merge-pull-request`, `transition-to-done`, `change-project-policy`. A server invariant (`ALWAYS_HUMAN_CAPABILITY_IDS`); no stored grant can hand them to an agent.
 
-**Attachments** — files under `projects/<slug>/tasks/<KEY>/attachments/` that a run granted `attach-evidence-references` (or the browser MCP) wrote. Served member-only at `/projects/:slug/tasks/:key/attachments/:file`; images render as timeline thumbnails.
+**Attachments** — files under `projects/<slug>/tasks/<KEY>/attachments/` that a run granted `attach-evidence-references` (or the browser MCP) wrote. Served member-only at `/projects/:slug/tasks/:key/attachments/:file`; images render as timeline thumbnails. Every kind opens an in-app card with a Download button — images the picture, text files a read-only reader, anything else a "no in-app preview" note — and at run completion the browser MCP's machine-stamped working artifacts are pruned unless the run cited the exact filename (ruling 105).
 
 **Autonomy** — the operator deployment's `supervised | full` setting. Supervised operators recommend at governed boundaries; full operators act. A per-run level is clamped to the configured ceiling (ruling 67).
 
@@ -42,7 +42,7 @@
 
 **Goal (chained goal)** — one outcome decomposed into an ordered chain of tasks, canonical at `projects/<slug>/goals/<id>.md` (`status` `active | paused | attention | completed | cancelled`, `onFailure` `pause | continue`, links with `pending | active | done | failed | skipped`). Tasks are created lazily as links complete; each task carries `goalRef`.
 
-**Guardrails** — per-project anti-noise rows in `project.md`: `meaningful-comment`, `no-duplicate-summary`, `compression-threshold` (default 40 events), `evidence-separation`; plus the `delete-branch-after-merge` row the branch-cleanup policy reads. `operator-brevity` was removed (ruling 104).
+**Guardrails** — per-project anti-noise rows in `project.md`: `meaningful-comment`, `no-duplicate-summary`, `compression-threshold` (default 40 events), `evidence-separation`; plus the `delete-branch-after-merge` row the branch-cleanup policy reads. `operator-brevity` was removed (ruling 104). Edited on Policy → Guardrails (toggle, threshold value, removal of retired rows; ruling 112); the branch-cleanup row is edited on Settings → GitHub.
 
 **Guest** — a registered user who is not a member of the surrounding project. Renders as a pill on their comments.
 

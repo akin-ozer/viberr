@@ -1,4 +1,5 @@
 import type { Route } from "./+types/resources.run-log";
+import { ERROR_CODES } from "~/server/errors/error-codes";
 import { requireUser } from "~/server/auth/require-user.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -21,11 +22,16 @@ import { getRun } from "~/server/runtimes/run-store.server";
  *                           OLDER than `seq`. The task loader now ships a
  *                           bounded window of each agent group's console
  *                           (NFR5), and this is how the console walks back
- *                           through the history it did not ship. When a page
- *                           comes back with `hasMore: false` the run is
- *                           exhausted — step to the previous run id in that
- *                           group's `logWindow.runIds` and page ITS tail
- *                           (`before` omitted).
+ *                           through the history it did not ship. `hasMore`,
+ *                           `headSeq` and `oldestSeq` are PAGE-LOCAL cursors
+ *                           for this stateful console (ruling 107 disowned
+ *                           them as facts about the run): `hasMore: false`
+ *                           means this page reached the run's oldest line —
+ *                           the console then steps to the previous run id in
+ *                           the group's `logWindow.runIds` and pages ITS tail
+ *                           (`before` omitted). A model reading a run goes
+ *                           through `viberr_ops.read_run_log`, which reports
+ *                           the run's REAL bounds instead.
  *
  * F10-06/F10-33: raw run logs are SENSITIVE — they carry tool output, agent
  * prompts, repository metadata, and possibly secrets. (P13-U-1 now scrubs the
@@ -45,7 +51,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const runId = url.searchParams.get("runId");
   if (!runId) {
     return Response.json(
-      { error: { code: "validation", message: "runId is required." } },
+      { error: { code: ERROR_CODES.VALIDATION_FAILED, message: "runId is required." } },
       { status: 400 },
     );
   }

@@ -17,6 +17,27 @@ import {
 } from "./capabilities";
 
 describe("capability catalog", () => {
+  it("A00-8 (pass 32): the ENFORCED_CAPABILITY_IDS literal lists each id exactly once", async () => {
+    // A Set swallows a duplicate silently, so `execute-code-or-write-repo` sat
+    // in ENFORCED_CAPABILITY_IDS twice for a whole pass — a future edit would
+    // have deleted the wrong copy and changed nothing. The literal is read from
+    // the source so a duplicate cannot hide inside the Set again. (The set
+    // deliberately OVERLAPS the claude-only one — those ids have a runtime
+    // consumer, scoped to Claude; capabilityEnforcement checks that set first.)
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("./capabilities.ts", import.meta.url), "utf8");
+    const start = source.indexOf("export const ENFORCED_CAPABILITY_IDS");
+    const end = source.indexOf("]);", start);
+    const literal = source.slice(start, end);
+    const seen = new Map<string, number>();
+    for (const m of literal.matchAll(/^\s*"([a-z-]+)",/gm)) {
+      seen.set(m[1]!, (seen.get(m[1]!) ?? 0) + 1);
+    }
+    const duplicated = [...seen].filter(([, n]) => n > 1).map(([id]) => id);
+    expect(duplicated).toEqual([]);
+    expect(seen.has("execute-code-or-write-repo")).toBe(true);
+  });
+
   it("has no duplicate ids and every enforced id exists in the catalog", () => {
     const ids = CAP_CATALOG.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
