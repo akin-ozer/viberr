@@ -125,10 +125,10 @@ export function AgentModal({
   // A stored role that merely repeats the name is the pre-pass-32 default, so
   // it prefills EMPTY to invite a real one (the card falls back to "Agent
   // profile" for such a role either way — agent-types.ts profileRoleLabel).
+  const storedRoleRepeatsName =
+    !!initial && initial.role.trim().toLowerCase() === initial.name.trim().toLowerCase();
   const [role, setRole] = useState(
-    initial && initial.role.trim().toLowerCase() !== initial.name.trim().toLowerCase()
-      ? initial.role
-      : "",
+    initial && !storedRoleRepeatsName ? initial.role : "",
   );
   // P13-AP-01: the persona (the agent's system prompt) is edited on its own,
   // separately from the one-line blurb the operator reads. Editing the blurb no
@@ -248,6 +248,15 @@ export function AgentModal({
           placeholder="e.g. Schema changes"
           onChange={(e) => setRole(e.target.value)}
         />
+        {/* Review F10 (pass 32): a pre-pass-32 template stored its NAME as its
+            role, which prefills empty here and greys out Save — say why, so a
+            routine edit is not a mystery. */}
+        {storedRoleRepeatsName && role.trim().length === 0 && (
+          <span className="fhint">
+            This template&apos;s stored role repeated its name; give it a real
+            role to save.
+          </span>
+        )}
       </div>
       <div className="field">
         <span className="flabel">Backend</span>

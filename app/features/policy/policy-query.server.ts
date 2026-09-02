@@ -147,7 +147,11 @@ export function listGuardrailViews(
   const stored =
     readProjectFile({ projectSlug, dataRoot: ctx.dataRoot })?.parsed.frontmatter
       .guardrails ?? [];
-  const byId = new Map(stored.map((g) => [g.id, g]));
+  // Review F13 (pass 32): FIRST occurrence wins, the same row `setGuardrail`'s
+  // `findIndex` mutates — a hand-edited file carrying an id twice must not show
+  // one row's state while the toggle writes the other.
+  const byId = new Map<string, Guardrail>();
+  for (const g of stored) if (!byId.has(g.id)) byId.set(g.id, g);
   const view = (g: Guardrail, present: boolean): GuardrailView => ({
     id: g.id,
     label: guardrailLabel(g.id),

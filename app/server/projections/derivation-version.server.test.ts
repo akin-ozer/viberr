@@ -1,3 +1,4 @@
+import { chmodSync } from "node:fs";
 import type { DatabaseSync as TestStoreDb } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -8,6 +9,7 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "./rebuilder.server";
+import { resolveTaskFilePath } from "~/server/files/task-writer.server";
 import { getSetting, setSetting } from "~/server/settings/instance-settings.server";
 import {
   ensureProjectionDerivation,
@@ -65,10 +67,34 @@ describe("ensureProjectionDerivation", () => {
     expect(getSetting(store.db, KEY, z.number())).toBe(PROJECTION_DERIVATION_VERSION);
   });
 
+  it("review F5: a rebuild with errors withholds the stamp so the next boot retries", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { title: "Unreadable probe" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const taskFile = resolveTaskFilePath({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    });
+    chmodSync(taskFile, 0o000);
+    try {
+      const check = ensureProjectionDerivation(store.db, { dataRoot: store.dataRoot });
+      expect(check.rebuilt?.errors).toBeGreaterThan(0);
+      // Canary: stamp unconditionally after the rescan and this reads the
+      // current version while VIB-1's rows still carry the old derivation.
+      expect(check.stamped).toBe(false);
+      expect(getSetting(store.db, KEY, z.number())).toBeNull();
+    } finally {
+      chmodSync(taskFile, 0o644);
+    }
+  });
+
   it("is a no-op when the stamp is current", () => {
     const store = setupTestStore(ctx);
     setSetting(store.db, KEY, PROJECTION_DERIVATION_VERSION);
     const check = ensureProjectionDerivation(store.db, { dataRoot: store.dataRoot });
-    expect(check).toEqual({ previous: PROJECTION_DERIVATION_VERSION, rebuilt: null });
+    expect(check).toEqual({ previous: PROJECTION_DERIVATION_VERSION, rebuilt: null, stamped: true });
   });
 });

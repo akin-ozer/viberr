@@ -128,6 +128,8 @@ describe("HumanAccess", () => {
     // paragraph — same facts, scannable.
     expect(container.textContent).toContain("This project is members-only");
     expect(container.querySelectorAll(".pol-rules li")).toHaveLength(4);
+    // Review F12: a <ul> is flow content — its wrapper must not be a <span>.
+    expect(container.querySelector(".pol-rules")!.parentElement!.tagName).toBe("DIV");
     // N20-7: the owner authority footnote now also documents that an owner may
     // resolve the operator's non-acceptance packet options, not just accept.
     expect(container.textContent).toContain(

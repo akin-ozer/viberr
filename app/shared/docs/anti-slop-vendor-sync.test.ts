@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 /**
  * B06-T11 (pass 32): `tools/oxlint/anti-slop/` is a VENDORED copy of the
@@ -16,11 +18,16 @@ import { describe, expect, it } from "vitest";
  * vendor copy this test pins.
  *
  * The skill assets are a local developer tool (`.claude/skills/` is not part
- * of the repository), so the byte-identity half runs only where they exist;
- * CI has only the vendored tree and can compare it to nothing. The V11-7 half
- * needs no source tree and always runs.
+ * of the repository), so the byte-identity half runs only where they exist.
+ * Review F14 (pass 32): that made this a local-only pin, not a gate — so the
+ * tree is ALSO held to a committed manifest (`tools/oxlint/anti-slop.manifest.json`,
+ * written by `node scripts/anti-slop-manifest.mjs` after a skill refresh),
+ * which runs everywhere: a local edit to a vendored rule fails CI until the
+ * tree is re-pinned on purpose. The V11-7 half needs no source tree either.
  */
 const ROOT = process.cwd();
+const MANIFEST = path.join(ROOT, "tools", "oxlint", "anti-slop.manifest.json");
+const manifestSchema = z.record(z.string(), z.string().regex(/^[0-9a-f]{64}$/));
 const VENDORED = path.join(ROOT, "tools", "oxlint", "anti-slop");
 const SOURCE = path.join(
   ROOT,
@@ -55,6 +62,17 @@ describe("tools/oxlint/anti-slop mirrors the install-anti-slop skill assets (B06
         readFileSync(path.join(VENDORED, rel), "utf8"),
         `${rel} drifted from the skill assets`,
       ).toBe(readFileSync(path.join(SOURCE, rel), "utf8"));
+    }
+  });
+
+  it("matches the committed manifest, file for file (the CI gate)", () => {
+    const manifest = manifestSchema.parse(JSON.parse(readFileSync(MANIFEST, "utf8")));
+    expect(walk(VENDORED)).toEqual(Object.keys(manifest).sort());
+    for (const [rel, sha] of Object.entries(manifest)) {
+      const actual = createHash("sha256")
+        .update(readFileSync(path.join(VENDORED, rel)))
+        .digest("hex");
+      expect(actual, `${rel} drifted from the manifest — re-pin with scripts/anti-slop-manifest.mjs`).toBe(sha);
     }
   });
 

@@ -238,7 +238,9 @@ export function HumanAccess({
           paragraph. Same facts, same emphasis; only the shape changed. */}
       <div className="pol-note after">
         <Icon name="message" />
-        <span>
+        {/* A <div>, not the note's usual <span>: the list below is flow
+            content, which a <span> may not contain (review F12, pass 32). */}
+        <div>
           Rules that reach beyond project roles:
           <ul className="pol-rules">
             <li>
@@ -278,7 +280,7 @@ export function HumanAccess({
               audit trail as <em>org-admin override</em>.
             </li>
           </ul>
-        </span>
+        </div>
       </div>
     </div>
   );

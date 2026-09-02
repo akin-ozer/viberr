@@ -561,3 +561,29 @@ ones marked *canaried* were reverted once to prove the lock goes red.
   test's DB closed. Fixed twice over: the result is computed before the best-effort note (nothing
   touches the DB after the await; `noteInterrupt` catches its own failures), and every test call
   is awaited (sync cleanup helpers made async), so the record is complete when the call returns.
+
+### Adversarial review of clusters E/F (opus, max effort, 2026-09-02) — 14 findings
+Reviewed `c5113182..7023c653`; 2–4 were already fixed by the three commits that landed while it
+ran (phase-10 lock, audit filter value, the interruptRun await sweep). The live ones:
+- R1 FIXED: `value` on an ABSENT default row wrote the shipped `on: true` (compaction switched on
+  behind a card that showed OFF); now `on: false` + a toast that says the number was saved while
+  the guardrail is off; route lock, canaried.
+- R5 FIXED: a forced derivation rebuild with per-file errors no longer stamps the version (the
+  next boot retries; boot logs at warn); `DerivationCheck.stamped`; chmod-000 lock.
+- R6 FIXED: a second interrupt inside the adapter's exit window (row still `running`,
+  `interrupted_by` already set) is `already-terminal` — no second audit row or note; lock.
+- R7 FIXED: the S3 card is keyed on the stored target, so a save folds the form and a clear opens
+  it empty; lock (rerender).
+- R8 FIXED: no-op toasts are built from the label ("… is not on this project's guardrails ·
+  nothing changed"), never by splitting a success sentence; lock.
+- R9 FIXED: both weak canaries replaced — the template edit lock now asserts a NEW role lands, the
+  audit-name lock asserts an agent-authored `runtime.run.started` row renders the decoded name.
+- R10 FIXED: the legacy-template Role prefill explains itself inline ("…stored role repeated its
+  name; give it a real role to save"); lock.
+- R11 FIXED: `GITHUB_MANAGED_GUARDRAIL_ID` pinned to `BRANCH_CLEANUP_GUARDRAIL_ID` by test.
+- R12 FIXED: the Policy rules list sits in a `<div>`, not a `<span>`; lock.
+- R13 FIXED: duplicate `guardrails` ids resolve first-wins on read, matching the write.
+- R14 FIXED: the vendored anti-slop tree is now held to a COMMITTED manifest
+  (`tools/oxlint/anti-slop.manifest.json`, `node scripts/anti-slop-manifest.mjs`) on every
+  machine, and to the skill assets where present.
+- Minor FIXED: the copy-pasted SAFETY blocks the await-sweep script left in the set-boundary tests.

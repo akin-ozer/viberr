@@ -570,11 +570,13 @@ describe("audit-panel actor names (E32-8, pass 32)", () => {
   it("decodes agent and system labels to the Stream's display names, humans by users-table name", () => {
     const store = setupTestStore(ctx);
     const arda = store.users.arda;
+    // A whitelisted action an AGENT writes (the session-open row).
     recordAudit(store.db, {
-      action: "task.agent.replied",
+      action: "runtime.run.started",
       actor: { userId: null, label: "agent:claude/developer (Implementation)" },
       projectSlug: store.slug,
       taskKey: "VIB-201",
+      details: { role: "Reviewer", backend: "claude", kind: "reviewer" },
     });
     recordAudit(store.db, {
       action: "github.reconcile",
@@ -614,10 +616,16 @@ describe("audit-panel actor names (E32-8, pass 32)", () => {
     ).toBeGreaterThan(0);
     expect(displayAuditActorLabel("delivery")).toBe("Delivery");
     expect(displayAuditActorLabel("operator")).toBe("Operator");
-    // The rendered sentence uses the same name (canary: put `row.actor_label`
-    // back at the `actor` derivation in auditText).
+    // The rendered sentence uses the same name for a human (the users-table
+    // row wins either way — the NON-human sentence path is the one that
+    // exercises displayAuditActorLabel, locked below and in
+    // activity-feed-phase10.server.test.ts "Operator opened …").
     const entries = listAuditLog(store.db, store.slug);
     const change = entries.find((e) => e.text.includes("impl → review"))!;
     expect(change.text.startsWith(`${arda.name} set`)).toBe(true);
+    // Review F9b: an agent-authored row renders its decoded name (canary: put
+    // `row.actor_label` back at the `actor` derivation in auditText).
+    const agentRow = entries.find((e) => e.text.startsWith("Developer (Implementation) · Claude opened the Reviewer runtime session"));
+    expect(agentRow, "agent audit rows must render the decoded actor name").toBeTruthy();
   });
 });

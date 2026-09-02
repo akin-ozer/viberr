@@ -25,6 +25,7 @@ container starts or stop it first.
 | `npm run dev` | app | Vite dev server on `PORT` (default 5173); boots the whole server, including watchers and background timers |
 | `npm run build` / `npm run start` | app | production build / `react-router-serve ./build/server/index.js` |
 | `npm run lint` | none | `oxlint` with the vendored anti-slop plugin; must exit 0 |
+| `node scripts/anti-slop-manifest.mjs` | none | re-pins `tools/oxlint/anti-slop/` to `tools/oxlint/anti-slop.manifest.json` after the install-anti-slop skill refreshes it (the vendor-sync test holds the tree to that manifest on CI) |
 | `npm run typecheck` | none | `react-router typegen` + `tsc` |
 | `npm test` | none | vitest over `app/**/*.test.{ts,tsx}` |
 | `npm run e2e [-- <playwright args>]` | n/a (Docker) | production-image Playwright run, see [testing.md](testing.md#4-end-to-end-suite-playwright) |

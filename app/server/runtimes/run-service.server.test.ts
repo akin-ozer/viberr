@@ -28,6 +28,7 @@ import {
   listRunLines,
   listRunsForTaskRows,
   upsertRun,
+  patchRun,
 } from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import { RUN_PHASE } from "./adapter.server";
@@ -550,6 +551,24 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
     expect(result.run!.profileId).toBe("dev");
     // The group's identity is its representative — the NEWEST run of the agent.
     expect(result.run!.serverRunId).toBe(newer.runId);
+  });
+
+  it("review F6: a second interrupt in the adapter's exit window is a no-op", async () => {
+    // The live-handle arm stamps `interrupted_by` at once but leaves the row
+    // `running` until the adapter's onExit; the button re-enables as soon as
+    // the action returns. Simulate that window and click again.
+    const runId = await startRunning();
+    patchRun(store.db, runId, { interruptedBy: store.users.arda.id });
+    const before = listAuditEvents(store.db, { action: "runtime.run.interrupted" }).length;
+    const result = await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
+    // Canary: drop the `run.interrupted_by` guard in interruptRun and this
+    // writes a second audit row (and a second timeline note).
+    expect(result.outcome).toBe("already-terminal");
+    expect(listAuditEvents(store.db, { action: "runtime.run.interrupted" })).toHaveLength(before);
   });
 
   it("interrupting a finished run is an idempotent no-op (not an error)", async () => {

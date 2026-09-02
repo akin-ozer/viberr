@@ -271,6 +271,9 @@ interface GuardrailBefore {
 interface GuardrailBeforeRef {
   current: GuardrailBefore | null;
 }
+interface GuardrailOnRef {
+  current: boolean | null;
+}
 
 export interface SetGuardrailInput {
   projectSlug: string;
@@ -336,6 +339,9 @@ export async function setGuardrail(
   // A ref, not a `let`: TypeScript narrows a closure-assigned local to its
   // initialiser at the read below (the WithdrawnPacketRef lesson).
   const before: GuardrailBeforeRef = { current: null };
+  /** The row's `on` after a `value` write — the toast says when the number was
+   *  saved onto a guardrail that is OFF, so nobody expects compaction to start. */
+  const onAfter: GuardrailOnRef = { current: null };
   await updateProjectFile(ref, (parsed) => {
     const rows = parsed.frontmatter.guardrails;
     const at = rows.findIndex((g) => g.id === id);
@@ -355,11 +361,15 @@ export async function setGuardrail(
       if (op === "value" && shipped.unit === undefined) {
         throw AppError.validation(`${label} has no numeric setting.`);
       }
+      // Review F1 (pass 32): the card showed this row OFF ("not in project.md"),
+      // so a `value` write keeps it off — `value` never toggles, as the
+      // contract above says; the shipped row's `on: true` must not leak in.
       rows.push(
         op === "value"
-          ? { ...shipped, value: value! }
+          ? { ...shipped, on: false, value: value! }
           : { ...shipped, on: op === "on" },
       );
+      onAfter.current = op === "value" ? false : op === "on";
       changed = true;
       return;
     }
@@ -367,6 +377,7 @@ export async function setGuardrail(
       if (row.unit === undefined) {
         throw AppError.validation(`${label} has no numeric setting.`);
       }
+      onAfter.current = row.on;
       if (row.value === value) return; // no-op
       row.value = value!;
       changed = true;
@@ -379,13 +390,25 @@ export async function setGuardrail(
   });
 
   const unit = DEFAULT_GUARDRAILS.find((d) => d.id === id)?.unit ?? "";
+  if (!changed) {
+    // Review F8 (pass 32): a no-op says what did NOT happen, never a success
+    // sentence with a suffix (the remove copy claimed a removal it never did).
+    const noop =
+      op === "remove"
+        ? `${label} is not on this project's guardrails · nothing changed`
+        : op === "value"
+          ? `${label} is already ${value} ${unit} · nothing changed`
+          : `${label} is already ${op} · nothing changed`;
+    return { toast: noop, changed: false };
+  }
   const toast =
     op === "remove"
       ? `${label} removed from this project's guardrails`
       : op === "value"
-        ? `${label}: ${value} ${unit} · applies to the next compaction pass`
+        ? onAfter.current === false
+          ? `${label}: ${value} ${unit} · saved; the guardrail is off, so it applies once you turn it on`
+          : `${label}: ${value} ${unit} · applies to the next compaction pass`
         : `${label}: ${op} · applies from the next agent comment`;
-  if (!changed) return { toast: `${toast.split(" · ")[0]} · already so, nothing changed`, changed: false };
 
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {

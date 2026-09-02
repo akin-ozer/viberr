@@ -210,7 +210,15 @@ export function OrgSettingsPage({
         </div>
       </div>
       <RunConcurrencyControl runConcurrency={runConcurrency} />
-      <AuditExportCard s3Audit={s3Audit} events={auditEvents} />
+      {/* Review F7 (pass 32): the card's `editing` and field state are seeded
+          from the target once; keying it on the stored target resets both when a
+          save or clear lands, so the form folds after a save and never shows a
+          cleared target's values. */}
+      <AuditExportCard
+        key={s3Audit ? `${s3Audit.bucket}|${s3Audit.region}|${s3Audit.prefix}|${s3Audit.endpoint}|${s3Audit.accessKeyId}` : "none"}
+        s3Audit={s3Audit}
+        events={auditEvents}
+      />
       <StorageLine storage={view.storage} />
     </main>
   );

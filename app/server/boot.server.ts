@@ -625,11 +625,21 @@ export async function bootServer(): Promise<void> {
     // and, when it ran, already covers the drift rescan.
     const derivation = ensureProjectionDerivation(db);
     if (derivation.rebuilt) {
-      logger.info("boot rebuilt every projection for a derivation change", {
+      const detail = {
         from: derivation.previous,
         to: PROJECTION_DERIVATION_VERSION,
         ...derivation.rebuilt,
-      });
+      };
+      if (derivation.stamped) {
+        logger.info("boot rebuilt every projection for a derivation change", detail);
+      } else {
+        // A file failed to project, so the stamp was withheld and the next boot
+        // rebuilds again — say so where an operator will look.
+        logger.warn(
+          "boot rebuilt projections for a derivation change with errors; will retry next boot",
+          detail,
+        );
+      }
     } else {
       const summary = rescanProjections(db);
       if (summary.changed > 0 || summary.removed > 0 || summary.errors > 0) {

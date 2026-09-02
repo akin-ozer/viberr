@@ -1565,6 +1565,13 @@ export async function interruptRun(
     // Idempotent no-op — the run already reached a terminal state.
     return { outcome: "already-terminal", run: projectOne(db, run) };
   }
+  // Review F6 (pass 32): the live-handle arm below stamps `interrupted_by` at
+  // once but leaves `state = running` until the adapter's onExit lands. A
+  // second click in that window (the button re-enables as soon as the action
+  // returns) must not write a second audit row and a second timeline note.
+  if (run.interrupted_by) {
+    return { outcome: "already-terminal", run: projectOne(db, run) };
+  }
 
   const state = getState();
   const handle = state.handles.get(input.runId);

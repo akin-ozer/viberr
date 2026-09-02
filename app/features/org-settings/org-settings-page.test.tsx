@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -654,6 +655,28 @@ describe("ResourcesPanel", () => {
     expect(document.querySelectorAll(".ctx-group")).toHaveLength(3);
     const skillChip = chips.find((c) => c.textContent === "terraform-review")!;
     expect(skillChip.className).toContain(" on");
+  });
+
+  it("review F10: a legacy template whose role repeats its name explains the greyed Save", () => {
+    const legacy: GagentView[] = [{ ...GAGENTS[1]!, role: GAGENTS[1]!.name }];
+    const { getByText, getByLabelText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={legacy}
+        templateGrants={TEMPLATE_GRANTS}
+        stages={STAGES}
+      />,
+    );
+    fireEvent.click(getByLabelText("Edit Spare"));
+    const save = getByText("Save changes").closest("button")!;
+    expect(save.disabled).toBe(true);
+    expect(
+      getByText(/This template's stored role repeated its name; give it a real role to save\./),
+    ).toBeTruthy();
+    fireEvent.change(document.getElementById("ga-role")!, { target: { value: "Spare hands" } });
+    expect(save.disabled).toBe(false);
   });
 
   it("kb name opens the StoreBrowser over the real tree", () => {
@@ -1432,6 +1455,39 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
     expect(save.className).toContain("btn");
     expect(save.className).not.toContain("primary");
     expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
+  });
+
+  it("review F7: a saved target folds the form again (state follows the stored target)", () => {
+    // The page re-renders with a NEW stored target after a save (loader
+    // revalidation); a harness stands in for the loader so the render stays
+    // inside renderPanel's router.
+    function Harness() {
+      const [s3, setS3] = useState<typeof S3 | null>(S3);
+      return (
+        <>
+          <button type="button" onClick={() => setS3({ ...S3, region: "eu-west-2" })}>
+            harness: saved
+          </button>
+          <button type="button" onClick={() => setS3(null)}>
+            harness: cleared
+          </button>
+          {page(s3)}
+        </>
+      );
+    }
+    const { getByText } = renderPanel(<Harness />);
+    fireEvent.click(getByText("Edit target"));
+    expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
+    // Canary: drop the `key` on <AuditExportCard> and the form stays open forever.
+    fireEvent.click(getByText("harness: saved"));
+    expect(document.querySelector(".audit-s3-grid")).toBeNull();
+    expect(getByText(/eu-west-2/)).toBeTruthy();
+    // Clearing the target opens the form on EMPTY fields, not the cleared values.
+    fireEvent.click(getByText("harness: cleared"));
+    expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
+    expect(
+      [...document.querySelectorAll<HTMLInputElement>(".audit-s3-grid input")].every((i) => i.value === ""),
+    ).toBe(true);
   });
 
   it("configured: the form folds behind a summary line until Edit target", () => {

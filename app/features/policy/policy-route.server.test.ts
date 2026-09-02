@@ -240,7 +240,7 @@ describe("set-guardrail (E32-6, pass 32)", () => {
       id: "meaningful-comment",
       op: "off",
     })) as PolicyAccepted;
-    expect(again.toast).toContain("already so, nothing changed");
+    expect(again.toast).toBe("Meaningful comments is already off · nothing changed");
     expect(listAuditEvents(app.db, { action: "project.policy.guardrail_changed" })).toHaveLength(1);
 
     // Restore.
@@ -282,6 +282,62 @@ describe("set-guardrail (E32-6, pass 32)", () => {
 
     // Restore.
     await postAction(ids.arda, { intent: "set-guardrail", id: "compression-threshold", op: "value", value: "40" });
+  });
+
+  it("review F1: a value written onto an ABSENT row keeps it off and says so", async () => {
+    // A project whose file lacks the row: the card shows it OFF ("not in
+    // project.md") with the shipped number prefilled. Typing a number must
+    // save the number without switching compaction on behind the reader's back.
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    await updateProjectFile({ projectSlug: "viberr-core", dataRoot: app.dataRoot }, (parsed) => {
+      parsed.frontmatter.guardrails = parsed.frontmatter.guardrails.filter(
+        (g) => g.id !== "compression-threshold",
+      );
+    });
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const { projectFilePath } = await import("~/server/files/file-store-root.server");
+    rebuildPath(app.db, projectFilePath("viberr-core", app.dataRoot), { dataRoot: app.dataRoot });
+    expect(
+      (await runLoader(ids.arda)).view.guardrails.find((g) => g.id === "compression-threshold"),
+    ).toMatchObject({ present: false, on: false, value: 40 });
+
+    // SAFETY: an admin on a valid input, so `setGuardrail` reaches its accept arm
+    // and the action returns the accepted shape.
+    const set = (await postAction(ids.arda, {
+      intent: "set-guardrail",
+      id: "compression-threshold",
+      op: "value",
+      value: "50",
+    })) as PolicyAccepted;
+    expect(set.toast).toBe(
+      "Compression threshold: 50 events · saved; the guardrail is off, so it applies once you turn it on",
+    );
+    // Canary: push `{ ...shipped, value }` without `on: false` and this reads on:true.
+    expect(
+      (await runLoader(ids.arda)).view.guardrails.find((g) => g.id === "compression-threshold"),
+    ).toMatchObject({ present: true, on: false, value: 50 });
+
+    // Restore: on, at the shipped value.
+    await postAction(ids.arda, { intent: "set-guardrail", id: "compression-threshold", op: "on" });
+    await postAction(ids.arda, { intent: "set-guardrail", id: "compression-threshold", op: "value", value: "40" });
+    expect(
+      (await runLoader(ids.arda)).view.guardrails.find((g) => g.id === "compression-threshold"),
+    ).toMatchObject({ present: true, on: true, value: 40 });
+  });
+
+  it("review F8: removing an id that is not there says so and records nothing", async () => {
+    const before = listAuditEvents(app.db, { action: "project.policy.guardrail_changed" }).length;
+    // SAFETY: an admin on a valid input, so `setGuardrail` reaches its accept arm
+    // and the action returns the accepted shape.
+    const gone = (await postAction(ids.arda, {
+      intent: "set-guardrail",
+      id: "never-existed",
+      op: "remove",
+    })) as PolicyAccepted;
+    // Canary: rebuild the no-op copy by splitting the success toast and this
+    // claims "removed … · already so".
+    expect(gone.toast).toBe("never-existed is not on this project's guardrails · nothing changed");
+    expect(listAuditEvents(app.db, { action: "project.policy.guardrail_changed" })).toHaveLength(before);
   });
 
   it("never removes an enforced row, never touches the GitHub-owned row, removes an unknown one", async () => {
@@ -446,8 +502,6 @@ describe("set-boundary", () => {
   it("rejects a reviewer (Edit workflow & policy is admin-only)", async () => {
     // SAFETY: a contributor fails the admin-only capability check, which raises
     // an AppError the action answers through `appErrorResponse`.
-    // SAFETY: this call is refused (a capability or validation AppError the
-    // action answers through `appErrorResponse`), so the data is the refusal shape.
     const result = (await postAction(ids.selin, {
       intent: "set-boundary",
       from: "impl",
@@ -460,8 +514,6 @@ describe("set-boundary", () => {
   it("persists a boundary change with the verbatim toast + audit", async () => {
     // SAFETY: an admin editing an unlocked boundary, so `setTransitionBoundary`
     // runs to completion and the action returns its accept arm.
-    // SAFETY: an admin on a valid input, so `setGuardrail` reaches its accept arm
-    // and the action returns the accepted shape.
     const result = (await postAction(ids.arda, {
       intent: "set-boundary",
       from: "impl",
@@ -505,8 +557,6 @@ describe("set-boundary", () => {
   it("review→done stays LOCKED human — server hard-reject", async () => {
     // SAFETY: the locked-boundary guard raises an AppError even for an admin,
     // which the action answers through `appErrorResponse`.
-    // SAFETY: this call is refused (a capability or validation AppError the
-    // action answers through `appErrorResponse`), so the data is the refusal shape.
     const result = (await postAction(ids.arda, {
       intent: "set-boundary",
       from: "review",

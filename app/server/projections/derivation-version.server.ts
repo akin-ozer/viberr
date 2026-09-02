@@ -32,6 +32,11 @@ export interface DerivationCheck {
   previous: number;
   /** Set when a full forced rebuild ran because the stamp was behind. */
   rebuilt: RescanSummary | null;
+  /** False when the rebuild ran but a file failed to project: the stamp stays
+   *  behind so the NEXT boot retries (review F5, pass 32) — otherwise the rows
+   *  of an unreadable task would keep the old derivation forever under a stamp
+   *  that claims otherwise. */
+  stamped: boolean;
 }
 
 /** Boot: force a full rebuild when the derivation moved on, then stamp. */
@@ -40,8 +45,13 @@ export function ensureProjectionDerivation(
   options: { dataRoot?: string } = {},
 ): DerivationCheck {
   const previous = getSetting(db, SETTING_KEY, z.number().int().positive()) ?? 1;
-  if (previous === PROJECTION_DERIVATION_VERSION) return { previous, rebuilt: null };
+  if (previous === PROJECTION_DERIVATION_VERSION) {
+    return { previous, rebuilt: null, stamped: true };
+  }
   const rebuilt = rescanProjections(db, { dataRoot: options.dataRoot, force: true });
-  setSetting(db, SETTING_KEY, PROJECTION_DERIVATION_VERSION);
-  return { previous, rebuilt };
+  // `rebuildAll` counts a file it could not project into `errors` rather than
+  // throwing; only a clean pass earns the stamp.
+  const stamped = rebuilt.errors === 0;
+  if (stamped) setSetting(db, SETTING_KEY, PROJECTION_DERIVATION_VERSION);
+  return { previous, rebuilt, stamped };
 }
