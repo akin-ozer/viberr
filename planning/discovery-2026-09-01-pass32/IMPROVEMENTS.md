@@ -541,8 +541,10 @@ ones marked *canaried* were reverted once to prove the lock goes red.
   `delivery`, `system:workspace-reconcile` — while the Stream beside it names every actor.
   `displayAuditActorLabel` decodes agent/system refs to the timeline's display names
   ("Developer (Implementation) · Claude", "Workspace reconcile"); `auditFilterActors` returns
-  `{ value, label }` so the filter still matches the stored label; lock in
-  `activity-feed.server.test.ts`.
+  `{ value, label }` matching what the panel's filter compiles to (`COALESCE(u.name,
+  a.actor_label)`), ONE option per person even when callers recorded a user under different
+  labels (live: "Arda" listed twice); the `runtime.run.started` sentence now opens with
+  "Operator" (its lock updated); locks in `activity-feed.server.test.ts`.
 - D32-14 live evidence: after the rebuilt container booted, the log shows "boot rebuilt every
   projection for a derivation change {from:1,to:2,tasks:8,changed:11}", the stamp is stored, and
   `task_events` holds zero `<backend>/<profile>` refs; the Stream actor filter lists "Docs Writer"

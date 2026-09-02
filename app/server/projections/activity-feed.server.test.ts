@@ -594,9 +594,24 @@ describe("audit-panel actor names (E32-8, pass 32)", () => {
       expect.arrayContaining([
         { value: "agent:claude/developer (Implementation)", label: "Developer (Implementation) · Claude" },
         { value: "system:workspace-reconcile", label: "Workspace reconcile" },
-        { value: arda.email, label: arda.name },
+        { value: arda.name, label: arda.name },
       ]),
     );
+    // One option per PERSON: a second row recorded under the user's name (not
+    // the email) must not add a second "Arda".
+    recordAudit(store.db, {
+      action: "project.member.role_changed",
+      actor: { userId: arda.id, label: arda.name },
+      projectSlug: store.slug,
+      details: { from: "contributor", to: "viewer", targetUserId: store.users.selin.id },
+    });
+    expect(
+      auditFilterActors(store.db, store.slug).filter((o) => o.label === arda.name),
+    ).toHaveLength(1);
+    // The value is what the panel's filter matches on (COALESCE(name, label)).
+    expect(
+      listAuditLog(store.db, store.slug, { filters: { actor: arda.name } }).length,
+    ).toBeGreaterThan(0);
     expect(displayAuditActorLabel("delivery")).toBe("Delivery");
     expect(displayAuditActorLabel("operator")).toBe("Operator");
     // The rendered sentence uses the same name (canary: put `row.actor_label`

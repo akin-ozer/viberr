@@ -602,14 +602,26 @@ export function auditFilterActors(db: DatabaseSync, slug: string): AuditActorOpt
   // when the LEFT JOIN finds no row.
   const rows = db
     .prepare(
-      `SELECT DISTINCT a.actor_label AS value, u.name AS name
+      `SELECT DISTINCT a.actor_label AS label, u.name AS name
        FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
        WHERE a.project_slug = ?`,
     )
-    .all(slug) as Array<{ value: string; name: string | null }>;
-  return rows
-    .map((row) => ({ value: row.value, label: row.name ?? displayAuditActorLabel(row.value) }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .all(slug) as Array<{ label: string; name: string | null }>;
+  // The filter compiles to `COALESCE(u.name, a.actor_label) = ?` (below), so a
+  // human's VALUE is their current name — one option per person even when
+  // callers recorded them under different labels (email on one path, name on
+  // another; live the panel listed "Arda" twice) — and everyone else's is the
+  // stored label, displayed decoded.
+  const byValue = new Map<string, AuditActorOption>();
+  for (const row of rows) {
+    const value = row.name ?? row.label;
+    if (byValue.has(value)) continue;
+    byValue.set(value, {
+      value,
+      label: row.name ?? displayAuditActorLabel(row.label),
+    });
+  }
+  return [...byValue.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /** Every audit-panel entry matching the filters, newest first, both legs

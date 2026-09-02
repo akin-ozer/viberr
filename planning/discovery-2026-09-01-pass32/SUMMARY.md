@@ -55,3 +55,14 @@ writable attachments; viberr_ops reads audited.
 ## External constraints
 Codex account over quota until 2026-09-18 (credential itself proven good). Claude 5-hour window hit
 94% at 23:47 (resets ~00:50); agent-run-heavy use cases paused until then.
+
+## Implementation status (2026-09-02)
+Branch `pass32/implementation` → PR #269 (clusters A–F in one PR, per-cluster commits). Every
+ledger item is dispositioned in IMPROVEMENTS.md (FIXED with a lock, DECIDED-NO-CHANGE with the
+ruling, or VERIFIED-NOT-A-DEFECT with the evidence). Guardrails card = ruling 112 landed. A
+projection derivation-version stamp (`instance_settings.projection.derivationVersion`) forces one
+full rebuild at boot when a derived column's rule changes (first use: D32-14 actor refs).
+Gates: lint 0, tsc clean, vitest 300+ files / 4900+ tests green; CI verify + e2e green on the
+push before the last two commits (re-running). Live: container rebuilt from the branch, the
+Guardrails toggle round-tripped (file, projection, audit, toast), the boot log shows the forced
+derivation rebuild, the Stream and Audit actor filters name every actor once.
