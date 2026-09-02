@@ -160,3 +160,6 @@ PENDING: UC-12/13/14/15/23 (RBAC probe agent running) · UC-20 schedule · UC-25
 - 2026-09-02 ~01:05 Final visual pass over the rebuilt container (19 pages → screenshots/final-*).
   One more sibling found and fixed (E32-9, owner seat on a closed task). PR #269 green (verify +
   e2e) at 565b71eb; the closed-seat fix follows in the next push.
+- 2026-09-02 ~01:20 Owner batch 3 answered (4 questions): closed owner seat = admins may reassign
+  (ruling 118), actor refs + derivation stamp kept (119), guardrail value keeps off (112),
+  template Role required with hint (120). Admin carve-out applied and locked.

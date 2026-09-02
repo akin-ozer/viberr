@@ -111,8 +111,9 @@ function renderPanel(patch: Partial<TaskDetail> = {}) {
   return render(<Stub initialEntries={["/"]} />);
 }
 
-/** Same panel, as a CONTRIBUTOR (the tier that may take the owner seat). */
-function renderAsContributor(patch: Partial<TaskDetail> = {}) {
+/** Same panel, as a CONTRIBUTOR (the tier that may take the owner seat) — or
+ *  any role passed in. */
+function renderAsContributor(patch: Partial<TaskDetail> = {}, myRole = "contributor") {
   const task = detail(patch);
   const Stub = createRoutesStub([
     {
@@ -122,7 +123,7 @@ function renderAsContributor(patch: Partial<TaskDetail> = {}) {
           task={task}
           stage={STAGES[1]}
           meId="u-arda"
-          myRole="contributor"
+          myRole={myRole}
           archived={task.archived === true}
           acceptance={ACCEPTANCE}
           ownerBusy={false}
@@ -155,6 +156,14 @@ describe("owner seat on closed and archived tasks (D32-16 / E32-9)", () => {
     merged.unmount();
     const archived = renderAsContributor({ owner: null, archived: true });
     expect(archived.queryByText("Assign me")).toBeNull();
+  });
+
+  it("ruling 118: an ADMIN may still take a closed seat for the record, never an archived one", () => {
+    const closedAsAdmin = renderAsContributor({ owner: null, displayReadiness: "accepted" }, "admin");
+    expect(closedAsAdmin.queryByText("Assign me")).not.toBeNull();
+    closedAsAdmin.unmount();
+    const archivedAsAdmin = renderAsContributor({ owner: null, archived: true }, "admin");
+    expect(archivedAsAdmin.queryByText("Assign me")).toBeNull();
   });
 });
 

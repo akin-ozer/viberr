@@ -1227,7 +1227,7 @@ describe("ownership", () => {
     ).rejects.toThrow(/archived — restore it before changing its owner/);
   });
 
-  it("E32-9: a CLOSED task (terminal stage) refuses ownership changes (reopen first)", async () => {
+  it("E32-9 / ruling 118: a CLOSED task refuses a contributor's take; an admin may reassign for the record", async () => {
     const store = prepared();
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "done" }),
@@ -1242,6 +1242,15 @@ describe("ownership", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/closed — move it back to an open stage before changing its owner/);
+    // The admin carve-out (canary: drop the `release-any-ownership` clause and
+    // this refuses arda too).
+    const task = await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.owner).toMatchObject({ userId: store.users.selin.id });
   });
 
   it("take (unowned) — exact assign-event copy", async () => {

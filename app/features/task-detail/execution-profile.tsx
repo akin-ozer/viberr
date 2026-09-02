@@ -115,7 +115,14 @@ function OwnerControl({
       task.displayReadiness === "accepted" ||
       task.displayReadiness === "merged" ||
       task.archived;
-    return canOwn && !closed ? (
+    // Ruling 118: an admin may still reassign a CLOSED (not archived) seat for
+    // the record — the same tier that releases any owner.
+    // SAFETY: same invariant as `canOwn` above — `myRole` is the layout loader's
+    // own project role (or "admin"/null), widened to `string` by the prop chain;
+    // `roleCan` denies any other value, so the widening can only under-grant.
+    const adminSeat =
+      !task.archived && roleCan(myRole as ProjectRole | null, "release-any-ownership");
+    return canOwn && (!closed || adminSeat) ? (
       <button
         type="button"
         className="rev-add"

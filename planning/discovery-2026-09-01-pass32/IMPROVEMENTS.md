@@ -598,3 +598,10 @@ ran (phase-10 lock, audit filter value, the interruptRun await sweep). The live 
   seat is frozen on a CLOSED task too — `setOwner` refuses at the terminal stage ("move it back to
   an open stage before changing its owner"), both panels withhold the affordance on
   accepted/merged; server + panel locks, both canaried.
+
+### Owner batch 3 (2026-09-02, asked directly after the final visual pass)
+- E32-9 → **Ruling 118**: closed seat frozen for contributors/maintainers; a project ADMIN may
+  reassign for the record (`release-any-ownership` tier). Applied server + both panels; locks.
+- D32-14 + derivation stamp → **Ruling 119**: keep (refs by profile, stamp self-applies).
+- Guardrail value-on-absent-row keeps OFF → recorded under ruling 112.
+- D32-7 required Role with legacy hint → **Ruling 120**: keep.

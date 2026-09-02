@@ -4099,15 +4099,20 @@ export async function setOwner(
       `${input.taskKey} is archived — restore it before changing its owner.`,
     );
   }
-  // E32-9 (pass 32, live VIB-4): a task at the terminal stage is CLOSED — every
-  // runtime control on its page says so (G9) — and the owner seat's authority
-  // (review, acceptance, packet resolution) has nothing left to act on. Freeze
-  // it like the archived seat; a reopened task (moved back to an open stage)
-  // takes owners again.
+  // E32-9 / ruling 118 (owner, 2026-09-02): a task at the terminal stage is
+  // CLOSED — every runtime control on its page says so (G9) — and the owner
+  // seat's authority (review, acceptance, packet resolution) has nothing left
+  // to act on. Contributors and maintainers cannot take it; a project ADMIN may
+  // still reassign it for the record (the same tier that releases any owner).
+  // A reopened task (moved back to an open stage) takes owners again.
   const terminalId = terminalStageIdOf(project);
-  if (terminalId !== null && existing.parsed.frontmatter.stage === terminalId) {
+  if (
+    terminalId !== null &&
+    existing.parsed.frontmatter.stage === terminalId &&
+    !roleCan(actorRole, "release-any-ownership")
+  ) {
     throw AppError.validation(
-      `${input.taskKey} is closed — move it back to an open stage before changing its owner.`,
+      `${input.taskKey} is closed — move it back to an open stage before changing its owner (an admin can still reassign it for the record).`,
     );
   }
 

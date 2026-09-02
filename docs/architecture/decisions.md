@@ -1799,7 +1799,9 @@ the quieter packet or the bare owner cell as drift.)*
     removable). An enforced row the file lacks renders OFF with "not in project.md" and
     turning it on writes the shipped row. `edit-policy` tier, audited as
     `project.policy.guardrail_changed` (before/after in the details), reprojected, and
-    rendered as a sentence in the Activity audit panel. (`setGuardrail` in
+    rendered as a sentence in the Activity audit panel. A number written onto a row the
+    file lacks keeps that row OFF and the toast says so — a value never toggles a
+    guardrail (owner, 2026-09-02). (`setGuardrail` in
     `app/features/policy/policy-actions.server.ts`, `Guardrails` in `policy-page.tsx`.)
 
 113. **ONE UI vocabulary for capability modes (owner, 2026-09-02).** The same stored
@@ -1890,8 +1892,34 @@ ruling 44 says every one should be. Where recorded today is named per item.)*
     (`VIBERR_CODEX_IDLE_TIMEOUT_MS`); cited as an owner ruling in `codex-runtime.server.ts` and
     `task-activity.server.ts`.
 
+118. **A closed task's owner seat is frozen for contributors and maintainers; a project
+    admin may reassign it for the record (owner, 2026-09-02, E32-9).** A task at the
+    terminal stage is closed — every runtime control on its page says so (G9) — and the
+    owner's authority (review, acceptance, packet resolution) has nothing left to act on.
+    Live, a Done + merged task still offered "Assign me" in both owner cells and the server
+    accepted the take. `setOwner` now refuses at the terminal stage unless the actor holds
+    `release-any-ownership` (the admin tier that already releases any owner); both panels
+    withhold the affordance below that tier. Archived seats stay frozen for everyone
+    (D32-16); a task moved back to an open stage takes owners again.
+
+119. **Stream actor refs are keyed by profile, and a projection derivation-version stamp
+    self-applies rule changes (owner, 2026-09-02, D32-14).** `task_events.actor_ref` for an
+    agent is `agent/<profileId>` — a profile that ran a Codex leg and a Claude leg is ONE
+    actor in the Activity filter. Because the boot rescan is a content-hash short-circuit
+    and the store has no migrations, `instance_settings.projection.derivationVersion`
+    records the rule set the projections were derived under; a stamp behind
+    `PROJECTION_DERIVATION_VERSION` forces one full rebuild at boot (withheld when a file
+    fails to project, so the next boot retries). Bump the constant for every future change
+    to how a projected column is derived.
+
+120. **Global templates carry a required Role; legacy templates explain the empty prefill
+    (owner, 2026-09-02, D32-7).** The instance template editor stored the name as the role,
+    so every template saved there read as the generic "Agent profile". Role is required, as
+    in the project editor; a template whose stored role repeats its name prefills empty
+    with an inline hint, so the one-time cost is a typed role, never a mystery grey Save.
+
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
-on this list: they are **rulings 109–116** above. Everything still listed here predates
+on this list: they are **rulings 109–120** above. Everything still listed here predates
 that pass and remains unnumbered.)*
 
 ## Route map

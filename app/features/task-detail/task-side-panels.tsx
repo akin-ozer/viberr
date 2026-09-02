@@ -842,14 +842,16 @@ export function CurrentStatePanel({
                   </button>
                 )}
               </span>
-            ) : canOwn && !archived && !closed ? (
+            ) : canOwn && !archived && (!closed || canReleaseAnyOwner) ? (
               // Q5 clean tiering: only contributor+ may hold the owner seat
               // (setOwner enforces `own-task`). Viewers are read + comment, so
               // hide "Assign me" rather than render a button that 403s.
               // D32-16: an archived task's owner seat is frozen server-side
-              // (restore first), so the affordance goes with it. E32-9: so is
-              // a CLOSED (accepted/merged) task's — live, a Done task whose
-              // every other control read "task closed" still offered it.
+              // (restore first), so the affordance goes with it. E32-9 /
+              // ruling 118: so is a CLOSED (accepted/merged) task's — live, a
+              // Done task whose every other control read "task closed" still
+              // offered it — except to an ADMIN, who may reassign for the
+              // record (the release-any-ownership tier).
               <button
                 type="button"
                 className="rev-add sm"
