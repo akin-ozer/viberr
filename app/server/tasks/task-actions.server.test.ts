@@ -1227,6 +1227,23 @@ describe("ownership", () => {
     ).rejects.toThrow(/archived — restore it before changing its owner/);
   });
 
+  it("E32-9: a CLOSED task (terminal stage) refuses ownership changes (reopen first)", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "done" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // Canary: drop the terminal-stage guard in setOwner and the take succeeds.
+    await expect(
+      setOwner(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/closed — move it back to an open stage before changing its owner/);
+  });
+
   it("take (unowned) — exact assign-event copy", async () => {
     const store = prepared();
     withTask(store);

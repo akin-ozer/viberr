@@ -157,3 +157,6 @@ PENDING: UC-12/13/14/15/23 (RBAC probe agent running) · UC-20 schedule · UC-25
   shipped a `$${…}` slip ("was refused $<date>"); the B06-T3 "flake" was an unfaithful
   simulation (fresh mtime on stale content). `interruptRun` is async now — every caller awaits.
   Lint + tsc clean; targeted suites green; full suite running.
+- 2026-09-02 ~01:05 Final visual pass over the rebuilt container (19 pages → screenshots/final-*).
+  One more sibling found and fixed (E32-9, owner seat on a closed task). PR #269 green (verify +
+  e2e) at 565b71eb; the closed-seat fix follows in the next push.

@@ -109,8 +109,13 @@ function OwnerControl({
     // F19-11: the eligibility sentence lives in the cell's VALUE, stated once
     // for every role — this control renders the affordance or nothing.
     // D32-16: an archived task's owner seat is frozen (setOwner refuses), so
-    // the control is withheld like every other runtime action on it.
-    return canOwn && !task.archived ? (
+    // the control is withheld like every other runtime action on it. E32-9:
+    // a CLOSED task's seat is frozen the same way.
+    const closed =
+      task.displayReadiness === "accepted" ||
+      task.displayReadiness === "merged" ||
+      task.archived;
+    return canOwn && !closed ? (
       <button
         type="button"
         className="rev-add"

@@ -111,6 +111,53 @@ function renderPanel(patch: Partial<TaskDetail> = {}) {
   return render(<Stub initialEntries={["/"]} />);
 }
 
+/** Same panel, as a CONTRIBUTOR (the tier that may take the owner seat). */
+function renderAsContributor(patch: Partial<TaskDetail> = {}) {
+  const task = detail(patch);
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: () => (
+        <CurrentStatePanel
+          task={task}
+          stage={STAGES[1]}
+          meId="u-arda"
+          myRole="contributor"
+          archived={task.archived === true}
+          acceptance={ACCEPTANCE}
+          ownerBusy={false}
+          onOwner={() => {}}
+          onRelease={() => {}}
+          onArchive={() => {}}
+          onAccept={() => {}}
+          onTransition={() => {}}
+          transitionBusy={false}
+          acceptBusy={false}
+          dispositionBusy={false}
+        />
+      ),
+    },
+  ]);
+  return render(<Stub initialEntries={["/"]} />);
+}
+
+describe("owner seat on closed and archived tasks (D32-16 / E32-9)", () => {
+  it("offers Assign me on an open unowned task, withholds it once closed or archived", () => {
+    const open = renderAsContributor({ owner: null });
+    expect(open.queryByText("Assign me")).not.toBeNull();
+    open.unmount();
+    // Canary: drop `!closed` from the owner cell and the accepted task offers it.
+    const accepted = renderAsContributor({ owner: null, displayReadiness: "accepted" });
+    expect(accepted.queryByText("Assign me")).toBeNull();
+    accepted.unmount();
+    const merged = renderAsContributor({ owner: null, displayReadiness: "merged" });
+    expect(merged.queryByText("Assign me")).toBeNull();
+    merged.unmount();
+    const archived = renderAsContributor({ owner: null, archived: true });
+    expect(archived.queryByText("Assign me")).toBeNull();
+  });
+});
+
 /** The kv-row value for a given label. */
 function kv(container: HTMLElement, label: string): string {
   const row = [...container.querySelectorAll(".kv-row")].find(

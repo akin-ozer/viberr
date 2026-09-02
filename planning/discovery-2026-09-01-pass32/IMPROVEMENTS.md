@@ -587,3 +587,14 @@ ran (phase-10 lock, audit filter value, the interruptRun await sweep). The live 
   (`tools/oxlint/anti-slop.manifest.json`, `node scripts/anti-slop-manifest.mjs`) on every
   machine, and to the skill assets where present.
 - Minor FIXED: the copy-pasted SAFETY blocks the await-sweep script left in the set-boundary tests.
+
+### Final visual pass (2026-09-02, rebuilt container at 565b71eb)
+- Every page of the current build captured to `screenshots/final-*.png` (login, home, board, review
+  queue, project controller, agents, policy, github, activity, project settings, a merged task,
+  the four instance-settings tabs, instance controller, insights, notifications, profile); page
+  titles follow the D32-3 grammar on all of them.
+- E32-9 FIXED (found in `final-task-VIB-4.png`): a Done + merged task whose every runtime control
+  read "task closed" still offered "Assign me" in both owner cells. Sibling of D32-16: the owner
+  seat is frozen on a CLOSED task too — `setOwner` refuses at the terminal stage ("move it back to
+  an open stage before changing its owner"), both panels withhold the affordance on
+  accepted/merged; server + panel locks, both canaried.

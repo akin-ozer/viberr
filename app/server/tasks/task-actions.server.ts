@@ -4099,6 +4099,17 @@ export async function setOwner(
       `${input.taskKey} is archived — restore it before changing its owner.`,
     );
   }
+  // E32-9 (pass 32, live VIB-4): a task at the terminal stage is CLOSED — every
+  // runtime control on its page says so (G9) — and the owner seat's authority
+  // (review, acceptance, packet resolution) has nothing left to act on. Freeze
+  // it like the archived seat; a reopened task (moved back to an open stage)
+  // takes owners again.
+  const terminalId = terminalStageIdOf(project);
+  if (terminalId !== null && existing.parsed.frontmatter.stage === terminalId) {
+    throw AppError.validation(
+      `${input.taskKey} is closed — move it back to an open stage before changing its owner.`,
+    );
+  }
 
   const isTake = input.targetUserId === actor.userId;
   // A TAKEOVER of an OCCUPIED seat (claiming a task another member owns) is the
