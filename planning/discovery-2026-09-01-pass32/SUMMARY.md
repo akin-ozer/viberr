@@ -66,3 +66,8 @@ Gates: lint 0, tsc clean, vitest 300+ files / 4900+ tests green; CI verify + e2e
 push before the last two commits (re-running). Live: container rebuilt from the branch, the
 Guardrails toggle round-tripped (file, projection, audit, toast), the boot log shows the forced
 derivation rebuild, the Stream and Audit actor filters name every actor once.
+Review round: an opus max-effort adversarial review of the E/F diff found 14 issues (3 already
+fixed mid-review); the 11 live ones are fixed with locks in 565b71eb (see IMPROVEMENTS.md). The
+CI `verify` red on the first two E-pushes was an unhandled rejection from un-awaited test callers
+of the now-async `interruptRun`; fixed by reordering the function and a per-file await sweep.
+Gates at 565b71eb: lint 0, tsc clean, vitest 302 files / 4917 tests.
