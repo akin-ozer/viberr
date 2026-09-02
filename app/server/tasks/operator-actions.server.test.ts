@@ -431,7 +431,7 @@ describe("operatorDispatchAgent", () => {
     expect(r.message).toBe("Started a Claude run for Dev (the delivering agent).");
     expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
     expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "primary")).toBe(true);
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("recommend mode adds ONE actionable run_agent card and does NOT engage or run", async () => {
@@ -534,7 +534,7 @@ describe("operatorDispatchAgent", () => {
     expect(
       d.candidates.find((c) => c.profileId === "developer")?.eligibleForStage,
     ).toBe(true);
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("an UNKNOWN profileId is a noop that points at the roster, not a crash", async () => {
@@ -641,7 +641,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
       authority("full"),
     );
     expect(r.outcome).not.toBe("denied");
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 });
 
@@ -686,7 +686,7 @@ describe("operatorDispatchAgent — recommend is an APPLYABLE run_agent card", (
     );
     expect(task().frontmatter.recommendations).toHaveLength(0);
     expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("the card carries the operator's PROMPT, and apply runs it (auto-engaging the profile)", async () => {
@@ -732,7 +732,7 @@ describe("operatorDispatchAgent — recommend is an APPLYABLE run_agent card", (
       supportingEngagements(task().frontmatter).map((x) => x.profileId),
     ).toContain("reviewer");
     expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("a NEWER prompt for the same agent REPLACES the pending card — never silently dropped (hunt 2026-08-29)", async () => {
@@ -805,7 +805,7 @@ describe("operatorDispatchAgent — recommend is an APPLYABLE run_agent card", (
     expect(
       supportingEngagements(task().frontmatter).map((x) => x.profileId),
     ).toContain("developer");
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 });
 
@@ -830,7 +830,7 @@ describe("dispatchGate — absent means the catalog default (hunt 2026-08-29)", 
     );
     expect(r.outcome).toBe("done");
     expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("an EXPLICIT `dispatch-agents: off` still denies — absent-means-granted is not a bypass", async () => {
@@ -869,7 +869,7 @@ describe("operatorDispatchAgent — supporting posture (delivers derivation)", (
     // Supporting, not delivering — the deliverer slot stays empty.
     expect(deliveringEngagement(task().frontmatter)).toBeNull();
     expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "reviewer")).toBe(true);
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("an ENGAGED profile keeps its shape on a bare re-dispatch", async () => {
@@ -891,16 +891,20 @@ describe("operatorDispatchAgent — supporting posture (delivers derivation)", (
     expect(r.outcome).toBe("done");
     expect(r.message).toBe("Started a Claude run for Rev (a reviewer).");
     expect(deliveringEngagement(task().frontmatter)).toBeNull();
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 });
 
 /** Stop every still-streaming run's cadence timer so it does not outlive a test. */
-function interruptRunningRuns(taskKey: string): void {
+async function interruptRunningRuns(taskKey: string): Promise<void> {
   const arda = { userId: store.users.arda.id, label: store.users.arda.email };
   for (const r of listRunsForTask(store.db, store.slug, taskKey)) {
     if (r.lifecycle === "running" || r.lifecycle === "queued") {
-      interruptRun(store.db, { projectSlug: store.slug, taskKey, runId: r.serverRunId }, arda);
+      await interruptRun(
+        store.db,
+        { projectSlug: store.slug, taskKey, runId: r.serverRunId, dataRoot: store.dataRoot },
+        arda,
+      );
     }
   }
 }
@@ -933,7 +937,7 @@ describe("operatorDispatchAgent — the prompt hand-off", () => {
     expect(prompt!.text).toBe("@Dev implement the auth guard first, then wire the tests.");
     // …and its run was triggered (the primary run row exists right after the await).
     expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "primary")).toBe(true);
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("F32-8 (pass 32): a directive naming an org MCP server the target does NOT hold is annotated on the hand-off", async () => {
@@ -969,7 +973,7 @@ describe("operatorDispatchAgent — the prompt hand-off", () => {
     expect(prompt!.text).toContain("re-run qa_echo yourself");
     expect(prompt!.text).toContain("Rev holds no MCP grant for `qa-echo`");
     expect(prompt!.text).toContain("Do not hunt for them");
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("F32-8 (pass 32): a directive that names no ungranted server is handed off verbatim", async () => {
@@ -999,7 +1003,7 @@ describe("operatorDispatchAgent — the prompt hand-off", () => {
       (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
     );
     expect(prompt!.text).toBe("@Dev implement the auth guard; echo the config on start.");
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("direct WITHOUT a prompt starts a bare run and posts NO synthetic comment", async () => {
@@ -1020,7 +1024,7 @@ describe("operatorDispatchAgent — the prompt hand-off", () => {
       ),
     ).toBe(false);
     expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "primary")).toBe(true);
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("recommend + prompt files the run_agent card and does NOT run the agent", async () => {
@@ -1075,7 +1079,7 @@ describe("operatorDispatchAgent — the prompt hand-off", () => {
     );
     expect(prompt).toBeDefined();
     expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "reviewer")).toBe(true);
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 });
 
@@ -1176,7 +1180,7 @@ describe("operator transition chain (P11-70 runaway backstop)", () => {
     expect(task().packet).toBeFalsy();
     // Let the fire-and-forget auto-invoke settle, then clean up its fake run.
     await new Promise((r) => setTimeout(r, 50));
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 });
 
@@ -1214,7 +1218,7 @@ describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
     await p1;
     // Give the queued trigger time to drain, then interrupt anything running.
     await new Promise((r) => setTimeout(r, 50));
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
     // Exactly the coordination happened; no double-driving (the recommendation
     // isn't duplicated — a transition rec is present at most once).
     const recs = task().frontmatter.recommendations.filter(
@@ -1268,7 +1272,7 @@ describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
 
     await inFlight;
     await new Promise((r) => setTimeout(r, 50));
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   /**
@@ -2274,7 +2278,7 @@ describe("applyRecommendation / dismissRecommendation", () => {
     expect(task().frontmatter.recommendations).toHaveLength(0);
     const audits = listAuditEvents(store.db, {}).map((a) => a.action);
     expect(audits).toContain("task.recommendation.applied");
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("a stage transition clears stale transition recommendations", async () => {
@@ -3357,7 +3361,7 @@ describe("supporting-dispatch copy branches on verdict authority (F21-6)", () =>
     seedTask("review");
     const r = await dispatch("reviewer");
     expect(r.message).toBe("Started a Claude run for Rev (a reviewer).");
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("a verdict-INCAPABLE profile is dispatched 'as a supporting agent'", async () => {
@@ -3366,7 +3370,7 @@ describe("supporting-dispatch copy branches on verdict authority (F21-6)", () =>
     const r = await dispatch("web-verifier");
     expect(r.message).toBe("Started a Claude run for Web Verifier (a supporting agent).");
     expect(r.message).not.toContain("reviewer");
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("the RECOMMENDATION message carries the same distinction", async () => {
@@ -3407,7 +3411,7 @@ describe("supporting-dispatch copy branches on verdict authority (F21-6)", () =>
     );
     expect(r.outcome).toBe("done");
     expect(r.message).toBe("Prompted @Web Verifier (a supporting agent) and started its run.");
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 });
 
@@ -3473,7 +3477,7 @@ describe("delegated-ask disclosure is mechanical, not just prose (R20-9)", () =>
     expect(packet.body).toContain("The repo supports both.");
     expect(packet.body).toContain("the operator prompted Dev on this task");
     expect(packet.body).toContain("not by that agent");
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("discloses even when the model leaves the body empty", async () => {
@@ -3485,7 +3489,7 @@ describe("delegated-ask disclosure is mechanical, not just prose (R20-9)", () =>
     await openPacket(toolkit, undefined);
 
     expect(task().packet!.body).toContain("the operator prompted Dev on this task");
-    interruptRunningRuns("VIB-1");
+    await interruptRunningRuns("VIB-1");
   });
 
   it("says nothing when no agent was consulted this run — the disclosure is a FACT, not decoration", async () => {

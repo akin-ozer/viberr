@@ -627,9 +627,9 @@ describe("startSpecialistRun", () => {
     expect(lineCount).toBeGreaterThan(0);
 
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
       actor(store.users.arda),
     );
 
@@ -660,9 +660,9 @@ describe("startSpecialistRun", () => {
     expect(result.backend).toBe("codex");
 
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
       actor(store.users.arda),
     );
 
@@ -687,9 +687,9 @@ describe("startSpecialistRun", () => {
         actor(store.users.arda),
         { dataRoot: store.dataRoot },
       );
-      interruptRun(
+      await interruptRun(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: r.runId },
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: r.runId, dataRoot: store.dataRoot },
         actor(store.users.arda),
       );
       return r;
@@ -742,9 +742,9 @@ describe("startSpecialistRun", () => {
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
       actor(store.users.arda),
     );
 
@@ -793,9 +793,9 @@ describe("startSpecialistRun", () => {
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
       actor(store.users.arda),
     );
     expect(run.backend).toBe("codex");
@@ -1171,9 +1171,9 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     ).toBe("VIB-1");
 
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
       actor(store.users.arda),
     );
   });
@@ -1217,9 +1217,9 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     expect(lineCount).toBeGreaterThan(0);
 
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
       actor(store.users.arda),
     );
     expect(
@@ -1241,9 +1241,9 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     // after a run" fix: the UI "Run" button path now reports back.
     await waitForLines(result.runId, 2);
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
       actor(store.users.arda),
     );
     let replied = false;
@@ -2645,8 +2645,8 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
       actor(store.users.arda), { dataRoot: store.dataRoot });
     expect(result.role).toBe("reviewer");
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+    await interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
       actor(store.users.arda));
     return lastRunSpec()?.systemPrompt ?? "";
   }
@@ -2766,8 +2766,8 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
       actor(store.users.arda), { dataRoot: store.dataRoot });
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: devRun.runId },
+    await interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: devRun.runId, dataRoot: store.dataRoot },
       actor(store.users.arda));
     expect(lastRunSpec()?.systemPrompt ?? "").not.toContain("SENTINEL-REVIEWER-ONLY-KB");
   });
@@ -2834,8 +2834,8 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
       actor(store.users.arda), { dataRoot: store.dataRoot });
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+    await interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
       actor(store.users.arda));
   }
 
@@ -3086,8 +3086,8 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", delivers: false },
       actor(store.users.arda), { dataRoot: store.dataRoot });
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+    await interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
       actor(store.users.arda));
     const support = path.join(
       store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "workspace", "support", "dev", "widgets",
@@ -3399,8 +3399,8 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
         actor(store.users.arda), { dataRoot: store.dataRoot });
       const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      interruptRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      await interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
         actor(store.users.arda));
 
       const spec = lastRunSpec()!;
@@ -3470,8 +3470,8 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
         actor(store.users.arda), { dataRoot: store.dataRoot });
       const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      interruptRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      await interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
         actor(store.users.arda));
 
       const criticWs = path.join(
@@ -3636,9 +3636,9 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
     expect(prompt).toMatch(/not the source of truth/i);
 
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
       actor(store.users.arda),
     );
   });
@@ -3745,9 +3745,9 @@ describe("P19-G11 — the run records what it was given", () => {
       { dataRoot: store.dataRoot },
     );
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
       actor(store.users.arda),
     );
     return run.runId;
@@ -4075,9 +4075,9 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
       }
       const run = await pending;
       const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      interruptRun(
+      await interruptRun(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId },
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
         actor(store.users.arda),
       );
       return run;

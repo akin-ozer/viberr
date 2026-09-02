@@ -1129,9 +1129,9 @@ describe("resolvePacket kind matrix", () => {
     expect(runs.length).toBe(1);
     expect(runs[0]!.backend).toBe("claude");
     expect(runs[0]!.kind).toBe("primary");
-    interruptRun(
+    await interruptRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: runs[0]!.id },
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: runs[0]!.id, dataRoot: store.dataRoot },
       actor(store.users.murat),
     );
 
@@ -1235,9 +1235,9 @@ describe("resolvePacket kind matrix", () => {
       const first = listRunsForTaskRows(store.db, store.slug, "VIB-1");
       expect(first).toHaveLength(1);
       expect(first[0]!.backend).toBe("claude");
-      interruptRun(
+      await interruptRun(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: first[0]!.id },
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: first[0]!.id, dataRoot: store.dataRoot },
         actor(store.users.murat),
       );
 
@@ -1252,9 +1252,9 @@ describe("resolvePacket kind matrix", () => {
         actor(store.users.murat),
         { dataRoot: store.dataRoot },
       );
-      interruptRun(
+      await interruptRun(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: later.runId },
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: later.runId, dataRoot: store.dataRoot },
         actor(store.users.murat),
       );
       expect(later.backend).toBe("claude");
