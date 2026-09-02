@@ -552,3 +552,12 @@ ones marked *canaried* were reverted once to prove the lock goes red.
 - E32-6 live: toggled Meaningful comments off and on from the card — toasts, `project.md` row,
   two `project.policy.guardrail_changed` audit rows (beforeOn true/false), "4 of 4 enforced
   guardrails on" restored; the Policy "last change" chip now counts the guardrail change.
+
+### CI follow-up (2026-09-02, verify job on PR #269)
+- The first two cluster-E pushes failed `verify` with an UNHANDLED REJECTION ("database is not
+  open" from `getRun` inside `interruptRun`), not a failing test: `interruptRun` had become async
+  and read the DB AFTER awaiting the timeline note, while ~40 test call sites in five files still
+  called it synchronously (my call-site grep had been head-limited), so the tail ran after the
+  test's DB closed. Fixed twice over: the result is computed before the best-effort note (nothing
+  touches the DB after the await; `noteInterrupt` catches its own failures), and every test call
+  is awaited (sync cleanup helpers made async), so the record is complete when the call returns.

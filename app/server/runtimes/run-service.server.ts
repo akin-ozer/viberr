@@ -1615,10 +1615,18 @@ export async function interruptRun(
     details: { threadId: run.thread_id, backend: run.backend, role: run.role },
   });
   logger.info("run interrupted", { runId: input.runId, by: actor.userId });
-  await noteInterrupt(db, run, actor, input.dataRoot);
 
+  // The response is complete BEFORE the best-effort note: every DB read for the
+  // result happens here, so a caller that does not await (test cleanup after
+  // its DB closed) can never surface "database is not open" as an unhandled
+  // rejection from the tail — `noteInterrupt` catches its own failures.
   const after = getRun(db, input.runId);
-  return { outcome: "interrupted", run: after ? projectOne(db, after) : null };
+  const result: InterruptResult = {
+    outcome: "interrupted",
+    run: after ? projectOne(db, after) : null,
+  };
+  await noteInterrupt(db, run, actor, input.dataRoot);
+  return result;
 }
 
 /**
