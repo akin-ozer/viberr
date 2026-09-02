@@ -2,7 +2,8 @@
 
 > Directory by directory: what lives where, what each module owns, and the
 > import rules between layers. Generated from the tree on `main` @ `68b5480`
-> (2026-09-01) and the header comment of each module. Counts are approximate
+> (2026-09-01) and the header comment of each module; the ruling-121 rows
+> re-verified against the working tree on 2026-09-03. Counts are approximate
 > and will drift; the structure will not.
 
 ## 1. Top level
@@ -54,7 +55,7 @@ Tests are co-located (`foo.server.test.ts`). There are no `utils.ts` dumping gro
 | `audit/` | `recordAudit` (writes), `audit-query` (freshness reads), `audit-browse` (org-admin in-app view), `audit-export` (CSV/JSON download, 100k cap), `s3-config` + `s3-put` (SigV4 PUT, no SDK). |
 | `auth/` | better-auth identity provisioning, login + forced reset, rate limit (10 per email+ip per 15 min), CSRF (origin proof + HMAC double-submit), OAuth providers configured in-app and their credential test, OAuth whitelist provisioning, `require-user` guards, `project-authority` (the single project-authority resolver), `require-project` (the members-only 404), user admin and store, bootstrap admin. |
 | `config/` | `env.server.ts`: the validated environment schema. |
-| `controller/` | Conversations store, run engine, toolkit (`viberr_controller`), ops MCP (`viberr_ops`), tool guards, controller profile + locks. |
+| `controller/` | Conversations store (scopes: instance / board / task), run engine, the per-turn context read (`controller-context.server.ts`, ruling 121), toolkit (`viberr_controller`), ops MCP (`viberr_ops`), tool guards, controller profile + locks. |
 | `db/` | SQLite open + pragmas, migration runner, data-root writer lock + guard, CLI lock for scripts, retention, self-heal of a corrupt DB, backup/restore, transaction helper. |
 | `errors/` | `AppError` and the stable `ERROR_CODES`. |
 | `events/` | Projection event emitter, the SSE broker (per-connection scopes, 25 s heartbeat, 256-event ring buffer, re-authorization each tick), the publisher bridging the two. |
@@ -92,7 +93,7 @@ Tests are co-located (`foo.server.test.ts`). There are no `utils.ts` dumping gro
 | `project-settings/` | Identity, stage editor, members, repository and credential, branch cleanup toggle, danger zone. |
 | `org-settings/` | Tabs: connections, users and access, sign-in & SSO, agent resources (KBs, MCP servers, skills, global agent templates, store browser), controller, audit. |
 | `kb-browser/` | The store folder file manager (upload, folders, GitHub import, SKILL.md editing). |
-| `controller/` | The conversation surface and the Goals panel. |
+| `controller/` | The conversation surface and the Goals panel; the controller dock (`controller-dock.tsx`, mounted by `root.tsx`), its route-derived scope (`controller-dock-context.ts`) and its view builder (`controller-dock-query.server.ts`, served by `routes/resources.controller.ts`). |
 | `notifications/` | The inbox page and the shared notification row. |
 | `profile/` | Identity, notification routing, appearance, access view, GitHub identity, password change. |
 | `insights/` | Read-only run analytics dashboard. |

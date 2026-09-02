@@ -426,16 +426,24 @@ CREATE TABLE controller_conversations (
   -- evaluated against, and (with org admins) the only reader.
   user_id TEXT NOT NULL,
   user_label TEXT NOT NULL,
-  -- NULL = instance scope; a slug binds the conversation to that project's
-  -- board context (the project-role axis).
+  -- The conversation's SCOPE (ruling 121): NULL/NULL = instance; a slug alone
+  -- binds the conversation to that project's board context (the project-role
+  -- axis); slug + task_key anchors it to ONE task, whose canonical file the
+  -- server reads into every turn. A task without a project is not a scope.
   project_slug TEXT,
+  task_key TEXT,
   title TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  last_message_at TEXT
+  last_message_at TEXT,
+  CHECK (task_key IS NULL OR project_slug IS NOT NULL)
 );
 CREATE INDEX idx_controller_conversations__user
   ON controller_conversations (user_id, last_message_at DESC);
+-- The dock (ruling 121) lists ONE scope at a time: this user's threads for one
+-- board or one task, newest first.
+CREATE INDEX idx_controller_conversations__scope
+  ON controller_conversations (user_id, project_slug, task_key, last_message_at DESC);
 CREATE TABLE controller_messages (
   id TEXT PRIMARY KEY,
   conversation_id TEXT NOT NULL
@@ -448,6 +456,11 @@ CREATE TABLE controller_messages (
   -- The agent_runs row that produced a controller reply (its console is the
   -- deep record); NULL on user rows and on refusal notes written run-less.
   run_id TEXT,
+  -- Ruling 121: the page the person was looking at when they sent a user
+  -- message (pathname + query, e.g. /projects/viberr/board?filter=waiting) so
+  -- a transcript read back later still says where the ask came from. NULL on
+  -- controller rows and on messages sent before the dock existed.
+  surface TEXT,
   created_at TEXT NOT NULL,
   UNIQUE (conversation_id, seq)
 );

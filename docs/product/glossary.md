@@ -2,7 +2,8 @@
 
 > The vocabulary the code, the UI and the rulings use. Where a term has an
 > enum behind it, the enum is the truth and is named. Verified against `main`
-> @ `68b5480` (2026-09-01).
+> @ `68b5480` (2026-09-01); the ruling-121 terms re-verified against the
+> working tree on 2026-09-03.
 
 **Acceptance** — the human act that closes a task into the terminal stage. Verdict-gated (ruling 20), requires the review PR head to contain the delivered revision, refuses while the PR is closed unmerged (ruling 37), and must carry the disclosure echo the human was shown (ruling 88). Two other endings exist: **force-accept** (admin-only override of the verdict gate, audited `task.acceptance.forced`, recorded as `acceptance: forced` and rendered `bypassed`) and **Completed, no changes** (a verified empty diff or no branch; still verdict-gated, merges nothing).
 
@@ -24,7 +25,9 @@
 
 **Connection** — an org-level GitHub owner + PAT (`github_connections`). Distinct from a user's stored PAT (`github_pats`) and from a project's credential binding (`project_github_credentials`).
 
-**Controller** — the single instance-level conversational agent (`kind: controller`) reachable at `/controller` and `/projects/:slug/controller`. Every tool call runs under the asking user's live authority (ruling 99). Its configuration is deployment-locked by default (ruling 108).
+**Controller** — the single instance-level conversational agent (`kind: controller`) reachable at `/controller`, `/projects/:slug/controller` and, on every signed-in surface, through the controller dock. Every tool call runs under the asking user's live authority (ruling 99). Its configuration is deployment-locked by default (ruling 108).
+
+**Controller dock** — the floating Controller button (bottom-right, every signed-in surface except the controller pages and login) and its non-modal panel, bound to the place the person is standing (ruling 121). A **conversation scope** is that binding: instance, one board, or one task; the server gathers the scope as a **context read** at the start of every turn (the task's `task.md` verbatim and bounded, or a board snapshot, or the person's projects). A user message's **surface** is the page it was sent from.
 
 **Data root** — `VIBERR_DATA_ROOT`. Holds canonical files, SQLite, run logs, KBs and skills. One app process per data root, enforced by `state/writer.lock`.
 

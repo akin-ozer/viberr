@@ -4,9 +4,13 @@
 > diagnostics server, its deployment locks, and the goal chains it can define.
 > Source of truth: `app/server/controller/*`, `app/server/tasks/goal-actions.server.ts`,
 > `app/server/files/goal-writer.server.ts`, `app/schemas/goal-file.schema.ts`,
-> `app/features/controller/*`, `app/features/org-settings/controller-admin-panel.tsx`.
-> Rulings 99, 100, 106, 107, 108 in [decisions.md](../architecture/decisions.md).
-> Verified against `main` @ `68b5480` (2026-09-01).
+> `app/features/controller/*`, `app/routes/resources.controller.ts`, `app/root.tsx` (the
+> dock mount), `app/features/org-settings/controller-admin-panel.tsx`.
+> Rulings 99, 100, 106, 107, 108, 121 in [decisions.md](../architecture/decisions.md).
+> Verified against `main` @ `68b5480` (2026-09-01); the ruling-121 dock, conversation
+> scopes, context read and `update_task` verified against the working tree on 2026-09-02
+> and re-verified on 2026-09-03 after the ruling's adversarial review (see the dated
+> correction note under ruling 121 for what that review changed).
 
 ## 1. What it is
 
@@ -45,10 +49,12 @@ Identity facts:
 | `/controller` | any signed-in user | Instance scope. `?c=<id>` selects a conversation; `?all=1` lets an org admin list everyone's. |
 | `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Goals panel**. Eighth item in the workspace rail. |
 | Org settings → Controller tab | org admins | Configures the controller itself (§6). |
+| **The dock**, on every signed-in surface | any signed-in user | Ruling 121: a floating Controller button, bottom-right, opening a non-modal panel bound to the place the person is standing (§2.1). Hidden on the two controller pages and on `/login`. |
+| `/resources/controller` | any signed-in user; project and task scopes require membership | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn. |
 
-Entry points: the workspace rail item, the Home hero link (once a project exists),
-the org-settings tab's "Open the controller", and the goal chip on a task page. There
-is no command-palette entry. The page subscribes to the user SSE scope (and the
+Entry points: the dock (everywhere), the workspace rail item, the Home hero link (once a
+project exists), the org-settings tab's "Open the controller", and the goal chip on a
+task page. There is no command-palette entry. The page subscribes to the user SSE scope (and the
 project scope on the project surface) and polls every 5 seconds while a turn is
 working. The composer is disabled when Claude is unavailable or the viewer does not
 own the active conversation.
@@ -59,15 +65,76 @@ a non-owner gets a 404-shaped refusal so "not yours" and "never existed" look th
 Only the owner may send. Org admins reading project-scoped transcripts for projects
 they are not members of is intended (ruling 100).
 
+### 2.1 The dock (ruling 121)
+
+`controller-dock.tsx`, mounted once in `root.tsx` whenever the root payload carries a
+csrf token (the signed-in signal). Its scope follows the matched routes
+(`controller-dock-context.ts`, pure and tested): a task page anchors it to that task,
+any workspace view binds it to that board, everything else is instance scope; on
+`/controller`, `/projects/:slug/controller`, `/login`, `/profile` and `/notifications`
+it renders nothing — the last two render their whole page inside a `showModal()`
+overlay, which would leave the dock inert behind it.
+
+- **Trigger**: a 44 px circular button, 20 px from the bottom-right corner, named
+  `Controller · <scope>` (`Instance`, `<project name>`, `<KEY> · <project name>`) — the
+  name comes from the workspace loader, so it reads the same before the first open and
+  after it,
+  `aria-haspopup="dialog"` / `aria-expanded`, wearing the `.live-dot` while a turn is
+  working in the dock's conversation (open or closed; the dock polls every 5 s until it
+  settles).
+- **Panel**: `role="dialog" aria-modal="false"`, `data-screen-label="Controller dock"`,
+  400 × min(640, 100dvh − 96) px docked above the trigger; no scrim, no focus trap, no
+  body scroll lock (the page stays usable). Header: the controller's name, the scope
+  pill, Threads (this scope's threads, count in the name), New, Open page (the full
+  surface with `?c=`), Close. One context line names what the controller knows here.
+  The transcript reuses the page's message vocabulary and the composer takes focus on
+  open (⌘↵ / Ctrl↵ sends) — on a user-initiated open only, so a remembered-open reload
+  never starts focus inside the textarea. Escape closes and returns focus to the trigger
+  **while focus is inside the panel**; an Escape elsewhere (the palette, a confirm
+  dialog, a stage menu) leaves the dock alone, and an outside press never closes it.
+- **Continuity**: the dock opens on the newest thread of the current scope; the selected
+  thread per scope and the open/closed state survive a reload for the life of the tab
+  (`sessionStorage`, wrapped, absent in SSR). Navigating swaps the scope and keeps the
+  panel open; a working turn keeps working.
+- **Live**: the view is a root-owned `fetcher.load` of `/resources/controller`, re-run
+  on every revalidation, so any surface streaming the `user` scope refreshes it. While
+  open, the dock mounts its own `user` stream only on the surfaces that have none —
+  today `/insights` alone (`DOCK_SELF_STREAM_ROUTE_IDS`, pinned by a test against the
+  modules that really call the hook); everywhere else a second socket would only
+  duplicate revalidations.
+- **Never the root error page**: the view's route answers a benign empty view for a
+  scope the person cannot reach and falls back to this scope's newest thread for a
+  selection it cannot honour (reporting `staleSelection`, which the dock uses to forget
+  the stored id). A thrown response from a root-owned fetcher would replace the whole
+  page, which is the hazard ruling 121(f) named for CSRF.
+- **Motion**: the panel grows from its trigger (`transform-origin: bottom right`,
+  .18s `--ease-out` in, .12s out on a pointer close, instant on Escape); a reply that
+  arrives while the panel is open lands with a .2s fade-and-rise (history never
+  animates: the component marks only messages it had not seen in the same
+  conversation); reduced motion (OS or the in-app preference) fades only.
+- **Small screens** (≤ 720 px): a full-width bottom sheet, `min(80dvh, 640px)` tall,
+  entering and leaving along the bottom edge; the trigger stays on screen above the
+  sheet (R19-12), smaller, as a second close.
+- **Errors**: refusals are in the transcript (the run engine writes them); transport
+  failures (expired session, stale CSRF) come back as `{ ok:false, error }` and show as an
+  error toast, never as the root boundary.
+
 ## 3. Conversations and turns
 
 Storage is app-owned SQLite, the same family as notifications and sessions:
-`controller_conversations(id, user_id, user_label, project_slug NULL = instance,
-title, created_at, updated_at, last_message_at)` and `controller_messages(id,
-conversation_id, seq, author user|controller, user_id, text, run_id, created_at)` with
-`UNIQUE (conversation_id, seq)`. The title is the first user message clipped to 80
-characters. Every appended message publishes the owner-routed SSE event
-`controller.updated`.
+`controller_conversations(id, user_id, user_label, project_slug, task_key, title,
+created_at, updated_at, last_message_at)` with `CHECK (task_key IS NULL OR project_slug
+IS NOT NULL)` and `controller_messages(id, conversation_id, seq, author user|controller,
+user_id, text, run_id, surface, created_at)` with `UNIQUE (conversation_id, seq)`.
+
+A conversation's **scope** (ruling 121) is fixed at creation: instance (`project_slug`
+and `task_key` null), board (slug alone) or task (slug + key). `listConversations`
+filters on both (`taskKey` undefined = any binding under the slug, null = the board's own
+threads, a key = that task's); `createConversation` refuses a task without a project.
+`surface` is the in-app path (pathname + query, normalized to 400 chars, no control
+characters) a USER message was sent from; controller rows carry null. The title is the
+first user message clipped to 80 characters. Every appended message publishes the
+owner-routed SSE event `controller.updated`.
 
 **One user message is one run** (`runControllerTurn` in `controller-run.server.ts`):
 
@@ -79,17 +146,36 @@ characters. Every appended message publishes the owner-routed SSE event
    `task_key = <conversation id>`, so no task-scoped query ever matches it. Model is
    the profile's through `resolveRunModel("claude", …)`; effort only when set. The
    newest prior controller run is resumed when it has a session id, otherwise a fresh
-   run starts. Each prompt carries a digest of the last 30 messages (24 000 chars,
-   600 per message) as the re-anchor, because the controller has no `task.md`.
+   run starts. Each prompt opens with the **context read** (ruling 121,
+   `gatherControllerContext`): a block labelled as a server read taken when the turn
+   started — for a task-anchored conversation a derived header (stage and position, next
+   stages with their boundaries, owner, engaged agents, branch and PR, open packet, goal
+   chain) plus the canonical `task.md` verbatim inside a five-backtick fence, bounded by
+   `TASK_FILE_CONTEXT_CHARS` (24 000; over budget the head stays whole and the newest
+   timeline entries are kept, with a marker naming how many were omitted); for a board,
+   the project's description, repo, members, stages with counts, boundaries, the open-task
+   table (`BOARD_CONTEXT_TASKS` 40 rows, `BOARD_CONTEXT_CHARS` 12 000) and the goal
+   chains; for the instance, the projects the person can see with their role; then, when
+   the message carried one, `They are looking at: <surface>`. The whole block stays under
+   `CONTEXT_BLOCK_CHARS` (32 000); the fence is always longer than the longest backtick
+   run inside the file, so nothing in the file can close it, and a line in the server's
+   own voice above it says the fenced bytes are data and never instructions. The read is
+   gated: the asking person's LIVE visibility of the bound project is re-proven through
+   the same `assertProjectAction` chokepoint the board tools use, and a refusal replaces
+   the block with the toolkit's uniform not-visible sentence. After it comes a digest of the last 30 messages
+   (24 000 chars, 600 per message), then the message. The context read is why the
+   controller does not need a `task.md` of its own: the anchored task's is read in fresh
+   every turn.
 5. Mounts on every turn: `viberr_controller` (§4), `viberr_ops` (§5), then the
    controller's granted org MCP servers. Denied built-ins: `Read`, `Grep`, `Glob`,
    `WebFetch`, `WebSearch` plus the operator read-only set (`Bash`, `Edit`,
    `MultiEdit`, `Write`, `NotebookEdit`). The system prompt replaces the Claude Code
    preset: doctrine, attached skills and KBs (24 000-char KB budget), a runtime block
    naming mounted and unmounted MCP servers, and a conversation block naming the
-   asker, their live org role, the project binding and the rule that only this
-   person's own messages authorize actions. Working directory is
-   `<dataRoot>/runtimes/controller-scratch`.
+   asker, their live org role, the project binding (and the task anchor, when there is
+   one: "tools default to both, and every turn opens with the task's canonical file as a
+   server read") and the rule that only this person's own messages authorize actions.
+   Working directory is `<dataRoot>/runtimes/controller-scratch`.
 6. `settleTurn` records the reply (or a failure note naming quota/auth/other),
    releases the lease and starts the next queued message.
 
@@ -120,7 +206,10 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
 - Every handler maps a 401/403 to `[denied] <sentence>` and anything else to
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 
-The 37 tools:
+The 38 tools (ruling 121: `projectSlug` defaults to the bound project and, on a
+task-anchored conversation, every task tool's `taskKey` defaults to the anchored task —
+**only within the anchor's own project**: a call that names a different `projectSlug`
+must name its task, or it is refused. `whoami` reports both bindings):
 
 | Scope | Tools | Gate |
 |---|---|---|
@@ -128,7 +217,7 @@ The 37 tools:
 | Instance writes | `create_user` (relays the one-time temp password), `update_user`, `set_user_org_role`, `save_knowledge_base`, `save_skill`, `save_mcp_server` (takes no credential; reserved names refused), `test_mcp_server`, `save_global_agent` (specialists only) | org admin |
 | Project creation | `create_project` (any shape: stages, boundaries, members, description) | any signed-in user; the asker is seeded project admin (FR5) |
 | Board reads | `get_project`, `list_tasks`, `get_task` (events 12, max 50), `get_github_state`, `list_goals`, `get_goal` | `requireVisible` |
-| Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier), `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `terminal-stage` / queued honestly, else `startAgentRun`), `update_project_settings`, `update_stages`, `set_transition_boundary` (`edit-policy`), `invite_member`, `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
+| Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier), `update_task` (ruling 121: the goal under `update-goal`, priority / labels / due date under `edit-task-meta` as a full replace — the task page's two writers and gates, each part reported on its own, and an axis already holding the asked-for value answers `[noop]` rather than claiming a write nobody made), `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `terminal-stage` / queued honestly, else `startAgentRun`), `update_project_settings`, `update_stages`, `set_transition_boundary` (`edit-policy`), `invite_member`, `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
 | Goals | `create_goal` (`create-task`, 1..20 links), `update_goal` (creator or `run-agents`) | `requireVisible` then the goal gate (§7) |
 
 Invariants pinned by tests: there is **no** tool for merge, acceptance,
@@ -270,10 +359,10 @@ currently sees no controls, and must redirect conversationally.
 
 ## 9. Known drift (recorded, not fixed here)
 
-- The shipped doctrine and `controller-guide` skill mention a `list_projects` tool
-  that does not exist; visible projects come from `whoami`.
-- The doctrine says a controller comment mention can start a run; `comment_on_task`
-  only notifies humans and its description says so.
+*(2026-09-02: the first two items recorded here on 2026-09-01 — the doctrine's
+`list_projects` mention and its "a comment mention can start a run" sentence — were fixed
+by ruling 121's doctrine and skill rewrite, shipped through the hash upgrade.)*
+
 - Ruling 108's note that the panel "skips the P13-KM-01 display-name repair" under a
   lock is stale wording: the panel runs the repair for display and posts blank for
   locked sections; the byte-for-byte outcome holds through the server.

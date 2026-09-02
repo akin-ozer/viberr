@@ -289,9 +289,10 @@ export function ControllerAdminPanel({
         </div>
       </div>
       <p className="fine dim">
-        One controller manages this instance. Anyone can talk to it; every
-        action it takes runs under the asking person's own permissions. This
-        tab configures the controller itself, which only org admins can do
+        One controller manages this instance. Anyone can talk to it, from the
+        Controller button in the corner of every page or from its own pages;
+        every action it takes runs under the asking person's own permissions.
+        This tab configures the controller itself, which only org admins can do
         {/* D04-U8 (pass 32): the lead is read first; when a deployment locks
             sections, say so here instead of promising an editable tab and
             walking it back in the note below. */}

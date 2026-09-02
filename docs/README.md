@@ -2,6 +2,8 @@
 
 This directory is the code-verified reference for Viberr as it is built. Every page was
 checked against the tree on `main` @ `68b5480` (2026-09-01) and says so in its header;
+the six pages ruling 121 touched carry a second, later stamp (2026-09-02, re-verified
+2026-09-03 after the ruling's adversarial review);
 where an older document was found wrong, the page says what changed and the full ledger
 is in [validation/2026-09-01-doc-validation.md](validation/2026-09-01-doc-validation.md).
 Viberr is **pre-production**: formats and schemas change without migrations, so trust the
@@ -40,7 +42,7 @@ dated header and the code over anything undated.
 | [architecture/data-model.md](architecture/data-model.md) | Data-root layout, every SQLite table (primary vs derived vs config), indexes, retention, ids |
 | [architecture/file-formats.md](architecture/file-formats.md) | The canonical `project.md`, `task.md`, goal and agent-profile formats; timeline grammar; packet YAML (the `## Packet` section is pinned by a test) |
 | [architecture/projections-and-events.md](architecture/projections-and-events.md) | Writers, watcher, tolerant parsing and diagnostics, rebuilder, rescan/rebuild, SSE broker and client |
-| [architecture/decisions.md](architecture/decisions.md) | Conventions, 116 numbered owner rulings, the unrecorded decisions since 2026-08-20, the route map |
+| [architecture/decisions.md](architecture/decisions.md) | Conventions, 121 numbered owner rulings, the unrecorded decisions since 2026-08-20, the route map |
 
 ### Domain
 
@@ -49,7 +51,7 @@ dated header and the code over anything undated.
 | [domain/task-lifecycle.md](domain/task-lifecycle.md) | Governed mutation shape, RBAC matrix, creation, stages and boundaries, transitions, readiness/waiting/validation, ownership, engagements, packets, recommendations, schedules, delivery, the acceptance endings, archive, timeline, notifications |
 | [domain/operator.md](domain/operator.md) | The per-task coordinator: authority and gates, triggers, the turn, the 12 `viberr` tools, packets, guardrails |
 | [domain/agents-and-runtime.md](domain/agents-and-runtime.md) | Backends and credentials, models, a run's life (persistence, admission, streaming, failure kinds, resume), specialist dispatch and tools, capability catalog and enforcement, context mounting, workspaces and git, boot recovery, seeded catalog |
-| [domain/controller-and-goals.md](domain/controller-and-goals.md) | The instance controller: conversations, the 37 `viberr_controller` tools, `viberr_ops`, deployment locks, chained goals |
+| [domain/controller-and-goals.md](domain/controller-and-goals.md) | The instance controller: the dock on every surface, conversation scopes and the per-turn context read (ruling 121), the 38 `viberr_controller` tools, `viberr_ops`, deployment locks, chained goals |
 | [domain/github-delivery.md](domain/github-delivery.md) | PATs and connections, repo attach, the delivery pipeline, PR adoption and collisions, revisions and verdicts, the reconciler, scope violations |
 | [domain/auth-and-rbac.md](domain/auth-and-rbac.md) | better-auth setup, CSRF, OAuth whitelist, org and project roles, enforcement, org settings, audit, insights, profile |
 

@@ -87,10 +87,13 @@ import {
   releaseOwner,
   requireProjectMutable,
   setOwner,
+  setTaskMetadata,
   transitionStage,
+  updateTaskGoal,
   userName,
   type CreateTaskInput,
 } from "~/server/tasks/task-actions.server";
+import { PRIORITY_VALUES } from "~/schemas/task-file.schema";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import type { StartAgentRunInput } from "~/server/tasks/specialist-run.server";
 import { canRunAgents } from "~/server/auth/project-authority.server";
@@ -132,6 +135,9 @@ export interface ControllerToolkitDeps {
   user: { id: string; email: string; name: string };
   /** The conversation's bound project, when it has one (tool default). */
   projectSlug?: string | null;
+  /** Ruling 121: the conversation's anchored task, when it has one — every
+   *  task tool's `taskKey` defaults to it. */
+  taskKey?: string | null;
 }
 
 export interface ControllerToolkit {
@@ -146,7 +152,9 @@ export const CONTROLLER_TOOLKIT_INSTRUCTIONS =
   "checked by the server per call: instance tools follow their org role, board tools follow " +
   "their role in that project. A [denied] answer is final — relay it with its reason. Reads " +
   "are your ground truth; call them before asserting state. Nothing here deletes, merges, " +
-  "accepts completions, resolves decision packets, or moves a task into its final stage.";
+  "accepts completions, resolves decision packets, or moves a task into its final stage. " +
+  "When the conversation is bound to a project, tools default to it; when it is anchored to a " +
+  "task, the task tools default to that task as well.";
 
 const prose = normalizeEscapedNewlines;
 
@@ -173,6 +181,28 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     }
     return slug;
   }
+  const boundTask = deps.taskKey ?? null;
+  /**
+   * Resolve a task tool's key against the conversation's anchor (ruling 121).
+   *
+   * The anchor only applies to ITS OWN project. A call that overrides
+   * `projectSlug` and leaves `taskKey` off used to silently inherit the
+   * anchored key and act on a same-named task in the other project - a write
+   * nobody named (review finding 4). Naming the task is required there.
+   */
+  function keyOf(given: string | undefined, slug: string): string {
+    const named = given?.trim();
+    if (named) return named;
+    if (boundTask && slug === boundSlug) return boundTask;
+    if (boundTask) {
+      throw AppError.validation(
+        `This conversation is anchored to ${boundTask} in ${boundSlug}; name the task in ${slug}.`,
+      );
+    }
+    throw AppError.validation(
+      "Name the task (this conversation is not anchored to one).",
+    );
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: SdkMcpToolDefinition<any>[] = [];
@@ -188,7 +218,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "whoami",
-      "The asking person's identity and live authority: org role, visible projects with their project role, and this conversation's project binding. Call it when unsure what the person may do.",
+      "The asking person's identity and live authority: org role, visible projects with their project role, and this conversation's bindings (project, and the anchored task when there is one). Call it when unsure what the person may do.",
       {},
       run(() => {
         const admin = orgAdmin();
@@ -208,6 +238,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           name: user.name,
           orgRole: admin ? "admin" : "member",
           conversationProject: boundSlug,
+          conversationTask: boundTask,
           projects,
         });
       }),
@@ -860,15 +891,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       "One task's live state: stage, readiness, goal text, engaged agents, PR state, open packet, plus the newest timeline events. Membership gated. Historical (Done, archived) tasks read the same way.",
       {
         projectSlug: z.string().optional(),
-        taskKey: z.string(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
         events: z.number().int().min(1).max(50).optional().describe("Newest timeline events to include (default 12)."),
       },
-      runWith((args: { projectSlug?: string; taskKey: string; events?: number }) => {
+      runWith((args: { projectSlug?: string; taskKey?: string; events?: number }) => {
         const slug = slugOf(args.projectSlug);
+        const key = keyOf(args.taskKey, slug);
         requireVisible(slug, "read this task");
-        const summary = getTaskSummary(db, slug, args.taskKey);
-        if (!summary) throw AppError.notFound(`No task ${args.taskKey} in ${slug}.`);
-        const events = listTaskEvents(db, slug, args.taskKey)
+        const summary = getTaskSummary(db, slug, key);
+        if (!summary) throw AppError.notFound(`No task ${key} in ${slug}.`);
+        const events = listTaskEvents(db, slug, key)
           .slice(0, args.events ?? 12)
           .map((e) => ({
             at: e.occurredAt,
@@ -930,24 +962,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       "Move a task to another stage. Workflow boundaries and your project role decide; a move into the final Done stage is refused here, because acceptance is decided on the task page with its own confirmation.",
       {
         projectSlug: z.string().optional(),
-        taskKey: z.string(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
         toStageId: z.string().describe("Target stage id (from get_project)."),
       },
-      runWith(async (args: { projectSlug?: string; taskKey: string; toStageId: string }) => {
+      runWith(async (args: { projectSlug?: string; taskKey?: string; toStageId: string }) => {
         const slug = slugOf(args.projectSlug);
+        const key = keyOf(args.taskKey, slug);
         requireVisible(slug, "move tasks");
         const project = getProject(db, slug);
         if (!project) throw new NotVisibleError(notVisible(slug));
         const terminal = project.stages[project.stages.length - 1];
         if (terminal && args.toStageId === terminal.id) {
           return (
-            `[denied] Moving ${args.taskKey} into ${terminal.name} means accepting its completion, ` +
+            `[denied] Moving ${key} into ${terminal.name} means accepting its completion, ` +
             `which carries its own confirmation and merge consequences. Decide it on the task page: ` +
-            `projects/${slug}/tasks/${args.taskKey}.`
+            `projects/${slug}/tasks/${key}.`
           );
         }
-        const summary = getTaskSummary(db, slug, args.taskKey);
-        if (!summary) throw AppError.notFound(`No task ${args.taskKey} in ${slug}.`);
+        const summary = getTaskSummary(db, slug, key);
+        if (!summary) throw AppError.notFound(`No task ${key} in ${slug}.`);
         // `manual` ALWAYS, exactly as the board drag and the task dropdown send
         // it. It is what marks a move as a person's own decision, and it is
         // what puts every move behind `approve-transition`. Leaving it off for
@@ -958,12 +991,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         // door than the one they already have.
         const move: Parameters<typeof transitionStage>[1] = {
           projectSlug: slug,
-          taskKey: args.taskKey,
+          taskKey: key,
           toStageId: args.toStageId,
           manual: true,
         };
         const moved = await transitionStage(db, move, actor, { dataRoot });
-        return `[done] ${args.taskKey} is now in stage ${moved.stage}.`;
+        return `[done] ${key} is now in stage ${moved.stage}.`;
       }),
     ),
     "move_task",
@@ -975,11 +1008,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       "Post a controller comment on a task's timeline: publish information for humans, or brief agents. @mentions notify people. It never starts a run by itself; use run_agent_on_task to put an agent to work.",
       {
         projectSlug: z.string().optional(),
-        taskKey: z.string(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
         text: z.string(),
       },
-      runWith(async (args: { projectSlug?: string; taskKey: string; text: string }) => {
+      runWith(async (args: { projectSlug?: string; taskKey?: string; text: string }) => {
         const slug = slugOf(args.projectSlug);
+        const key = keyOf(args.taskKey, slug);
         requireVisible(slug, "comment on this task");
         // Commenting names no RbacAction, so it never passes through
         // `requireAction` — the chokepoint that freezes an archived project.
@@ -991,18 +1025,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           loadProjectContext({ dataRoot }, slug),
           "comment on this task",
         );
-        const summary = getTaskSummary(db, slug, args.taskKey);
-        if (!summary) throw AppError.notFound(`No task ${args.taskKey} in ${slug}.`);
+        const summary = getTaskSummary(db, slug, key);
+        if (!summary) throw AppError.notFound(`No task ${key} in ${slug}.`);
         const text = `${prose(args.text).trim()}\n\n_Posted by the controller for ${userName(db, user.id)}._`;
         await postAgentComment(db, { dataRoot }, {
           projectSlug: slug,
-          taskKey: args.taskKey,
+          taskKey: key,
           actorRef: { kind: "controller" },
           text,
           // C03-OC1: the audit row names the asker, like every other tool.
           auditActor: actor,
         });
-        return `[done] Comment posted on ${args.taskKey}.`;
+        return `[done] Comment posted on ${key}.`;
       }),
     ),
     "comment_on_task",
@@ -1014,23 +1048,24 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       "Assign a task's human owner: the asking person themselves, another member, or release it. Contributor+ for self, ownership rules apply for others.",
       {
         projectSlug: z.string().optional(),
-        taskKey: z.string(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
         owner: z
           .string()
           .describe('A member email, "me" for the asking person, or "none" to release.'),
       },
-      runWith(async (args: { projectSlug?: string; taskKey: string; owner: string }) => {
+      runWith(async (args: { projectSlug?: string; taskKey?: string; owner: string }) => {
         const slug = slugOf(args.projectSlug);
+        const key = keyOf(args.taskKey, slug);
         requireVisible(slug, "change task ownership");
         const who = args.owner.trim().toLowerCase();
         if (who === "none") {
           await releaseOwner(
             db,
-            { projectSlug: slug, taskKey: args.taskKey },
+            { projectSlug: slug, taskKey: key },
             actor,
             { dataRoot },
           );
-          return `[done] ${args.taskKey} is now unowned.`;
+          return `[done] ${key} is now unowned.`;
         }
         const target =
           who === "me"
@@ -1039,14 +1074,127 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (!target) throw AppError.notFound(`No Viberr user with the email ${args.owner}.`);
         const updated = await setOwner(
           db,
-          { projectSlug: slug, taskKey: args.taskKey, targetUserId: target },
+          { projectSlug: slug, taskKey: key, targetUserId: target },
           actor,
           { dataRoot },
         );
-        return `[done] ${args.taskKey} is owned by ${updated.owner?.name ?? target}.`;
+        return `[done] ${key} is owned by ${updated.owner?.name ?? target}.`;
       }),
     ),
     "set_task_owner",
+  );
+
+  add(
+    tool(
+      "update_task",
+      "Edit a task's goal text and/or its metadata (priority, labels, due date) — the same two writers the task page uses, behind the same gates: the goal needs maintainer or above, metadata needs the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Never edits the title, stage, owner or engaged agents.",
+      {
+        projectSlug: z.string().optional(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
+        goal: z.string().optional().describe("The new goal text (deliverable plus the done signal)."),
+        priority: z.enum(PRIORITY_VALUES).optional(),
+        labels: z.array(z.string()).optional().describe("The full label set; [] clears it."),
+        dueDate: z.string().optional().describe("ISO date (YYYY-MM-DD), or \"\" to clear."),
+      },
+      runWith(
+        async (args: {
+          projectSlug?: string;
+          taskKey?: string;
+          goal?: string;
+          priority?: (typeof PRIORITY_VALUES)[number];
+          labels?: string[];
+          dueDate?: string;
+        }) => {
+          const slug = slugOf(args.projectSlug);
+          const key = keyOf(args.taskKey, slug);
+          requireVisible(slug, "edit this task");
+          const hasMeta =
+            args.priority !== undefined || args.labels !== undefined || args.dueDate !== undefined;
+          if (args.goal === undefined && !hasMeta) {
+            throw AppError.validation(
+              "Pass a goal and/or at least one metadata field (priority, labels, dueDate).",
+            );
+          }
+          // Two writers, two gates. Each part reports on its own so a goal that
+          // wrote is never hidden behind a metadata refusal (or the reverse);
+          // when nothing was applied the first refusal is the answer.
+          //
+          // Both writers short-circuit when the value is already what was
+          // asked for: no file write, no timeline note, no audit row. Reporting
+          // that as "[done] updated" told the person something happened when
+          // nothing did (review finding 14), so the before/after comparison
+          // below decides which axes really changed.
+          const before = getTaskSummary(db, slug, key);
+          const applied: string[] = [];
+          const unchanged: string[] = [];
+          const refused: string[] = [];
+          let firstError: AppError | null = null;
+          if (args.goal !== undefined) {
+            try {
+              await updateTaskGoal(
+                db,
+                { projectSlug: slug, taskKey: key, goal: prose(args.goal) },
+                actor,
+                { dataRoot },
+              );
+              if (before && before.goal === prose(args.goal).trim()) unchanged.push("goal");
+              else applied.push("goal");
+            } catch (error) {
+              if (!(error instanceof AppError)) throw error;
+              firstError ??= error;
+              refused.push(`goal: ${error.userMessage}`);
+            }
+          }
+          if (hasMeta) {
+            const meta: Parameters<typeof setTaskMetadata>[1] = {
+              projectSlug: slug,
+              taskKey: key,
+            };
+            if (args.priority !== undefined) meta.priority = args.priority;
+            if (args.labels !== undefined) meta.labels = args.labels;
+            if (args.dueDate !== undefined) meta.dueDate = args.dueDate;
+            const fields = [
+              args.priority !== undefined ? "priority" : null,
+              args.labels !== undefined ? "labels" : null,
+              args.dueDate !== undefined ? "due date" : null,
+            ].filter((f): f is string => f !== null);
+            try {
+              await setTaskMetadata(db, meta, actor, { dataRoot });
+              const after = getTaskSummary(db, slug, key);
+              for (const field of fields) {
+                const same =
+                  before !== null &&
+                  after !== null &&
+                  (field === "priority"
+                    ? before.priority === after.priority
+                    : field === "labels"
+                      ? before.labels.join("\u0000") === after.labels.join("\u0000")
+                      : before.dueDate === after.dueDate);
+                if (same) unchanged.push(field);
+                else applied.push(field);
+              }
+            } catch (error) {
+              if (!(error instanceof AppError)) throw error;
+              firstError ??= error;
+              refused.push(`${fields.join(", ")}: ${error.userMessage}`);
+            }
+          }
+          if (applied.length === 0 && firstError) throw firstError;
+          const noted = refused.length ? ` Not applied: ${refused.join("; ")}` : "";
+          if (applied.length === 0 && unchanged.length > 0) {
+            return `[noop] ${key}: ${unchanged.join(", ")} already had that value; nothing was written.${noted}`;
+          }
+          return (
+            `[done] ${key} updated: ${applied.join(", ")}.` +
+            (unchanged.length
+              ? ` Already set, nothing written: ${unchanged.join(", ")}.`
+              : "") +
+            noted
+          );
+        },
+      ),
+    ),
+    "update_task",
   );
 
   add(
@@ -1055,15 +1203,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       "Put an agent to work on a task with a directive: the operator (coordination) or a deployed agent profile (stage work). Maintainer or above. The result reports honestly whether a run started.",
       {
         projectSlug: z.string().optional(),
-        taskKey: z.string(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
         agent: z
           .string()
           .describe('"operator", or a deployed profile id from get_project.'),
         prompt: z.string().optional().describe("The directive: what to do for this task."),
       },
       runWith(
-        async (args: { projectSlug?: string; taskKey: string; agent: string; prompt?: string }) => {
+        async (args: { projectSlug?: string; taskKey?: string; agent: string; prompt?: string }) => {
           const slug = slugOf(args.projectSlug);
+          const key = keyOf(args.taskKey, slug);
           requireVisible(slug, "run agents");
           const file = readProjectFile({ projectSlug: slug, dataRoot });
           if (!file) throw new NotVisibleError(notVisible(slug));
@@ -1084,7 +1233,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             );
             const operatorInput: RunOperatorInput = {
               projectSlug: slug,
-              taskKey: args.taskKey,
+              taskKey: key,
               trigger: "manual",
               actor: auditActor,
             };
@@ -1098,19 +1247,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               return "[denied] The operator is not run while a decision packet is open. Answer the packet first.";
             }
             if (result.refused === "terminal-stage") {
-              return `[denied] ${args.taskKey} is already Done; there is nothing for the operator to coordinate.`;
+              return `[denied] ${key} is already Done; there is nothing for the operator to coordinate.`;
             }
             if (result.queued) {
-              return `[done] The operator is already working ${args.taskKey}; your directive was queued for it.`;
+              return `[done] The operator is already working ${key}; your directive was queued for it.`;
             }
-            return `[done] Operator run started on ${args.taskKey}.`;
+            return `[done] Operator run started on ${key}.`;
           }
           const { startAgentRun } = await import(
             "~/server/tasks/specialist-run.server"
           );
           const runInput: StartAgentRunInput = {
             projectSlug: slug,
-            taskKey: args.taskKey,
+            taskKey: key,
             profileId: args.agent.trim(),
             triggeredByName: display,
             triggeredByUserId: user.id,
@@ -1120,7 +1269,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             runInput.directiveFrom = display;
           }
           const started = await startAgentRun(db, runInput, actor, { dataRoot });
-          return `[done] ${started.name} run started on ${args.taskKey} (${started.backend}).`;
+          return `[done] ${started.name} run started on ${key} (${started.backend}).`;
         },
       ),
     ),

@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useFetcher, useRevalidator, useSearchParams } from "react-router";
+import {
+  Link,
+  useFetcher,
+  useLocation,
+  useRevalidator,
+  useSearchParams,
+} from "react-router";
 import type {
   ControllerSurfaceView,
   ConversationListItem,
@@ -97,9 +103,11 @@ export function ControllerPage({
         <div>
           <h1>{view.controllerName}</h1>
           <p className="fine dim">
-            {projectSlug
-              ? `Managing the ${projectSlug} board with your own permissions.`
-              : "Managing this instance with your own permissions."}
+            {view.conversation?.taskKey
+              ? `Anchored to ${view.conversation.taskKey} on the ${view.projectName ?? projectSlug} board, with your own permissions.`
+              : projectSlug
+                ? `Managing the ${view.projectName ?? projectSlug} board with your own permissions.`
+                : "Managing this instance with your own permissions."}
           </p>
         </div>
         {!view.available && (
@@ -178,7 +186,12 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
                 className={`ctl-conv${c.id === active ? " on" : ""}`}
                 to={href(c)}
               >
-                <span className="ctl-conv-title">{c.title}</span>
+                <span className="ctl-conv-title">
+                  {c.taskKey && (
+                    <span className="pill agent sm ctl-conv-task">{c.taskKey}</span>
+                  )}
+                  {c.title}
+                </span>
                 <span className="fine xs dim">
                   {!c.own && `${c.ownerLabel} · `}
                   {c.lastMessageAt ? (
@@ -235,6 +248,11 @@ function Transcript({ view }: { view: ControllerSurfaceView }) {
                 )}
               </span>
               <LocalDayDotTime iso={m.createdAt} />
+              {m.surface && (
+                <span className="ctl-msg-surface" title={m.surface}>
+                  from {surfaceLabel(m.surface)}
+                </span>
+              )}
             </header>
             <div className="md-body">
               <Markdown text={m.text} />
@@ -264,6 +282,7 @@ function Composer({
   conversationId: string | null;
 }) {
   const [text, setText] = useState("");
+  const location = useLocation();
   const busy = send.state !== "idle";
   const disabled =
     !view.available || (view.conversation !== null && !view.viewerOwnsActive);
@@ -274,6 +293,7 @@ function Composer({
     body.set("_csrf", csrf);
     body.set("intent", "send");
     body.set("text", value);
+    body.set("surface", `${location.pathname}${location.search}`);
     if (conversationId) body.set("conversationId", conversationId);
     send.submit(body, { method: "post" });
     setText("");
@@ -282,6 +302,7 @@ function Composer({
     <div className="ctl-composer">
       <textarea
         value={text}
+        autoFocus={!disabled}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -315,6 +336,25 @@ function Composer({
       </div>
     </div>
   );
+}
+
+/**
+ * Ruling 121: the surface a message was sent from, as a short word — the
+ * workspace view's name, a task key, or "Home". The full path stays in the
+ * title attribute.
+ */
+export function surfaceLabel(surface: string): string {
+  const path = surface.split("?")[0] ?? surface;
+  const task = path.match(/^\/projects\/[^/]+\/tasks\/([^/]+)/);
+  if (task?.[1]) return task[1];
+  const view = path.match(/^\/projects\/[^/]+(?:\/([^/]+))?/);
+  if (view) {
+    const segment = view[1] ?? "board";
+    return segment.charAt(0).toUpperCase() + segment.slice(1);
+  }
+  if (path === "/") return "Home";
+  const top = path.split("/").filter(Boolean)[0] ?? "";
+  return top ? top.charAt(0).toUpperCase() + top.slice(1) : "Home";
 }
 
 // ---------------------------------------------------------------- goals

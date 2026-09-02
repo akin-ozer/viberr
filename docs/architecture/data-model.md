@@ -5,7 +5,8 @@
 > `db/migrations/0001_baseline.sql` (schema), `app/server/db/retention.server.ts`
 > and `app/server/ops/maintenance.server.ts` (retention). Field-level file formats
 > are in [file-formats.md](file-formats.md). Verified against `main` @ `68b5480`
-> (2026-09-01); §5 and §6 re-verified 2026-09-02 against `pass32/implementation`
+> (2026-09-01); the ruling-121 controller columns re-verified against the working
+> tree on 2026-09-03; §5 and §6 re-verified 2026-09-02 against `pass32/implementation`
 > @ `478bed0`.
 
 ## 1. The two stores and the rule that separates them
@@ -122,7 +123,7 @@ files) · **C** cache/operational (safe to lose).
 | `org_skills` | P (metadata) | `name` (slug and folder), `summary`. Content is `skills/<name>/SKILL.md`. |
 | `org_mcp_servers` | P | `name`, `transport` (`HTTP \| stdio`), `target`, optional `cred_ref`, probe results (`tools_count`, `up`, `last_checked_at`, `last_error`), warm-up bookkeeping (`warming_since`, `first_success_at`, `heuristic_warmups`). |
 | `model_availability` | C | Models the provider refused for this account, learned only from real run failures; presence = unavailable. |
-| `controller_conversations` / `controller_messages` | P | The controller's transcripts, owned by the asking user (`project_slug` null = instance scope). |
+| `controller_conversations` / `controller_messages` | P | The controller's transcripts, owned by the asking user. Scope (ruling 121): `project_slug` + `task_key` (both null = instance, slug alone = board, slug + key = one task; `CHECK (task_key IS NULL OR project_slug IS NOT NULL)`), indexed per user and scope. `controller_messages.surface` is the in-app path a user message was sent from (null on controller rows). |
 
 ### Runs
 

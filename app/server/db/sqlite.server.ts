@@ -92,7 +92,7 @@ export function getDb(): DatabaseSync {
     db = openDatabase(dbPath);
     const result = runMigrations(db);
     ensureSingleFlightIndexes(db);
-    ensureRunRowColumns(db);
+    ensureBaselineColumns(db);
     logger.info("sqlite ready", {
       dbPath,
       migrationsApplied: result.applied,
@@ -134,35 +134,85 @@ export function ensureSingleFlightIndexes(db: DatabaseSync): void {
  * "additive drift" the boot integrity WARN names `ALTER TABLE … ADD COLUMN` as
  * the remedy for — so the remedy is applied here, idempotently, instead of
  * being left to an operator: a missing column would otherwise fail every
- * `patchRun` that names it ("no such column") and, with it, every agent
- * completion on that root.
+ * writer that names it ("no such column").
+ *
+ * Ruling 121 added the controller ones. Their absence is worse than the run
+ * columns' — `listConversations` names `task_key` on the dock's root-owned
+ * loader, which runs on the FIRST signed-in page of every surface, so an
+ * upgraded root would answer a 500 there and (fetcher errors going to the
+ * route's own boundary) replace every page in the app with the root error
+ * page. The boot WARN could not have caught it either: `projectionMissingColumns`
+ * inspects the rebuilder's tables, and these are app-owned.
+ *
+ * What ALTER TABLE cannot carry is the conversation-scope CHECK. It is a
+ * constraint, not a column, so an upgraded root keeps rows without it and
+ * `createConversation`'s own validation is the enforcement there — which is
+ * why that validation exists in code rather than leaning on the schema.
  */
-const RUN_ROW_COLUMNS: readonly { name: string; ddl: string }[] = [
-  { name: "dispatched_by_name", ddl: "dispatched_by_name TEXT" },
-  { name: "dispatched_by_user_id", ddl: "dispatched_by_user_id TEXT" },
+const BASELINE_COLUMNS: readonly {
+  table: string;
+  columns: readonly { name: string; ddl: string }[];
+}[] = [
+  {
+    table: "agent_runs",
+    columns: [
+      { name: "dispatched_by_name", ddl: "dispatched_by_name TEXT" },
+      { name: "dispatched_by_user_id", ddl: "dispatched_by_user_id TEXT" },
+    ],
+  },
+  {
+    table: "controller_conversations",
+    columns: [{ name: "task_key", ddl: "task_key TEXT" }],
+  },
+  {
+    table: "controller_messages",
+    columns: [{ name: "surface", ddl: "surface TEXT" }],
+  },
 ];
 
-export function ensureRunRowColumns(db: DatabaseSync): void {
-  try {
-    // SAFETY: `PRAGMA table_info` always yields rows with a TEXT `name`.
-    const present = new Set(
-      (db.prepare(`PRAGMA table_info(agent_runs)`).all() as { name: string }[]).map(
-        (c) => c.name,
-      ),
-    );
-    for (const column of RUN_ROW_COLUMNS) {
-      if (present.has(column.name)) continue;
-      db.exec(`ALTER TABLE agent_runs ADD COLUMN ${column.ddl}`);
-      logger.info("added a baseline column this data root predated", {
-        table: "agent_runs",
-        column: column.name,
-      });
+/** Indexes the baseline gained after a root applied it. `IF NOT EXISTS` makes
+ *  each free on a fresh root; on an upgraded one it follows the column above. */
+const BASELINE_INDEXES: readonly string[] = [
+  `CREATE INDEX IF NOT EXISTS idx_controller_conversations__scope
+     ON controller_conversations (user_id, project_slug, task_key, last_message_at DESC)`,
+];
+
+export function ensureBaselineColumns(db: DatabaseSync): void {
+  for (const { table, columns } of BASELINE_COLUMNS) {
+    try {
+      // SAFETY: `PRAGMA table_info` always yields rows with a TEXT `name`;
+      // `table` is a literal from the list above, never caller input.
+      const present = new Set(
+        (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
+          (c) => c.name,
+        ),
+      );
+      // No table at all is the migration runner's problem, not this backstop's.
+      if (present.size === 0) continue;
+      for (const column of columns) {
+        if (present.has(column.name)) continue;
+        db.exec(`ALTER TABLE ${table} ADD COLUMN ${column.ddl}`);
+        logger.info("added a baseline column this data root predated", {
+          table,
+          column: column.name,
+        });
+      }
+    } catch (error) {
+      logger.warn(
+        "baseline columns could not be ensured — writers that name them will fail until the root is re-baselined",
+        { table, err: error instanceof Error ? error : new Error(String(error)) },
+      );
     }
-  } catch (error) {
-    logger.warn(
-      "agent_runs baseline columns could not be ensured — completions that name them will fail until the root is re-baselined",
-      { err: error instanceof Error ? error : new Error(String(error)) },
-    );
+  }
+  for (const ddl of BASELINE_INDEXES) {
+    try {
+      db.exec(ddl);
+    } catch (error) {
+      logger.warn(
+        "a baseline index could not be ensured — reads stay correct but unindexed; it is retried next boot",
+        { err: error instanceof Error ? error : new Error(String(error)) },
+      );
+    }
   }
 }
 

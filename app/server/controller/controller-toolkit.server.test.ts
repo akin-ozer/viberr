@@ -626,3 +626,168 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     expect(resumed).toContain("[done]");
   });
 });
+
+// ------------------------------------------------------------ ruling 121
+
+/** Build the toolkit AS one user with a task anchor and call one tool. */
+async function callAnchored(
+  userId: string,
+  toolName: string,
+  args: Record<string, JsonValue> = {},
+  taskKey: string | null = "VIB-142",
+): Promise<string> {
+  const { buildControllerToolkit } = await import("./controller-toolkit.server");
+  const { findUserById } = await import("~/server/auth/user-store.server");
+  const user = findUserById(app.db, userId)!;
+  const toolkit = buildControllerToolkit({
+    db: app.db,
+    ctx: { dataRoot: app.dataRoot },
+    user: { id: user.id, email: user.email, name: user.name },
+    projectSlug: SLUG,
+    taskKey,
+  });
+  const tool = toolkit.tools.find((t) => t.name === toolName);
+  expect(tool, `tool ${toolName} must exist`).toBeTruthy();
+  // SAFETY: every toolkit handler is wrapped by `run`, which always returns
+  // the `textResult` shape: { content: [{ type: "text", text }] }.
+  const result = (await tool!.handler(args, {})) as {
+    content: { text: string }[];
+  };
+  return result.content[0]!.text;
+}
+
+describe("task anchoring (ruling 121)", () => {
+  it("defaults every task tool's key to the anchored task, and asks for one when there is none", async () => {
+    expect(await call(ids.maintainer, "get_task", {})).toContain(
+      "[error] Name the task (this conversation is not anchored to one).",
+    );
+    const anchored = await callAnchored(ids.maintainer, "get_task", {});
+    expect(anchored).toContain('"key": "VIB-142"');
+    // An explicit key still wins over the anchor.
+    const explicit = await callAnchored(ids.maintainer, "get_task", { taskKey: "VIB-148" });
+    expect(explicit).toContain('"key": "VIB-148"');
+    expect(explicit).not.toContain('"key": "VIB-142"');
+  });
+
+  it("whoami reports the anchored task beside the project binding", async () => {
+    const text = await callAnchored(ids.contributor, "whoami", {});
+    expect(text).toContain(`"conversationProject": "${SLUG}"`);
+    expect(text).toContain('"conversationTask": "VIB-142"');
+    expect(await call(ids.contributor, "whoami", {})).toContain('"conversationTask": null');
+  });
+
+  it("update_task edits the goal under update-goal and the metadata under edit-task-meta, each on its own", async () => {
+    const { getTaskSummary } = await import("~/server/projections/task-query.server");
+    // Nothing to do is an error, not a silent no-op.
+    expect(await callAnchored(ids.maintainer, "update_task", {}, "VIB-148")).toContain(
+      "[error] Pass a goal and/or at least one metadata field",
+    );
+    // A viewer edits nothing.
+    expect(
+      await callAnchored(ids.viewer, "update_task", { labels: ["x"] }, "VIB-148"),
+    ).toMatch(/^\[denied\]/);
+    // A contributor holds edit-task-meta but not update-goal: the metadata
+    // lands, the goal refusal is reported beside it, nothing is hidden.
+    const partial = await callAnchored(
+      ids.contributor,
+      "update_task",
+      { goal: "A goal the contributor may not set.", labels: ["triaged"], priority: "high" },
+      "VIB-148",
+    );
+    expect(partial).toContain("[done] VIB-148 updated: priority, labels.");
+    expect(partial).toContain("Not applied: goal:");
+    let after = getTaskSummary(app.db, SLUG, "VIB-148")!;
+    expect(after.labels).toEqual(["triaged"]);
+    expect(after.priority).toBe("high");
+    expect(after.goal).not.toContain("the contributor may not set");
+    // A maintainer sets both; metadata is a full replace of what is passed.
+    const full = await callAnchored(
+      ids.maintainer,
+      "update_task",
+      { goal: "Deliver the widget with a passing e2e run.", labels: [], dueDate: "2026-12-31" },
+      "VIB-148",
+    );
+    expect(full).toBe("[done] VIB-148 updated: goal, labels, due date.");
+    after = getTaskSummary(app.db, SLUG, "VIB-148")!;
+    expect(after.goal).toBe("Deliver the widget with a passing e2e run.");
+    expect(after.labels).toEqual([]);
+    expect(after.dueDate).toBe("2026-12-31");
+    // Clearing the date is "" and a bad value throws before any write.
+    expect(
+      await callAnchored(ids.maintainer, "update_task", { dueDate: "" }, "VIB-148"),
+    ).toBe("[done] VIB-148 updated: due date.");
+    expect(getTaskSummary(app.db, SLUG, "VIB-148")!.dueDate).toBeNull();
+    expect(
+      await callAnchored(ids.maintainer, "update_task", { dueDate: "not-a-date" }, "VIB-148"),
+    ).toMatch(/^\[error\]/);
+  });
+
+  /**
+   * Review finding 4: the anchor belongs to ITS OWN project. A call that
+   * overrides projectSlug and omits taskKey used to inherit the anchored key
+   * and act on a same-named task in the other project — a write nobody named.
+   */
+  it("refuses to carry the anchored task key into another project", async () => {
+    const text = await callAnchored(
+      ids.orgAdmin,
+      "get_task",
+      { projectSlug: "deploy-pipeline" },
+      "VIB-142",
+    );
+    expect(text).toContain("[error] This conversation is anchored to VIB-142 in viberr-core");
+    expect(text).toContain("name the task in deploy-pipeline");
+    // Naming the task explicitly still works across projects.
+    const named = await callAnchored(
+      ids.orgAdmin,
+      "get_task",
+      { projectSlug: "deploy-pipeline", taskKey: "DEP-2" },
+      "VIB-142",
+    );
+    expect(named).not.toContain("[error] This conversation is anchored");
+  });
+
+  /**
+   * Review finding 14: both writers short-circuit when the value is already
+   * what was asked for — no file write, no timeline note, no audit row — and
+   * the tool reported "[done] updated" anyway.
+   */
+  it("says nothing was written when the value was already set", async () => {
+    const { getTaskSummary } = await import("~/server/projections/task-query.server");
+    await callAnchored(ids.maintainer, "update_task", { priority: "high" }, "VIB-151");
+    expect(getTaskSummary(app.db, SLUG, "VIB-151")!.priority).toBe("high");
+
+    const again = await callAnchored(
+      ids.maintainer,
+      "update_task",
+      { priority: "high" },
+      "VIB-151",
+    );
+    expect(again).toBe(
+      "[noop] VIB-151: priority already had that value; nothing was written.",
+    );
+
+    // A mixed call reports each half honestly.
+    const mixed = await callAnchored(
+      ids.maintainer,
+      "update_task",
+      { priority: "high", labels: ["fresh-label"] },
+      "VIB-151",
+    );
+    expect(mixed).toContain("[done] VIB-151 updated: labels.");
+    expect(mixed).toContain("Already set, nothing written: priority.");
+  });
+
+  it("update_task is a write tool, so the always-human and no-delete invariants still hold", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+    });
+    const names = toolkit.tools.map((t) => t.name);
+    expect(names).toContain("update_task");
+    expect(names.some((n) => /delete|remove_task|merge|accept|force|resolve_packet/.test(n))).toBe(false);
+  });
+});

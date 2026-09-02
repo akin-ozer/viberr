@@ -61,7 +61,7 @@ the PRD's last note and are not yet reflected in it (§5).
 | FR37 | One human owner per task governs any open decision | IMPLEMENTED | `ownerUserId`, acceptance and packet authority in `task-actions`, `pr-human-approval.server.ts` |
 | FR38 | Contributor+ take/release ownership; admins release any | IMPLEMENTED | `shared/rbac.ts` `own-task`, `release-any-ownership` |
 | FR39 | Schedule a future run; server fires; canonical; never on terminal; no pinned backend | IMPLEMENTED as amended | `tasks/schedule.server.ts`, `execution-profile.tsx` |
-| FR40 | One instance controller; per-tool live RBAC; no escalation, no deletes; admin-only config | IMPLEMENTED | `server/controller/*`; rulings 100, 106, 107, 108 landed after the PRD note |
+| FR40 | One instance controller; per-tool live RBAC; no escalation, no deletes; admin-only config | IMPLEMENTED | `server/controller/*`; rulings 100, 106, 107, 108 landed after the PRD note; ruling 121 (2026-09-02) added the dock on every surface, task-scoped conversations, the per-turn context read and `update_task` |
 | FR41 | Chained goals | IMPLEMENTED | `tasks/goal-actions.server.ts`, `schemas/goal-file.schema.ts`, `features/controller/controller-page.tsx` |
 
 ## 3. Non-functional requirements
@@ -105,6 +105,7 @@ the PRD's last note and are not yet reflected in it (§5).
 | 2026-08-31 | FR33, browser matrix, phase 1 | ruling 102 export-before-purge; ruling 103 Chromium-only; ruling 104 no operator write cap |
 | 2026-08-31 | FR17 | ruling 105 browser working-artifact prune + universal attachment card with Download and a text viewer |
 | 2026-09-01 | FR40 | rulings 106 controller settings at agent-editor parity, 107 built-in `viberr_ops` diagnostics, 108 controller grants and instructions deployment-locked by default |
+| 2026-09-02 | FR40 | ruling 121: the controller dock on every signed-in surface, conversation scopes (instance / board / task), the server-side context read (`task.md` verbatim and bounded, board snapshot, visible projects, the surface hint), `update_task`, the recorded surface on user messages |
 | 2026-09-02 | FR19/FR21, FR26, FR40 | rulings 109–116 (pass 32): Codex parity carve-out labeled "advisory on Codex"; the collision ceremony's order and its follow-up; audited `viberr_ops` reads; a Guardrails card under Policy; one capability-mode vocabulary; `accept_completion` refused at authoring off the acceptance boundary; the shared Claude MCP-log cache as a disclosed residual |
 
 ## 5. Drift the PRD does not record

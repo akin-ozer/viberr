@@ -1,11 +1,9 @@
 import { data } from "react-router";
 import { pageTitle } from "~/shared/page-title";
 import type { Route } from "./+types/controller";
-import {
-  appErrorResponse,
-  requireFormAction,
-} from "~/server/auth/form-action.server";
-import { requireUser } from "~/server/auth/require-user.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
+import { requireAuth } from "~/server/auth/require-user.server";
+import { csrfError } from "~/features/shell/csrf-result.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { createConversation } from "~/server/controller/controller-conversations.server";
 import { runControllerTurn } from "~/server/controller/controller-run.server";
@@ -24,7 +22,7 @@ export function meta() {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await requireUser(request);
+  const { user } = await requireAuth(request);
   const url = new URL(request.url);
   const db = getDb();
   const view = getControllerSurface(
@@ -40,7 +38,14 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const { auth, db, formData, intent } = await requireFormAction(request);
+  const auth = await requireAuth(request);
+  const db = getDb();
+  const formData = await request.formData();
+  // UI-32 (ruling 121 brought it here): a stale token answers a toast-shaped
+  // result, not a thrown 403 that replaces the page with the root boundary.
+  const csrfFailure = await csrfError(request, auth.sessionId, formData);
+  if (csrfFailure) return csrfFailure;
+  const intent = String(formData.get("intent") ?? "");
   try {
     if (intent === "send") {
       const text = String(formData.get("text") ?? "");
@@ -61,6 +66,10 @@ export async function action({ request }: Route.ActionArgs) {
           name: auth.user.name,
           orgRole: auth.user.role,
         },
+        // Ruling 121(d) records the page every USER message was sent from, and
+        // that includes the ones sent from here (review finding 23). The store
+        // normalizes it; a form without the field records null, as before.
+        surface: String(formData.get("surface") ?? "") || null,
       });
       if (result.state === "refused") {
         // The refusal is already recorded IN the conversation; the transcript

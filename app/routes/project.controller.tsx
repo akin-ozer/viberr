@@ -1,10 +1,9 @@
 import { data } from "react-router";
 import type { Route } from "./+types/project.controller";
 import { pageTitle } from "~/shared/page-title";
-import {
-  appErrorResponse,
-  requireFormAction,
-} from "~/server/auth/form-action.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
+import { requireAuth } from "~/server/auth/require-user.server";
+import { csrfError } from "~/features/shell/csrf-result.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { requireVisibleProject } from "./project-visibility.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -69,7 +68,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { auth, db, formData, intent } = await requireFormAction(request);
+  const auth = await requireAuth(request);
+  const db = getDb();
+  const formData = await request.formData();
+  // UI-32 (ruling 121 brought it here): a stale token answers a toast-shaped
+  // result, not a thrown 403 that replaces the page with the root boundary.
+  const csrfFailure = await csrfError(request, auth.sessionId, formData);
+  if (csrfFailure) return csrfFailure;
+  const intent = String(formData.get("intent") ?? "");
   requireVisibleProject(db, params.slug, {
     userId: auth.user.id,
     label: auth.user.email,
@@ -94,6 +100,8 @@ export async function action({ request, params }: Route.ActionArgs) {
           name: auth.user.name,
           orgRole: auth.user.role,
         },
+        // Ruling 121(d): the page a user message was sent from (finding 23).
+        surface: String(formData.get("surface") ?? "") || null,
       });
       return { ok: true as const, conversationId };
     }

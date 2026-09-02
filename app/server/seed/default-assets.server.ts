@@ -182,6 +182,16 @@ interface PriorShippedHashes {
 }
 
 export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
+  [path.join("agents", "definitions", "controller.md")]: [
+    // ruling 121 outgoing: named the non-existent `list_projects`, claimed a
+    // comment mention could start a run, and knew nothing of the per-turn
+    // context read or `update_task`.
+    "8dcb2d1bb8f3668bcc9337af2d07be196ed704b66d70b699b2ac55e39ebf258c",
+  ],
+  [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // ruling 121 outgoing (same rewrite).
+    "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
+  ],
   [path.join("agents", "definitions", "operator.md")]: [
     // outgoing before the rework-routing guidance (reworkStages)
     "6c67b50034ccc80b28563c8415722d5efb9b8da2f854d6339461036f1a46e71d",

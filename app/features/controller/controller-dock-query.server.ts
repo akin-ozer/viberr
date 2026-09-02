@@ -1,0 +1,232 @@
+import type { DatabaseSync } from "node:sqlite";
+import { isOrgAdmin } from "~/server/auth/project-authority.server";
+import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
+import { getProject } from "~/server/projections/board-query.server";
+import { getTaskSummary } from "~/server/projections/task-query.server";
+import {
+  canAccessConversation,
+  conversationScopeOf,
+  getConversation,
+  listConversations,
+  listMessages,
+  type ControllerConversation,
+  type ControllerMessage,
+  type ConversationScope,
+} from "~/server/controller/controller-conversations.server";
+import { resolveControllerConfig } from "~/server/controller/controller-profile.server";
+import { conversationTurnState } from "~/server/controller/controller-run.server";
+
+/**
+ * The controller DOCK's view (ruling 121): what the floating panel shows for
+ * the place the person is standing. One scope at a time — the instance, one
+ * board, or one task — with that scope's own threads, the active transcript,
+ * and the one-line disclosure of what the controller knows here.
+ *
+ * The scope is resolved and authorized by the resource route BEFORE this runs;
+ * this module only reads.
+ *
+ * NOTHING HERE THROWS (review finding 2). The dock's view is a root-owned
+ * `fetcher.load`, and React Router routes a fetcher loader's thrown response to
+ * the boundary of the route that owns the fetcher — root — so a throw here
+ * replaces the WHOLE page with the root error page, which is exactly the hazard
+ * ruling 121(f) named for CSRF and fixed there. A selection that is stale,
+ * unreadable or out of scope is therefore not an error: the view answers the
+ * scope's newest thread and reports `staleSelection`, and the client drops the
+ * stored id. A scope the person cannot reach answers `unavailable`. Neither
+ * leaks anything: both are the same benign shape for a missing project and a
+ * forbidden one, and the page routes still 404 on their own.
+ */
+
+export interface ControllerDockScope {
+  kind: ConversationScope;
+  projectSlug: string | null;
+  taskKey: string | null;
+  /** Display name of the bound project (null at instance scope). */
+  projectName: string | null;
+  /** The pill in the panel header: `Instance`, `<project>`, `<KEY> · <project>`. */
+  label: string;
+  /** What the controller knows here, in one sentence. */
+  contextLine: string;
+  /** Where the full surface for this scope lives. */
+  pageHref: string;
+}
+
+export interface ControllerDockThread {
+  id: string;
+  title: string;
+  lastMessageAt: string | null;
+}
+
+export interface ControllerDockView {
+  available: boolean;
+  controllerName: string;
+  /** The scope is not this person's to talk in here (unknown or forbidden
+   *  project, unknown task). The panel says so instead of the page dying. */
+  unavailable: boolean;
+  /** The `c` the client asked for could not be honoured; it dropped back to
+   *  this scope's newest thread and the client forgets the stored id. */
+  staleSelection: boolean;
+  scope: ControllerDockScope;
+  conversation: ControllerConversation | null;
+  messages: ControllerMessage[];
+  turn: { working: boolean; runId: string | null };
+  threads: ControllerDockThread[];
+  viewerOwnsActive: boolean;
+}
+
+/** The dock's `c` parameter: absent = the newest thread here, `new` = none. */
+export const DOCK_NEW_CONVERSATION = "new";
+
+export function describeDockScope(
+  db: DatabaseSync,
+  binding: { projectSlug: string | null; taskKey: string | null },
+): ControllerDockScope {
+  const kind = conversationScopeOf(binding);
+  const project = binding.projectSlug ? getProject(db, binding.projectSlug) : null;
+  const projectName = project?.name ?? binding.projectSlug;
+  const acts = "acts with your permissions";
+  if (kind === "task") {
+    return {
+      kind,
+      projectSlug: binding.projectSlug,
+      taskKey: binding.taskKey,
+      projectName,
+      label: `${binding.taskKey} · ${projectName}`,
+      contextLine: `Knows the ${binding.taskKey} task file and its place in the ${projectName} workflow · ${acts}`,
+      pageHref: `/projects/${binding.projectSlug}/controller`,
+    };
+  }
+  if (kind === "board") {
+    return {
+      kind,
+      projectSlug: binding.projectSlug,
+      taskKey: null,
+      projectName,
+      label: projectName ?? "Board",
+      contextLine: `Knows the ${projectName} board: stages, members, open tasks, goal chains · ${acts}`,
+      pageHref: `/projects/${binding.projectSlug}/controller`,
+    };
+  }
+  return {
+    kind,
+    projectSlug: null,
+    taskKey: null,
+    projectName: null,
+    label: "Instance",
+    contextLine: `Knows your projects and org role · ${acts}`,
+    pageHref: "/controller",
+  };
+}
+
+/** Whether a conversation belongs to exactly this scope (never a looser or a
+ *  neighbouring one): the dock shows one place's threads and nothing else. */
+export function conversationMatchesScope(
+  conversation: ControllerConversation,
+  scope: { projectSlug: string | null; taskKey: string | null },
+): boolean {
+  return (
+    conversation.projectSlug === scope.projectSlug &&
+    conversation.taskKey === scope.taskKey
+  );
+}
+
+export function getControllerDock(
+  db: DatabaseSync,
+  viewer: { id: string; email: string },
+  input: {
+    projectSlug: string | null;
+    taskKey: string | null;
+    /** A conversation id, `DOCK_NEW_CONVERSATION`, or null for the newest. */
+    conversationId: string | null;
+    dataRoot?: string;
+  },
+): ControllerDockView {
+  const binding = { projectSlug: input.projectSlug, taskKey: input.taskKey };
+  const scope = describeDockScope(db, binding);
+  // The dock lists the VIEWER's own threads for this exact scope: a board
+  // scope excludes task threads (`taskKey: null`), a task scope is that task.
+  const rows = listConversations(db, {
+    userId: viewer.id,
+    projectSlug: binding.projectSlug,
+    taskKey: binding.taskKey,
+    limit: 30,
+  });
+  let conversation: ControllerConversation | null = null;
+  let staleSelection = false;
+  if (input.conversationId === null) {
+    conversation = rows[0] ?? null;
+  } else if (input.conversationId !== DOCK_NEW_CONVERSATION) {
+    const found = getConversation(db, input.conversationId);
+    const admin = isOrgAdmin(db, viewer.id);
+    if (
+      !found ||
+      !canAccessConversation(db, found, {
+        userId: viewer.id,
+        orgRole: admin ? "admin" : "member",
+      }) ||
+      !conversationMatchesScope(found, binding)
+    ) {
+      // Not an error — see the module note. The stored id belongs to another
+      // user, another scope, or a database that was re-baselined; fall back to
+      // this scope's newest thread and tell the client to forget it.
+      staleSelection = true;
+      conversation = rows[0] ?? null;
+    } else {
+      conversation = found;
+    }
+  }
+  const config = resolveControllerConfig(input.dataRoot);
+  return {
+    available: isBackendAvailable("claude"),
+    controllerName: config.name,
+    unavailable: false,
+    staleSelection,
+    scope,
+    conversation,
+    messages: conversation ? listMessages(db, conversation.id) : [],
+    turn: conversation
+      ? conversationTurnState(db, conversation.id)
+      : { working: false, runId: null },
+    threads: rows.map((c) => ({
+      id: c.id,
+      title: c.title || "New conversation",
+      lastMessageAt: c.lastMessageAt,
+    })),
+    viewerOwnsActive: conversation ? conversation.userId === viewer.id : false,
+  };
+}
+
+/** Does this task exist in this project? (The dock asks before binding a
+ *  thread to it; the answer is the same for "gone" and "never was".) */
+export function dockTaskExists(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+): boolean {
+  return getTaskSummary(db, projectSlug, taskKey) !== null;
+}
+
+/** The view for a scope this person cannot talk in here: the panel explains
+ *  itself and offers no composer, and the page it sits on is untouched. */
+export function unavailableDockView(
+  db: DatabaseSync,
+  binding: { projectSlug: string | null; taskKey: string | null },
+  dataRoot?: string,
+): ControllerDockView {
+  const scope = describeDockScope(db, binding);
+  return {
+    available: isBackendAvailable("claude"),
+    controllerName: resolveControllerConfig(dataRoot).name,
+    unavailable: true,
+    staleSelection: false,
+    scope: {
+      ...scope,
+      contextLine: "Not available here: this project or task is not open to you.",
+    },
+    conversation: null,
+    messages: [],
+    turn: { working: false, runId: null },
+    threads: [],
+    viewerOwnsActive: false,
+  };
+}

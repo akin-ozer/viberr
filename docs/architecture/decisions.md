@@ -1918,6 +1918,115 @@ ruling 44 says every one should be. Where recorded today is named per item.)*
     in the project editor; a template whose stored role repeats its name prefills empty
     with an inline hint, so the one-time cost is a typed role, never a mystery grey Save.
 
+121. **The controller dock: the controller is available on every signed-in surface, with
+    the context of where the person is standing (owner, 2026-09-02).** Owner ask: "make
+    controller available as a helper hover icon across the app; controller gets context
+    wherever it is; on a board it does the work on that board; on a task it gathers the
+    task.md into context and does the work." Four owner answers (all the recommendations):
+    a floating bottom-right button opening a docked, NON-MODAL panel (not a topbar popover,
+    not a drawer); the panel reopens the newest thread of the current scope; the toolkit
+    gains `update_task`; every user message records the page it was sent from. The pieces:
+    **(a) Scope.** A conversation is bound, at creation and forever, to one of three places:
+    the instance (`project_slug` and `task_key` null), one board (slug alone) or one task
+    (slug + key; `CHECK (task_key IS NULL OR project_slug IS NOT NULL)`). The dock derives
+    the scope from the matched routes (`controller-dock-context.ts`): a task page anchors to
+    that task, any workspace view binds to that board, everything else is instance scope;
+    the two full controller pages and `/login` carry no dock. The dock lists ONE scope's
+    threads at a time (a board scope excludes its tasks' threads); the project Controller
+    page lists both with a task chip.
+    **(b) The context read.** "The controller gets context" is a SERVER read
+    (`controller-context.server.ts`), gathered at the start of every turn and labelled as a
+    read taken at that instant, placed above the transcript digest and the message: for a
+    task, a derived header (stage, next stages with their boundaries, owner, engaged agents,
+    PR, open packet) plus the canonical `task.md` VERBATIM, fenced, bounded by
+    `TASK_FILE_CONTEXT_CHARS` (24 000) — over budget the head stays whole and the NEWEST
+    timeline entries are kept with a marker naming the omitted count; for a board, stages
+    with counts, boundaries, members, the open-task table (40 rows / 12 000 chars) and the
+    goal chains; for the instance, the projects the person can see. The block never exceeds
+    `CONTEXT_BLOCK_CHARS` (32 000). It is a same-turn read, so the doctrine's rule holds by
+    construction; every action still runs through a tool, gated live. The doctrine and the
+    `controller-guide` skill say so, and were hash-upgraded in place (their outgoing hashes
+    are in `PRIOR_SHIPPED_HASHES`); the same rewrite removed the two recorded drifts (the
+    non-existent `list_projects`; "a comment mention can start a run").
+    **(c) Tool defaults and `update_task`.** On a task-anchored conversation every task
+    tool's `taskKey` defaults to the anchored task (`keyOf`, the `slugOf` twin); `whoami`
+    reports both bindings. `update_task` edits the goal (`updateTaskGoal`, gated
+    `update-goal`) and/or priority, labels, due date (`setTaskMetadata`, gated
+    `edit-task-meta`, full replace as the page editor submits) — the same two writers and
+    gates the task page uses, each reporting on its own so a metadata write is never hidden
+    behind a goal refusal. No title edit (no writer exists); the no-delete and always-human
+    invariants are untouched.
+    **(d) The surface.** `controller_messages.surface` records the pathname + query the
+    person was looking at when they sent a USER message (normalized: an in-app path only,
+    400 chars, no control characters); the turn prompt carries it as "They are looking at:
+    …" and the full page renders it as a "from Board" chip. Controller rows never carry one.
+    **(e) The dock itself** (`controller-dock.tsx`, mounted once in `root.tsx` when the root
+    payload carries a csrf token): a 44 px trigger named `Controller · <scope>` with the
+    `.live-dot` while a turn works; a `role="dialog" aria-modal="false"` panel
+    (`data-screen-label="Controller dock"`) that grows from its trigger
+    (`transform-origin: bottom right`, .18s in, .12s out, Escape instant, reduced motion
+    fades), no scrim, no focus trap, no scroll lock; the composer takes focus on open and
+    the trigger gets it back on close; an outside press does NOT close it; one context line
+    says what the controller knows here; Threads / New / Open page / Close in the header;
+    open state and the per-scope thread selection survive a reload (`sessionStorage`,
+    per tab). Data is a root-owned `fetcher.load` of `/resources/controller` (GET the
+    scope's view, POST `send`), which React Router re-runs on every revalidation, so every
+    surface streaming the `user` scope refreshes the dock for free; while open the dock
+    holds its own `user` stream for the surfaces without one and polls every 5 s while a
+    turn works. Under 720 px it is a bottom sheet entering and leaving along the bottom
+    edge; the trigger stays on screen (R19-12) above the sheet.
+    **(f) Authority.** Unchanged: the asking user's live permissions per tool call, the
+    same actor label, the same conversation ownership; the resource route applies the
+    members-only 404 (byte-identical to the layout's) and the task route's own 404, and a
+    thread from another scope is not found. CSRF failures on the dock AND on both full pages
+    now answer the toast-shaped `{ ok:false, error }` (UI-32) instead of a thrown 403 that
+    replaced the page with the root boundary.
+    (`app/server/controller/controller-context.server.ts`, `controller-conversations.server.ts`,
+    `controller-run.server.ts`, `controller-toolkit.server.ts`, `app/routes/resources.controller.ts`,
+    `app/features/controller/controller-dock*.ts(x)`, `controller-dock-query.server.ts`,
+    `app/root.tsx`, `db/migrations/0001_baseline.sql`; discovery ledger in
+    `planning/discovery-2026-09-02-controller-dock/`.)
+
+*(Corrected 2026-09-03, after an adversarial review of the ruling-121 change set — 8
+lensed reviewers, every finding refuted by 3 independent skeptics, then a synthesis and a
+completeness critic. 36 findings were confirmed and fixed in the same change; four of
+them adjust what (a), (e) and (f) above describe, so they are recorded here rather than
+by rewriting those paragraphs:*
+    *(i) **The dock is off `/profile` and `/notifications`** as well as the two
+    controller pages and login. Both render their whole page inside a `showModal()`
+    `PageOverlay`, which makes everything outside the dialog inert: the dock painted
+    there as a dimmed button that could not be clicked or focused, and a click on it
+    reached the overlay's backdrop and closed the page. (a)'s "every signed-in surface"
+    now means every surface that is not itself a modal.*
+    *(ii) **The dock's data route never throws.** (f) says the route applies the
+    members-only 404; it still authorizes exactly the same way, but it ANSWERS with a
+    benign empty view (`unavailable`) for a scope the person cannot reach and with this
+    scope's newest thread plus `staleSelection` for a selection it cannot honour. The
+    view feeds a root-owned fetcher, and React Router routes such a throw to the ROOT
+    boundary — replacing the whole page, which is the hazard (f) already names for CSRF.
+    Three ordinary paths reached it (a send answered after navigating away, a
+    revalidation after a project was deleted, a stale per-tab selection after an account
+    switch). The full pages keep their own 404s.*
+    *(iii) **A task anchor binds only inside its own project.** (c) says every task
+    tool's `taskKey` defaults to the anchored task; a call that overrides `projectSlug`
+    now has to name its task, because the default silently acted on a same-named task in
+    the other project. `update_task` also answers `[noop]` where a writer short-circuits
+    on an unchanged value, instead of reporting a write that never happened.*
+    *(iv) **The per-turn context read is gated.** (b) describes what it gathers; it now
+    re-proves the asking person's LIVE visibility of the bound project first, through the
+    same `assertProjectAction` chokepoint the board tools use. Without it, an ex-member
+    driving an old thread from either full page received that project's canonical
+    `task.md` in the prompt while every tool call in the same turn refused. The fence
+    around the file is also computed from its content (a five-backtick line inside a
+    comment could close a fixed five-backtick fence).*
+    *Two more fixes are behaviour the ruling never claimed and are noted for the record:
+    the store's conversation list gained a `rowid DESC` tie-break, without which
+    same-millisecond threads came back oldest-first and the route test failed most runs;
+    and `openDb` gained an additive backstop for `controller_conversations.task_key`,
+    `controller_messages.surface` and the scope index, without which every existing data
+    root — which never re-runs the squashed baseline — would have answered a 500 on the
+    dock's loader and shown the root error page on every signed-in surface.)*
+
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates
 that pass and remains unnumbered.)*
@@ -1939,6 +2048,7 @@ that pass and remains unnumbered.)*
 /profile   /notifications   /notifications/read   /prefs/theme
 /resources/events  (SSE)   /resources/health   /resources/run-log
 /resources/search   /resources/session-export   /resources/model-catalog
+/resources/controller                   (ruling 121 — the dock's GET view + POST send)
 ```
 
 *(Corrected 2026-08-06, pass 19, against `app/routes.ts`: `/projects`, `/notifications/read`,
