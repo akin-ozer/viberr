@@ -7,3 +7,4 @@ PASS33-MCP-TOKEN-7QX4
 ```
 
 -- recorded under pass 33 --
+<!-- pass-33 drift probe: a commit added after the review verdict -->
