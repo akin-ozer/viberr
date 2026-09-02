@@ -45,6 +45,10 @@ import {
 } from "./ops/maintenance.server";
 import { rescanProjections } from "./projections/rescan.server";
 import {
+  ensureProjectionDerivation,
+  PROJECTION_DERIVATION_VERSION,
+} from "./projections/derivation-version.server";
+import {
   finalizeOrphanedRuns,
   recoverStrandedOperatorPlans,
   recoverUnreactedAgentRuns,
@@ -616,9 +620,21 @@ export async function bootServer(): Promise<void> {
   // rescan converges projections with the store before the watcher takes
   // over. Cheap on a clean tree; failures must never block boot.
   try {
-    const summary = rescanProjections(db);
-    if (summary.changed > 0 || summary.removed > 0 || summary.errors > 0) {
-      logger.info("boot rescan reconciled offline drift", { ...summary });
+    // A derivation change (derivation-version.server.ts) needs a FORCED full
+    // rebuild the hash short-circuit below would never perform; it runs first
+    // and, when it ran, already covers the drift rescan.
+    const derivation = ensureProjectionDerivation(db);
+    if (derivation.rebuilt) {
+      logger.info("boot rebuilt every projection for a derivation change", {
+        from: derivation.previous,
+        to: PROJECTION_DERIVATION_VERSION,
+        ...derivation.rebuilt,
+      });
+    } else {
+      const summary = rescanProjections(db);
+      if (summary.changed > 0 || summary.removed > 0 || summary.errors > 0) {
+        logger.info("boot rescan reconciled offline drift", { ...summary });
+      }
     }
   } catch (error) {
     logger.error("boot rescan failed", {

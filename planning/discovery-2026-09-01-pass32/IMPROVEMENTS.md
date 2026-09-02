@@ -463,6 +463,10 @@ ones marked *canaried* were reverted once to prove the lock goes red.
 - D32-14 FIXED: `task_events.actor_ref` for agents is `agent/<profileId>` (backend-agnostic), so a
   fork that ran one leg per backend is ONE actor option and one filter matches both legs; feed
   locks updated; *canaried*.
+  Follow-through: the boot rescan is a content-hash short-circuit, so a derivation change never
+  reached existing rows — `derivation-version.server.ts` stamps `PROJECTION_DERIVATION_VERSION`
+  in `instance_settings` and forces ONE full rebuild at boot when the stamp is behind (bump it for
+  every future derivation change); test + boot hook.
 - D32-15 FIXED: the root ErrorBoundary reads `requireRole`'s JSON envelope
   (`{ error: { message } }`) as page copy, so a non-admin on /org/settings or /insights reads
   "This area requires the admin role." instead of "Forbidden"; `root.test.tsx` lock, *canaried*.
