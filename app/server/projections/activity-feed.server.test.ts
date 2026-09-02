@@ -17,6 +17,8 @@ import {
   listActivityStream,
   listAuditLog,
   streamFilterOptions,
+  auditFilterActors,
+  displayAuditActorLabel,
 } from "./activity-feed.server";
 
 const ctx = createTestDbContext();
@@ -561,5 +563,46 @@ describe("feed filters (P21 — owner request: search + filters per panel)", () 
 
     // The unfiltered count keeps its cheap aggregate path.
     expect(countAuditLog(store.db, store.slug)).toBe(3);
+  });
+});
+
+describe("audit-panel actor names (E32-8, pass 32)", () => {
+  it("decodes agent and system labels to the Stream's display names, humans by users-table name", () => {
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    recordAudit(store.db, {
+      action: "task.agent.replied",
+      actor: { userId: null, label: "agent:claude/developer (Implementation)" },
+      projectSlug: store.slug,
+      taskKey: "VIB-201",
+    });
+    recordAudit(store.db, {
+      action: "github.reconcile",
+      actor: { userId: null, label: "system:workspace-reconcile" },
+      projectSlug: store.slug,
+    });
+    recordAudit(store.db, {
+      action: "project.policy.boundary_changed",
+      actor: { userId: arda.id, label: arda.email },
+      projectSlug: store.slug,
+      details: { from: "impl", to: "review", boundary: "auto" },
+    });
+    const options = auditFilterActors(store.db, store.slug);
+    // The VALUE stays the stored label (what the filter matches on); the LABEL
+    // is what a reader sees.
+    expect(options).toEqual(
+      expect.arrayContaining([
+        { value: "agent:claude/developer (Implementation)", label: "Developer (Implementation) · Claude" },
+        { value: "system:workspace-reconcile", label: "Workspace reconcile" },
+        { value: arda.email, label: arda.name },
+      ]),
+    );
+    expect(displayAuditActorLabel("delivery")).toBe("Delivery");
+    expect(displayAuditActorLabel("operator")).toBe("Operator");
+    // The rendered sentence uses the same name (canary: put `row.actor_label`
+    // back at the `actor` derivation in auditText).
+    const entries = listAuditLog(store.db, store.slug);
+    const change = entries.find((e) => e.text.includes("impl → review"))!;
+    expect(change.text.startsWith(`${arda.name} set`)).toBe(true);
   });
 });

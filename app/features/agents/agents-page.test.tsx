@@ -410,6 +410,9 @@ describe("ProfileDetail", () => {
     expect(
       container.querySelector(".cap-col.forbidden")!.textContent,
     ).toContain("Merge a pull request");
+    // D32-8 (pass 32): the empty RECOMMENDS ONLY bucket says "None" under its
+    // header instead of rendering a header over nothing.
+    expect(container.querySelector(".cap-col.recommend")!.textContent).toContain("None");
     // Nothing was granted as a context resource — all three groups say None.
     expect(container.querySelectorAll(".res-group").length).toBe(3);
     expect(queryByText("reviewer-expertise")).toBeNull();

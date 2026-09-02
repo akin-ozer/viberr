@@ -1,4 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
+import {
+  agentBackendName,
+  agentRoleDisplay,
+  decodeActorRef,
+  slugToRole,
+  systemIdToName,
+} from "~/server/files/actor-ref.server";
 import { z } from "zod";
 import {
   createActorRenderOverlay,
@@ -348,7 +355,7 @@ function auditText(
   row: AuditRow,
   resolveUserName: (userId: string | null | undefined) => string | null,
 ): string {
-  const actor = row.actor_name ?? row.actor_label;
+  const actor = row.actor_name ?? displayAuditActorLabel(row.actor_label);
   const d = auditDetails.parse(
     row.details_json ? JSON.parse(row.details_json) : {},
   );
@@ -554,17 +561,55 @@ function auditFiltersActive(f: AuditFilters): boolean {
 
 /** The audit panel's actor vocabulary: everyone who ever wrote an audit row,
  *  by current display name (label fallback). */
-export function auditFilterActors(db: DatabaseSync, slug: string): string[] {
+/** One audit-panel actor filter option: `value` is the stored label the
+ *  filter matches on, `label` what a reader sees. */
+export interface AuditActorOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * E32-8 (pass 32, live): an audit row's `actor_label` is whatever `recordAudit`
+ * was handed — a human's email, a system id (`delivery`, `system:workspace-
+ * reconcile`) or an agent's ENCODED ref (`agent:claude/developer
+ * (Implementation)`). The Stream names every actor; the Audit panel printed the
+ * raw token in its filter and in every sentence ("agent:claude/developer
+ * (Implementation) set …"). Humans resolve through the users table (below);
+ * this turns the other two families into the same display names the timeline
+ * uses (`actor-ref.server.ts`), so one actor reads one way on both panels.
+ */
+export function displayAuditActorLabel(raw: string): string {
+  const ref = decodeActorRef(raw);
+  switch (ref.kind) {
+    case "agent":
+      return `${slugToRole(ref.profileId)} (${agentRoleDisplay(ref)}) · ${agentBackendName(ref.backend)}`;
+    case "system":
+      return systemIdToName(ref.systemId);
+    case "operator":
+      return "Operator";
+    case "controller":
+      return "Controller";
+    case "human":
+      return ref.nameHint ?? raw;
+    case "unknown":
+      // Bare system words (`delivery`, `system`) and anything else: capitalise.
+      return raw ? raw[0]!.toUpperCase() + raw.slice(1) : raw;
+  }
+}
+
+export function auditFilterActors(db: DatabaseSync, slug: string): AuditActorOption[] {
   // SAFETY: `actor_label` is NOT NULL; `name` is NOT NULL on users, null only
   // when the LEFT JOIN finds no row.
   const rows = db
     .prepare(
-      `SELECT DISTINCT COALESCE(u.name, a.actor_label) AS label
+      `SELECT DISTINCT a.actor_label AS value, u.name AS name
        FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
-       WHERE a.project_slug = ? ORDER BY label`,
+       WHERE a.project_slug = ?`,
     )
-    .all(slug) as Array<{ label: string }>;
-  return rows.map((row) => row.label);
+    .all(slug) as Array<{ value: string; name: string | null }>;
+  return rows
+    .map((row) => ({ value: row.value, label: row.name ?? displayAuditActorLabel(row.value) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /** Every audit-panel entry matching the filters, newest first, both legs

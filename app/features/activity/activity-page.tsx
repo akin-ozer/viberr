@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { AuditActorOption } from "~/server/projections/activity-feed.server";
 import { useNavigate, useSearchParams } from "react-router";
 import { Icon, type IconName } from "~/ui/icon";
 import { useHydrated } from "~/ui/local-time";
@@ -379,8 +380,9 @@ function AuditLogs({
   total: number;
   /** Timezone-agnostic first-pass rendering until hydration (see ActivityPage). */
   utc: boolean;
-  /** Everyone who ever wrote an audit row, for the actor filter. */
-  actorOptions: string[];
+  /** Everyone who ever wrote an audit row, for the actor filter — the stored
+   *  label as the value, a display name as the label (E32-8). */
+  actorOptions: AuditActorOption[];
   onOpen: (key: string) => void;
   onShowOlder: () => void;
 }) {
@@ -416,10 +418,7 @@ function AuditLogs({
         }}
         typeLabel="kind"
         typeOptions={AUDIT_KIND_OPTIONS}
-        actorOptions={actorOptions.map((label) => ({
-          value: label,
-          label,
-        }))}
+        actorOptions={actorOptions}
       />
       <div className="pev-list">
         {compactAuditEntries(entries).map((row) =>
@@ -642,8 +641,8 @@ export function ActivityPage({
   auditTotal: number;
   /** The stream's filter vocabulary (actors by stable ref, event types). */
   streamOptions: { actors: { ref: string; label: string }[]; types: string[] };
-  /** The audit panel's actor labels. */
-  auditActors: string[];
+  /** The audit panel's actor options (stored label → display name). */
+  auditActors: AuditActorOption[];
 }) {
   const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();

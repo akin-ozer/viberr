@@ -534,3 +534,19 @@ ones marked *canaried* were reverted once to prove the lock goes red.
 - V11-8 FIXED: `.claude/launch.json` uses `$PWD/docker-data`.
 - Housekeeping from D32-18: `run-service.server.test.ts` interrupt calls pass the store's
   `dataRoot` so the new note lands instead of logging "task file not found".
+
+### Found during the cluster E live verification (2026-09-02)
+- E32-8 FIXED (live, Activity page): the Audit panel's actor filter and its sentences printed the
+  RAW stored `actor_label` for non-human actors — `agent:claude/developer (Implementation)`,
+  `delivery`, `system:workspace-reconcile` — while the Stream beside it names every actor.
+  `displayAuditActorLabel` decodes agent/system refs to the timeline's display names
+  ("Developer (Implementation) · Claude", "Workspace reconcile"); `auditFilterActors` returns
+  `{ value, label }` so the filter still matches the stored label; lock in
+  `activity-feed.server.test.ts`.
+- D32-14 live evidence: after the rebuilt container booted, the log shows "boot rebuilt every
+  projection for a derivation change {from:1,to:2,tasks:8,changed:11}", the stamp is stored, and
+  `task_events` holds zero `<backend>/<profile>` refs; the Stream actor filter lists "Docs Writer"
+  once.
+- E32-6 live: toggled Meaningful comments off and on from the card — toasts, `project.md` row,
+  two `project.policy.guardrail_changed` audit rows (beforeOn true/false), "4 of 4 enforced
+  guardrails on" restored; the Policy "last change" chip now counts the guardrail change.
