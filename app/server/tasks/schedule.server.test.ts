@@ -16,6 +16,7 @@ import {
   installFakeRuntime,
   startedRunSpecs,
 } from "../../../test-support/fake-runtime";
+import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { getProject } from "~/server/projections/board-query.server";
@@ -162,12 +163,18 @@ function rawSchedule(over: Partial<TaskSchedule> = {}): TaskSchedule {
 const GIT_ENV_KEYS = ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_ALLOW_PROTOCOL"] as const;
 let savedGitEnv: Partial<Record<(typeof GIT_ENV_KEYS)[number], string | undefined>> = {};
 
-beforeEach(() => {
+beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   // Project the project so getProject() has its stages (terminal-stage checks).
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   installFakeRuntime();
+  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
+  // only reaches an adapter when the owner has that backend connected. Arda
+  // owns the tasks in this file; connecting both backends for him is the
+  // ordinary state of somebody using the product.
+  await connectFakeBackend(store.db, store.users.arda.id, "claude");
+  await connectFakeBackend(store.db, store.users.arda.id, "codex");
 
   const gitRoot = ctx.makeTempDir();
   const configPath = path.join(gitRoot, "gitconfig");
@@ -196,7 +203,7 @@ afterEach(() => {
 
 describe("scheduleTaskAction", () => {
   it("adds a pending schedule to the task file + projection", async () => {
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.arda.id, stage: "impl" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const s = await scheduleTaskAction(
@@ -233,7 +240,7 @@ describe("scheduleTaskAction", () => {
   it("T17: the created entry records WHO scheduled it (creator attribution round-trips)", async () => {
     // Canary: drop `createdByLabel: actor.label` (or swap `createdBy` for
     // "system") in scheduleTaskAction and this reads the wrong author back.
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.arda.id, stage: "impl" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await scheduleTaskAction(
@@ -264,7 +271,7 @@ describe("scheduleTaskAction", () => {
     // profile is deployed when it fires (see runOperator → resolveOperatorAuthority).
     // Canary: re-add `autonomy`/`backend` to the stored entry in
     // schedule.server.ts and these read back a value instead of undefined.
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.arda.id, stage: "impl" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await scheduleTaskAction(
@@ -297,7 +304,7 @@ describe("scheduleTaskAction", () => {
         },
       ],
     });
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.arda.id, stage: "impl" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const s = await scheduleTaskAction(
@@ -353,7 +360,7 @@ describe("scheduleTaskAction", () => {
   });
 
   it("rejects a past due time", async () => {
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.arda.id, stage: "impl" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await expect(
       scheduleTaskAction(store.db, { projectSlug: store.slug, taskKey: "VIB-1", dueAt: new Date(Date.now() - 1000).toISOString() }, actor(), dctx()),
@@ -361,7 +368,7 @@ describe("scheduleTaskAction", () => {
   });
 
   it("rejects scheduling on a Done (terminal) task", async () => {
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: terminalStage() }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { ownerUserId: store.users.arda.id, stage: terminalStage() }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await expect(
       scheduleTaskAction(store.db, { projectSlug: store.slug, taskKey: "VIB-2", dueAt: new Date(Date.now() + 3_600_000).toISOString() }, actor(), dctx()),
@@ -371,7 +378,7 @@ describe("scheduleTaskAction", () => {
 
 describe("cancelScheduledAction", () => {
   it("marks a pending schedule cancelled + audits", async () => {
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", schedules: [rawSchedule({ dueAt: new Date(Date.now() + 3_600_000).toISOString() })] }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.arda.id, stage: "impl", schedules: [rawSchedule({ dueAt: new Date(Date.now() + 3_600_000).toISOString() })] }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const res = await cancelScheduledAction(store.db, { projectSlug: store.slug, taskKey: "VIB-1", scheduleId: "sch_test1" }, actor(), dctx());
@@ -395,7 +402,7 @@ describe("cancelScheduledAction", () => {
     // (schedule.server.ts) and this fires a cancelled occurrence.
     writeTask(store.dataRoot, store.slug, {
       // Already due, not in the future: the cancel has to beat the tick.
-      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", schedules: [rawSchedule()] }),
+      frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.arda.id, stage: "impl", schedules: [rawSchedule()] }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -428,6 +435,7 @@ describe("fireDueSchedules", () => {
   it("fires a due pending schedule (marks fired + audits) and leaves a future one pending", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [
           rawSchedule({ id: "sch_due" }),
@@ -481,6 +489,7 @@ describe("fireDueSchedules", () => {
     // path and both ticks claim, producing two operator runs.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [rawSchedule({ id: "sch_raced", prompt: "re-check before standup" })],
       }),
@@ -517,6 +526,7 @@ describe("fireDueSchedules", () => {
     // watching (FR39): a scheduled operator re-run on abandoned work.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-9", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         archived: true,
         schedules: [rawSchedule({ id: "sch_arch" })],
@@ -548,6 +558,7 @@ describe("fireDueSchedules", () => {
     // now folds the project's own archived flag into mootness.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [
           rawSchedule({ id: "sch_frozen", action: "run-agent", profileId: "dev" }),
@@ -581,6 +592,7 @@ describe("fireDueSchedules", () => {
     // under a claim note that announced an agent run.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [
           rawSchedule({ id: "sch_noprof", action: "run-agent", profileId: null }),
@@ -618,6 +630,7 @@ describe("fireDueSchedules", () => {
     // clone forced the lease up.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [
           rawSchedule({
@@ -684,12 +697,14 @@ describe("fireDueSchedules", () => {
 
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-9", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [rawSchedule({ id: "sch_a" })],
       }),
     });
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-10", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [rawSchedule({ id: "sch_b" })],
       }),
@@ -715,6 +730,7 @@ describe("fireDueSchedules", () => {
   it("F10-16: does NOT re-drive a FRESH claim (still within its lease)", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [
           rawSchedule({
@@ -734,7 +750,7 @@ describe("fireDueSchedules", () => {
 
   it("retires a due schedule on a Done task WITHOUT running the operator (skipped-done)", async () => {
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-3", { stage: terminalStage(), schedules: [rawSchedule({ id: "sch_done" })] }),
+      frontmatter: baseTaskFrontmatter("VIB-3", { ownerUserId: store.users.arda.id, stage: terminalStage(), schedules: [rawSchedule({ id: "sch_done" })] }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -761,6 +777,7 @@ describe("fireDueSchedules", () => {
     // `parsed.frontmatter.stage` and this fires an operator run.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-7", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [rawSchedule({ id: "sch_toctou" })],
       }),
@@ -769,6 +786,7 @@ describe("fireDueSchedules", () => {
     // …and now the task reaches Done in the file, with the projection unrebuilt.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-7", {
+        ownerUserId: store.users.arda.id,
         stage: terminalStage(),
         schedules: [rawSchedule({ id: "sch_toctou" })],
       }),
@@ -814,6 +832,7 @@ describe("fireDueSchedules", () => {
 
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-8", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [rawSchedule({ id: "sch_first" }), rawSchedule({ id: "sch_second" })],
       }),
@@ -851,6 +870,7 @@ describe("fireDueSchedules", () => {
   it("B-WF3: the operator run says it is SCHEDULED and carries the note", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [
           rawSchedule({ id: "sch_note", prompt: "re-check whether CI went green" }),
@@ -949,6 +969,7 @@ describe("tasksWithUnresolvedSchedules (B-WF5)", () => {
     // A fired occurrence is not a candidate; a pending one is.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-4", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [
           rawSchedule({
@@ -961,6 +982,7 @@ describe("tasksWithUnresolvedSchedules (B-WF5)", () => {
     });
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-5", {
+        ownerUserId: store.users.arda.id,
         stage: "impl",
         schedules: [rawSchedule({ id: "sch_pending" })],
       }),
@@ -988,7 +1010,7 @@ describe("tasksWithUnresolvedSchedules (B-WF5)", () => {
 
   it("ignores a task with no schedules at all", () => {
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-6", { stage: "impl" }),
+      frontmatter: baseTaskFrontmatter("VIB-6", { ownerUserId: store.users.arda.id, stage: "impl" }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     expect(tasksWithUnresolvedSchedules(store.db)).toEqual([]);

@@ -37,9 +37,11 @@ import {
  * is why a count on its own would not be enough.
  */
 
-/** Every table that stores a sealed box. `sealSecret(` has exactly two homes;
- *  key-rotation.server.test.ts fails if a third appears, because a count that
- *  silently misses a store is worse than no count. */
+/** Every table that stores a sealed box. key-rotation.server.test.ts pins this
+ *  list to the `sealSecret(` call sites in `app/` and fails when a new one
+ *  appears unregistered, because a count that silently misses a store is worse
+ *  than no count — it would tell an operator the rotation is finished while a
+ *  whole table still needs the retired key. */
 export const SEALED_STORES = [
   {
     id: "github_pats",
@@ -79,6 +81,20 @@ export const SEALED_STORES = [
     table: "s3_audit_config",
     column: "secret_box",
     nameColumn: "bucket",
+    idColumn: "id",
+  },
+  // Ruling 127: the API keys and workspace access tokens people paste on
+  // Profile → Agent accounts. `login` rows carry no box (the vendor binary
+  // holds that credential in the person's runtime home), which is why the box
+  // column is nullable and the scans below filter on `IS NOT NULL`. The row's
+  // BACKEND is its label — never the person's email, which a rotation report
+  // printed to a terminal has no business naming.
+  {
+    id: "user_backend_credentials",
+    label: "Personal backend API keys",
+    table: "user_backend_credentials",
+    column: "secret_box",
+    nameColumn: "backend",
     idColumn: "id",
   },
 ] as const;
@@ -141,9 +157,10 @@ function scanStore(
 ): SealedStoreScan {
   // SAFETY: every SEALED_STORES entry names columns 0001_baseline declares
   // TEXT — its id column is the table's primary key and its name column is NOT
-  // NULL in all three stores (so `string | null` is the conservative reading),
-  // and `WHERE <box column> IS NOT NULL` is what makes `box` a string on the
-  // one store whose box column is nullable (`org_mcp_servers.cred_ref`).
+  // NULL in every registered store (so `string | null` is the conservative
+  // reading), and `WHERE <box column> IS NOT NULL` is what makes `box` a string
+  // on the two stores whose box column is nullable (`org_mcp_servers.cred_ref`
+  // and `user_backend_credentials.secret_box`, NULL on every `login` row).
   const rows = db
     .prepare(
       `SELECT ${store.idColumn} AS id, ${store.nameColumn} AS name, ${store.column} AS box

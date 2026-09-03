@@ -160,7 +160,15 @@ describe("the controller dock (ruling 121)", () => {
     const composer = await screen.findByLabelText("Message to the controller");
     await waitFor(() => expect(composer.hasAttribute("disabled")).toBe(true));
     await waitFor(() => expect(document.activeElement).toBe(panel));
-    expect(composer.getAttribute("placeholder")).toMatch(/Claude backend is unavailable/);
+    // Ruling 127: the dock's refusal is the person's own, and names the one
+    // place they fix it — the same sentence the page's composer and the
+    // refused turn's transcript line carry.
+    expect(composer.getAttribute("placeholder")).toMatch(
+      /your own Claude account/,
+    );
+    expect(composer.getAttribute("placeholder")).toMatch(
+      /Profile → Agent accounts/,
+    );
   });
 
   it("Escape inside the panel closes instantly and hands focus back to the trigger", async () => {

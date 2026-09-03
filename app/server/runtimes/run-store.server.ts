@@ -56,6 +56,11 @@ export type AgentRunRow = {
    *  without the guaranteed operator re-invoke. Null on every other run. */
   dispatched_by_name: string | null;
   dispatched_by_user_id: string | null;
+  /** Ruling 127: the credential principal — the person whose connected backend
+   *  account this run bills, and whose runtime home holds its transcript. Task
+   *  runs carry the task owner, controller turns the asker. Null only on a run
+   *  refused before any credential was looked up (an unowned task). */
+  credential_user_id: string | null;
 };
 
 export interface InsertRunInput {
@@ -85,6 +90,12 @@ export interface InsertRunInput {
   outputTokens?: number;
   totalCostUsd?: number | null;
   interruptedBy?: string | null;
+  /** Ruling 127: the credential principal (see `AgentRunRow.credential_user_id`).
+   *  Optional at THIS layer — the store is a plain writer, also driven by
+   *  fixtures that build a row directly, and an omitted principal stores NULL.
+   *  The rule "a run that spawned a process has a principal" is enforced one
+   *  level up, where `StartRunInput`/`ReserveRunInput` require the field. */
+  credentialUserId?: string | null;
 }
 
 /** Insert (or replace, for seed idempotency) an agent_runs row. */
@@ -96,13 +107,13 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         model, session_id, sdk, agent_name, agent_profile_id, state, phase, step,
         started_at, finished_at,
         turns, input_tokens, cached_input_tokens, output_tokens, total_cost_usd,
-        interrupted_by, created_at, updated_at)
+        interrupted_by, credential_user_id, created_at, updated_at)
      VALUES
        (@id, @taskKey, @projectSlug, @threadId, @role, @kind, @backend,
         @model, @sessionId, @sdk, @agentName, @agentProfileId, @state, @phase, @step,
         @startedAt, @finishedAt,
         @turns, @inputTokens, @cachedInputTokens, @outputTokens, @totalCostUsd,
-        @interruptedBy, @createdAt, @updatedAt)
+        @interruptedBy, @credentialUserId, @createdAt, @updatedAt)
      ON CONFLICT(id) DO UPDATE SET
         task_key=excluded.task_key, project_slug=excluded.project_slug,
         thread_id=excluded.thread_id, role=excluded.role, kind=excluded.kind,
@@ -114,7 +125,9 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         finished_at=excluded.finished_at, turns=excluded.turns,
         input_tokens=excluded.input_tokens, cached_input_tokens=excluded.cached_input_tokens,
         output_tokens=excluded.output_tokens, total_cost_usd=excluded.total_cost_usd,
-        interrupted_by=excluded.interrupted_by, updated_at=excluded.updated_at`,
+        interrupted_by=excluded.interrupted_by,
+        credential_user_id=excluded.credential_user_id,
+        updated_at=excluded.updated_at`,
   ).run({
     id: input.id,
     taskKey: input.taskKey,
@@ -139,6 +152,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
     outputTokens: input.outputTokens ?? 0,
     totalCostUsd: input.totalCostUsd ?? null,
     interruptedBy: input.interruptedBy ?? null,
+    credentialUserId: input.credentialUserId ?? null,
     createdAt: now,
     updatedAt: now,
   });
@@ -168,6 +182,10 @@ export interface RunPatch {
   /** See `AgentRunRow.dispatched_by_name` (pass 32, C02-R11). */
   dispatchedByName?: string | null;
   dispatchedByUserId?: string | null;
+  /** Ruling 127: the credential principal, patchable like `backend` is — the
+   *  start path stamps it onto the row a reservation already inserted, without
+   *  re-writing every other column of a run that is already live. */
+  credentialUserId?: string | null;
 }
 
 /** Patch selected fields on a run row; always bumps updated_at. */
@@ -192,6 +210,7 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     outcomeKey: ["outcome_key", patch.outcomeKey],
     dispatchedByName: ["dispatched_by_name", patch.dispatchedByName],
     dispatchedByUserId: ["dispatched_by_user_id", patch.dispatchedByUserId],
+    credentialUserId: ["credential_user_id", patch.credentialUserId],
   } satisfies Record<keyof RunPatch, readonly [string, SQLInputValue | undefined]>;
 
   const cols: string[] = [];

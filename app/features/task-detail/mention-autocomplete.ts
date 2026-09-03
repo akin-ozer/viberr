@@ -1,4 +1,8 @@
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
+import {
+  backendRunMark,
+  type TaskRunPrincipalView,
+} from "./run-principal-view";
 
 /**
  * Pure logic for the comment composer's @-mention autocomplete: detecting an
@@ -33,11 +37,28 @@ export interface MentionSuggestion {
   operator?: boolean;
   /** Avatar initials for user rows. */
   initials?: string;
+  /** Ruling 127: a caveat about what this handle would actually DO, appended
+   *  to the sub-line. Today only the `@claude` / `@codex` backend handles carry
+   *  one: mentioning them starts a run on the TASK OWNER's account, so a row
+   *  whose backend the owner has not connected promises a run that refuses. */
+  note?: string;
 }
 
-/** Flatten the loader's mentionables into one rankable list: agents, then
- *  reserved, then users (the group precedence the goal specifies). */
-export function flattenMentionables(m: Mentionables): MentionSuggestion[] {
+/**
+ * Flatten the loader's mentionables into one rankable list: agents, then
+ * reserved, then users (the group precedence the goal specifies).
+ *
+ * `runPrincipal` (ruling 127) is the task owner whose accounts a mention-driven
+ * run would bill. The rows stay OFFERED when the owner cannot run a backend —
+ * a comment posts either way, and hiding the handle would leave the human
+ * guessing why `@codex` does nothing — but they carry the reason, in the same
+ * voice the run controls use. Absent (a bare render, a surface with no task)
+ * means nothing is claimed either way.
+ */
+export function flattenMentionables(
+  m: Mentionables,
+  runPrincipal?: TaskRunPrincipalView | null,
+): MentionSuggestion[] {
   const out: MentionSuggestion[] = [];
   for (const a of m.agents) {
     out.push({
@@ -61,6 +82,12 @@ export function flattenMentionables(m: Mentionables): MentionSuggestion[] {
     // ABSENT rather than undefined.
     if (r.handle === "claude") row.backend = "claude";
     if (r.handle === "codex") row.backend = "codex";
+    // Only the backend handles start a run on a person's account, so only they
+    // can be refused for want of one.
+    if (runPrincipal !== undefined && (row.backend === "claude" || row.backend === "codex")) {
+      const mark = backendRunMark(runPrincipal, row.backend);
+      if (mark) row.note = mark;
+    }
     out.push(row);
   }
   for (const u of m.users) {

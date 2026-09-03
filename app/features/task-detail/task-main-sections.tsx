@@ -15,6 +15,7 @@ import {
   type OwnerAction,
   type TaskMemberView,
 } from "./execution-profile";
+import type { TaskRunPrincipalView } from "./run-principal-view";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
 /**
@@ -296,7 +297,7 @@ export function ExecutionSection({
   deployedSpecialists,
   operatorBackend,
   operatorAutonomy,
-  backendAvailable,
+  runPrincipal,
   canRunAgents,
   activeAgentProfileIds,
   operatorRunActive,
@@ -311,7 +312,9 @@ export function ExecutionSection({
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
   operatorAutonomy: "supervised" | "full";
-  backendAvailable: { claude: boolean; codex: boolean };
+  /** Ruling 127: the task owner's accounts, which every run here bills
+   *  (null = unowned). */
+  runPrincipal: TaskRunPrincipalView | null;
   canRunAgents: boolean;
   /** Profile ids of engagements with a live (queued/running) run. */
   activeAgentProfileIds: string[];
@@ -411,7 +414,7 @@ export function ExecutionSection({
       deployedSpecialists={deployedSpecialists}
       operatorBackend={operatorBackend}
       operatorAutonomy={operatorAutonomy}
-      backendAvailable={backendAvailable}
+      runPrincipal={runPrincipal}
       canRunAgents={canRunAgents}
       activeAgentProfileIds={activeAgentProfileIds}
       operatorRunActive={operatorRunActive}

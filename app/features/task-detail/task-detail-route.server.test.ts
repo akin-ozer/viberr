@@ -79,6 +79,18 @@ beforeAll(async () => {
     selin: byEmail("selin@viberr.dev"),
     deniz: byEmail("deniz@viberr.dev"),
   };
+  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a
+  // dispatch (and the operator drive a packet resolution re-queues) only
+  // reaches an adapter when that person has the backend connected. These five
+  // are the demo humans this file acts as; connecting both backends for each
+  // is the ordinary state of a team using the product, and it keeps the
+  // dispatch tests below about dispatch rather than about connection.
+  const { connectFakeBackends } = await import(
+    "../../../test-support/backend-credentials"
+  );
+  for (const userId of Object.values(ids)) {
+    await connectFakeBackends(app.db, userId);
+  }
 });
 afterAll(() => app.cleanup());
 
@@ -227,6 +239,91 @@ describe("loader — VIB-142 fidelity", () => {
   it("404s unknown keys into the in-shell boundary", async () => {
     const thrown = await runLoader("VIB-999", ids.arda).catch((e) => e);
     expect(thrown?.init?.status ?? thrown?.status).toBe(404);
+  });
+});
+
+/* ---------------------------------------------- ruling 127 run principal */
+
+/**
+ * Ruling 127 — the loader ships WHOSE accounts this task's agent runs would
+ * bill, not whether the deployment holds a credential.
+ *
+ * The old `backendAvailable` pair answered one question for every task in the
+ * instance. A run bills the task OWNER, so two tasks on one board can differ,
+ * and a disabled Run has to name the person who can fix it. These pin the
+ * shape (`runPrincipal`), the three states it distinguishes (owner with the
+ * backend connected, owner without, no owner at all) and the hard rule that
+ * nothing about the credential itself reaches the browser.
+ */
+describe("loader — runPrincipal (ruling 127)", () => {
+  it("names the OWNER and answers per backend from THEIR accounts", async () => {
+    // VIB-142 is seeded owned by Arda, and the file's beforeAll connected both
+    // backends for every demo human.
+    const data = await runLoader("VIB-142", ids.selin);
+    expect(data.runPrincipal).toEqual({
+      ownerUserId: ids.arda,
+      ownerName: "Arda Kaya",
+      claude: { available: true, detail: null },
+      codex: { available: true, detail: null },
+    });
+    // The answer is about the OWNER, not the viewer: Selin asked, and what
+    // came back is Arda's.
+    expect(data.runPrincipal?.ownerUserId).not.toBe(ids.selin);
+  });
+
+  it("an UNOWNED task ships null: there is nobody to bill", async () => {
+    // VIB-148 is seeded with no owner (the ownership describe below is what
+    // changes that, which is why this reads it first).
+    const data = await runLoader("VIB-148", ids.arda);
+    expect(data.runPrincipal).toBeNull();
+  });
+
+  it("reports the owner's DISCONNECTED backend with the store's own remedy, naming no environment variable", async () => {
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    await disconnectFakeBackend(app.db, ids.arda, "codex");
+    try {
+      const data = await runLoader("VIB-142", ids.arda);
+      expect(data.runPrincipal?.codex.available).toBe(false);
+      expect(data.runPrincipal?.codex.detail).toContain(
+        "Connect it on your Profile",
+      );
+      // The other backend is a separate account and a separate answer.
+      expect(data.runPrincipal?.claude).toEqual({
+        available: true,
+        detail: null,
+      });
+      // Ruling 127 deleted the deployment credentials: no surface may send a
+      // person hunting for one.
+      const wire = JSON.stringify(data.runPrincipal);
+      for (const dead of [
+        "ANTHROPIC_API_KEY",
+        "CODEX_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "OPENAI_API_KEY",
+        "this instance",
+      ]) {
+        expect(wire).not.toContain(dead);
+      }
+    } finally {
+      await connectFakeBackend(app.db, ids.arda, "codex");
+    }
+  });
+
+  it("carries no secret, no sealed box and no filesystem path", async () => {
+    const { fakeBackendSecret } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    const data = await runLoader("VIB-142", ids.arda);
+    const wire = JSON.stringify(data);
+    expect(wire).not.toContain(fakeBackendSecret("claude"));
+    expect(wire).not.toContain(fakeBackendSecret("codex"));
+    expect(wire).not.toContain("secret_box");
+    expect(wire).not.toContain("secretSuffix");
+    // The loader ships a verdict and a sentence, nothing that locates the
+    // credential on disk.
+    expect(JSON.stringify(data.runPrincipal)).not.toContain(app.dataRoot);
   });
 });
 
@@ -748,6 +845,11 @@ describe("loader — deployed specialists", () => {
 
 describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
   it("dispatching the developer AUTO-ENGAGES it as the deliverer and starts the run (streaming toast)", async () => {
+    // Ruling 127: VIB-166 is seeded UNOWNED, and an unowned task cannot run
+    // agents at all — there is no account to bill, so the dispatch would be
+    // refused before any adapter. Arda takes the seat first, which is exactly
+    // what the refusal tells a human to do ("Own the task (Assign me)").
+    await postIntent("VIB-166", ids.arda, { intent: "owner-take" });
     // VIB-166 is a triage task with NO engagements. The Developer's eligible
     // stages are ready/impl (F1 still holds inside the auto-engage), so move it
     // to Ready first — dispatching a developer at Triage is correctly rejected.

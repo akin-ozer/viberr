@@ -5,6 +5,9 @@
 > `scripts/e2e.ts`, `compose.e2e.yml`, `.github/workflows/ci.yml`, `test-support/*`.
 > Verified against `main` @ `68b5480` (2026-09-01); §2 and §4 re-verified 2026-09-02
 > against `pass32/implementation` @ `478bed0`. Requires Node 26+ and `npm ci`.
+> Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): the
+> `setup-env.ts` list, the `backend-credentials` harness and the fake-binary sign-in
+> harness.
 
 ## 1. The five gates
 
@@ -29,13 +32,29 @@ on failure. No secrets are needed: the unit setup file seeds synthetic ones and
   behaviour by extracting it into `app/` (the CLIs are thin wrappers over `app/server`
   modules) or through e2e.
 - `test-support/setup-env.ts` seeds `VIBERR_SESSION_SECRET` and
-  `VIBERR_SECRET_ENCRYPTION_KEY` (`??=`), **blanks** every backend credential
-  (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `VIBERR_CLAUDE_USE_CLI_AUTH`,
-  `CODEX_ACCESS_TOKEN`, `CODEX_API_KEY`, `OPENAI_API_KEY`, `VIBERR_CODEX_USE_CLI_AUTH`,
-  `VIBERR_BROWSER_EXECUTABLE`) so no test can build a real adapter, points
-  `CLAUDE_CONFIG_DIR` / `CODEX_HOME` at empty temp dirs, and sets
+  `VIBERR_SECRET_ENCRYPTION_KEY` (`??=`) and **blanks the ambient vendor keys a dev machine
+  or CI host might carry** (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`,
+  `ANTHROPIC_AUTH_TOKEN`, `CODEX_ACCESS_TOKEN`, `CODEX_API_KEY`, `OPENAI_API_KEY`, plus
+  `VIBERR_BROWSER_EXECUTABLE`), assigning `""` rather than deleting, because
+  `loadEnvFile()` runs later and would refill a deleted key from someone's `.env`. This is
+  belt and braces: `filteredSpawnEnv()` strips every one of them by regex anyway, and the
+  risk it guards against is a paid provider call from `npm test`. Then
   `GIT_ALLOW_PROTOCOL=file` so nothing can clone over the network. It does **not** set
   `VIBERR_DATA_ROOT`; every harness below uses its own `mkdtemp` root, so `VIBERR_DATA_ROOT=$(mktemp -d) npm test` is unnecessary unless you write a harness-less test that calls `getEnv()`.
+  *(Corrected 2026-09-02, ruling 127 — the file used to blank `VIBERR_CLAUDE_USE_CLI_AUTH`
+  / `VIBERR_CODEX_USE_CLI_AUTH` and point `CLAUDE_CONFIG_DIR` / `CODEX_HOME` at empty temp
+  dirs. Those variables no longer exist: a run reads its home from the credential
+  principal's `runtimes/users/<id>/…`, which every harness roots in its own temp data root,
+  so there is no ambient path left for a probe to find.)*
+- **Availability is now a fact about a PERSON, so a test seeds it like data.** There is no
+  `setBackendAvailability` any more. `test-support/backend-credentials.ts` gives
+  `connectFakeBackend(db, userId, backend)`, `connectFakeBackends(db, userId)` and
+  `disconnectFakeBackend(db, userId, backend)`, which go through the REAL
+  `setBackendApiKey` / `disconnectBackend` with an injected `fetch` that answers 200
+  without a socket, so a test cannot end up with a row shape the product would not produce.
+  `fakeBackendSecret(backend)` returns the plaintext those helpers seal, which is what a
+  redaction test asserts on. Connect the backend for the run's PRINCIPAL: the task owner
+  for a task run, the asker for a controller turn.
 - `test-support/setup-dom.ts` polyfills `<dialog>` `show/showModal/close` and stubs
   `ResizeObserver` under jsdom.
 - No `.env` is required.
@@ -50,6 +69,8 @@ on failure. No secrets are needed: the unit setup file seeds synthetic ones and
 | `fake-runtime.ts` | `installFakeRuntime()`, `queueFakeRun({ lines, backend, outcome, keepRunning, sessionId })`, `startedRunSpecs()`, `lastRunSpec()` |
 | `fake-github.ts` | `fakeGithubFetch({ "GET /user": spec \| fn })` → `{ fetchImpl, calls, callsTo }`; unmatched → 404; `unreachableFetch()` |
 | `demo-seed.ts`, `demo-data.ts`, `custom-board.ts` | the demo fixture (arda & co, three projects, twelve tasks) and its 3-stage custom board |
+| `backend-credentials.ts` | `connectFakeBackend(db, userId, backend)`, `connectFakeBackends(db, userId)`, `disconnectFakeBackend(db, userId, backend)`, `fakeBackendSecret(backend)` — the ruling-127 replacement for `setBackendAvailability` |
+| `fake-vendor-binary.ts` | `writeFakeVendorBinaries()` → executable `claude` / `codex` stand-ins (mode 0o755) for `deps.binaries`, with `cleanup()`; `setFakeVendorMode("success" \| "fail" \| "hang")`, `setFakeVendorLoggedOut()`, `setFakeVendorLogoutExit()`, `resetFakeVendorEnv()`; the evidence readers `fakeVendorEnv/Argv/Stdin/Terminated/Logout(home)`; `FAKE_DEVICE_CODE`, `FAKE_CLAUDE_URL`, `FAKE_CODEX_URL` |
 | `audit-log.ts` | `listAuditEvents(db, { limit, action })` |
 
 Import route modules **after** `setupAppTest()` so they see the test env:
@@ -103,6 +124,31 @@ ctx.cleanup();
   (`meaningful-comment`, `evidence-separation`, `no-duplicate-summary`,
   `compression-threshold`) are enforced per project through `project.md` `guardrails`,
   edited on the Policy page's Guardrails card (ruling 112).
+- **A run needs a connected principal, not a flipped switch (ruling 127).** A test that
+  wants a real-looking run connects the backend for the person who will pay for it, with
+  `connectFakeBackend`. A test that wants the refusal asserts the sentence
+  `principalRefusalMessage` produces, for one of three shapes: an unowned task, a disabled
+  or deleted owner, or an owner with nothing connected. A refusal writes an honest
+  `run·unavailable` error run through the normal completion pipeline, so the packet and
+  timeline effects are observable without any process having started.
+- **The hosted sign-in is driven by a FAKE BINARY, never a mock.** `backend-login.server.ts`
+  takes its vendor binaries through `deps.binaries`, so its tests hand it the pair
+  `writeFakeVendorBinaries()` (`test-support/fake-vendor-binary.ts`) writes to a temp dir
+  (mode 0o755): a small Node script that prints the vendor's exact lines, waits on stdin for
+  the code (Claude) or sleeps and exits (Codex), writes a credential file into the home the
+  env hands it, and answers `auth status` / `login status`. That is a real child process over a
+  real pipe: URL capture, ANSI stripping, code submission, success rows and audit, failure
+  exits, timeouts, cancel and session replacement are all exercised end to end. Each fake
+  drops its evidence INSIDE the home it was handed, which is where the assertions read it
+  from: `fake-env.json` (the whole child env), `fake-argv.json`, `fake-stdin.txt` (Claude
+  only, proving nothing but the code reached stdin) and `fake-terminated.txt`, written from
+  a `SIGTERM` handler so a test can prove a replaced or cancelled child really died instead
+  of being orphaned. The same pair serves the credential store's DISCONNECT tests: the
+  vendors' `logout` branches drop `fake-logout.json` (argv plus the whole child env), so
+  `backend-credentials.server.test.ts` proves the vendor's own logout ran, ran against the
+  home that call named, and saw no credential of the server's — one fake vendor in the
+  repo, not two. `no-module-mocking` is a lint rule (no `vi.mock`), and a mocked spawn
+  would prove nothing about the parsing this module exists to do.
 - Never mutate `node_modules` while `vitest run` is in flight (it once produced 688
   phantom failures).
 

@@ -236,26 +236,34 @@ describe("the turn carries the context read (ruling 121)", () => {
    * surface hint cannot be unwired with the suite still green.
    */
   it("starts the run with the context read, the anchored task and the surface hint", async () => {
-    const { setBackendAvailability } = await import(
-      "~/server/runtimes/runtime-registry.server"
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
     );
     const { lastRunSpec } = await import("../../../test-support/fake-runtime");
     const { runControllerTurn } = await import("./controller-run.server");
     const { createConversation } = await import("./controller-conversations.server");
-    setBackendAvailability("claude", true);
+    // Ruling 127: a controller turn bills the ASKER's own Claude account, so
+    // the way to make one start is to connect the asker's — there is no
+    // instance-level switch left to flip. Disconnected again below so the
+    // next case still meets the hermetic "nobody has connected" default.
+    await connectFakeBackend(app.db, user.id, "claude");
     const conversation = createConversation(app.db, {
       userId: user.id,
       userLabel: user.email,
       projectSlug: "viberr-core",
       taskKey: "VIB-142",
     });
-    await runControllerTurn(app.db, {
-      conversationId: conversation.id,
-      text: "what is this task?",
-      user: { ...user, orgRole: "admin" },
-      surface: "/projects/viberr-core/tasks/VIB-142?events=50",
-      dataRoot: app.dataRoot,
-    });
+    try {
+      await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "what is this task?",
+        user: { ...user, orgRole: "admin" },
+        surface: "/projects/viberr-core/tasks/VIB-142?events=50",
+        dataRoot: app.dataRoot,
+      });
+    } finally {
+      await disconnectFakeBackend(app.db, user.id, "claude");
+    }
     const spec = lastRunSpec();
     expect(spec, "a controller run must have started").toBeTruthy();
     // The context read is FIRST, and it is the task's own file.

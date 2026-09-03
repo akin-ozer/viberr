@@ -15,9 +15,9 @@ import {
 } from "~/server/controller/controller-conversations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
-  resetRegistryForTests,
-  setBackendAvailability,
-} from "~/server/runtimes/runtime-registry.server";
+  connectFakeBackend,
+  disconnectFakeBackend,
+} from "../../../test-support/backend-credentials";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import {
   conversationMatchesScope,
@@ -56,10 +56,6 @@ const OTHER_SLUG = "billing-service";
 const ctx = createTestDbContext();
 afterEach(() => {
   ctx.cleanup();
-  // `setBackendAvailability` writes a sticky process-global override; one test
-  // below flips it and every other test wants the hermetic (no credential)
-  // answer back.
-  resetRegistryForTests();
 });
 
 /**
@@ -358,6 +354,7 @@ describe("unavailableDockView — the benign refusal", () => {
 
     const view = unavailableDockView(
       store.db,
+      { id: store.users.selin.id },
       { projectSlug: SLUG, taskKey: null },
       store.dataRoot,
     );
@@ -389,6 +386,7 @@ describe("unavailableDockView — the benign refusal", () => {
     const store = storeWithTwoProjects();
     const gone = unavailableDockView(
       store.db,
+      { id: store.users.selin.id },
       { projectSlug: "no-such-project", taskKey: "NOPE-1" },
       store.dataRoot,
     );
@@ -494,25 +492,43 @@ describe("dockTaskExists — asked before a thread is bound to a task", () => {
 describe("available — the dock's honesty about the backend", () => {
   /**
    * `available` is one of the three flags the panel disables its composer on.
-   * An instance with no Claude credential must say so rather than accept a
-   * message it cannot answer — and the refusal view has to report it too, or a
-   * dock that came back from `unavailable` would enable the composer on an
-   * instance that still has no backend.
+   * A person with no Claude connected must be told so rather than have a
+   * message accepted that cannot be answered — and the refusal view has to
+   * report it too, or a dock that came back from `unavailable` would enable
+   * the composer for somebody with nothing to run on.
+   *
+   * Ruling 127 makes that a fact about the VIEWER, not the deployment: a turn
+   * bills the asker's own Claude account, so one member reads `available:
+   * false` while another, on the same instance, reads `true`.
    */
-  it("reports the live backend availability in both the normal and the unavailable view", () => {
+  it("reports the VIEWER's own Claude connection in both the normal and the unavailable view", async () => {
     const store = storeWithTwoProjects();
     const scope = { projectSlug: SLUG, taskKey: null };
+    const viewer = store.users.selin;
 
-    setBackendAvailability("claude", false);
+    await disconnectFakeBackend(store.db, viewer.id, "claude");
     expect(
-      dock(store, store.users.selin, { ...scope, conversationId: null }).available,
+      dock(store, viewer, { ...scope, conversationId: null }).available,
     ).toBe(false);
-    expect(unavailableDockView(store.db, scope, store.dataRoot).available).toBe(false);
-
-    setBackendAvailability("claude", true);
     expect(
-      dock(store, store.users.selin, { ...scope, conversationId: null }).available,
+      unavailableDockView(store.db, { id: viewer.id }, scope, store.dataRoot)
+        .available,
+    ).toBe(false);
+
+    await connectFakeBackend(store.db, viewer.id, "claude");
+    expect(
+      dock(store, viewer, { ...scope, conversationId: null }).available,
     ).toBe(true);
-    expect(unavailableDockView(store.db, scope, store.dataRoot).available).toBe(true);
+    expect(
+      unavailableDockView(store.db, { id: viewer.id }, scope, store.dataRoot)
+        .available,
+    ).toBe(true);
+
+    // The same instance, a different person: still not connected, and the
+    // dock says so for them alone.
+    expect(
+      dock(store, store.users.arda, { ...scope, conversationId: null })
+        .available,
+    ).toBe(false);
   });
 });

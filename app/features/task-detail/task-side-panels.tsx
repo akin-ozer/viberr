@@ -833,7 +833,12 @@ export function CurrentStatePanel({
             {owner ? (
               <span
                 className="rev-stack"
-                title="Human owner: reviews & accepts, this task only"
+                // Ruling 127 widened what this seat means: the owner is still
+                // the human reviewer and acceptance authority for this task,
+                // and is now also WHOSE Claude and Codex accounts its agent
+                // runs bill. The row that shows (and releases) the seat is
+                // where that belongs.
+                title="Human owner: reviews and accepts this task, and its agent runs use their own Claude and Codex accounts"
               >
                 <Avatar person={owner} />
                 <span className="rs-names">

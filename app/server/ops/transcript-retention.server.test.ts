@@ -49,6 +49,15 @@ function makeRoot(): string {
   return dataRoot;
 }
 
+/** Ruling 127: session homes are PER PERSON, under `runtimes/users/<id>/`.
+ *  Two people here, so a sweep that visited only one would be visible. */
+const ALICE = "u_alice";
+const BOB = "u_bob";
+
+function userHome(root: string, userId: string, backend: "claude" | "codex"): string {
+  return path.join(root, "runtimes", "users", userId, `${backend}-home`);
+}
+
 describe("pruneRuntimeTranscripts (gap 20)", () => {
   it("removes run transcripts past the window and keeps recent ones", () => {
     const root = makeRoot();
@@ -72,11 +81,11 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
 
   it("prunes the app-owned provider session homes too", () => {
     const root = makeRoot();
+    // One aged file in each of TWO people's homes — the sweep visits every
+    // per-person root (`listUserRuntimeRoots`), not just the first.
     const claudeSession = writeAged(
       path.join(
-        root,
-        "runtimes",
-        "claude-home",
+        userHome(root, ALICE, "claude"),
         "projects",
         "-data-projects-p-tasks-VIB-1-workspace",
         "sess-old.jsonl",
@@ -86,9 +95,7 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
     );
     const codexRollout = writeAged(
       path.join(
-        root,
-        "runtimes",
-        "codex-home",
+        userHome(root, BOB, "codex"),
         "sessions",
         "2026",
         "01",
@@ -100,9 +107,7 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
     );
     const fresh = writeAged(
       path.join(
-        root,
-        "runtimes",
-        "codex-home",
+        userHome(root, BOB, "codex"),
         "sessions",
         "2026",
         "08",
@@ -120,17 +125,36 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
     expect(existsSync(fresh)).toBe(true);
     // The emptied date directories go with them.
     expect(
-      existsSync(path.join(root, "runtimes", "codex-home", "sessions", "2026", "01")),
+      existsSync(path.join(userHome(root, BOB, "codex"), "sessions", "2026", "01")),
     ).toBe(false);
+  });
+
+  it("never walks into a directory that is not a path-safe user id", () => {
+    // `listUserRuntimeRoots` is the only enumerator, and it refuses any name
+    // this app could not have minted — so nothing a sweep did not create can
+    // be recursed into, whatever a hand-edited volume holds.
+    const root = makeRoot();
+    const stray = writeAged(
+      path.join(root, "runtimes", "users", "..evil", "claude-home", "x.jsonl"),
+      "{}\n",
+      DEFAULT_SESSION_HOME_RETENTION_DAYS + 400,
+    );
+    expect(pruneRuntimeTranscripts({ dataRoot: root }).sessions).toBe(0);
+    expect(existsSync(stray)).toBe(true);
   });
 
   it("NEVER deletes a credential or config file, only *.jsonl (P11-04)", () => {
     const root = makeRoot();
-    const auth = path.join(root, "runtimes", "codex-home", "auth.json");
+    // Ruling 127: these are now ONE PERSON's vendor-held sign-ins. Deleting
+    // either signs that person out of their own Claude/Codex account.
+    const auth = path.join(userHome(root, ALICE, "codex"), "auth.json");
     writeAged(auth, '{"token":"x"}', 400);
-    const claudeConfig = path.join(root, "runtimes", "claude-home", ".credentials.json");
+    const claudeConfig = path.join(
+      userHome(root, ALICE, "claude"),
+      ".credentials.json",
+    );
     writeAged(claudeConfig, "{}", 400);
-    const configToml = path.join(root, "runtimes", "codex-home", "config.toml");
+    const configToml = path.join(userHome(root, ALICE, "codex"), "config.toml");
     writeAged(configToml, "model = 'x'", 400);
 
     pruneRuntimeTranscripts({ dataRoot: root });
@@ -167,7 +191,7 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
       10,
     );
     const session = writeAged(
-      path.join(root, "runtimes", "claude-home", "projects", "p", "s.jsonl"),
+      path.join(userHome(root, ALICE, "claude"), "projects", "p", "s.jsonl"),
       "{}\n",
       400,
     );

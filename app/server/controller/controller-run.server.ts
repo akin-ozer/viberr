@@ -17,8 +17,9 @@ import {
 } from "~/server/tasks/specialist-mcp.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import {
-  isBackendAvailable,
-} from "~/server/runtimes/runtime-registry.server";
+  resolveUserRunPrincipal,
+  type RunPrincipalRefusal,
+} from "~/server/runtimes/run-principal.server";
 import type { RunMcpServers } from "~/server/runtimes/adapter.server";
 import {
   registerRunCompletion,
@@ -214,10 +215,16 @@ export async function runControllerTurn(
     surface,
   });
 
-  if (!isBackendAvailable("claude")) {
-    const note =
-      "The controller needs the Claude backend and no usable Claude credential is configured. " +
-      "An org admin sets one in the deployment environment; until then I cannot answer.";
+  // Ruling 127: a controller turn runs on the ASKER's own Claude account —
+  // their words, their conversation, their bill. Nobody else's credential may
+  // answer for them, so a viewer who has not connected Claude is refused here,
+  // in the transcript, before any process. The refusal is per-person: another
+  // member with Claude connected can still use the controller.
+  const principal = resolveUserRunPrincipal(db, input.user.id, "claude", {
+    dataRoot: input.dataRoot,
+  });
+  if (!principal.ok) {
+    const note = controllerRefusalNote(principal.refusal);
     appendMessage(db, {
       conversationId: conversation.id,
       author: "controller",
@@ -249,7 +256,15 @@ export async function runControllerTurn(
   const entry: LeaseEntry = { runId: null, queue: [] };
   map.set(conversation.id, entry);
   try {
-    const runId = await startTurnRun(db, conversation, entry, input, text, surface);
+    const runId = await startTurnRun(
+      db,
+      conversation,
+      entry,
+      input,
+      text,
+      principal.principal.userId,
+      surface,
+    );
     return { state: "started", runId, messageId: message.id };
   } catch (error) {
     map.delete(conversation.id);
@@ -271,12 +286,56 @@ export async function runControllerTurn(
   }
 }
 
+/**
+ * The controller's OWN refusal sentence.
+ *
+ * `principalRefusalMessage` is written for a TASK run — it says "the task
+ * owner", which is not who this refusal is about — so the controller writes
+ * its own first line and appends the specific half (a missing sign-in file)
+ * from the health detail, which is person-agnostic. The one thing both must
+ * say, and do: nothing was started.
+ */
+function controllerRefusalNote(refusal: RunPrincipalRefusal): string {
+  // The discriminator is the ROW, not the verification: every unavailable
+  // health has `verification: "none"` (that is what unavailable means), so
+  // testing it here skipped this branch on every refusal and the wiped-volume
+  // case got the generic "isn't connected yet" copy. `kind !== null` is what
+  // `principalRefusalMessage` uses for the same choice — a login row whose
+  // credential file vanished has a kind, and the detail that goes with it.
+  if (
+    refusal.kind === "no-credential" &&
+    refusal.health.kind !== null &&
+    refusal.health.detail
+  ) {
+    // The health detail is the specific case ("your sign-in file is missing…")
+    // and it is already addressed to the person themselves.
+    return `${refusal.health.detail} The controller runs on your own Claude account, so I cannot answer until it is connected.`;
+  }
+  if (refusal.kind === "no-credential") {
+    return (
+      "The controller runs on your own Claude account, and Claude isn't connected for you yet. " +
+      "Connect it on your Profile → Agent accounts, then send your message again."
+    );
+  }
+  // The asker IS the signed-in user, so the remaining refusals can only mean
+  // their own account was disabled or deleted mid-session (a live session
+  // outliving the account). `principalRefusalMessage` would say "this task's
+  // owner", which names neither a task nor a person that exists here, so the
+  // controller says the true thing plainly instead.
+  return (
+    "Your account is disabled or gone, so there is no Claude account for the controller " +
+    "to run on. Ask an org admin to re-enable it. I have not started anything."
+  );
+}
+
 async function startTurnRun(
   db: DatabaseSync,
   conversation: ControllerConversation,
   entry: LeaseEntry,
   input: ControllerTurnInput,
   text: string,
+  /** Ruling 127: the asker's user id — the account this turn bills. */
+  credentialUserId: string,
   /** The surface of THIS message (a queued turn carries its own, not the
    *  first message's). */
   surface: string | null,
@@ -339,6 +398,7 @@ async function startTurnRun(
     const resumeInput: ResumeRunInput = {
       runId: prior.id,
       prompt,
+      credentialUserId,
       autonomous: true,
       systemPrompt,
       mcpServers,
@@ -356,6 +416,7 @@ async function startTurnRun(
       role: "Controller",
       kind: "controller",
       backend: "claude",
+      credentialUserId,
       model: resolveRunModel("claude", config.model),
       agentName: config.name,
       agentProfileId: CONTROLLER_PROFILE_ID,
@@ -468,7 +529,19 @@ async function settleTurn(
     return;
   }
   try {
-    await startTurnRun(db, conversation, entry, input, next.text, next.surface);
+    // Ruling 127: the queued message is the same asker's — the lease is
+    // per-conversation and only its owner may speak in it — so the turn bills
+    // the same account the one that just finished did. Ruling 121: the surface
+    // is the QUEUED message's own, not the one that just finished.
+    await startTurnRun(
+      db,
+      conversation,
+      entry,
+      input,
+      next.text,
+      input.user.id,
+      next.surface,
+    );
   } catch (error) {
     logger.error("queued controller turn failed to start", {
       conversationId,

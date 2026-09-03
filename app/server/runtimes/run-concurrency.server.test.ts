@@ -13,6 +13,7 @@ import {
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { installFakeRuntime, queueFakeRun } from "../../../test-support/fake-runtime";
+import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { getRun } from "./run-store.server";
 import {
   drainRunQueue,
@@ -33,7 +34,7 @@ import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server
 let ctx: TestDbContext;
 let store: TestStore;
 
-beforeEach(() => {
+beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   writeTask(store.dataRoot, store.slug, {
@@ -45,6 +46,10 @@ beforeEach(() => {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
   installFakeRuntime();
+  // Ruling 127: every run here bills VIB-1's owner, so he has to have the
+  // backend connected or the cap would never be reached — each run would be
+  // refused before it took a slot.
+  await connectFakeBackend(store.db, store.users.arda.id, "claude");
 });
 
 afterEach(() => {
@@ -76,6 +81,7 @@ async function startHeldRun(threadId: string): Promise<string> {
     backend: "claude",
     model: "claude-sonnet-4-5",
     agentProfileId: `reviewer-${threadId}`,
+    credentialUserId: store.users.arda.id,
     prompt: "review VIB-1",
     dataRoot: store.dataRoot,
   });
@@ -336,6 +342,7 @@ describe("run concurrency cap — reserved (specialist) runs", () => {
       backend: "claude",
       model: "claude-sonnet-4-5",
       agentProfileId: `reviewer-res-${n}`,
+      credentialUserId: store.users.arda.id,
       phase,
     });
   }

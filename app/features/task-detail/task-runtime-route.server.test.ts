@@ -47,6 +47,14 @@ beforeAll(async () => {
     deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
   };
 
+  // Ruling 127: these runs bill arda (the demo tasks' owner), so he needs the
+  // backend connected — the same thing that makes a real dispatch reach an
+  // adapter.
+  const { connectFakeBackend } = await import(
+    "../../../test-support/backend-credentials"
+  );
+  await connectFakeBackend(app.db, ids.arda, "claude");
+  await connectFakeBackend(app.db, ids.arda, "codex");
   const { startRun } = await import("~/server/runtimes/run-service.server");
   installFakeRuntime();
 
@@ -79,6 +87,7 @@ beforeAll(async () => {
     role: "Primary specialist",
     kind: "primary",
     agentProfileId: "developer",
+    credentialUserId: ids.arda,
     backend: "codex",
     model: "gpt-5.4-codex",
     prompt: "analyze",
@@ -99,6 +108,7 @@ beforeAll(async () => {
     role: "Primary specialist",
     kind: "primary",
     agentProfileId: "developer",
+    credentialUserId: ids.arda,
     backend: "claude",
     model: "claude-sonnet-4-5",
     prompt: "work",

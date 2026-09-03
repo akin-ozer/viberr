@@ -305,6 +305,76 @@ describe("createTask", () => {
     expect(audit[0]?.taskKey).toBe("VIB-100");
   });
 
+  /**
+   * Ruling 127 — creation SEATS the creator as owner.
+   *
+   * Every agent run on a task bills the OWNER's own Claude/Codex accounts, so
+   * a task with no owner cannot run an agent at all. Being born unowned meant
+   * every brand-new task was unable to do the one thing it exists for, with an
+   * "Assign me" ceremony standing between a person and their own work. The
+   * seat is written through `setOwner`'s OWN event builder, so the timeline
+   * reads the same however the seat was filled.
+   */
+  it("seats the CREATOR as owner, with setOwner's assign event and the audit detail", async () => {
+    const store = prepared();
+    await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Mine from birth" },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-100",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.frontmatter.ownerUserId).toBe(store.users.murat.id);
+    // ONE assign event, in the shape a take through `setOwner` writes: the
+    // human's own actor ref, and text naming what the seat now decides.
+    const assigns = file.parsed.timeline.filter((e) => e.type === "assign");
+    expect(assigns).toHaveLength(1);
+    expect(assigns[0]!.actor).toMatchObject({
+      kind: "human",
+      userId: store.users.murat.id,
+    });
+    expect(assigns[0]!.text).toContain("Took task ownership");
+    expect(assigns[0]!.text).toContain("owner's own Claude and Codex accounts");
+    expect(assigns[0]!.toAgent).toBe(false);
+    // The audit row records the seat too — who was billed for what starts here.
+    const audit = listAuditEvents(store.db, { action: "task.created" });
+    expect(audit[0]?.details).toMatchObject({
+      ownerUserId: store.users.murat.id,
+    });
+  });
+
+  it("a task created under OPERATOR authority keeps a NULL seat", async () => {
+    // The operator is not a person and has no account to bill, so nothing it
+    // creates is born owned — a human takes that seat. Canary: seat
+    // `actor.userId` unconditionally and the in-process operator's own actor
+    // lands in `ownerUserId`, where every later run would try to bill it.
+    const store = prepared();
+    await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Operator spawned" },
+      // The RBAC gate still runs on the member the operator acts inside; the
+      // SEAT is decided by `operatorAuthorized`, which says the mutation is the
+      // operator's, not that member's.
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot, operatorAuthorized: true },
+    );
+
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-100",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.frontmatter.ownerUserId).toBeNull();
+    expect(file.parsed.timeline.filter((e) => e.type === "assign")).toEqual([]);
+    const audit = listAuditEvents(store.db, { action: "task.created" });
+    expect(audit[0]?.details).toMatchObject({ ownerUserId: null });
+  });
+
   // R19-14: every task passes the triage quality gate — creation lands at the
   // entry stage ONLY. The pre-ruling behavior (create mid-stage, operator
   // assigned at birth) is exactly what the ruling forbids.

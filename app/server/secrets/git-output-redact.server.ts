@@ -128,8 +128,8 @@ export function redactGitOutput(
  * for a packet observation line, a fenced timeline block and a log field.
  *
  * Ruling 69's argument transfers verbatim from git to the model runtimes: the
- * credential never lives in argv (Codex gets it via `CodexOptions.apiKey`/env,
- * Claude via `claudeSpawnEnv`), so the same value+pattern scrub plus
+ * credential never lives in argv (both adapters get it on the run's spawn env,
+ * assembled per run from its credential principal), so the same value+pattern scrub plus
  * control-character stripping makes a provider's own complaint safe to surface.
  * `redactGitOutput` already IS that shared child-process scrubber, so this
  * layers on top of it: coerce the (possibly nested) error to text, scrub, keep

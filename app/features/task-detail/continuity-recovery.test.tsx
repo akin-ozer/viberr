@@ -18,6 +18,17 @@ import {
 } from "./continuity-recovery";
 import { TaskDetailPage } from "./task-detail-page";
 
+/** Ruling 127: the task owner whose accounts a run bills, both backends
+ *  connected — the ordinary case, so the run controls render live and these
+ *  tests keep testing what they are about. The refusal states are covered in
+ *  execution-profile.test.tsx. */
+const CONNECTED_PRINCIPAL = {
+  ownerUserId: "u-arda",
+  ownerName: "Arda Kaya",
+  claude: { available: true, detail: null },
+  codex: { available: true, detail: null },
+};
+
 afterEach(cleanup);
 
 /**
@@ -497,7 +508,7 @@ function renderPage(task: Partial<TaskDetail> = {}, runtime: RunView[] = [broken
             deployedSpecialists={[]}
             operatorBackend="claude"
             operatorAutonomy="supervised"
-            backendAvailable={{ claude: true, codex: true }}
+            runPrincipal={CONNECTED_PRINCIPAL}
             activeAgentProfileIds={[]}
             timelineHasMore={false}
             timelineRemaining={0}

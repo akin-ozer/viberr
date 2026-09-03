@@ -53,12 +53,15 @@ export async function setupAppTest(): Promise<AppTestContext> {
 
   // Fail closed on the runtime too: every route-level test gets the fake
   // adapters. Without this a test that reaches autoInvokeOperator falls through
-  // to selectAdapter and either constructs a REAL adapter (if a credential ever
-  // leaks in — a paid provider call from `npm test`) or, with none, reports
-  // "unavailable" and drives the operator run into an async failure escalation
-  // that races the assertions. The fakes complete deterministically instead.
-  // Overrides are sticky, so a test that afterwards forces a backend
-  // unavailable (setBackendAvailability(…, false)) still wins.
+  // to selectAdapter and constructs a REAL adapter — a paid provider call from
+  // `npm test` the moment a credential leaks in. The fakes complete
+  // deterministically instead.
+  //
+  // Ruling 127: this decides only WHICH adapter a run reaches, never whether
+  // it may run. That is a fact about the run's credential principal, so a test
+  // whose dispatch must reach an adapter connects the backend for the person
+  // it bills (`connectFakeBackend` in test-support/backend-credentials.ts),
+  // and one that wants a refusal simply leaves them unconnected.
   const { installFakeRuntime } = await import("./fake-runtime");
   installFakeRuntime();
 

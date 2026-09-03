@@ -5,6 +5,9 @@
 > plus the raw `process.env` reads listed in §3. `.env.example` documents the
 > operator-facing subset. Verified against `main` @ `68b5480` (2026-09-01);
 > §2 and §3 re-verified 2026-09-02 against `pass32/implementation` @ `478bed0`.
+> Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`):
+> the nine deployment-wide agent-backend variables are gone; agent backends are
+> connected per person and appear in §4, not here.
 
 Viberr is configured almost entirely through environment variables, validated
 once at boot by `parseEnv` in `app/server/config/env.server.ts`. The process
@@ -21,7 +24,7 @@ files, and the in-app OAuth provider rows that override the deployment env.
 | Variable | Rule | Purpose |
 |---|---|---|
 | `VIBERR_SESSION_SECRET` | ≥ 32 characters | Signs the session cookie (`viberr.session_token`) and the CSRF double-submit token. Generate with `openssl rand -base64 48`. |
-| `VIBERR_SECRET_ENCRYPTION_KEY` | base64 decoding to exactly 32 bytes | AES-256-GCM key for every sealed secret in SQLite: GitHub PATs, MCP credentials, OAuth client secrets, the S3 audit export key. Generate with `openssl rand -base64 32`. Losing it makes every stored secret unreadable; rotate it with `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` + `npm run keys`. |
+| `VIBERR_SECRET_ENCRYPTION_KEY` | base64 decoding to exactly 32 bytes | AES-256-GCM key for every sealed secret in SQLite: GitHub PATs, MCP credentials, OAuth client secrets, the S3 audit export key, and each person's agent-backend API keys (ruling 127). Generate with `openssl rand -base64 32`. Losing it makes every stored secret unreadable; rotate it with `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` + `npm run keys`. |
 
 ## 2. Validated optional variables (the schema)
 
@@ -46,24 +49,27 @@ files, and the in-app OAuth provider rows that override the deployment env.
 | `VIBERR_SEED_ADMIN_EMAIL` | `admin@viberr.dev` | Bootstrap admin, created only while the `users` table is empty (boot and `npm run seed` both call `seedInitialAdmin`). |
 | `VIBERR_SEED_ADMIN_PASSWORD` | boot: random one-time password printed once as `VIBERR BOOTSTRAP ADMIN`; seed CLI: `SEED_DEFAULT_PASSWORD` | ≥ 8 characters. The boot-generated password forces a reset at first sign-in (`pwreset_required`). |
 
-### Agent backends
+### Agent backends: none
 
-Presence of any one credential makes a backend `real`; the registry never makes a
-paid call to detect availability (`isBackendAvailable` in
-`app/server/runtimes/runtime-registry.server.ts`). Both `*_USE_CLI_AUTH` flags have a
-second, filesystem condition; a key or token never does.
+There are no agent-backend environment variables (ruling 127). The deployment-wide
+`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `VIBERR_CLAUDE_USE_CLI_AUTH`,
+`CLAUDE_CONFIG_DIR`, `CODEX_ACCESS_TOKEN`, `CODEX_API_KEY`, `OPENAI_API_KEY`,
+`CODEX_HOME` and `VIBERR_CODEX_USE_CLI_AUTH` were deleted from the schema, from
+`.env.example`, from the image and from `compose.yml`. Claude and Codex are connected
+**per person** on Profile → Agent accounts, and each run is built from the credential of
+the one person it bills; see §4 and
+[deployment.md](deployment.md#agent-accounts-are-per-person-ruling-127).
 
-| Variable | Default | Notes |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | unset | Claude, pay-as-you-go. |
-| `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token from `claude setup-token`. Recommended in the container. |
-| `VIBERR_CLAUDE_USE_CLI_AUTH` | unset | `1` = use an already logged-in `claude` CLI. Honoured only if `CLAUDE_CONFIG_DIR` (or `~/.claude`) exists; `<dir>/.credentials.json` proves a file-backed login; on macOS an existing dir with no credentials file is accepted as a Keychain login. Does not work in the container. |
-| `CLAUDE_CONFIG_DIR` | image: `/data/runtimes/claude-home`; otherwise `<dataRoot>/runtimes/claude-home` (or `~/.claude` under CLI auth) | Where the Claude SDK writes resumable session transcripts (`projects/<cwd>/<sid>.jsonl`). Resolved by `resolveClaudeConfigDir` in `claude-config.server.ts`; the session exporter reads the same place. |
-| `CODEX_ACCESS_TOKEN` | unset | ChatGPT Business/Enterprise workspace token (subscription entitlements, no Platform billing). Recommended in the container. |
-| `CODEX_API_KEY` / `OPENAI_API_KEY` | unset | Usage-based Platform billing. |
-| `VIBERR_CODEX_USE_CLI_AUTH` | unset | `1` = use a `codex login` `auth.json`. Honoured only if the file exists in the auth source (`$CODEX_HOME/auth.json`). |
-| `CODEX_HOME` | image: `/data/runtimes/codex-home` | Codex login/auth source. A Viberr run always gets an app-owned run home under `<dataRoot>/runtimes/codex-home` (`resolveCodexHome` in `codex-config.server.ts`); `prepareCodexHome` mirrors `auth.json` in per run. Compose mounts the host `~/.codex` read-only at `/host-codex` and the entrypoint copies `auth.json` in once when the volume lacks it. |
-| `VIBERR_BROWSER_EXECUTABLE` | image: `/usr/bin/chromium` | Chromium binary for the `use-browser` Playwright MCP mount. When set the mount also passes `--no-sandbox`. |
+Setting one of those names in the deployment environment does nothing useful: the schema
+does not read it, and `filteredSpawnEnv()` (`runtime-registry.server.ts`) strips every
+credential-shaped variable from the base env both adapters spawn on, so an ambient value
+never reaches an agent process either. The only credential env a child ever sees is the
+principal's, added by `runCredentialFor` for that one run.
+
+*(Corrected 2026-09-02, ruling 127 — this section used to be a seven-row table of
+deployment credentials plus a presence-only availability rule. Both are gone: presence of
+a key on this server is no longer what makes a backend usable, and `isBackendAvailable`
+no longer exists.)*
 
 ### Runtime tuning
 
@@ -77,7 +83,7 @@ and fallback.
 | `VIBERR_CODEX_IDLE_TIMEOUT_MS` | `900000` (15 min) | Same guard for Codex. |
 | `VIBERR_GIT_CLONE_TIMEOUT_MS` | `900000` (15 min) | Ceiling on one `git clone` / mirror fetch (`cloneTimeoutMs` in `git-clone-auth.server.ts`); the schedule claim lease is sized against it. Ignored unless a positive integer. |
 | `VIBERR_TRANSCRIPT_RETENTION_DAYS` | `30` | Age at which `runtimes/<backend>/<runId>.jsonl` is pruned. `0` keeps forever. Aligned with the 30-day `run_log_lines` window. |
-| `VIBERR_SESSION_HOME_RETENTION_DAYS` | `30` | Same window for the provider session homes (`claude-home/projects/`, `codex-home/sessions/`). `0` keeps forever. |
+| `VIBERR_SESSION_HOME_RETENTION_DAYS` | `30` | Same window for the per-person provider session homes (`runtimes/users/*/claude-home/projects/`, `runtimes/users/*/codex-home/sessions/`). `*.jsonl` only, so a sign-in file is never pruned. `0` keeps forever. |
 | `VIBERR_MAINTENANCE_INTERVAL_MS` | `21600000` (6 h) | Cadence of the periodic store-maintenance pass (`app/server/ops/maintenance.server.ts`). |
 | `VIBERR_DISK_CHECK_INTERVAL_MS` | `300000` (5 min) | Cadence of the free-space check on the data root. |
 | `VIBERR_DISK_LOW_FREE_MB` | `2048` | Free-space threshold below which the data root reads `low` (`app/server/ops/disk-space.server.ts`). |
@@ -163,7 +169,6 @@ that were here moved into the schema.)*
 | `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` | unset | Comma-separated retired keys, newest first, for a rotation window (`app/server/secrets/secret-box.server.ts`). Reads only; a malformed entry is skipped silently so a key list never reaches an error message. |
 | `VIBERR_E2E_KEEP` | unset | `1` keeps the e2e compose stack up after `npm run e2e` (`scripts/e2e.ts`). |
 | `VIBERR_E2E_BASE_URL` | set by `scripts/e2e.ts` | The Playwright base URL; `playwright.config.ts` refuses to run without it. |
-| `CODEX_CLI_HOME` | `~/.codex` | Compose-only: the host directory mounted read-only at `/host-codex` for the one-time `auth.json` seed. |
 
 The runtime also **sets** environment for the processes it spawns and never
 inherits its own environment into them: spawned MCP servers and agent runs get a
@@ -184,16 +189,26 @@ away from the host config, `GIT_ALLOW_PROTOCOL` restricted, and
 | Controller model, effort, grants, instructions | `agents/profiles/controller.md` + `agents/definitions/controller.md` in the data root | Org admin, Controller tab; grant sections and instructions locked unless unlocked by env (§2) |
 | Per-project workflow, members, agent deployments, guardrails, credential policy | `projects/<slug>/project.md` | Project admins through Policy / Settings / Agents |
 | Per-user theme, motion, notification routing, timeline default, pins | `users.theme` + cookie `viberr_theme`; `user_prefs` table | The user, Profile overlay |
+| Personal backend credentials (ruling 127) | `user_backend_credentials` (sealed `secret_box` for a pasted key or token; a `login` row holds no secret) + the vendor's own file in `runtimes/users/<id>/{claude-home,codex-home}` | The person, Profile → Agent accounts |
+| Which account a run bills (the credential principal) | derived per run and persisted as `agent_runs.credential_user_id` | Nobody sets it: task runs take the task owner, controller turns the asker (`run-principal.server.ts`) |
 
 ## 5. What the container image bakes in
 
 From the `Dockerfile` runtime stage: `NODE_ENV=production`, `VIBERR_DATA_ROOT=/data`,
-`CLAUDE_CONFIG_DIR=/data/runtimes/claude-home`, `CODEX_HOME=/data/runtimes/codex-home`,
 `UV_CACHE_DIR=/data/runtimes/uv-cache`, `UV_PYTHON_INSTALL_DIR=/data/runtimes/uv-python`,
 `PORT=3000`, `VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`. Everything else comes from
 `.env` via compose `env_file`. Compose additionally forces `NODE_ENV=production` and
 `VIBERR_DATA_ROOT=/data` even when `.env` carries the dev values, pins `hostname: viberr`
 (so a recreated container can reclaim its own writer lock) and runs with `init: true`.
+
+The image bakes **no** backend credential and **no** runtime home, and it declares no
+`ENTRYPOINT`: the CMD is pid 1 and compose's `init: true` reaps orphans. Each person's
+home is created on demand at `/data/runtimes/users/<userId>/{claude-home,codex-home}`,
+mode 0700, by `ensureUserBackendHome`. *(Corrected 2026-09-02, ruling 127 — the image
+used to bake `CLAUDE_CONFIG_DIR=/data/runtimes/claude-home` and
+`CODEX_HOME=/data/runtimes/codex-home` and to run `scripts/docker-entrypoint.sh`, which
+seeded `auth.json` from a read-only `/host-codex` mount. The variables, the script, the
+mount and the `CODEX_CLI_HOME` compose knob that pointed at it are all deleted.)*
 
 ## 6. Local development
 

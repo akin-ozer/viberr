@@ -21,25 +21,14 @@ services:
       # equivalents (VIBERR_DATA_ROOT=./data, NODE_ENV=development).
       NODE_ENV: production
       VIBERR_DATA_ROOT: /data
-      # --- Run agents on a SUBSCRIPTION (no per-token API key) ---
-      # Claude (Claude Pro/Max): run `claude setup-token` once on any machine,
-      # put the token in .env as CLAUDE_CODE_OAUTH_TOKEN=... (env_file injects it).
-      #
-      # Codex state is isolated from the host's personal ~/.codex directory.
-      # Preferred subscription auth is CODEX_ACCESS_TOKEN from .env
-      # (ChatGPT Business/Enterprise; no Platform API billing). Other ChatGPT
-      # plans use the CLI login (auth.json) — AUTO-SEEDED at boot from the
-      # read-only /host-codex mount below when the volume lacks it, so a plain
-      # `docker compose up` starts with Codex working even on a fresh/wiped
-      # ./docker-data (the old recurring trap: only Codex silently degraded on
-      # a wipe, because Claude's token rides .env while auth.json lived solely
-      # on the volume). Manual fallback for hosts without ~/.codex:
-      #   docker compose cp ~/.codex/auth.json app:/data/runtimes/codex-home/auth.json
-      # — picked up live, no restart (availability re-probes). Without any
-      # credential, Viberr reports Codex UNAVAILABLE (honest degraded state)
-      # rather than starting a doomed run (F-DOCKER1). Sessions + the seeded
-      # auth persist on the /data mount; host sessions are never imported.
-      CODEX_HOME: /data/runtimes/codex-home
+      # No agent-backend credential is set here (ruling 127). Claude and Codex
+      # are connected PER PERSON in the app, on Profile → Agent accounts: a
+      # hosted sign-in through the bundled vendor binary, or a pasted API key /
+      # ChatGPT workspace access token sealed in the database. Each person's
+      # sign-in lands in /data/runtimes/users/<userId>/{claude-home,codex-home}
+      # on the volume below, so it survives a recreate. An instance-wide key
+      # would bill every run to whoever owns it, which is what the ruling
+      # forbids.
       # --- Controller configuration locks (ruling 108) ---
       # The controller's skill / knowledge-base / MCP grants and its
       # instructions are LOCKED by default: the Controller settings tab shows
@@ -59,16 +48,11 @@ services:
       - "${PORT:-3000}:${PORT:-3000}"
     volumes:
       # Everything stateful lives under the data root: canonical project/task
-      # markdown, SQLite projections + app DB, run logs, KBs. Back this up.
+      # markdown, SQLite projections + app DB, run logs, KBs, and each person's
+      # agent-backend runtime home (runtimes/users/<userId>/…, ruling 127).
+      # Back this up. Wiping it signs everyone out of Claude and Codex; they
+      # reconnect on Profile → Agent accounts.
       - ./docker-data:/data
-      # Codex CLI auth auto-seed: the host's ~/.codex is mounted READ-ONLY at a
-      # side path; the entrypoint copies auth.json into the writable
-      # $CODEX_HOME only when the volume lacks it. A DIRECTORY mount (not the
-      # file) because the CLI rewrites auth.json via rename — a file mount
-      # would pin the dead inode and go silently stale. The container copy
-      # stays self-managing afterwards (the SDK refreshes it). Set
-      # CODEX_CLI_HOME to another path, or remove this line to opt out.
-      - ${CODEX_CLI_HOME:-~/.codex}:/host-codex:ro
     healthcheck:
       test:
         [

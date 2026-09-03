@@ -8,6 +8,9 @@ Rewritten 2026-09-01 against `main` @ `68b5480` and re-verified 2026-09-02 again
 listed in [`../validation/2026-09-01-doc-validation.md`](../validation/2026-09-01-doc-validation.md).
 Every environment variable named here is documented in
 [`configuration.md`](configuration.md).
+Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): the health
+`backends` row, the whole "Agent runtimes" section, the session-home retention row and the
+backup note were rewritten for per-person agent accounts.
 
 ## First diagnostic: is every canonical file trustworthy?
 
@@ -42,7 +45,7 @@ Key order is part of the contract:
 | `projections` | `{ projects, tasks }` row counts |
 | `watcher`, `kbWatcher` | store and knowledge-base watchers alive; a watcher error clears the handle, so `false` is a real dead watcher, not "never started" |
 | `lock` | `{ pid, hostname, startedAt }` of the single-writer holder, `null` if none |
-| `backends` | `{ claude, codex }` → `real` \| `unavailable`, credential presence only, re-probed on every call, never a validity check |
+| `backends` | `{ claude: { connectedUsers }, codex: { connectedUsers } }` → how many PEOPLE have connected each backend (ruling 127), recounted on every call. `0` is a normal reading, not a fault, and never degrades health; it is not a validity check, and it does not answer "can this task run", which is a fact about the task owner. *(Corrected 2026-09-02 — this was `real` \| `unavailable` from an env probe that no longer exists.)* |
 | `browser` | `{ status: "ready" }` or `{ status: "unavailable", reason }` for the governed browser |
 | `disk` | `{ freeBytes, totalBytes, usedPercent, status: ok\|low\|critical, lowThresholdBytes, criticalThresholdBytes }` or `null` when neither source could measure the root (not degraded); 5 s cache. The reading comes from POSIX `df -kP` (fragment-size aware), with `statfs(2)` only as the fallback — Node exposes `bsize` alone, and on Docker Desktop's virtiofs `f_bsize` ≠ `f_frsize`, which reported a near-full 229 GB volume as 62 TB with 1 TB free (F32-1, pass 32) |
 | `maintenance` | `{ intervalMs, diskCheckIntervalMs, lastPassAt, lastPassReason: boot\|interval\|disk-pressure, lastFreedBytes, scheduled }` |
@@ -51,8 +54,8 @@ Key order is part of the contract:
 Status codes: the bare URL is a **liveness** probe and returns `200` even when degraded;
 `?probe=readiness` (or `?probe=ready`) returns `503` with the same body while
 `degraded[]` is non-empty; `503 { "ok": false, "status": "down" }` when the snapshot
-itself threw (database unreachable). Unavailable backends or browser and a `null` disk
-reading are deliberately **not** degraded. The compose healthchecks call the liveness
+itself threw (database unreachable). A zero `connectedUsers`, an unavailable browser and a
+`null` disk reading are deliberately **not** degraded. The compose healthchecks call the liveness
 form, so a degraded instance never fails the Docker healthcheck.
 
 The boot log (structured JSON on stdout) prints one `boot integrity check` line: data
@@ -149,36 +152,74 @@ a readiness downgrade (tolerant parsing):
 
 ## Agent runtimes
 
-- A backend with **no** credential is **unavailable**: a run started on it fails fast
-  with an honest "backend unavailable" error run and a blocked recovery packet.
-  Detection is presence-only (no paid call) and is **re-probed on every check**, so a
-  copied-in `auth.json` is picked up without a restart; a changed environment variable
-  still needs one because it is process env. Seven credential paths count:
+- **Whose account a run uses is the first question (ruling 127).** There is no
+  instance-level "the backend is configured". Every run bills ONE person, persisted on
+  the run row as `agent_runs.credential_user_id`: the **task owner** for anything on a
+  task (operator, specialist, resume, scheduled, boot recovery, retry) and the **asker**
+  for a controller turn. Whether that person can run a backend is re-derived on every
+  check (`userBackendHealth` in `app/server/runtimes/backend-credentials.server.ts`), so a
+  fresh sign-in counts without a restart and a wiped volume reads as "sign in again"
+  immediately.
 
-  | backend | any one of these makes it available |
-  |---|---|
-  | Claude | `ANTHROPIC_API_KEY` · `CLAUDE_CODE_OAUTH_TOKEN` · `VIBERR_CLAUDE_USE_CLI_AUTH=1` **and** a Claude config dir that a logged-in CLI could have written |
-  | Codex | `CODEX_ACCESS_TOKEN` · `CODEX_API_KEY` · `OPENAI_API_KEY` · `VIBERR_CODEX_USE_CLI_AUTH=1` **and** `auth.json` present under the login dir (`CODEX_HOME` or `~/.codex`) |
+- **A refused run names its principal and starts no process.** Three refusals, and the
+  sentence a human sees comes from one place (`principalRefusalMessage` in
+  `run-principal.server.ts`), so the error run, the packet body and the UI agree:
 
-- **Both CLI-auth paths have a second condition; a real key or token never does.** The
-  flags are verified against the filesystem (`hasCredential` in
-  `app/server/runtimes/runtime-registry.server.ts`). On the Claude side a config dir that
-  does not exist **refutes** the flag; `<configDir>/.credentials.json` is a proven
-  file-backed login; on **darwin** an existing dir with no credentials file is the normal
-  logged-in state (Keychain) and the weaker verification is reported rather than hidden.
-- **Codex's second condition is the recurring docker trap.** `CODEX_HOME` defaults to
-  `/data/runtimes/codex-home` under Compose, on the `./docker-data` volume, so recreating
-  that directory silently drops `auth.json` while `VIBERR_CODEX_USE_CLI_AUTH=1` stays set.
-  Fix it by copying the credential back, not by re-setting the flag:
-  `docker compose cp ~/.codex/auth.json app:/data/runtimes/codex-home/auth.json`
-  (readable/writable by uid 1000). Health also reports the misconfiguration where
-  `CODEX_HOME` is the app's own run home; in containers prefer `CODEX_ACCESS_TOKEN`.
-  Full matrix: [deployment.md](./deployment.md#agent-backends-in-the-container).
+  | Refusal | What it means | Remedy |
+  |---|---|---|
+  | unowned | the task has no owner, so no account can pay for the run | take the task (Assign me) and run again |
+  | owner-missing | the owner's user row is gone or disabled | assign a new owner |
+  | no-credential | the owner (or the asker) has not connected that backend, or their sign-in file is missing | that person connects it on their own Profile → Agent accounts |
+
+  Each writes an honest `run·unavailable` error run and the usual blocked recovery packet
+  through the normal completion pipeline. No agent process is started, so there is nothing
+  to interrupt and no partial work to reconcile.
+
+- **A missing sign-in file after a volume wipe** is the common Docker case. A hosted
+  sign-in lives only at
+  `$VIBERR_DATA_ROOT/runtimes/users/<userId>/claude-home/.credentials.json` or
+  `.../codex-home/auth.json`; deleting or recreating that directory removes it while the
+  credential ROW stays in `user_backend_credentials` (a wipe of the WHOLE `./docker-data`
+  volume takes the database with it, and then the row is gone too). Health for that person
+  then reads "Your <Backend> sign-in
+  file is missing from this server (the runtime volume was wiped). Sign in again on your
+  Profile → Agent accounts." Do not copy a file in by hand: the vendor binary owns that
+  file, and Viberr never reads or writes its contents. The person signs in again. (On
+  macOS only, an existing home with no credential file is honoured as a Keychain login and
+  reported with the weaker `presence` verification rather than hidden.)
+
+- **Check who is connected** without touching a credential:
+
+  ```bash
+  curl -s localhost:${PORT:-3000}/resources/health | jq .backends
+  # {"claude":{"connectedUsers":3},"codex":{"connectedUsers":1}}
+
+  sqlite3 "$VIBERR_DATA_ROOT/state/projection.sqlite" \
+    "SELECT u.email, c.backend, c.kind, c.method, c.verified_at, c.created_at
+       FROM user_backend_credentials c JOIN users u ON u.id = c.user_id
+      ORDER BY u.email, c.backend;"
+  ```
+
+  One row per `(user, backend)`; connecting a new method REPLACES the previous row.
+  `kind = 'login'` carries no secret at all (the vendor binary holds it), `api_key` /
+  `access_token` carry a sealed `secret_box` you must never select into a terminal. A row
+  is necessary but not sufficient for a `login`: the file above must also exist.
+
+- **Removing an org account retires its agent accounts** (ruling 127): the vendor logout
+  runs, the sign-in file is deleted from that person's runtime home, and the credential
+  rows go, before the `users` row cascades. The audit detail on `org.user.removed` lists
+  `backendsRetired`. Nothing else on any path removes that file, and a removed person can
+  no longer reach Disconnect, so a leftover would be a live Claude.ai / ChatGPT credential
+  on this server that no row accounts for and every runtime backup carries forward. Their
+  transcripts stay (they are the run record) and age out through the retention sweep.
 - Raw run logs are append-only under `$VIBERR_DATA_ROOT/runtimes/<backend>/<runId>.jsonl`;
-  the log panel projects them. Interrupt is admin/maintainer-gated and audited.
+  the log panel projects them. Provider session transcripts live in the principal's own
+  home. Interrupt is admin/maintainer-gated and audited.
 - Quota and rate-limit state per backend is on `/insights` (org admin); a quota-refused
-  run opens a packet with a `retry_other_backend` option, and the switch sticks on the
-  engagement (`pinnedBackend`).
+  run opens a packet with a `retry_other_backend` option, offered only when the task owner
+  has the other backend connected, and the switch sticks on the engagement
+  (`pinnedBackend`). The Agent-logs "Retry on <other>" button passes the same test, so a
+  task never offers in one surface what the other withholds.
 - Concurrency: Org settings → runtime sets `maxConcurrentRuns` (0 = unlimited, ceiling
   64); excess runs wait in a `pending` queue that drains on every completion.
 - After a restart, orphaned `running|queued` rows are finalized as `error`
@@ -186,6 +227,12 @@ a readiness downgrade (tolerant parsing):
   (capped 3 per 30 min); finished runs whose completion never posted are replayed. This
   is why `task.agent.replied` and `runtime.operator.plan_executed` audit rows are exempt
   from retention.
+
+*(Rewritten 2026-09-02 for ruling 127. The old section listed "seven credential paths"
+across `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` / `VIBERR_CLAUDE_USE_CLI_AUTH` and
+`CODEX_ACCESS_TOKEN` / `CODEX_API_KEY` / `OPENAI_API_KEY` / `VIBERR_CODEX_USE_CLI_AUTH`,
+and told an operator to `docker compose cp ~/.codex/auth.json` into a shared
+`/data/runtimes/codex-home`. None of those variables, and neither shared home, exists.)*
 
 ## Auth / access
 
@@ -222,7 +269,7 @@ is reported on `/resources/health` under `maintenance`.
 | `audit_events` | deleted after **90 days**, **exported first** (below), except the two recovery-marker actions | no |
 | `notifications` | trimmed to the **newest 500 per user** | no |
 | run transcripts `runtimes/<backend>/*.jsonl` | mtime older than **30 days** | `VIBERR_TRANSCRIPT_RETENTION_DAYS` (0 = forever) |
-| provider session homes `runtimes/{claude,codex}-home/**/*.jsonl` | mtime older than **30 days** | `VIBERR_SESSION_HOME_RETENTION_DAYS` (0 = forever) |
+| per-person provider session homes `runtimes/users/*/claude-home/projects/**/*.jsonl` and `runtimes/users/*/codex-home/sessions/**/*.jsonl` | mtime older than **30 days**. `*.jsonl` ONLY: `auth.json`, `.credentials.json` and `.claude.json` are the vendor-held sign-ins and are never touched, so retention can never sign anybody out (ruling 127) | `VIBERR_SESSION_HOME_RETENTION_DAYS` (0 = forever) |
 | task `workspace/` directories | removed for tasks in the terminal stage, only when no run is queued or running | no |
 
 **Two audit actions are exempt from the 90-day delete** because boot recovery uses them
@@ -301,11 +348,16 @@ stop it first. Do **not** wipe `state/` while the app runs.
 `npm run backup [-- --out <dir>]` writes a consistent point-in-time artefact (`VACUUM
 INTO` from a read-only connection plus the store tree — `projects/`, `agents/`, `kb/`,
 `skills/` and `audit-exports/` — and a manifest) **without** taking the lock, so it works
-on a live instance. `npm run restore -- --from <artefact>` takes the
+on a live instance. `runtimes/` is excluded unless you pass `--include-runtimes`, and
+since ruling 127 that directory holds every person's live vendor sign-in
+(`runtimes/users/<userId>/…`), so an artefact taken with it is a secret. `npm run restore -- --from <artefact>` takes the
 lock, needs `--force` on an occupied root and moves displaced data to
 `<dataRoot>.replaced-<ts>/`; `--file <store path>` restores one canonical file without
 touching the database. Back up `VIBERR_SECRET_ENCRYPTION_KEY` separately: without it every
-sealed PAT and MCP credential in the artefact is unreadable. A raw copy of the live
+sealed PAT, MCP credential and **personal backend API key** (`user_backend_credentials`,
+ruling 127) in the artefact is unreadable, and restoring the database without the key
+leaves every person who pasted a key having to connect that backend again. Rotating is
+safe: `npm run keys -- reseal` covers that store like the others. A raw copy of the live
 `projection.sqlite` misses committed rows still in the WAL; use the CLI. Details and the
 ghost-membership warning for a `projects/`-only restore:
 [deployment.md](./deployment.md#persistence-backup--restore).

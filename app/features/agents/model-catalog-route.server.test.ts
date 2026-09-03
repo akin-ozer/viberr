@@ -8,9 +8,19 @@ import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
 
 /**
  * Route-level tests for GET /resources/model-catalog: requires auth,
- * returns the curated catalog shape per backend (claude enhances live only
- * when a credential is present — none in tests, so curated), and defaults
- * an unknown backend to claude so the modal always renders.
+ * returns the curated catalog shape per backend, and defaults an unknown
+ * backend to claude so the modal always renders.
+ *
+ * Ruling 127 gave this route BOTH arms to answer, and which one it takes is a
+ * fact about the person asking: Claude's live `supportedModels()` list is what
+ * ONE account offers, so the route resolves the VIEWER's own credential
+ * (`runCredentialFor`) and hands it to the catalog. A viewer who has not
+ * connected Claude is the ordinary case, not an error: they get the curated
+ * list and no probe is spawned. Both arms are covered below, and the live one
+ * is driven WITHOUT a network or a spawned binary by warming the catalog's own
+ * per-home cache through its injectable query seam — which also proves the
+ * route passes THAT viewer's home, since a cache entry belonging to another
+ * home is a miss by construction.
  */
 
 let app: AppTestContext;
@@ -22,22 +32,17 @@ beforeAll(async () => {
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
-  // Deterministic curated path: force claude unavailable so the route never
-  // spawns a live supportedModels() query against an ambient dev credential.
-  const { setBackendAvailability } = await import(
-    "~/server/runtimes/runtime-registry.server"
-  );
+  // Ruling 127: the enhanced probe needs the VIEWER's own Claude credential,
+  // and the demo seed connects nobody — so the route takes the curated path by
+  // construction and never spawns a live supportedModels() query. That is the
+  // product's real behaviour for a person who has not connected Claude, not a
+  // test-only override.
   const { resetModelCatalogCache } = await import(
     "~/server/runtimes/model-catalog.server"
   );
-  setBackendAvailability("claude", false);
   resetModelCatalogCache();
 });
-afterAll(async () => {
-  const { resetRegistryForTests } = await import(
-    "~/server/runtimes/runtime-registry.server"
-  );
-  resetRegistryForTests();
+afterAll(() => {
   app.cleanup();
 });
 
@@ -101,6 +106,87 @@ describe("resources/model-catalog", () => {
     const res = await runLoader("", ardaId);
     const body: ModelCatalogBody = await res.json();
     expect(body.data.defaultModel).toBe("sonnet");
+  });
+
+  /**
+   * Ruling 127, the OTHER arm: a viewer who HAS connected Claude gets the list
+   * their own account offers.
+   *
+   * Nothing here spawns a binary or opens a socket. The catalog caches a live
+   * result under the HOME DIRECTORY that produced it (one person's subscription
+   * must never decide another's picker), so warming that cache through the
+   * module's injectable query seam, keyed to the home `runCredentialFor` will
+   * hand the route, is enough: the route serving those models proves it passed
+   * this viewer's credential, and a second viewer still getting the curated
+   * list proves it did not pass somebody else's.
+   */
+  it("serves the VIEWER's own live model list once they have connected Claude, and nobody else's", async () => {
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    const { insertUser } = await import("~/server/auth/user-store.server");
+    const { userBackendHome } = await import(
+      "~/server/runtimes/user-homes.server"
+    );
+    const { getModelCatalog, resetModelCatalogCache } = await import(
+      "~/server/runtimes/model-catalog.server"
+    );
+    const stranger = insertUser(app.db, {
+      id: "u_catalog_stranger",
+      email: "stranger@viberr.test",
+      name: "Stranger",
+      role: "member",
+    });
+    await connectFakeBackend(app.db, ardaId, "claude");
+    try {
+      // The cache entry Arda's own credential would produce. `homeDir` is the
+      // identity the catalog keys on, and it is the one the route resolves for
+      // him (`runCredentialFor` reads the same per-user home).
+      const home = userBackendHome(ardaId, "claude");
+      const warmed = await getModelCatalog("claude", {
+        credential: {
+          env: { CLAUDE_CONFIG_DIR: home },
+          secrets: [],
+          kind: "api_key",
+          homeDir: home,
+        },
+        claudeQueryFn: () =>
+          Object.assign((async function* () {})(), {
+            supportedModels: async () => [
+              {
+                value: "claude-sonnet-4-5",
+                displayName: "Claude Sonnet (Arda's account)",
+                description: "live",
+                supportsEffort: true,
+                supportedEffortLevels: ["low", "high"],
+              },
+            ],
+            interrupt: async () => {},
+          }),
+      });
+      expect(warmed.models.map((m) => m.value)).toEqual(["claude-sonnet-4-5"]);
+
+      // The ROUTE, for the connected viewer: the live list, not the curated one.
+      const mine: ModelCatalogBody = await (
+        await runLoader("?backend=claude", ardaId)
+      ).json();
+      expect(mine.data.models.map((m) => m.value)).toEqual(["claude-sonnet-4-5"]);
+      expect(mine.data.models[0]!.displayName).toContain("Arda's account");
+
+      // …and for a viewer who has connected nothing: curated, with no probe.
+      // (A stranger's cache miss cannot fall through to Arda's entry.)
+      const theirs: ModelCatalogBody = await (
+        await runLoader("?backend=claude", stranger.id)
+      ).json();
+      expect(theirs.data.models.map((m) => m.value)).toEqual([
+        "sonnet",
+        "opus",
+        "haiku",
+      ]);
+    } finally {
+      await disconnectFakeBackend(app.db, ardaId, "claude");
+      resetModelCatalogCache();
+    }
   });
 
   // R20-3 / F20-4: the route threads the db so `getModelCatalog` stamps each

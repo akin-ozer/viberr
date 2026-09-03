@@ -158,6 +158,11 @@ const BASELINE_COLUMNS: readonly {
     columns: [
       { name: "dispatched_by_name", ddl: "dispatched_by_name TEXT" },
       { name: "dispatched_by_user_id", ddl: "dispatched_by_user_id TEXT" },
+      // Ruling 127: the run's credential principal. `upsertRun` names it on
+      // EVERY insert, so a root that predates the baseline edit would fail
+      // every run start rather than degrade — the exact failure this healer
+      // exists for.
+      { name: "credential_user_id", ddl: "credential_user_id TEXT" },
     ],
   },
   {

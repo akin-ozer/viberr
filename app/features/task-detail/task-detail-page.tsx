@@ -22,6 +22,7 @@ import {
   OperatorRecommendations,
   type RecommendationView,
 } from "./operator-recommendations";
+import type { TaskRunPrincipalView } from "./run-principal-view";
 import { AttachmentsPanel } from "./attachments-panel";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { Timeline, type TimelineFilterId } from "./timeline";
@@ -109,7 +110,7 @@ export function TaskDetailPage({
   deployedSpecialists,
   operatorBackend,
   operatorAutonomy,
-  backendAvailable,
+  runPrincipal,
   activeAgentProfileIds,
   runsVisible = true,
   timelineHasMore,
@@ -159,8 +160,10 @@ export function TaskDetailPage({
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
   operatorAutonomy: "supervised" | "full";
-  /** P11-41: which backends are configured, for the run picker. */
-  backendAvailable: { claude: boolean; codex: boolean };
+  /** Ruling 127: whose accounts this task's agent runs bill (the OWNER's) and
+   *  what those accounts can run. `null` = unowned, so nothing runs here.
+   *  P11-41's "would fail fast" gate, answered per person. */
+  runPrincipal: TaskRunPrincipalView | null;
   /** Profile ids of engagements with a live run (per-agent gating). */
   activeAgentProfileIds: string[];
   /** UI-30: false → the viewer is not a project member, so `lines`/`raw`/`sid`
@@ -379,6 +382,7 @@ export function TaskDetailPage({
     canInterrupt,
     onInterrupt,
     onRetryBackend,
+    retryBackends,
     onCompleteMerge,
     onForceAccept,
   } = useRunControls({
@@ -386,6 +390,9 @@ export function TaskDetailPage({
     runtime,
     myRole,
     canRunAgents,
+    // Ruling 127: the retry-on-the-other-backend offer bills the task owner,
+    // so it follows their connected accounts, not the viewer's grant alone.
+    runPrincipal,
     // F19-10: the merge control follows the SERVER's acceptance authority
     // (role OR this task's own owner), not a role-only copy of it.
     acceptanceHasAuthority: acceptance.hasAuthority,
@@ -767,7 +774,7 @@ export function TaskDetailPage({
           deployedSpecialists={deployedSpecialists}
           operatorBackend={operatorBackend}
           operatorAutonomy={operatorAutonomy}
-          backendAvailable={backendAvailable}
+          runPrincipal={runPrincipal}
           canRunAgents={canRunAgents}
           activeAgentProfileIds={activeAgentProfileIds}
           operatorRunActive={operatorRunActive}
@@ -781,6 +788,7 @@ export function TaskDetailPage({
             onSel={selectLog}
             linesByThread={linesByThread}
             {...(onRetryBackend ? { onRetryBackend } : {})}
+            retryBackends={retryBackends}
             retrying={runBusy}
             streamError={streamError}
             olderByThread={olderByThread}
@@ -827,6 +835,7 @@ export function TaskDetailPage({
           tlDefault={tlDefault}
           ask={ask}
           mentionables={mentionables}
+          runPrincipal={runPrincipal}
           onAgentLog={onAgentLog}
           taskClosed={taskClosed}
           {...(attachmentsBase

@@ -111,17 +111,21 @@ export const LINE_LOST_TAG = "run·line_lost";
  * Input-side isolation is already real — `filteredSpawnEnv` strips every
  * credential-shaped variable from both spawn envs (F10-02) and Codex runs with
  * `shell_environment_policy.inherit: "core"`. But the app then deliberately
- * re-adds the SELECTED provider credential to the agent's child env
- * (`claudeSpawnEnv` / `codexSpawnEnv`), and Claude has no counterpart to Codex's
- * shell-env policy. So one `env`-printing tool call put that credential verbatim
- * into a member-visible console, the `{ } raw` toggle, and the persisted
- * `.jsonl` — the one concrete leak path PRD-8/NFR7 forbid.
+ * re-adds ONE credential to the agent's child env: the credential principal's
+ * own (`runCredentialFor`, ruling 127). Claude has no counterpart to Codex's
+ * shell-env policy, so one `env`-printing tool call put that credential
+ * verbatim into a member-visible console, the `{ } raw` toggle, and the
+ * persisted `.jsonl` — the one concrete leak path PRD-8/NFR7 forbid. Since
+ * ruling 127 it is somebody's PERSONAL key, which makes the leak worse: the
+ * people who can read a task's run console are not the person paying for it.
  *
- * Two rules, both cheap enough to run per emitted line:
- *   1. exact values — every credential-shaped variable in THIS process's env
- *      (same regex the spawn filter uses), which by construction includes the
- *      values the app injected;
- *   2. token PATTERNS — provider/PAT prefixes that are secrets wherever they
+ * Three rules, all cheap enough to run per emitted line:
+ *   1. the run's OWN secrets — the plaintext `runCredentialFor` put in the
+ *      child env, passed in as `opts.secrets` because it is sealed in the
+ *      database and never appears in this process's environment;
+ *   2. exact values — every credential-shaped variable in THIS process's env
+ *      (same regex the spawn filter uses);
+ *   3. token PATTERNS — provider/PAT prefixes that are secrets wherever they
  *      came from (a PAT the agent minted itself, a key a human pasted into a
  *      prompt).
  *
@@ -135,8 +139,8 @@ export const LINE_LOST_TAG = "run·line_lost";
 
 /**
  * Below this length a credential-shaped variable is a FLAG, not a secret
- * (`VIBERR_CLAUDE_USE_CLI_AUTH=1` matches the name regex). Redacting a 1-char
- * value would scrub every digit out of every log line.
+ * (`GIT_TERMINAL_PROMPT=0` matches the name regex). Redacting a 1-char value
+ * would scrub every digit out of every log line.
  */
 const MIN_SECRET_VALUE_LEN = 12;
 
@@ -146,17 +150,32 @@ function escapeRegExp(value: string): string {
 
 /**
  * Build the redactor ONCE per run (in `createRunSink`), not per line: the
- * credential set is whatever this process holds when the run starts, which is
- * exactly what that run's child env received.
+ * credential set is whatever this process holds when the run starts, plus the
+ * PER-RUN secrets the run service resolved for this run's credential principal
+ * — which together are exactly what that run's child env received.
+ *
+ * `extraSecrets` is the ruling-127 half and the load-bearing one now. A
+ * personal API key lives sealed in `user_backend_credentials`, never in this
+ * process's env, so the env sweep alone would not know it — and a run billed to
+ * person A would then print person A's key verbatim into a member-visible
+ * console the first time the model ran `env`. `runCredentialFor` hands the
+ * plaintext to the spawn env and the SAME value here, so the two can never
+ * disagree about what must not be shown.
  */
 export function createLineRedactor(
   env: NodeJS.ProcessEnv = process.env,
+  extraSecrets: readonly string[] = [],
 ): (text: string) => string {
   const values = new Set<string>();
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined || value.length < MIN_SECRET_VALUE_LEN) continue;
     if (!CREDENTIAL_ENV_RE.test(key)) continue;
     values.add(value);
+  }
+  for (const secret of extraSecrets) {
+    // The same floor as the env sweep: a value too short to be a credential
+    // would scrub ordinary output, and no provider issues one.
+    if (secret.length >= MIN_SECRET_VALUE_LEN) values.add(secret);
   }
   // Longest first so a credential that contains another one is fully replaced.
   const literals = [...values].sort((a, b) => b.length - a.length).map(escapeRegExp);
@@ -184,7 +203,18 @@ function redactDisplay(
   return clean === json ? display : (JSON.parse(clean) as LogLine);
 }
 
-export function createRunSink(db: DatabaseSync, spec: RunSpec) {
+/** Per-run sink options. */
+export interface RunSinkOptions {
+  /** Ruling 127: the plaintext credentials this run's child env carries, from
+   *  `runCredentialFor`. Redacted from every persisted line and SSE payload. */
+  secrets?: readonly string[];
+}
+
+export function createRunSink(
+  db: DatabaseSync,
+  spec: RunSpec,
+  opts: RunSinkOptions = {},
+) {
   // Where the raw truth goes: requested backend dir + session id (or run id
   // until the session id lands). We buffer to the run-id file first, since
   // the session id arrives on the init/thread.started line — but to keep it
@@ -204,8 +234,10 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
   let outputTokens = 0;
   let totalCostUsd: number | null = null;
 
-  // P13-U-1: built once per run — see createLineRedactor.
-  const redact = createLineRedactor();
+  // P13-U-1: built once per run — see createLineRedactor. `opts.secrets` is the
+  // principal's own credential (ruling 127), which lives sealed in the database
+  // rather than in this process's env, so the env sweep could not find it.
+  const redact = createLineRedactor(process.env, opts.secrets ?? []);
 
   const publishState = (state: RunState) => {
     publishRunStateChanged({
@@ -412,7 +444,7 @@ export function createRunSink(db: DatabaseSync, spec: RunSpec) {
         }
         // F32-4 (pass 32): the credential half. Both classifiers tag a
         // rejected key/token/refresh-token as `·auth`; the presence-only
-        // availability signals (`backends`, `backendCredentialHealth`) cannot
+        // availability signals (`backends`, `userBackendHealth`) cannot
         // see it, so the refusal is recorded off the same structured class the
         // quota flag rides, with the provider's sentence as its evidence.
         if (display?.tag?.endsWith("·auth") && display.text) {

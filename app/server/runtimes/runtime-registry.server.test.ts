@@ -1,30 +1,13 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CodexOptions, ThreadEvent } from "@openai/codex-sdk";
 import { z } from "zod";
 import {
-  backendCredentialHealth,
-  claudeCliAuthDiagnostics,
-  claudeSpawnEnv,
-  codexAuthMisconfiguration,
-  codexCliAuthDiagnostics,
-  codexSpawnEnv,
+  CREDENTIAL_ENV_RE,
   createAdapters,
-  isBackendAvailable,
-  resetRegistryForTests,
+  filteredSpawnEnv,
   selectAdapter,
-  setBackendAvailability,
 } from "./runtime-registry.server";
 import {
-  backendUnavailableMessage,
   repoWriteWithheldFromDenylist,
   webSearchWithheldFromDenylist,
 } from "./run-service.server";
@@ -51,407 +34,181 @@ function fakeClaudeQuery(...messages: unknown[]): ClaudeQuery {
 }
 
 describe("runtime-registry", () => {
-  const tmpDirs: string[] = [];
-  const savedDataRoot = process.env.VIBERR_DATA_ROOT;
-  const savedClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
-  // The D1 tests repoint $HOME so `~/.codex/auth.json` is a fact they control
-  // rather than one the machine supplies. It MUST go back: the temp dir is
-  // removed below, and a stale $HOME pointing at a deleted directory would
-  // leak into every later test in this worker.
-  const savedHome = process.env.HOME;
+  const RESTORE: Record<string, string | undefined> = {};
+  function setEnv(key: string, value: string): void {
+    if (!(key in RESTORE)) RESTORE[key] = process.env[key];
+    process.env[key] = value;
+  }
   afterEach(() => {
-    resetRegistryForTests();
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    delete process.env.VIBERR_CLAUDE_USE_CLI_AUTH;
-    delete process.env.CODEX_ACCESS_TOKEN;
-    delete process.env.CODEX_API_KEY;
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.VIBERR_CODEX_USE_CLI_AUTH;
-    delete process.env.CODEX_HOME;
-    if (savedClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-    else process.env.CLAUDE_CONFIG_DIR = savedClaudeConfigDir;
-    // The mirror resolves the run home under the data root, so these tests
-    // repoint it; put the ambient value back rather than dropping it.
-    if (savedDataRoot === undefined) delete process.env.VIBERR_DATA_ROOT;
-    else process.env.VIBERR_DATA_ROOT = savedDataRoot;
-    if (savedHome === undefined) delete process.env.HOME;
-    else process.env.HOME = savedHome;
-    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
-  });
-
-  /** A CLAUDE_CONFIG_DIR that exists, optionally holding a file-based login. */
-  function claudeConfigDir(opts: { credentials: boolean }): string {
-    const dir = mkdtempSync(path.join(tmpdir(), "viberr-claude-home-"));
-    tmpDirs.push(dir);
-    if (opts.credentials) {
-      writeFileSync(path.join(dir, ".credentials.json"), "{}");
+    for (const [key, value] of Object.entries(RESTORE)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+      delete RESTORE[key];
     }
-    return dir;
-  }
-
-  function codexHome(withAuth: boolean): string {
-    const dir = mkdtempSync(path.join(tmpdir(), "viberr-codex-home-"));
-    tmpDirs.push(dir);
-    if (withAuth) writeFileSync(path.join(dir, "auth.json"), "{}");
-    return dir;
-  }
-
-  it("detects claude available when ANTHROPIC_API_KEY is present (no API call)", () => {
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
-    expect(isBackendAvailable("claude")).toBe(true);
-  });
-
-  it("detects claude available via a subscription OAuth token (claude setup-token)", () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-test";
-    expect(isBackendAvailable("claude")).toBe(true);
   });
 
   /**
-   * D2/pass-16 — this test used to assert PRESENCE ONLY: the flag alone made the
-   * registry pick the REAL adapter, so the F-DOCKER1 shape (flag set from
-   * `.env`, config dir pointed somewhere the logged-in CLI never wrote) was
-   * fully reachable on the Claude side too — every run then died on auth
-   * instead of degrading honestly. The flag is now validated as far as the
-   * platform allows; see `claudeCliAuthDiagnostics`.
+   * Ruling 127: this module no longer knows anything about credentials. The
+   * availability probe, its CLI-auth diagnostics and the two credential-adding
+   * spawn-env builders are gone — a run's credential is a fact about the ONE
+   * person it bills, resolved by `backend-credentials.server` and assembled
+   * into `spec.env` by the run service. What stays here is the INPUT-side
+   * hygiene both adapters are built on, and it is the thing that makes
+   * per-person credentials safe: the base env every child starts from must
+   * carry no credential at all, or a run billed to one person could see
+   * another's — or the deployment's own — key.
    */
-  it("detects claude available via CLI-auth when the config dir holds a login", () => {
-    process.env.VIBERR_CLAUDE_USE_CLI_AUTH = "1";
-    process.env.CLAUDE_CONFIG_DIR = claudeConfigDir({ credentials: true });
-    expect(isBackendAvailable("claude")).toBe(true);
-    expect(claudeCliAuthDiagnostics().verified).toBe("file");
-  });
+  it("filteredSpawnEnv strips every credential-shaped variable, and keeps the rest", () => {
+    setEnv("PATH", process.env.PATH || "/usr/bin:/bin");
+    setEnv("VIBERR_CLAUDE_TEST_MARKER", "present");
+    setEnv("ANTHROPIC_API_KEY", "sk-ant-should-not-leak");
+    setEnv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-should-not-leak");
+    setEnv("CODEX_ACCESS_TOKEN", "cat-should-not-leak");
+    setEnv("CODEX_API_KEY", "codex-should-not-leak");
+    setEnv("OPENAI_API_KEY", "platform-should-not-leak");
+    setEnv("GITHUB_TOKEN", "ghp_should_not_leak");
+    setEnv("MY_DEPLOY_SECRET", "server-deploy-secret");
+    setEnv("VIBERR_SESSION_SECRET", "server-session-secret");
+    setEnv("DATABASE_URL", "postgres://secret");
 
-  it("reports claude UNAVAILABLE under CLI-auth when the config dir does not exist (D2)", () => {
-    // The CLI materializes its config dir on first use, so "logged in, but the
-    // directory it would have created is absent" is provably false — on every
-    // platform. This is the Claude half of the F-DOCKER1 guard.
-    process.env.VIBERR_CLAUDE_USE_CLI_AUTH = "1";
-    process.env.CLAUDE_CONFIG_DIR = path.join(
-      tmpdir(),
-      `viberr-claude-missing-${Date.now()}`,
-    );
-    expect(isBackendAvailable("claude")).toBe(false);
-    expect(claudeCliAuthDiagnostics().verified).toBe("refuted");
-    expect(backendUnavailableMessage("claude")).toContain("holds no `claude` login");
-  });
+    const env = filteredSpawnEnv();
 
-  it("a real ANTHROPIC_API_KEY is authoritative even with no config dir", () => {
-    process.env.VIBERR_CLAUDE_USE_CLI_AUTH = "1";
-    process.env.CLAUDE_CONFIG_DIR = path.join(tmpdir(), "viberr-claude-nope");
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
-    expect(isBackendAvailable("claude")).toBe(true);
-  });
-
-  it("an existing config dir with no credentials FILE is honest about how it verified", () => {
-    // macOS keeps the CLI credential in the login Keychain, so there is no file
-    // to check and the server must not pop a keychain prompt to probe. The
-    // weaker verification is REPORTED rather than hidden; every other platform
-    // expects the credentials file and refutes the flag without it.
-    process.env.VIBERR_CLAUDE_USE_CLI_AUTH = "1";
-    process.env.CLAUDE_CONFIG_DIR = claudeConfigDir({ credentials: false });
-    const onMac = claudeCliAuthDiagnostics(process.env, "darwin");
-    expect(onMac.verified).toBe("presence");
-    const onLinux = claudeCliAuthDiagnostics(process.env, "linux");
-    expect(onLinux.verified).toBe("refuted");
-    // The honesty surface says which, instead of a bare "configured".
-    if (process.platform === "darwin") {
-      const health = backendCredentialHealth("claude");
-      expect(health.verification).toBe("presence");
-      expect(health.detail).toContain("cannot fully verify");
+    // Ordinary runtime settings survive — a child with no PATH/HOME cannot
+    // spawn `npx` for a stdio MCP server, and neither CLI could find its own
+    // machinery (adversarial-review HIGH #3).
+    expect(env.PATH).toBeTruthy();
+    expect(env.VIBERR_CLAUDE_TEST_MARKER).toBe("present");
+    // …and nothing credential-shaped does, whoever owns it.
+    for (const key of [
+      "ANTHROPIC_API_KEY",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "CODEX_ACCESS_TOKEN",
+      "CODEX_API_KEY",
+      "OPENAI_API_KEY",
+      "GITHUB_TOKEN",
+      "MY_DEPLOY_SECRET",
+      "VIBERR_SESSION_SECRET",
+      "DATABASE_URL",
+    ]) {
+      expect({ key, value: env[key] }).toEqual({ key, value: undefined });
     }
   });
 
-  it("detects codex available via CODEX_API_KEY or OPENAI_API_KEY", () => {
-    process.env.OPENAI_API_KEY = "sk-test";
-    expect(isBackendAvailable("codex")).toBe(true);
+  it("CREDENTIAL_ENV_RE matches the names the sink redacts values for", () => {
+    // One regex on both sides (the module comment's contract): what the spawn
+    // filter drops is exactly what the run sink treats as a secret VALUE, so
+    // "what counts as a credential" cannot drift between input and output.
+    for (const name of [
+      "ANTHROPIC_API_KEY",
+      "CODEX_API_KEY",
+      "OPENAI_API_KEY",
+      "CODEX_ACCESS_TOKEN",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "GITHUB_TOKEN",
+      "AWS_SECRET_ACCESS_KEY",
+      "SOME_PASSWORD",
+      "GIT_CREDENTIALS",
+    ]) {
+      expect({ name, matched: CREDENTIAL_ENV_RE.test(name) }).toEqual({
+        name,
+        matched: true,
+      });
+    }
+    for (const name of ["PATH", "HOME", "LANG", "GIT_CEILING_DIRECTORIES"]) {
+      expect({ name, matched: CREDENTIAL_ENV_RE.test(name) }).toEqual({
+        name,
+        matched: false,
+      });
+    }
   });
 
-  it("detects codex available via a ChatGPT workspace access token", () => {
-    process.env.CODEX_ACCESS_TOKEN = "cat-test";
-    expect(isBackendAvailable("codex")).toBe(true);
-  });
+  it("createAdapters builds BOTH adapters on the credential-free base env", async () => {
+    // Ruling 127: no config dir, no key, no home — the factory runs once per
+    // process and could only ever bake in an INSTANCE credential, which is the
+    // thing the ruling removes. Whatever a run needs arrives per run on
+    // `spec.env` from `runCredentialFor`.
+    setEnv("ANTHROPIC_API_KEY", "sk-ant-instance-key");
+    setEnv("CODEX_API_KEY", "instance-codex-key");
+    setEnv("VIBERR_CLAUDE_TEST_MARKER", "present");
 
-  it("detects codex available via CLI-auth when $CODEX_HOME/auth.json exists", () => {
-    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
-    process.env.CODEX_HOME = codexHome(true);
-    expect(isBackendAvailable("codex")).toBe(true);
-  });
-
-  it("reports codex UNAVAILABLE under CLI-auth when auth.json is missing (F-DOCKER1)", () => {
-    // The docker-compose case: CODEX_HOME points at an empty dir (no auth.json
-    // copied). The flag alone must NOT select the real adapter — that produced
-    // the redacted 'Codex execution failed' crash. Honest degraded state instead.
-    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
-    process.env.CODEX_HOME = codexHome(false);
-    expect(isBackendAvailable("codex")).toBe(false);
-  });
-
-  /**
-   * D1/pass-16 — the live incident (2026-08-03).
-   *
-   * A dev launcher exported `CODEX_HOME=<dataRoot>/runtimes/codex-home`, which
-   * is EXACTLY the path `resolveCodexHome` returns. Auth source == run home, so
-   * `prepareCodexHome`'s mirror short-circuits, the probe looks for auth.json
-   * inside Viberr's own empty run home, and every Codex run was refused with a
-   * bare "no usable credential configured" — while a working `~/.codex` login
-   * sat one directory away and the generic copy told the operator to copy their
-   * login INTO the app-owned dir, cementing the misconfiguration.
-   */
-  it("names the CODEX_HOME==run-home misconfiguration instead of a bare refusal (D1)", () => {
-    // HERMETIC: $HOME is a temp dir with NO `.codex/auth.json`, so this drives
-    // the "you have no login anywhere" half of the copy. The test used to read
-    // the real machine's home, so which half it exercised depended on whether
-    // the developer happened to be logged into Codex — it passed locally and
-    // failed on CI, and the branch CI hit was never asserted at all.
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-data-root-"));
-    tmpDirs.push(dataRoot);
-    const fakeHome = mkdtempSync(path.join(tmpdir(), "viberr-home-"));
-    tmpDirs.push(fakeHome);
-    process.env.HOME = fakeHome;
-    process.env.VIBERR_DATA_ROOT = dataRoot;
-    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
-    // The exact misconfiguration: CODEX_HOME pointed at Viberr's own run home.
-    process.env.CODEX_HOME = path.join(dataRoot, "runtimes", "codex-home");
-
-    const diag = codexCliAuthDiagnostics();
-    expect(diag.sourceIsRunHome).toBe(true);
-    expect(diag.authJsonExists).toBe(false);
-    expect(diag.defaultLoginExists).toBe(false);
-    expect(isBackendAvailable("codex")).toBe(false);
-
-    const detail = codexAuthMisconfiguration(diag);
-    expect(detail).toContain("Viberr's OWN per-run home");
-    // No login to point at, so the copy must say how to CREATE one.
-    expect(detail).toContain("Unset CODEX_HOME");
-    expect(detail).toContain("codex login");
-
-    // It reaches the two surfaces an operator actually reads: the run refusal…
-    const message = backendUnavailableMessage("codex");
-    expect(message).toContain("Viberr's OWN per-run home");
-    // …and it must NOT re-suggest copying the login into that same dead dir.
-    expect(message).not.toContain("docker compose cp");
-
-    // …and the credential-health surface the backend pickers render.
-    const health = backendCredentialHealth("codex");
-    expect(health.available).toBe(false);
-    expect(health.detail).toContain("Viberr's OWN per-run home");
-  });
-
-  it("points at the login the operator ALREADY has, when there is one (D1)", () => {
-    // The other half, and the one the live incident actually was: a working
-    // `~/.codex` login sat one directory away while every run was refused. The
-    // copy has to name it and say UNSET, not "run codex login" — the operator
-    // has already done that.
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-data-root-"));
-    tmpDirs.push(dataRoot);
-    const fakeHome = mkdtempSync(path.join(tmpdir(), "viberr-home-"));
-    tmpDirs.push(fakeHome);
-    mkdirSync(path.join(fakeHome, ".codex"), { recursive: true });
-    writeFileSync(path.join(fakeHome, ".codex", "auth.json"), "{}");
-    process.env.HOME = fakeHome;
-    process.env.VIBERR_DATA_ROOT = dataRoot;
-    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
-    process.env.CODEX_HOME = path.join(dataRoot, "runtimes", "codex-home");
-
-    const diag = codexCliAuthDiagnostics();
-    expect(diag.sourceIsRunHome).toBe(true);
-    expect(diag.defaultLoginExists).toBe(true);
-
-    const detail = codexAuthMisconfiguration(diag);
-    expect(detail).toContain("Viberr's OWN per-run home");
-    expect(detail).toContain(path.join(fakeHome, ".codex", "auth.json"));
-    expect(detail).toContain("UNSET CODEX_HOME");
-    // Nothing to log in to — telling them to would be the wrong instruction.
-    expect(detail).not.toContain("then run `codex login`");
-  });
-
-  it("the ordinary missing-auth.json case still gets the docker recipe (not the D1 copy)", () => {
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-data-root-"));
-    tmpDirs.push(dataRoot);
-    process.env.VIBERR_DATA_ROOT = dataRoot;
-    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
-    process.env.CODEX_HOME = codexHome(false); // a real login dir, just empty
-    expect(codexCliAuthDiagnostics().sourceIsRunHome).toBe(false);
-    const message = backendUnavailableMessage("codex");
-    expect(message).toContain("docker compose cp");
-    expect(message).not.toContain("Viberr's OWN per-run home");
-  });
-
-  it("a real CODEX_ACCESS_TOKEN is authoritative even with no auth.json", () => {
-    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
-    process.env.CODEX_HOME = codexHome(false);
-    process.env.CODEX_ACCESS_TOKEN = "cat-test";
-    expect(isBackendAvailable("codex")).toBe(true);
-  });
-
-  it("reports unavailable when no credential is present", () => {
-    expect(isBackendAvailable("claude")).toBe(false);
-    expect(isBackendAvailable("codex")).toBe(false);
-  });
-
-  it("re-probes an unavailable detection — a credential fixed at runtime heals it", () => {
-    expect(isBackendAvailable("claude")).toBe(false);
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test"; // set AFTER first probe
-    expect(isBackendAvailable("claude")).toBe(true); // live re-probe picks it up
-  });
-
-  it("self-heals the docker codex-home trap: auth.json dropped in AFTER the first probe", () => {
-    // The recurring compose breakage: a wiped ./docker-data volume empties
-    // CODEX_HOME, codex probes unavailable, and the old first-probe-wins cache
-    // pinned that for the process lifetime — even `docker compose cp`ing the
-    // file back kept runs refused until a restart. Now the next run just works.
-    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
-    const home = codexHome(false);
-    process.env.CODEX_HOME = home;
-    expect(isBackendAvailable("codex")).toBe(false); // fresh volume: no auth.json
-    writeFileSync(path.join(home, "auth.json"), "{}"); // docker compose cp …
-    expect(isBackendAvailable("codex")).toBe(true); // no restart needed
-  });
-
-  it("an explicit setBackendAvailability override is sticky — never re-probed", () => {
-    // The test harness forces both backends unavailable; an ambient dev-.env
-    // credential must NOT flip that back via the live re-probe.
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
-    setBackendAvailability("claude", false);
-    expect(isBackendAvailable("claude")).toBe(false);
-  });
-
-  it("selectAdapter returns the real adapter when available", () => {
-    setBackendAvailability("claude", true);
-    const adapters = createAdapters();
-    expect(selectAdapter("claude", adapters)).toEqual({
-      kind: "real",
-      adapter: adapters.claude,
+    let claudeEnv: Record<string, string> | undefined;
+    let codexEnv: Record<string, string> | undefined;
+    const adapters = createAdapters({
+      claudeQueryFn: (params) => {
+        claudeEnv = params.options?.env;
+        return fakeClaudeQuery({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          num_turns: 1,
+          usage: {},
+        });
+      },
+      codexFactory: (options) => {
+        codexEnv = options?.env;
+        const thread: ReturnType<CodexClient["startThread"]> = {
+          id: "thread-hygiene",
+          async runStreamed() {
+            const events = (async function* (): AsyncGenerator<ThreadEvent> {
+              yield {
+                type: "turn.completed",
+                usage: {
+                  input_tokens: 1,
+                  cached_input_tokens: 0,
+                  cache_write_input_tokens: 0,
+                  output_tokens: 1,
+                  reasoning_output_tokens: 0,
+                },
+              };
+            })();
+            return { events };
+          },
+        };
+        return { startThread: () => thread, resumeThread: () => thread };
+      },
     });
+
+    const spec: RunSpec = {
+      runId: "run_hygiene",
+      projectSlug: "viberr-core",
+      taskKey: "VIB-1",
+      threadId: "primary",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      prompt: "hello",
+      workdir: "/tmp",
+      autonomous: true,
+    };
+    const sink = { onLine: () => {}, onExit: () => {} };
+    adapters.claude.start(spec, sink);
+    adapters.codex.start({ ...spec, backend: "codex" }, sink);
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+
+    for (const env of [claudeEnv, codexEnv]) {
+      expect(env?.PATH).toBeTruthy();
+      expect(env?.VIBERR_CLAUDE_TEST_MARKER).toBe("present");
+      // Nothing the deployment happens to hold reaches a child.
+      expect(env?.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(env?.CODEX_API_KEY).toBeUndefined();
+      // …and the factory adds no home of its own: a run's home is its
+      // principal's, and arrives on spec.env.
+      expect(env?.CLAUDE_CONFIG_DIR).toBeUndefined();
+      expect(env?.CODEX_HOME).toBeUndefined();
+    }
   });
 
-  it("returns unavailable when the requested backend has no credential", () => {
-    setBackendAvailability("codex", false);
-    const adapters = createAdapters();
-    expect(selectAdapter("codex", adapters)).toEqual({ kind: "unavailable" });
-  });
-
-  // P14-RT-05: the mirror used to run ONCE, inside createAdapters. The
-  // availability probe re-probes live and reports codex available the moment
-  // auth.json lands, and the unavailable copy promises "the next run picks it up
-  // without a restart" — but the run home stayed empty until a restart, so runs
-  // failed auth instead. Selection is per-run, so the mirror belongs here.
-  it("selectAdapter mirrors an auth.json that lands AFTER the adapters were built", () => {
-    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
-    const login = codexHome(false);
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-data-root-"));
-    tmpDirs.push(dataRoot);
-    process.env.CODEX_HOME = login;
-    process.env.VIBERR_DATA_ROOT = dataRoot;
-    const runHome = path.join(dataRoot, "runtimes", "codex-home");
-
-    // Boot: no login yet, so nothing to mirror.
-    const adapters = createAdapters();
-    expect(existsSync(path.join(runHome, "auth.json"))).toBe(false);
-
-    // The human logs in (or `docker compose cp`s the file in) mid-process.
-    writeFileSync(path.join(login, "auth.json"), "{}");
-    expect(selectAdapter("codex", adapters)).toEqual({
-      kind: "real",
-      adapter: adapters.codex,
+  it("selectAdapter is a plain lookup — availability is not its business", () => {
+    // Ruling 127: whether a run may proceed is decided upstream, by resolving
+    // its credential principal. `startRun` never reaches this function for a
+    // run it refused, so an "unavailable" arm here would be a second, quieter
+    // place for that decision to live.
+    const adapters = createAdapters({
+      claudeQueryFn: () => fakeClaudeQuery(),
     });
-    expect(existsSync(path.join(runHome, "auth.json"))).toBe(true);
-  });
-
-  it("selectAdapter touches nothing for claude, or outside cached-login mode", () => {
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-data-root-"));
-    tmpDirs.push(dataRoot);
-    process.env.VIBERR_DATA_ROOT = dataRoot;
-    process.env.CODEX_HOME = codexHome(true);
-    // Token auth: auth.json is irrelevant, so the run home is never populated.
-    process.env.CODEX_ACCESS_TOKEN = "cat-test";
-    const adapters = createAdapters();
-    expect(selectAdapter("codex", adapters).kind).toBe("real");
-    expect(
-      existsSync(path.join(dataRoot, "runtimes", "codex-home", "auth.json")),
-    ).toBe(false);
-  });
-
-  it("codexSpawnEnv preserves runtime essentials but filters unrelated server secrets", () => {
-    // The Codex SDK REPLACES the child env with what we pass, so it must be
-    // complete — the bug was passing only { CODEX_HOME }, stripping PATH/HOME
-    // and breaking the spawned `codex` binary.
-    process.env.PATH = process.env.PATH || "/usr/bin:/bin";
-    process.env.VIBERR_CODEX_TEST_MARKER = "present";
-    process.env.VIBERR_SESSION_SECRET = "server-session-secret";
-    process.env.ANTHROPIC_API_KEY = "claude-secret";
-    try {
-      const env = codexSpawnEnv("/codex");
-      expect(env.CODEX_HOME).toBe("/codex"); // forced
-      expect(env.PATH).toBeTruthy(); // preserved (would be missing with the bug)
-      expect(env.VIBERR_CODEX_TEST_MARKER).toBe("present"); // process.env carried through
-      expect(env.VIBERR_SESSION_SECRET).toBeUndefined();
-      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
-      expect(Object.keys(env).length).toBeGreaterThan(2);
-    } finally {
-      delete process.env.VIBERR_CODEX_TEST_MARKER;
-      delete process.env.VIBERR_SESSION_SECRET;
-      delete process.env.ANTHROPIC_API_KEY;
-    }
-  });
-
-  it("claudeSpawnEnv preserves runtime essentials but filters server secrets (F10-02)", () => {
-    // The Claude Agent SDK REPLACES the child env with what we pass (verified in
-    // sdk.mjs). Previously the adapter spread the raw process.env, leaking every
-    // server secret to the spawned `claude`. claudeSpawnEnv mirrors codexSpawnEnv.
-    process.env.PATH = process.env.PATH || "/usr/bin:/bin";
-    process.env.VIBERR_CLAUDE_TEST_MARKER = "present";
-    process.env.MY_DEPLOY_SECRET = "server-deploy-secret";
-    process.env.DATABASE_URL = "postgres://secret";
-    process.env.GITHUB_TOKEN = "ghp_should_not_leak";
-    try {
-      const env = claudeSpawnEnv("/claude-cfg", "anthropic-key", "oauth-tok");
-      expect(env.CLAUDE_CONFIG_DIR).toBe("/claude-cfg"); // forced
-      expect(env.PATH).toBeTruthy(); // preserved
-      expect(env.VIBERR_CLAUDE_TEST_MARKER).toBe("present"); // ordinary var carried
-      // The selected Claude credential is re-added explicitly...
-      expect(env.ANTHROPIC_API_KEY).toBe("anthropic-key");
-      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("oauth-tok");
-      // ...but NO server secret survives the filter.
-      expect(env.MY_DEPLOY_SECRET).toBeUndefined();
-      expect(env.DATABASE_URL).toBeUndefined();
-      expect(env.GITHUB_TOKEN).toBeUndefined();
-    } finally {
-      delete process.env.VIBERR_CLAUDE_TEST_MARKER;
-      delete process.env.MY_DEPLOY_SECRET;
-      delete process.env.DATABASE_URL;
-      delete process.env.GITHUB_TOKEN;
-    }
-  });
-
-  it("codexSpawnEnv prefers subscription access-token auth over API billing", () => {
-    process.env.CODEX_API_KEY = "api-billing-key";
-    process.env.OPENAI_API_KEY = "platform-billing-key";
-    try {
-      const env = codexSpawnEnv("/codex", "cat-subscription-test");
-      expect(env.CODEX_HOME).toBe("/codex");
-      expect(env.CODEX_ACCESS_TOKEN).toBe("cat-subscription-test");
-      expect(env.CODEX_API_KEY).toBeUndefined();
-      expect(env.OPENAI_API_KEY).toBeUndefined();
-    } finally {
-      delete process.env.CODEX_API_KEY;
-      delete process.env.OPENAI_API_KEY;
-    }
-  });
-
-  it("codexSpawnEnv keeps an explicitly selected cached login off API billing", () => {
-    process.env.CODEX_API_KEY = "api-billing-key";
-    process.env.OPENAI_API_KEY = "platform-billing-key";
-    try {
-      const env = codexSpawnEnv("/codex", undefined, true);
-      expect(env.CODEX_HOME).toBe("/codex");
-      expect(env.CODEX_API_KEY).toBeUndefined();
-      expect(env.OPENAI_API_KEY).toBeUndefined();
-    } finally {
-      delete process.env.CODEX_API_KEY;
-      delete process.env.OPENAI_API_KEY;
-    }
+    expect(selectAdapter("claude", adapters)).toBe(adapters.claude);
+    expect(selectAdapter("codex", adapters)).toBe(adapters.codex);
   });
 
   it("createAdapters accepts injected SDK fakes (no real SDK constructed)", () => {
@@ -484,8 +241,6 @@ describe("runtime-registry", () => {
  * which needs a real repo, real PRs and 20 minutes of provider time.
  */
 describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () => {
-  afterEach(() => resetRegistryForTests());
-
   /** The Codex thread options + CLI options these tests read. `config` is the
    *  SDK's own recursive `--config` value, so a leaf is decoded where read. */
   interface CodexCapture {

@@ -4,6 +4,11 @@ Viberr is a single-node, self-hosted monolith: one Node process serving the SSR 
 SSE live updates, and an embedded SQLite projection database, with all authoritative
 state on the local filesystem. There is no external database, cache, or queue to run.
 
+*Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): agent
+backends are connected per person in the app, not configured in the deployment
+environment. "Agent backends in the container" below was rewritten; the persistence tree,
+the backup notes and the health example follow it.*
+
 ## What runs
 
 - One container (see [`Dockerfile`](../../Dockerfile) + [`compose.yml`](../../compose.yml)).
@@ -35,8 +40,11 @@ drop the previous key once status reports none. Without that count there is no m
 at which removing the old key is known to be safe.
 
 Optional integrations, enabled only when their vars are present:
-`GITHUB_OAUTH_*` / `GOOGLE_OAUTH_*` (OAuth sign-in), `VIBERR_SEED_ADMIN_*` (bootstrap
-admin on first boot of an empty DB), and the agent backends below.
+`GITHUB_OAUTH_*` / `GOOGLE_OAUTH_*` (OAuth sign-in) and `VIBERR_SEED_ADMIN_*` (bootstrap
+admin on first boot of an empty DB). Agent backends are **not** among them: since ruling
+127 they carry no environment variables at all, and are connected per person in the app
+(below). `VIBERR_SECRET_ENCRYPTION_KEY` also seals the personal backend API keys people
+paste, so losing it costs those too.
 
 ## TLS and the reverse proxy
 
@@ -78,7 +86,7 @@ Two proxy details worth getting right:
 
 HSTS, certificate renewal and redirect-to-https all belong to the proxy layer.
 
-## Agent backends in the container
+## Agent accounts are per person (ruling 127)
 
 The image ships everything needed to run real agents: the Claude/Codex SDKs' native
 linux binaries (installed by `npm ci` in the linux build stage) plus, in the runtime
@@ -86,66 +94,93 @@ stage, `git` and a CA bundle (a real run clones the task's repo and the coding a
 shells out to git), Debian `chromium` with `fonts-liberation` for the governed browser
 (`VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`), and `uv`/`uvx` for Python stdio MCP
 servers (their caches live under `runtimes/uv-cache` and `runtimes/uv-python` on the
-volume). *(Inventory corrected 2026-09-01.)* The container is stateless with no logged-in CLI, so credentials
-are injected. **You can use a subscription (no per-token API key) for either backend:**
+volume). *(Inventory corrected 2026-09-01.)*
 
-**Claude — Pro/Max subscription (recommended, one env var):**
-1. On any machine with the `claude` CLI logged in: `claude setup-token` → prints a
-   long-lived OAuth token (`sk-ant-oat01-…`).
-2. Put it in the container's `.env`: `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…`.
-The SDK authenticates with it — verified: an invalid token returns a 401, a valid one
-runs. (An `ANTHROPIC_API_KEY` also works if you prefer pay-as-you-go.)
+What it does **not** ship is a credential. There is no deployment-wide key, no shared
+runtime home, no `/host-codex` mount and no entrypoint that seeds one. **Every person
+connects Claude and Codex for themselves, in the app, on Profile → Agent accounts**, and
+every run bills exactly one person: the **task owner** for a run on a task (operator,
+specialist, resume, scheduled, boot recovery, retry) and the **asker** for a controller
+turn. That principal is persisted on the run row as `agent_runs.credential_user_id`.
 
-**Codex — ChatGPT Business/Enterprise subscription (recommended):**
-1. In the ChatGPT workspace [Access tokens page](https://learn.chatgpt.com/docs/enterprise/access-tokens),
-   create a Codex access token for this trusted deployment.
-2. Put it in `.env` as `CODEX_ACCESS_TOKEN=…`. This is a ChatGPT-workspace
-   credential that uses subscription entitlements, not a Platform API key.
+Two ways to connect, per backend:
 
-The SDK passes the token to its bundled Codex CLI through the environment. No
-host Codex directory is mounted. Treat the token as a secret, use a finite
-expiration, and rotate it regularly.
+- **Hosted sign-in through the unmodified vendor binary.** Claude: `claude auth login`
+  with `--claudeai` (a Pro/Max subscription) or `--console`. Codex: `codex login
+  --device-auth`, the device-code flow OpenAI ships for headless machines. Viberr drives
+  the binary, shows the URL (and, for Codex, the one-time code to type), and never sees
+  the token: the binary writes its own credential file into that person's runtime home,
+  `<dataRoot>/runtimes/users/<userId>/claude-home/.credentials.json` or
+  `.../codex-home/auth.json` (Viberr creates the directory mode `0700` and nothing else
+  about that file). This is what Anthropic's
+  [Claude Code legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance)
+  requires of a platform that hosts Claude Code: each end user authenticates with their
+  own credentials, billed to them, through the vendor's own flow, and the app may not
+  collect or store a Claude.ai session token. There is deliberately no "paste your
+  setup-token" field.
+- **A pasted key or token.** Claude: a Console API key (`sk-ant-…`), verified against a
+  free `GET https://api.anthropic.com/v1/models` before it is stored. Codex: an OpenAI
+  Platform API key (verified against `GET https://api.openai.com/v1/models`) or a ChatGPT
+  **workspace access token**, which is stored *unverified* because there is no free probe
+  for one. Pasted values are sealed with `VIBERR_SECRET_ENCRYPTION_KEY` in
+  `user_backend_credentials`, displayed only as their last 4 characters, and handed to a
+  child process only for a run that person's account is paying for. The run sink redacts
+  them from every persisted log line.
 
-**Codex — cached login for other ChatGPT plans:**
-1. On the host, run `codex login` and confirm `~/.codex/auth.json` exists.
-2. Copy only that credential into the dedicated container home:
-   `mkdir -p ./docker-data/runtimes/codex-home && cp ~/.codex/auth.json ./docker-data/runtimes/codex-home/auth.json`.
-3. Set `VIBERR_CODEX_USE_CLI_AUTH=1` in `.env`. `CODEX_HOME` points to that
-   isolated directory on the existing `/data` mount, allowing refresh and session persistence
-   without importing host config, MCP servers, rules, or skills. The files must
-   be readable and writable by uid 1000 (the container's `node` user).
+A ChatGPT workspace can have device-code authorization switched off; the sign-in card
+then reports the vendor's own refusal and points at the workspace admin, or at a pasted
+key. Treat a pasted token as a secret, prefer a finite expiration, and rotate it.
 
-If the host uses an OS credential store instead of `auth.json`, configure
-[Codex file credential storage](https://learn.chatgpt.com/docs/auth#credential-storage)
-before logging in. A `CODEX_API_KEY` / `OPENAI_API_KEY` also works, but uses
-usage-based Platform billing.
+**First run, as the first admin.** After `docker compose up -d`, sign in as the bootstrap
+admin, open **Profile → Agent accounts**, and connect at least one backend for yourself.
+Until somebody does, the instance runs no agents: an agent started on a task whose owner
+has nothing connected is refused before any process starts, with an honest
+`run·unavailable` error run and a blocked recovery packet naming the owner and the
+backend. Because task creation now seats the creator as owner, the person who creates
+work is the person whose accounts pay for it, unless ownership is reassigned.
 
-If `VIBERR_CODEX_USE_CLI_AUTH=1` is set but `$CODEX_HOME/auth.json` is missing
-(and no access token/API key is configured), Viberr reports Codex **unavailable**.
-There is no fallback engine: a run started on that backend fails fast with an
-honest error and a blocked recovery packet, rather than starting a run that would
-die with a redacted "Codex execution failed" line. Copy `auth.json` (step 2 above)
-to enable real Codex runs.
+**What a wiped volume loses.** The hosted sign-in files live only under
+`runtimes/users/<userId>/` on the `/data` volume. Deleting or recreating that volume
+signs everyone out of the vendors: their cards flip to "sign-in file missing (the runtime
+volume was wiped)" and each person signs in again. Sealed API keys survive a volume wipe
+only if the database did, and are readable only with the same
+`VIBERR_SECRET_ENCRYPTION_KEY`. Nothing else is lost: the credential rows, the runs and
+the transcripts are unaffected by a re-signin, and no run is retried automatically.
 
-**Security boundary:** the dedicated `CODEX_HOME` prevents importing the host's
-full personal Codex configuration; it does not isolate that credential or the
-application data from an autonomous coding process running as the same container
-user. Treat the single-container setup as trusted-task mode. Untrusted tasks need
-a separate worker user/container with only the task workspace mounted, plus
-server-owned Git push/PR delivery so repository credentials never enter the
+**Backups include the homes only on request.** `npm run backup` excludes `runtimes/` by
+default precisely because it now holds every person's live sign-in; `--include-runtimes`
+carries `runtimes/users/` (and the raw transcripts) and turns the artefact into a secret.
+The sealed keys ride in `projection.sqlite`, which the default backup does take, and are
+unreadable without the encryption key backed up separately.
+
+**Security boundary.** A per-person runtime home keeps one person's vendor sign-in out of
+another person's runs, and `filteredSpawnEnv()` strips every credential-shaped variable
+from the base env both adapters spawn on, so a child sees only its own principal's
+credential. It does **not** isolate those homes, or the application data, from an
+autonomous coding process running as the same container user: a run can read the
+filesystem it executes on. Treat the single-container setup as trusted-task mode.
+Untrusted tasks need a separate worker user/container with only the task workspace
+mounted, plus server-owned Git push/PR delivery so repository credentials never enter the
 agent's environment.
 
-Without any credential a backend is **unavailable**: starting a run on it fails fast
-with an honest error run and a blocked recovery packet.
-Confirm what's active:
+Confirm what's connected:
 
 ```bash
 curl -s localhost:${PORT:-3000}/resources/health | jq .backends
-# {"claude":"real","codex":"unavailable"}   ← claude credential reached the container
+# {"claude":{"connectedUsers":3},"codex":{"connectedUsers":1}}
 ```
 
-`real` means the credential is present (SDK executes); it is not a validity check — an
-invalid key surfaces as a failed run in the agent log, not here.
+That is a count of PEOPLE, not a verdict on this server. Zero is a normal reading, never
+degraded: it means nobody has connected that backend yet. It is not a validity check
+either, and it cannot answer "can this task run", which is a fact about the task's owner
+and is shown on the task page, in the packet and on the Agents page.
+
+*(Rewritten 2026-09-02 for ruling 127. This section used to be titled "Agent backends in
+the container" and told an operator to run `claude setup-token`, paste
+`CLAUDE_CODE_OAUTH_TOKEN` / `CODEX_ACCESS_TOKEN` into `.env`, or copy `~/.codex/auth.json`
+into a shared `runtimes/codex-home` and set `VIBERR_CODEX_USE_CLI_AUTH=1`. All nine
+variables, the shared homes, the `/host-codex` mount and the entrypoint that seeded it are
+deleted; the health example returned `{"claude":"real","codex":"unavailable"}`.)*
 
 ## First run
 
@@ -158,6 +193,10 @@ docker compose logs -f app  # boot integrity log: dirs, migrations, counts, user
 - Migrations apply automatically at boot; no manual migrate step is needed.
 - On an **empty** users table the bootstrap admin is created from `VIBERR_SEED_ADMIN_EMAIL`
   / `VIBERR_SEED_ADMIN_PASSWORD` (or a random password logged once).
+- Connect an agent backend for yourself on **Profile → Agent accounts** before expecting
+  any agent to run (ruling 127). Nothing in `.env` does it, and an instance with nobody
+  connected refuses every agent run honestly rather than starting one. See
+  [Agent accounts are per person](#agent-accounts-are-per-person-ruling-127).
 - Seed BEFORE the app starts (or stop it first) — `npm run seed` takes the
   single-writer lock and refuses against a running container.
   `npm run seed` seeds the product baseline — the built-in agent
@@ -165,7 +204,8 @@ docker compose logs -f app  # boot integrity log: dirs, migrations, counts, user
   always starts as a clean sheet.
 - Health: `GET /resources/health` → `{ ok, status, degraded[], projections: { projects,
   tasks }, watcher, kbWatcher, lock, backends, browser, disk, maintenance, build }` (key
-  order is part of the contract). The bare URL is a **liveness** probe: `200` even when
+  order is part of the contract; `backends` is `{ claude: { connectedUsers }, codex: {
+  connectedUsers } }` since ruling 127). The bare URL is a **liveness** probe: `200` even when
   `status: "degraded"`. For a **readiness** probe call `?probe=readiness`: it returns
   `503` with the same body while anything is degraded (a dead watcher, no lock, low disk).
   `503 { ok: false, status: "down" }` means SQLite is unreachable. Compose's own
@@ -185,17 +225,21 @@ projects/       canonical project.md, task.md, goals/*.md (the source of truth �
                 per project: .repo-mirror/ (bare mirror, a cache)
 agents/         agents/profiles/*.md templates + agents/definitions/ doctrine files
 kb/ skills/     knowledge-base and skill files
-runtimes/       raw NDJSON run logs per backend, Claude/Codex session homes (Codex may hold
-                auth.json), uv-cache/ and uv-python/ in the container
+runtimes/       raw NDJSON run logs per backend; users/<userId>/{claude-home,codex-home}/,
+                one person's vendor sign-in file plus their provider sessions (ruling 127);
+                uv-cache/ and uv-python/ in the container
 audit-exports/  audit-events-<date>.jsonl written before each 90-day purge
-state/          projection.sqlite (users, sessions, projections, audit, PATs, notifications),
-                writer.lock, shipped-assets.json
+state/          projection.sqlite (users, sessions, projections, audit, PATs, notifications,
+                sealed personal backend keys), writer.lock, shipped-assets.json
 ```
 
-Boot creates the ten `DATA_ROOT_SUBDIRS` (`projects`, `agents`, `agents/profiles`,
-`runtimes`, `runtimes/claude-home`, `runtimes/codex-home`, `kb`, `skills`,
-`audit-exports`, `state`); the rest
-appear when first written. *(Corrected 2026-09-02, pass 32 — A00-6: `audit-exports/`
+Boot creates the nine `DATA_ROOT_SUBDIRS` (`projects`, `agents`, `agents/profiles`,
+`runtimes`, `runtimes/users`, `kb`, `skills`, `audit-exports`, `state`); the rest
+appear when first written, including each person's own
+`runtimes/users/<userId>/{claude-home,codex-home}` (mode 0700, created by
+`ensureUserBackendHome` the first time they connect). *(Corrected 2026-09-02, ruling 127 —
+the list used to hold the shared `runtimes/claude-home` and `runtimes/codex-home`, which
+no longer exist.)* *(Corrected 2026-09-02, pass 32 — A00-6: `audit-exports/`
 joined the list, so the folder the runbook, the backup and `file-formats.md` all name
 exists on every root instead of only on one that has already purged.)* There is no `auth/`, `cache/` or `logs/` directory; application
 logs are structured JSON on stdout. Full layout with retention:
@@ -215,10 +259,11 @@ logs are structured JSON on stdout. Full layout with retention:
   backup that refused to run on a live instance would be no backup at all.
 
   Read the artefact's own README for what it excludes. Two exclusions matter most:
-  `runtimes/` (live agent logins — opt in with `--include-runtimes`, and then treat the
-  artefact as a secret), and **`VIBERR_SECRET_ENCRYPTION_KEY` itself**, which lives in the
-  environment. Without that key every sealed PAT and MCP credential in the backed-up
-  database is unreadable, so back the key up separately.
+  `runtimes/` (live agent logins, now one set per person under `runtimes/users/` — opt in
+  with `--include-runtimes`, and then treat the artefact as a secret), and
+  **`VIBERR_SECRET_ENCRYPTION_KEY` itself**, which lives in the
+  environment. Without that key every sealed PAT, MCP credential and personal backend API
+  key in the backed-up database is unreadable, so back the key up separately.
 
   The older advice — copy `./docker-data` wholesale, being careful to include the
   `-wal`/`-shm` sidecars — still works, but it is exactly the trap `VACUUM INTO` removes:

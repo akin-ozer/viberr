@@ -1,18 +1,27 @@
 import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { resolveClaudeConfigDir } from "./claude-config.server";
-import { codexSessionRoots } from "./codex-config.server";
 import type { RealBackend } from "./runtime-registry.server";
+import { userBackendHome } from "./user-homes.server";
 
 /**
  * Locate the on-disk provider session transcript for a run so it can be
  * EXPORTED and resumed on another machine (same subscription). The agents run
  * inside the app's runtime (in Docker, on the data volume); each provider keeps
- * its own resumable transcript there, keyed by the session id the UI shows:
+ * its own resumable transcript there, keyed by the session id the UI shows.
  *
- *   Claude Code : $CLAUDE_CONFIG_DIR/projects/<cwd-slashes-as-dashes>/<sid>.jsonl
- *   Codex       : <codex run home>/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl
+ * Ruling 127: "there" is the CREDENTIAL PRINCIPAL's own runtime home — the run
+ * row's `credential_user_id` — because that is the home the binary was spawned
+ * with:
+ *
+ *   Claude Code : runtimes/users/<id>/claude-home/projects/<cwd-as-dashes>/<sid>.jsonl
+ *   Codex       : runtimes/users/<id>/codex-home/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl
+ *
+ * Every entry point therefore takes the principal's user id, and a run with a
+ * NULL principal (one refused before any process started) has no transcript at
+ * all — the export route 404s, as it already did for a run whose provider kept
+ * none. Searching every user's home for a session id would be worse than
+ * useless: it would hand one person's conversation to whoever could name it.
  *
  * We locate the file by the session id itself (globbing the per-project dirs /
  * dated rollout dirs) so we never depend on reproducing the cwd→folder
@@ -33,13 +42,23 @@ export interface LocatedTranscript {
   bytes: number;
 }
 
-/** Every `…/sessions` dir a codex rollout may live in. Runs write into the
- *  app-owned run home (P13-LV-13); the human's login dir is still searched so a
- *  transcript recorded before that split stays exportable. */
-function codexSessionDirs(): string[] {
-  return codexSessionRoots()
-    .map((root) => path.join(root, "sessions"))
-    .filter((dir) => existsSync(dir));
+/** The `…/sessions` dir of ONE person's codex home — the only place a run
+ *  billed to them could have written a rollout (ruling 127). Empty when the
+ *  home does not exist, or when the run had no principal. */
+function codexSessionDirs(userId: string | null, dataRoot?: string): string[] {
+  if (!userId) return [];
+  const dir = path.join(userBackendHome(userId, "codex", dataRoot), "sessions");
+  return existsSync(dir) ? [dir] : [];
+}
+
+/** The `projects` dir of ONE person's claude home, or null when there is no
+ *  principal to look under. */
+function claudeProjectsDir(
+  userId: string | null,
+  dataRoot?: string,
+): string | null {
+  if (!userId) return null;
+  return path.join(userBackendHome(userId, "claude", dataRoot), "projects");
 }
 
 /**
@@ -96,11 +115,15 @@ function fileStats(filePath: string): TranscriptSize {
   }
 }
 
-/** Claude: `<sid>.jsonl` inside any per-project dir under
- *  `$CLAUDE_CONFIG_DIR/projects/` (search every project dir by session id). */
-function locateClaude(sessionId: string): string | null {
-  const projectsDir = path.join(resolveClaudeConfigDir(), "projects");
-  if (!existsSync(projectsDir)) return null;
+/** Claude: `<sid>.jsonl` inside any per-project dir under the principal's
+ *  `claude-home/projects/` (search every project dir by session id). */
+function locateClaude(
+  userId: string | null,
+  sessionId: string,
+  dataRoot?: string,
+): string | null {
+  const projectsDir = claudeProjectsDir(userId, dataRoot);
+  if (!projectsDir || !existsSync(projectsDir)) return null;
   let entries: string[];
   try {
     entries = readdirSync(projectsDir);
@@ -117,8 +140,12 @@ function locateClaude(sessionId: string): string | null {
 /** Codex: a `rollout-…jsonl` whose filename embeds the session id, found by
  *  recursively walking the dated dirs under each codex `sessions` root.
  *  Filename-only walk — no file reads. */
-function codexTranscriptByFilename(sessionId: string): string | null {
-  const stack: string[] = codexSessionDirs();
+function codexTranscriptByFilename(
+  userId: string | null,
+  sessionId: string,
+  dataRoot?: string,
+): string | null {
+  const stack: string[] = codexSessionDirs(userId, dataRoot);
   if (stack.length === 0) return null;
   while (stack.length) {
     const dir = stack.pop()!;
@@ -144,8 +171,12 @@ function codexTranscriptByFilename(sessionId: string): string | null {
 
 /** Content fallback: the id appears in the session-meta (first line). Reads
  *  every candidate file — export-route only, never on a loader path. */
-function codexTranscriptByContent(sessionId: string): string | null {
-  const stack: string[] = codexSessionDirs();
+function codexTranscriptByContent(
+  userId: string | null,
+  sessionId: string,
+  dataRoot?: string,
+): string | null {
+  const stack: string[] = codexSessionDirs(userId, dataRoot);
   if (stack.length === 0) return null;
   while (stack.length) {
     const dir = stack.pop()!;
@@ -173,8 +204,15 @@ function codexTranscriptByContent(sessionId: string): string | null {
   return null;
 }
 
-function locateCodex(sessionId: string): string | null {
-  return codexTranscriptByFilename(sessionId) ?? codexTranscriptByContent(sessionId);
+function locateCodex(
+  userId: string | null,
+  sessionId: string,
+  dataRoot?: string,
+): string | null {
+  return (
+    codexTranscriptByFilename(userId, sessionId, dataRoot) ??
+    codexTranscriptByContent(userId, sessionId, dataRoot)
+  );
 }
 
 // ------------------------------------------------------- existence probe
@@ -193,16 +231,26 @@ const TRANSCRIPT_EXISTS_TTL_MS = 30_000;
 const TRANSCRIPT_EXISTS_MAX_ENTRIES = 500;
 const transcriptExistsCache = new Map<string, { ok: boolean; at: number }>();
 
-export function transcriptExists(backend: RealBackend, sessionId: string): boolean {
-  if (!sessionId) return false;
-  const key = `${backend}:${sessionId}`;
+export function transcriptExists(
+  backend: RealBackend,
+  /** Ruling 127: the run row's `credential_user_id` — whose home to look in.
+   *  Null (a refused run) has no transcript by construction. */
+  userId: string | null,
+  sessionId: string,
+  dataRoot?: string,
+): boolean {
+  if (!sessionId || !userId) return false;
+  // The principal is part of the key: the same session id under a different
+  // home is a different question, and a shared key would serve one person's
+  // answer for another's run.
+  const key = `${backend}:${userId}:${sessionId}`;
   const cached = transcriptExistsCache.get(key);
   const now = Date.now();
   if (cached && now - cached.at < TRANSCRIPT_EXISTS_TTL_MS) return cached.ok;
   const ok =
     backend === "codex"
-      ? codexTranscriptByFilename(sessionId) !== null
-      : locateClaude(sessionId) !== null;
+      ? codexTranscriptByFilename(userId, sessionId, dataRoot) !== null
+      : locateClaude(userId, sessionId, dataRoot) !== null;
   if (
     transcriptExistsCache.size >= TRANSCRIPT_EXISTS_MAX_ENTRIES &&
     !transcriptExistsCache.has(key)
@@ -257,16 +305,28 @@ export const SESSION_MISSING_RE =
  */
 export function probeSessionContinuity(
   backend: RealBackend,
+  /** Ruling 127: whose home holds the transcript — the principal of the RESUMED
+   *  turn, which is the task owner as of now, so this never reads one person's
+   *  transcript on behalf of another (agents-and-runtime.md §3.6). An owner
+   *  CHANGE is not decided here: `resumeRun` treats a principal that differs
+   *  from the prior run's as `missing` before calling this, because a home with
+   *  no transcript store yet answers `unknown` and `unknown` means "resume as
+   *  before". */
+  userId: string | null,
   sessionId: string | null | undefined,
+  dataRoot?: string,
 ): SessionContinuity {
   if (!sessionId) return "unknown";
+  // No principal, no home to look in — and no run to start either. `unknown`
+  // keeps this probe out of the way of the refusal `startRun` records.
+  if (!userId) return "unknown";
   if (backend === "codex") {
-    if (codexSessionDirs().length === 0) return "unknown";
-    return locateCodex(sessionId) ? "present" : "missing";
+    if (codexSessionDirs(userId, dataRoot).length === 0) return "unknown";
+    return locateCodex(userId, sessionId, dataRoot) ? "present" : "missing";
   }
-  const projectsDir = path.join(resolveClaudeConfigDir(), "projects");
-  if (!existsSync(projectsDir)) return "unknown";
-  return locateClaude(sessionId) ? "present" : "missing";
+  const projectsDir = claudeProjectsDir(userId, dataRoot);
+  if (!projectsDir || !existsSync(projectsDir)) return "unknown";
+  return locateClaude(userId, sessionId, dataRoot) ? "present" : "missing";
 }
 
 /**
@@ -275,10 +335,17 @@ export function probeSessionContinuity(
  */
 export function locateTranscript(
   backend: RealBackend,
+  /** Ruling 127: the run row's `credential_user_id`. A run with none never
+   *  spawned a process, so it has no transcript to export. */
+  userId: string | null,
   sessionId: string,
+  dataRoot?: string,
 ): LocatedTranscript | null {
-  if (!sessionId) return null;
-  const filePath = backend === "codex" ? locateCodex(sessionId) : locateClaude(sessionId);
+  if (!sessionId || !userId) return null;
+  const filePath =
+    backend === "codex"
+      ? locateCodex(userId, sessionId, dataRoot)
+      : locateClaude(userId, sessionId, dataRoot);
   if (!filePath) return null;
   const { lineCount, bytes } = fileStats(filePath);
   return {
@@ -352,7 +419,7 @@ const RESUME_SCRIPT_TEMPLATE = [
   "# Installs the conversation transcript where the local CLI looks for it, then",
   "# prints the exact resume command. Writes ONE file; carries NO credentials —",
   "# sign in locally with your own subscription first:",
-  "#   Claude : run `claude` once and sign in (Pro/Max), or `claude setup-token`",
+  "#   Claude : run `claude` once and sign in with your own account (Pro/Max or Console)",
   "#   Codex  : run `codex login` (a ChatGPT plan that includes Codex)",
   "set -euo pipefail",
   "",

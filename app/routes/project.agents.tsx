@@ -9,10 +9,16 @@ import {
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { requireVisibleProject } from "./project-visibility.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { getProject } from "~/server/projections/board-query.server";
+import {
+  getProject,
+  listProjectMembers,
+} from "~/server/projections/board-query.server";
 import { listAgentDeployments } from "~/server/projections/agent-deployments.server";
 import { buildResourceCatalog } from "~/server/org/resource-catalog.server";
-import { backendCredentialHealth } from "~/server/runtimes/runtime-registry.server";
+import {
+  connectedUserIds,
+  isBackendAvailableFor,
+} from "~/server/runtimes/backend-credentials.server";
 import {
   createAgentProfile,
   deleteAgentProfile,
@@ -51,21 +57,35 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // loader ALONE and the layout's membership refusal never executes. The guard
   // answers a non-member with the byte-identical unknown-slug 404 — a 403 here
   // would confirm the project exists (WI-13).
-  await requireProjectMember(request, params.slug, "view this project's agents");
+  const { user } = await requireProjectMember(
+    request,
+    params.slug,
+    "view this project's agents",
+  );
   const db = getDb();
   const project = getProject(db, params.slug);
   if (!project) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
-  // F16: ONE credential probe per backend, feeding both the boolean the modals
-  // already consumed and the roster's new health line. `backendCredentialHealth`
-  // is the single source the run service and the logs read (D1/D2) — deriving
-  // `available` from it here is what keeps the page from growing a second,
-  // quietly divergent answer to "can this profile actually run?".
-  const backendHealth = {
-    claude: backendCredentialHealth("claude"),
-    codex: backendCredentialHealth("codex"),
+  // Ruling 127: "is this backend configured?" has no instance-level answer any
+  // more — a run bills a PERSON. So the page gets two person-shaped facts per
+  // backend, from the one store every surface reads
+  // (`backend-credentials.server`): whether the VIEWER connected it (they are
+  // who would press Run, on the tasks they own), and how many of this
+  // project's members have — the honest replacement for the old boolean.
+  const memberIds = new Set(
+    listProjectMembers(db, params.slug).map((m) => m.userId),
+  );
+  const summary = (backend: "claude" | "codex") => {
+    const connected = connectedUserIds(db, backend);
+    return {
+      backend,
+      viewerConnected: isBackendAvailableFor(db, user.id, backend),
+      membersConnected: connected.filter((id) => memberIds.has(id)).length,
+      membersTotal: memberIds.size,
+    };
   };
+  const backendHealth = { claude: summary("claude"), codex: summary("codex") };
   return {
     profiles: assembleAgentRoster(db, params.slug),
     // The org-level template LIBRARY, minus what this project already runs
@@ -95,17 +115,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // unconditionally — a toggle for it would be one an admin could flip with no
     // effect. No profile grants it either, as of B7 (pass 16).
     resourceCatalog: buildResourceCatalog(db),
-    // Per-backend credential availability (same cheap SDK-auth check the run
-    // service uses). The create/edit modal disables a backend that isn't
-    // configured so a new profile can't be pinned to a runtime whose every run
-    // would fail (RU-2).
-    backendAvailable: {
-      claude: backendHealth.claude.available,
-      codex: backendHealth.codex.available,
-    },
-    // …and WHY, in words, for the roster (F16): the task-level Execution
-    // profile panel already said "Codex — not configured" while this page
-    // called the same profile "idle · available".
+    // Ruling 127: ONE backend answer for this page. The roster line reads the
+    // count, and the create/edit modal reads `viewerConnected` for its advisory
+    // note. It is deliberately not a second `backendAvailable` pair: authoring a
+    // profile is not running one (a run bills the TASK OWNER), so nothing on
+    // this page gates the form on the author's own credential.
     backendHealth,
   };
 }
@@ -248,7 +262,6 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
       projectName={loaderData.projectName}
       myRole={layout?.myRole ?? null}
       resourceCatalog={loaderData.resourceCatalog}
-      backendAvailable={loaderData.backendAvailable}
       backendHealth={loaderData.backendHealth}
     />
   );

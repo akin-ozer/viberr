@@ -72,6 +72,8 @@ function renderModal(props: {
   onSubmit?: (p: ProfileFormPayload) => void;
   onClose?: () => void;
   resourceCatalog?: ResCatalogGroup[];
+  /** Ruling 127: the VIEWER's own connections. Omitted = not probed. */
+  viewerConnected?: Record<"codex" | "claude", boolean>;
 }): RenderResult {
   const Stub = createRoutesStub([
     {
@@ -87,6 +89,9 @@ function renderModal(props: {
           onSubmit={props.onSubmit ?? (() => {})}
           {...(props.resourceCatalog
             ? { resourceCatalog: props.resourceCatalog }
+            : {})}
+          {...(props.viewerConnected
+            ? { viewerConnected: props.viewerConnected }
             : {})}
         />
       ),
@@ -1715,6 +1720,89 @@ describe("P13-UI-52 — the editor states the backend narrowing before the save"
   });
 });
 
+/**
+ * Ruling 127 (live): the editor inherited RU-2's rule "disable a backend that
+ * cannot run", which used to mean "not configured on this deployment". Since a
+ * run bills the TASK OWNER, the author's own credential decides nothing about
+ * whether this profile runs, and gating on it made a FRESH INSTANCE unable to
+ * create any profile at all: nobody has connected anything, so both chips were
+ * dead, Save was held forever on "one execution backend ... required", and the
+ * only explanation lived in a `title` on a disabled button, which no browser
+ * opens (the same P14 rule the policy rows follow).
+ */
+describe("ruling 127 — the editor advises about the viewer's account, it does not gate on it", () => {
+  const NOTHING_CONNECTED = { claude: false, codex: false } as const;
+
+  it("a viewer who has connected neither backend can still author a profile", async () => {
+    const onSubmit = vi.fn();
+    const { container, getByText, getByPlaceholderText } = renderModal({
+      initial: null,
+      onSubmit,
+      viewerConnected: { ...NOTHING_CONNECTED },
+    });
+    // Neither chip is dead: authoring is not running.
+    const chips = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".pick-chips .pick-chip"),
+    ).filter((b) => b.textContent === "Codex" || b.textContent === "Claude");
+    expect(chips).toHaveLength(2);
+    expect(chips.map((b) => b.disabled)).toEqual([false, false]);
+
+    fireEvent.change(getByPlaceholderText("e.g. Migrations"), {
+      target: { value: "Migrations" },
+    });
+    fireEvent.change(getByPlaceholderText("e.g. Schema changes"), {
+      target: { value: "Schema changes" },
+    });
+    fireEvent.click(getByText("Codex"));
+    fireEvent.click(getByText("Ready"));
+    await waitFor(() => expect(getByText("Ready to add to Viberr Core.")).toBeTruthy());
+    fireEvent.click(getByText("Create profile"));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ backend: "codex" });
+  });
+
+  it("states the consequence as RENDERED copy, naming where the viewer connects it", () => {
+    const { container, getByText } = renderModal({
+      initial: null,
+      viewerConnected: { ...NOTHING_CONNECTED },
+    });
+    // Nothing is said before a backend is picked: there is no consequence yet.
+    expect(container.querySelector(".field .def-note")).toBeNull();
+
+    fireEvent.click(getByText("Claude"));
+    const note = container.querySelector(".field .def-note")!;
+    expect(note.textContent).toContain("You haven't connected Claude.");
+    // It is advice, not a refusal: the profile still runs for the people whose
+    // tasks it is dispatched on.
+    expect(note.textContent).toContain("runs use the task owner's account");
+    expect(note.textContent).toContain("Profile → Agent accounts");
+    // No environment variable to set, and no instance-level claim: ruling 127
+    // left neither.
+    expect(container.textContent).not.toContain("on this instance");
+    expect(container.textContent).not.toContain("VIBERR_CLAUDE_USE_CLI_AUTH");
+  });
+
+  it("says nothing when the viewer has connected the backend they picked", () => {
+    const { container, getByText } = renderModal({
+      initial: null,
+      viewerConnected: { claude: true, codex: false },
+    });
+    fireEvent.click(getByText("Claude"));
+    expect(container.querySelector(".field .def-note")).toBeNull();
+    // …and speaks again for the one they have not.
+    fireEvent.click(getByText("Codex"));
+    expect(container.querySelector(".field .def-note")!.textContent).toContain(
+      "You haven't connected Codex.",
+    );
+  });
+
+  it("claims nothing at all when connections were not probed", () => {
+    const { container, getByText } = renderModal({ initial: null });
+    fireEvent.click(getByText("Claude"));
+    expect(container.querySelector(".field .def-note")).toBeNull();
+  });
+});
+
 describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
   const TEMPLATES: LibraryProfileView[] = [
     {
@@ -1871,39 +1959,38 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
 });
 
 /**
- * F16 (live): a Codex-backed profile on an instance with no Codex credential
- * read "idle · available" on this page, while the task-level Execution profile
- * panel one click away read "Codex — not configured". Availability is two
- * claims — nothing is running it, AND a run could start — and only the first
- * was ever checked here. The health comes from `backendCredentialHealth`, the
- * same probe the run service reads.
+ * F16 (live): a Codex-backed profile whose backend could not run read "idle ·
+ * available" on this page, while the task-level Execution profile panel one
+ * click away disagreed. Availability is two claims — nothing is running it,
+ * AND a run could start — and only the first was ever checked here.
+ *
+ * Ruling 127 makes the second claim person-shaped: a run bills the task
+ * owner's own account, so what this page answers is whether the VIEWER has
+ * connected the backend (they are who presses Run on the tasks they own),
+ * alongside how many project members have.
  */
-describe("F16: the roster tells the truth about backend credentials", () => {
-  // The REAL shape `backendCredentialHealth()` returns, not a happy-path
-  // narrowing of it — `verification` is a 4-way union and `detail` carries the
-  // actionable sentence exactly when something is wrong.
+describe("F16: the roster tells the truth about backend connections", () => {
   const HEALTHY: BackendHealthMap = {
     codex: {
       backend: "codex" as const,
-      available: true,
-      verification: "credential" as const,
-      detail: null,
+      viewerConnected: true,
+      membersConnected: 3,
+      membersTotal: 7,
     },
     claude: {
       backend: "claude" as const,
-      available: true,
-      verification: "credential" as const,
-      detail: null,
+      viewerConnected: true,
+      membersConnected: 5,
+      membersTotal: 7,
     },
   };
   const NO_CODEX: BackendHealthMap = {
     ...HEALTHY,
     codex: {
       backend: "codex" as const,
-      available: false,
-      verification: "none" as const,
-      detail:
-        "VIBERR_CODEX_USE_CLI_AUTH=1 is set, but the Codex CLI login file is missing at `/home/.codex/auth.json`.",
+      viewerConnected: false,
+      membersConnected: 2,
+      membersTotal: 7,
     },
   };
 
@@ -1923,34 +2010,57 @@ describe("F16: the roster tells the truth about backend credentials", () => {
       />,
     );
 
-  it("still says 'idle · available' when the backend really is configured", () => {
+  it("still says 'idle · available' when the viewer has the backend connected", () => {
     const { getByText, queryByText } = renderDetail(HEALTHY);
     expect(getByText("idle · available")).toBeTruthy();
-    expect(queryByText(/not configured/)).toBeNull();
+    expect(queryByText(/not connected/)).toBeNull();
   });
 
-  it("names the missing credential instead of claiming availability", () => {
+  it("states WHOSE account a run spends, and how many members could (ruling 127)", () => {
+    // The runtime row's old answer was a deployment claim. This page is not on
+    // a task, so it cannot name the person a run will bill — it states the
+    // RULE, and the one instance-level number that survives per-person
+    // credentials: how many of this project's members have connected it.
+    const { container } = renderDetail(HEALTHY);
+    // `mkProfile` runs Codex first — "a run uses the first".
+    expect(container.textContent).toContain(
+      "Runs use the task owner's Codex account · 3 of 7 members connected",
+    );
+    // Nothing claims the deployment holds a credential: it holds none.
+    expect(container.textContent).not.toContain("on this instance");
+    expect(container.textContent).not.toContain("configured");
+  });
+
+  it("says it on a profile whose backend the viewer HAS not connected too, with that backend's own count", () => {
+    const { container } = renderDetail(NO_CODEX);
+    expect(container.textContent).toContain(
+      "Runs use the task owner's Codex account · 2 of 7 members connected",
+    );
+  });
+
+  it("says the VIEWER has not connected it, instead of claiming availability", () => {
     const { container, getByText, queryByText } = renderDetail(NO_CODEX);
     // `mkProfile` runs Codex first — "a run uses the first".
     expect(queryByText("idle · available")).toBeNull();
-    expect(getByText("idle · Codex not configured")).toBeTruthy();
+    expect(getByText("idle · Codex not connected")).toBeTruthy();
     // The backend chip mirrors the task-level panel's wording…
     expect(container.querySelector(".be-chip .model-sub")!.textContent).toContain(
-      "not configured",
+      "not connected",
     );
-    // …and the actionable detail is the registry's own sentence, on screen,
-    // not buried in a tooltip.
-    expect(container.textContent).toContain("auth.json");
+    // …and the actionable sentence is on screen, addressed to the person and
+    // naming where they fix it — no environment variable, because ruling 127
+    // left none to set.
+    expect(container.textContent).toContain("Profile → Agent accounts");
+    expect(container.textContent).toContain("2 of 7 project members");
+    expect(container.textContent).not.toContain("VIBERR_CODEX_USE_CLI_AUTH");
     // The empty-deployments copy stops calling it assignable.
-    expect(container.textContent).toContain(
-      "assigning it would produce a refused run",
-    );
+    expect(container.textContent).toContain("would be refused");
   });
 
-  it("claims nothing either way when health was not probed", () => {
+  it("claims nothing either way when connections were not probed", () => {
     const { getByText, queryByText } = renderDetail(undefined);
     expect(getByText("idle · available")).toBeTruthy();
-    expect(queryByText(/not configured/)).toBeNull();
+    expect(queryByText(/not connected/)).toBeNull();
   });
 
   it("flags the unusable profile in the roster list too", () => {
@@ -1979,7 +2089,9 @@ describe("F16: the roster tells the truth about backend credentials", () => {
     // The row badge stops saying the flat "idle" and carries the reason.
     expect(container.querySelector(".profile-list .ag-idle")).toBeNull();
     const badge = container.querySelector(".profile-list .model-sub")!;
-    expect(badge.getAttribute("title")).toContain("auth.json");
+    // Ruling 127: the hover sentence names the person's own remedy, not a
+    // deployment file path — there is no instance credential to point at.
+    expect(badge.getAttribute("title")).toContain("Profile → Agent accounts");
     expect(badge.textContent).toContain("no runtime");
   });
 });

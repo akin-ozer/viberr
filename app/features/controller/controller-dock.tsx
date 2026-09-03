@@ -8,6 +8,7 @@ import {
 } from "react-router";
 import { z } from "zod";
 import type { ControllerDockView } from "./controller-dock-query.server";
+import { CLAUDE_NOT_CONNECTED } from "./controller-page";
 import type { loader as projectLoader } from "~/routes/project";
 import {
   dockContextFromMatches,
@@ -292,7 +293,8 @@ function DockShell({ context }: { context: DockContext }) {
 
   // Focus, on a USER-INITIATED open only (review findings 7 and 10). Opening
   // the dock means wanting to type, so the composer takes focus; when it cannot
-  // (no backend, a read-only thread, the view still loading) the panel itself
+  // (this person has no Claude connected, a read-only thread, the view still
+  // loading) the panel itself
   // does, so a keyboard user is inside the dialog either way. Closing returns
   // focus to the button - the panel renders BEFORE its trigger, like the bell
   // popover.
@@ -582,7 +584,10 @@ function DockShell({ context }: { context: DockContext }) {
                     : disabled
                       ? current.available
                         ? "Read-only: only the thread's owner can talk in it."
-                        : "The Claude backend is unavailable, so the controller cannot answer."
+                        : // Ruling 127: the dock bills the person reading it, so
+                          // it says what the page's composer and the refused
+                          // turn's transcript line say, from the one home.
+                          CLAUDE_NOT_CONNECTED
                       : "Ask the controller, or tell it what to do here…"
                 }
                 disabled={disabled}

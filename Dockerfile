@@ -98,14 +98,13 @@ ENV VIBERR_BUILD_SHA=$VIBERR_BUILD_SHA
 ENV VIBERR_BUILD_TIME=$VIBERR_BUILD_TIME
 ENV NODE_ENV=production
 # Canonical file store + SQLite projections live here; compose mounts a
-# host directory (or named volume) at this path.
+# host directory (or named volume) at this path. Ruling 127: each person's own
+# agent-backend sign-in and provider sessions live under
+# /data/runtimes/users/<userId>/{claude-home,codex-home}, created 0o700 on
+# demand, so they survive container restarts and a `docker compose up --build`.
+# There is no image-level backend credential and no shared runtime home: a run
+# gets the home and key of the ONE person it bills.
 ENV VIBERR_DATA_ROOT=/data
-# Persist Claude Agent SDK sessions on the data volume so resuming an agent
-# (commenting on a task) survives container restarts.
-ENV CLAUDE_CONFIG_DIR=/data/runtimes/claude-home
-# Keep Codex sessions and optional cached ChatGPT login on the same managed
-# data volume; never import the host user's full ~/.codex directory.
-ENV CODEX_HOME=/data/runtimes/codex-home
 # uv's package cache and its managed CPython, on the same volume for the same
 # reason: both default under $HOME, which is container-local, so every
 # `docker compose up` after a recreate would re-download an interpreter and
@@ -139,11 +138,14 @@ USER node
 
 EXPOSE 3000
 
-# Seeds the Codex CLI login from the optional read-only host mount into the
-# writable $CODEX_HOME when the volume lacks it (see the script's rationale),
-# then execs the CMD. `sh`-prefixed so the file's exec bit can't matter.
-ENTRYPOINT ["sh", "/app/scripts/docker-entrypoint.sh"]
-
+# No ENTRYPOINT (ruling 127). There used to be one — `scripts/docker-entrypoint.sh`,
+# which seeded a Codex CLI login from a read-only host mount into a shared
+# $CODEX_HOME before exec'ing the CMD. Both the mount and the shared home are
+# gone: a credential seeded by the image is a credential every person's runs
+# bill to whoever owns it. People sign in for themselves on Profile → Agent
+# accounts. With no entrypoint the CMD below is pid 1 directly, and compose's
+# `init: true` reaps orphans.
+#
 # react-router-serve honors $PORT (default above: 3000).
 #
 # The server binary directly, NOT `npm run start`: with npm in between, npm is
@@ -151,5 +153,5 @@ ENTRYPOINT ["sh", "/app/scripts/docker-entrypoint.sh"]
 # reaches node. That is not cosmetic — node's shutdown handler is what
 # checkpoints the WAL and RELEASES the data-root writer lock (B-FD1), so an
 # npm-wrapped server left a lock file behind on every stop and the next boot
-# could refuse to start. `exec` in the entrypoint makes this pid 1.
+# could refuse to start.
 CMD ["node", "/app/node_modules/@react-router/serve/bin.cjs", "./build/server/index.js"]

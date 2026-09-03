@@ -592,8 +592,10 @@ export interface RunFailure {
  * error line the backend emitted (e.g. a Codex "usage limit" message, an auth
  * failure, a crashed tool). Returns null when the run logged no error line.
  * Classified into a short kind so the recovery packet can be specific.
- * "unavailable" is the R7-2 fail-fast class: the backend had no usable
- * credential, so no agent process ever started.
+ * "unavailable" is the R7-2 fail-fast class: no agent process ever started.
+ * Under ruling 127 that means the run had no credential principal (an unowned
+ * task, or an owner whose account is gone) or that person had not connected the
+ * backend, so there was nothing to spawn with.
  */
 export function runFailureReason(
   db: DatabaseSync,

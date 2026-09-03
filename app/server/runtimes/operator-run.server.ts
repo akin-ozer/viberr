@@ -93,6 +93,11 @@ import {
 } from "~/server/tasks/task-actions.server";
 import { RUN_PHASE } from "./adapter.server";
 import type { RealBackend } from "./runtime-registry.server";
+import {
+  refusedPrincipalUserId,
+  resolveTaskRunPrincipal,
+  type RunPrincipalResolution,
+} from "./run-principal.server";
 // F21-3: the ONE operator confinement list (see the re-export below).
 import { OPERATOR_READ_ONLY_DENIED_TOOLS } from "./claude-runtime.server";
 import {
@@ -123,8 +128,12 @@ import {
  *     same gated operator-actions as the Claude tools — so Codex honors the
  *     identical RBAC + autonomy, it just plans-then-executes instead of
  *     calling tools live.
- *   no credential → startRun records an honest error; the completion hook
- *     escalates a blocked recovery packet.
+ *   no credential principal (ruling 127) → the drive still opens a RUN ROW, but
+ *     `startRun` records it as an honest error and the completion hook
+ *     escalates a blocked recovery packet. The operator is a TASK run, so its
+ *     principal is the task OWNER: an unowned task, a dead owner, or an owner
+ *     who has not connected this backend all land here, and none of them clones
+ *     a repository or spawns a process.
  */
 
 export interface RunOperatorInput {
@@ -1464,8 +1473,19 @@ export async function runOperator(
   // rather than in the two start functions so the reserved row and the launched
   // run are the same thread.
   const threadId = "op-" + newId("t").replace("t_", "").slice(0, 8);
-  const cloning = pendingOperatorClone(taskFileRef(input));
-  const reservation = cloning
+  // Ruling 127: whose accounts this drive bills — the task owner. Resolved
+  // BEFORE the clone and the reservation, because a refused drive must pay for
+  // neither; `startRun` turns the refusal into the run's whole outcome.
+  const principal = resolveTaskRunPrincipal(
+    db,
+    { dataRoot: input.dataRoot },
+    input.projectSlug,
+    input.taskKey,
+    backend,
+  );
+  const cloning = principal.ok ? pendingOperatorClone(taskFileRef(input)) : null;
+  const reservation =
+    cloning && principal.ok
     ? reserveRun(db, {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
@@ -1476,6 +1496,7 @@ export async function runOperator(
         model: authority.model,
         agentName: authority.name,
         agentProfileId: "operator",
+        credentialUserId: principal.principal.userId,
         phase: RUN_PHASE.preparing,
         // D1 (pass 23, owner ruling Q3): the same cold-clone honesty the
         // specialist strip gets — say when the multi-minute first-task mirror
@@ -1494,17 +1515,26 @@ export async function runOperator(
     // `unavailable` arm rather than stranding the run, and the prompt then SAYS
     // the operator is blind instead of letting it read its empty task folder as
     // "the repo" (F19-4).
-    const workspace = await ensureOperatorRepoCheckout(
-      db,
-      taskFileRef(input),
-      // F27-U1: `cloning` is the repo of the cold first-task clone; stream its
-      // percentage onto the reservation the operator drive just claimed.
-      reservation && cloning
-        ? (fraction) =>
-            reservation.phase(RUN_PHASE.preparing, cloneProgressStep(cloning, fraction))
-        : undefined,
-    );
-    const start = { threadId, reservation };
+    // Ruling 127: a drive with no credential principal is about to be recorded
+    // as a refusal, so it clones nothing — the same posture the pre-127
+    // "backend unavailable" arm had. `kind: "none"` is exactly what the prompt
+    // builders already handle for a project with no repo.
+    const workspace: OperatorWorkspaceView = principal.ok
+      ? await ensureOperatorRepoCheckout(
+          db,
+          taskFileRef(input),
+          // F27-U1: `cloning` is the repo of the cold first-task clone; stream
+          // its percentage onto the reservation the operator drive claimed.
+          reservation && cloning
+            ? (fraction) =>
+                reservation.phase(
+                  RUN_PHASE.preparing,
+                  cloneProgressStep(cloning, fraction),
+                )
+            : undefined,
+        )
+      : { kind: "none" };
+    const start: OperatorRunStart = { threadId, reservation, principal };
     return backend === "codex"
       ? await startCodexOperatorRun(db, ctx, input, authority, leaseKey, leaseToken, workspace, start)
       : await startRealOperatorRun(db, ctx, input, authority, leaseKey, leaseToken, workspace, start);
@@ -1523,6 +1553,8 @@ interface OperatorRunStart {
   threadId: string;
   /** The reserved, already-`running` row, when the drive had to clone. */
   reservation: RunReservation | null;
+  /** Ruling 127: whose accounts this drive bills, or why it cannot run. */
+  principal: RunPrincipalResolution;
 }
 
 // ------------------------------------------------- codex (structured output)
@@ -1877,7 +1909,13 @@ async function startCodexOperatorRun(
   // Resolved BEFORE the persona (B8) so the prompt describes what MOUNTS.
   // F21-3: that resolve now pre-flights the stdio mounts, so "what mounts" is
   // what actually starts, not what the registry row remembers.
-  const mcp = await operatorMcpResolution(db, authority.mcps, "codex");
+  // Ruling 127: which is why a REFUSED drive skips it — the pre-flight starts
+  // each stdio server to handshake it and corrects its registry row, real
+  // child processes and org-level writes for a run that will never exist. The
+  // same posture `ensureOperatorRepoCheckout` already takes above.
+  const mcp = start.principal.ok
+    ? await operatorMcpResolution(db, authority.mcps, "codex")
+    : NO_OPERATOR_MCPS;
   // Pass-24 B-1 (owner ruling): the Codex operator's cwd is a dedicated empty
   // scratch folder, so its one writable root (workspace-write) does NOT contain
   // `task.md` or the shared deliverer checkout — both stay readable but
@@ -1930,7 +1968,13 @@ async function startCodexOperatorRun(
     autonomous: true,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
     dataRoot: input.dataRoot,
+    // Ruling 127: the task owner's Codex account, or the refusal that says
+    // why there is none.
+    credentialUserId: start.principal.ok
+      ? start.principal.principal.userId
+      : refusedPrincipalUserId(start.principal.refusal),
   };
+  if (!start.principal.ok) spec.principalRefusal = start.principal.refusal;
   // An absent effort leaves the SDK on its own default; an absent mcpServers
   // key is what the adapters read as "this run mounts none".
   if (authority.effort) spec.effort = authority.effort;
@@ -2508,7 +2552,13 @@ async function startRealOperatorRun(
   // F21-3: resolved (and stdio-pre-flighted) ONCE, then handed to the toolkit —
   // a second resolve inside the toolkit would re-mount a server the pre-flight
   // had just dropped, so the prompt and the mount would disagree.
-  const mcp = await operatorMcpResolution(db, authority.mcps, "claude");
+  // Ruling 127: skipped entirely on a refused drive, which spawns nothing —
+  // the pre-flight would otherwise start every declared stdio server (and
+  // rewrite its health row) for a run recorded as "no agent process was
+  // started".
+  const mcp = start.principal.ok
+    ? await operatorMcpResolution(db, authority.mcps, "claude")
+    : NO_OPERATOR_MCPS;
   const systemPrompt = buildOperatorSystemPrompt(
     authority,
     input.dataRoot,
@@ -2565,7 +2615,13 @@ async function startRealOperatorRun(
     autonomous: true,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
     dataRoot: input.dataRoot,
+    // Ruling 127: the task owner's Claude account, or the refusal that says
+    // why there is none.
+    credentialUserId: start.principal.ok
+      ? start.principal.principal.userId
+      : refusedPrincipalUserId(start.principal.refusal),
   };
+  if (!start.principal.ok) spec.principalRefusal = start.principal.refusal;
   // An absent effort leaves the SDK on its own default.
   if (authority.effort) spec.effort = authority.effort;
   // R21-4: adopt the row the human has been watching since before the clone,
@@ -2642,9 +2698,15 @@ async function escalateFailedOperatorRun(
         ? "the coordinating model is over its usage quota"
         : reason?.kind === "auth"
           ? "the coordinating model's credential was rejected"
-          : reason?.kind === "unavailable"
-            ? "the coordinating backend has no usable credential configured (the run was refused — no agent process started)"
-            : "the coordinating run did not complete";
+          : "the coordinating run did not complete";
+    // Ruling 127: a drive refused for want of a credential principal already
+    // recorded the ONE sentence that names the person and their remedy
+    // (`principalRefusalMessage`, on the run's `run·unavailable` line). Repeat
+    // the generic "fix the credential, or retry on the other backend" advice
+    // here and the packet tells a second, wronger story: the fix belongs to the
+    // task owner, on their own Profile, and the other backend is refused for
+    // exactly the same reason.
+    const refusal = reason?.kind === "unavailable" ? reason.text : "";
     const providerText = reason?.providerText ?? "";
     logger.warn("real operator run failed — escalating", {
       taskKey: input.taskKey,
@@ -2657,9 +2719,12 @@ async function escalateFailedOperatorRun(
       packetType: "blocked",
       title: "Operator run failed — pick a recovery path",
       body:
-        `The operator run did not complete — ${detail}. No coordination was ` +
-        `performed. Retry on the other backend, fix the credential, or redirect ` +
-        `the task.` +
+        (refusal
+          ? `The operator could not run on this task. ${refusal} No ` +
+            `coordination was performed.`
+          : `The operator run did not complete — ${detail}. No coordination was ` +
+            `performed. Retry on the other backend, fix the credential, or ` +
+            `redirect the task.`) +
         // R20-3 (F20-4): the operator's OWN escalation used to drop the
         // provider's words entirely; append the redacted sentence so a Codex
         // model/account mismatch reads its real cause, not the generic advice.
@@ -2783,7 +2848,9 @@ async function operatorMcpResolution(
 }
 
 /** Nothing resolved — the honest default when a caller has no DB to resolve
- *  with (prompt-shape tests). It never CLAIMS a server the run may not have. */
+ *  with (prompt-shape tests), and what a drive refused for a missing credential
+ *  principal uses instead of pre-flighting servers no process will connect to
+ *  (ruling 127). It never CLAIMS a server the run may not have. */
 const NO_OPERATOR_MCPS: OperatorMcpResolution = {
   servers: {},
   mounted: [],

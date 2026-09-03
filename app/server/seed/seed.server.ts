@@ -96,10 +96,12 @@ const DERIVED_TABLES = [
 /**
  * Wipe the store back to a clean sheet: projects/, agents/profiles, the raw
  * runtime .jsonl transcript truth, and every derived table. Scoped to the
- * per-backend TRANSCRIPT dirs (`runtimes/<backend>/<id>.jsonl`) and NEVER the
- * credential HOMES that also live under `runtimes/` — `codex-home/auth.json`
- * (Codex subscription auth) and `claude-home` (P11-04: deleting those logged
- * the whole instance out). Users/auth tables are preserved.
+ * per-backend RUN-LOG dirs (`runtimes/<backend>/<id>.jsonl`) and NEVER the
+ * per-person runtime homes that also live under `runtimes/` — ruling 127 put
+ * every vendor sign-in there (`users/<id>/codex-home/auth.json`,
+ * `users/<id>/claude-home/.credentials.json`), so deleting them would sign
+ * every person on the instance out of their own accounts (P11-04, when the
+ * homes were still deployment-wide). Users/auth tables are preserved.
  */
 export function resetStore(db: DatabaseSync, dataRoot: string): void {
   const projRoot = projectsDir(dataRoot);

@@ -5,6 +5,11 @@
 > `app/server/auth/*`, `app/shared/rbac.ts`, `app/server/org/*`,
 > `app/server/audit/*`, `app/server/db/retention.server.ts`. Verified against
 > `main` @ `68b5480` (2026-09-01).
+>
+> Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`):
+> §5 gains the `profile.backend.*` audit family and §7 describes the Agent accounts
+> panel. Agent backends now authenticate per person; there is no deployment-wide
+> Claude or Codex credential to administer.
 
 ## 1. Authentication
 
@@ -146,9 +151,14 @@ the tabs sit the Audit log card and the run-concurrency control.
 - **Users & access**: allow access by local account (temp password shown once, reset
   forced), Google account, Google domain, or GitHub handle; edit name/email; change org
   role; reset password (revokes all sessions); disable/enable (disable revokes
-  sessions); remove (prunes memberships, releases tasks, deletes the identity). Status
-  pills: whitelisted, password reset pending, disabled. Audit `org.user.*`,
-  `org.domain.*`, `auth.password.reset`.
+  sessions); remove (prunes memberships, releases tasks, retires the person's agent
+  accounts, deletes the identity). Removal runs the vendor's own logout and deletes the
+  sign-in file from that person's runtime home before the row cascades (ruling 127) —
+  the row goes with the account either way, but nothing else would ever remove a live
+  Claude.ai / ChatGPT credential from this server, and the person can no longer reach
+  Disconnect to revoke it themselves; the audit detail lists `backendsRetired`, and
+  transcripts stay. Status pills: whitelisted, password reset pending, disabled. Audit
+  `org.user.*`, `org.domain.*`, `auth.password.reset`.
 - **Sign-in & SSO**: §2.
 - **Agent resources**: knowledge bases (`name`, `dir`, refresh `on change | manual`,
   re-index, delete), MCP servers (`HTTP` or `stdio`, target, sealed credential; saving
@@ -186,6 +196,19 @@ recommendations, quality, schedules, agent and operator actions), `goal.*`,
 `controller.authority.denied`, `projection.rescan|rebuild`, `seed.*`,
 `secrets.resealed`, `store.restored`.
 
+**`profile.backend.*` (ruling 127).** Connecting or dropping a personal agent account
+is governed, because it changes whose provider account this instance's runs bill. Five
+actions, all instance-scoped (no `project_slug`, no `task_key`), actor the person
+themselves: `profile.backend.login_started` {backend, method} when the vendor's own
+binary is spawned, `profile.backend.login_failed` {backend, method, reason} on a
+non-zero exit, an unconfirmed sign-in or the 15/16-minute timeout,
+`profile.backend.login_cancelled` {backend, method}, `profile.backend.connected`
+{backend, kind, method | verified} on success or a saved key, and
+`profile.backend.disconnected` {backend, kind}. Subject kind is `backend_login` for
+the session rows and `backend_credential` for the stored ones. The `reason` is the
+same already-redacted sentence the person sees; a key, a token, a one-time code and a
+raw vendor line never reach an audit row.
+
 Where it is read:
 
 - **Org settings → Audit log**: an in-app browse of the newest 150 rows (max 500) with
@@ -221,11 +244,63 @@ Identity (name, title; audit `profile.updated`), notification routing (six in-ap
 opt-out toggles: packets, approvals, mentions, policy, quality, controller; enforced
 inside `createNotification`), appearance (theme `light | dark | system` persisted to
 `users.theme` and the `viberr_theme` cookie; reduce motion; default timeline filter),
-a read-only "Your access" table rendered from the same RBAC rows, GitHub identity
-(disconnect flips `idp` back to `local`, refused without a password), and a
-self-service password change that keeps the current session and revokes every other
-one (audit `auth.password.changed`). Preferences other than theme live in
-`user_prefs`.
+a read-only "Your access" table rendered from the same RBAC rows, **Agent accounts**
+(below), GitHub identity (disconnect flips `idp` back to `local`, refused without a
+password), and a self-service password change that keeps the current session and
+revokes every other one (audit `auth.password.changed`). Preferences other than theme
+live in `user_prefs`.
+
+### Agent accounts (ruling 127)
+
+The panel sits in the right column above GitHub identity, one `cred-card` per backend,
+and it is where a person connects the provider account their agent runs bill: runs on
+tasks they own, and their own controller turns. There is no deployment-wide Claude or
+Codex credential any more, so this panel is the only place either backend is connected.
+
+Two routes in, both the vendor's own:
+
+- **Hosted sign-in.** `backend-login-start` spawns the UNMODIFIED bundled vendor binary
+  (`claude auth login --claudeai` or `--console`; `codex login --device-auth`) with
+  `filteredSpawnEnv()` plus that person's own runtime home
+  (`<dataRoot>/runtimes/users/<id>/{claude-home,codex-home}`), argv only, never a shell,
+  every stream piped. Only the vendor being signed in to has to be installed
+  (`resolveBackendBinary`), so a host whose other optional platform package never landed
+  still connects the one it has; when the package IS missing the person is told which
+  binary is absent and that an admin can reinstall without `--omit=optional`, not a
+  generic 500 sentence. The card then shows what the vendor printed: the URL to open, and
+  for Codex the one-time code to type on OpenAI's page. Claude asks for the code
+  Anthropic displays, which `backend-login-code` writes to the child's stdin and nowhere
+  else (empty, whitespace-only and over-long values are refused before stdin). On exit 0
+  the driver asks the SAME binary (`claude auth status`, `codex login status`) whether it
+  is really signed in, and only that answer writes the row. The session is polled from the
+  browser through `/resources/backend-login` every 2 s while it is live; the success toast
+  settles on that result, never on the submit. The step list is a polite live region and
+  takes focus when it replaces the button that started the flow, because every value in it
+  (the link, the code, the status line) arrives from a later poll.
+- **A pasted credential.** `backend-set-key` verifies an Anthropic Console or OpenAI
+  Platform API key with a FREE `GET /v1/models` probe before sealing it; a ChatGPT
+  workspace access token has no free probe and is stored `verified_at = null` with the
+  card saying so. `backend-disconnect` runs the vendor's own logout, removes the
+  credential file and drops the row (transcripts stay).
+
+Viberr never implements the vendors' OAuth, never reads, copies or stores a Claude.ai or
+ChatGPT **session** token, and offers no setup-token field: Anthropic's Claude Code
+legal page requires a hosting platform to have each end user authenticate with their own
+credentials through Anthropic's own flow, and forbids collecting or storing Claude.ai
+session tokens. The one vendor-issued token Viberr ever holds is the ChatGPT workspace
+access token a person deliberately pastes: an `access_token` row, sealed like any API
+key and never returned to a loader. A `login` row therefore holds no secret at all; the
+vendor's own client owns the credential file inside that person's home, and availability
+is re-probed from the filesystem on every read, so a wiped runtime volume reads as "sign
+in again" the moment it happens. Pasted keys are sealed (AES-256-GCM) and registered in
+`SEALED_STORES`, so a key rotation reaches them; only the last four characters ever
+reach a loader. One sign-in runs per person per backend; starting another cancels the
+first (SIGTERM, then SIGKILL five seconds later), and a session that ends stays readable
+for ten minutes so the card can report the outcome. A sign-in already connected is not a
+reason to hide a running one: the in-progress card renders over the connected card until
+the flow ends, which is how a key is replaced by a hosted sign-in, and a card whose
+credential file has vanished offers the sign-in its own sentence names, beside
+Disconnect.
 
 ## 8. Known drift in older documents
 

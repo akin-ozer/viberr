@@ -13,6 +13,8 @@ import { getEnv } from "../config/env.server";
  *                                          served member-only, cited as evidence)
  *   agents/profiles/<id>.md               (org-level agent profile templates)
  *   runtimes/                             (NDJSON run logs — Phase 8)
+ *   runtimes/users/<userId>/claude-home   (ruling 127 — that person's own
+ *   runtimes/users/<userId>/codex-home     vendor sign-in + provider sessions)
  *   kb/<dir>/                             (knowledge-base folders — Phase 9B;
  *                                          UI renders them as store://kb/<dir>/)
  *   skills/<name>/SKILL.md                (skill folders — Phase 9B;
@@ -28,12 +30,14 @@ export const DATA_ROOT_SUBDIRS = [
   "agents",
   "agents/profiles",
   "runtimes",
-  "runtimes/claude-home",
-  // Codex subscription login dir under compose (CODEX_HOME=/data/runtimes/
-  // codex-home). Created so the mount target exists; the operator still copies
-  // auth.json in (F-DOCKER1) — an empty dir means Codex reports unavailable
-  // rather than dying mid-run.
-  "runtimes/codex-home",
+  // Ruling 127: the per-person runtime homes. The deployment-wide
+  // `runtimes/claude-home` / `runtimes/codex-home` are gone — a credential in a
+  // shared home is a credential every run bills to whoever owns it. Each
+  // person's `runtimes/users/<userId>/{claude-home,codex-home}` is created
+  // 0o700 on demand by `ensureUserBackendHome` (user-homes.server.ts); the
+  // parent is created here so the documented tree (and the backup, retention
+  // and runbook entries that name it) is true on a fresh root.
+  "runtimes/users",
   "kb",
   "skills",
   // Ruling 102: the purge's durable export of expiring audit rows (A00-6,

@@ -89,7 +89,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const scope = scopeParams(url.searchParams);
   const actor = { userId: auth.user.id, label: auth.user.email };
   if (!scopeIsReachable(db, scope, actor)) {
-    return { view: unavailableDockView(db, scope) };
+    return { view: unavailableDockView(db, { id: auth.user.id }, scope) };
   }
   const c = url.searchParams.get("c")?.trim() || null;
   const view = getControllerDock(

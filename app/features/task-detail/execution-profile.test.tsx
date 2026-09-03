@@ -9,6 +9,7 @@ import {
   ExecutionProfile,
   type DeployedSpecialistView,
 } from "./execution-profile";
+import type { TaskRunPrincipalView } from "./run-principal-view";
 
 afterEach(cleanup);
 
@@ -69,6 +70,37 @@ function unownedTask(): TaskSummary {
   };
 }
 
+/** The same row, OWNED by the viewer — the fixture for anything that presses a
+ *  run control, since ruling 127 refuses every run on a task with no owner to
+ *  bill. */
+function ownedTask(): TaskSummary {
+  return {
+    ...unownedTask(),
+    owner: {
+      kind: "human",
+      userId: "u-arda",
+      name: "Arda Kaya",
+      initials: "AK",
+      tone: "",
+    },
+  };
+}
+
+/** Ruling 127: the task owner whose accounts a run bills, both connected. The
+ *  owner here is the VIEWER (`meId`), which is the ordinary case on a task
+ *  somebody is working; the refusal tests below vary both halves. */
+function connectedPrincipal(
+  patch: Partial<TaskRunPrincipalView> = {},
+): TaskRunPrincipalView {
+  return {
+    ownerUserId: "u-arda",
+    ownerName: "Arda Kaya",
+    claude: { available: true, detail: null },
+    codex: { available: true, detail: null },
+    ...patch,
+  };
+}
+
 function renderExec(props: Partial<ComponentProps<typeof ExecutionProfile>> = {}) {
   return render(
     <MemoryRouter>
@@ -81,7 +113,7 @@ function renderExec(props: Partial<ComponentProps<typeof ExecutionProfile>> = {}
         deployedSpecialists={deployedFixture}
         operatorBackend="claude"
         operatorAutonomy="supervised"
-        backendAvailable={{ claude: true, codex: true }}
+        runPrincipal={null}
         canRunAgents
         activeAgentProfileIds={[]}
         operatorRunActive={false}
@@ -163,7 +195,13 @@ describe("ExecutionProfile — unowned copy matches the RBAC matrix (F19-11)", (
 describe("OperatorRunControl steer input — Enter submits, IME-guarded", () => {
   function renderWithRunSpy() {
     const calls: string[] = [];
-    const utils = renderExec({ onRunOperator: (s) => calls.push(s) });
+    // Ruling 127: a run needs an owner to bill, so the steer tests run on an
+    // OWNED task whose owner has connected both backends.
+    const utils = renderExec({
+      task: ownedTask(),
+      runPrincipal: connectedPrincipal(),
+      onRunOperator: (s) => calls.push(s),
+    });
     // Both run controls carry an `.op-steer` input now (PromptInput is shared
     // with the agent prompt) — the aria-label is the operator one's identity.
     const input = utils.container.querySelector<HTMLInputElement>(
@@ -308,5 +346,154 @@ describe("model-unavailable warnings — run control + ledger rows", () => {
     );
     expect(revNote).toBeTruthy();
     expect(revNote!.textContent).toContain("not supported when using Codex");
+  });
+});
+
+/**
+ * Ruling 127 — every run control on this panel answers for the task OWNER.
+ *
+ * The panel used to take one deployment-wide `backendAvailable` boolean pair,
+ * so a disabled Run could only ever say "the backend isn't configured on this
+ * instance" — a sentence that named a credential nobody can set any more, and
+ * a fix nobody on this page could perform. A run bills the owner's own
+ * account, so the refusal names the person, and the two refusals are kept
+ * apart: an UNOWNED task has nobody to bill (no backend switch fixes it), a
+ * connected-less owner has an account that has not been connected yet.
+ *
+ * P11-41's "would fail fast" behaviour is unchanged: the run that would refuse
+ * is refused HERE, before it is spent, and a SCHEDULED run stays available
+ * (the owner can connect the backend, or the seat can change hands, before it
+ * fires).
+ */
+describe("ruling 127: the run controls answer for the task owner", () => {
+  const operatorRun = (container: HTMLElement) =>
+    [...container.querySelectorAll<HTMLButtonElement>(".op-run > button")].find(
+      (b) => /Run operator|Schedule/.test(b.textContent ?? ""),
+    )!;
+  const dispatchRun = (container: HTMLElement) =>
+    [
+      ...container.querySelectorAll<HTMLButtonElement>(".agent-run > button"),
+    ].find((b) => /^(Run|Schedule)$/.test(b.textContent?.trim() ?? ""))!;
+  const pickDeveloper = (container: HTMLElement) => {
+    fireEvent.focus(
+      container.querySelector('input[aria-label="Choose an agent to run"]')!,
+    );
+    fireEvent.click(
+      [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+        (o) => o.textContent?.includes("Developer"),
+      )!,
+    );
+  };
+
+  it("an UNOWNED task refuses every run, and says who has to fix it", () => {
+    const calls: string[] = [];
+    const { container } = renderExec({
+      runPrincipal: null,
+      onRunOperator: (s) => calls.push(s),
+    });
+    expect(operatorRun(container).disabled).toBe(true);
+    expect(container.textContent).toContain("Own this task to run agents");
+    expect(container.textContent).toContain(
+      "Agent runs use the task owner's accounts, and this task has none",
+    );
+    // The dispatch refuses the same way, once a pick makes a run possible.
+    pickDeveloper(container);
+    expect(dispatchRun(container).disabled).toBe(true);
+    // And the row itself says it before the pick is made.
+    fireEvent.focus(
+      container.querySelector('input[aria-label="Choose an agent to run"]')!,
+    );
+    expect(
+      [...container.querySelectorAll('[role="option"]')].some((o) =>
+        o.textContent?.includes("no task owner"),
+      ),
+    ).toBe(true);
+    // Nothing is claimed about a deployment credential: there is none.
+    expect(container.textContent).not.toContain("on this instance");
+    expect(container.textContent).not.toContain("environment");
+  });
+
+  it("names the OWNER when the viewer is somebody else, and points at their Profile", () => {
+    const { container } = renderExec({
+      task: ownedTask(),
+      meId: "u-bea",
+      operatorBackend: "codex",
+      runPrincipal: connectedPrincipal({
+        ownerName: "Ada Lovelace",
+        codex: {
+          available: false,
+          detail: "Codex isn't connected. Connect it on your Profile → Agent accounts.",
+        },
+      }),
+    });
+    expect(operatorRun(container).disabled).toBe(true);
+    expect(container.textContent).toContain(
+      "Codex isn't connected for Ada Lovelace, the task owner",
+    );
+    expect(container.textContent).toContain(
+      "they can connect Codex on Profile → Agent accounts",
+    );
+    // Never the second-person sentence: "your Profile" is false advice for a
+    // teammate who cannot connect somebody else's account.
+    expect(container.textContent).not.toContain("on your Profile");
+  });
+
+  it("addresses the OWNER themselves in the store's own words (a wiped runtime volume)", () => {
+    const wiped =
+      "Your Codex sign-in file is missing from this server (the runtime volume was wiped). " +
+      "Sign in again on your Profile → Agent accounts.";
+    const { container } = renderExec({
+      task: ownedTask(),
+      meId: "u-arda",
+      operatorBackend: "codex",
+      runPrincipal: connectedPrincipal({
+        codex: { available: false, detail: wiped },
+      }),
+    });
+    expect(container.textContent).toContain(wiped);
+    expect(container.textContent).toContain(
+      "Runs on this task use your own account",
+    );
+  });
+
+  it("refuses the run NOW but keeps SCHEDULING alive (the owner can connect it first)", () => {
+    const { container } = renderExec({
+      task: ownedTask(),
+      operatorBackend: "codex",
+      runPrincipal: connectedPrincipal({
+        codex: { available: false, detail: null },
+      }),
+    });
+    expect(operatorRun(container).disabled).toBe(true);
+    fireEvent.change(
+      container.querySelector<HTMLSelectElement>(
+        'select[aria-label="When the operator run starts"]',
+      )!,
+      { target: { value: "60" } },
+    );
+    const later = operatorRun(container);
+    expect(later.disabled).toBe(false);
+    expect(later.textContent).toContain("Schedule");
+  });
+
+  it("a dispatch is judged on the PICKED agent's backend, not the operator's", () => {
+    // The roster's Developer runs on Codex; the operator is on Claude. Claude
+    // is connected and Codex is not, so the operator control runs and the
+    // dispatch refuses — one panel, two different answers, both true.
+    const { container } = renderExec({
+      task: ownedTask(),
+      meId: "u-bea",
+      operatorBackend: "claude",
+      runPrincipal: connectedPrincipal({
+        ownerName: "Ada Lovelace",
+        codex: { available: false, detail: null },
+      }),
+    });
+    expect(operatorRun(container).disabled).toBe(false);
+    pickDeveloper(container);
+    expect(dispatchRun(container).disabled).toBe(true);
+    expect(container.querySelector(".agent-run")!.textContent).toContain(
+      "Codex isn't connected for Ada Lovelace",
+    );
   });
 });

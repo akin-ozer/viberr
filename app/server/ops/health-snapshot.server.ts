@@ -6,7 +6,7 @@ import {
   latestBackendRateLimits,
   type BackendQuotaRow,
 } from "~/server/runtimes/backend-quota.server";
-import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
+import { countConnectedUsers } from "~/server/runtimes/backend-credentials.server";
 import { browserRuntimeStatus } from "~/server/tasks/specialist-browser-mcp.server";
 import { getBuildInfo, type BuildInfo } from "./build-info.server";
 import { cachedDataRootSpace, type DiskSpace } from "./disk-space.server";
@@ -26,8 +26,22 @@ import { maintenanceState, type MaintenanceState } from "./maintenance.server";
  * This module owns only the reading.
  */
 
-/** Env-presence verdict per backend; never a token-validity probe. */
-export type BackendPresence = "real" | "unavailable";
+/**
+ * Ruling 127: how many PEOPLE have connected this backend.
+ *
+ * There is no instance-level "the backend is configured" verdict any more — a
+ * run bills the person it is for, so the only true instance-level number is a
+ * count of the people who can run it. Zero is a real, actionable reading ("no
+ * one on this instance has connected Codex"); it is not a fault, so it never
+ * degrades health — a deployment where nobody uses Codex is a correct
+ * deployment, exactly as the browser-runtime reading already is (R17-5).
+ *
+ * Still never a token-validity probe: a sealed key counts, and a vendor
+ * sign-in counts when its credential file is on this server.
+ */
+export interface BackendConnections {
+  connectedUsers: number;
+}
 
 /** Whether the `use-browser` runtime (chromium + the Playwright MCP CLI) is
  *  installed. Informational, like `backends`: a deployment that never grants
@@ -46,7 +60,7 @@ export interface HealthSnapshot {
   /** Who holds the single-writer lock on this data root (B-FD1/F18-5).
    *  `bootId` stays internal; this is what a human needs to see one writer. */
   lock: { pid: number; hostname: string; startedAt: string } | null;
-  backends: { claude: BackendPresence; codex: BackendPresence };
+  backends: { claude: BackendConnections; codex: BackendConnections };
   browser: BrowserHealth;
   /** Free space on the data root. null when the filesystem could not be
    *  measured, which is not the same as "there is no space". */
@@ -56,7 +70,7 @@ export interface HealthSnapshot {
   /**
    * F32-9 (pass 32): what each backend last TOLD us — the latest rate-limit
    * reading, a quota exhaustion read off a refused run, a credential refusal.
-   * `backends` above is env presence only; without this the controller's
+   * `backends` above is a connection COUNT only; without this the controller's
    * `instance_health` answered "codex usable, no quota exhaustion flagged"
    * ten minutes after a codex run had been refused for quota, while the
    * Insights page (which reads the same store) showed "usage limit reached".
@@ -126,8 +140,8 @@ export function healthSnapshot(db: DatabaseSync): HealthSnapshot {
         }
       : null,
     backends: {
-      claude: isBackendAvailable("claude") ? "real" : "unavailable",
-      codex: isBackendAvailable("codex") ? "real" : "unavailable",
+      claude: { connectedUsers: countConnectedUsers(db, "claude") },
+      codex: { connectedUsers: countConnectedUsers(db, "codex") },
     },
     browser: browser.available
       ? { status: "ready" }

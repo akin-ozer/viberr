@@ -5,6 +5,8 @@
 > `app/server/github/*`, `app/server/secrets/*`, `app/server/org/connections.server.ts`,
 > `app/server/tasks/task-actions.server.ts` (delivery and acceptance),
 > `app/features/github/*`. Verified against `main` @ `68b5480` (2026-09-01).
+> Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`):
+> `SEALED_STORES` gained a fifth column, each person's agent-backend API keys.
 
 ## 1. Credentials
 
@@ -50,7 +52,7 @@ sealed under retired keys open; `getPatToken` re-seals them lazily; `npm run key
 status` counts what still opens only under a retired key and `npm run keys -- reseal
 [--dry-run]` finishes the job (takes the writer lock). `SEALED_STORES` enumerates
 every sealed column: PAT tokens, MCP credentials, OAuth client secrets, the S3
-secret.
+secret, and each person's agent-backend API keys (ruling 127).
 
 **The token never reaches argv or a remote URL.** Git runs with a temporary
 `GIT_ASKPASS` helper fed from env (`createGitHubAskpassEnv`), `credential.helper`

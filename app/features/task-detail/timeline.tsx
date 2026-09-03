@@ -14,6 +14,7 @@ import { useToast } from "~/ui/toast";
 import { EVIDENCE_EMPTY_COLUMN } from "~/schemas/task-file.schema";
 import { eventMeta, typedKind } from "./event-meta";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
+import type { TaskRunPrincipalView } from "./run-principal-view";
 import {
   CommentComposer,
   mentionNamesFor,
@@ -366,6 +367,7 @@ export function Timeline({
   tlDefault,
   ask,
   mentionables,
+  runPrincipal,
   onAgentLog,
   taskClosed,
   runLive,
@@ -382,6 +384,9 @@ export function Timeline({
   ask: number;
   /** @-mention autocomplete directory (loader) — agents/users/reserved. */
   mentionables: Mentionables;
+  /** Ruling 127: the task owner whose accounts an `@claude` / `@codex` mention
+   *  would bill, so the menu can mark a handle that would refuse. */
+  runPrincipal?: TaskRunPrincipalView | null;
   /** BUG 3: when an @agent comment triggers a run, the server returns the
    *  grouped Agent-logs id to auto-select + stream. Fired once per success. */
   onAgentLog?: (threadId: string) => void;
@@ -531,6 +536,7 @@ export function Timeline({
             <CommentComposer
               ref={composerRef}
               mentionables={mentionables}
+              runPrincipal={runPrincipal}
               onChange={(raw) => {
                 draftRef.current = raw;
               }}

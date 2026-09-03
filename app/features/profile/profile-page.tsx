@@ -14,6 +14,8 @@ import { RBAC_ROWS } from "~/features/policy/policy-data";
 import type { ProjectRole } from "~/shared/rbac";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { PROFILE_NTF, type NotifPrefs } from "./notification-prefs";
+import { AgentAccountsPanel } from "./agent-accounts-panel";
+import type { ProfileBackend } from "./profile-query.server";
 
 /**
  * Profile and preferences overlay, including appearance and a self-serve
@@ -45,6 +47,9 @@ export interface ProfileData {
   accessRole: ProjectRole | null;
   /** F18-3: whether GitHub OAuth is configured on this deployment. */
   githubConfigured: boolean;
+  /** Ruling 127: the viewer's own Claude and Codex accounts. Type-only import
+   *  of the loader's shape, so the panel and the query cannot drift apart. */
+  backends: ProfileBackend[];
   prefs: {
     notifs: NotifPrefs;
     motion: "full" | "reduce";
@@ -891,6 +896,8 @@ export function ProfilePage({
     appearance: ProfileFetcher;
     password: ProfileFetcher;
     github: ProfileFetcher;
+    /** Ruling 127: the Agent-accounts intents. */
+    backends: ProfileFetcher;
   };
   submitWith: (
     fetcher: ProfileFetcher,
@@ -939,6 +946,14 @@ export function ProfilePage({
               role={data.accessRole}
               onNav={onNav}
               hasMembership={first !== null}
+            />
+            {/* Ruling 127: above GitHub identity. This is the panel that
+                decides whether this person's agents can run at all, so it
+                outranks the attribution card below it. */}
+            <AgentAccountsPanel
+              backends={data.backends}
+              fetcher={fetchers.backends}
+              submit={submitWith(fetchers.backends)}
             />
             <ProfileGithub
               data={data}

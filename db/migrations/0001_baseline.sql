@@ -307,6 +307,27 @@ CREATE TABLE project_github_credentials (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+-- Ruling 127: a person's connected agent backends. One row per (user, backend); connecting a new
+-- method REPLACES the previous row. `kind = 'login'` rows carry NO secret: the vendor binary
+-- holds the credential in the user's runtime home. API keys / access tokens are sealed boxes
+-- (registered in SEALED_STORES so key rotation reaches them).
+CREATE TABLE user_backend_credentials (
+  id TEXT PRIMARY KEY,                       -- newId("ubc")
+  user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+  backend TEXT NOT NULL CHECK (backend IN ('claude', 'codex')),
+  kind TEXT NOT NULL CHECK (kind IN ('login', 'api_key', 'access_token')),
+  -- login: which vendor flow signed in ('claudeai' | 'console' | 'device'); NULL otherwise
+  method TEXT,
+  secret_box TEXT,                           -- sealSecret box; NULL for login
+  secret_suffix TEXT,                        -- last 4 chars for display; NULL for login
+  -- non-secret facts the vendor reported (JSON object): e.g. {"authMethod":"claudeai"} from
+  -- `claude auth status`, or {"status":"Logged in using ChatGPT"} from `codex login status`.
+  detail_json TEXT NOT NULL DEFAULT '{}',
+  verified_at TEXT,                          -- last time the provider itself accepted it
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (user_id, backend)
+);
 -- U33-2 (pass 33): the last repository-access probe per project. App-owned
 -- OBSERVATION, not a projection of project.md, so a rebuild must not clear it —
 -- which is why it is its own table rather than a `projects` column. It exists so
@@ -527,7 +548,16 @@ CREATE TABLE "agent_runs" (
   -- them so a run recovered after a restart still cc-tags its dispatcher and
   -- always re-invokes the operator. NULL on runs nobody dispatched by hand.
   dispatched_by_name TEXT,
-  dispatched_by_user_id TEXT
+  dispatched_by_user_id TEXT,
+  -- Ruling 127: the CREDENTIAL PRINCIPAL — whose connected backend accounts this
+  -- run billed. Task runs (operator, specialist, resume, scheduled, boot recovery,
+  -- retry) carry the task owner; controller turns carry the asker. NULL only on a
+  -- run refused before any credential was looked up (an unowned task, or one whose
+  -- owner account is gone or disabled): a run that ever spawned a process has a
+  -- non-null principal. A run refused because the owner has not connected THAT
+  -- backend still records the owner (refusedPrincipalUserId). Also the key the
+  -- transcript lookup uses — a run's session lives in that person's runtime home.
+  credential_user_id TEXT
 );
 CREATE TABLE run_log_lines (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

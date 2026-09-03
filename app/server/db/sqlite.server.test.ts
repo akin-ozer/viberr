@@ -14,7 +14,7 @@ import {
 } from "./sqlite.server";
 
 describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)", () => {
-  it("adds the dispatched_by_* columns a pre-pass-32 root lacks, idempotently", () => {
+  it("adds every baseline column a pre-existing root lacks, idempotently", () => {
     // A data root that applied 0001 BEFORE the columns existed never re-runs
     // the file (migrations stay squashed pre-prod), and `patchRun` naming a
     // missing column would fail every agent completion on that root. The
@@ -37,10 +37,13 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         "outcome_key",
         "dispatched_by_name",
         "dispatched_by_user_id",
+        // Ruling 127: `upsertRun` names the credential principal on every
+        // insert, so a root without this column could not start a run at all.
+        "credential_user_id",
       ]);
       // Second boot: nothing to add, nothing thrown.
       ensureBaselineColumns(db);
-      expect(columns()).toHaveLength(4);
+      expect(columns()).toHaveLength(5);
       db.prepare(`UPDATE agent_runs SET dispatched_by_name = ? WHERE id = ?`).run("x", "none");
       db.close();
     } finally {

@@ -49,7 +49,10 @@ import {
   type AgentRunRow,
   type InsertRunInput,
 } from "./run-store.server";
-import { probeSessionContinuity } from "./session-export.server";
+import {
+  probeSessionContinuity,
+  type SessionContinuity,
+} from "./session-export.server";
 import {
   resolveTaskFilePath,
   updateTaskFile,
@@ -57,16 +60,20 @@ import {
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
-  claudeCliAuthDiagnostics,
-  codexAuthMisconfiguration,
-  codexCliAuthDiagnostics,
   createAdapters,
-  resetRegistryForTests,
   selectAdapter,
-  setBackendAvailability,
   type AdapterSet,
   type RealBackend,
 } from "./runtime-registry.server";
+import {
+  runCredentialFor,
+  type RunCredential,
+} from "./backend-credentials.server";
+import {
+  principalRefusalMessage,
+  type RunPrincipalRefusal,
+} from "./run-principal.server";
+
 import { newId } from "~/shared/ids/new-id.server";
 
 /**
@@ -230,11 +237,17 @@ export function chainRunCompletion(
   if (db) fireIfAlreadyTerminal(db, runId);
 }
 
-/** Test-only: reset live handles and install explicitly supplied adapters. */
+/**
+ * Test-only: reset live handles and install explicitly supplied adapters.
+ *
+ * It no longer forces availability: since ruling 127 "available" is a fact
+ * about a PERSON, so a test that wants a run to reach its adapter seeds a
+ * credential row for that run's principal (`connectFakeBackend` in
+ * `test-support/`). Installing the fakes here still fails the runtime closed —
+ * nothing in the suite can construct a real adapter — which is what this was
+ * ever for.
+ */
 export function configureRunServiceForTests(adapters: AdapterSet): void {
-  resetRegistryForTests();
-  setBackendAvailability("claude", true);
-  setBackendAvailability("codex", true);
   const cache: Record<symbol, ServiceState | undefined> = globalThis;
   cache[SERVICE_KEY] = {
     handles: new Map(),
@@ -267,6 +280,18 @@ export interface StartRunInput {
   role: string;
   kind: RunKind;
   backend: RealBackend;
+  /**
+   * Ruling 127: whose accounts this run bills — the task owner for a task run,
+   * the asker for a controller turn. Required, and `null` ONLY for a run being
+   * recorded as REFUSED (no principal could be resolved). A null principal
+   * never spawns a process: `startRun` writes the honest error run instead.
+   */
+  credentialUserId: string | null;
+  /** Why there is no principal, when the caller already resolved that. Its
+   *  sentence (`principalRefusalMessage`) is what the error run's line, the
+   *  packet body and the disabled control all render, so a person cannot be
+   *  told three different stories about one refusal. */
+  principalRefusal?: RunPrincipalRefusal;
   model: string;
   /** Reasoning/effort level (claude options.effort · codex
    *  modelReasoningEffort). Optional — the SDK default applies when absent. */
@@ -358,6 +383,10 @@ export interface ReserveRunInput {
   role: string;
   kind: RunKind;
   backend: RealBackend;
+  /** Ruling 127: the principal `startRun` will bill when it adopts this row —
+   *  persisted here too so a reservation that is abandoned mid-preparation
+   *  still records whose account the run was going to use. */
+  credentialUserId: string | null;
   model: string;
   agentName?: string | null;
   agentProfileId: string;
@@ -478,6 +507,7 @@ export function reserveRun(
       sdk: SDK_LABEL[input.backend] ?? "",
       agentName: input.agentName ?? null,
       agentProfileId: input.agentProfileId,
+      credentialUserId: input.credentialUserId,
       state: "running",
       phase: input.phase,
       step: input.step ?? null,
@@ -662,6 +692,9 @@ type RunStartedAudit = {
   role: string;
   kind: RunKind;
   resumed: boolean;
+  /** Ruling 127: whose account this run bills. Null on a refused run — the
+   *  audit row then says, permanently, that nobody was billed. */
+  credentialUserId: string | null;
   /** R7-2 fail-fast marker: the run never spawned a backend process. */
   failedUnavailable?: true;
 };
@@ -738,7 +771,13 @@ export async function startRun(
     });
   }
 
-  const selection = selectAdapter(input.backend, state.adapters);
+  // Ruling 127: the credential comes BEFORE the adapter. A run with no
+  // principal — or one whose principal has not connected this backend — is
+  // refused here, and the refusal is the run's whole outcome: an honest error
+  // row and no process. Resolved before the row is written so a caller bug
+  // (an env key colliding with a credential key) throws instead of stranding
+  // a `running` row.
+  const credential = resolveRunCredential(db, input);
   const runRow: InsertRunInput = {
     id: runId,
     projectSlug: input.projectSlug,
@@ -754,6 +793,7 @@ export async function startRun(
     sessionId: input.resumeSessionId ?? null,
     agentName: input.agentName ?? null,
     agentProfileId: input.agentProfileId,
+    credentialUserId: input.credentialUserId,
     // A reserved row is ALREADY running (that is the point) — re-stamping it
     // `queued` would blink the strip off between preparation and the spawn, and
     // would throw away the clock the human has been watching.
@@ -778,8 +818,9 @@ export async function startRun(
     role: input.role,
     kind: input.kind,
     resumed: Boolean(input.resumeSessionId),
+    credentialUserId: input.credentialUserId,
   };
-  if (selection.kind === "unavailable") details.failedUnavailable = true;
+  if (!credential.ok) details.failedUnavailable = true;
 
   // Governed action: opening a runtime session is audited (BUILD-PLAN
   // Phase 10 / contracts — run start + interrupt both leave audit rows).
@@ -853,23 +894,37 @@ export async function startRun(
     spec.webSearchWithheld = true;
   }
   if (input.outputSchema) spec.outputSchema = input.outputSchema;
-  if (input.env && Object.keys(input.env).length) spec.env = input.env;
+  // Ruling 127: the credential's env (the principal's home, plus their pasted
+  // key when they have one) is the BASE; the caller's per-run overlay (the
+  // specialist's GIT_* workspace confinement) goes on top. `resolveRunCredential`
+  // has already refused a caller overlay that names a credential key, so the
+  // spread order cannot silently decide whose account pays.
+  // A refused run never spawns anything, so it carries no credential env — the
+  // spec is still built in full because `failRunUnavailable` persists through
+  // the same sink every other run uses.
+  const runEnv: Record<string, string> = credential.ok
+    ? { ...credential.credential.env }
+    : {};
+  Object.assign(runEnv, input.env);
+  if (Object.keys(runEnv).length) spec.env = runEnv;
 
-  if (selection.kind === "unavailable") {
+  if (!credential.ok) {
     // F26-1: a reserved run that fails here never launches — release its slot
     // and let a run parked behind the cap take it.
     if (reservation) {
       state.reserved.delete(reservation.runId);
       drainRunQueue(db);
     }
-    failRunUnavailable(db, spec, reservation?.startedAt);
+    failRunUnavailable(db, spec, credential.message, reservation?.startedAt);
     return { runId };
   }
 
-  const launchOpts: Parameters<typeof launch>[3] = {};
+  const launchOpts: Parameters<typeof launch>[4] = {};
   if (reservation) launchOpts.startedAt = reservation.startedAt;
   if (modelSubstitution) launchOpts.notice = modelSubstitution;
-  const launchThunk = () => launch(db, spec, selection.adapter, launchOpts);
+  const adapter = selectAdapter(input.backend, state.adapters);
+  const secrets = credential.credential.secrets;
+  const launchThunk = () => launch(db, spec, adapter, secrets, launchOpts);
   // A RESERVED run already rendered "Preparing workspace" as a `running` row and
   // committed its slot at reserve time (counted in `state.reserved` under the cap,
   // F26-1) — it launches directly rather than being demoted back to `queued`
@@ -887,9 +942,106 @@ export async function startRun(
   return { runId };
 }
 
+/** What `startRun` got when it asked for its principal's credential. */
+type ResolvedRunCredential =
+  | { ok: true; credential: RunCredential }
+  /** No process may start; `message` is the whole sentence the run records. */
+  | { ok: false; message: string };
+
 /**
- * R7-2 fail-fast: finalize a run whose backend has no usable credential as an
- * honest `error` — one classified terminal err line (the copy is what
+ * Ruling 127: the credential of the ONE person this run bills, or the sentence
+ * explaining why there is none.
+ *
+ * Three ways a run has no credential, and all three end in an honest error run
+ * rather than a thrown 500 — the run row IS the report, and its completion
+ * callbacks (escalation packet, timeline event, waiting flip) are what a human
+ * actually sees:
+ *
+ *  - the caller resolved no principal at all (`credentialUserId: null`) and
+ *    passed the refusal that says why (unowned task, dead owner, backend not
+ *    connected for the owner);
+ *  - `runCredentialFor` refuses for a principal that WAS resolved — the
+ *    sign-in file vanished between resolve and start, or the sealed key can no
+ *    longer be opened;
+ *  - a caller bug: `input.env` names a key the credential owns. That one
+ *    THROWS, because silently letting either side win would decide whose
+ *    account pays for the run.
+ */
+function resolveRunCredential(
+  db: DatabaseSync,
+  input: StartRunInput,
+): ResolvedRunCredential {
+  // The caller's own refusal wins, and is checked FIRST. It was produced by
+  // `run-principal` with the whole picture — who owns the task, whether that
+  // person still exists — and re-deriving an answer here would tell a second
+  // story about one refusal. (A `no-credential` refusal still carries the
+  // owner's id, so the run records whose account it would have billed; that is
+  // why this cannot key off `credentialUserId` alone.)
+  if (input.principalRefusal) {
+    return {
+      ok: false,
+      message: backendUnavailableMessage(input.backend, {
+        kind: "refusal",
+        refusal: input.principalRefusal,
+      }),
+    };
+  }
+  // Falsy, not strictly-null: an empty string is not a user id either, and a
+  // caller bug must reach a human as the honest refusal run rather than as a
+  // SQLite binding crash three frames down.
+  if (!input.credentialUserId) {
+    return { ok: false, message: missingPrincipalMessage(input.backend) };
+  }
+  let credential: RunCredential;
+  try {
+    credential = runCredentialFor(
+      db,
+      input.credentialUserId,
+      input.backend,
+      input.dataRoot,
+    );
+  } catch (error) {
+    if (!(error instanceof AppError)) throw error;
+    return {
+      ok: false,
+      message: backendUnavailableMessage(input.backend, {
+        kind: "detail",
+        detail: error.userMessage,
+      }),
+    };
+  }
+  const collisions = Object.keys(input.env ?? {}).filter(
+    (key) => key in credential.env,
+  );
+  if (collisions.length) {
+    throw AppError.internal(
+      `run env overlay collides with the credential env: ${collisions.join(", ")}`,
+    );
+  }
+  return { ok: true, credential };
+}
+
+/** Every refusal sentence ends the same way, because the fact a human most
+ *  needs is that nothing was spent. */
+const NO_PROCESS = "No agent process was started.";
+
+/**
+ * The fallback when a caller passed `credentialUserId: null` without saying
+ * why. Every caller in the product resolves a principal first
+ * (`run-principal.server.ts`) and passes its refusal, so this is a bug guard —
+ * but a bug guard that still tells the human something true and actionable
+ * instead of an empty run log.
+ */
+function missingPrincipalMessage(backend: RealBackend): string {
+  return (
+    `${BACKEND_LABEL[backend]} runs bill a person's own account, and this run was started ` +
+    `without one. Own the task (Assign me) and run the agent again. ${NO_PROCESS}`
+  );
+}
+
+/**
+ * R7-2 fail-fast: finalize a run that never got a credential as an honest
+ * `error` — one classified terminal err line (the tag is what
  * `runFailureReason` classifies as "unavailable") and no backend process.
  * Persisting through the regular sink keeps the SSE/log/state plumbing
  * identical to any other terminal run, so registered completion callbacks
@@ -898,14 +1050,16 @@ export async function startRun(
 function failRunUnavailable(
   db: DatabaseSync,
   spec: RunSpec,
+  text: string,
   startedAt?: string,
 ): void {
+  // A refused run holds no credential, so there is nothing per-run to redact —
+  // the sink's own env sweep and token patterns still apply.
   const sink = createRunSink(db, spec);
   // R21-4: a run that was RESERVED kept the human waiting through its workspace
   // preparation — its clock started there, not here.
   sink.markRunning(startedAt);
   const now = new Date().toISOString();
-  const text = backendUnavailableMessage(spec.backend);
   sink.line({
     // An honest server-authored envelope — NOT a fabricated backend wire line.
     raw: JSON.stringify({ type: "error", source: "viberr", message: text }),
@@ -921,35 +1075,31 @@ function failRunUnavailable(
 }
 
 /**
- * Actionable copy for a run refused because its backend has no credential.
- * State-aware for the codex CLI-auth trap: when the opt-in flag IS set but
- * `$CODEX_HOME/auth.json` is missing (the docker-compose volume-wipe case),
- * re-suggesting the flag is actively misleading — name the missing file and
- * the exact copy command instead. Availability re-probes live, so once the
- * file lands the next run works with no restart.
+ * The sentence a run refused for want of a credential records — the ONE builder
+ * the error run's `run·unavailable` line, the blocked packet's body and the
+ * disabled dispatch control all read.
+ *
+ * Ruling 127 replaced the deployment-wide answer this used to give (which named
+ * `ANTHROPIC_API_KEY`, `CODEX_HOME` and a pair of CLI-auth opt-ins that no
+ * longer exist) with a PERSON: a run bills a person, so the only honest
+ * refusal names that person and where THEY connect the backend. The two shapes
+ * are the resolver's refusal (`principalRefusalMessage`) and, when the
+ * principal resolved but their credential did not survive to spawn time, that
+ * credential's own health detail.
  */
-export function backendUnavailableMessage(backend: RealBackend): string {
-  if (backend === "claude") {
-    // D2: the CLI-auth opt-in is now validated, so the refusal can name the
-    // dir it checked instead of re-suggesting the flag that is already set.
-    const claude = claudeCliAuthDiagnostics();
-    if (claude.optIn && claude.verified === "refuted") {
-      return `Claude Code is unavailable: VIBERR_CLAUDE_USE_CLI_AUTH=1 is set, but \`${claude.configDir}\` holds no \`claude\` login (no ${claude.credentialsPath}, and the CLI has never run against that config dir). Point CLAUDE_CONFIG_DIR at the logged-in dir, or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN, or run this agent on another backend. No agent process was started.`;
-    }
-    return "Claude Code is unavailable: no usable credential is configured. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (or opt in with VIBERR_CLAUDE_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
-  }
-  const diag = codexCliAuthDiagnostics();
-  // D1: the source==run-home misconfiguration must be named FIRST. The generic
-  // copy below tells the operator to copy their login INTO Viberr's own run
-  // home, which in this state cements the misconfiguration instead of fixing it.
-  const misconfigured = codexAuthMisconfiguration(diag);
-  if (misconfigured) {
-    return `Codex is unavailable. ${misconfigured} No agent process was started.`;
-  }
-  if (diag.optIn && !diag.authJsonExists) {
-    return `Codex is unavailable: VIBERR_CODEX_USE_CLI_AUTH=1 is set, but the Codex CLI login file is missing at ${diag.authJsonPath}. Copy it from a logged-in machine (docker: \`docker compose cp ~/.codex/auth.json app:${diag.authJsonPath}\`) and the next run picks it up without a restart. Or set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY, or run this agent on another backend. No agent process was started.`;
-  }
-  return "Codex is unavailable: no usable credential is configured. Set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY (or opt in with VIBERR_CODEX_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
+export type RunUnavailability =
+  | { kind: "refusal"; refusal: RunPrincipalRefusal }
+  /** A full sentence from the credential store (`UserBackendHealth.detail`, or
+   *  the un-openable-key refusal `runCredentialFor` raises). */
+  | { kind: "detail"; detail: string };
+
+export function backendUnavailableMessage(
+  backend: RealBackend,
+  cause: RunUnavailability,
+): string {
+  return cause.kind === "refusal"
+    ? principalRefusalMessage(cause.refusal, backend)
+    : `${cause.detail} ${NO_PROCESS}`;
 }
 
 // ------------------------------------------- continuity recovery (P13-D-2)
@@ -1122,6 +1272,25 @@ export async function noteCompletionEffectsLost(
 export interface ResumeRunInput {
   runId: string;
   prompt: string;
+  /**
+   * Ruling 127: whose accounts the RESUMED turn bills — the task owner as of
+   * NOW, not whoever the original run billed. `resumeRun` re-resolves nothing
+   * itself; the caller passes the principal it resolved.
+   *
+   * The consequence is deliberate and documented in agents-and-runtime.md
+   * §3.6: a task whose owner changed since the original run reads as a missing
+   * provider session and takes the existing continuity-reset path — one fresh
+   * run re-anchored on `task.md`, with the timeline saying context was lost.
+   * `resumeRun` decides that from the CHANGE itself (this id against the prior
+   * run's `credential_user_id`), not from probing the new owner's home: a home
+   * with no transcript store yet answers `unknown`, which means "resume as
+   * before" and would hand the SDK a session id that only exists in somebody
+   * else's home. The alternative (reading the previous owner's home) would
+   * resume one person's conversation inside another person's account.
+   */
+  credentialUserId: string | null;
+  /** Why there is no principal for this resume (see `StartRunInput`). */
+  principalRefusal?: RunPrincipalRefusal;
   /** Reuse the original run's clone workdir (defaults to the task dir). */
   workdir?: string;
   /** Override the model for the resumed turns (defaults to the prior run's).
@@ -1187,6 +1356,7 @@ export interface ResumeRunInput {
  * fresh-vs-resume parity XS-1 and F7 were about.
  */
 function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void {
+  if (input.principalRefusal) target.principalRefusal = input.principalRefusal;
   if (input.effort) target.effort = input.effort;
   if (input.workdir) target.workdir = input.workdir;
   if (input.autonomous !== undefined) target.autonomous = input.autonomous;
@@ -1239,9 +1409,35 @@ export async function resumeRun(
   const resumeThreadId =
     prev.thread_id + "-r" + newId("t").replace("t_", "").slice(0, 6);
 
+  // Ruling 127: an OWNER CHANGE decides continuity on its own, before any
+  // filesystem is consulted. The probe below reads the principal's own runtime
+  // home, and a home whose transcript store does not exist yet — the new owner
+  // connected the backend but has never had a run on this server, so
+  // `claude-home/projects/` was never created — answers `unknown`, whose
+  // contract is "absence proves nothing, resume as before". That would hand
+  // the SDK the PREVIOUS owner's session id inside the new owner's home and
+  // fail at the vendor ("No conversation found with session ID …"), which is
+  // exactly the dead-id class P13-D-2 exists to prevent. When the seat has
+  // changed hands since the run being resumed, the prior transcript is by
+  // construction in somebody else's home: a known miss, not an unknown one.
+  const ownerChanged =
+    input.credentialUserId !== null &&
+    prev.credential_user_id !== null &&
+    prev.credential_user_id !== input.credentialUserId;
   // P13-D-2: probe before handing the id to the SDK. `unknown` (no transcript
   // store to look in) resumes exactly as before — absence proves nothing there.
-  const continuity = probeSessionContinuity(backend, prev.session_id);
+  // Ruling 127: the transcript lives in the PRINCIPAL's own runtime home, so
+  // the probe has to be told whose. A resume with no principal (the task lost
+  // its owner) has no home to look in and no run to start either — it falls
+  // through to `startRun`, which records the refusal.
+  const continuity: SessionContinuity = ownerChanged
+    ? "missing"
+    : probeSessionContinuity(
+        backend,
+        input.credentialUserId,
+        prev.session_id,
+        input.dataRoot,
+      );
   if (continuity === "missing") {
     logger.warn("runtime continuity lost — re-anchoring on task.md", {
       runId: prev.id,
@@ -1258,6 +1454,7 @@ export async function resumeRun(
       role: prev.role,
       kind: prev.kind,
       backend,
+      credentialUserId: input.credentialUserId,
       model: input.model ?? prev.model,
       agentName: input.agentName ?? prev.agent_name,
       agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
@@ -1277,6 +1474,7 @@ export async function resumeRun(
     role: prev.role,
     kind: prev.kind,
     backend,
+    credentialUserId: input.credentialUserId,
     // Prefer the caller's model (the agent's current profile) over the stale
     // model on the prior run row — editing an agent to a new model must apply
     // when its session is resumed via a comment.
@@ -1391,6 +1589,10 @@ function launch(
   db: DatabaseSync,
   spec: RunSpec,
   adapter: RuntimeAdapter,
+  /** Ruling 127: the plaintext credentials THIS run's child env carries. The
+   *  sink redacts them from every persisted line — they belong to one person
+   *  and the run console is visible to every project member. */
+  secrets: readonly string[],
   opts: {
     /** The RESERVED run's original instant (R21-4) — absent for a run that was
      *  not reserved, which then starts its clock here. */
@@ -1400,7 +1602,7 @@ function launch(
   } = {},
 ): void {
   const state = getState();
-  const sink = createRunSink(db, spec);
+  const sink = createRunSink(db, spec, { secrets });
 
   // Set when onExit fires DURING adapter.start() (synchronous exit / spawn
   // crash) so we skip tracking a handle for an already-terminal run.

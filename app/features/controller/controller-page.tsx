@@ -41,6 +41,22 @@ interface ActionResult {
 }
 
 /**
+ * Ruling 127: what a viewer whose Claude is not connected reads here.
+ *
+ * The controller bills the ASKER, so this is never "the deployment has no
+ * credential" — it is one person's account, and the remedy is theirs. The
+ * words are the server's own (`controllerRefusalNote` in
+ * controller-run.server.ts), so the disabled composer and the refusal the
+ * transcript would record say the same thing. Exported because the DOCK
+ * (ruling 121) is a second composer for the same turn and must not tell a
+ * second story about one refusal.
+ */
+export const CLAUDE_NOT_CONNECTED =
+  "The controller runs on your own Claude account, and Claude isn't connected " +
+  "for you yet. Connect it on your Profile → Agent accounts, then send your " +
+  "message again.";
+
+/**
  * U33-8: `?c=new` — the blank composer, asked for by name.
  *
  * Ruling 121 gave the DOCK a continuity rule: with nothing selected it opens
@@ -124,9 +140,11 @@ export function ControllerPage({
                 : "Managing this instance with your own permissions."}
           </p>
         </div>
-        {!view.available && (
-          <Pill kind="risk">Claude backend unavailable</Pill>
-        )}
+        {/* Ruling 127: a controller turn runs on the ASKER's own Claude
+            account, so this pill is about the person reading it. Another
+            member with Claude connected converses normally while this one
+            cannot, which the old instance-wide wording could not express. */}
+        {!view.available && <Pill kind="risk">Claude not connected</Pill>}
         {!projectSlug && (
           <Link to="/" className="btn sm ctl-home">
             <Icon name="arrow" className="r180" />
@@ -230,7 +248,10 @@ function Transcript({ view }: { view: ControllerSurfaceView }) {
   const endRef = useRef<HTMLDivElement | null>(null);
   const count = view.messages.length;
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
+    // Optional-chained CALL, the same idiom date-picker/label-input use: jsdom's
+    // Element carries no `scrollIntoView`, and pinning this surface's copy in a
+    // component test must not depend on a browser-only scroll nicety.
+    endRef.current?.scrollIntoView?.({ block: "end" });
   }, [count, view.turn.working]);
 
   if (!view.conversation) {
@@ -332,7 +353,10 @@ function Composer({
           disabled
             ? view.available
               ? "Read-only: only the conversation's owner can talk in it."
-              : "The Claude backend is unavailable, so the controller cannot answer."
+              : // Ruling 127: the same sentence the refused turn records
+                // (`controllerRefusalNote`), so the composer and the transcript
+                // cannot tell two stories about one refusal.
+                CLAUDE_NOT_CONNECTED
             : "Ask the controller, or tell it what to do…"
         }
         disabled={disabled}

@@ -6,11 +6,14 @@
 > `app/server/files/goal-writer.server.ts`, `app/schemas/goal-file.schema.ts`,
 > `app/features/controller/*`, `app/routes/resources.controller.ts`, `app/root.tsx` (the
 > dock mount), `app/features/org-settings/controller-admin-panel.tsx`.
-> Rulings 99, 100, 106, 107, 108, 121 in [decisions.md](../architecture/decisions.md).
+> Rulings 99, 100, 106, 107, 108, 121, 127 in [decisions.md](../architecture/decisions.md).
 > Verified against `main` @ `68b5480` (2026-09-01); the ruling-121 dock, conversation
 > scopes, context read and `update_task` verified against the working tree on 2026-09-02
 > and re-verified on 2026-09-03 after the ruling's adversarial review (see the dated
-> correction note under ruling 121 for what that review changed).
+> correction note under ruling 121 for what that review changed). Updated 2026-09-02 for
+> ruling 127 (branch `claude/per-user-codex-auth-difdnn`): §1 and §2 (a turn runs on the
+> asker's own Claude account), §5 (`instance_health`'s new per-backend shape, and a dated
+> correction to ruling 107).
 
 ## 1. What it is
 
@@ -37,8 +40,22 @@ Identity facts:
   row would be a toggle with no effect.
 - Claude only. The toolkit is in-process (DB handles and sealed credentials never
   cross a process boundary) and Codex's single-shot plan executor cannot serve a
-  conversation that reads mid-turn. An unavailable Claude backend refuses honestly
-  inside the transcript.
+  conversation that reads mid-turn.
+- **A turn runs on the ASKER's own Claude account** (ruling 127). The credential
+  principal of a controller run is `input.user.id` (`resolveUserRunPrincipal`), and the
+  run row records it in `credential_user_id`; there is no instance account, so "is the
+  controller available" is a question about the person looking at it. A viewer who has
+  not connected Claude is refused honestly INSIDE the transcript ("The controller runs
+  on your own Claude account, and Claude isn't connected for you yet. Connect it on your
+  Profile → Agent accounts, then send your message again."), and the composer is
+  disabled with that same sentence before they type it. Somebody who DID connect and
+  whose sign-in file went with a wiped runtime volume gets the store's specific sentence
+  instead ("Your Claude sign-in file is missing from this server …"), because telling
+  them to connect something they already connected is not an instruction anyone can
+  follow. Another member who HAS connected
+  Claude keeps conversing at the same moment: one person's missing connection is never
+  an instance outage. Dispatches the toolkit makes (`startAgentRun` / `runOperator`) act
+  on a TASK, so they bill that task's owner, not the asker.
 - Its actor reference in task files is the bare `controller`; it renders as an agent
   named "Controller". `@controller` is a reserved mention handle.
 
@@ -56,8 +73,9 @@ Entry points: the dock (everywhere), the workspace rail item, the Home hero link
 project exists), the org-settings tab's "Open the controller", and the goal chip on a
 task page. There is no command-palette entry. The page subscribes to the user SSE scope (and the
 project scope on the project surface) and polls every 5 seconds while a turn is
-working. The composer is disabled when Claude is unavailable or the viewer does not
-own the active conversation.
+working. The composer is disabled when the VIEWER has no Claude connected (ruling 127)
+or when they do not own the active conversation; the two states render different
+sentences, because only the first one is theirs to fix.
 
 Conversations belong to the asking user. `canAccessConversation` allows the owner and
 a **live-resolved** org admin; project members do not read each other's transcripts;
@@ -92,6 +110,11 @@ overlay, which would leave the dock inert behind it.
   never starts focus inside the textarea. Escape closes and returns focus to the trigger
   **while focus is inside the panel**; an Escape elsewhere (the palette, a confirm
   dialog, a stage menu) leaves the dock alone, and an outside press never closes it.
+- **Availability is the VIEWER's** (ruling 127): the dock's `available` is
+  `isBackendAvailableFor(db, viewer, "claude")`, in the normal view and in the
+  `unavailable` refusal view alike, so a person with no Claude connected reads the
+  same sentence the full page's composer and the refused turn's transcript line
+  carry. There is no instance credential for it to report.
 - **Continuity**: the dock opens on the newest thread of the current scope; the selected
   thread per scope and the open/closed state survive a reload for the life of the tab
   (`sessionStorage`, wrapped, absent in SSR). Navigating swaps the scope and keeps the
@@ -263,13 +286,25 @@ pinned, non-interactive chip.
 
 | Tool | What it returns | Gate |
 |---|---|---|
-| `instance_health` | The same `healthSnapshot` the `/resources/health` route serves (status, degraded subsystems, projections, watchers, lock holder, backends, browser, disk, maintenance, build) plus per-backend credential presence and the run concurrency snapshot `{cap, live, queued}` | The reading is open to anyone; the credential **detail** (which config directory was checked, what to set) is org-admin only |
+| `instance_health` | The same `healthSnapshot` the `/resources/health` route serves (status, degraded subsystems, projections, watchers, lock holder, `backends.<b>.connectedUsers`, browser, disk, maintenance, build), plus `backendCredentials: [{ backend, connectedUsers, askerConnected }]` and the run concurrency snapshot `{cap, live, queued}` | Open to anyone: nothing here names another person or any deployment configuration. The browser executable **path** stays org-admin only (`browserDetail`) |
 | `read_run_log` | A bounded page of a run's console: `run {…, logLines}`, `page {firstSeq, lastSeq, olderExist, newerExist, next}`, `lines[{seq, at, display}]`. Default 200 newest lines, max 500, in either direction; `since` together with `before` is refused | A member of the run's project; a controller turn's log follows conversation ownership with org-admin supervision. A missing run, a forbidden project and a forbidden conversation all answer the same not-visible sentence |
 | `read_store_doc` | One store document with `truncated` reported honestly | org admin |
 
 Nothing here writes, deletes or starts anything. The health body assembly lives in
 `app/server/ops/health-snapshot.server.ts` so the route and the tool read one
 derivation.
+
+**Correction to ruling 107 (2026-09-02, ruling 127).** Ruling 107 split
+`instance_health`'s backend reading in two: everyone learned WHETHER a backend was
+usable, only an org admin learned WHY (the credential detail named the deployment's
+config directory and the environment variable to set). That split no longer applies,
+because the thing it protected is gone: agent backends are connected per person, there
+is no deployment credential and no config path to withhold. The org-admin-only detail
+arm is deleted, and the tool answers every asker the same two facts per backend, both
+safe: `connectedUsers` (a count, the same one the unauthenticated health probe already
+publishes) and `askerConnected` (a fact about the person asking, and the only one that
+changes what they can do next). Ruling 107's own subject — one health derivation, read
+by the route and the tool — is unchanged.
 
 ## 6. Configuring the controller (rulings 106 and 108)
 

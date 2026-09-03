@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
+import type { RunCredential } from "./backend-credentials.server";
 import type {
   ClaudeQuery,
   ClaudeQueryFn,
@@ -152,23 +153,37 @@ describe("curated catalog", () => {
   });
 });
 
+/**
+ * Ruling 127: the enhanced probe reads the VIEWER's OWN Claude account. There
+ * is no instance account left to enumerate against, so "available" is replaced
+ * by "the caller handed us a credential" — and a caller that hands none gets
+ * the curated list, which is a complete answer for somebody who has not
+ * connected Claude.
+ */
+const VIEWER_CREDENTIAL: RunCredential = {
+  env: {
+    CLAUDE_CONFIG_DIR: "/data/runtimes/users/u_viewer/claude-home",
+    ANTHROPIC_API_KEY: "sk-ant-viewer-key-000000000000",
+  },
+  secrets: ["sk-ant-viewer-key-000000000000"],
+  kind: "api_key",
+  homeDir: "/data/runtimes/users/u_viewer/claude-home",
+};
+
 describe("getModelCatalog", () => {
   it("codex is curated-only (never calls the SDK)", async () => {
     const queryFn = vi.fn<ClaudeQueryFn>();
     const cat = await getModelCatalog("codex", {
       claudeQueryFn: queryFn,
-      isAvailable: () => true,
+      credential: VIEWER_CREDENTIAL,
     });
     expect(cat.defaultModel).toBe("gpt-5.6-terra");
     expect(queryFn).not.toHaveBeenCalled();
   });
 
-  it("claude falls back to curated when the backend is unavailable", async () => {
+  it("claude falls back to curated when the VIEWER has no Claude connected", async () => {
     const queryFn = vi.fn<ClaudeQueryFn>();
-    const cat = await getModelCatalog("claude", {
-      claudeQueryFn: queryFn,
-      isAvailable: () => false,
-    });
+    const cat = await getModelCatalog("claude", { claudeQueryFn: queryFn });
     expect(cat.defaultModel).toBe("sonnet");
     expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "opus", "haiku"]);
     expect(queryFn).not.toHaveBeenCalled();
@@ -193,7 +208,7 @@ describe("getModelCatalog", () => {
     const queryFn = makeFakeQuery(live);
     const cat = await getModelCatalog("claude", {
       claudeQueryFn: queryFn,
-      isAvailable: () => true,
+      credential: VIEWER_CREDENTIAL,
     });
     expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "haiku-lite"]);
     // Effort levels are taken per-model from supportedEffortLevels.
@@ -223,11 +238,11 @@ describe("getModelCatalog", () => {
 
     const first = await getModelCatalog("claude", {
       claudeQueryFn: queryFn,
-      isAvailable: () => true,
+      credential: VIEWER_CREDENTIAL,
     });
     const second = await getModelCatalog("claude", {
       claudeQueryFn: queryFn,
-      isAvailable: () => true,
+      credential: VIEWER_CREDENTIAL,
     });
     expect(first.models.map((m) => m.value)).toEqual(["sonnet"]);
     expect(second.models.map((m) => m.value)).toEqual(["sonnet"]);
@@ -241,7 +256,7 @@ describe("getModelCatalog", () => {
       });
     const cat = await getModelCatalog("claude", {
       claudeQueryFn: queryFn,
-      isAvailable: () => true,
+      credential: VIEWER_CREDENTIAL,
     });
     expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "opus", "haiku"]);
   });
@@ -250,7 +265,7 @@ describe("getModelCatalog", () => {
     const queryFn = makeFakeQuery([]);
     const cat = await getModelCatalog("claude", {
       claudeQueryFn: queryFn,
-      isAvailable: () => true,
+      credential: VIEWER_CREDENTIAL,
     });
     expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "opus", "haiku"]);
   });
@@ -281,7 +296,7 @@ describe("the live probe is CONFINED like a real run (A1, F10-02 regression)", (
     try {
       await getModelCatalog("claude", {
         claudeQueryFn: queryFn,
-        isAvailable: () => true,
+        credential: VIEWER_CREDENTIAL,
       });
       // The field must EXIST — an absent `env` is the leak, not a neutral default.
       expect(seen?.env).toBeDefined();
@@ -292,8 +307,11 @@ describe("the live probe is CONFINED like a real run (A1, F10-02 regression)", (
       expect(env.DATABASE_URL).toBeUndefined();
       expect(env.VIBERR_SESSION_SECRET).toBeUndefined();
       expect(env.VIBERR_SECRET_ENCRYPTION_KEY).toBeUndefined();
-      // …and it never reads/writes the host ~/.claude.
-      expect(env.CLAUDE_CONFIG_DIR).toBeTruthy();
+      // …and it reads/writes the VIEWER's own home, carrying THEIR key and no
+      // other — the probe bills nothing, but it does read a personal account,
+      // so it reads the account of the person who asked (ruling 127).
+      expect(env.CLAUDE_CONFIG_DIR).toBe(VIEWER_CREDENTIAL.homeDir);
+      expect(env.ANTHROPIC_API_KEY).toBe(VIEWER_CREDENTIAL.secrets[0]);
     } finally {
       delete process.env.VIBERR_CATALOG_PROBE_MARKER;
       delete process.env.MY_DEPLOY_SECRET;
@@ -303,7 +321,7 @@ describe("the live probe is CONFINED like a real run (A1, F10-02 regression)", (
   });
 
   it("carries the same host-isolation options a run gets", () => {
-    const options = claudeProbeOptions();
+    const options = claudeProbeOptions(VIEWER_CREDENTIAL);
     expect(options.settingSources).toEqual([]);
     expect(options.skills).toEqual([]);
     expect(options.plugins).toEqual([]);
@@ -361,7 +379,7 @@ describe("isKnownModel agrees with what the picker offered (P13-RT-07)", () => {
 
   it("accepts a non-dated value the live catalog actually listed", async () => {
     const catalog = await getModelCatalog("claude", {
-      isAvailable: () => true,
+      credential: VIEWER_CREDENTIAL,
       claudeQueryFn: makeFakeQuery([
         {
           value: "opus-next",
@@ -411,7 +429,7 @@ describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable"
     });
     const cat = await getModelCatalog("claude", {
       db,
-      isAvailable: () => false, // curated path still carries all three
+      // No credential: the curated path still carries all three.
     });
     expect(cat.models.find((m) => m.value === "opus")?.unavailable).toBeTruthy();
   });
@@ -426,7 +444,7 @@ describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable"
     const before = await getModelCatalog("claude", {
       db,
       claudeQueryFn: queryFn,
-      isAvailable: () => true,
+      credential: VIEWER_CREDENTIAL,
     });
     expect(before.models[0]!.unavailable).toBeUndefined();
     // Mark it — no cache reset — the very next call reflects it.
@@ -434,7 +452,7 @@ describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable"
     const after = await getModelCatalog("claude", {
       db,
       claudeQueryFn: queryFn,
-      isAvailable: () => true,
+      credential: VIEWER_CREDENTIAL,
     });
     expect(after.models[0]!.unavailable?.reason).toBe("gone");
     // And clearing it takes effect the next call with no reset either.
@@ -442,7 +460,7 @@ describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable"
     const cleared = await getModelCatalog("claude", {
       db,
       claudeQueryFn: queryFn,
-      isAvailable: () => true,
+      credential: VIEWER_CREDENTIAL,
     });
     expect(cleared.models[0]!.unavailable).toBeUndefined();
   });

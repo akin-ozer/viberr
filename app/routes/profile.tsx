@@ -13,15 +13,20 @@ import type { loader as rootLoader } from "../root";
 import { requireAuth, requireUser } from "~/server/auth/require-user.server";
 import { csrfError } from "~/features/shell/csrf-result.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { isAppError } from "~/server/errors/app-error.server";
+import { AppError, isAppError } from "~/server/errors/app-error.server";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { getProfileView } from "~/features/profile/profile-query.server";
 import {
+  cancelBackendSignIn,
   changeOwnPassword,
+  connectBackendKey,
+  disconnectBackendAccount,
   disconnectGithubIdentity,
   setMotionPref,
   setNotifRoutingPref,
   setTimelineDefaultPref,
+  startBackendSignIn,
+  submitBackendSignInCode,
   updateProfileIdentity,
 } from "~/features/profile/profile-actions.server";
 import {
@@ -56,6 +61,22 @@ export function meta() {
 const overlayReturnState = z
   .object({ returnTo: z.string().optional().catch(undefined) })
   .catch({});
+
+/**
+ * Ruling 127 form fields. Decoded, never coerced: `backend` names a directory
+ * segment and a spawn target, and `method` / `kind` decide which vendor flow
+ * runs, so a value outside the vocabulary must be a refusal with a sentence,
+ * not a silent default.
+ */
+const backendField = z.enum(["claude", "codex"]);
+const loginMethodField = z.enum(["claudeai", "console", "device"]);
+const pasteKindField = z.enum(["api_key", "access_token"]);
+
+/** The one sentence every unknown backend/method/kind value gets. */
+function decodeOr<T>(parsed: z.ZodSafeParseResult<T>, message: string): T {
+  if (!parsed.success) throw AppError.validation(message);
+  return parsed.data;
+}
 
 export async function loader({ request }: Route.LoaderArgs) {
   const user = await requireUser(request);
@@ -125,6 +146,75 @@ export async function action({ request }: Route.ActionArgs) {
         const { toast } = disconnectGithubIdentity(db, actor);
         return { ok: true as const, intent, toast };
       }
+      // Ruling 127: the five Agent-accounts intents. None of them toasts a
+      // success here except the two that ARE complete when they return; a
+      // sign-in is only connected once the vendor's own binary says so, which
+      // the panel learns from /resources/backend-login.
+      case "backend-login-start": {
+        startBackendSignIn(
+          db,
+          actor,
+          decodeOr(
+            backendField.safeParse(formData.get("backend")),
+            "Unknown agent backend.",
+          ),
+          decodeOr(
+            loginMethodField.safeParse(formData.get("method")),
+            "Unknown sign-in method.",
+          ),
+        );
+        return { ok: true as const, intent };
+      }
+      case "backend-login-code": {
+        submitBackendSignInCode(
+          db,
+          actor,
+          decodeOr(
+            backendField.safeParse(formData.get("backend")),
+            "Unknown agent backend.",
+          ),
+          String(formData.get("code") ?? ""),
+        );
+        return { ok: true as const, intent };
+      }
+      case "backend-login-cancel": {
+        const { toast } = cancelBackendSignIn(
+          db,
+          actor,
+          decodeOr(
+            backendField.safeParse(formData.get("backend")),
+            "Unknown agent backend.",
+          ),
+        );
+        return { ok: true as const, intent, toast };
+      }
+      case "backend-set-key": {
+        const { toast } = await connectBackendKey(
+          db,
+          actor,
+          decodeOr(
+            backendField.safeParse(formData.get("backend")),
+            "Unknown agent backend.",
+          ),
+          decodeOr(
+            pasteKindField.safeParse(formData.get("kind")),
+            "Unknown credential kind.",
+          ),
+          String(formData.get("secret") ?? ""),
+        );
+        return { ok: true as const, intent, toast };
+      }
+      case "backend-disconnect": {
+        const { toast } = await disconnectBackendAccount(
+          db,
+          actor,
+          decodeOr(
+            backendField.safeParse(formData.get("backend")),
+            "Unknown agent backend.",
+          ),
+        );
+        return { ok: true as const, intent, toast };
+      }
       default:
         return data(
           { ok: false as const, intent, error: "Unknown action." },
@@ -164,6 +254,11 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   const appearanceFetcher = useFetcher<ProfileActionData>();
   const passwordFetcher = useFetcher<ProfileActionData>();
   const githubFetcher = useFetcher<ProfileActionData>();
+  // Ruling 127: the Agent-accounts panel's own action fetcher. Its POLLING is a
+  // separate per-card fetcher inside the panel (`/resources/backend-login`) —
+  // a `fetcher.load` on this one would overwrite the intent RESULT the toast
+  // and the inline error settle on.
+  const backendsFetcher = useFetcher<ProfileActionData>();
 
   const close = () => {
     const { returnTo } = overlayReturnState.parse(location.state);
@@ -224,6 +319,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
           appearance: appearanceFetcher,
           password: passwordFetcher,
           github: githubFetcher,
+          backends: backendsFetcher,
         }}
         submitWith={submitWith}
       />

@@ -3,6 +3,19 @@ import { z } from "zod";
 import { resolveOAuthProvider } from "~/server/auth/oauth-providers.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
+import {
+  BACKEND_PASTE_KINDS,
+  userBackendHealth,
+  type LoginMethod,
+  type PastedKind,
+  type UserBackendHealth,
+} from "~/server/runtimes/backend-credentials.server";
+import {
+  BACKEND_SIGN_IN_METHODS,
+  getBackendLogin,
+  type LoginSessionView,
+} from "~/server/runtimes/backend-login.server";
+import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { ROLE_IDS } from "~/features/policy/policy-data";
 import type { ProjectRole } from "~/shared/rbac";
 import { ROLE_RANK } from "~/shared/rbac";
@@ -43,6 +56,56 @@ export interface ProfileMembership {
   role: ProjectRole;
 }
 
+/**
+ * One backend card on Profile → Agent accounts (ruling 127).
+ *
+ * `health` is the SAME per-person answer every other surface reads
+ * (`userBackendHealth`), never a second opinion computed here; `login` is the
+ * viewer's own hosted sign-in when one is running or recently ended; `methods`
+ * is what this vendor actually offers, so the card renders the buttons the
+ * vendor supports instead of a hardcoded pair.
+ */
+export interface ProfileBackend {
+  backend: RealBackend;
+  health: UserBackendHealth;
+  login: LoginSessionView | null;
+  methods: {
+    signIn: LoginMethod[];
+    paste: PastedKind[];
+  };
+}
+
+/** Both agent backends, in the order the panel renders them. */
+export const PROFILE_BACKENDS: readonly RealBackend[] = ["claude", "codex"];
+
+/**
+ * The viewer's own agent accounts. Re-derived per request (health re-probes the
+ * filesystem, a sign-in session is live process state), and secret-free: a
+ * `UserBackendHealth` carries a key's last four characters and never the key,
+ * and a `LoginSessionView` carries only what the vendor showed the person.
+ */
+export function getProfileBackends(
+  db: DatabaseSync,
+  userId: string,
+): ProfileBackend[] {
+  return PROFILE_BACKENDS.map((backend) => ({
+    backend,
+    health: userBackendHealth(db, userId, backend),
+    login: getBackendLogin(userId, backend),
+    methods: {
+      // The sign-in list is the DRIVER's own table, not a copy of it: a card
+      // that offered a flow `startBackendLogin` refuses would post a button
+      // that can only ever come back "Claude does not offer that sign-in
+      // method." (AGENTS.md: one home per fact.)
+      signIn: [...BACKEND_SIGN_IN_METHODS[backend]],
+      // The paste list is the STORE's own table for the same reason: a card
+      // that offered `access_token` for Claude would post a button
+      // `setBackendApiKey` can only refuse.
+      paste: [...BACKEND_PASTE_KINDS[backend]],
+    },
+  }));
+}
+
 export interface ProfileView {
   user: {
     id: string;
@@ -69,6 +132,9 @@ export interface ProfileView {
    * instead of warn scope chips + a doomed Connect button (mirrors R17-4).
    */
   githubConfigured: boolean;
+  /** Ruling 127: the viewer's own Claude and Codex accounts, one entry per
+   *  backend. Runs on tasks they own, and their controller turns, bill these. */
+  backends: ProfileBackend[];
   prefs: {
     notifs: NotifPrefs;
     motion: MotionPreference;
@@ -185,6 +251,7 @@ export function getProfileView(
     // handler can actually start the flow.
     githubConfigured:
       resolveOAuthProvider(db, "github").credentials !== null,
+    backends: getProfileBackends(db, userId),
     prefs: {
       notifs: getNotifPrefs(db, userId),
       motion: getMotionPref(db, userId),

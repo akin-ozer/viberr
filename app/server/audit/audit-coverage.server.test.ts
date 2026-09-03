@@ -30,19 +30,43 @@ import {
   interruptRun,
   startRun,
 } from "~/server/runtimes/run-service.server";
+import {
+  disconnectBackend,
+  setBackendApiKey,
+} from "~/server/runtimes/backend-credentials.server";
+import {
+  cancelBackendLogin,
+  resetBackendLoginsForTests,
+  startBackendLogin,
+} from "~/server/runtimes/backend-login.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   installFakeRuntime,
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
+import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import {
+  resetFakeVendorEnv,
+  setFakeVendorMode,
+  writeFakeVendorBinaries,
+  type FakeVendorBinaries,
+} from "../../../test-support/fake-vendor-binary";
 
 let ctx: TestDbContext;
 let store: TestStore;
+/** Ruling 127: the sign-in actions are audited by a driver that spawns the
+ *  vendor's own binary, so the sweep drives real (fake) executables. */
+let vendors: FakeVendorBinaries;
 
-beforeEach(() => {
+/** The vendors' free key probe, answered without a network (ruling 127). */
+const acceptingProvider: typeof fetch = () =>
+  Promise.resolve(new Response("{}", { status: 200 }));
+
+beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
+  vendors = writeFakeVendorBinaries();
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter("VIB-1", {
       stage: "triage",
@@ -76,9 +100,18 @@ beforeEach(() => {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
   installFakeRuntime();
+  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
+  // only reaches an adapter when the owner has that backend connected. Arda
+  // owns the tasks in this file; connecting both backends for him is the
+  // ordinary state of somebody using the product.
+  await connectFakeBackend(store.db, store.users.arda.id, "claude");
+  await connectFakeBackend(store.db, store.users.arda.id, "codex");
 });
 
 afterEach(() => {
+  resetBackendLoginsForTests();
+  resetFakeVendorEnv();
+  vendors.cleanup();
   resetSseBrokerForTests();
   ctx.cleanup();
 });
@@ -244,6 +277,7 @@ describe("governed actions record audit rows (table-driven)", () => {
             role: "Primary specialist",
             kind: "primary",
             agentProfileId: "developer",
+            credentialUserId: store.users.arda.id,
             backend: "claude",
             model: "m",
             prompt: "go",
@@ -268,6 +302,7 @@ describe("governed actions record audit rows (table-driven)", () => {
             role: "R",
             kind: "reviewer", // distinct thread — VIB-1 already has a primary
             agentProfileId: "reviewer",
+            credentialUserId: store.users.arda.id,
             backend: "claude",
             model: "m",
             prompt: "go",
@@ -358,6 +393,95 @@ describe("governed actions record audit rows (table-driven)", () => {
           }),
       },
       {
+        // Ruling 127: connecting and disconnecting a PERSONAL agent account is
+        // governed — it changes whose provider account this instance's runs
+        // bill — so both leave an audit row. Instance-wide: a personal
+        // credential belongs to no project and no task.
+        name: "setBackendApiKey (personal Claude key)",
+        action: "profile.backend.connected",
+        instanceWide: true,
+        run: () =>
+          setBackendApiKey(
+            store.db,
+            actorArda(),
+            "claude",
+            "api_key",
+            "sk-ant-api03-audit-sweep-key",
+            { fetchImpl: acceptingProvider, dataRoot: store.dataRoot },
+          ),
+      },
+      {
+        name: "disconnectBackend",
+        action: "profile.backend.disconnected",
+        instanceWide: true,
+        run: async () => {
+          await setBackendApiKey(
+            store.db,
+            actorArda(),
+            "codex",
+            "api_key",
+            "sk-proj-audit-sweep-key",
+            { fetchImpl: acceptingProvider, dataRoot: store.dataRoot },
+          );
+          await disconnectBackend(store.db, actorArda(), "codex", {
+            dataRoot: store.dataRoot,
+          });
+        },
+      },
+      {
+        // Ruling 127: a hosted sign-in is a governed action at every step. The
+        // vendor's own binary is spawned here (a fake executable), so what the
+        // sweep proves is the DRIVER's audit trail, not a stub's.
+        name: "startBackendLogin",
+        action: "profile.backend.login_started",
+        instanceWide: true,
+        run: () => {
+          setFakeVendorMode("hang");
+          startBackendLogin(store.db, actorArda(), "claude", "claudeai", {
+            binaries: vendors.binaries,
+            dataRoot: store.dataRoot,
+          });
+        },
+      },
+      {
+        name: "cancelBackendLogin",
+        action: "profile.backend.login_cancelled",
+        instanceWide: true,
+        run: () => {
+          setFakeVendorMode("hang");
+          startBackendLogin(store.db, actorArda(), "codex", "device", {
+            binaries: vendors.binaries,
+            dataRoot: store.dataRoot,
+          });
+          cancelBackendLogin(store.db, actorArda(), "codex");
+        },
+      },
+      {
+        // The timeout is the failure path a person is most likely to meet, and
+        // the one nothing else would notice: it is audited by a TIMER, with no
+        // request in flight to carry the news.
+        name: "startBackendLogin (timed out)",
+        action: "profile.backend.login_failed",
+        instanceWide: true,
+        run: async () => {
+          setFakeVendorMode("hang");
+          startBackendLogin(store.db, actorArda(), "claude", "console", {
+            binaries: vendors.binaries,
+            dataRoot: store.dataRoot,
+            timeoutMs: 40,
+          });
+          const deadline = Date.now() + 5_000;
+          while (
+            listAuditEvents(store.db, {
+              action: "profile.backend.login_failed",
+            }).length === 0 &&
+            Date.now() < deadline
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+        },
+      },
+      {
         name: "rescanProjections",
         action: "projection.rescan",
         instanceWide: true,
@@ -397,6 +521,12 @@ describe("governed actions record audit rows (table-driven)", () => {
         "github.credential.revalidated",
         "projection.rescan",
         "projection.rebuild",
+        // Ruling 127: a person's own agent account, connected on their profile.
+        "profile.backend.connected",
+        "profile.backend.disconnected",
+        "profile.backend.login_started",
+        "profile.backend.login_failed",
+        "profile.backend.login_cancelled",
       ].includes(row.action);
       if (!taskless) {
         expect(

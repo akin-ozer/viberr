@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
+import type { TaskRunPrincipalView } from "./run-principal-view";
 import {
   detectMentionToken,
   filterMentions,
@@ -55,8 +56,14 @@ export interface MentionAutocomplete {
 export function useMentionAutocomplete(
   mentionables: Mentionables,
   applyInsert: (result: InsertResult) => void,
+  /** Ruling 127: the task's run principal, so the `@claude` / `@codex` rows can
+   *  say whose account they would bill and whether it can pay. */
+  runPrincipal?: TaskRunPrincipalView | null,
 ): MentionAutocomplete {
-  const all = useMemo(() => flattenMentionables(mentionables), [mentionables]);
+  const all = useMemo(
+    () => flattenMentionables(mentionables, runPrincipal),
+    [mentionables, runPrincipal],
+  );
   const [token, setToken] = useState<MentionToken | null>(null);
   const [active, setActiveIndex] = useState(0);
   /** The surface text the current token was detected in — what `pick` edits. */

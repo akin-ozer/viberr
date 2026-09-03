@@ -10,6 +10,7 @@ import {
   probeSessionContinuity,
   transcriptExists,
 } from "./session-export.server";
+import { userBackendHome } from "./user-homes.server";
 
 /**
  * Session export: locate a provider transcript by session id (robust to the
@@ -17,9 +18,11 @@ import {
  */
 
 let tmp: string;
-const savedClaude = process.env.CLAUDE_CONFIG_DIR;
-const savedCodex = process.env.CODEX_HOME;
-const savedDataRoot = process.env.VIBERR_DATA_ROOT;
+/** Ruling 127: transcripts live in the credential PRINCIPAL's own runtime home,
+ *  so every lookup names the person whose run wrote it. Two people here, so a
+ *  probe that ignored the principal would be visible. */
+const OWNER = "u_owner";
+const OTHER = "u_other";
 
 /** Claude encoding: absolute cwd with every non-alphanumeric char -> '-'. */
 function encode(cwd: string): string {
@@ -35,43 +38,50 @@ function decodeEmbedded(script: string): string {
   return Buffer.from(m[1]!.replace(/\n/g, ""), "base64").toString("utf8");
 }
 
+const savedDataRoot = process.env.VIBERR_DATA_ROOT;
+
 beforeEach(() => {
+  // A fresh, EMPTY data root per test: "no transcript store at all" is a state
+  // several cases assert on, and an ambient data root a developer's `.env`
+  // supplies would silently answer `missing` where they want `unknown`. Each
+  // person's homes are created only when a test writes into them.
   tmp = mkdtempSync(path.join(os.tmpdir(), "viberr-export-"));
-  process.env.CLAUDE_CONFIG_DIR = path.join(tmp, "claude-home");
-  process.env.CODEX_HOME = path.join(tmp, "codex-home");
-  // Codex has TWO session roots (`codexSessionRoots`): the human's login dir
-  // (`CODEX_HOME`, pinned above) and the app-owned run home, which resolves off
-  // `VIBERR_DATA_ROOT`. Only the first was pinned, so the probe still consulted
-  // whatever data root the ambient env named — and `env.server`'s module-scope
-  // `loadEnvFile()` supplies one from a developer's `.env`. On a machine that
-  // had run the app, `<data root>/runtimes/codex-home/sessions` EXISTS, so the
-  // "no sessions dir ⇒ unknown" cases below answered `missing` instead: this
-  // file passed on CI and failed on a laptop — the same class of leak
-  // test-support/setup-env.ts documents for `CLAUDE_CONFIG_DIR`. Pointed at a
-  // path that does NOT exist, because "no store at all" is the state these
-  // cases assert on.
   process.env.VIBERR_DATA_ROOT = path.join(tmp, "data-root");
   resetEnvCacheForTests();
 });
 
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
-  if (savedClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-  else process.env.CLAUDE_CONFIG_DIR = savedClaude;
-  if (savedCodex === undefined) delete process.env.CODEX_HOME;
-  else process.env.CODEX_HOME = savedCodex;
   if (savedDataRoot === undefined) delete process.env.VIBERR_DATA_ROOT;
   else process.env.VIBERR_DATA_ROOT = savedDataRoot;
   resetEnvCacheForTests();
 });
 
-/** Write a Claude session transcript at the encoded-cwd project dir. */
-function writeClaudeSession(sid: string, cwd: string, lines: object[]): string {
-  const dir = path.join(process.env.CLAUDE_CONFIG_DIR!, "projects", encode(cwd));
+/** One person's claude/codex home under the test data root. */
+function home(userId: string, backend: "claude" | "codex"): string {
+  return userBackendHome(userId, backend);
+}
+
+/** Write a Claude session transcript into `userId`'s home, at the encoded-cwd
+ *  project dir. */
+function writeClaudeSession(
+  sid: string,
+  cwd: string,
+  lines: object[],
+  userId = OWNER,
+): string {
+  const dir = path.join(home(userId, "claude"), "projects", encode(cwd));
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${sid}.jsonl`);
   writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
   return file;
+}
+
+/** A dated codex rollout dir inside `userId`'s codex home. */
+function codexDir(day: string, userId = OWNER): string {
+  const dir = path.join(home(userId, "codex"), "sessions", "2026", "07", day);
+  mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 describe("locateTranscript (claude)", () => {
@@ -84,7 +94,7 @@ describe("locateTranscript (claude)", () => {
       { type: "user", sessionId: sid, cwd, message: { role: "user" } },
       { type: "assistant", sessionId: sid, message: { role: "assistant" } },
     ]);
-    const found = locateTranscript("claude", sid);
+    const found = locateTranscript("claude", OWNER, sid);
     expect(found).not.toBeNull();
     expect(found!.sessionId).toBe(sid);
     expect(found!.cwd).toBe(cwd);
@@ -93,8 +103,19 @@ describe("locateTranscript (claude)", () => {
   });
 
   it("returns null when no transcript exists for the id", () => {
-    expect(locateTranscript("claude", "does-not-exist")).toBeNull();
-    expect(locateTranscript("claude", "")).toBeNull();
+    expect(locateTranscript("claude", OWNER, "does-not-exist")).toBeNull();
+    expect(locateTranscript("claude", OWNER, "")).toBeNull();
+  });
+
+  it("never reaches into another person's home, and has none for a null principal", () => {
+    // Ruling 127: a session id names a conversation inside ONE person's
+    // account. Searching every home for it would hand somebody else's
+    // transcript to whoever could name the id — and a run refused before it
+    // started (`credential_user_id` null) wrote no transcript at all.
+    writeClaudeSession(sid, cwd, [{ type: "queue-operation", sessionId: sid }], OTHER);
+    expect(locateTranscript("claude", OWNER, sid)).toBeNull();
+    expect(locateTranscript("claude", null, sid)).toBeNull();
+    expect(locateTranscript("claude", OTHER, sid)).not.toBeNull();
   });
 });
 
@@ -102,39 +123,37 @@ describe("locateTranscript (codex)", () => {
   const sid = "0199a2c4-7b31-7802-abcd-000000000001";
 
   it("finds a rollout file whose name embeds the session id, under dated dirs", () => {
-    const dir = path.join(process.env.CODEX_HOME!, "sessions", "2026", "07", "05");
-    mkdirSync(dir, { recursive: true });
+    const dir = codexDir("05");
     const file = path.join(dir, `rollout-2026-07-05T12-00-00-${sid}.jsonl`);
     writeFileSync(file, JSON.stringify({ type: "session_meta", payload: { id: sid, cwd: "/work/repo" } }) + "\n");
-    const found = locateTranscript("codex", sid);
+    const found = locateTranscript("codex", OWNER, sid);
     expect(found).not.toBeNull();
     expect(found!.filePath).toBe(file);
     expect(found!.cwd).toBe("/work/repo");
   });
 
   it("returns null when the sessions dir has no matching rollout", () => {
-    expect(locateTranscript("codex", sid)).toBeNull();
+    expect(locateTranscript("codex", OWNER, sid)).toBeNull();
   });
 });
 
 describe("transcriptExists (loader-path probe)", () => {
   it("claude: true only when the sid transcript file exists", () => {
     const sid = "aaaa1111-ae14-41da-a8d9-f8c48b800605";
-    expect(transcriptExists("claude", "missing-claude-sid")).toBe(false);
-    expect(transcriptExists("claude", "")).toBe(false);
+    expect(transcriptExists("claude", OWNER, "missing-claude-sid")).toBe(false);
+    expect(transcriptExists("claude", OWNER, "")).toBe(false);
     writeClaudeSession(sid, "/w/x", [{ type: "queue-operation", sessionId: sid }]);
-    expect(transcriptExists("claude", sid)).toBe(true);
+    expect(transcriptExists("claude", OWNER, sid)).toBe(true);
   });
 
   it("codex: matches by FILENAME only — a content-only id is a conservative miss", () => {
     const sid = "0199a2c4-7b31-7802-abcd-00000000ee01";
-    const dir = path.join(process.env.CODEX_HOME!, "sessions", "2026", "07", "06");
-    mkdirSync(dir, { recursive: true });
+    const dir = codexDir("06");
     writeFileSync(
       path.join(dir, `rollout-2026-07-06T12-00-00-${sid}.jsonl`),
       JSON.stringify({ type: "session_meta", payload: { id: sid } }) + "\n",
     );
-    expect(transcriptExists("codex", sid)).toBe(true);
+    expect(transcriptExists("codex", OWNER, sid)).toBe(true);
 
     // An id present ONLY inside file content (not the filename) is skipped by
     // the probe (no file reads on a loader path) — the full locator still
@@ -144,19 +163,18 @@ describe("transcriptExists (loader-path probe)", () => {
       path.join(dir, "rollout-2026-07-06T13-00-00-unrelated.jsonl"),
       JSON.stringify({ type: "session_meta", payload: { id: contentOnly } }) + "\n",
     );
-    expect(transcriptExists("codex", contentOnly)).toBe(false);
-    expect(locateTranscript("codex", contentOnly)).not.toBeNull();
+    expect(transcriptExists("codex", OWNER, contentOnly)).toBe(false);
+    expect(locateTranscript("codex", OWNER, contentOnly)).not.toBeNull();
   });
 
   it("caches within the TTL: a hit stays true after the file is deleted", () => {
     const sid = "0199a2c4-7b31-7802-abcd-00000000ee03";
-    const dir = path.join(process.env.CODEX_HOME!, "sessions", "2026", "07", "07");
-    mkdirSync(dir, { recursive: true });
+    const dir = codexDir("07");
     const file = path.join(dir, `rollout-2026-07-07T12-00-00-${sid}.jsonl`);
     writeFileSync(file, "{}\n");
-    expect(transcriptExists("codex", sid)).toBe(true);
+    expect(transcriptExists("codex", OWNER, sid)).toBe(true);
     rmSync(file);
-    expect(transcriptExists("codex", sid)).toBe(true); // served from the cache
+    expect(transcriptExists("codex", OWNER, sid)).toBe(true); // served from the cache
   });
 });
 
@@ -168,26 +186,25 @@ describe("probeSessionContinuity", () => {
     // No `<config>/projects` dir at all → absence proves NOTHING. Answering
     // "missing" here would throw away every live session on any deployment
     // whose transcripts this process cannot see.
-    expect(probeSessionContinuity("claude", sid)).toBe("unknown");
+    expect(probeSessionContinuity("claude", OWNER, sid)).toBe("unknown");
 
     writeClaudeSession(sid, "/w/x", [{ type: "queue-operation", sessionId: sid }]);
-    expect(probeSessionContinuity("claude", sid)).toBe("present");
+    expect(probeSessionContinuity("claude", OWNER, sid)).toBe("present");
     // The store exists and does not hold this id → genuinely swept.
-    expect(probeSessionContinuity("claude", "never-existed")).toBe("missing");
+    expect(probeSessionContinuity("claude", OWNER, "never-existed")).toBe("missing");
   });
 
   it("codex: finds a rollout by CONTENT too — a filename miss is not a dead session", () => {
     const sid = "0199a2c4-7b31-7802-abcd-00000000ff01";
-    expect(probeSessionContinuity("codex", sid)).toBe("unknown"); // no sessions dir
+    expect(probeSessionContinuity("codex", OWNER, sid)).toBe("unknown"); // no sessions dir
 
-    const dir = path.join(process.env.CODEX_HOME!, "sessions", "2026", "07", "08");
-    mkdirSync(dir, { recursive: true });
+    const dir = codexDir("08");
     writeFileSync(
       path.join(dir, `rollout-2026-07-08T12-00-00-${sid}.jsonl`),
       JSON.stringify({ type: "session_meta", payload: { id: sid } }) + "\n",
     );
-    expect(probeSessionContinuity("codex", sid)).toBe("present");
-    expect(probeSessionContinuity("codex", "0199-nope")).toBe("missing");
+    expect(probeSessionContinuity("codex", OWNER, sid)).toBe("present");
+    expect(probeSessionContinuity("codex", OWNER, "0199-nope")).toBe("missing");
 
     // `transcriptExists` (the loader-path Export probe) matches by FILENAME
     // only, so a content-only id reads as a conservative miss there. Doing that
@@ -198,26 +215,45 @@ describe("probeSessionContinuity", () => {
       path.join(dir, "rollout-2026-07-08T13-00-00-anon.jsonl"),
       JSON.stringify({ type: "session_meta", payload: { id: contentOnly } }) + "\n",
     );
-    expect(transcriptExists("codex", contentOnly)).toBe(false);
-    expect(probeSessionContinuity("codex", contentOnly)).toBe("present");
+    expect(transcriptExists("codex", OWNER, contentOnly)).toBe(false);
+    expect(probeSessionContinuity("codex", OWNER, contentOnly)).toBe("present");
   });
 
   it("is uncached — a transcript deleted after a hit reads as missing at once", () => {
     const sid = "0199a2c4-7b31-7802-abcd-00000000ff03";
-    const dir = path.join(process.env.CODEX_HOME!, "sessions", "2026", "07", "09");
-    mkdirSync(dir, { recursive: true });
+    const dir = codexDir("09");
     const file = path.join(dir, `rollout-2026-07-09T12-00-00-${sid}.jsonl`);
     writeFileSync(file, "{}\n");
-    expect(probeSessionContinuity("codex", sid)).toBe("present");
+    expect(probeSessionContinuity("codex", OWNER, sid)).toBe("present");
     rmSync(file);
     // `transcriptExists` would still say true here (30 s TTL) — a stale `true`
     // is exactly the dead id this probe exists to catch.
-    expect(probeSessionContinuity("codex", sid)).toBe("missing");
+    expect(probeSessionContinuity("codex", OWNER, sid)).toBe("missing");
   });
 
   it("treats a null/empty session id as unknown, never missing", () => {
-    expect(probeSessionContinuity("claude", null)).toBe("unknown");
-    expect(probeSessionContinuity("codex", "")).toBe("unknown");
+    expect(probeSessionContinuity("claude", OWNER, null)).toBe("unknown");
+    expect(probeSessionContinuity("codex", OWNER, "")).toBe("unknown");
+  });
+
+  it("an owner change reads as MISSING — the resume never enters the old owner's account", () => {
+    // Ruling 127, stated as behaviour: a resumed task run bills the owner AS OF
+    // NOW, and the probe looks in THAT person's home. So a task whose seat
+    // changed hands since the original run reports the session gone and takes
+    // the continuity-reset path (one fresh run, re-anchored on task.md, with
+    // the timeline saying context was lost) — rather than replaying one
+    // person's conversation inside another person's account.
+    const sid = "cccc3333-ae14-41da-a8d9-f8c48b800605";
+    writeClaudeSession(sid, "/w/x", [{ type: "queue-operation", sessionId: sid }], OTHER);
+    expect(probeSessionContinuity("claude", OTHER, sid)).toBe("present");
+    // The new owner HAS a store (they run agents too) and it does not hold it.
+    writeClaudeSession("their-own-session", "/w/x", [{}], OWNER);
+    expect(probeSessionContinuity("claude", OWNER, sid)).toBe("missing");
+  });
+
+  it("a run with no principal probes nothing — there is no home to look in", () => {
+    writeClaudeSession("orphan-sid", "/w/x", [{}], OWNER);
+    expect(probeSessionContinuity("claude", null, "orphan-sid")).toBe("unknown");
   });
 
   it("SESSION_MISSING_RE matches what the two CLIs actually print", () => {
@@ -240,7 +276,7 @@ describe("buildResumeScript", () => {
       { type: "assistant", sessionId: sid, cwd, message: { role: "assistant", content: "hi" } },
     ];
     writeClaudeSession(sid, cwd, lines);
-    const located = locateTranscript("claude", sid)!;
+    const located = locateTranscript("claude", OWNER, sid)!;
     const { filename, body } = buildResumeScript(located, { taskKey: "CTL-1" });
 
     expect(filename).toBe(`resume-CTL-1-${sid.slice(0, 8)}.sh`);
@@ -257,11 +293,10 @@ describe("buildResumeScript", () => {
   });
 
   it("codex: keeps the rollout filename and prints `codex resume`", () => {
-    const dir = path.join(process.env.CODEX_HOME!, "sessions", "2026", "07", "05");
-    mkdirSync(dir, { recursive: true });
+    const dir = codexDir("05");
     const origName = `rollout-2026-07-05T12-00-00-${sid}.jsonl`;
     writeFileSync(path.join(dir, origName), JSON.stringify({ type: "session_meta", payload: { id: sid } }) + "\n");
-    const located = locateTranscript("codex", sid)!;
+    const located = locateTranscript("codex", OWNER, sid)!;
     const { body } = buildResumeScript(located, { taskKey: "CTL-1" });
     expect(body).toContain('BACKEND="codex"');
     expect(body).toContain(`ORIG_NAME="${origName}"`);

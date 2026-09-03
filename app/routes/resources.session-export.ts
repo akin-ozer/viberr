@@ -62,7 +62,14 @@ export async function loader({ request }: Route.LoaderArgs) {
     );
   }
   const backend: RealBackend = run.backend === "codex" ? "codex" : "claude";
-  const located = locateTranscript(backend, run.session_id);
+  // Ruling 127: the transcript lives in the home of the person the run billed
+  // (`credential_user_id`), because that is the home the vendor binary wrote
+  // it into. A run with no principal never spawned a process and has none.
+  const located = locateTranscript(
+    backend,
+    run.credential_user_id,
+    run.session_id,
+  );
   if (!located) {
     return new Response(
       `No ${backend} session transcript found on disk for ${run.session_id}. ` +

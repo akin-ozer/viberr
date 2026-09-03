@@ -6,17 +6,22 @@
 > (2026-09-01). Where the PRD carries a dated amendment, the status is judged against
 > the amended text and says "as amended". Vocabulary: IMPLEMENTED · PARTIAL · NOT
 > IMPLEMENTED · UNVERIFIABLE. Edit the canon PRD only; the mirror follows.
+> Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): FR19,
+> NFR7, NFR9 and NFR10 re-judged against per-person agent accounts, plus a new drift item
+> in §5.
 
 ## 1. Summary
 
 | Set | Total | Implemented | Partial | Not implemented |
 |---|---|---|---|---|
-| Functional (FR1–FR41) | 41 | 39 (11 of them as amended) | 2 (FR6, FR8) | 0 |
+| Functional (FR1–FR41) | 41 | 39 (12 of them as amended) | 2 (FR6, FR8) | 0 |
 | Non-functional (NFR1–NFR18) | 18 | 16 (4 as amended) | 2 (NFR6, NFR9) | 0 |
 
 The two PRD copies are identical today. Every amendment through 2026-08-31 (rulings
-102–104) is in both. Rulings 100, 101, 105, 106, 107 and 108 changed behaviour after
-the PRD's last note and are not yet reflected in it (§5).
+102–104) is in both. Rulings 100, 101, 105, 106, 107, 108 and **127** changed behaviour
+after the PRD's last note and are not yet reflected in it (§5). *(FR19 joined the amended
+set on 2026-09-02 under ruling 127: profiles still execute via Codex/Claude, but on the
+credential principal's own account rather than a deployment-wide one.)*
 
 ## 2. Functional requirements
 
@@ -40,7 +45,7 @@ the PRD's last note and are not yet reflected in it (§5).
 | FR16 | Typed important events + conversation in one chronology | IMPLEMENTED | `TIMELINE_EVENT_TYPES` (11), `features/task-detail/timeline.tsx` |
 | FR17 | Validation outcomes, evidence incl. posted files, change summaries, compressed history | IMPLEMENTED | verdicts, evidence rows, attachments (`server/files/task-attachments.server.ts`, `routes/task-attachment.ts`), `timeline-compaction.server.ts`, `comment-guardrails.server.ts` |
 | FR18 | Dedicated operator per active task | IMPLEMENTED | `runtimes/operator-run.server.ts` (per-task lease, single-flight) |
-| FR19 | Execute profiles via Codex / Claude backends | IMPLEMENTED | `runtimes/runtime-registry.server.ts`, `claude-runtime.server.ts`, `codex-runtime.server.ts` |
+| FR19 | Execute profiles via Codex / Claude backends | IMPLEMENTED as amended | `runtimes/runtime-registry.server.ts` (adapters + spawn-env filtering), `claude-runtime.server.ts`, `codex-runtime.server.ts`; since ruling 127 the account a run executes on is the **credential principal's**, resolved by `run-principal.server.ts` and built by `runCredentialFor` (`backend-credentials.server.ts`), never a deployment-wide key |
 | FR20 | Operator recommends, triggers work, re-engages supporters | IMPLEMENTED | `RECOMMENDATION_KINDS`, `operator-toolkit.server.ts`, `features/task-detail/operator-recommendations.tsx` |
 | FR21 | Specialists execute stage work; append outcomes, blockers, evidence | IMPLEMENTED | `specialist-run.server.ts`, `agent-outcome.server.ts`, `agent-reply.server.ts` |
 | FR22 | Threads resume across stages; re-anchor when history is gone | IMPLEMENTED | `run-service.resumeRun`, continuity event, `run-recovery.server.ts` |
@@ -74,10 +79,10 @@ the PRD's last note and are not yet reflected in it (§5).
 | NFR4 | Shared updates converge without refresh | IMPLEMENTED | SSE + watcher + 5-min GitHub poller + boot rescan |
 | NFR5 | Timeline usable without the full raw history | IMPLEMENTED | `timeline-slice.ts`, run-log paging |
 | NFR6 | All traffic encrypted in transit | **PARTIAL** | The app speaks plain HTTP and delegates TLS to the proxy; boot warns on an `http://` production origin (`config/env.server.ts`) |
-| NFR7 | No credentials in timelines, comments, audit, logs | IMPLEMENTED | redaction in `run-sink.server.ts`, `git-output-redact.server.ts` |
+| NFR7 | No credentials in timelines, comments, audit, logs | IMPLEMENTED | redaction in `run-sink.server.ts` (now per run: `createRunSink(db, spec, { secrets })` carries the principal's own value into `createLineRedactor`), `git-output-redact.server.ts`; `user_backend_credentials.secret_box` is never selected by a reader, so a loader cannot spread it out |
 | NFR8 | Separate human/agent boundaries on every action; MCP grants outside the matrix | IMPLEMENTED as amended | `shared/capabilities.ts`, `specialist-tool-policy.ts`, Codex sandbox parity (ruling 101) |
-| NFR9 | Least-privilege credentials per project policy and task context | **PARTIAL** | Per-project PAT, credential-less agents, repo-scoped read tool; no per-task narrowing beyond repo-path scoping |
-| NFR10 | Security-relevant actions audited | IMPLEMENTED | denials, credential events, approvals; pinned by `server/audit/audit-coverage.server.test.ts` |
+| NFR9 | Least-privilege credentials per project policy and task context | **PARTIAL** (narrower gap since ruling 127) | Per-project PAT, credential-less agents, repo-scoped read tool; and a run now carries exactly ONE person's backend credential (`filteredSpawnEnv()` + `runCredentialFor`), so an agent can no longer reach an instance-wide provider key. Still no per-task narrowing of the PAT beyond repo-path scoping, and "active task context" remains unmodelled (§5) |
+| NFR10 | Security-relevant actions audited | IMPLEMENTED | denials, credential events, approvals; the ruling-127 family `profile.backend.connected` / `profile.backend.disconnected` (plus the sign-in driver's `login_started` / `login_failed` / `login_cancelled`) and `credentialUserId` on `runtime.run.started`; pinned by `server/audit/audit-coverage.server.test.ts` |
 | NFR11 | Task-state consistency across restarts | IMPLEMENTED | writer lock, boot rescan, `reconcileRestartedWork`, schedule leases, self-heal |
 | NFR12 | Continue from canonical state when runtime history is unavailable | IMPLEMENTED | `resumeRun`, `continuity-recovery.tsx` |
 | NFR13 | Reconciliation never corrupts canonical state | IMPLEMENTED | the rebuilder contains no file writer; retention never touches markdown |
@@ -107,6 +112,7 @@ the PRD's last note and are not yet reflected in it (§5).
 | 2026-09-01 | FR40 | rulings 106 controller settings at agent-editor parity, 107 built-in `viberr_ops` diagnostics, 108 controller grants and instructions deployment-locked by default |
 | 2026-09-02 | FR40 | ruling 121: the controller dock on every signed-in surface, conversation scopes (instance / board / task), the server-side context read (`task.md` verbatim and bounded, board snapshot, visible projects, the surface hint), `update_task`, the recorded surface on user messages |
 | 2026-09-02 | FR19/FR21, FR26, FR40 | rulings 109–116 (pass 32): Codex parity carve-out labeled "advisory on Codex"; the collision ceremony's order and its follow-up; audited `viberr_ops` reads; a Guardrails card under Policy; one capability-mode vocabulary; `accept_completion` refused at authoring off the acceptance boundary; the shared Claude MCP-log cache as a disclosed residual |
+| 2026-09-02 | FR19, FR37/FR38, NFR7, NFR9, NFR10 | ruling 127: agent backends authenticate per person, every run carries a credential principal, task creation seats the creator as owner. **Not yet in the canon PRD** (§5 item 12) |
 
 ## 5. Drift the PRD does not record
 
@@ -130,6 +136,13 @@ the PRD's last note and are not yet reflected in it (§5).
     now carry those amendments in the PRD itself — 2026-09-02, pass 32.)*
 11. **Project classification** says "single-page"; the app is server-rendered with
     hydration.
+12. **The PRD assumes instance-level agent credentials.** FR19 and the phase text read as
+    though a deployment configures Codex/Claude once and every profile executes on it.
+    Ruling 127 (2026-09-02) makes that per person: each user connects their own accounts
+    on Profile → Agent accounts, every run bills ONE principal (the task owner, or the
+    asker on a controller turn), and a task with no owner runs no agents. The canon PRD
+    carries no amendment for this yet, so FR19, NFR9 and the "backend configured" phrasing
+    behind them are judged against the ruling here.
 
 ## 6. README "Known gaps" re-verification
 

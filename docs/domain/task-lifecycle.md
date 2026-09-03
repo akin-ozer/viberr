@@ -5,7 +5,10 @@
 > `app/server/tasks/task-actions.server.ts`, `app/schemas/task-file.schema.ts`,
 > `app/shared/workflow/*`, `app/shared/rbac.ts`. File fields are in
 > [file-formats.md](../architecture/file-formats.md). Verified against `main`
-> @ `68b5480` (2026-09-01).
+> @ `68b5480` (2026-09-01). Updated 2026-09-02 for ruling 127 (branch
+> `claude/per-user-codex-auth-difdnn`): §3 (creation seats the creator as owner)
+> and §7 (whose accounts a task's agent runs bill, and what an unowned task
+> refuses).
 
 ## 1. The shape of every governed mutation
 
@@ -66,7 +69,19 @@ minute). Denials are audited as `project.authority.denied`.
 project mutex, writes `task.md` with `readiness: input_required`, `waiting: human`,
 the goal (or the placeholder "Goal to be refined at the triage quality gate."),
 optional `priority | labels | dueDate`, optional `goalRef`, then auto-invokes the
-operator with the `create` trigger. Priority is `low | normal | high | urgent`
+operator with the `create` trigger.
+
+**Creation seats the creator as owner** (ruling 127). `ownerUserId` is the human actor,
+and the file is written with the SAME `assign` timeline event a take through `setOwner`
+writes (one event builder, so the timeline reads identically however the seat was
+filled), with the audit's `task.created` details carrying `ownerUserId`. The reason is
+the credential principal: every agent run on a task bills the OWNER's own Claude and
+Codex accounts, so a task born unowned could not run the operator it was about to
+invoke. A task created by the OPERATOR itself (`OPERATOR_TASK_ACTOR`, or an
+operator-authorized context) keeps a null seat — the operator is not a person and has no
+account to bill — and a human has to take that one before agents can run on it. A
+controller-driven creation IS a human creation: the asker is the actor, and they get the
+seat. Priority is `low | normal | high | urgent`
 (`urgent` also sets the legacy boolean the board highlights), labels are at most 12
 of 32 characters, due date is a plain `YYYY-MM-DD`. `edit-task-meta` grooms these
 later without touching any gate.
@@ -147,6 +162,27 @@ declaration that names nothing on this board is treated as unrestricted.
   takeover of another owner needs the acceptance tier; `release-any-ownership` is
   admin). Ownership changes are `assign` timeline events; admin releases are audited.
   Removing a member releases their tasks.
+- **The owner is who a run bills** (ruling 127). Every task run — operator, specialist,
+  resume, scheduled, boot recovery, retry — resolves `resolveTaskRunPrincipal` first and
+  spawns with the owner's own backend credential; the run row records them in
+  `credential_user_id`. Three consequences a person can see:
+  - an **unowned** task refuses agent runs. Nothing is spawned: the refusal is an honest
+    `error` run carrying `principalRefusalMessage` ("… need a task owner … Own the task
+    (Assign me) and run the agent again. No agent process was started."), the usual
+    blocked packet, and the ordinary completion effects. The task page's run controls
+    are disabled with the same sentence, so the refusal is visible before the click.
+  - a task whose owner has not connected THAT backend refuses the same way, naming the
+    owner and pointing at their Profile → Agent accounts. `retry_other_backend` is
+    offered only when the owner has the other backend connected, and the Agent-logs
+    console asks the same question before it renders "Retry on <other>": with the owner
+    unconnected there it renders no button and says so ("<Other> isn't connected for the
+    task owner, so there is no other backend to retry on"), so the packet and the console
+    never tell two stories about one task.
+  - a **hand-off changes whose account pays** from the next run on. An in-flight run
+    keeps the principal it started with (the column is per run), and a resume after a
+    hand-off looks for the provider session in the NEW owner's home, finds none, and
+    takes the continuity-reset path with a `continuity` timeline event
+    ([agents-and-runtime.md §3.6](agents-and-runtime.md#36-resume-continuity-export)).
 - `appendComment` (any member) writes a `comment` event, applies mention routing and
   fans out `mention` notifications. **Mentions stay inside the project** (pass 33, F33-9):
   the picker offers project members only, and a handle that resolves to exactly one real

@@ -36,7 +36,12 @@ import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { RunCallbacks, RunSpec, RuntimeAdapter } from "./adapter.server";
-import { setBackendAvailability, type AdapterSet } from "./runtime-registry.server";
+import type { AdapterSet } from "./runtime-registry.server";
+import {
+  connectFakeBackend,
+  disconnectFakeBackend,
+  fakeBackendSecret,
+} from "../../../test-support/backend-credentials";
 import {
   installFakeRuntime,
   lastRunSpec,
@@ -56,7 +61,7 @@ const stdioServerStub = { command: "npx", args: ["-y", "example-mcp"] };
 let ctx: TestDbContext;
 let store: TestStore;
 
-beforeEach(() => {
+beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   writeTask(store.dataRoot, store.slug, {
@@ -65,6 +70,12 @@ beforeEach(() => {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
   installFakeRuntime();
+  // Ruling 127: a run bills a PERSON, so "this backend can run" is a fact about
+  // the principal. Arda owns VIB-1 in this file and is every run's principal
+  // unless a test says otherwise; connecting both backends for him is the
+  // ordinary state of somebody using the product.
+  await connectFakeBackend(store.db, store.users.arda.id, "claude");
+  await connectFakeBackend(store.db, store.users.arda.id, "codex");
 });
 
 afterEach(() => {
@@ -86,8 +97,14 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
-type TestRunInput = Omit<Parameters<typeof startRun>[1], "agentProfileId"> & {
+type TestRunInput = Omit<
+  Parameters<typeof startRun>[1],
+  "agentProfileId" | "credentialUserId"
+> & {
   agentProfileId?: string;
+  /** Ruling 127: defaults to arda, VIB-1's owner. Pass `null` for the refused
+   *  run these tests exercise separately. */
+  credentialUserId?: string | null;
 };
 
 function startTestRun(
@@ -101,7 +118,11 @@ function startTestRun(
       : input.kind === "reviewer"
         ? "reviewer"
         : "developer");
-  return startRun(db, { ...input, agentProfileId });
+  const credentialUserId =
+    input.credentialUserId === undefined
+      ? store.users.arda.id
+      : input.credentialUserId;
+  return startRun(db, { ...input, agentProfileId, credentialUserId });
 }
 
 describe("run-service lifecycle", () => {
@@ -362,9 +383,10 @@ describe("run-service lifecycle", () => {
   });
 });
 
-describe("unavailable backend", () => {
-  async function startUnavailable() {
-    setBackendAvailability("claude", false);
+describe("a run with no credential principal (ruling 127)", () => {
+  /** The owner has not connected the backend — the ordinary refusal. */
+  async function startWithoutCredential() {
+    await disconnectFakeBackend(store.db, store.users.arda.id, "claude");
     return startTestRun(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -376,20 +398,132 @@ describe("unavailable backend", () => {
       dataRoot: store.dataRoot,
     });
   }
+  const startUnavailable = startWithoutCredential;
 
-  it("startRun finalizes an unavailable backend as a classified error", async () => {
+  it("startRun finalizes a principal with no credential as a classified error", async () => {
     const { runId } = await startUnavailable();
     const run = getRun(store.db, runId)!;
     expect(run.state).toBe("error"); // fail-fast: terminal synchronously
     expect(run.backend).toBe("claude");
+    // The principal IS recorded: the run knows whose account it tried to bill,
+    // which is what makes the refusal auditable rather than anonymous.
+    expect(run.credential_user_id).toBe(store.users.arda.id);
     const lines = listRunLines(store.db, runId);
     expect(lines).toHaveLength(1);
     expect(lines[0]!.display.ev).toBe("err");
-    // The copy is actionable and classifies as the "unavailable" failure class.
-    expect(lines[0]!.display.text).toContain("no usable credential");
-    expect(lines[0]!.display.text).toContain("ANTHROPIC_API_KEY");
+    // The copy names the person and where THEY fix it — no environment
+    // variable, because there is none to set.
+    expect(lines[0]!.display.text).toContain("Profile → Agent accounts");
+    expect(lines[0]!.display.text).toContain("No agent process was started.");
+    expect(lines[0]!.display.text).not.toContain("ANTHROPIC_API_KEY");
     const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
     expect(runFailureReason(store.db, runId)?.kind).toBe("unavailable");
+  });
+
+  it("an unowned task refuses with the owner sentence and a NULL principal", async () => {
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "codex",
+      model: defaultModelFor("codex"),
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      credentialUserId: null,
+      principalRefusal: { kind: "unowned", taskKey: "VIB-1" },
+    });
+    const run = getRun(store.db, runId)!;
+    expect(run.state).toBe("error");
+    // Null only here: a run that ever spawned a process has a principal.
+    expect(run.credential_user_id).toBeNull();
+    const text = listRunLines(store.db, runId)[0]!.display.text ?? "";
+    expect(text).toContain("Codex runs on VIB-1 need a task owner");
+    expect(text).toContain("Assign me");
+    expect(text).toContain("No agent process was started.");
+  });
+
+  it("records the principal on a run that DOES start, and audits it", async () => {
+    queueFakeRun(
+      instantScript([
+        { t: "1", ev: "result", tag: "result", text: "done" },
+      ]),
+    );
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "claude",
+      model: "claude-sonnet-4-5",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(getRun(store.db, runId)!.credential_user_id).toBe(
+      store.users.arda.id,
+    );
+    const audit = listAuditEvents(store.db, { action: "runtime.run.started" });
+    expect(audit[0]?.details).toMatchObject({
+      credentialUserId: store.users.arda.id,
+    });
+  });
+
+  it("hands the principal's credential to the adapter and redacts it from the log", async () => {
+    // The two halves of ruling 127's spawn hygiene, on one run: the child env
+    // carries this person's key, and the sink scrubs that same value out of
+    // every persisted line — the run console is visible to every project
+    // member, and the key is not theirs.
+    const secret = fakeBackendSecret("claude");
+    queueFakeRun(
+      instantScript([
+        { t: "1", ev: "text", tag: "assistant", text: `env says ${secret}` },
+        { t: "2", ev: "result", tag: "result", text: "done" },
+      ]),
+    );
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "claude",
+      model: "claude-sonnet-4-5",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      env: { GIT_CEILING_DIRECTORIES: "/tmp/ceiling" },
+    });
+    await settle();
+    const spec = lastRunSpec()!;
+    expect(spec.env?.ANTHROPIC_API_KEY).toBe(secret);
+    expect(spec.env?.CLAUDE_CONFIG_DIR).toContain(store.users.arda.id);
+    // The caller's own overlay still lands beside it.
+    expect(spec.env?.GIT_CEILING_DIRECTORIES).toBe("/tmp/ceiling");
+    for (const line of listRunLines(store.db, runId)) {
+      expect(line.display.text ?? "").not.toContain(secret);
+    }
+    expect(
+      listRunLines(store.db, runId).some((l) =>
+        (l.display.text ?? "").includes("[redacted]"),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses a per-run env overlay that would decide whose account pays", async () => {
+    // A caller bug, not a user error: silently letting either side win would
+    // let a workspace overlay swap the credential of the person being billed.
+    await expect(
+      startTestRun(store.db, {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        role: "Primary specialist",
+        kind: "primary",
+        backend: "claude",
+        model: "claude-sonnet-4-5",
+        prompt: "go",
+        dataRoot: store.dataRoot,
+        env: { ANTHROPIC_API_KEY: "someone-elses-key" },
+      }),
+    ).rejects.toThrow(/collides with the credential env/);
   });
 
   it("a completion callback registered after the fail-fast still fires (F8 escalation path)", async () => {
@@ -609,6 +743,7 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
     const resumed = await resumeRun(store.db, {
       runId,
       prompt: "follow up",
+      credentialUserId: store.users.arda.id,
       dataRoot: store.dataRoot,
     });
     await settle();
@@ -655,6 +790,7 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
     const resumed = await resumeRun(store.db, {
       runId,
       prompt: "follow up",
+      credentialUserId: store.users.arda.id,
       disallowedTools: ["Bash(gh pr merge:*)", "Edit"],
       skills: ["conventional-commits"],
       env: { GIT_CEILING_DIRECTORIES: "/data/projects/x/tasks/VIB-1" },
@@ -786,6 +922,7 @@ describe("D4 — allowedTools reaches the run and survives a resume", () => {
     const resumed = await resumeRun(store.db, {
       runId,
       prompt: "follow up",
+      credentialUserId: store.users.arda.id,
       allowedTools: ["mcp__viberr__report_outcome"],
       mcpServers: { viberr_agent: sdkServerStub, everything: stdioServerStub },
       dataRoot: store.dataRoot,
@@ -806,33 +943,25 @@ describe("D4 — allowedTools reaches the run and survives a resume", () => {
 /* ---------------- runtime continuity recovery (P13-D-2 / FR22) ------------- */
 
 describe("resumeRun — continuity recovery", () => {
-  const savedConfigDir = process.env.CLAUDE_CONFIG_DIR;
-  let claudeHome: string;
-
-  beforeEach(async () => {
-    const { mkdtempSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const path = (await import("node:path")).default;
-    claudeHome = mkdtempSync(path.join(tmpdir(), "viberr-continuity-"));
-    process.env.CLAUDE_CONFIG_DIR = claudeHome;
-    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
-    resetEnvCacheForTests();
-  });
-
-  afterEach(async () => {
-    const { rmSync } = await import("node:fs");
-    rmSync(claudeHome, { recursive: true, force: true });
-    if (savedConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-    else process.env.CLAUDE_CONFIG_DIR = savedConfigDir;
-    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
-    resetEnvCacheForTests();
-  });
-
-  /** Make `<CLAUDE_CONFIG_DIR>/projects` exist so absence is CONCLUSIVE. */
-  async function withTranscriptStore(sid?: string): Promise<void> {
+  /**
+   * Ruling 127: the transcript store is the PRINCIPAL's own runtime home, not a
+   * deployment-wide `CLAUDE_CONFIG_DIR` — so the probe reads
+   * `<dataRoot>/runtimes/users/<owner>/claude-home/projects`. The consequence
+   * the ruling makes explicit is exercised at the bottom of this block: an
+   * owner change since the original run reads as a missing session and takes
+   * this same continuity-reset path, rather than resuming one person's
+   * conversation inside another's account.
+   */
+  async function withTranscriptStore(sid?: string, userId?: string): Promise<void> {
     const { mkdirSync, writeFileSync } = await import("node:fs");
     const path = (await import("node:path")).default;
-    const projects = path.join(claudeHome, "projects", "-w-x");
+    const { userBackendHome } = await import("./user-homes.server");
+    const home = userBackendHome(
+      userId ?? store.users.arda.id,
+      "claude",
+      store.dataRoot,
+    );
+    const projects = path.join(home, "projects", "-w-x");
     mkdirSync(projects, { recursive: true });
     if (sid) writeFileSync(path.join(projects, `${sid}.jsonl`), "{}\n");
   }
@@ -872,6 +1001,7 @@ describe("resumeRun — continuity recovery", () => {
         resumeRun(store.db, {
           runId,
           prompt: "follow up",
+          credentialUserId: store.users.arda.id,
           dataRoot: store.dataRoot,
           ...extra,
         }),
@@ -975,6 +1105,67 @@ describe("resumeRun — continuity recovery", () => {
     expect(spec.prompt).toBe("follow up");
   });
 
+  /**
+   * Ruling 127, stated as behaviour: a resumed turn bills the task owner AS OF
+   * NOW, and the continuity probe reads THAT person's home. So a seat that
+   * changed hands between the original run and the reply cannot resume the
+   * previous owner's conversation inside the new owner's account — the
+   * transcript is not in their home, and the existing continuity-reset path
+   * (one fresh run re-anchored on task.md) is the honest outcome.
+   */
+  it("a resume for a DIFFERENT principal re-anchors instead of borrowing the session", async () => {
+    const { specs, resume } = await startThenResume();
+    // The session IS on disk — in the ORIGINAL owner's home.
+    await withTranscriptStore("sess-gone");
+    // This new owner HAS run agents here before (their store exists). The
+    // change of seat is what decides it, so the never-run case below reaches
+    // the same place.
+    await withTranscriptStore(undefined, store.users.murat.id);
+    await connectFakeBackend(store.db, store.users.murat.id, "claude");
+
+    const resumed = await resume({ credentialUserId: store.users.murat.id });
+    await settle();
+
+    expect(resumed.continuityReset).toBe(true);
+    const spec = specs.find((s) => s.runId === resumed.runId)!;
+    expect(spec.resumeSessionId).toBeNull();
+    expect(spec.prompt).toContain("[continuity notice]");
+    // …and the fresh run bills the NEW owner, which is the whole point.
+    expect(getRun(store.db, resumed.runId)!.credential_user_id).toBe(
+      store.users.murat.id,
+    );
+    expect(spec.env?.CLAUDE_CONFIG_DIR).toContain(store.users.murat.id);
+  });
+
+  /**
+   * The hole a probe-only version of the rule above leaves open, and the reason
+   * `resumeRun` decides an owner change from the CHANGE rather than from disk:
+   * a new owner who has connected the backend but never had a run on this
+   * server has no `claude-home/projects/` yet, so the probe answers `unknown`
+   * — whose contract is "resume as before". The previous owner's session id
+   * then went to the SDK inside the new owner's home and failed at the vendor
+   * ("No conversation found with session ID …"), producing a blocked packet
+   * instead of the one fresh re-anchored run ruling 127 promises.
+   */
+  it("re-anchors for a new principal who has never had a run here", async () => {
+    const { specs, resume } = await startThenResume();
+    // The session is on disk in the ORIGINAL owner's home; the new owner has no
+    // transcript store at all, which is what used to read as `unknown`.
+    await withTranscriptStore("sess-gone");
+    await connectFakeBackend(store.db, store.users.murat.id, "claude");
+
+    const resumed = await resume({ credentialUserId: store.users.murat.id });
+    await settle();
+
+    expect(resumed.continuityReset).toBe(true);
+    const spec = specs.find((s) => s.runId === resumed.runId)!;
+    expect(spec.resumeSessionId).toBeNull();
+    expect(spec.prompt).toContain("[continuity notice]");
+    expect(getRun(store.db, resumed.runId)!.credential_user_id).toBe(
+      store.users.murat.id,
+    );
+  });
+
   it("resumes normally when there is NO transcript store to look in (unknown)", async () => {
     // No `<config>/projects` dir at all. Absence proves nothing here, and
     // treating it as "gone" would throw away every live session on any
@@ -1047,36 +1238,43 @@ describe("getRunLog paging", () => {
   });
 });
 
-describe("backendUnavailableMessage — state-aware codex copy", () => {
-  const cleanupDirs: string[] = [];
-  afterEach(async () => {
-    delete process.env.VIBERR_CODEX_USE_CLI_AUTH;
-    delete process.env.CODEX_HOME;
-    const { rmSync } = await import("node:fs");
-    for (const d of cleanupDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+describe("backendUnavailableMessage (ruling 127)", () => {
+  it("renders the resolver's own refusal sentence for a refusal", () => {
+    // ONE builder for the error-run line, the packet body and the disabled
+    // control, so a person cannot be told three stories about one refusal.
+    const msg = backendUnavailableMessage("codex", {
+      kind: "refusal",
+      refusal: { kind: "unowned", taskKey: "VIB-9" },
+    });
+    expect(msg).toContain("Codex runs on VIB-9 need a task owner");
+    expect(msg).toContain("No agent process was started.");
   });
 
-  it("names the missing auth.json + the docker copy command when the CLI-auth opt-in IS set", async () => {
-    // The docker volume-wipe trap: flag on (from .env), file gone. Re-suggesting
-    // the flag the user already set is what made the breakage look mysterious.
-    const { mkdtempSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const path = (await import("node:path")).default;
-    const home = mkdtempSync(path.join(tmpdir(), "viberr-codex-msg-"));
-    cleanupDirs.push(home);
-    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
-    process.env.CODEX_HOME = home; // empty — no auth.json
-    const msg = backendUnavailableMessage("codex");
-    expect(msg).toContain(`missing at ${path.join(home, "auth.json")}`);
-    expect(msg).toContain("docker compose cp");
-    expect(msg).toContain("without a restart");
-    expect(msg).not.toContain("opt in with VIBERR_CODEX_USE_CLI_AUTH"); // flag is already set
+  it("passes a credential-store detail through, and still promises nothing ran", () => {
+    const msg = backendUnavailableMessage("claude", {
+      kind: "detail",
+      detail: "Your Claude sign-in file is missing from this server.",
+    });
+    expect(msg).toBe(
+      "Your Claude sign-in file is missing from this server. No agent process was started.",
+    );
   });
 
-  it("keeps the generic no-credential copy when the opt-in is NOT set", () => {
-    const msg = backendUnavailableMessage("codex");
-    expect(msg).toContain("no usable credential");
-    expect(msg).toContain("opt in with VIBERR_CODEX_USE_CLI_AUTH=1");
+  it("names no environment variable — there is none left to set", () => {
+    const msg = backendUnavailableMessage("codex", {
+      kind: "refusal",
+      refusal: { kind: "owner-missing", ownerUserId: "u_gone" },
+    });
+    for (const gone of [
+      "ANTHROPIC_API_KEY",
+      "CODEX_API_KEY",
+      "OPENAI_API_KEY",
+      "CODEX_HOME",
+      "VIBERR_CODEX_USE_CLI_AUTH",
+      "VIBERR_CLAUDE_USE_CLI_AUTH",
+    ]) {
+      expect({ gone, named: msg.includes(gone) }).toEqual({ gone, named: false });
+    }
   });
 });
 
@@ -1232,6 +1430,7 @@ describe("reserveRun — a live row while the workspace is prepared (R21-4)", ()
       backend: "claude",
       model: "sonnet",
       agentName: "dev",
+      credentialUserId: store.users.arda.id,
       agentProfileId: "developer",
       phase: RUN_PHASE.preparing,
       step: "Cloning acme/app",
@@ -1259,6 +1458,7 @@ describe("reserveRun — a live row while the workspace is prepared (R21-4)", ()
       kind: "primary",
       backend: "claude",
       model: "sonnet",
+      credentialUserId: store.users.arda.id,
       agentProfileId: "developer",
       phase: RUN_PHASE.preparing,
     })!;
@@ -1296,6 +1496,7 @@ describe("reserveRun — a live row while the workspace is prepared (R21-4)", ()
       kind: "primary",
       backend: "claude",
       model: "sonnet",
+      credentialUserId: store.users.arda.id,
       agentProfileId: "developer",
       phase: RUN_PHASE.preparing,
     })!;
@@ -1336,6 +1537,7 @@ describe("a reservation interrupted while the workspace is prepared", () => {
       kind: "primary",
       backend: "claude",
       model: "sonnet",
+      credentialUserId: store.users.arda.id,
       agentProfileId: "developer",
       phase: RUN_PHASE.preparing,
       step: "Cloning acme/app",

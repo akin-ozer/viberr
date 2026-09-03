@@ -6,6 +6,9 @@
 > `app/server/db/backup.server.ts`, `app/server/seed/*`, `app/server/org/org-seed.server.ts`.
 > Verified against `main` @ `68b5480` (2026-09-01); the table and the backup contents
 > re-verified 2026-09-02 against `pass32/implementation` @ `478bed0`.
+> Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): the
+> entrypoint row is gone, `keys` now covers personal backend keys, and the seed and
+> backup directory lists name the per-person runtime homes.
 
 ## 1. The writer lock rule
 
@@ -36,10 +39,9 @@ container starts or stop it first.
 | `npm run backup [-- --out <dir>] [--include-runtimes]` | none (read-only DB) | `VACUUM INTO` snapshot + store tree copy (incl. `audit-exports/`, ruling 102) + manifest |
 | `npm run restore -- --from <artefact> [--force]` | **writer** | whole-root restore; occupied roots need `--force` and are moved aside, never deleted |
 | `npm run restore -- --from <artefact> --file <store path>` | none | single canonical file restore; the displaced file is kept as `<file>.broken-<ts>` |
-| `npm run keys -- status` | none (read-only DB) | how many sealed secrets still open only under a retired `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` key |
-| `npm run keys -- reseal [--dry-run]` | **writer** | re-seal them under the current key |
+| `npm run keys -- status` | none (read-only DB) | how many sealed secrets still open only under a retired `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` key, across every registered store: GitHub PATs, org MCP credentials, OAuth client secrets, the S3 key and, since ruling 127, `user_backend_credentials` ("Personal backend API keys"; a `login` row has no box and is skipped) |
+| `npm run keys -- reseal [--dry-run]` | **writer** | re-seal them under the current key, personal backend keys included. A row it reports as unopenable is a person who must connect that backend again; the report names the backend, never the person's email |
 | `node scripts/measure-routes.mjs [routeId…]` | none | client asset closure per route (raw + gzip bytes) from a prior `npm run build`; not in `package.json` |
-| `scripts/docker-entrypoint.sh` | n/a | image entrypoint: copies `/host-codex/auth.json` into `$CODEX_HOME` once when missing, then `exec "$@"` |
 
 ## 3. Details that matter
 
@@ -47,7 +49,8 @@ container starts or stop it first.
 
 1. `ensureDataRootDirs`.
 2. With `--reset`: `rm -rf projects/`, `agents/profiles/`, `runtimes/claude/`,
-   `runtimes/codex/` (transcript dirs only, never the credential homes), then `DELETE
+   `runtimes/codex/` (the RUN-LOG dirs only, never `runtimes/users/`, which since ruling
+   127 holds every person's own vendor sign-in), then `DELETE
    FROM` `staged_outcomes, run_log_lines, agent_runs, notifications, provenance,
    diagnostics, scope_violations, user_prefs, task_events, task_projections,
    project_members, projects`; then `kb/`, `skills/` and the tables
@@ -66,8 +69,12 @@ container starts or stop it first.
 
 Survives `--reset`: every auth table, `github_connections`, `github_pats`,
 `project_github_credentials`, `instance_settings`, `s3_audit_config`,
-`model_availability`, controller conversations, `oauth_providers`, and on disk
-`runtimes/codex-home/`, `runtimes/claude-home/`, `runtimes/uv-*`, `audit-exports/`.
+`model_availability`, `user_backend_credentials`, controller conversations,
+`oauth_providers`, and on disk `runtimes/users/` (each person's `claude-home` and
+`codex-home`), `runtimes/uv-*`, `audit-exports/`. *(Corrected 2026-09-02, ruling 127 —
+the shared `runtimes/claude-home/` and `runtimes/codex-home/` this line named no longer
+exist; a `--reset` that deleted `runtimes/users/` would sign every person on the instance
+out of their own Claude and Codex accounts.)*
 Does **not** survive (the README used to omit these): `kb/`, `skills/`,
 admin-registered MCP server rows, `user_prefs`, `scope_violations`.
 
@@ -88,11 +95,13 @@ Writes `<--out ?? ./backups>/viberr-backup-<timestamp>/` (refuses an existing di
 any path inside the data root): `projection.sqlite` via `VACUUM INTO` from a read-only
 connection (WAL folded in, no sidecars), `projects/`, `agents/`, `kb/`, `skills/`,
 `audit-exports/` (`BACKED_UP_STORE_DIRS`; a directory that does not exist yet is
-skipped) — and `runtimes/` only with `--include-runtimes`; treat that artefact as a
+skipped) — and `runtimes/` only with `--include-runtimes`, which since ruling 127 means
+every person's live vendor sign-in under `runtimes/users/`; treat that artefact as a
 secret — skipping `*.tmp`; `MANIFEST.json` (`viberr-backup/1`, sha256, row counts for users, sessions,
 accounts, PATs, audit, notifications, MCP servers) and `README.txt`. Always excluded:
 `state/writer.lock`, the encryption key (back up `VIBERR_SECRET_ENCRYPTION_KEY`
-separately or the sealed columns are unreadable), `*.tmp`.
+separately or the sealed columns are unreadable, personal backend API keys included),
+`*.tmp`.
 
 ### `npm run restore`
 

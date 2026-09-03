@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
-import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
+import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import {
@@ -177,7 +177,12 @@ export function getControllerDock(
   }
   const config = resolveControllerConfig(input.dataRoot);
   return {
-    available: isBackendAvailable("claude"),
+    // Ruling 127: a controller turn runs on the ASKER's own Claude account, so
+    // the dock's "available" is a fact about the person the panel is open for,
+    // never about this deployment.
+    available: isBackendAvailableFor(db, viewer.id, "claude", {
+      dataRoot: input.dataRoot,
+    }),
     controllerName: config.name,
     unavailable: false,
     staleSelection,
@@ -210,12 +215,14 @@ export function dockTaskExists(
  *  itself and offers no composer, and the page it sits on is untouched. */
 export function unavailableDockView(
   db: DatabaseSync,
+  /** Ruling 127: even the refusal view answers availability for THIS person. */
+  viewer: { id: string },
   binding: { projectSlug: string | null; taskKey: string | null },
   dataRoot?: string,
 ): ControllerDockView {
   const scope = describeDockScope(db, binding);
   return {
-    available: isBackendAvailable("claude"),
+    available: isBackendAvailableFor(db, viewer.id, "claude", { dataRoot }),
     controllerName: resolveControllerConfig(dataRoot).name,
     unavailable: true,
     staleSelection: false,

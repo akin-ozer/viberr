@@ -230,6 +230,10 @@ describe("SEALED_STORES covers every sealed store", () => {
       "server/auth/oauth-providers.server.ts",
       "server/org/resources.server.ts",
       "server/secrets/pat-store.server.ts",
+      // Ruling 127: the personal Claude/Codex keys people paste on their
+      // profile. A `login` row has no box; a pasted one does, and a rotation
+      // that skipped this table would brick every person's agent runs.
+      "server/runtimes/backend-credentials.server.ts",
       // …and this module, which re-seals all of them.
       "server/secrets/key-rotation.server.ts",
     ].sort());
@@ -241,6 +245,8 @@ describe("SEALED_STORES covers every sealed store", () => {
       "org_mcp_servers",
       // Pass-25: the S3 audit-export secret access key.
       "s3_audit_config",
+      // Ruling 127: personal backend API keys / workspace access tokens.
+      "user_backend_credentials",
     ]);
   });
 });

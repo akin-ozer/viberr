@@ -204,18 +204,21 @@ const HEALTH_REPLY = z.object({
   projections: z.object({ projects: z.number(), tasks: z.number() }),
   watcher: z.boolean(),
   kbWatcher: z.boolean(),
-  backends: z.object({ claude: z.string(), codex: z.string() }),
+  backends: z.object({
+    claude: z.object({ connectedUsers: z.number() }),
+    codex: z.object({ connectedUsers: z.number() }),
+  }),
   maintenance: z.object({ scheduled: z.boolean() }),
   build: z.object({ version: z.string().nullable() }),
-  // Strict, and the two authority-gated keys are OPTIONAL: a member's row must
-  // carry neither, and the key-set assertions below read what actually came
-  // back rather than what a tolerant schema would let through.
+  // Ruling 127: strict, and NOTHING is authority-gated any more — the org-admin
+  // detail arm named a deployment config path, and there is no such path left.
+  // Every asker gets the same two facts, one of which is about their own
+  // account.
   backendCredentials: z.array(
     z.strictObject({
       backend: z.string(),
-      available: z.boolean(),
-      verification: z.string().optional(),
-      detail: z.string().nullable().optional(),
+      connectedUsers: z.number(),
+      askerConnected: z.boolean(),
     }),
   ),
   runs: z.object({ cap: z.number(), live: z.number(), queued: z.number() }),
@@ -431,35 +434,47 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     }
   });
 
-  it("keeps the credential EXPLANATION for org admins: it names deployment paths", async () => {
-    // `backendCredentialHealth`'s detail sentence interpolates the config
-    // directory it looked in (`/Users/<owner>/.claude` under the CLI-auth
-    // opt-in) and what to set instead. That is configuration, and configuration
-    // is org-admin territory — a member of no project reached it here before
-    // this, through a tool with no gate at all.
-    const member = parsed(
-      HEALTH_REPLY,
-      await call(ids.nonMember, "instance_health"),
+  it("answers every asker the same two facts, and `askerConnected` is about THEM (ruling 127)", async () => {
+    // Ruling 107 split this reading in two — everyone learned WHETHER a backend
+    // could run, only org admins learned WHY — because the "why" sentence
+    // interpolated the deployment's config directory. Ruling 127 deleted that
+    // sentence along with the instance credential it described, so the split
+    // has nothing left to protect: the org-admin arm is gone, and no row here
+    // names a host path, an environment variable or another person.
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
     );
-    for (const row of member.backendCredentials) {
-      expect(Object.keys(row).sort()).toEqual(["available", "backend"]);
+    await connectFakeBackend(app.db, ids.orgAdmin, "claude");
+    try {
+      const member = parsed(
+        HEALTH_REPLY,
+        await call(ids.nonMember, "instance_health"),
+      );
+      const admin = parsed(
+        HEALTH_REPLY,
+        await call(ids.orgAdmin, "instance_health"),
+      );
+      for (const row of [...member.backendCredentials, ...admin.backendCredentials]) {
+        expect(Object.keys(row).sort()).toEqual([
+          "askerConnected",
+          "backend",
+          "connectedUsers",
+        ]);
+      }
+      // The instance-level count is the same for both — it is a fact about the
+      // instance, not about the asker.
+      expect(member.backendCredentials.map((c) => c.connectedUsers)).toEqual(
+        admin.backendCredentials.map((c) => c.connectedUsers),
+      );
+      // …and the per-asker fact differs, which is the whole point of keeping it.
+      const claudeFor = (rows: typeof member.backendCredentials) =>
+        rows.find((c) => c.backend === "claude")!;
+      expect(claudeFor(admin.backendCredentials).askerConnected).toBe(true);
+      expect(claudeFor(member.backendCredentials).askerConnected).toBe(false);
+      expect(claudeFor(admin.backendCredentials).connectedUsers).toBe(1);
+    } finally {
+      await disconnectFakeBackend(app.db, ids.orgAdmin, "claude");
     }
-    const admin = parsed(
-      HEALTH_REPLY,
-      await call(ids.orgAdmin, "instance_health"),
-    );
-    for (const row of admin.backendCredentials) {
-      expect(Object.keys(row).sort()).toEqual([
-        "available",
-        "backend",
-        "detail",
-        "verification",
-      ]);
-    }
-    // Same availability either way: the fact is open, only the explanation moves.
-    expect(member.backendCredentials.map((c) => c.available)).toEqual(
-      admin.backendCredentials.map((c) => c.available),
-    );
   });
 });
 

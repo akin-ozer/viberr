@@ -25,6 +25,10 @@ import {
   updateUserFields,
 } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
+import {
+  retireUserBackends,
+  type BackendBinaries,
+} from "~/server/runtimes/backend-credentials.server";
 import { projectFilePath } from "~/server/files/file-store-root.server";
 import {
   readProjectFile,
@@ -404,7 +408,13 @@ export async function deleteOrgUser(
   db: DatabaseSync,
   userId: string,
   actor: AuditActor,
-  ctx: { dataRoot?: string } = {},
+  ctx: {
+    dataRoot?: string;
+    /** Ruling 127: the vendor binaries, when the caller already holds them.
+     *  Omitted, `retireUserBackends` resolves them itself; a test hands fakes
+     *  so removing an account never spawns a real `claude auth logout`. */
+    binaries?: BackendBinaries;
+  } = {},
 ): Promise<{ user: OrgUserView; toast: string; projectsPruned: string[] }> {
   const existing = findUserById(db, userId);
   if (!existing) throw AppError.notFound("No such user.");
@@ -418,6 +428,14 @@ export async function deleteOrgUser(
   // UI-29: prune BEFORE the identity/user rows go, so a failure here leaves the
   // account intact rather than half-deleted with live memberships.
   const projectsPruned = await pruneUserFromProjects(db, userId, actor, ctx);
+  // Ruling 127: the `user_backend_credentials` rows cascade with the account,
+  // but the vendor's own sign-in FILE in this person's runtime home does not —
+  // and nothing else on any path would ever remove it. Retire the accounts
+  // first (vendor logout, then the credential file, then the row), or removing
+  // somebody would leave their live Claude.ai / ChatGPT credential on this
+  // server forever, unrevokable by them and copied into every backup that
+  // includes the runtime volume. Transcripts are the run record and stay.
+  const backendsRetired = await retireUserBackends(db, userId, ctx);
   // Remove the better-auth identity too — otherwise the orphaned `user` row
   // (email is UNIQUE NOT NULL) makes re-creating the same email throw a raw
   // constraint mid-flow (pass-4 WI-3). Deleting the `user` row cascades its
@@ -434,6 +452,9 @@ export async function deleteOrgUser(
       email: existing.email,
       name: existing.name,
       projectsPruned,
+      // Ruling 127: which agent accounts were retired with this one, so the
+      // revocation is auditable rather than silent.
+      backendsRetired,
     },
   });
   return {
