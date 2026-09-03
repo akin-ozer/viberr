@@ -7,6 +7,19 @@ is in [validation/2026-09-01-doc-validation.md](validation/2026-09-01-doc-valida
 Viberr is **pre-production**: formats and schemas change without migrations, so trust the
 dated header and the code over anything undated.
 
+Updated 2026-09-02 for ruling 121 (branch `claude/per-user-codex-auth-difdnn`): agent backends
+are connected **per person** on Profile → Agent accounts, not per instance. Every page that
+described deployment-wide backend credentials, the shared runtime homes, the `/host-codex`
+mount or the container entrypoint was rewritten in that change. The primary rewrite is
+`domain/agents-and-runtime.md`, whose §2 carried the deployment-wide credential table and the
+app-owned config homes; the rest are `architecture/decisions.md`,
+`architecture/codebase-map.md`, `architecture/data-model.md`, `architecture/overview.md`,
+`architecture/file-formats.md`, `domain/auth-and-rbac.md`, `domain/task-lifecycle.md`,
+`domain/controller-and-goals.md`, `domain/operator.md`, `domain/github-delivery.md`,
+`ui/surfaces.md`, `operations/configuration.md`, `operations/deployment.md`,
+`operations/runbook.md`, `product/glossary.md`, `product/requirements-status.md`,
+`development/testing.md` and `development/scripts.md`.
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating
@@ -28,7 +41,7 @@ dated header and the code over anything undated.
 | Page | What it answers |
 |---|---|
 | [product/overview.md](product/overview.md) | Vision, personas, operating model, V1 scope, boundaries, phases |
-| [product/glossary.md](product/glossary.md) | Terms and enums: readiness, waiting, validation, packet kinds, capability modes, roles, run states … |
+| [product/glossary.md](product/glossary.md) | Terms and enums: readiness, waiting, validation, packet kinds, capability modes, roles, run states, agent accounts and the credential principal … |
 | [product/requirements-status.md](product/requirements-status.md) | Every PRD requirement (FR1–41, NFR1–18) with status and code location; amendment chronology; drift the PRD does not record |
 
 ### Architecture
@@ -37,10 +50,10 @@ dated header and the code over anything undated.
 |---|---|
 | [architecture/overview.md](architecture/overview.md) | The system in one read: stack, layer rules, read/write path, boot, timers, security |
 | [architecture/codebase-map.md](architecture/codebase-map.md) | Directory-by-directory map of `app/`, `db/`, `scripts/`, `test-support/` |
-| [architecture/data-model.md](architecture/data-model.md) | Data-root layout, every SQLite table (primary vs derived vs config), indexes, retention, ids |
+| [architecture/data-model.md](architecture/data-model.md) | Data-root layout including the per-person runtime homes, every SQLite table (primary vs derived vs config), indexes, retention, ids |
 | [architecture/file-formats.md](architecture/file-formats.md) | The canonical `project.md`, `task.md`, goal and agent-profile formats; timeline grammar; packet YAML (the `## Packet` section is pinned by a test) |
 | [architecture/projections-and-events.md](architecture/projections-and-events.md) | Writers, watcher, tolerant parsing and diagnostics, rebuilder, rescan/rebuild, SSE broker and client |
-| [architecture/decisions.md](architecture/decisions.md) | Conventions, 116 numbered owner rulings, the unrecorded decisions since 2026-08-20, the route map |
+| [architecture/decisions.md](architecture/decisions.md) | Conventions, 120 numbered owner rulings (1–121; the number 117 was never used), the unrecorded decisions since 2026-08-20, the route map |
 
 ### Domain
 
@@ -48,17 +61,17 @@ dated header and the code over anything undated.
 |---|---|
 | [domain/task-lifecycle.md](domain/task-lifecycle.md) | Governed mutation shape, RBAC matrix, creation, stages and boundaries, transitions, readiness/waiting/validation, ownership, engagements, packets, recommendations, schedules, delivery, the acceptance endings, archive, timeline, notifications |
 | [domain/operator.md](domain/operator.md) | The per-task coordinator: authority and gates, triggers, the turn, the 12 `viberr` tools, packets, guardrails |
-| [domain/agents-and-runtime.md](domain/agents-and-runtime.md) | Backends and credentials, models, a run's life (persistence, admission, streaming, failure kinds, resume), specialist dispatch and tools, capability catalog and enforcement, context mounting, workspaces and git, boot recovery, seeded catalog |
+| [domain/agents-and-runtime.md](domain/agents-and-runtime.md) | Backends, the credential principal and per-person runtime homes (ruling 121), models, a run's life (persistence, admission, streaming, failure kinds, resume), specialist dispatch and tools, capability catalog and enforcement, context mounting, workspaces and git, boot recovery, seeded catalog |
 | [domain/controller-and-goals.md](domain/controller-and-goals.md) | The instance controller: conversations, the 37 `viberr_controller` tools, `viberr_ops`, deployment locks, chained goals |
 | [domain/github-delivery.md](domain/github-delivery.md) | PATs and connections, repo attach, the delivery pipeline, PR adoption and collisions, revisions and verdicts, the reconciler, scope violations |
-| [domain/auth-and-rbac.md](domain/auth-and-rbac.md) | better-auth setup, CSRF, OAuth whitelist, org and project roles, enforcement, org settings, audit, insights, profile |
+| [domain/auth-and-rbac.md](domain/auth-and-rbac.md) | better-auth setup, CSRF, OAuth whitelist, org and project roles, enforcement, org settings, audit, insights, profile (incl. Agent accounts) |
 
 ### Operations
 
 | Page | What it answers |
 |---|---|
-| [operations/configuration.md](operations/configuration.md) | Every environment variable (required, schema-validated, raw reads), non-env settings, what the image bakes in |
-| [operations/deployment.md](operations/deployment.md) | Single-node Docker: secrets, TLS proxy, backends in the container, first run, persistence, backup/restore, re-baselining, the writer lock |
+| [operations/configuration.md](operations/configuration.md) | Every environment variable (required, schema-validated, raw reads), non-env settings including the per-person backend credentials, what the image bakes in |
+| [operations/deployment.md](operations/deployment.md) | Single-node Docker: secrets, TLS proxy, per-person agent accounts in the container, first run, persistence, backup/restore, re-baselining, the writer lock |
 | [operations/runbook.md](operations/runbook.md) | Day-2: store check, health fields and probes, rescan vs rebuild, diagnostics, GitHub and runtime issues, auth, retention, lock refusals, self-heal, backup |
 
 ### Development

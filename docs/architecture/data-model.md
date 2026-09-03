@@ -6,7 +6,9 @@
 > and `app/server/ops/maintenance.server.ts` (retention). Field-level file formats
 > are in [file-formats.md](file-formats.md). Verified against `main` @ `68b5480`
 > (2026-09-01); §5 and §6 re-verified 2026-09-02 against `pass32/implementation`
-> @ `478bed0`.
+> @ `478bed0`. Updated 2026-09-02 for ruling 121 (branch
+> `claude/per-user-codex-auth-difdnn`): per-person agent-backend credentials and
+> runtime homes.
 
 ## 1. The two stores and the rule that separates them
 
@@ -37,12 +39,18 @@ ${VIBERR_DATA_ROOT}/
   agents/
     profiles/<id>.md             org-level agent profile templates (operator, controller, specialists)
   runtimes/
-    claude-home/                 Claude SDK session transcripts (resumable state)
-    codex-home/                  Codex run home; may hold auth.json
+    users/                       per-person agent homes (ruling 121); one subdirectory per
+                                 connected person, created 0o700 on demand
   kb/                            knowledge-base folders (store://kb/<dir>/)
   skills/                        skill folders (store://skills/<name>/SKILL.md)
+  audit-exports/                 rows the 90-day audit purge exported before deleting
   state/                         projection.sqlite (+ -wal/-shm) and writer.lock
 ```
+
+*(Corrected 2026-09-02 — `audit-exports` was already in `DATA_ROOT_SUBDIRS` and missing
+here; ruling 121 replaced the shared `runtimes/claude-home` and `runtimes/codex-home` with
+`runtimes/users`, whose per-person subdirectories are created on demand rather than at
+boot.)*
 
 Created lazily by the code that needs them:
 
@@ -55,6 +63,9 @@ Created lazily by the code that needs them:
   projects/<slug>/goals/<goal-id>.md                chained goals (ruling 99)
   projects/<slug>/.mirror or equivalent             per-project git mirror cache (repo-mirror.server.ts)
   agents/definitions/operator.md, controller.md     system-profile doctrine files shipped by boot
+  runtimes/users/<userId>/claude-home/               that person's CLAUDE_CONFIG_DIR (ruling 121): the vendor's own
+                                                    sign-in file plus their Claude transcripts under projects/
+  runtimes/users/<userId>/codex-home/                that person's CODEX_HOME: auth.json plus sessions/
   runtimes/<backend>/<runId>.jsonl                  raw NDJSON transcript of every run (canonical run truth)
   runtimes/uv-cache/, runtimes/uv-python/           uv's cache for Python MCP servers (container)
   audit-exports/audit-events-<YYYY-MM-DD>.jsonl     rows the 90-day audit purge exported before deleting
@@ -113,6 +124,7 @@ files) · **C** cache/operational (safe to lose).
 | `github_connections` | P | Org-level owner connections: `owner` → `pat_id`, `is_default`, `repos_count`, `expires_at`. |
 | `project_github_credentials` | P | Which PAT a project uses (one per project). |
 | `scope_violations` | P | Open/resolved PAT scope violations per project (and optional task); at most one open row per `(project, scope, task)`. |
+| `user_backend_credentials` | P | Ruling 121: one row per `(user, backend)` — how that person connected Claude/Codex. `kind = 'login'` carries NO secret (the vendor binary holds it in `runtimes/users/<id>/…`), only `method` (`claudeai \| console \| device`) and the non-secret `detail_json` the vendor reported; `api_key`/`access_token` carry a sealed `secret_box` + `secret_suffix`. `verified_at` is the last time the provider itself accepted the value (null on a ChatGPT workspace token, which has no free probe). Connecting a new method REPLACES the row. |
 
 ### Org resources, models, controller
 
@@ -128,9 +140,17 @@ files) · **C** cache/operational (safe to lose).
 
 | Table | Kind | What it holds |
 |---|---|---|
-| `agent_runs` | P | One row per run: `kind` (`operator \| primary \| reviewer \| controller`, a **delivery axis**: `primary` = delivering, `reviewer` = any supporting run), `backend`, `model`, `session_id`, `state` (`queued \| running \| finished \| error \| interrupted`), `phase`/`step`, token and cost counters, `interrupted_by`, `agent_profile_id`, `outcome_key`. Controller turns use `project_slug = ''` and `task_key = <conversation id>`. |
+| `agent_runs` | P | One row per run: `kind` (`operator \| primary \| reviewer \| controller`, a **delivery axis**: `primary` = delivering, `reviewer` = any supporting run), `backend`, `model`, `session_id`, `state` (`queued \| running \| finished \| error \| interrupted`), `phase`/`step`, token and cost counters, `interrupted_by`, `agent_profile_id`, `outcome_key`, `credential_user_id`. Controller turns use `project_slug = ''` and `task_key = <conversation id>`. |
 | `run_log_lines` | C | Projected console lines per run (`raw_json`, `display_json`, `seq`). Retained 30 days; the `.jsonl` file is the truth. |
 | `staged_outcomes` | C | A Claude `report_outcome` envelope staged mid-run until the completion callback consumes it; orphans pruned after 24 h. |
+
+`agent_runs.credential_user_id` is the run's **credential principal** (ruling 121):
+whose connected backend account it billed, and therefore whose runtime home holds
+its transcript. Task runs carry the task owner, controller turns the asker; a run
+refused because that person has not connected THAT backend still records them, so
+the refusal is auditable rather than anonymous. It is NULL only on a run that was
+refused before any credential was looked up: an unowned task, or one whose owner
+account is gone or disabled — no process was ever started in either case.
 
 Two partial unique indexes on `agent_runs` enforce single-flight at the DB layer:
 `idx_agent_runs__one_delivering` (one live `primary` run per task) and
@@ -154,7 +174,7 @@ tables are the documented exception (singular, camelCase). Timestamps are UTC IS
 | `notifications` | newest 500 per user | `applyRetention` |
 | `staged_outcomes` | 24 h TTL | `agent-outcome.server.ts` on consumption |
 | `runtimes/<backend>/*.jsonl` | `VIBERR_TRANSCRIPT_RETENTION_DAYS` (30) | `pruneRuntimeTranscripts` |
-| `claude-home/projects/`, `codex-home/sessions/` | `VIBERR_SESSION_HOME_RETENTION_DAYS` (30) | `pruneRuntimeTranscripts` |
+| `runtimes/users/*/claude-home/projects/**/*.jsonl`, `runtimes/users/*/codex-home/sessions/**/*.jsonl` | `VIBERR_SESSION_HOME_RETENTION_DAYS` (30). Extension-gated to `*.jsonl`: `auth.json`, `.credentials.json` and `.claude.json` are the vendor-held sign-ins and are never touched, so retention cannot sign a person out (ruling 121) | `pruneRuntimeTranscripts` |
 | task `workspace/` clones | removed once the task is in its project's terminal stage, only when no run is live | `reclaimTerminalTaskWorkspaces` (boot after run recovery; each maintenance pass) |
 | `provenance` | none | manual `DELETE … WHERE observed_at < …; VACUUM;` with the app stopped |
 | better-auth `session` rows | none on a timer; expired rows are simply never honoured | sign-out, password change, admin disable/reset, or the auth guard on a disabled user |
@@ -175,7 +195,8 @@ the remedy: a CHECK that refuses a value the build now produces, and a column th
 rebuilder INSERTs that the live table lacks. The second shape is repaired at open for
 the columns that carry it: `ensureRunRowColumns` (`app/server/db/sqlite.server.ts`)
 `ALTER TABLE agent_runs ADD COLUMN`s each missing `RUN_ROW_COLUMNS` entry
-(`dispatched_by_name`, `dispatched_by_user_id`) idempotently on every boot, so additive
+(`dispatched_by_name`, `dispatched_by_user_id`, `credential_user_id`) idempotently on
+every boot, so additive
 drift there needs no operator action at all. For a CHECK that no ALTER can widen, the
 remedy is to re-baseline — preferably preserve-copy (fresh file + migrations, then copy
 the non-rebuildable tables across with foreign keys off, the shape

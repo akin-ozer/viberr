@@ -9,6 +9,11 @@ against the tree for several passes and is stale in places; the code-verified re
 [`../validation/2026-09-01-doc-validation.md`](../validation/2026-09-01-doc-validation.md).
 Where `architecture.md` and the code disagree, the code wins.)*
 
+*Updated 2026-09-02 for ruling 121 (branch `claude/per-user-codex-auth-difdnn`): ruling 121 is
+recorded below, the route map gains `/resources/backend-login`, and rulings 49, 84 and 107 carry
+dated correction notes where their text described the deployment-wide backend credentials or the
+shared runtime homes as current.*
+
 **Provenance.** The content below was recovered from `docs/build/CONVENTIONS.md`, which was
 deleted in commit c1acf2c ("Remove obsolete code and simplify project structure") along
 with the rest of `docs/build/`. Sixteen comments in fifteen files still cited it by name
@@ -519,6 +524,13 @@ inventory is not regenerated automatically and has drifted; the verified module 
     (`stripUngovernedRepoCatalog` in `app/server/runtimes/skill-mount.server.ts` — moved there
     from `specialist-run.server.ts`, path corrected 2026-09-01;
     `app/server/runtimes/claude-runtime.server.ts`)
+    *(Corrected 2026-09-02, ruling 121 — the isolation stands but its owner changed. There is
+    no app-owned deployment-wide `CLAUDE_CONFIG_DIR` or `CODEX_HOME` any more: a run's child
+    gets the CREDENTIAL PRINCIPAL's own home,
+    `<dataRoot>/runtimes/users/<userId>/{claude-home,codex-home}`, from `runCredentialFor`
+    (`backend-credentials.server.ts`). The user-level catalog the host account carries is still
+    never reachable, and the Codex flags are unchanged; what the catalog is isolated from is now
+    one person's runtime home rather than one instance's.)*
 
 50. **R18-4 (2026-08-05): branch-collision stays a human-gated packet — do NOT auto-reset.** A
     stale remote task branch (a reused task key whose old branch still exists on GitHub) forces
@@ -1089,6 +1101,12 @@ inventory is not regenerated automatically and has drifted; the verified module 
     `auth.json` into the container so the Codex parity legs could run — is deliberately NOT promoted:
     it is an operational step taken during the pass, not a rule that binds the product, and canon that
     absorbs run-log entries stops being readable as law.)*
+    *(Corrected 2026-09-02, ruling 121 — that R21-1 step is now HISTORY, not a fallback anybody
+    can repeat: there is no shared `runtimes/codex-home` to copy an `auth.json` into, no
+    `/host-codex` mount and no entrypoint that seeds one. A person signs Codex in for themselves
+    on Profile → Agent accounts and the vendor binary writes the credential into
+    `runtimes/users/<userId>/codex-home/`. Left in place because the paragraph is about why an
+    operational step was never promoted to a ruling, which is still the point it makes.)*
     (`consultationDisclosure` + the `open_decision_packet` handler in
     `app/server/tasks/operator-toolkit.server.ts`, pinned by
     `app/server/tasks/operator-actions.server.test.ts`; the prompt clause is `triageQualityGate` in
@@ -1647,6 +1665,15 @@ the quieter packet or the bare owner cell as drift.)*
     explains an unusable credential by naming the config directory it looked in
     and what to set instead: that is deployment configuration, and this review
     found a member of no project reading a host path through an ungated tool),
+    *(Corrected 2026-09-02, ruling 121 — the org-admin credential-detail arm is
+    DELETED, not narrowed. `backendCredentialHealth` is gone with the
+    instance-level credential it described, so there is no host path left for a
+    tool to leak: `instance_health` now reports, per backend, `connectedUsers`
+    (how many people have connected it) and `askerConnected` (whether the person
+    asking has), both open to anyone, because a count of colleagues and a fact
+    about yourself name no deployment configuration. A person who is not
+    connected is told to connect it on their own Profile → Agent accounts, which
+    is an in-app remedy rather than a config directory.)*
     `read_run_log` (a member of the run's project; a controller turn's log
     follows conversation ownership with org-admin supervision, via
     `canReadControllerRunLog` — the exact gate `/resources/run-log` applies,
@@ -1918,6 +1945,34 @@ ruling 44 says every one should be. Where recorded today is named per item.)*
     in the project editor; a template whose stored role repeats its name prefills empty
     with an inline hint, so the one-time cost is a typed role, never a mystery grey Save.
 
+121. **Agent backends authenticate per person, never per instance (owner, 2026-09-02).** The
+    deployment-wide `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` / `VIBERR_CLAUDE_USE_CLI_AUTH`
+    / `CLAUDE_CONFIG_DIR` / `CODEX_ACCESS_TOKEN` / `CODEX_API_KEY` / `OPENAI_API_KEY` /
+    `CODEX_HOME` / `VIBERR_CODEX_USE_CLI_AUTH` credentials, the shared `runtimes/claude-home`
+    and `runtimes/codex-home`, the compose `/host-codex` mount and the entrypoint's auth seeding
+    are removed. Each person connects Claude and Codex on Profile → Agent accounts: a hosted
+    sign-in driven through the UNMODIFIED bundled vendor binary (`claude auth login`,
+    `codex login --device-auth`) whose credential lives only in that person's runtime home
+    (`<dataRoot>/runtimes/users/<userId>/{claude-home,codex-home}`), or a pasted API key /
+    workspace access token sealed in `user_backend_credentials`. Viberr never implements the
+    vendors' OAuth, never reads, copies or stores a Claude.ai or ChatGPT **session** token, and
+    never offers a setup-token field (Anthropic's Claude Code legal page: hosted platforms must
+    have each end user authenticate with their own credentials, billed to them; apps may not
+    collect or store Claude.ai session tokens); the only vendor-issued token it ever holds is
+    the ChatGPT workspace access token a person deliberately pastes, sealed like any API key.
+    **Every run has a credential principal**, persisted as `agent_runs.credential_user_id`:
+    task runs — operator, specialist, resume, scheduled, boot recovery, retry — use the **task
+    owner's** accounts; controller turns use the asker's Claude account. A task without an
+    owner cannot run agents (an honest `run·unavailable` error run and the usual blocked
+    packet, no process started), which is why **creation now seats the creator as owner**.
+    Spawn env hygiene is unchanged: the child sees only the selected principal's credential,
+    and the run sink redacts that value from every persisted line. Instance-level "backend
+    configured" surfaces are gone: the task page, packets and the Agents page answer for the
+    task owner, the controller for the asker, health for a connected-user count.
+    (`app/server/runtimes/user-homes.server.ts`, `backend-credentials.server.ts`,
+    `run-principal.server.ts`, `backend-login.server.ts`; the surface is Profile → Agent accounts
+    with the poll route `/resources/backend-login`.)
+
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates
 that pass and remains unnumbered.)*
@@ -1939,6 +1994,7 @@ that pass and remains unnumbered.)*
 /profile   /notifications   /notifications/read   /prefs/theme
 /resources/events  (SSE)   /resources/health   /resources/run-log
 /resources/search   /resources/session-export   /resources/model-catalog
+/resources/backend-login                (ruling 121 — the signed-in viewer's own sign-in session)
 ```
 
 *(Corrected 2026-08-06, pass 19, against `app/routes.ts`: `/projects`, `/notifications/read`,
@@ -1947,3 +2003,9 @@ were never added here.)*
 
 *(Corrected 2026-09-01: `/org/settings/audit-export` and `/insights` ship and were missing. The
 per-route guard and form-intent inventory is in [`../ui/surfaces.md`](../ui/surfaces.md).)*
+
+*(Updated 2026-09-02 for ruling 121, branch `claude/per-user-codex-auth-difdnn`:
+`/resources/backend-login` — `GET ?backend=claude|codex` behind `requireUser`, answering the
+CALLER's own live sign-in session plus the public half of their `userBackendHealth` (no
+`verification` verdict, no ids), so the Profile poller stops when the backend flips to
+available. It reads nobody else's session.)*

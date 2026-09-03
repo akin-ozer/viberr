@@ -3,7 +3,9 @@
 > Directory by directory: what lives where, what each module owns, and the
 > import rules between layers. Generated from the tree on `main` @ `68b5480`
 > (2026-09-01) and the header comment of each module. Counts are approximate
-> and will drift; the structure will not.
+> and will drift; the structure will not. Updated 2026-09-02 for ruling 121 (branch
+> `claude/per-user-codex-auth-difdnn`): the per-person backend modules under
+> `server/runtimes/`, the deleted config-dir resolvers, and the deleted image entrypoint.
 
 ## 1. Top level
 
@@ -11,15 +13,19 @@
 app/                 the application (React Router 8 framework mode, SSR)
 db/migrations/       0001_baseline.sql — the whole SQLite schema, squashed
 scripts/             operational CLIs run with tsx (seed, rescan, backup, restore, keys, store:check, e2e)
+                     (no docker-entrypoint.sh since ruling 121: the image declares no ENTRYPOINT)
 e2e/                 Playwright specs + the login fixture (auth.setup.ts)
-test-support/        vitest fakes: app, db, store, runtime, github, demo seed
+test-support/        vitest fakes: app, db, store, runtime, github, demo seed, backend credentials
+                     (connectFakeBackend / disconnectFakeBackend, ruling 121), fake vendor
+                     binaries (writeFakeVendorBinaries, the sign-in driver's real child process)
 tools/oxlint/        the vendored anti-slop lint plugin (15 rules)
 design/              the HTML/JSX prototype the UI was ported from, the design system, a PRD mirror
 planning/            canon (planning-artifacts/) and the discovery-pass ledgers
 qa/                  smoke-run evidence notes written by agents during live passes
 docs/                this documentation set
 compose.yml          production-shaped single container; compose.e2e.yml is the isolated e2e stack
-Dockerfile           three stages: prod-deps, build, runtime (node:26-slim + git + chromium + uv)
+Dockerfile           three stages: prod-deps, build, runtime (node:26-slim + git + chromium + uv);
+                     no ENTRYPOINT, no backend credential, no runtime home baked in (ruling 121)
 .claude/launch.json  two dev launchers (docker-data vs hermetic ./data)
 ```
 
@@ -68,7 +74,7 @@ Tests are co-located (`foo.server.test.ts`). There are no `utils.ts` dumping gro
 | `prefs/` | `user_prefs` key-value store. |
 | `projections/` | Rebuilder (files → SQLite), full rebuild, rescan, single-flight cooldowns, board/task/review/activity/agent-deployment/decision/notification/policy-violation read models, task activity ("gone quiet"). |
 | `provenance/` | Read and write layers over the `provenance` table. |
-| `runtimes/` | Adapter interface, Claude and Codex adapters and their config-dir resolvers, runtime registry (availability, spawn env filtering), run service (start/resume/interrupt/log, concurrency cap and queue), run store (raw NDJSON + rows), run sink (persist then publish), run events, run projection, wire-format normalizer, model catalog and availability, backend quota telemetry, skill mount (workspace `.claude` owner), session export, run recovery, operator run engine. |
+| `runtimes/` | Adapter interface, Claude and Codex adapters, runtime registry (spawn env filtering + adapter construction only), and the ruling-121 per-person auth trio: `user-homes.server.ts` (the one resolver for `runtimes/users/<userId>/{claude-home,codex-home}`), `backend-credentials.server.ts` (the `user_backend_credentials` store, provider verification, vendor logout, per-person health, `runCredentialFor`) and `run-principal.server.ts` (owner/asker resolution and the single refusal sentence), plus `backend-login.server.ts` (the hosted sign-in driver over the unmodified vendor binaries). Then run service (start/resume/interrupt/log, concurrency cap and queue), run store (raw NDJSON + rows), run sink (persist then publish), run events, run projection, wire-format normalizer, model catalog and availability, backend quota telemetry, skill mount (workspace `.claude` owner), session export, run recovery, operator run engine. *(Corrected 2026-09-02, ruling 121 — `claude-config.server.ts` and `codex-config.server.ts`, the shared config-dir resolvers, and the registry's whole availability half (`isBackendAvailable`, `backendCredentialHealth`, the CLI-auth diagnostics, `setBackendAvailability`, `codexSpawnEnv`/`claudeSpawnEnv`) are deleted, not moved.)* |
 | `secrets/` | Secret box (AES-256-GCM `v1$iv$ct$tag`), PAT store and validator, key rotation reseal, git-output redaction. |
 | `seed/` | Product seed (clean sheet), the built-in agent catalog, shipped assets (skills, definitions, profiles) and the boot backfill, base-agent deployment, seed credentials. |
 | `settings/` | `instance_settings` JSON key-value (concurrency cap, quota observations). |
@@ -82,7 +88,7 @@ Tests are co-located (`foo.server.test.ts`). There are no `utils.ts` dumping gro
 | `shell/` | Workspace rail (`nav.ts` order: Board, Review queue, Controller, Agents, Policy, GitHub, Activity, Settings), topbar, ⌘K palette and its server query, bell popover, user menu, theme preference, route pending bar, CSRF result helper. |
 | `home/` | `/`: project cards, pinned/all/archived groups, new-project modal (name, key, connection, repo, workflow, policy preset), project creation server logic, org tiles, admin store strip (re-scan, rebuild). |
 | `board/` | Board columns, filters (URL params), dnd-kit drag with server-authoritative drop resolution, list view, new-task dialog, board-drop acceptance ceremony. |
-| `task-detail/` | Hero, diagnostics, recommendations, execution profile with run controls and scheduling, decision packet, live run strip, agent logs, timeline (Lexical composer with @mention autocomplete), attachments panel and lightbox, side panels (GitHub trace, current state, permissions), accept/release/archive confirms, continuity recovery panel. |
+| `task-detail/` | Hero, diagnostics, recommendations, execution profile with run controls and scheduling, decision packet, live run strip, agent logs, timeline (Lexical composer with @mention autocomplete), attachments panel and lightbox, side panels (GitHub trace, current state, permissions), accept/release/archive confirms, continuity recovery panel, plus the per-person run principal every run control answers from (`run-principal-view.ts`, ruling 121). |
 | `runtime/` | Run panels (live strip, log console, raw view), the dedicated run-log SSE consumer, log noise filter and clock helpers. |
 | `review/` | The review queue split by acceptance authority. |
 | `agents/` | Profiles master-detail, create/edit modal, capability matrix modal, roster assembly, profile CRUD actions. |
@@ -94,7 +100,7 @@ Tests are co-located (`foo.server.test.ts`). There are no `utils.ts` dumping gro
 | `kb-browser/` | The store folder file manager (upload, folders, GitHub import, SKILL.md editing). |
 | `controller/` | The conversation surface and the Goals panel. |
 | `notifications/` | The inbox page and the shared notification row. |
-| `profile/` | Identity, notification routing, appearance, access view, GitHub identity, password change. |
+| `profile/` | Identity, notification routing, appearance, access view, GitHub identity, password change, and the **Agent accounts** panel (ruling 121): one card per backend with the hosted sign-in, the paste forms and Disconnect, polling `/resources/backend-login` while a sign-in is live. |
 | `insights/` | Read-only run analytics dashboard. |
 | `live-updates/` | `useLiveUpdates`: SSE subscription → debounced loader revalidation. |
 

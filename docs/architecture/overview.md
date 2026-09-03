@@ -7,7 +7,9 @@
 > `68b5480` (2026-09-01). For the directory-by-directory map see
 > [codebase-map.md](codebase-map.md); for the storage model see
 > [data-model.md](data-model.md); for the binding rulings see
-> [decisions.md](decisions.md).
+> [decisions.md](decisions.md). Updated 2026-09-02 for ruling 121 (branch
+> `claude/per-user-codex-auth-difdnn`): the data-root subdirectory list and the security
+> posture, both of which described deployment-wide agent credentials.
 
 ## 1. One process, one data root
 
@@ -115,7 +117,10 @@ active loaders (300 ms debounce); run logs are fetched by reference from
 2. Parse env once; warn when OAuth is configured without `BETTER_AUTH_URL` or when a
    production origin is plain `http://`.
 3. `ensureDataRootDirs` (`projects`, `agents`, `agents/profiles`, `runtimes`,
-   `runtimes/claude-home`, `runtimes/codex-home`, `kb`, `skills`, `state`).
+   `runtimes/users`, `kb`, `skills`, `audit-exports`, `state`). *(Corrected 2026-09-02 —
+   `audit-exports` was missing, and ruling 121 replaced the shared
+   `runtimes/claude-home` / `runtimes/codex-home` with `runtimes/users`, under which each
+   person's own `<userId>/{claude-home,codex-home}` is created 0o700 on demand.)*
 4. Take `state/writer.lock` (refuse with the holder named, exit 1) and arm the
    SIGINT/SIGTERM shutdown; start the 20 s lock-ownership guard (fails closed).
 5. Seed the shipped agent assets (skills, operator and controller definitions, base
@@ -193,15 +198,29 @@ with retention is in [data-model.md](data-model.md).
 - **Authorization**: membership from `project.md`, one role → action table, audited
   org-admin override, audited denials, project existence never disclosed to
   non-members.
-- **Secrets**: env-only keys; AES-256-GCM sealed columns with lazy key rotation; the
-  PAT reaches git only through `GIT_ASKPASS`; git output and run-log lines are redacted;
-  SSE payloads are references, never content.
+- **Secrets**: env-only keys; AES-256-GCM sealed columns with lazy key rotation (GitHub
+  PATs, MCP credentials, OAuth client secrets, the S3 key, and the personal backend API
+  keys of ruling 121); the PAT reaches git only through `GIT_ASKPASS`; git output and
+  run-log lines are redacted, including each run's own credential value; SSE payloads are
+  references, never content.
+- **Agent accounts are per person (ruling 121)**: there is no deployment-wide provider
+  credential. Each person connects Claude and Codex on Profile → Agent accounts; a hosted
+  sign-in is executed by the unmodified vendor binary and its credential file stays in
+  that person's own runtime home (`<dataRoot>/runtimes/users/<userId>/{claude-home,
+  codex-home}`, mode 0700), while a pasted key or workspace token is sealed in
+  `user_backend_credentials` and never returned to a loader. Every run resolves ONE
+  principal (the task owner, or the asker on a controller turn), persisted as
+  `agent_runs.credential_user_id`; a run with no available principal is refused before any
+  process starts. Viberr implements none of the vendors' OAuth and stores no Claude.ai or
+  ChatGPT session token.
 - **Agent confinement**: Claude deny lists bind under `bypassPermissions`; Codex sandbox
-  mode from grants plus a dedicated `CODEX_HOME`; the repo's own `.claude` catalog is
-  stripped and only granted skills are mounted; reserved MCP names are enforced at the
+  mode from grants plus the principal's own `CODEX_HOME`; the repo's own `.claude` catalog
+  is stripped and only granted skills are mounted; reserved MCP names are enforced at the
   writer, picker and resolver; the browser MCP is isolated and capability-gated; the
-  in-process GitHub read tool scopes every path under the task's own repo; credentials
-  are filtered out of every child environment.
+  in-process GitHub read tool scopes every path under the task's own repo; every child env
+  starts from `filteredSpawnEnv()`, which strips every credential-shaped variable AND
+  both vendor home variables, and gains back only the one principal's credential and the
+  one home they own.
 - **Ops**: single-writer lock with a fail-closed guard, WAL checkpoint on shutdown,
   self-heal on corruption, liveness vs readiness on `/resources/health`.
 

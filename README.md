@@ -27,9 +27,11 @@ audit, notifications, run history — never canonical business truth.
 
 Stack: React Router 8 (framework mode, SSR) · Node >= 26 · TypeScript 7 · `node:sqlite` (WAL)
 · Zod v4 · SSE for live updates (no websockets) · the ported `viberr.css` design system
-(no Tailwind). Agent runtimes: Claude Agent SDK + Codex SDK — configure a credential for
-at least one to run real agents. A backend with no credential is reported unavailable and
-runs on it fail fast with an honest error.
+(no Tailwind). Agent runtimes: Claude Agent SDK + Codex SDK. Each person connects their
+own Claude and Codex accounts on Profile → Agent accounts (ruling 121), and every run
+bills exactly one person: the task owner on a task, the asker on a controller
+conversation. A backend nobody connected simply has no runs; a run whose principal has
+not connected it fails fast with an honest error and starts no process.
 
 **Status: pre-production.** Schema and file formats change without migrations or
 back-compat.
@@ -78,7 +80,8 @@ notifications start empty, and no run history is ever fabricated — agent runs 
 from real runs you start. `npm run seed -- --reset` wipes projects, agent profile
 templates, org knowledge bases, skills and MCP server rows, runtime transcripts, user
 prefs, scope violations and all derived state back to that clean sheet (users/auth,
-GitHub connections and PATs, instance settings and the runtime credential homes survive).
+GitHub connections and PATs, instance settings and every person's connected agent
+accounts, including their runtime homes under `runtimes/users/`, survive).
 
 Without `npm run seed`, an empty instance boots too: when the users table is empty the
 server creates the same bootstrap admin at startup — set `VIBERR_SEED_ADMIN_EMAIL` /
@@ -108,37 +111,56 @@ Details for each: [`docs/development/scripts.md`](docs/development/scripts.md).
 
 ## Enabling real agent backends
 
-Out of the box no agent backend is configured, so runs fail fast with an honest
-"backend unavailable" error. To run agents you can use a
-**subscription (no per-token API key)** or an API key; set it in `.env` and restart —
-detection is presence-only, no paid call, re-checked on every probe:
+There is nothing to put in `.env` (ruling 121). **Every person connects Claude and Codex
+for themselves**, in the app, on **Profile → Agent accounts**. Every agent run then bills
+exactly one person: a run on a task uses the **task owner's** accounts, and a controller
+conversation uses the **asker's** Claude account. A task with no owner cannot run agents;
+it says so and starts no process.
 
-- **Claude — Pro/Max subscription:** `claude setup-token` (once, on any logged-in
-  machine) → `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…`. _(Or pay-as-you-go
-  `ANTHROPIC_API_KEY=sk-ant-…`.)_
-- **Codex — ChatGPT Business/Enterprise subscription (recommended for the
-  container):** create a [Codex access token](https://learn.chatgpt.com/docs/enterprise/access-tokens)
-  in the ChatGPT workspace and set `CODEX_ACCESS_TOKEN=…`. It uses workspace
-  subscription entitlements—not Platform API billing—and requires no host
-  `~/.codex` mount.
-- **Codex — other ChatGPT plans:** run `codex login`, then copy only
-  `~/.codex/auth.json` to `./docker-data/runtimes/codex-home/auth.json` and set
-  `VIBERR_CODEX_USE_CLI_AUTH=1`. The dedicated runtime directory is already on
-  the app's `/data` volume, so login refresh and resumable sessions persist
-  without importing personal config, MCP servers, rules, or skills. _(Or use `CODEX_API_KEY` /
-  `OPENAI_API_KEY` for usage-based Platform billing.)_
+Each backend card offers a hosted sign-in and a pasted credential:
 
-The dedicated Codex home avoids importing the host's full personal setup, but
-it is not a security sandbox from autonomous coding runs in the same container.
-For untrusted tasks, run Codex under a separate OS user/container with only the
-task workspace mounted and keep delivery credentials in the server process.
+- **Claude:** "Sign in with Claude" (a Claude Pro/Max subscription) or "Sign in with
+  Console", both driven through the unmodified bundled `claude` binary, or paste a Console
+  API key (`sk-ant-…`).
+- **Codex:** "Sign in with ChatGPT", a device-code sign-in through the bundled `codex`
+  binary, or paste an OpenAI Platform API key, or paste a ChatGPT **workspace access
+  token** (workspace entitlements rather than Platform billing; stored unverified, because
+  there is no free way to check one).
 
-Confirm what's live: `GET /resources/health` → `backends: { claude, codex }` reports
-`real` vs `unavailable` — `real` means a credential is configured/detected (presence
-only; an expired token still reads `real`), `unavailable` means runs on that backend fail
-fast. New runs then stream real SDK output; raw NDJSON of every run is
-persisted under `<data root>/runtimes/<backend>/`. Container specifics:
-[`docs/operations/deployment.md`](docs/operations/deployment.md); how runs are confined:
+**Viberr never stores your sign-in tokens.** It does not implement the vendors' OAuth,
+never reads or copies a Claude.ai or ChatGPT session token, and offers no "paste your
+setup-token" field. Anthropic's [Claude Code legal and compliance
+page](https://code.claude.com/docs/en/legal-and-compliance) requires a platform that hosts
+Claude Code to have each end user authenticate with their own credentials, billed to them,
+and forbids apps from collecting or storing Claude.ai credentials. So a hosted sign-in is
+run by the vendor's own binary and the credential it writes stays in that person's runtime
+home on this server, at `docker-data/runtimes/users/<userId>/claude-home/` or
+`.../codex-home/` (a directory Viberr creates mode 0700, and nothing else about that
+file). A pasted key is sealed with `VIBERR_SECRET_ENCRYPTION_KEY`
+in the database, is never shown again (only its last 4 characters), and reaches only the
+child process of a run that person's account is paying for; the run sink redacts it from
+every persisted log line.
+
+The device-code sign-in for Codex is what OpenAI ships for headless machines, and some
+ChatGPT workspaces have it switched off. If the card reports that device code
+authorization is not enabled, ask your ChatGPT workspace admin to enable it, or paste an
+API key or a workspace access token instead.
+
+Those runtime homes live on the `/data` volume, so sign-ins and resumable sessions survive
+a container restart. Wiping the volume signs everyone out: the card then reads "sign-in
+file missing" and the person signs in again. A runtime home is not a security sandbox from
+an autonomous coding run in the same container. For untrusted tasks, run agents under a
+separate OS user or container with only the task workspace mounted, and keep delivery
+credentials in the server process.
+
+Confirm what's live: `GET /resources/health` reports `backends: { claude: { connectedUsers
+}, codex: { connectedUsers } }`, a count of the people on this instance who have connected
+that backend. Zero is a normal reading, never a fault: it means nobody has connected it
+yet. It is still not a validity check. Whether a particular run can start is a fact about
+its own principal, shown on the task page and the Agents page. New runs stream real SDK
+output; raw NDJSON of every run is persisted under `<data root>/runtimes/<backend>/`.
+Container specifics: [`docs/operations/deployment.md`](docs/operations/deployment.md); how
+runs are confined:
 [`docs/domain/agents-and-runtime.md`](docs/domain/agents-and-runtime.md).
 
 ## Enabling GitHub integration
@@ -196,9 +218,12 @@ host) and speaks **plain HTTP** — for anything beyond localhost, front it with
 TLS-terminating reverse proxy, set `BETTER_AUTH_URL` to the public https origin and
 `VIBERR_TRUST_PROXY=1`. Skipping the proxy gives you a silent login loop, not an
 insecure-but-working app; the deployment guide explains why. All state lives in the
-volume mounted at `/data` (`./docker-data` by default). Back it up with `npm run backup`
+volume mounted at `/data` (`./docker-data` by default), including each person's connected
+agent accounts under `runtimes/users/`. Back it up with `npm run backup`
 (a raw copy of the live SQLite file misses rows still in the WAL) and keep
-`VIBERR_SECRET_ENCRYPTION_KEY` with the backup. `npm run seed` against a running
+`VIBERR_SECRET_ENCRYPTION_KEY` with the backup; the default backup leaves `runtimes/` out
+because it holds live sign-ins, so a restore asks people to sign in again unless you pass
+`--include-runtimes` and treat the artefact as a secret. `npm run seed` against a running
 container is **refused**: it would be a second writer on the data root. The compose file
 wires a liveness healthcheck against `/resources/health` and `restart: unless-stopped`.
 See [docs/operations/deployment.md](docs/operations/deployment.md) for the full
@@ -212,8 +237,9 @@ single-node story (TLS, backup/restore, projection rebuild, the writer lock) and
 backends, browser, disk, maintenance, build }` — `watcher` / `kbWatcher` report whether
 the file-store and knowledge-base watchers are alive, `lock: { pid, hostname, startedAt }`
 names the process holding the single-writer lock on this data root (one app process per
-data root, ever), `backends: { claude, codex }` reports `real`/`unavailable` per runtime
-(see [Enabling real agent backends](#enabling-real-agent-backends)), `disk` carries the
+data root, ever), `backends: { claude: { connectedUsers }, codex: { connectedUsers } }`
+counts the people who have connected that backend (zero is a normal reading, not a fault;
+see [Enabling real agent backends](#enabling-real-agent-backends)), `disk` carries the
 free-space status and `maintenance` the last retention pass. The bare URL is a liveness
 probe (`200` even when `status: "degraded"`); `?probe=readiness` returns `503` while
 anything is degraded. It returns `503` with `{ ok: false, status: "down" }` if the
@@ -240,7 +266,7 @@ app/
   app.css          # the ported viberr.css design system + marked additions
 db/migrations/     # one squashed SQL baseline (auto-applied at boot)
 scripts/           # seed, seed-demo, rescan, store-check, backup, restore, secret-keys,
-                   # e2e (tsx) + docker-entrypoint.sh + measure-routes.mjs
+                   # e2e (tsx) + measure-routes.mjs
 e2e/               # playwright specs
 test-support/      # app/db/store/runtime/github fakes for vitest
 tools/oxlint/      # the vendored anti-slop lint plugin
@@ -248,7 +274,8 @@ docs/              # the code-verified documentation set (start at docs/README.m
 planning/          # PRD, original architecture and UX canon + pass ledgers
 design/            # HTML mock, design system, PRD mirror (pinned by test)
 data/ | docker-data/   # runtime data root (gitignored): projects/<slug>/tasks/<KEY>/task.md,
-                   # projects/<slug>/goals/<id>.md, agents/, runtimes/, kb/, skills/,
+                   # projects/<slug>/goals/<id>.md, agents/, runtimes/ (incl.
+                   # runtimes/users/<userId>/ per-person agent homes), kb/, skills/,
                    # audit-exports/, state/projection.sqlite
 ```
 
