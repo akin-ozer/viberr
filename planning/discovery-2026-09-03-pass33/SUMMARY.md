@@ -73,8 +73,9 @@ granted KB, and its run record showed `skills: {granted: [...], native: [...], i
 
 - **72 use cases** exercised live ([USE-CASES.md](USE-CASES.md)); 50 was the target.
 - **23 findings** ([FINDINGS.md](FINDINGS.md)), all closed; 1 self-refuted.
-- Gates at close: `oxlint` 0 errors · `tsc` clean · **5069 unit tests in 309 files** ·
-  `build` clean · **e2e 67/67** (65 before this pass).
+- Gates at close: `oxlint` 0 errors · `tsc` clean · **5201 unit tests in 319 files** ·
+  `build` clean · **e2e 67/67** (65 before this pass). The suite grew by **132 tests in 10
+  new files** — the coverage band below.
 - 6 new rulings, 8 `docs/` pages updated in the same change.
 
 ## Where the material is
@@ -90,13 +91,34 @@ granted KB, and its run record showed `skills: {granted: [...], native: [...], i
 | [reference/](reference/) | the UI surface inventory and the test-coverage inventory |
 | [screenshots/](screenshots/) | ~60 captures, light and dark, desktop and mobile |
 
+## The coverage band — every named gap closed
+
+The coverage inventory named ten authority chokepoints whose guards could be **deleted with
+every gate still green**. Ruling 65 says a guard that cannot go red is a ruling that gets
+reverted in silence, so each one now has a test file, written against the real module (no
+`vi.mock` of the thing under test, no skips), and each was proven by breaking the source,
+watching the test go red, and restoring it.
+
+| chokepoint | new file | tests | what it pins |
+|---|---|---|---|
+| `requireProjectMember` | `app/server/auth/require-project.server.test.ts` | 13 | ruling 25: a non-member gets the unknown-slug 404 byte for byte; auth resolves before membership; archived projects stay readable to members (R6-3); the refusal is silent to the client, never to the audit log |
+| `getProjectGithubContext` | `app/server/github/github-context.server.test.ts` | 9 | repo-less degrades before credential; no project borrows another's PAT; an unreadable secret degrades rather than building an **anonymous** client; `patId` and the token on the wire stay paired |
+| `requireFormAction` | `app/server/auth/form-action.server.test.ts` | 12 | the CSRF + intent gate on every POST |
+| controller dock cross-scope guard | `app/features/controller/controller-dock-query.server.test.ts` | 11 | ruling 121: the dock's per-surface scope resolution and what it refuses to carry across scopes |
+| `canAccessConversation` / `canReadControllerRunLog` / `get_github_state` | `app/server/controller/controller-access.server.test.ts` | 14 | a transcript belongs to one person: the **project admin of the bound board reads nothing**, supervision is org-level and resolved live, and "not yours" is byte-identical to "never existed" |
+| `run-events.server.ts` | `app/server/runtimes/run-events.server.test.ts` | 7 | the run event stream's ordering and terminal contract |
+| `claude-config.server.ts` | `app/server/runtimes/claude-config.server.test.ts` | 12 | what the Claude backend is actually handed: skills, KBs, MCP grants |
+| `write-cache.server.ts` | `app/server/files/write-cache.server.test.ts` | 12 | the read-your-own-writes repair, its 100 ms slack trade stated outright, and the 500-path bound evicting the coldest not the hottest |
+| `ACTION_ROLES` | `app/shared/rbac.test.ts` | 17 | the matrix at exactly the floor each ruling assigned it, `force-accept-completion` strictly narrower than `accept-completion`, **and the two domain doc tables pinned against the code** |
+| `task-mutation.server.ts` | `app/server/tasks/task-mutation.server.test.ts` | 18 | the governed-mutation envelope every task write passes through |
+
+Three were re-canaried independently of the agents that wrote them, at integration level rather
+than by hand-checking their reports: `canAccessConversation` forced to `return true` → 3 red;
+`freshestContent` short-circuited to the disk bytes → 6 red; `force-accept-completion` widened
+to maintainer → 4 red, two of which are the doc tables. Sources restored, `git diff` empty.
+
 ## Left open, deliberately
 
-- The **test-coverage gaps** the inventory names are recorded but not all closed: chokepoints
-  with no test that can go red — `requireProjectMember`, `getProjectGithubContext`,
-  `requireFormAction`, `controller-dock-query.server.ts`'s cross-scope guard,
-  `run-events.server.ts`, `claude-config.server.ts`, `write-cache.server.ts`. This pass added
-  tests where it changed behaviour; the standing gaps are the next pass's first band.
 - **Codex could not be exercised live** — the account's quota is exhausted until 2026-09-18.
   The failure path was proven instead (provider's own words, blocked packet,
   `retry_other_backend`, and a backend pin that stuck), and the confinement was read off the

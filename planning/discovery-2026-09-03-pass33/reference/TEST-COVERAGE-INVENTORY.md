@@ -12,6 +12,18 @@ theme×surface matrix) each count as one line here but generate many cases at ru
 **Totals: 307 vitest files / 4855 `it`/`test` lines, plus 8 Playwright specs
 (38 `test(` lines, more at runtime) driven by `npm run e2e`.**
 
+> **Closing note, 2026-09-03 (end of pass 33).** This census is the *discovery* snapshot —
+> read it as "what was true when the pass opened". The **Thin coverage** gaps it names as
+> having no test that can go red were then closed by the pass itself: ten new test files,
+> 132 cases, covering `require-project.server.ts`, `github-context.server.ts`,
+> `form-action.server.ts`, `controller-dock-query.server.ts`, `controller-conversations`'
+> two access predicates plus `get_github_state`, `run-events.server.ts`,
+> `claude-config.server.ts`, `write-cache.server.ts`, `task-mutation.server.ts` and
+> `ACTION_ROLES` (`app/shared/rbac.test.ts`, which also pins the two domain doc tables
+> against the code). Each was proven by breaking its source and watching the test go red.
+> The suite closed at **319 files / 5201 cases**. The rows below are left as written —
+> they are the record of what the gap was, not a live to-do list.
+
 Config facts worth carrying into pass 33:
 
 - `vitest.config.ts` — `include: ["app/**/*.test.{ts,tsx}"]`, single `node`
