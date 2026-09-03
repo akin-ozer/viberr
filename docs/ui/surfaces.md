@@ -4,6 +4,12 @@
 > it accepts. Source of truth: `app/routes.ts`, `app/routes/*`, `app/features/shell/*`.
 > Verified against `main` @ `68b5480` (2026-09-01). The behaviour behind each intent is
 > in the domain docs linked per row.
+>
+> Updated 2026-09-02 for ruling 121 (branch `claude/per-user-codex-auth-difdnn`):
+> `/profile` gained the **Agent accounts** panel and its five intents, and
+> `/resources/backend-login` is a new fetcher target that answers the CALLER's own
+> hosted sign-in session. Agent backends are connected per person there, never per
+> deployment.
 
 ## 1. Route table
 
@@ -35,7 +41,7 @@ POST.
 | `/org/settings/audit-export` | `org.settings.audit-export.ts` | org admin | CSV/JSON download, 100 000-row cap | |
 | `/controller` | `controller.tsx` | user, form | instance controller conversation (per user) | `send` |
 | `/insights` | `insights.tsx` | org admin | run analytics: counts, cost, tokens, outcomes, backend quota readings | |
-| `/profile` | `profile.tsx` | user | identity, password, GitHub identity disconnect, theme, motion, notification and timeline prefs | `identity`, `change-password`, `github-disconnect`, `set-motion`, `set-notif`, `set-tl-default` |
+| `/profile` | `profile.tsx` | user | identity, password, **Agent accounts** (ruling 121: connect Claude and Codex for yourself), GitHub identity disconnect, theme, motion, notification and timeline prefs | `identity`, `change-password`, `github-disconnect`, `set-motion`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
 | `/notifications` | `notifications.tsx` | user | newest 200, auto-read on viewing the target | |
 | `/notifications/read` | `notifications.read.tsx` | user | fetcher target | `read-all` |
 | `/prefs/theme` | `prefs.theme.tsx` | user | theme cookie + user row | |
@@ -43,8 +49,18 @@ POST.
 | `/resources/run-log` | `resources.run-log.ts` | member / conversation owner | run log lines by `since` or `before` | |
 | `/resources/health` | `resources.health.ts` | public | liveness; `?probe=readiness` → 503 when degraded | |
 | `/resources/search` | `resources.search.ts` | user | ⌘K palette query over visible projects | |
-| `/resources/model-catalog` | `resources.model-catalog.ts` | user | models and efforts per backend | |
+| `/resources/model-catalog` | `resources.model-catalog.ts` | user | models and efforts per backend (Claude enhanced with the VIEWER's own account) | |
+| `/resources/backend-login` | `resources.backend-login.ts` | user | `?backend=claude\|codex` → the CALLER's own hosted sign-in session (`{ login, health }`), polled every 2 s by Profile → Agent accounts; an unknown backend is a 400 `{ error: { code: "validation_failed", message } }`, and it reads nobody else's session | |
 | `/resources/session-export` | `resources.session-export.ts` | member / conversation owner | resume-script download | |
+
+The five `backend-*` intents on `/profile` are the Agent-accounts panel: `backend-login-start`
+{backend, method} spawns the vendor's own binary (`claude auth login --claudeai|--console`,
+`codex login --device-auth`) in that person's runtime home; `backend-login-code` {backend, code}
+writes Anthropic's one-time code to the child's stdin (Claude only); `backend-login-cancel`
+{backend} kills it; `backend-set-key` {backend, kind, secret} verifies and seals a pasted API
+key or ChatGPT workspace access token; `backend-disconnect` {backend} runs the vendor logout,
+deletes the credential file and drops the row. Full behaviour in
+[../domain/auth-and-rbac.md §7](../domain/auth-and-rbac.md#7-profile-and-preferences-profile).
 
 Intents behind `project.task.tsx` are explained in
 [../domain/task-lifecycle.md](../domain/task-lifecycle.md); GitHub intents in
@@ -140,3 +156,19 @@ comes from the shell model.
   `{day} · {time}`, relative forms.
 - Settings headings name their scope: "Instance settings" versus "<project> · settings"
   (ruling 32).
+- **No surface gates AUTHORING on the viewer's own agent account** (ruling 121): a run
+  bills the task owner, so the agent profile editor's Execution backend chips are always
+  live (a fresh instance where nobody has connected anything must still be able to create
+  profiles) and an unconnected viewer gets a rendered note under the chips, never a
+  disabled chip with the reason hidden in a `title` no browser opens: "You haven't
+  connected <Backend>. You can still pin this profile to it: runs use the task owner's
+  account … Connect <Backend> on your Profile → Agent accounts to run it on the tasks you
+  own." The Agents roster states the rule plus a count ("Runs use the task owner's Codex
+  account · 3 of 7 members connected"); the loader ships that one `backendHealth` probe
+  and no second availability pair. *(Added 2026-09-02 for ruling 121 — the editor
+  initially inherited the pre-ruling "disable an unconfigured backend" rule, which now
+  reads as the author's own credential and blocked profile creation outright.)*
+- A "Retry on <other backend>" offer is rendered only where the retry could actually run,
+  and the console explains a withheld one (see
+  [../domain/task-lifecycle.md](../domain/task-lifecycle.md), the owner-is-who-a-run-bills
+  bullet).

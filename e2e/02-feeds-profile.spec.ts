@@ -116,3 +116,50 @@ test("profile theme switch persists after reload", async ({ page }) => {
   // Restore the default so later manual runs start from system.
   await themeSeg.getByRole("button", { name: "System", exact: true }).click();
 });
+
+/**
+ * Ruling 121: Profile → Agent accounts. Every agent run bills ONE person's
+ * provider account, so a fresh instance must show the signed-in admin exactly
+ * where to connect Claude and Codex, and must say honestly that neither is
+ * connected yet.
+ *
+ * Presence only, deliberately: connecting either backend drives the vendor's
+ * own binary out to Anthropic or OpenAI, and the e2e image has no network and
+ * no account to bill. The sign-in flow itself is covered where it can be driven
+ * against a fake vendor binary (backend-login.server.test.ts).
+ */
+test("profile shows Agent accounts with both backends unconnected", async ({
+  page,
+}) => {
+  await page.goto("/profile");
+
+  const panel = page.locator(".panel", { hasText: "Agent accounts" });
+  await expect(panel).toBeVisible();
+
+  const cards = panel.locator(".cred-card");
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0).locator(".cred-name")).toHaveText("Claude");
+  await expect(cards.nth(1).locator(".cred-name")).toHaveText("Codex");
+
+  // Both read "Not connected", and each names the vendor whose account a run
+  // would bill.
+  await expect(
+    cards.nth(0).getByText(/Not connected\. Runs on tasks you own/),
+  ).toBeVisible();
+  await expect(
+    cards.nth(1).getByText(/Not connected\. Runs on tasks you own/),
+  ).toBeVisible();
+
+  // The vendors' own flows, not a Viberr-implemented OAuth and never a
+  // setup-token field.
+  await expect(
+    panel.getByRole("button", { name: "Sign in with Claude" }),
+  ).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "Sign in with ChatGPT" }),
+  ).toBeVisible();
+  await expect(panel.getByText(/setup.token/i)).toHaveCount(0);
+
+  // The panel sits above GitHub identity in the right column.
+  await expect(page.locator(".panel", { hasText: "GitHub identity" })).toBeVisible();
+});

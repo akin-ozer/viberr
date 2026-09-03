@@ -54,6 +54,12 @@ export default [
   // Session export — downloads a bash installer that carries a run's provider
   // transcript so the conversation can be resumed locally (same subscription).
   route("resources/session-export", "routes/resources.session-export.ts"),
+  // Ruling 121: the signed-in viewer's OWN hosted sign-in session plus their
+  // backend health. Profile → Agent accounts polls it while a `claude auth
+  // login` / `codex login --device-auth` child is running, because that process
+  // lives on the server and the browser has no other way to see what the vendor
+  // printed. Keyed by the session user; it reads nobody else's sign-in.
+  route("resources/backend-login", "routes/resources.backend-login.ts"),
 
   // R19-19: one task attachment (browser-produced screenshot/PDF). A resource
   // route OUTSIDE the workspace layout — it serves raw bytes, member-only.

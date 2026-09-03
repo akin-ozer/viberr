@@ -28,6 +28,45 @@ const BASE: ProfileData = {
   memberships: [{ slug: "viberr-core", name: "Viberr Core", role: "maintainer" }],
   accessRole: "maintainer",
   githubConfigured: true,
+  // Ruling 121: the viewer's own agent accounts, neither connected.
+  backends: [
+    {
+      backend: "claude",
+      health: {
+        backend: "claude",
+        userId: "u_arda",
+        available: false,
+        kind: null,
+        method: null,
+        verification: "none",
+        secretSuffix: null,
+        verifiedAt: null,
+        connectedAt: null,
+        detail:
+          "Claude isn't connected. Connect it on your Profile → Agent accounts.",
+      },
+      login: null,
+      methods: { signIn: ["claudeai", "console"], paste: ["api_key"] },
+    },
+    {
+      backend: "codex",
+      health: {
+        backend: "codex",
+        userId: "u_arda",
+        available: false,
+        kind: null,
+        method: null,
+        verification: "none",
+        secretSuffix: null,
+        verifiedAt: null,
+        connectedAt: null,
+        detail:
+          "Codex isn't connected. Connect it on your Profile → Agent accounts.",
+      },
+      login: null,
+      methods: { signIn: ["device"], paste: ["api_key", "access_token"] },
+    },
+  ],
   prefs: { notifs: DEFAULT_NOTIF_PREFS, motion: "full", tlDefault: "all" },
 };
 
@@ -47,6 +86,7 @@ function renderProfile(data: ProfileData = BASE) {
         const appearance = useFetcher<ProfileActionData>();
         const password = useFetcher<ProfileActionData>();
         const github = useFetcher<ProfileActionData>();
+        const backends = useFetcher<ProfileActionData>();
         return (
           <ToastProvider>
             <ProfilePage
@@ -55,7 +95,14 @@ function renderProfile(data: ProfileData = BASE) {
               onTheme={(v) => {
                 lastTheme = v;
               }}
-              fetchers={{ identity, prefs, appearance, password, github }}
+              fetchers={{
+                identity,
+                prefs,
+                appearance,
+                password,
+                github,
+                backends,
+              }}
               submitWith={() => (fields) => {
                 lastSubmit = fields;
               }}
@@ -66,6 +113,13 @@ function renderProfile(data: ProfileData = BASE) {
     },
   ]);
   return render(<Stub initialEntries={["/profile"]} />);
+}
+
+/** The GitHub identity panel alone. Several of its assertions name classes the
+ *  Agent accounts panel (ruling 121) also uses, and a page-wide query would
+ *  read that panel's state as this one's. */
+function githubPanel(getByText: (text: string) => HTMLElement): HTMLElement {
+  return getByText("GitHub identity").closest(".panel")!;
 }
 
 describe("ProfilePage", () => {
@@ -174,32 +228,51 @@ describe("ProfilePage", () => {
     expect(getByText("Policy → Human access")).toBeTruthy();
   });
 
+  it("mounts Agent accounts in the right column ABOVE GitHub identity (ruling 121)", () => {
+    const { container, getByText, getAllByText } = renderProfile();
+    expect(getByText("Agent accounts")).toBeTruthy();
+    // Both backends read "Not connected" on a fresh account.
+    expect(getAllByText(/Not connected\. Runs on tasks you own/)).toHaveLength(2);
+    // Order within the right column: the panel that decides whether this
+    // person's agents can run at all comes before the attribution card.
+    const headings = [...container.querySelectorAll(".profile-col")][1]!;
+    const titles = [...headings.querySelectorAll("h2")].map((h) => h.textContent);
+    expect(titles.indexOf("Agent accounts")).toBeLessThan(
+      titles.indexOf("GitHub identity"),
+    );
+  });
+
   it("GitHub identity: not-connected card with missing chips and a real Connect button", () => {
-    const { container, getByText } = renderProfile();
+    const { getByText } = renderProfile();
     expect(getByText("GitHub identity")).toBeTruthy();
     expect(getByText("not connected")).toBeTruthy();
-    expect(container.querySelectorAll(".scope-chip.miss")).toHaveLength(2);
-    expect(container.querySelector(".cred-warn")).toBeTruthy();
+    // Ruling 121: `.cred-warn` is no longer unique to this panel — the Agent
+    // accounts cards above it use the same class for their unconnected state —
+    // so these assertions are scoped to the GitHub panel rather than the page.
+    const github = githubPanel(getByText);
+    expect(github.querySelectorAll(".scope-chip.miss")).toHaveLength(2);
+    expect(github.querySelector(".cred-warn")).toBeTruthy();
     // MU-1: Connect starts the real OAuth flow via a button (POST to
     // /api/auth/sign-in/social), not a dead /auth/github link.
-    const connect = container.querySelector<HTMLButtonElement>(
+    const connect = github.querySelector<HTMLButtonElement>(
       ".cred-warn button.btn",
     )!;
     expect(connect).toBeTruthy();
     expect(connect.textContent).toContain("Connect");
-    expect(container.querySelector(".cred-warn a.btn")).toBeNull();
+    expect(github.querySelector(".cred-warn a.btn")).toBeNull();
   });
 
   it("F18-3: GitHub identity is a quiet one-liner (no warn chips, no Connect) when OAuth is unconfigured", () => {
-    const { container, getByText } = renderProfile({
+    const { getByText } = renderProfile({
       ...BASE,
       githubConfigured: false,
       user: { ...BASE.user, githubConnected: false },
     });
     expect(getByText("GitHub identity")).toBeTruthy();
-    // No doomed Connect affordance, no warn scope chips.
-    expect(container.querySelector(".cred-warn")).toBeNull();
-    expect(container.querySelectorAll(".scope-chip.miss")).toHaveLength(0);
+    // No doomed Connect affordance, no warn scope chips — in THIS panel.
+    const github = githubPanel(getByText);
+    expect(github.querySelector(".cred-warn")).toBeNull();
+    expect(github.querySelectorAll(".scope-chip.miss")).toHaveLength(0);
     expect(getByText(/GitHub sign-in isn't configured on this deployment/)).toBeTruthy();
   });
 
