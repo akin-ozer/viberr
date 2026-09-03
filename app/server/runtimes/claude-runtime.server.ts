@@ -31,8 +31,12 @@ import { redactProviderText } from "~/server/secrets/git-output-redact.server";
  * = <session_id>`. Autonomous: `options.permissionMode = 'bypassPermissions'`.
  * Success is gated on the final result's `is_error`, NOT any exit code.
  *
- * Auth: ANTHROPIC_API_KEY (env). The SDK factory is injectable so tests
- * drive a fake async generator — real Claude is NEVER invoked in tests.
+ * Auth: whatever the run's CREDENTIAL PRINCIPAL connected (ruling 121) — the
+ * hosted sign-in the bundled `claude` binary holds inside that person's
+ * `CLAUDE_CONFIG_DIR`, or a Console `ANTHROPIC_API_KEY` they pasted. Both
+ * arrive on `spec.env`, assembled by `runCredentialFor` in the run service;
+ * this adapter reads no credential of its own. The SDK factory is injectable
+ * so tests drive a fake async generator — real Claude is NEVER invoked.
  */
 
 /** The subset of the SDK we depend on (kept narrow + injectable). */

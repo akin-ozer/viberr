@@ -76,10 +76,11 @@ import {
 } from "~/features/agents/agents-query.server";
 import { primaryRunBackend } from "~/server/agents/deployment-view.server";
 import type { AgentProfileView } from "~/features/agents/agent-types";
+import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
-  isBackendAvailable,
-  type RealBackend,
-} from "~/server/runtimes/runtime-registry.server";
+  refusedPrincipalUserId,
+  resolveTaskRunPrincipal,
+} from "~/server/runtimes/run-principal.server";
 import {
   defaultModelFor,
   resolveRunModel,
@@ -1437,12 +1438,42 @@ async function dispatchAgentRun(
     );
   }
 
+  // Ruling 121: WHOSE account this run bills, resolved BEFORE anything is
+  // spent. A task with no owner, an owner whose account is gone, or an owner
+  // who has not connected this backend all end the same way — an honest error
+  // run through the normal completion pipeline, with no clone, no reservation
+  // and no process. Resolving here (rather than letting `startRun` discover it)
+  // is what keeps a multi-minute clone from being paid for a run that was
+  // never going to start.
+  const principal = resolveTaskRunPrincipal(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    backend,
+  );
+  // The clone gate, and every other "will a provider process actually consume
+  // this?" gate below. A refused run still becomes a RUN ROW — `startRun`
+  // records the refusal as an honest terminal error and the normal completion
+  // pipeline opens the blocked packet — it just never pays for a checkout, a
+  // skill mount, a browser or a toolkit for a process that will not exist.
+  // Same shape the pre-121 "backend unavailable" path had (R7-2).
+  const realBackend = principal.ok;
+
   // P14-LV-09: resolve the MCP grants BEFORE the persona, and build it from what
   // actually mounted — passing the DECLARED names is the literal symptom (the
   // prompt announced a server the run had no tools for). The persona itself is
   // built AFTER the clone below, because the same rule now applies to skills:
   // which ones mount natively is only knowable once the workspace exists.
-  const resolvedMcps = await mcpServersFor(db, mcpNames, backend);
+  //
+  // Ruling 121: and AFTER the principal, because this resolve is not a read.
+  // `mcpServersFor` pre-flights every declared stdio server by SPAWNING it to
+  // handshake it (F20-10) and corrects its registry row from what happened —
+  // vendor/org child processes and org-level writes for a run the next line is
+  // about to refuse. A refused run mounts nothing, so it resolves nothing.
+  const resolvedMcps: RunMcpMounts = realBackend
+    ? await mcpServersFor(db, mcpNames, backend)
+    : { unresolved: [], unhealthy: [] };
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
   // resolution the completion pipeline re-derives (agent-outcome.server.ts).
@@ -1473,11 +1504,6 @@ async function dispatchAgentRun(
   // P13-D-5: one project, one repository.
   const repo = projectRepo(ctx, input.projectSlug);
 
-  // Best-effort clone — only when a REAL backend will actually consume a
-  // working tree (R7-2: no credential → fail fast or gated test engine, neither
-  // needs a checkout).
-  const realBackend = isBackendAvailable(backend);
-
   // Thread prefix: the delivering agent streams on `primary-…`; each
   // supporting agent groups on its `r<index>-…` prefix (the agents deployment
   // projection groups on it). Unique suffix so re-runs never collide on
@@ -1504,22 +1530,28 @@ async function dispatchAgentRun(
   // mirror in seconds. The strip showed a static "Cloning …" for the whole
   // download and "looked stalled for minutes" on the first-run experience; say
   // when the wait is the one-time mirror build so it reads as expected setup.
-  pending.reservation = reserveRun(db, {
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    threadId,
-    role: engagement.role,
-    kind: delivers ? "primary" : "reviewer",
-    backend,
-    model,
-    agentName,
-    agentProfileId: engagement.profileId,
-    phase: RUN_PHASE.preparing,
-    step:
-      repo && realBackend
-        ? cloneStepLabel(repo, mirrorIsCold(input.projectSlug, repo, ctx.dataRoot))
-        : "Setting up the run workspace",
-  });
+  // Ruling 121: a REFUSED run has nothing to prepare, so it reserves nothing.
+  // The reservation exists to render a live "Preparing workspace" strip during
+  // a clone; showing one for a run that is about to be recorded as an error
+  // would be theatre, and it would hold a concurrency slot for it.
+  pending.reservation = principal.ok
+    ? reserveRun(db, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        threadId,
+        role: engagement.role,
+        kind: delivers ? "primary" : "reviewer",
+        backend,
+        credentialUserId: principal.principal.userId,
+        model,
+        agentName,
+        agentProfileId: engagement.profileId,
+        phase: RUN_PHASE.preparing,
+        step: repo
+          ? cloneStepLabel(repo, mirrorIsCold(input.projectSlug, repo, ctx.dataRoot))
+          : "Setting up the run workspace",
+      })
+    : null;
 
   // P8 (pass 25): a SUPPORTING (non-delivering) engagement runs in its OWN
   // isolated checkout so its writes never reach the delivering tree (which
@@ -1886,10 +1918,18 @@ async function dispatchAgentRun(
     // resumes into one entry labeled by the agent's name.
     agentName,
     agentProfileId: engagement.profileId,
+    // Ruling 121: the task owner pays for this run — or nobody does, and the
+    // refusal below is what the run records. A run refused because the owner
+    // has not connected the backend still NAMES that owner, so the refusal is
+    // auditable; a run with no owner at all records null.
+    credentialUserId: principal.ok
+      ? principal.principal.userId
+      : refusedPrincipalUserId(principal.refusal),
     prompt,
     actor: auditActor,
     dataRoot: ctx.dataRoot,
   };
+  if (!principal.ok) runInput.principalRefusal = principal.refusal;
   if (effort) runInput.effort = effort;
   if (persona) runInput.systemPrompt = persona;
   if (disallowedTools.length) runInput.disallowedTools = disallowedTools;

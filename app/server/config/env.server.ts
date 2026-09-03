@@ -108,33 +108,15 @@ const envSchema = z.object({
     .min(8, "must be at least 8 characters")
     .optional(),
 
-  // Optional runtime-backend API keys. When absent, runs fail fast with an
-  // availability error. Presence is a cheap auth check; the
-  // registry NEVER makes a paid call to detect availability.
-  //  - Claude Agent SDK: ANTHROPIC_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN (from
-  //    `claude setup-token` — the subscription/OAuth path), or set
-  //    VIBERR_CLAUDE_USE_CLI_AUTH=1 to use an already-logged-in `claude` CLI.
-  //  - Codex SDK: CODEX_ACCESS_TOKEN (ChatGPT Business/Enterprise subscription
-  //    automation), CODEX_API_KEY / OPENAI_API_KEY, or
-  //    VIBERR_CODEX_USE_CLI_AUTH=1 for an existing `codex login`.
-  ANTHROPIC_API_KEY: z.string().min(1).optional(),
-  CLAUDE_CODE_OAUTH_TOKEN: z.string().min(1).optional(),
-  VIBERR_CLAUDE_USE_CLI_AUTH: z.string().optional(),
-  // Claude Agent SDK config/session dir. Sessions live at
-  // $CLAUDE_CONFIG_DIR/projects/<cwd>/<id>.jsonl; default it under the data
-  // volume so a resumed session (commenting an agent) survives restarts.
-  CLAUDE_CONFIG_DIR: z.string().optional(),
-  // ChatGPT-workspace Codex credential for trusted non-interactive workflows.
-  // Unlike CODEX_API_KEY / OPENAI_API_KEY, this uses workspace subscription
-  // entitlements rather than Platform API billing.
-  CODEX_ACCESS_TOKEN: z.string().min(1).optional(),
-  CODEX_API_KEY: z.string().min(1).optional(),
-  OPENAI_API_KEY: z.string().min(1).optional(),
-  // Codex ChatGPT-plan (subscription) login dir — `codex login` writes
-  // auth.json here (default ~/.codex). Point it at a mounted volume in a
-  // container so the subscription auth (and its token refresh) persists.
-  CODEX_HOME: z.string().optional(),
-  VIBERR_CODEX_USE_CLI_AUTH: z.string().optional(),
+  // Ruling 121: the deployment-wide agent-backend credentials are GONE
+  // (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, VIBERR_CLAUDE_USE_CLI_AUTH,
+  // CLAUDE_CONFIG_DIR, CODEX_ACCESS_TOKEN, CODEX_API_KEY, OPENAI_API_KEY,
+  // CODEX_HOME, VIBERR_CODEX_USE_CLI_AUTH). Every person connects Claude and
+  // Codex on Profile -> Agent accounts; the credential lives in that person's
+  // runtime home or sealed in `user_backend_credentials`, and each run's
+  // spawn env is built from the credential of the ONE person it bills. An
+  // instance-wide key would bill every run to whoever owns it, which is
+  // exactly what the ruling forbids — so there is nothing to declare here.
 
   // Optional runtime tuning knobs. Parsed as raw strings here (the call sites
   // apply their own numeric coercion + fallback default); declaring them keeps

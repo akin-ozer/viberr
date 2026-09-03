@@ -24,8 +24,8 @@ import { openDatabase } from "./sqlite.server";
  * Backup and restore for the data root (gap 14).
  *
  * `state/projection.sqlite` is not a cache. It is the ONLY home of users,
- * better-auth credentials and sessions, AES-sealed PATs, audit events and
- * notifications — none of it rebuildable from the canonical markdown. The
+ * better-auth credentials and sessions, AES-sealed PATs and personal
+ * agent-backend API keys (ruling 121), audit events and notifications — none of it rebuildable from the canonical markdown. The
  * product's own answer to FR33's 90-day audit hard-delete is "snapshot the
  * data root on a schedule", and to a bad hand-edit it is "restore the backup".
  * Both rested on a paragraph of prose: there was no backup command, and the
@@ -84,8 +84,8 @@ export const BACKED_UP_STORE_DIRS = [
 ] as const;
 
 /**
- * `runtimes/` holds LIVE agent credentials (`codex-home/auth.json`) and run
- * transcripts. Opt in with `includeRuntimes` when you want them; the default
+ * `runtimes/` holds LIVE agent credentials — since ruling 121 each person's own
+ * (`users/<userId>/codex-home/auth.json`) — and run transcripts. Opt in with `includeRuntimes` when you want them; the default
  * is out, and the manifest says so rather than leaving an operator to guess
  * whether their artefact contains a credential.
  */
@@ -293,7 +293,7 @@ function contains(hasProjection: boolean, dirs: string[]): string[] {
   const list = [
     ...(hasProjection
       ? [
-          "state/projection.sqlite — users, better-auth credentials and sessions, AES-sealed GitHub PATs, MCP credentials, audit events, notifications, and every projection (a consistent point-in-time copy, WAL included)",
+          "state/projection.sqlite — users, better-auth credentials and sessions, AES-sealed GitHub PATs, MCP credentials and personal agent-backend API keys (ruling 121), audit events, notifications, and every projection (a consistent point-in-time copy, WAL included)",
         ]
       : []),
     ...dirs.map((dir) => `${dir}/ — the canonical files, copied verbatim`),
@@ -306,10 +306,10 @@ function excludes(includeRuntimes: boolean): string[] {
     ...(includeRuntimes
       ? []
       : [
-          "runtimes/ — agent CLI logins (codex-home/auth.json is a LIVE credential) and run transcripts. Re-authenticate after a restore, or pass --include-runtimes to carry them (and then treat the artefact as a secret).",
+          "runtimes/ — each person's agent CLI logins (users/<id>/codex-home/auth.json is a LIVE credential) and run transcripts. Everyone re-authenticates after a restore, or pass --include-runtimes to carry them (and then treat the artefact as a secret).",
         ]),
     "state/writer.lock — the running process's lock; restoring one would refuse the next boot.",
-    "The encryption key itself. VIBERR_SECRET_ENCRYPTION_KEY lives in the environment, NOT in this artefact: without it every sealed PAT and MCP credential in the database is unreadable. Back the key up separately.",
+    "The encryption key itself. VIBERR_SECRET_ENCRYPTION_KEY lives in the environment, NOT in this artefact: without it every sealed secret in the database is unreadable (GitHub PATs, MCP credentials, sign-in provider secrets, the S3 audit-export key, and each person's agent-backend API keys). Back the key up separately.",
     "*.tmp — atomic writes in flight, never content.",
   ];
 }
@@ -577,9 +577,9 @@ function renderRestore(result: Omit<RestoreResult, "text">): string {
     lines.push(`  the replaced data was moved to ${result.displacedTo} (not deleted)`);
   }
   lines.push(
-    "  runtimes/ was left exactly as it was — a restore never touches the agent CLI logins",
+    "  runtimes/ was left exactly as it was — a restore never touches anyone's agent CLI logins",
     "",
-    "VIBERR_SECRET_ENCRYPTION_KEY is not part of the artefact: without the key this backup was taken under, every sealed PAT and MCP credential is unreadable.",
+    "VIBERR_SECRET_ENCRYPTION_KEY is not part of the artefact: without the key this backup was taken under, every sealed secret is unreadable (GitHub PATs, MCP credentials, sign-in provider secrets, the S3 audit-export key, and each person's agent-backend API keys).",
     "Start the app — boot reconciles the projection against the restored files.",
   );
   return lines.join("\n");

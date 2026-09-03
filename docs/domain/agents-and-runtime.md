@@ -5,7 +5,10 @@
 > dies. Source of truth: `app/server/runtimes/*`, `app/server/tasks/specialist-*.ts`,
 > `app/server/tasks/agent-*.ts`, `app/shared/capabilities.ts`, `app/server/seed/*`.
 > Verified against `main` @ `68b5480` (2026-09-01); §2.5 and §4.3 re-verified
-> 2026-09-02 against `pass32/implementation` @ `478bed0`. The operator's own behaviour is in
+> 2026-09-02 against `pass32/implementation` @ `478bed0`. Updated 2026-09-02 for
+> ruling 121 (branch `claude/per-user-codex-auth-difdnn`): §§2.1, 2.2, 2.3, 3.1, 3.5,
+> 3.6, 3.7 and gotcha 8 now describe the per-person credential principal, and the closing
+> paragraph no longer claims the credentials are environment variables. The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -29,48 +32,76 @@
 
 ## 2. Backends
 
-### 2.1 Credential detection
+### 2.1 Credential principal and per-person availability (ruling 121)
 
-`isBackendAvailable(backend)` re-probes on **every call**, never makes a paid request, and
-is what `/resources/health` reports as `backends: { claude, codex }` (`real |
-unavailable`). Seven paths count:
+There is **no instance-level "the backend is configured"**. Every run bills ONE person —
+its **credential principal**, persisted as `agent_runs.credential_user_id`: the **task
+owner** for every task run (operator, specialist, resume, scheduled, boot recovery,
+retry), the **asker** for a controller turn. A task with no owner cannot run agents.
 
-| Backend | Available when any one holds |
-|---|---|
-| Claude | `ANTHROPIC_API_KEY` · `CLAUDE_CODE_OAUTH_TOKEN` · `VIBERR_CLAUDE_USE_CLI_AUTH` truthy **and** the Claude config dir is not refuted (`.credentials.json` present = `file`; on darwin an existing dir alone = `presence` because the keychain holds the login; a missing dir = `refuted`) |
-| Codex | `CODEX_ACCESS_TOKEN` · `CODEX_API_KEY` · `OPENAI_API_KEY` · `VIBERR_CODEX_USE_CLI_AUTH` truthy **and** `auth.json` exists under the *login* dir (`CODEX_HOME` or `~/.codex`) |
+`userBackendHealth(db, userId, backend)` (`backend-credentials.server.ts`) is the ONE
+answer every surface reads. It re-probes on **every call**, never makes a paid request,
+and needs a `user_backend_credentials` row for that (person, backend):
 
-Truthy means `1 | true | yes`. `backendCredentialHealth` also reports a verification
-level (`credential | file | presence | none`) and one misconfiguration text: when
-`CODEX_HOME` points at the app's own run home (`<dataRoot>/runtimes/codex-home`, which
-is what the Docker image sets) *and* CLI auth is on, the "source" and the mirror target
-are the same path. The container is expected to use `CODEX_ACCESS_TOKEN` or an API key.
+| Row kind | Available when | `verification` |
+|---|---|---|
+| `api_key` / `access_token` | always (the sealed box is the credential) | `credential` |
+| `login` | the vendor's own file is in that person's home (`claude-home/.credentials.json`, `codex-home/auth.json`) | `file` |
+| `login` on darwin | the home exists but holds no file (the Claude binary uses the Keychain) | `presence` |
+| none, or a `login` whose file is gone | never — `detail` says which, addressed to the person | `none` |
 
-A run started on an unavailable backend fails fast with the tag `run·unavailable`, an
-honest error run and a blocked recovery packet. There is no fallback engine.
+`/resources/health` reports the instance-level number that remains: `backends: { claude:
+{ connectedUsers }, codex: { connectedUsers } }` (`countConnectedUsers`). Zero is a real
+reading, not a fault.
 
-### 2.2 App-owned config homes
+`run-principal.server.ts` resolves WHOSE account a run uses (`resolveTaskRunPrincipal` /
+`resolveUserRunPrincipal`) and `principalRefusalMessage` writes the ONE human sentence
+for the three refusals: **unowned** task, **owner-missing** (deleted or disabled), and
+**no-credential** (named owner, plus the health detail). A refused run fails fast with
+the tag `run·unavailable`, an honest error run carrying that sentence, and a blocked
+recovery packet quoting it — no clone, no reservation, no process, and nothing spent on
+its behalf either: the principal is resolved BEFORE the stdio MCP pre-flight (which
+starts each declared server to handshake it and corrects its registry row) and before
+the skills are mounted into the workspace, on the fresh, resume and operator paths
+alike. There is no fallback engine and no other account to fall back to.
 
-- Claude: `CLAUDE_CONFIG_DIR` wins; else with CLI auth on, `~/.claude`; else
-  `<dataRoot>/runtimes/claude-home`.
-- Codex: the run home is always `<dataRoot>/runtimes/codex-home`; the login source is
-  `CODEX_HOME || ~/.codex`. With CLI auth on, `prepareCodexHome` symlinks (or copies)
-  `auth.json` from the source into the run home before each selection and never throws.
+### 2.2 Per-person runtime homes
+
+- `<dataRoot>/runtimes/users/<userId>/claude-home` is the child's `CLAUDE_CONFIG_DIR`
+  (sessions under `projects/`); `…/codex-home` is its `CODEX_HOME` (sessions under
+  `sessions/`). Created `0o700` on demand by `ensureUserBackendHome`
+  (`user-homes.server.ts`); the user id is path-checked against
+  `/^[A-Za-z0-9_-]{1,64}$/` first. The deployment-wide `runtimes/claude-home` /
+  `runtimes/codex-home` and the host `~/.codex` mount are gone.
+- `runCredentialFor(db, userId, backend)` builds what the run's child env carries: the
+  home always; `ANTHROPIC_API_KEY` (claude), `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN`
+  (codex) only for a pasted credential. In both codex secret cases `OPENAI_API_KEY` is
+  explicitly absent. A `login` kind adds no secret: the vendor binary reads its own file.
 - Spawn env hygiene: every variable matching `CREDENTIAL_ENV_RE` (`API_KEY`, `TOKEN`,
-  `SECRET`, `PASSWORD`, `PRIVATE_KEY`, `CREDENTIALS`, `AUTH` …) and the private-runtime
-  set (`DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`) is stripped from
-  the child; only the selected backend's own credential is re-added. When a Codex
-  access token or cached login is in play, `CODEX_API_KEY`/`OPENAI_API_KEY` are deleted.
+  `SECRET`, `PASSWORD`, `PRIVATE_KEY`, `CREDENTIALS`, `AUTH` …), the private-runtime
+  set (`DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`) and **both vendor
+  homes** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME` — neither is credential-shaped, but a home
+  is where a vendor binary keeps its credential, so an ambient one would let a run billed
+  to one person authenticate as whoever a leftover sign-in file names) is stripped from
+  the child (`filteredSpawnEnv`); the run service then adds exactly one principal's
+  credential on top, and `startRun` throws if the caller's own `env` overlay names a key
+  the credential owns. The run sink redacts those plaintext values from every persisted
+  line (`createRunSink(db, spec, { secrets })`) — the key belongs to one person and the
+  run console is visible to every project member.
 
 ### 2.3 Models and effort
 
 | Backend | Models (default first) | Efforts (default) | Rules |
 |---|---|---|---|
-| claude | `sonnet`, `opus`, `haiku` (aliases), plus any dated `claude-*` id containing a digit, plus the live list from `supportedModels()` (10 min cache, 15 s timeout) | `low medium high xhigh max` (`high`) | Alias or dated id runs verbatim; a string containing opus/haiku/sonnet maps to the alias; anything else falls back to the SDK default |
+| claude | `sonnet`, `opus`, `haiku` (aliases), plus any dated `claude-*` id containing a digit, plus the live `supportedModels()` list of the VIEWER's OWN connected Claude account (10 min cache keyed by that person's home, 15 s timeout; ruling 121) | `low medium high xhigh max` (`high`) | Alias or dated id runs verbatim; a string containing opus/haiku/sonnet maps to the alias; anything else falls back to the SDK default |
 | codex | `gpt-5.6-terra`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5` (closed list) | `low medium high xhigh` (`medium`); `minimal` accepted at run time, never offered | A model persisted for the other backend is **substituted silently** at start with only a `run·model_substituted` log line |
 
 `/resources/model-catalog?backend=` serves `{ models, efforts, defaultModel,
 defaultEffort }` to the profile editor (unknown backend → claude; `requireUser` only).
+The route resolves the viewer's own `runCredentialFor(db, user.id, "claude")` and passes
+it to the catalog; a viewer who has not connected Claude gets the curated list and no
+probe is spawned, and one person's live list is never served to another (the cache entry
+carries the home that produced it).
 Effort is ranked `minimal 0 … max 5` and clamped to the backend's list.
 
 **Availability marks** (`model_availability`): a model is marked unavailable only from a
@@ -140,7 +171,15 @@ exhaustion expires after 6 h. Insights renders both; "no reading yet" is neutral
 - `agent_runs`: `id, task_key, project_slug, thread_id, role, kind, backend, model,
   session_id, sdk, state (queued|running|finished|error|interrupted), phase, step,
   started_at, finished_at, turns, input_tokens, cached_input_tokens, output_tokens,
-  total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key`.
+  total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key,
+  credential_user_id`.
+- `credential_user_id` (ruling 121) is the run's **credential principal**: whose account
+  it billed. It is written on the reserved row and on the started row, carried in the
+  `runtime.run.started` audit, and read back by the transcript locator and the run
+  projection. It is NULL only on a run that was refused before any credential was looked
+  up — an unowned task, or one whose owner account is gone or disabled. A run refused
+  because the owner has not connected THAT backend still records the owner
+  (`refusedPrincipalUserId`), so the refusal is auditable rather than anonymous.
 - `run_log_lines`: `(run_id, seq)` unique, `raw_json`, `display_json`.
 - Raw NDJSON, the truth: `<dataRoot>/runtimes/<backend>/<runId>.jsonl` (always the run
   id, never the session id).
@@ -193,8 +232,11 @@ and a `continuity` timeline event is written, so a lost effect is visible.
 
 `RunFailureKind = quota | auth | unavailable | max_turns | idle_timeout |
 session_missing | unknown`, read from the terminal tag suffix first and regexes second.
-The completion pipeline opens a stuck-loop packet with a `retry_other_backend` option
-for `quota | auth | unavailable`, notes model availability, and clears waiting to human.
+The completion pipeline opens a stuck-loop packet, notes model availability, and clears
+waiting to human. `retry_other_backend` is offered for `quota | auth | unavailable` only
+when the **task owner** has the other backend connected (ruling 121) — otherwise the
+retry would be refused for the same reason, and the refusal sentence already names the
+real remedy.
 
 ### 3.6 Resume, continuity, export
 
@@ -203,8 +245,21 @@ for `quota | auth | unavailable`, notes model availability, and clears waiting t
   session records `run·session_missing`, writes a `continuity` timeline event (actor
   `runtime-continuity`) and starts a fresh run whose prompt carries a continuity-reset
   preamble anchored on `task.md`. Boot recovery reuses the same path.
-- Transcripts: Claude `$CLAUDE_CONFIG_DIR/projects/<cwd-dashes>/<sid>.jsonl`; Codex
-  `<home>/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl`. `GET
+- The resumed turn bills the task owner **as of now**: `resumeRun` re-resolves nothing,
+  the caller passes `credentialUserId` (ruling 121). A task whose owner changed since
+  the original run reads as a missing session and takes the continuity-reset path above
+  — one fresh run re-anchored on `task.md`, with the timeline saying context was lost.
+  The alternative would be resuming one person's conversation inside another person's
+  account. `resumeRun` decides that from the CHANGE (the passed principal against the
+  prior run's `credential_user_id`), not from the probe: `probeSessionContinuity` looks
+  only in the passed principal's home, and a home with no transcript store yet — a new
+  owner who has connected the backend but never had a run here — answers `unknown`,
+  which means "resume as before".
+- Transcripts: Claude
+  `runtimes/users/<principal>/claude-home/projects/<cwd-dashes>/<sid>.jsonl`; Codex
+  `runtimes/users/<principal>/codex-home/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl`
+  (the run row's `credential_user_id`; a run with none never spawned a process and has
+  no transcript). `GET
   /resources/session-export?run=` (member-gated, 404 without a transcript on disk)
   downloads a bash installer that drops the transcript where the local CLI looks and
   prints `claude --resume <id>` / `codex resume <id>`.
@@ -216,10 +271,19 @@ for `quota | auth | unavailable`, notes model availability, and clears waiting t
 with `run·resumed` boundary lines between runs; groups are keyed `operator` or
 `<kind>:<profileId>`. Render states: running → running, error → error, finished →
 done or idle, queued/interrupted → idle. `failedBackendUnavailable` (tag
-`run·unavailable` or known signatures) adds an `altBackend` hint. Two UI facts worth
-knowing: every `error` run is labelled **"continuity error"**, not only session
-failures; and telemetry tags are collapsed by `log-noise.ts`. The console shows the
-redacted `run·inputs` line so a human can see exactly what the agent was given.
+`run·unavailable` or known signatures) marks every such run, whatever its principal, and
+the Agent-logs footer states that failure in those words; only the OTHER errored runs
+get the generic **"continuity error"** sentence. The retry OFFER travels separately
+(ruling 121). `altBackend` rides only when the run had a credential principal — a run
+refused because the task has no owner at all would be refused on the other backend for
+the same reason — and the "Retry on <other>" button additionally requires that the task
+owner has that other backend connected, the same test the packet's
+`retry_other_backend` option must pass, so the button and the packet never tell one task
+two stories. With no offer the footer states the failure and advertises no retry at all.
+The task page's own controls answer from the loader's `runPrincipal` (the owner's
+per-backend health), so a disabled Run names the person, never a deployment credential.
+Telemetry tags are collapsed by `log-noise.ts`, and the console shows the redacted
+`run·inputs` line so a human can see exactly what the agent was given.
 
 ## 4. Specialist runs
 
@@ -498,11 +562,15 @@ full` and the project-effective grants.
    on every surface that shows the grant.
 7. The `MANAGED_SETTINGS` SDK option is inert; `settings.json` from skill-mount is the
    real exclusion mechanism.
-8. The Dockerfile sets `CODEX_HOME` to the run home; combined with
-   `VIBERR_CODEX_USE_CLI_AUTH=1` this is the reported misconfiguration. Use a token in
-   containers.
+8. Agent backends are connected **per person** on Profile → Agent accounts (ruling 121):
+   there is no deployment-wide key, no `CODEX_HOME`/`CLAUDE_CONFIG_DIR` to set and no
+   host `~/.codex` mount. A wiped runtime volume signs each person out of their own
+   vendor sign-in (a sealed pasted key survives in the database).
 9. A supporting Claude run with write grants can commit locally in its own support
    checkout; only push, PR create and PR merge are denied on top of the grants.
 
-Environment variables for all of the above are listed in
-[../operations/configuration.md](../operations/configuration.md).
+The tuning knobs above (turn caps, timeouts, concurrency, the browser executable) are
+environment variables and are listed in
+[../operations/configuration.md](../operations/configuration.md). The agent CREDENTIALS
+are not: since ruling 121 each person connects Claude and Codex on Profile → Agent
+accounts, and nothing about a backend account is read from the deployment environment.

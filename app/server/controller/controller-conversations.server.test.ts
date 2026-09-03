@@ -27,6 +27,13 @@ beforeAll(async () => {
   ownerId = findUserByEmail(app.db, "selin@viberr.dev")!.id;
   otherMemberId = findUserByEmail(app.db, "murat@viberr.dev")!.id;
   orgAdminId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
+  // Ruling 121: a controller turn runs on the ASKER's own Claude account, so
+  // the conversation owner has to have connected Claude for any turn in this
+  // file to start. The refusal case disconnects him deliberately.
+  const { connectFakeBackend } = await import(
+    "../../../test-support/backend-credentials"
+  );
+  await connectFakeBackend(app.db, ownerId, "claude");
 });
 afterAll(() => app.cleanup());
 
@@ -141,15 +148,18 @@ describe("conversation access", () => {
     expect(thrown!.init?.status).toBe(404);
   });
 
-  it("a turn with no Claude credential refuses honestly IN the transcript", async () => {
+  it("a turn refuses honestly IN the transcript when the ASKER has no Claude connected", async () => {
+    // Ruling 121: the controller runs on the asker's OWN Claude account, so the
+    // refusal is about them — not about the deployment — and another member who
+    // HAS connected Claude can still converse (asserted below).
     const { createConversation, listMessages } = await import(
       "./controller-conversations.server"
     );
     const { runControllerTurn } = await import("./controller-run.server");
-    const { setBackendAvailability } = await import(
-      "~/server/runtimes/runtime-registry.server"
+    const { disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
     );
-    setBackendAvailability("claude", false);
+    await disconnectFakeBackend(app.db, ownerId, "claude");
     try {
       const conversation = createConversation(app.db, {
         userId: ownerId,
@@ -172,7 +182,9 @@ describe("conversation access", () => {
       expect(messages).toHaveLength(2);
       expect(messages[0]!.author).toBe("user");
       expect(messages[1]!.author).toBe("controller");
-      expect(messages[1]!.text).toContain("Claude backend");
+      // Addressed to the person, naming where THEY fix it.
+      expect(messages[1]!.text).toContain("your own Claude account");
+      expect(messages[1]!.text).toContain("Profile → Agent accounts");
       // The first user message titled the conversation.
       const { getConversation } = await import(
         "./controller-conversations.server"
@@ -181,7 +193,124 @@ describe("conversation access", () => {
         "Anyone there?",
       );
     } finally {
-      setBackendAvailability("claude", true);
+      const { connectFakeBackend } = await import(
+        "../../../test-support/backend-credentials"
+      );
+      await connectFakeBackend(app.db, ownerId, "claude");
+    }
+  });
+
+  it("a sign-in whose credential FILE is gone gets the store's own sentence", async () => {
+    // Ruling 121, the wiped-runtime-volume case. This person HAS a connection
+    // row — they signed in through the vendor's own binary — so "Claude isn't
+    // connected for you yet" is both false and unactionable: what went missing
+    // is the sign-in file that lived on the volume. The refusal note carries
+    // the store's specific detail for exactly this case, and the branch that
+    // does so used to be unreachable (it keyed off `verification`, which is
+    // "none" on EVERY unavailable health).
+    const { createConversation, listMessages } = await import(
+      "./controller-conversations.server"
+    );
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { recordBackendLogin } = await import(
+      "~/server/runtimes/backend-credentials.server"
+    );
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    await disconnectFakeBackend(app.db, ownerId, "claude");
+    // A `login` row with no credential file under this data root: the exact
+    // state a wiped runtime volume leaves behind.
+    recordBackendLogin(
+      app.db,
+      { userId: ownerId, label: "selin@viberr.dev" },
+      "claude",
+      "claudeai",
+      { authMethod: "claudeai" },
+    );
+    try {
+      const conversation = createConversation(app.db, {
+        userId: ownerId,
+        userLabel: "selin@viberr.dev",
+        projectSlug: null,
+      });
+      const result = await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "Anyone there?",
+        user: {
+          id: ownerId,
+          email: "selin@viberr.dev",
+          name: "Selin Aksoy",
+          orgRole: "member",
+        },
+        dataRoot: app.dataRoot,
+      });
+      expect(result.state).toBe("refused");
+      const note = listMessages(app.db, conversation.id)[1]!.text;
+      expect(note).toContain("sign-in file is missing from this server");
+      expect(note).toContain("your own Claude account");
+      // …and NOT the generic copy, which would send them to connect something
+      // they already connected.
+      expect(note).not.toContain("isn't connected for you yet");
+    } finally {
+      await disconnectFakeBackend(app.db, ownerId, "claude");
+      await connectFakeBackend(app.db, ownerId, "claude");
+    }
+  });
+
+  it("another member WITH Claude connected still gets a turn (ruling 121)", async () => {
+    // The half that makes the refusal above person-shaped rather than a
+    // deployment outage: one member's missing connection never silences
+    // anybody else's controller. Canary: read availability from an instance
+    // probe again and this turn is refused alongside the one above.
+    const { createConversation, listMessages } = await import(
+      "./controller-conversations.server"
+    );
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    const { getRun } = await import("~/server/runtimes/run-store.server");
+    await disconnectFakeBackend(app.db, ownerId, "claude");
+    await connectFakeBackend(app.db, orgAdminId, "claude");
+    const conversation = createConversation(app.db, {
+      userId: orgAdminId,
+      userLabel: "arda@viberr.dev",
+      projectSlug: null,
+    });
+    try {
+      const result = await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "Anyone there?",
+        user: {
+          id: orgAdminId,
+          email: "arda@viberr.dev",
+          name: "Arda Yilmaz",
+          orgRole: "admin",
+        },
+        dataRoot: app.dataRoot,
+      });
+      // SAFETY: the conversation is fresh, so no lease is held and the turn
+      // takes the `started` arm — the only one carrying a runId.
+      if (result.state !== "started") throw new Error(`turn ${result.state}`);
+      const runId = result.runId;
+      // The turn bills the asker, and the run row says so permanently.
+      expect(getRun(app.db, runId)?.credential_user_id).toBe(orgAdminId);
+      // No refusal was written into the transcript: the only messages are the
+      // question and whatever the (fake) controller answered.
+      const messages = listMessages(app.db, conversation.id);
+      expect(messages[0]!.author).toBe("user");
+      expect(
+        messages.some((m) => m.text.includes("Profile → Agent accounts")),
+      ).toBe(false);
+      // Let the fake run finish so nothing writes after the suite closes the DB.
+      for (let i = 0; i < 200; i += 1) {
+        const state = getRun(app.db, runId)?.state;
+        if (state && state !== "running" && state !== "queued") break;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    } finally {
+      await connectFakeBackend(app.db, ownerId, "claude");
     }
   });
 

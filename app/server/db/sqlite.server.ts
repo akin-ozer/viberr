@@ -140,6 +140,10 @@ export function ensureSingleFlightIndexes(db: DatabaseSync): void {
 const RUN_ROW_COLUMNS: readonly { name: string; ddl: string }[] = [
   { name: "dispatched_by_name", ddl: "dispatched_by_name TEXT" },
   { name: "dispatched_by_user_id", ddl: "dispatched_by_user_id TEXT" },
+  // Ruling 121: the run's credential principal. `upsertRun` names it on EVERY
+  // insert, so a root that predates the baseline edit would fail every run
+  // start rather than degrade — the exact failure this healer exists for.
+  { name: "credential_user_id", ddl: "credential_user_id TEXT" },
 ];
 
 export function ensureRunRowColumns(db: DatabaseSync): void {

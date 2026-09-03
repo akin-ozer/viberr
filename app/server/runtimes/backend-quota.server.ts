@@ -95,11 +95,12 @@ export type BackendQuotaExhaustion = z.infer<typeof exhaustionSchema>;
 
 /**
  * F32-4 (pass 32): the provider REFUSED a run on this backend for its
- * CREDENTIAL — an expired refresh token, a revoked key, a 401. `backends` on
- * the health probe and `backendCredentialHealth` judge env/file PRESENCE only
- * (ruling 78: no synthetic token probe), so after a real refusal both kept
- * answering "real · usable via file" and the controller told the admin the
- * credential was fine ten minutes after a run had died on it. Same shape as
+ * CREDENTIAL — an expired refresh token, a revoked key, a 401. The connection
+ * counts on the health probe and `userBackendHealth` judge row/file PRESENCE
+ * only (ruling 78: no synthetic token probe; ruling 121 made the reading
+ * per-person without changing that), so after a real refusal both kept
+ * answering "connected" and the controller told the admin the credential was
+ * fine ten minutes after a run had died on it. Same shape as
  * exhaustion: derived from the failed run, carrying its id and the provider's
  * own sentence; retired by the next run that COMPLETES on the backend (the real
  * run is the re-probe) and by nothing else — a dead credential does not heal

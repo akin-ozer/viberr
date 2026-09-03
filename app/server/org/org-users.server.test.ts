@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { verifyPassword } from "~/server/auth/password.server";
 import { credentialPasswordHash } from "~/server/auth/identity.server";
@@ -33,6 +34,9 @@ const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 const ACTOR = { userId: "u_admin", label: "admin@test" };
+
+/** `audit_events.details_json` is NOT NULL TEXT (0001_baseline). */
+const auditDetailSchema = z.object({ details_json: z.string() });
 
 function makeDb() {
   const db = ctx.makeDb();
@@ -220,6 +224,74 @@ describe("edit / role / reset / remove", () => {
       ACTOR,
     );
     expect(again.user.email).toBe("reuse@test.dev");
+  });
+
+  /**
+   * Ruling 121: the credential ROWS cascade with the account, but the vendor's
+   * own sign-in file lives on the filesystem, where no foreign key reaches. Left
+   * behind it is a live Claude.ai / ChatGPT credential on this server that no
+   * row accounts for, that the person can never again reach `disconnectBackend`
+   * to revoke, and that every backup of the runtime volume carries forward.
+   */
+  it("delete retires the person's agent accounts, sign-in file included", async () => {
+    const { recordBackendLogin, getBackendCredential } = await import(
+      "~/server/runtimes/backend-credentials.server"
+    );
+    const { userBackendHome, claudeLoginCredentialPath } = await import(
+      "~/server/runtimes/user-homes.server"
+    );
+    const { writeFakeVendorBinaries } = await import(
+      "../../../test-support/fake-vendor-binary"
+    );
+    const { mkdirSync, existsSync, writeFileSync } = await import("node:fs");
+
+    const db = makeDb();
+    const dataRoot = ctx.makeTempDir();
+    const { user } = await createLocalAccount(
+      db,
+      { name: "Leaver", email: "leaver@test.dev", role: "member" },
+      ACTOR,
+    );
+    // The state a hosted sign-in leaves: a `login` row carrying no secret, and
+    // the vendor client's own credential file inside this person's home.
+    recordBackendLogin(
+      db,
+      { userId: user.id, label: user.email },
+      "claude",
+      "claudeai",
+      { authMethod: "claudeai" },
+    );
+    const home = userBackendHome(user.id, "claude", dataRoot);
+    mkdirSync(home, { recursive: true });
+    const credentialFile = claudeLoginCredentialPath(home);
+    writeFileSync(credentialFile, JSON.stringify({ fake: true }));
+
+    // Fake binaries: removing an account must never spawn the REAL
+    // `claude auth logout` from a test.
+    const fake = writeFakeVendorBinaries();
+    try {
+      await deleteOrgUser(db, user.id, ACTOR, {
+        dataRoot,
+        binaries: fake.binaries,
+      });
+    } finally {
+      fake.cleanup();
+    }
+
+    expect(existsSync(credentialFile)).toBe(false);
+    expect(getBackendCredential(db, user.id, "claude")).toBeNull();
+    // The revocation is auditable, not silent.
+    const removal = auditDetailSchema.parse(
+      db
+        .prepare(
+          `SELECT details_json FROM audit_events
+            WHERE action = 'org.user.removed' AND subject_id = ?`,
+        )
+        .get(user.id),
+    );
+    expect(JSON.parse(removal.details_json)).toMatchObject({
+      backendsRetired: ["claude"],
+    });
   });
 
   // rbac #5: deleting the identity cascades better-auth `session` rows via the

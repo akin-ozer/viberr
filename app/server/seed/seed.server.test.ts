@@ -212,13 +212,15 @@ describe("runSeed (clean-sheet product seed)", () => {
     expect(after.users).toBeGreaterThan(0);
   });
 
-  it("--reset preserves runtime credential homes, wipes only transcript dirs (P11-04)", async () => {
+  it("--reset preserves the per-person runtime homes, wipes only run-log dirs (P11-04)", async () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
     await runSeed(db, { dataRoot });
-    // A configured Codex credential home + a run transcript dir under runtimes/.
-    const codexAuth = join(dataRoot, "runtimes", "codex-home", "auth.json");
-    const claudeHome = join(dataRoot, "runtimes", "claude-home", "config.json");
+    // Ruling 121: the sign-ins live in each PERSON's own runtime home. A reset
+    // that took those with it would sign everybody out of their own Claude and
+    // Codex accounts — the P11-04 defect, one directory level deeper.
+    const codexAuth = join(dataRoot, "runtimes", "users", "u_arda", "codex-home", "auth.json");
+    const claudeHome = join(dataRoot, "runtimes", "users", "u_arda", "claude-home", ".credentials.json");
     const transcript = join(dataRoot, "runtimes", "codex", "run_abc.jsonl");
     mkdirSync(dirname(codexAuth), { recursive: true });
     mkdirSync(dirname(claudeHome), { recursive: true });
@@ -229,8 +231,8 @@ describe("runSeed (clean-sheet product seed)", () => {
 
     await runSeed(db, { dataRoot, reset: true });
 
-    expect(existsSync(codexAuth)).toBe(true); // credential home preserved
+    expect(existsSync(codexAuth)).toBe(true); // personal sign-in preserved
     expect(existsSync(claudeHome)).toBe(true);
-    expect(existsSync(transcript)).toBe(false); // transcript wiped
+    expect(existsSync(transcript)).toBe(false); // run log wiped
   });
 });

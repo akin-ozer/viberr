@@ -1,12 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
-import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import { DATED_CLAUDE_ID_RE } from "~/shared/model-ids";
-import { resolveClaudeConfigDir } from "./claude-config.server";
+import type { RunCredential } from "./backend-credentials.server";
 import { unavailableModels } from "./model-availability.server";
 import {
-  claudeSpawnEnv,
-  isBackendAvailable,
+  filteredSpawnEnv,
   type RealBackend,
 } from "./runtime-registry.server";
 import type {
@@ -29,11 +27,16 @@ import type {
  *   1. CURATED fallback — always available. Family aliases the CLI/SDK resolve
  *      to the latest model of that tier the account can use (claude), or a
  *      small hand-maintained model list (codex, which has NO list endpoint).
- *   2. ENHANCED (claude only) — when `isBackendAvailable('claude')`, a
- *      lightweight `query()` + `.supportedModels()` returns the LIVE list for
- *      the account/subscription, mapped to the same shape, cached in-process
- *      with a short TTL. On any throw/timeout it silently falls back to
- *      curated. The SDK query fn is injectable so tests use a fake (no spawn).
+ *   2. ENHANCED (claude only) — when the CALLER supplies a Claude
+ *      `RunCredential` (ruling 121: the VIEWER's own, resolved by the route
+ *      with `requireUser`), a lightweight `query()` + `.supportedModels()`
+ *      returns the LIVE list for THAT account/subscription, mapped to the same
+ *      shape, cached in-process with a short TTL. With no credential the
+ *      curated list is the whole answer — there is no instance account to ask,
+ *      and asking one person's account for another's picker would show models
+ *      the second person cannot run. On any throw/timeout it silently falls
+ *      back to curated. The SDK query fn is injectable so tests use a fake (no
+ *      spawn).
  *
  * The curated codex ids below are hand-maintained current ids and are
  * intentionally editable — Codex exposes no models endpoint, so the list is
@@ -335,8 +338,11 @@ export interface SdkModelInfo {
 interface CatalogDeps {
   /** Injected Claude SDK `query` (tests). Default: the real SDK, lazily loaded. */
   claudeQueryFn?: ClaudeQueryFn;
-  /** Overridable availability check (tests). */
-  isAvailable?: (backend: RealBackend) => boolean;
+  /** Ruling 121: the VIEWER's Claude credential, resolved by the caller
+   *  (`runCredentialFor` after `requireUser`). Absent — the viewer has not
+   *  connected Claude — means the curated list IS the answer; there is no
+   *  instance account left to enumerate against. */
+  credential?: RunCredential;
   /** Live-fetch timeout in ms (default 15000). */
   timeoutMs?: number;
   /** R20-3 (F20-4): the db to read `model_availability` marks from. When
@@ -374,6 +380,12 @@ const LIVE_TIMEOUT_MS = 15_000;
 interface CacheEntry {
   at: number;
   catalog: ModelCatalog;
+  /** Ruling 121: WHOSE account produced this list. A live catalog is what one
+   *  person's Claude subscription offers, so serving it to a second viewer
+   *  would show them models their own account may refuse. The home dir is the
+   *  per-person identity `runCredentialFor` already hands us; a hit for a
+   *  different one is a miss. */
+  homeDir: string;
 }
 
 const CATALOG_KEY = Symbol.for("viberr.modelCatalog");
@@ -404,11 +416,12 @@ export function resetModelCatalogCache(): void {
 
 /**
  * The model ids the LIVE catalog last offered for a backend (P13-RT-07).
- * Deliberately ignores the TTL: the TTL governs when to REFETCH, not whether a
- * value the picker already offered (and a profile already stored) is real. On a
- * cold process the cache is empty and validation falls back to the curated
- * aliases + the dated-id shape, which covers the ids `supportedModels()`
- * actually returns for Claude.
+ * Deliberately ignores the TTL — and, since ruling 121, whose account produced
+ * the entry: the TTL governs when to REFETCH, and the owner governs what to
+ * SHOW; neither governs whether a value the picker already offered (and a
+ * profile already stored) is a real model id. On a cold process the cache is
+ * empty and validation falls back to the curated aliases + the dated-id shape,
+ * which covers the ids `supportedModels()` actually returns for Claude.
  */
 function liveCatalogModelValues(backend: RealBackend): Set<string> {
   const entry = getCache().get(backend);
@@ -458,20 +471,22 @@ async function realQueryFn(): Promise<ClaudeQueryFn> {
  * signing secret, `VIBERR_SECRET_ENCRYPTION_KEY`, every provider key — and let
  * it read/write the operator's personal `~/.claude`. This probe is reachable
  * from the agent create/edit UI on every catalog miss, so it must be confined
- * exactly like a run: the filtered spawn env from `claudeSpawnEnv` plus a
- * deterministic `CLAUDE_CONFIG_DIR`, and the host-isolation trio the adapter
- * sets (`settingSources`/`skills`/`plugins`).
+ * exactly like a run: `filteredSpawnEnv()` plus the ONE credential this probe
+ * is allowed to use, and the host-isolation trio the adapter sets
+ * (`settingSources`/`skills`/`plugins`).
+ *
+ * Ruling 121: that credential is the VIEWER's — their home and, if they pasted
+ * one, their key, exactly as `runCredentialFor` assembles it for a run. The
+ * probe spends nothing (listing models is free), but it does read a personal
+ * account, so it reads the account of the person who asked.
  *
  * Exported so the confinement is assertable — see the model-catalog tests.
  */
-export function claudeProbeOptions(): ClaudeQueryOptions {
-  const env = getEnv();
+export function claudeProbeOptions(
+  credential: RunCredential,
+): ClaudeQueryOptions {
   return {
-    env: claudeSpawnEnv(
-      resolveClaudeConfigDir(),
-      env.ANTHROPIC_API_KEY,
-      env.CLAUDE_CODE_OAUTH_TOKEN,
-    ),
+    env: { ...filteredSpawnEnv(), ...credential.env },
     settingSources: [],
     skills: [],
     plugins: [],
@@ -493,9 +508,13 @@ interface ModelProbeQuery {
  *  spawns the binary, so "we never iterate" is not isolation. */
 async function fetchLiveClaudeModels(
   queryFn: ClaudeQueryFn,
+  credential: RunCredential,
   timeoutMs: number,
 ): Promise<SdkModelInfo[]> {
-  const q: ModelProbeQuery = queryFn({ prompt: "", options: claudeProbeOptions() });
+  const q: ModelProbeQuery = queryFn({
+    prompt: "",
+    options: claudeProbeOptions(credential),
+  });
   if (!q.supportedModels) {
     throw new Error("query() has no supportedModels()");
   }
@@ -535,9 +554,9 @@ function claudeCatalogFromLive(models: SdkModelInfo[]): ModelCatalog {
 
 /**
  * The model + effort catalog for a backend. Claude enhances the curated
- * fallback with the LIVE `supportedModels()` list when the backend is
- * available (cached with a short TTL); codex is curated-only. NEVER throws —
- * any live failure logs and returns curated.
+ * fallback with the LIVE `supportedModels()` list when the CALLER supplies the
+ * viewer's Claude credential (cached with a short TTL); codex is curated-only.
+ * NEVER throws — any live failure logs and returns curated.
  */
 export async function getModelCatalog(
   backend: RealBackend,
@@ -548,25 +567,30 @@ export async function getModelCatalog(
   const stamp = (c: ModelCatalog) => stampUnavailability(c, backend, deps.db);
   if (backend === "codex") return stamp(curatedCatalog("codex"));
 
-  const available = (deps.isAvailable ?? isBackendAvailable)("claude");
-  if (!available) return stamp(curatedCatalog("claude"));
+  const credential = deps.credential;
+  if (!credential) return stamp(curatedCatalog("claude"));
 
-  // Serve a fresh cached live result.
+  // Serve a fresh cached live result — but only the one this viewer's own
+  // account produced (ruling 121).
   const cache = getCache();
   const hit = cache.get("claude");
-  if (hit && Date.now() - hit.at < LIVE_TTL_MS) {
+  if (
+    hit &&
+    hit.homeDir === credential.homeDir &&
+    Date.now() - hit.at < LIVE_TTL_MS
+  ) {
     return stamp(cloneCatalog(hit.catalog));
   }
 
   try {
     const queryFn = deps.claudeQueryFn ?? (await realQueryFn());
     const timeoutMs = deps.timeoutMs ?? LIVE_TIMEOUT_MS;
-    const live = await fetchLiveClaudeModels(queryFn, timeoutMs);
+    const live = await fetchLiveClaudeModels(queryFn, credential, timeoutMs);
     if (!Array.isArray(live) || live.length === 0) {
       return stamp(curatedCatalog("claude"));
     }
     const catalog = claudeCatalogFromLive(live);
-    cache.set("claude", { at: Date.now(), catalog });
+    cache.set("claude", { at: Date.now(), catalog, homeDir: credential.homeDir });
     return stamp(cloneCatalog(catalog));
   } catch (error) {
     logger.info("model catalog live fetch failed — using curated", {

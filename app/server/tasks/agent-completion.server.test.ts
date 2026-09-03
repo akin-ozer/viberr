@@ -32,6 +32,7 @@ import {
   installFakeRuntime,
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
+import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import {
   applyAgentCompletionEffects,
   markWaitingAgent,
@@ -176,7 +177,7 @@ async function waitFor(
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   deployDevSpecialist();
@@ -191,6 +192,12 @@ beforeEach(() => {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
   installFakeRuntime();
+  // Ruling 121: an agent run bills the TASK OWNER's own accounts, so a run
+  // only reaches an adapter when the owner has that backend connected. Arda
+  // owns the tasks in this file; connecting both backends for him is the
+  // ordinary state of somebody using the product.
+  await connectFakeBackend(store.db, store.users.arda.id, "claude");
+  await connectFakeBackend(store.db, store.users.arda.id, "codex");
 });
 
 afterEach(() => {
@@ -247,6 +254,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       kind: "reviewer",
       role: "Reviewer",
       agentProfileId: "reviewer",
+      credentialUserId: store.users.arda.id,
       backend: "claude",
       model: "sonnet",
       prompt: "review",
@@ -1169,10 +1177,15 @@ describe("unavailable backend through the specialist start path", () => {
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    const { setBackendAvailability } = await import(
-      "~/server/runtimes/runtime-registry.server"
+    // Ruling 121: the refusal is about the TASK OWNER's account — arda owns
+    // VIB-1 here, and taking his accounts away is what makes the dispatch
+    // refuse. BOTH go, so the packet has no real "retry on the other backend"
+    // to offer either (asserted below).
+    const { disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
     );
-    setBackendAvailability("claude", false);
+    await disconnectFakeBackend(store.db, store.users.arda.id, "claude");
+    await disconnectFakeBackend(store.db, store.users.arda.id, "codex");
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
@@ -1186,22 +1199,92 @@ describe("unavailable backend through the specialist start path", () => {
       .get(result.runId) as { state: string };
     expect(row.state).toBe("error");
 
+    const blockedByRefusal = (text: string) => /isn't connected for/.test(text);
     const surfaced = await waitFor(() => {
       const parsed = taskFile().parsed;
       return (
         parsed.timeline.some(
-          (e) => e.type === "blocked" && /unavailable/i.test(e.text),
+          (e) => e.type === "blocked" && blockedByRefusal(e.text),
         ) && parsed.packet?.type === "blocked"
       );
     });
     expect(surfaced, "blocked event + recovery packet must land").toBe(true);
     const parsed = taskFile().parsed;
     const failureEvent = parsed.timeline.find(
-      (e) => e.type === "blocked" && /unavailable/i.test(e.text),
+      (e) => e.type === "blocked" && blockedByRefusal(e.text),
     )!;
-    expect(failureEvent.text).toContain("no usable credential");
-    expect(failureEvent.text).toContain("Configure a credential");
+    // Ruling 121: the packet body carries the resolver's OWN sentence — the one
+    // the run's error line carries — naming the owner and where THEY connect
+    // the backend. It never names an environment variable, and it never tells
+    // the reader to "configure a credential" on an instance that has none.
+    expect(failureEvent.text).toContain(store.users.arda.name);
+    expect(failureEvent.text).toContain("the task owner");
+    expect(failureEvent.text).toContain("Profile → Agent accounts");
+    expect(failureEvent.text).not.toContain("Configure a credential");
+    expect(failureEvent.text).not.toContain("ANTHROPIC_API_KEY");
+    // …and "retry on the other backend" is NOT offered: the owner has not
+    // connected Codex either, so that one-click recovery would fail the same
+    // way the moment it was clicked.
+    expect(
+      (parsed.packet?.options ?? []).some(
+        (o) => o.kind === "retry_other_backend",
+      ),
+    ).toBe(false);
     expect(parsed.frontmatter.waiting).toBe("human");
+  });
+
+  it("offers 'retry on the other backend' only when the OWNER has that one connected", async () => {
+    // Ruling 121: the retry run would bill the same owner. Offering it when
+    // they cannot run it promises a one-click fix that fails identically —
+    // the worst kind of packet option, because it looks like the way out.
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // Claude gone, Codex still connected (the beforeEach connected both).
+    const { disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    await disconnectFakeBackend(store.db, store.users.arda.id, "claude");
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const offered = await waitFor(() => {
+      const packet = taskFile().parsed.packet;
+      return (packet?.options ?? []).some(
+        (o) => o.kind === "retry_other_backend",
+      );
+    });
+    expect(offered, "the owner CAN run Codex, so the retry is real").toBe(true);
   });
 });
 
@@ -1280,6 +1363,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
       kind: "reviewer",
       role: "Reviewer",
       agentProfileId: "reviewer",
+      credentialUserId: store.users.arda.id,
       backend: "claude",
       model: "sonnet",
       prompt: "review",

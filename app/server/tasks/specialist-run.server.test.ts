@@ -57,7 +57,12 @@ import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   installFakeRuntime,
   lastRunSpec,
+  startedRunSpecs,
 } from "../../../test-support/fake-runtime";
+import {
+  connectFakeBackend,
+  disconnectFakeBackend,
+} from "../../../test-support/backend-credentials";
 import {
   assignReviewer,
   assignSpecialist,
@@ -134,7 +139,7 @@ function deployDevSpecialist(
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   deployDevSpecialist();
@@ -150,6 +155,12 @@ beforeEach(() => {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
   installFakeRuntime();
+  // Ruling 121: an agent run bills the TASK OWNER's accounts. Arda owns every
+  // task in this file, so connecting his backends is what makes a dispatch
+  // reach an adapter at all — the refusal path is exercised deliberately, in
+  // its own block near the bottom.
+  await connectFakeBackend(store.db, store.users.arda.id, "claude");
+  await connectFakeBackend(store.db, store.users.arda.id, "codex");
 });
 
 afterEach(() => {
@@ -1124,6 +1135,126 @@ describe("assignReviewer / removeReviewer", () => {
     await expect(
       assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
     ).rejects.toThrow(/not eligible/i);
+  });
+});
+
+/**
+ * Ruling 121 — a dispatch with no credential principal.
+ *
+ * Every agent run bills the TASK OWNER's own Claude/Codex account, so three
+ * states refuse before anything is spent: the task has no owner, the owner's
+ * account is gone, or the owner has not connected this backend. All three end
+ * the same way and deliberately so — an honest `error` run through the normal
+ * completion pipeline (so the packet and the timeline event happen exactly as
+ * they do for any other failed run), with no clone, no reservation, no
+ * process, and the ONE sentence `principalRefusalMessage` writes.
+ */
+describe("startAgentRun — no credential principal (ruling 121)", () => {
+  async function dispatch(): Promise<string> {
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const { runId } = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    return runId;
+  }
+
+  /** The one `run·unavailable` line a refused run records. (The dispatch also
+   *  writes its resolved-inputs disclosure line, as it does for every run.) */
+  function refusalText(runId: string): string {
+    const errors = listRunLines(store.db, runId).filter(
+      (l) => l.display.tag === "run·unavailable",
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.display.ev).toBe("err");
+    return errors[0]!.display.text ?? "";
+  }
+
+  it("an OWNER who has not connected the backend: names them, and starts nothing", async () => {
+    await disconnectFakeBackend(store.db, store.users.arda.id, "claude");
+    const runId = await dispatch();
+
+    const run = getRun(store.db, runId)!;
+    expect(run.state).toBe("error");
+    // The principal IS recorded — the refusal is auditable, not anonymous.
+    expect(run.credential_user_id).toBe(store.users.arda.id);
+    const text = refusalText(runId);
+    expect(text).toContain(store.users.arda.name);
+    expect(text).toContain(store.users.arda.email);
+    expect(text).toContain("the task owner");
+    expect(text).toContain("Profile → Agent accounts");
+    expect(text).toContain("No agent process was started.");
+    // No environment variable is named: ruling 121 left none to set.
+    expect(text).not.toContain("ANTHROPIC_API_KEY");
+    // Nothing was spawned: the fake adapter never saw a spec.
+    expect(startedRunSpecs()).toHaveLength(0);
+  });
+
+  it("an UNOWNED task: a null principal, and the sentence names the task", async () => {
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.ownerUserId = null;
+      },
+    );
+    const runId = await dispatch();
+
+    const run = getRun(store.db, runId)!;
+    expect(run.state).toBe("error");
+    // Null ONLY here: a run that ever spawned a process has a principal.
+    expect(run.credential_user_id).toBeNull();
+    const text = refusalText(runId);
+    expect(text).toContain("Claude runs on VIB-1 need a task owner");
+    expect(text).toContain("Assign me");
+    expect(startedRunSpecs()).toHaveLength(0);
+  });
+
+  it("a DISABLED owner reads as an owner the run cannot bill", async () => {
+    // A disabled account is as gone as a deleted one for billing: the person
+    // can no longer sign in, so nothing they own may keep spending on their
+    // provider account.
+    const { updateUserFields } = await import("~/server/auth/user-store.server");
+    const runId = await (async () => {
+      await assignSpecialist(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      updateUserFields(store.db, store.users.arda.id, { disabled: true });
+      const started = await startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      return started.runId;
+    })();
+    const text = refusalText(runId);
+    expect(text).toContain("owner account is disabled or gone");
+    expect(text).toContain("Assign a new owner");
+    expect(startedRunSpecs()).toHaveLength(0);
+  });
+
+  it("reserves no run row and clones nothing for a refused dispatch", async () => {
+    // The reservation exists to render a live "Preparing workspace" strip
+    // during a clone. A run about to be recorded as an error has nothing to
+    // prepare, so showing one would be theatre — and it would hold a
+    // concurrency slot for a run that will never launch.
+    await disconnectFakeBackend(store.db, store.users.arda.id, "claude");
+    const runId = await dispatch();
+    const rows = listRunsForTaskRows(store.db, store.slug, "VIB-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe(runId);
+    expect(rows[0]!.phase).toBeNull();
   });
 });
 

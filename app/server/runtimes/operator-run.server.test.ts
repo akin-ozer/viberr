@@ -23,10 +23,20 @@ import {
   configureRunServiceForTests,
 } from "./run-service.server";
 import {
-  setBackendAvailability,
   type AdapterSet,
 } from "./runtime-registry.server";
-import { insertRunLine, listRunsForTaskRows, upsertRun } from "./run-store.server";
+import {
+  connectFakeBackend,
+  connectFakeBackends,
+  disconnectFakeBackend,
+} from "../../../test-support/backend-credentials";
+import {
+  getRun,
+  insertRunLine,
+  listRunLines,
+  listRunsForTaskRows,
+  upsertRun,
+} from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import {
   executeStrandedCodexPlan,
@@ -147,7 +157,7 @@ describe("Codex structured operator completion", () => {
       dataRoot: store.dataRoot,
     })!.parsed;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ctx = createTestDbContext();
     store = setupTestStore(ctx);
     const project = readProjectFile({
@@ -196,7 +206,9 @@ describe("Codex structured operator completion", () => {
       codex: adapter,
     };
     configureRunServiceForTests(adapters);
-    setBackendAvailability("codex", true);
+    // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+    // have this backend connected or the drive is refused before it starts.
+    await connectFakeBackend(store.db, store.users.arda.id, "codex");
   });
 
   afterEach(() => {
@@ -1262,7 +1274,7 @@ describe("stranded auto-stage resume", () => {
     let store2: TestStore;
     let adapter2: ControlledAdapter;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       ctx2 = createTestDbContext();
       store2 = setupTestStore(ctx2);
       const project = readProjectFile({
@@ -1302,7 +1314,9 @@ describe("stranded auto-stage resume", () => {
       resetOperatorLeasesForTests();
       adapter2 = new ControlledAdapter();
       configureRunServiceForTests({ claude: adapter2, codex: adapter2 });
-      setBackendAvailability("codex", true);
+      // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+      // have this backend connected or the drive is refused before it starts.
+      await connectFakeBackend(store2.db, store2.users.arda.id, "codex");
     });
 
     afterEach(() => {
@@ -1892,7 +1906,7 @@ describe("pending trigger queue", () => {
     });
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ctx3 = createTestDbContext();
     store3 = setupTestStore(ctx3);
     seedOperatorProject();
@@ -1912,7 +1926,9 @@ describe("pending trigger queue", () => {
     resetOperatorLeasesForTests();
     adapter3 = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter3, codex: adapter3 });
-    setBackendAvailability("codex", true);
+    // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+    // have this backend connected or the drive is refused before it starts.
+    await connectFakeBackend(store3.db, store3.users.arda.id, "codex");
   });
 
   afterEach(() => {
@@ -2136,7 +2152,7 @@ describe("stranded codex plan recovery", () => {
   let store4: TestStore;
   let adapter4: ControlledAdapter;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ctx4 = createTestDbContext();
     store4 = setupTestStore(ctx4);
     const project = readProjectFile({
@@ -2176,7 +2192,9 @@ describe("stranded codex plan recovery", () => {
     resetOperatorLeasesForTests();
     adapter4 = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter4, codex: adapter4 });
-    setBackendAvailability("codex", true);
+    // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+    // have this backend connected or the drive is refused before it starts.
+    await connectFakeBackend(store4.db, store4.users.arda.id, "codex");
   });
 
   afterEach(() => {
@@ -2320,15 +2338,16 @@ describe("runOperator — authority, ordering, orphans", () => {
       ...over,
     });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ctx5 = createTestDbContext();
     store5 = setupTestStore(ctx5);
     resetSseBrokerForTests();
     resetOperatorLeasesForTests();
     adapter5 = new ProbeAdapter();
     configureRunServiceForTests({ claude: adapter5, codex: adapter5 });
-    setBackendAvailability("claude", true);
-    setBackendAvailability("codex", true);
+    // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+    // have the backend connected or the drive is refused before it starts.
+    await connectFakeBackends(store5.db, store5.users.arda.id);
   });
 
   afterEach(() => {
@@ -2369,6 +2388,72 @@ describe("runOperator — authority, ordering, orphans", () => {
     // floor is just `get_task`, and it still changes nothing.
     expect(spec.allowedTools).toEqual(["mcp__viberr__get_task"]);
     expect(spec.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
+  });
+
+  /**
+   * Ruling 121 — an operator drive bills the TASK OWNER's own accounts, so a
+   * task with no owner (or an owner who has not connected the backend) cannot
+   * coordinate at all. The refusal is recorded as the drive's whole outcome:
+   * a run row in `error` carrying the one refusal sentence, no clone, no
+   * process, and the same blocked recovery packet any failed operator run
+   * raises — with the sentence as its body rather than the generic
+   * "fix the credential" advice, which names a fix nobody here can make.
+   */
+  it("an UNOWNED task refuses the drive: no process, a NULL principal", async () => {
+    // Canary: drop the `resolveTaskRunPrincipal` call in runOperator and the
+    // drive clones, reserves and hands a spec to the adapter.
+    deployAgents([operatorAgent()]);
+    writeTask(store5.dataRoot, store5.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        readiness: "ready",
+        waiting: "agent",
+        ownerUserId: null,
+      }),
+      goal: "Ship the parser.",
+    });
+    rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+
+    const result = await drive({ trigger: "manual" });
+
+    expect(adapter5.pending).toBeNull();
+    const runs = operatorRuns();
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.state).toBe("error");
+    const run = getRun(store5.db, result.runId!)!;
+    // Null ONLY here: a run that ever spawned a process has a principal.
+    expect(run.credential_user_id).toBeNull();
+    const text = listRunLines(store5.db, run.id)[0]!.display.text ?? "";
+    expect(text).toContain("need a task owner");
+    expect(text).toContain("No agent process was started.");
+  });
+
+  it("an OWNER with no connected backend: the run names them, the packet quotes it", async () => {
+    deployAgents([operatorAgent()]);
+    seed("impl");
+    await disconnectFakeBackend(store5.db, store5.users.arda.id, "claude");
+
+    const result = await drive({ trigger: "manual" });
+
+    expect(adapter5.pending).toBeNull();
+    const run = getRun(store5.db, result.runId!)!;
+    expect(run.state).toBe("error");
+    // The principal IS recorded: the refusal says whose account it would have
+    // billed, which is what makes it auditable rather than anonymous.
+    expect(run.credential_user_id).toBe(store5.users.arda.id);
+    const text = listRunLines(store5.db, run.id)[0]!.display.text ?? "";
+    expect(text).toContain(store5.users.arda.name);
+    expect(text).toContain("Profile → Agent accounts");
+
+    // The escalation packet carries that same sentence — one refusal, one
+    // story — and stops advising a fix ("retry on the other backend") that is
+    // refused for exactly the same reason.
+    await eventually(() => {
+      const packet = task().packet;
+      expect(packet).not.toBeNull();
+      expect(packet!.body).toContain("Profile → Agent accounts");
+      expect(packet!.body).not.toContain("Retry on the other backend");
+    });
   });
 
   /**
@@ -2665,7 +2750,7 @@ describe("stranded-resume shares the transition chain cap (B4)", () => {
   let store6: TestStore;
   let adapter6: ControlledAdapter;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ctx6 = createTestDbContext();
     store6 = setupTestStore(ctx6);
     const project = readProjectFile({
@@ -2705,7 +2790,9 @@ describe("stranded-resume shares the transition chain cap (B4)", () => {
     resetOperatorLeasesForTests();
     adapter6 = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter6, codex: adapter6 });
-    setBackendAvailability("codex", true);
+    // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+    // have this backend connected or the drive is refused before it starts.
+    await connectFakeBackend(store6.db, store6.users.arda.id, "codex");
   });
 
   afterEach(() => {
@@ -2906,7 +2993,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
     }
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ctx7 = createTestDbContext();
     store7 = setupTestStore(ctx7);
     origins = ctx7.makeTempDir();
@@ -2914,8 +3001,9 @@ describe("R19-1 — the operator's read-only repository view", () => {
     resetOperatorLeasesForTests();
     adapter7 = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter7, codex: adapter7 });
-    setBackendAvailability("claude", true);
-    setBackendAvailability("codex", true);
+    // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+    // have the backend connected or the drive is refused before it starts.
+    await connectFakeBackends(store7.db, store7.users.arda.id);
   });
 
   afterEach(() => {

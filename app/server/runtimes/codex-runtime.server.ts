@@ -48,9 +48,12 @@ import { redactProviderText } from "~/server/secrets/git-output-redact.server";
  * in the SDK contract). The SDK spawns the codex binary internally; startup or
  * runtime failures are surfaced as sanitized failed runs.
  *
- * Auth: an existing Codex subscription login (auth.json / CODEX_ACCESS_TOKEN)
- * or API-key auth. The SDK factory is injectable so tests drive fakes — real
- * Codex is NEVER invoked.
+ * Auth: whatever the run's CREDENTIAL PRINCIPAL connected (ruling 121) — the
+ * `codex login` the vendor binary wrote into that person's `CODEX_HOME`, or a
+ * `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN` they pasted. Both arrive on
+ * `spec.env`, assembled by `runCredentialFor` in the run service; this adapter
+ * reads no credential of its own. The SDK factory is injectable so tests drive
+ * fakes — real Codex is NEVER invoked.
  */
 
 /**
@@ -76,7 +79,13 @@ export type CodexFactory = (options?: CodexOptions) => CodexClient;
 interface CodexAdapterDeps {
   /** Injected Codex factory (default: the real SDK, imported lazily). */
   codexFactory?: CodexFactory;
-  apiKey?: string;
+  /** The credential-free base spawn env (`filteredSpawnEnv`). The run's own
+   *  overlay — its principal's CODEX_HOME and, for a pasted credential, that
+   *  one key — arrives on `spec.env` and is merged over this. There is no
+   *  `apiKey` dep: the SDK's own `apiKey` option does nothing but set
+   *  `env.CODEX_API_KEY` (verified in @openai/codex-sdk/dist/index.js), which
+   *  is exactly what `runCredentialFor` already puts there for the ONE person
+   *  the run bills (ruling 121). */
   env?: Record<string, string>;
   /** Extra supported CLI config overrides, primarily for test/deployment seams. */
   config?: CodexOptions["config"];
@@ -151,7 +160,7 @@ const codexMcpServerSchema = z.union([
  *
  * NOTE also that this config does not REMOVE servers the run home declares —
  * the CLI merges `--config` per dotted leaf key. That is why runs get an
- * app-owned CODEX_HOME (`codex-config.server.ts`) instead of the host's. */
+ * a per-person CODEX_HOME (`user-homes.server.ts`) instead of the host's. */
 function codexMcpServers(servers: RunSpec["mcpServers"]): CodexConfig {
   const translated: CodexConfig = {};
   for (const [name, value] of Object.entries(servers ?? {})) {
@@ -248,8 +257,8 @@ function shellExportedEnv(spec: RunSpec) {
  *
  * ISOLATION (P13-LV-13 / LV-14 / RT-04): the CLI merges `--config` overrides
  * into whatever `$CODEX_HOME/config.toml` already declares, so config alone
- * cannot close the host channels — the app-owned run home
- * (`resolveCodexHome`/`prepareCodexHome`) is what does. These keys are the
+ * cannot close the host channels — the run's PER-PERSON home
+ * (`userBackendHome`, ruling 121) is what does. These keys are the
  * second half of the same fence, because the CLI RE-INSTALLS its five bundled
  * `.system` skills into *any* home on startup (verified with
  * `codex debug prompt-input` on a pristine home: `imagegen`, `openai-docs`,
@@ -284,7 +293,8 @@ function codexConfigForRun(
   const config: CodexConfig = {
     ...base,
     // Enforce these after base config so a host/deployment override cannot
-    // re-expose CODEX_ACCESS_TOKEN or other server credentials to tools.
+    // re-expose the principal's CODEX_ACCESS_TOKEN (or any other credential
+    // on the CLI's own process env) to tools the model runs.
     allow_login_shell: false,
     // RT-04: the checked-out repo's `AGENTS.md` (and any fallback project doc)
     // is otherwise merged into the run's INSTRUCTIONS at a higher trust tier
@@ -313,9 +323,10 @@ function codexConfigForRun(
       apps: false,
       // LV-13/LV-14 defense in depth: a plugin contributes BOTH skills and MCP
       // servers (the host leak included `github:yeet` and a plugin-supplied
-      // `sites-design-picker` server). The run home carries no plugins, but a
-      // deployment that points CODEX_HOME at a populated dir must not re-open
-      // the channel. Hooks are host-configured shell callbacks — same class.
+      // `sites-design-picker` server). A person's own codex home carries no
+      // plugins, but a home that somehow gained one (the vendor binary writes
+      // there too) must not re-open the channel. Hooks are host-configured
+      // shell callbacks — same class.
       plugins: false,
       hooks: false,
     },
@@ -763,7 +774,6 @@ export function createCodexAdapter(
           baseEnv || spec.env ? { ...baseEnv, ...spec.env } : undefined;
         const config = codexConfigForRun(spec, deps.config);
         const codexOptions: CodexOptions = { config };
-        if (deps.apiKey) codexOptions.apiKey = deps.apiKey;
         if (mergedEnv) codexOptions.env = mergedEnv;
         const codex = factory(codexOptions);
         // Parity ruling (2026-08-31, superseding R22's advisory posture):

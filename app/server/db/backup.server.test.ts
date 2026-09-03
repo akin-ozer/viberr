@@ -158,8 +158,11 @@ describe("createBackup", () => {
 
   it("carries runtimes/ only when asked", () => {
     const f = fixture();
-    mkdirSync(path.join(f.dataRoot, "runtimes", "codex-home"), { recursive: true });
-    writeFileSync(path.join(f.dataRoot, "runtimes", "codex-home", "auth.json"), "{}");
+    // Ruling 121: the credential that makes `runtimes/` opt-in is a PERSON's
+    // own vendor sign-in, under their runtime home.
+    const home = path.join(f.dataRoot, "runtimes", "users", "u_arda", "codex-home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(path.join(home, "auth.json"), "{}");
 
     const without = createBackup({ dataRoot: f.dataRoot, destination: f.out, name: "a" });
     expect(existsSync(path.join(without.dir, "store", "runtimes"))).toBe(false);
@@ -171,7 +174,17 @@ describe("createBackup", () => {
       includeRuntimes: true,
     });
     expect(
-      existsSync(path.join(with_.dir, "store", "runtimes", "codex-home", "auth.json")),
+      existsSync(
+        path.join(
+          with_.dir,
+          "store",
+          "runtimes",
+          "users",
+          "u_arda",
+          "codex-home",
+          "auth.json",
+        ),
+      ),
     ).toBe(true);
     expect(with_.manifest.excludes.join(" ")).not.toContain("runtimes/ —");
   });
@@ -330,7 +343,7 @@ describe("restoreStoreFile", () => {
     const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
     for (const bad of [
       "state/projection.sqlite",
-      "runtimes/codex-home/auth.json",
+      "runtimes/users/u_arda/codex-home/auth.json",
       "../../etc/passwd",
       "/etc/passwd",
     ]) {

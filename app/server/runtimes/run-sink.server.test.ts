@@ -20,10 +20,17 @@ import { listRunLines, rawLogPath, upsertRun } from "./run-store.server";
  *
  * Input-side isolation is real (`filteredSpawnEnv` strips every
  * credential-shaped variable from both spawn envs) — but the app then
- * deliberately re-adds the SELECTED provider credential to the agent's child
- * env, and Claude has no counterpart to Codex's shell-env policy. So a tool call
- * that printed its environment landed the live key verbatim in a member-visible
- * console, in the `{ } raw` toggle, and in the persisted `.jsonl`.
+ * deliberately re-adds ONE credential to the agent's child env, and Claude has
+ * no counterpart to Codex's shell-env policy. So a tool call that printed its
+ * environment landed the live key verbatim in a member-visible console, in the
+ * `{ } raw` toggle, and in the persisted `.jsonl`.
+ *
+ * Ruling 121 moved that one credential out of this process's environment: it is
+ * the run PRINCIPAL's own, sealed in `user_backend_credentials` and opened per
+ * run, so the env sweep alone can no longer see it. `createRunSink(db, spec,
+ * { secrets })` is how the value reaches the redactor, and it is now the
+ * load-bearing half — the key belongs to one person while the run console is
+ * visible to every project member.
  */
 
 let ctx: TestDbContext;
@@ -32,11 +39,19 @@ let store: TestStore;
 const SAVED = {
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
   CODEX_ACCESS_TOKEN: process.env.CODEX_ACCESS_TOKEN,
-  VIBERR_CLAUDE_USE_CLI_AUTH: process.env.VIBERR_CLAUDE_USE_CLI_AUTH,
+  GIT_TERMINAL_PROMPT: process.env.GIT_TERMINAL_PROMPT,
 };
 
 const CLAUDE_KEY = "sk-ant-api03-VERYSECRETVALUE0123456789abcdef";
 const CODEX_TOKEN = "codex-access-token-0123456789abcdef";
+/**
+ * The ruling-121 shape: a credential that exists ONLY in a sealed row and in
+ * the one run's spawn env, never in this process's environment. Deliberately a
+ * ChatGPT-workspace ACCESS TOKEN rather than an `sk-…` key: the token patterns
+ * would have caught an `sk-` prefix on sight, and then this file would be
+ * proving the pattern layer works rather than the per-run seam.
+ */
+const PERSONAL_TOKEN = "cwt-arda-workspace-0123456789abcdefghij";
 
 beforeEach(() => {
   ctx = createTestDbContext();
@@ -45,8 +60,8 @@ beforeEach(() => {
   process.env.ANTHROPIC_API_KEY = CLAUDE_KEY;
   process.env.CODEX_ACCESS_TOKEN = CODEX_TOKEN;
   // Credential-SHAPED but a flag, not a secret. Redacting a 1-char value would
-  // scrub every "1" out of every log line.
-  process.env.VIBERR_CLAUDE_USE_CLI_AUTH = "1";
+  // scrub every "0" out of every log line.
+  process.env.GIT_TERMINAL_PROMPT = "0";
 });
 
 afterEach(() => {
@@ -101,6 +116,25 @@ function sinkFor(runId: string, threadId = "primary") {
   return createRunSink(store.db, spec(runId));
 }
 
+/** The same row + sink, but carrying the per-run secrets `runCredentialFor`
+ *  resolved for the run's principal (ruling 121). */
+function sinkWithSecrets(runId: string, secrets: string[], threadId = "primary") {
+  upsertRun(store.db, {
+    id: runId,
+    projectSlug: store.slug,
+    taskKey: "VIB-1",
+    threadId,
+    role: "developer",
+    kind: "primary",
+    backend: "claude",
+    model: "sonnet",
+    sdk: "Claude Agent SDK",
+    agentProfileId: "dev",
+    state: "queued",
+  });
+  return createRunSink(store.db, spec(runId), { secrets });
+}
+
 describe("createLineRedactor", () => {
   it("replaces the credential values this process injects into agent envs", () => {
     const redact = createLineRedactor();
@@ -130,9 +164,44 @@ describe("createLineRedactor", () => {
     // No match at all → the very same string comes back (the cheap path).
     expect(redact(prose)).toBe(prose);
     // A short credential-shaped FLAG value never becomes a redaction pattern.
-    expect(redact("VIBERR_CLAUDE_USE_CLI_AUTH=1")).toBe(
-      "VIBERR_CLAUDE_USE_CLI_AUTH=1",
+    expect(redact("GIT_TERMINAL_PROMPT=0")).toBe("GIT_TERMINAL_PROMPT=0");
+  });
+
+  /**
+   * Ruling 121: the run's own secret. A personal API key is sealed in
+   * `user_backend_credentials` and decrypted for exactly one run, so it is
+   * never in `process.env` — the env sweep above cannot know it, and without
+   * this seam the first `env` a model ran would print one person's key into a
+   * console every project member can read.
+   */
+  it("redacts the PER-RUN secrets the env sweep cannot see", () => {
+    // Proof the env sweep alone misses it: the value is in no variable here,
+    // and no token pattern claims it either.
+    expect(createLineRedactor()(PERSONAL_TOKEN)).toBe(PERSONAL_TOKEN);
+    const redact = createLineRedactor(process.env, [PERSONAL_TOKEN]);
+    expect(redact(`CODEX_ACCESS_TOKEN=${PERSONAL_TOKEN}`)).toBe(
+      "CODEX_ACCESS_TOKEN=[redacted]",
     );
+    // The env-held credentials keep being redacted alongside it.
+    expect(redact(`x ${CLAUDE_KEY} y`)).toBe("x [redacted] y");
+  });
+
+  it("holds the per-run secrets to the same length floor as the env sweep", () => {
+    // A short "secret" is a flag or a fixture stub; redacting it would scrub
+    // ordinary prose, and no provider issues a credential this short.
+    const redact = createLineRedactor({}, ["short", PERSONAL_TOKEN]);
+    expect(redact("the short answer")).toBe("the short answer");
+    expect(redact(`key ${PERSONAL_TOKEN} here`)).toBe("key [redacted] here");
+  });
+
+  it("sorts a per-run secret against the env values longest-first", () => {
+    // One credential CONTAINING another (a token and its prefix) must be
+    // replaced whole, or the longer value leaks its tail.
+    const redact = createLineRedactor(
+      { INNER_TOKEN: PERSONAL_TOKEN.slice(0, 20) },
+      [PERSONAL_TOKEN],
+    );
+    expect(redact(`v=${PERSONAL_TOKEN}`)).toBe("v=[redacted]");
   });
 });
 
@@ -163,6 +232,46 @@ describe("the sink redacts before it persists", () => {
     expect(onDisk).toContain("[redacted]");
     // Everything else survives intact.
     expect(line!.display.text).toContain("PATH=/usr/bin");
+  });
+
+  it("scrubs the PRINCIPAL's own credential, which lives only in the sealed row", () => {
+    // Ruling 121's leak path: the run bills one person, its child env carries
+    // that person's credential, and the console is visible to every project
+    // member.
+    const sink = sinkWithSecrets("run_personal", [PERSONAL_TOKEN]);
+    sink.markRunning();
+    const text = `CODEX_ACCESS_TOKEN=${PERSONAL_TOKEN}\nPATH=/usr/bin`;
+    sink.line(
+      emitted(
+        { t: "00:00:01", ev: "out", tag: "tool_result", text },
+        JSON.stringify({ type: "tool_result", content: text }),
+      ),
+    );
+
+    const [line] = listRunLines(store.db, "run_personal");
+    expect(line!.display.text).not.toContain(PERSONAL_TOKEN);
+    expect(line!.display.text).toContain("CODEX_ACCESS_TOKEN=[redacted]");
+    expect(line!.raw).not.toContain(PERSONAL_TOKEN);
+    const onDisk = readFileSync(rawLogPath("claude", "run_personal"), "utf8");
+    expect(onDisk).not.toContain(PERSONAL_TOKEN);
+    expect(onDisk).toContain("[redacted]");
+    expect(line!.display.text).toContain("PATH=/usr/bin");
+  });
+
+  it("a sink built WITHOUT the run's secrets would have persisted it", () => {
+    // The canary for the seam itself: drop `{ secrets }` in `launch` and the
+    // key rides through, which is exactly what this pair proves is possible.
+    const sink = sinkFor("run_nosecrets", "primary-nosec");
+    sink.markRunning();
+    sink.line(
+      emitted(
+        { t: "00:00:01", ev: "out", tag: "tool_result", text: PERSONAL_TOKEN },
+        JSON.stringify({ type: "tool_result", content: PERSONAL_TOKEN }),
+      ),
+    );
+    expect(listRunLines(store.db, "run_nosecrets")[0]!.display.text).toBe(
+      PERSONAL_TOKEN,
+    );
   });
 
   it("keeps the display line parseable and untouched when it holds no secret", () => {

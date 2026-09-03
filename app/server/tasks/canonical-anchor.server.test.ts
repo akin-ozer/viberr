@@ -26,6 +26,7 @@ import {
   interruptRun,
 } from "~/server/runtimes/run-service.server";
 import { listRunsForTaskRows, upsertRun } from "~/server/runtimes/run-store.server";
+import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import {
   canonicalTaskAnchor,
   commentToAgent,
@@ -124,7 +125,7 @@ function parsed(overrides: Partial<ParsedTaskFile> = {}): ParsedTaskFile {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   specs.length = 0;
@@ -133,6 +134,11 @@ beforeEach(() => {
     claude: recordingAdapter("claude"),
     codex: recordingAdapter("codex"),
   });
+  // Ruling 121: a resumed specialist bills the TASK OWNER's own account, so
+  // the resume only reaches an adapter when the owner (arda, who owns VIB-1
+  // here) has the backend connected. Without it the reply is refused before a
+  // prompt is ever built, and this file asserts on the prompt.
+  await connectFakeBackend(store.db, store.users.arda.id, "claude");
 });
 
 afterEach(async () => {

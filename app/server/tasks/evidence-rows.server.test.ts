@@ -360,6 +360,7 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
       kind: "reviewer",
       role: "Review & validation",
       agentProfileId: "reviewer",
+      credentialUserId: store.users.arda.id,
       backend: "claude",
       model: "sonnet",
       prompt: "review",

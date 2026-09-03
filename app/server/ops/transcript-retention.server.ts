@@ -10,6 +10,7 @@ import type { RunBackend } from "~/features/runtime/runtime-types";
 import { getEnv } from "~/server/config/env.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
+import { listUserRuntimeRoots } from "~/server/runtimes/user-homes.server";
 
 /**
  * On-disk transcript retention (gap 20).
@@ -21,9 +22,10 @@ import { logger } from "~/server/logging/logger.server";
  *  - `runtimes/<backend>/<runId>.jsonl` — one raw envelope file per run, always
  *    (`run-store.server.ts` `rawLogPath`), appended for the life of the run and
  *    deleted by nothing except the destructive `npm run seed -- --reset`.
- *  - `runtimes/claude-home/projects/<cwd-as-dashes>/<sid>.jsonl` and
- *    `runtimes/codex-home/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl` — the
- *    provider session homes, one rollout per run, forever.
+ *  - `runtimes/users/<userId>/claude-home/projects/<cwd-as-dashes>/<sid>.jsonl`
+ *    and `runtimes/users/<userId>/codex-home/sessions/YYYY/MM/DD/rollout-…jsonl`
+ *    — the per-person provider session homes (ruling 121), one rollout per run,
+ *    forever.
  *
  * The asymmetry this fixes is the dishonest part: `run_log_lines` is deleted at
  * 30 days, so the run console goes empty while the raw file it projected lives
@@ -34,14 +36,16 @@ import { logger } from "~/server/logging/logger.server";
  *
  * ## Rules
  *
- * - **Only under the data root.** A deployment may point `CLAUDE_CONFIG_DIR` at
- *   the operator's `~/.claude`, or `CODEX_HOME` at a personal `~/.codex`
- *   (`codexSessionRoots` even searches it). Sweeping someone's own dir would be
- *   indefensible, so this walks the data-root layout and nothing else; a
- *   redirected home simply has no files here and is never touched.
- * - **Only `*.jsonl` files.** `codex-home/auth.json` is a live credential and
- *   `claude-home` holds config; deleting those logs the whole instance out
- *   (P11-04). Extension-gated, never directory-level `rm -rf`.
+ * - **Only under the data root, only under `runtimes/users/`.** The homes are
+ *   app-owned per-person directories (`listUserRuntimeRoots`, ruling 121) and
+ *   nothing else is walked — no host `~/.claude`, no personal `~/.codex`, no
+ *   directory whose name is not a path-safe user id.
+ * - **Only `*.jsonl` files.** `codex-home/auth.json` and
+ *   `claude-home/.credentials.json` are the VENDOR-held sign-ins that make
+ *   those people's backends usable, and `.claude.json` is config; deleting any
+ *   of them signs somebody out of their own account (P11-04, and now it would
+ *   be one person's account, not the instance's). Extension-gated, never
+ *   directory-level `rm -rf`.
  * - **mtime, not DB state.** An active run appends to its file continuously, so
  *   a file past the window cannot belong to a live run — and age-based pruning
  *   also collects the orphans a deleted project left behind, which a
@@ -209,12 +213,16 @@ export function pruneRuntimeTranscripts(
 
   if (sessionDays > 0) {
     const cutoff = now - sessionDays * 86_400_000;
-    // App-owned homes only — a home pointed outside the data root is somebody
-    // else's directory and is deliberately never swept.
-    const sessionRoots = [
-      path.join(root, "runtimes", "claude-home", "projects"),
-      path.join(root, "runtimes", "codex-home", "sessions"),
-    ];
+    // Ruling 121: one pair of session trees PER PERSON, and only the ones the
+    // app itself created. `listUserRuntimeRoots` skips any directory whose name
+    // is not a path-safe user id, so nothing a sweep did not put there can be
+    // walked into.
+    const sessionRoots = listUserRuntimeRoots(options.dataRoot).flatMap(
+      (user) => [
+        path.join(user.root, "claude-home", "projects"),
+        path.join(user.root, "codex-home", "sessions"),
+      ],
+    );
     for (const sessionRoot of sessionRoots) {
       for (const file of jsonlFiles(sessionRoot)) {
         const pruned = pruneFile(file, cutoff);

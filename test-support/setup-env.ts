@@ -2,7 +2,7 @@
  * Vitest setup: hermetic env for the test suite. The app's env parser
  * hard-requires two secrets at the first `getEnv()` call (fail-fast boot
  * validation), and some test paths reach it — e.g. `configureRunServiceForTests`
- * → `createAdapters` → `resolveClaudeConfigDir`. Locally a developer's `.env`
+ * → `createAdapters` → `filteredSpawnEnv`. Locally a developer's `.env`
  * may happen to satisfy it via a local .env; on CI and fresh clones nothing does, and
  * the whole suite fails on env validation.
  *
@@ -12,10 +12,6 @@
  * these fixed values everywhere — identical behavior locally and on CI, no
  * dependence on anyone's real secrets.
  */
-import { mkdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 process.env.VIBERR_SESSION_SECRET ??=
   "viberr-test-session-secret-0123456789abcdef";
 // AES-256-GCM key: base64 of exactly 32 bytes, as the schema enforces.
@@ -23,16 +19,15 @@ process.env.VIBERR_SECRET_ENCRYPTION_KEY ??=
   Buffer.alloc(32, 7).toString("base64");
 
 /**
- * Fail closed against ambient real-backend credentials (F10-10). An ordinary
- * test must NEVER be able to construct a real Claude/Codex adapter from a
- * developer's `.env` or a CI host's environment — the risk is a paid provider
- * call from `npm test`. Blank every variable `hasCredential()` inspects
- * (runtime-registry.server.ts) plus the CLI-auth flags, so
- * `isBackendAvailable` reports false under NODE_ENV=test. `""` reads as ABSENT
- * everywhere it matters: `hasCredential` tests `!!env.X` / `isTruthy(env.X)`
- * (which wants "1"/"true"/"yes"), and `parseEnv` drops empty strings before
- * validation. A test that deliberately exercises real-backend detection must
- * set these explicitly within the test (and clean up), which still works.
+ * Fail closed against ambient real-backend credentials (F10-10, ruling 121).
+ *
+ * Since ruling 121 no deployment-wide credential is DECLARED any more — a run's
+ * env is built from the credential of the ONE person it bills. But the spawn
+ * env still starts from `process.env` (`filteredSpawnEnv`), and a developer's
+ * `.env` or a CI host may carry a real provider key under one of these names.
+ * `filteredSpawnEnv` strips every one of them by regex, so this is belt and
+ * braces — and the braces matter: the risk is a paid provider call from
+ * `npm test`.
  *
  * Assign `""` — do NOT `delete`. env.server.ts calls `loadEnvFile()` at module
  * scope, i.e. AFTER this setup file has run, and loadEnvFile fills in every key
@@ -40,15 +35,20 @@ process.env.VIBERR_SECRET_ENCRYPTION_KEY ??=
  * so `delete` hands the developer's `.env` value straight back and re-opens the
  * leak; an empty string counts as present, so loadEnvFile leaves it alone.
  * (`??=` is equally wrong here — it preserves an ambient value outright.)
+ *
+ * The `VIBERR_*_USE_CLI_AUTH` flags and the `CLAUDE_CONFIG_DIR` / `CODEX_HOME`
+ * pins are gone with the shared homes: a run reads its home from the
+ * credential principal's own `runtimes/users/<id>/…` (user-homes.server.ts),
+ * which every harness roots in its own temp data root, so there is no ambient
+ * path left for a probe to find.
  */
 for (const key of [
   "ANTHROPIC_API_KEY",
   "CLAUDE_CODE_OAUTH_TOKEN",
-  "VIBERR_CLAUDE_USE_CLI_AUTH",
+  "ANTHROPIC_AUTH_TOKEN",
   "CODEX_ACCESS_TOKEN",
   "CODEX_API_KEY",
   "OPENAI_API_KEY",
-  "VIBERR_CODEX_USE_CLI_AUTH",
   // R19-19: a dev host may point this at a local Chrome; the browser-mount
   // tests must see the deterministic "unset" shape (no --executable-path /
   // --no-sandbox args), same hermeticity rule as the credentials above.
@@ -56,37 +56,6 @@ for (const key of [
 ] as const) {
   process.env[key] = "";
 }
-
-/**
- * Pin the provider transcript stores to an empty temp directory (P13-D-2).
- *
- * The continuity probe added this pass asks the filesystem whether a stored
- * session id still has a transcript before resuming it. `CLAUDE_CONFIG_DIR`
- * was never set here, so `resolveClaudeConfigDir()` fell back to the AMBIENT
- * data root: on a developer machine `./data/runtimes/claude-home/projects`
- * exists and the suite took the continuity path, while on CI it does not and
- * the suite took the ordinary resume path. Same code, two behaviours, decided
- * by whether someone had run the app locally — and it produced a real test that
- * passed on CI and failed on a laptop.
- *
- * An empty real directory (not a missing one) is the deterministic answer: the
- * store EXISTS and holds no transcripts, so every probe returns `missing`
- * rather than the `unknown` a nonexistent store would report. A test that wants
- * a live session materializes one; a test that wants `unknown` points these at
- * a path that does not exist.
- *
- * `CODEX_HOME` is therefore no longer blanked with the credential keys above.
- * It was in that list because `codexCliAuthUsable()` requires
- * `$CODEX_HOME/auth.json` to exist — and this directory has no `auth.json`, so
- * the hermeticity invariant now holds by construction rather than by erasing a
- * path the continuity probe needs. `VIBERR_CODEX_USE_CLI_AUTH` is blank anyway,
- * so the flag half of that gate is closed independently.
- */
-const transcriptRoot = mkdtempSync(path.join(tmpdir(), "viberr-test-transcripts-"));
-process.env.CLAUDE_CONFIG_DIR = path.join(transcriptRoot, "claude-home");
-process.env.CODEX_HOME = path.join(transcriptRoot, "codex-home");
-mkdirSync(path.join(process.env.CLAUDE_CONFIG_DIR, "projects"), { recursive: true });
-mkdirSync(path.join(process.env.CODEX_HOME, "sessions"), { recursive: true });
 
 /**
  * Fail closed against real NETWORK access from git (N19-6).

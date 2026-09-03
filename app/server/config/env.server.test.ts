@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { insecureAuthOriginWarning, parseEnv } from "./env.server";
+import { ENV_KEYS, insecureAuthOriginWarning, parseEnv } from "./env.server";
 
 const VALID_SESSION_SECRET = "s".repeat(32);
 // base64 of exactly 32 bytes
@@ -43,12 +43,32 @@ describe("parseEnv", () => {
     expect(env.VIBERR_SEED_ADMIN_EMAIL).toBe("admin@example.com");
   });
 
-  it("accepts a Codex ChatGPT-workspace access token", () => {
+  /**
+   * Ruling 121: agent backends authenticate PER PERSON. The nine
+   * deployment-wide credential variables are gone from the schema, and this
+   * gate is what stops one creeping back in — a declared key would be an
+   * instance credential every run could bill to whoever owns it, which is the
+   * whole thing the ruling forbids. An ambient value must be ignored, not
+   * carried through.
+   */
+  it("declares no deployment-wide agent-backend credential (ruling 121)", () => {
+    const removed = [
+      "ANTHROPIC_API_KEY",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "VIBERR_CLAUDE_USE_CLI_AUTH",
+      "CLAUDE_CONFIG_DIR",
+      "CODEX_ACCESS_TOKEN",
+      "CODEX_API_KEY",
+      "OPENAI_API_KEY",
+      "CODEX_HOME",
+      "VIBERR_CODEX_USE_CLI_AUTH",
+    ];
+    expect(ENV_KEYS.filter((key) => removed.includes(key))).toEqual([]);
     const env = parseEnv({
       ...REQUIRED_ENV,
-      CODEX_ACCESS_TOKEN: "cat-subscription-test",
+      ...Object.fromEntries(removed.map((key) => [key, "ambient-value"])),
     });
-    expect(env.CODEX_ACCESS_TOKEN).toBe("cat-subscription-test");
+    expect(Object.keys(env).filter((key) => removed.includes(key))).toEqual([]);
   });
 
   it("decodes the encryption key into the exact bytes", () => {

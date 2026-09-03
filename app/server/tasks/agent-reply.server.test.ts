@@ -1,14 +1,6 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resetEnvCacheForTests } from "~/server/config/env.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -31,6 +23,9 @@ import {
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
 import { installFakeRuntime, startedRunSpecs } from "../../../test-support/fake-runtime";
+import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { userBackendHome } from "~/server/runtimes/user-homes.server";
+import { probeSessionContinuity } from "~/server/runtimes/session-export.server";
 import {
   insertRunLine,
   listRunsForTaskRows,
@@ -107,29 +102,26 @@ function deployDevSpecialist(): void {
 }
 
 /**
- * P13-D-2: `resumeRun` now probes for the provider transcript behind a stored
+ * P13-D-2: `resumeRun` probes for the provider transcript behind a stored
  * session id, and the fake runtime mints session ids (`fake-<runId>`) that were
- * never written to disk. Pin CLAUDE_CONFIG_DIR at an EMPTY dir so the probe is
- * inconclusive ("unknown" → resume exactly as before) on every machine: without
- * it, `resolveClaudeConfigDir()` falls back to the ambient data root, whose
- * `claude-home/projects` exists on a developer's machine but not on CI — so the
- * suite would take a different path locally than it does in CI. Tests that
- * WANT a live session materialize its transcript here (see `writeTranscript`).
+ * never written to disk — so by default the probe finds no store at all and
+ * answers `unknown`, which resumes exactly as before. A test that wants a LIVE
+ * session materializes its transcript with `writeTranscript`.
+ *
+ * Ruling 121: the transcript lives in the RUN PRINCIPAL's own runtime home
+ * (`<dataRoot>/runtimes/users/<id>/claude-home/projects/`), not in a shared
+ * home a `CLAUDE_CONFIG_DIR` env var pointed at — so this writes into arda's
+ * home under the test's own data root, which is also what makes the probe
+ * hermetic without pinning anything in `process.env`.
  */
-let claudeHome: string;
-const savedClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
-
-/** Materialize a provider transcript so the continuity probe reports present. */
 function writeTranscript(sessionId: string): void {
-  const dir = path.join(claudeHome, "projects", "-fake-cwd");
+  const home = userBackendHome(store.users.arda.id, "claude", store.dataRoot);
+  const dir = path.join(home, "projects", "-fake-cwd");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, `${sessionId}.jsonl`), "{}\n");
 }
 
-beforeEach(() => {
-  claudeHome = mkdtempSync(path.join(tmpdir(), "viberr-agent-reply-"));
-  process.env.CLAUDE_CONFIG_DIR = claudeHome;
-  resetEnvCacheForTests();
+beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   deployDevSpecialist();
@@ -147,6 +139,12 @@ beforeEach(() => {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
   installFakeRuntime();
+  // Ruling 121: an agent run bills the TASK OWNER's own accounts, so a run
+  // only reaches an adapter when the owner has that backend connected. Arda
+  // owns the tasks in this file; connecting both backends for him is the
+  // ordinary state of somebody using the product.
+  await connectFakeBackend(store.db, store.users.arda.id, "claude");
+  await connectFakeBackend(store.db, store.users.arda.id, "codex");
 });
 
 afterEach(async () => {
@@ -166,10 +164,6 @@ afterEach(async () => {
   }
   resetSseBrokerForTests();
   ctx.cleanup();
-  rmSync(claudeHome, { recursive: true, force: true });
-  if (savedClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-  else process.env.CLAUDE_CONFIG_DIR = savedClaudeConfigDir;
-  resetEnvCacheForTests();
 });
 
 /* ---------------------------------------------------- resolveMentionedAgent */
@@ -1079,8 +1073,19 @@ describe("commentToAgent", () => {
     const priorCount = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;
     // P13-D-2: this test's precondition is a LIVE session — give it a real
     // transcript so the resume-time continuity probe reports `present` and the
-    // resume happens for the reason the test claims.
+    // resume happens for the reason the test claims. Asserted, not assumed:
+    // written to the wrong home (ruling 121 moved it into the OWNER's) the
+    // probe would answer `unknown` and the resume below would pass for the
+    // wrong reason.
     writeTranscript(priorSessionId);
+    expect(
+      probeSessionContinuity(
+        "claude",
+        store.users.arda.id,
+        priorSessionId,
+        store.dataRoot,
+      ),
+    ).toBe("present");
 
     const result = await commentToAgent(
       store.db,

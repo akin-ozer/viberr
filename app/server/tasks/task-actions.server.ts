@@ -117,6 +117,11 @@ import {
   patchRun,
 } from "~/server/runtimes/run-store.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
+import {
+  refusedPrincipalUserId,
+  resolveTaskRunPrincipal,
+} from "~/server/runtimes/run-principal.server";
 import type {
   runOperator,
   RunOperatorInput,
@@ -398,6 +403,32 @@ function humanActorRef(db: DatabaseSync, actor: TaskActor) {
   };
 }
 
+/**
+ * The `assign` timeline event every ownership change writes — `setOwner`'s
+ * take/hand-off, and (ruling 121) creation seating the creator.
+ *
+ * ONE builder because the owner seat is now load-bearing beyond bookkeeping:
+ * every agent run on the task bills the owner's accounts, so "who owns this and
+ * since when" has to read the same way in the timeline whichever door the seat
+ * changed through. A second inline event shape would drift the moment one of
+ * them gained a field.
+ */
+function ownerAssignEvent(
+  db: DatabaseSync,
+  actor: TaskActor,
+  text: string,
+): TaskFileEvent {
+  return {
+    occurredAt: new Date().toISOString(),
+    type: "assign",
+    actor: humanActorRef(db, actor),
+    title: null,
+    text,
+    toAgent: false,
+    evidence: null,
+  };
+}
+
 
 
 function summaryOrThrow(
@@ -480,6 +511,15 @@ export async function createTask(
     );
   }
   const stageId = stage.id;
+  // Ruling 121: only a HUMAN can be seated as owner — the seat is an account
+  // to bill and a person to hold review authority. A controller-driven human
+  // IS a human (the controller acts as them, with their user id); the operator
+  // toolkit's placeholder actor is not, and neither is any other in-process
+  // system actor.
+  const creator: TaskActor | null =
+    ctx.operatorAuthorized || actor.userId === OPERATOR_TASK_ACTOR.userId
+      ? null
+      : actor;
   // Degenerate single-stage project: the entry stage IS the done stage, and
   // nothing may be created straight into done.
   if (stageId === project.stages[project.stages.length - 1]?.id) {
@@ -503,7 +543,14 @@ export async function createTask(
     heldAtStage: null,
     readiness: "input_required",
     waiting: "human",
-    ownerUserId: null,
+    // Ruling 121: creation SEATS the creator as owner. Every agent run on a
+    // task bills the OWNER's own Claude/Codex accounts, so a task with no owner
+    // cannot run agents at all — and the pre-121 default (`null`) meant every
+    // brand-new task was born unable to do the one thing it exists for, with
+    // an "Assign me" ceremony standing between a person and their own work. An
+    // OPERATOR-created task keeps a null seat: the operator is not a person and
+    // has no account to bill; a human has to take that one.
+    ownerUserId: creator?.userId ?? null,
     engagements: [],
     recommendations: [],
     schedules: [],
@@ -531,10 +578,22 @@ export async function createTask(
     boardRank: null,
   };
 
-  await createTaskFile(taskRef(ctx, input.projectSlug, key), {
+  const createInput: Parameters<typeof createTaskFile>[1] = {
     frontmatter,
     goal: input.goal?.trim() || DEFAULT_GOAL,
-  });
+  };
+  // The same `assign` event a take through `setOwner` writes, so the timeline
+  // reads the same however the seat was filled (ruling 121).
+  if (creator) {
+    createInput.timeline = [
+      ownerAssignEvent(
+        db,
+        creator,
+        "Took task ownership by creating the task. Agent runs on this task use the owner's own Claude and Codex accounts, and the owner is its human reviewer and acceptance authority.",
+      ),
+    ];
+  }
+  await createTaskFile(taskRef(ctx, input.projectSlug, key), createInput);
 
   // project.md changed too (counter bump) — reproject both.
   rebuildPath(db, projectFilePath(input.projectSlug, ctx.dataRoot), {
@@ -549,7 +608,7 @@ export async function createTask(
     subjectId: key,
     projectSlug: input.projectSlug,
     taskKey: key,
-    details: { title, stage: stageId },
+    details: { title, stage: stageId, ownerUserId: frontmatter.ownerUserId },
   });
 
   // A dedicated operator coordinates every active task (ADR-002): auto-invoke
@@ -1119,12 +1178,13 @@ export interface CommentToAgentResult extends AppendCommentResult {
   operatorRefused: "open-packet" | "terminal-stage" | null;
   /**
    * A8 (pass 23): the comment is recorded BEFORE any run starts, so a SPECIALIST
-   * run-start failure (single-flight conflict, backend not configured, stage
-   * ineligibility) used to throw out of here — the commenter saw a bare error and
-   * could not tell their comment HAD posted. This carries the reason the run did
-   * not start (the comment did), so the route toasts "comment posted, run not
-   * started: <reason>" instead of an error that reads as total failure. Null on
-   * the happy path and on the runtime-denied path (which has its own signal).
+   * run-start failure (single-flight conflict, a backend the task owner has not
+   * connected (ruling 121), stage ineligibility) used to throw out of here — the
+   * commenter saw a bare error and could not tell their comment HAD posted. This
+   * carries the reason the run did not start (the comment did), so the route
+   * toasts "comment posted, run not started: <reason>" instead of an error that
+   * reads as total failure. Null on the happy path and on the runtime-denied
+   * path (which has its own signal).
    * Distinct from `operatorRefused`, which is the operator branch's governed
    * refusal signal.
    */
@@ -1516,11 +1576,12 @@ export async function commentToAgent(
   let resumeOutcomeKey: string | undefined;
 
   // A8 (pass 23): the comment is ALREADY on the timeline. A run-start failure
-  // (single-flight conflict, backend not configured, stage ineligibility) below
-  // used to throw straight out of here, so the commenter saw only an error and
-  // could not tell their comment HAD posted. Catch it and return the partial
-  // success — comment recorded, run not started, reason attached — rather than
-  // throwing. (The operator @mention refusal is a separate governed signal.)
+  // (single-flight conflict, a backend the task owner has not connected (ruling
+  // 121), stage ineligibility) below used to throw straight out of here, so the
+  // commenter saw only an error and could not tell their comment HAD posted.
+  // Catch it and return the partial success — comment recorded, run not started,
+  // reason attached — rather than throwing. (The operator @mention refusal is a
+  // separate governed signal.)
   try {
     // Dispatch-rework hunt (2026-08-29): the RESUME branch below calls
     // resumeRun directly and so bypassed dispatchAgentRun's same-engagement
@@ -1558,24 +1619,51 @@ export async function commentToAgent(
       ctx.dataRoot,
       target.isPrimary ? undefined : { profileId: target.profileId },
     );
+    // Ruling 121: a resumed task run bills the task owner AS OF NOW — the
+    // caller resolves the principal, `resumeRun` re-resolves nothing. When the
+    // seat changed hands since the original run, `resumeRun` takes the existing
+    // continuity-reset path: one fresh run re-anchored on task.md, with the
+    // timeline saying context was lost. That is the honest outcome — the
+    // alternative is resuming one person's conversation inside another's
+    // account (agents-and-runtime.md §3.6).
+    //
+    // Resolved FIRST, before the confinement below: `resolveResumeConfinement`
+    // is not a read. It pre-flights every declared stdio MCP server by spawning
+    // it, corrects the registry rows from what happened, and re-mounts the
+    // granted skills into the task workspace — real processes and real writes,
+    // whose only consumer is an agent process a refusal will never start.
+    const resumeBackend: RealBackend =
+      target.session.backend === "codex" ? "codex" : "claude";
+    const resumePrincipal = resolveTaskRunPrincipal(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      resumeBackend,
+    );
     // Re-establish the specialist's run confinement — denylist, git ceiling,
     // MCP set, persona — that the fresh-run path applies. Without this a
-    // resumed (@mention) specialist runs unconfined (XS-1).
+    // resumed (@mention) specialist runs unconfined (XS-1). A refused resume
+    // has no run to confine: `resumeRun` hands it to `startRun`, which records
+    // the refusal and starts nothing.
     const { resolveResumeConfinement } = await import("./specialist-run.server");
-    const confinement = await resolveResumeConfinement(db, ctx, {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      profileId: target.profileId,
-      backend: target.session.backend === "codex" ? "codex" : "claude",
-      role: target.role,
-      delivers: target.isPrimary,
-    });
+    const confinement = resumePrincipal.ok
+      ? await resolveResumeConfinement(db, ctx, {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          profileId: target.profileId,
+          backend: resumeBackend,
+          role: target.role,
+          delivers: target.isPrimary,
+        })
+      : null;
     const resume: Parameters<typeof resumeRun>[1] = {
       runId: target.session.id,
       prompt: followUp,
+      credentialUserId: resumePrincipal.ok
+        ? resumePrincipal.principal.userId
+        : refusedPrincipalUserId(resumePrincipal.refusal),
       workdir,
-      disallowedTools: confinement.disallowedTools,
-      env: confinement.env,
       // Apply the agent's CURRENT profile model/effort on resume — not the
       // stale value on the prior run row (editing an agent to a new model
       // must take effect when its session is resumed via a comment).
@@ -1591,22 +1679,27 @@ export async function commentToAgent(
     };
     // The workspace mount survives between runs, but the SDK options do not —
     // re-arm the native skills filter or the resumed run enables none.
-    if (confinement.skills) resume.skills = confinement.skills;
-    if (confinement.mcpServers) resume.mcpServers = confinement.mcpServers;
-    if (confinement.systemPrompt) resume.systemPrompt = confinement.systemPrompt;
-    // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a
-    // structured verdict/questions instead of falling back to the prose regex.
-    if (confinement.outputSchema) resume.outputSchema = confinement.outputSchema;
-    // C02-R3: the attachments drop is part of the confinement too (the Codex
-    // sandbox's extra writable root) — dropped on resume, an evidence-granted
-    // Codex reviewer could not post the files its persona promised.
-    if (confinement.attachmentsWritableDir) {
-      resume.attachmentsWritableDir = confinement.attachmentsWritableDir;
+    if (confinement) {
+      resume.disallowedTools = confinement.disallowedTools;
+      resume.env = confinement.env;
+      if (confinement.skills) resume.skills = confinement.skills;
+      if (confinement.mcpServers) resume.mcpServers = confinement.mcpServers;
+      if (confinement.systemPrompt) resume.systemPrompt = confinement.systemPrompt;
+      // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a
+      // structured verdict/questions instead of falling back to the prose regex.
+      if (confinement.outputSchema) resume.outputSchema = confinement.outputSchema;
+      // C02-R3: the attachments drop is part of the confinement too (the Codex
+      // sandbox's extra writable root) — dropped on resume, an evidence-granted
+      // Codex reviewer could not post the files its persona promised.
+      if (confinement.attachmentsWritableDir) {
+        resume.attachmentsWritableDir = confinement.attachmentsWritableDir;
+      }
     }
     if (target.effort) resume.effort = target.effort;
+    if (!resumePrincipal.ok) resume.principalRefusal = resumePrincipal.refusal;
     const resumed = await resumeRun(db, resume);
     runId = resumed.runId;
-    resumeOutcomeKey = confinement.outcomeKey;
+    resumeOutcomeKey = confinement?.outcomeKey;
     triggered = "resumed";
   } else {
     // 4b. No prior session for THIS agent — start a FRESH run. The
@@ -3568,7 +3661,11 @@ export async function applyAgentCompletionEffects(
         : failure?.kind === "auth"
           ? `${backendLabel} rejected the credentials`
           : failure?.kind === "unavailable"
-            ? `${backendLabel} is unavailable (no usable credential configured, so the run was refused and no agent process started)`
+            // Ruling 121: the refusal sentence is `principalRefusalMessage`'s,
+            // written by the resolver and already naming the person and the
+            // remedy. Repeating a generic "no usable credential configured"
+            // here would tell a second, wronger story about the same refusal.
+            ? failText || `${backendLabel} could not run for this task's owner`
             : failure?.kind === "max_turns"
               ? `the ${backendLabel} run hit its turn cap and was CUT OFF mid-work, which is not a task failure (its partial report, if any, is above)`
               // P13-D-2: a dead provider transcript is its own class. It used to
@@ -3596,7 +3693,8 @@ export async function applyAgentCompletionEffects(
           failure?.kind === "quota" || failure?.kind === "auth"
             ? " Retry on the other backend, or fix the credential and re-run."
             : failure?.kind === "unavailable"
-              ? " Configure a credential for this backend, or retry on the other backend."
+              // The refusal sentence already says who must do what and where.
+              ? ""
               : failure?.kind === "max_turns"
                 ? " Re-prompt the agent to continue from its session, or raise the turn cap (VIBERR_CLAUDE_MAX_TURNS)."
                 : failure?.kind === "session_missing"
@@ -3644,8 +3742,25 @@ export async function applyAgentCompletionEffects(
     const altBackend: RealBackend = input.backend === "codex" ? "claude" : "codex";
     const altLabel = altBackend === "claude" ? "Claude" : "Codex";
     const failedProfileId = input.profileId;
+    // Ruling 121: "retry on the other backend" is only a recovery if the TASK
+    // OWNER has that other backend connected — the retry run would bill them.
+    // Offering it otherwise promises a one-click fix that fails identically the
+    // moment it is clicked, which is the worst kind of packet option: it looks
+    // like the way out. An unowned task has no owner to ask, so it is never
+    // offered there either, and the refusal sentence already names the real
+    // remedy (own the task / connect the backend).
+    const ownerUserId =
+      completionFm?.ownerUserId ??
+      readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed
+        .frontmatter.ownerUserId ??
+      null;
+    const ownerHasAlt =
+      ownerUserId !== null &&
+      isBackendAvailableFor(db, ownerUserId, altBackend, {
+        dataRoot: ctx.dataRoot,
+      });
     const retryOption =
-      backendFailure
+      backendFailure && ownerHasAlt
         ? [
             {
               kind: "retry_other_backend" as const,
@@ -4168,15 +4283,7 @@ export async function setOwner(
     text = `Handed task ownership to **${userName(db, input.targetUserId)}**. They hold review & acceptance for this task now.`;
   }
 
-  const event: TaskFileEvent = {
-    occurredAt: new Date().toISOString(),
-    type: "assign",
-    actor: humanActorRef(db, actor),
-    title: null,
-    text,
-    toAgent: false,
-    evidence: null,
-  };
+  const event = ownerAssignEvent(db, actor, text);
 
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.frontmatter.ownerUserId = input.targetUserId;
