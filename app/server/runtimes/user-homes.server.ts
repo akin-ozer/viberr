@@ -5,7 +5,7 @@ import { getDataRoot } from "~/server/files/file-store-root.server";
 import type { RealBackend } from "./runtime-registry.server";
 
 /**
- * Per-person runtime homes (ruling 121).
+ * Per-person runtime homes (ruling 127).
  *
  * Every agent run bills ONE person, so every vendor binary a run spawns reads
  * its credential and writes its transcripts inside THAT person's own home:
@@ -25,7 +25,7 @@ import type { RealBackend } from "./runtime-registry.server";
  * The homes replace the deployment-wide `runtimes/claude-home` /
  * `runtimes/codex-home` and the host `~/.codex` mount: a credential in a shared
  * home is a credential every person's runs bill to whoever owns it, which is
- * exactly what ruling 121 forbids.
+ * exactly what ruling 127 forbids.
  *
  * The credential FILES here are vendor-owned — Viberr creates the directory and
  * never reads, copies or parses what the binary writes into it (Anthropic's

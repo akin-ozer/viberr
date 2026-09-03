@@ -37,7 +37,7 @@ beforeAll(async () => {
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
   murId = findUserByEmail(app.db, "murat@viberr.dev")!.id;
-  // Ruling 121: the route resolves its OWN vendor binaries (a form action must
+  // Ruling 127: the route resolves its OWN vendor binaries (a form action must
   // not take an executable path from its caller), so the only way to exercise
   // the sign-in intents without spawning the real `claude auth login` is the
   // resolver's named test seam.
@@ -370,14 +370,14 @@ describe("/profile action", () => {
 });
 
 /**
- * Ruling 121 — Profile → Agent accounts.
+ * Ruling 127 — Profile → Agent accounts.
  *
  * Every intent is driven through the real route action (session cookie, CSRF,
  * the module's own `resolveBackendBinary`), and the sign-in ones spawn a real
  * child: the fake vendor executables stand in for `claude` and `codex`, so what
  * is asserted is the route wired to the driver, not a stub of it.
  */
-describe("/profile agent accounts (ruling 121)", () => {
+describe("/profile agent accounts (ruling 127)", () => {
   /** The driver's own read path, polled until the session settles. */
   async function waitForLogin(
     userId: string,

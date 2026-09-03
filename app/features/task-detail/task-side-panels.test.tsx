@@ -143,13 +143,13 @@ function renderAsContributor(patch: Partial<TaskDetail> = {}, myRole = "contribu
 }
 
 /**
- * Ruling 121 — the owner seat is also the RUN PRINCIPAL: every agent run on a
+ * Ruling 127 — the owner seat is also the RUN PRINCIPAL: every agent run on a
  * task bills the owner's own Claude and Codex accounts. The Current-state row
  * is where a person sees and releases that seat, so it is where the widened
  * meaning has to be stated; the run controls in the execution profile then
  * name the owner when a backend of theirs is not connected.
  */
-describe("the owner row states what the seat now means (ruling 121)", () => {
+describe("the owner row states what the seat now means (ruling 127)", () => {
   it("names the acceptance authority AND whose accounts the agents run on", () => {
     const { container } = renderPanel({
       owner: {

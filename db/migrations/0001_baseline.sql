@@ -307,7 +307,7 @@ CREATE TABLE project_github_credentials (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
--- Ruling 121: a person's connected agent backends. One row per (user, backend); connecting a new
+-- Ruling 127: a person's connected agent backends. One row per (user, backend); connecting a new
 -- method REPLACES the previous row. `kind = 'login'` rows carry NO secret: the vendor binary
 -- holds the credential in the user's runtime home. API keys / access tokens are sealed boxes
 -- (registered in SEALED_STORES so key rotation reaches them).
@@ -327,6 +327,18 @@ CREATE TABLE user_backend_credentials (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (user_id, backend)
+);
+-- U33-2 (pass 33): the last repository-access probe per project. App-owned
+-- OBSERVATION, not a projection of project.md, so a rebuild must not clear it —
+-- which is why it is its own table rather than a `projects` column. It exists so
+-- the board and the home card can say "this project's repository is
+-- unreachable" without calling GitHub on a hot render path: every writer is a
+-- place that already had the answer in hand (the GitHub page's cached probe,
+-- project creation's own probe).
+CREATE TABLE project_github_health (
+  project_slug TEXT PRIMARY KEY,
+  result_json TEXT NOT NULL,
+  checked_at TEXT NOT NULL
 );
 CREATE TABLE scope_violations (
   id TEXT PRIMARY KEY,
@@ -447,16 +459,24 @@ CREATE TABLE controller_conversations (
   -- evaluated against, and (with org admins) the only reader.
   user_id TEXT NOT NULL,
   user_label TEXT NOT NULL,
-  -- NULL = instance scope; a slug binds the conversation to that project's
-  -- board context (the project-role axis).
+  -- The conversation's SCOPE (ruling 121): NULL/NULL = instance; a slug alone
+  -- binds the conversation to that project's board context (the project-role
+  -- axis); slug + task_key anchors it to ONE task, whose canonical file the
+  -- server reads into every turn. A task without a project is not a scope.
   project_slug TEXT,
+  task_key TEXT,
   title TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  last_message_at TEXT
+  last_message_at TEXT,
+  CHECK (task_key IS NULL OR project_slug IS NOT NULL)
 );
 CREATE INDEX idx_controller_conversations__user
   ON controller_conversations (user_id, last_message_at DESC);
+-- The dock (ruling 121) lists ONE scope at a time: this user's threads for one
+-- board or one task, newest first.
+CREATE INDEX idx_controller_conversations__scope
+  ON controller_conversations (user_id, project_slug, task_key, last_message_at DESC);
 CREATE TABLE controller_messages (
   id TEXT PRIMARY KEY,
   conversation_id TEXT NOT NULL
@@ -469,6 +489,11 @@ CREATE TABLE controller_messages (
   -- The agent_runs row that produced a controller reply (its console is the
   -- deep record); NULL on user rows and on refusal notes written run-less.
   run_id TEXT,
+  -- Ruling 121: the page the person was looking at when they sent a user
+  -- message (pathname + query, e.g. /projects/viberr/board?filter=waiting) so
+  -- a transcript read back later still says where the ask came from. NULL on
+  -- controller rows and on messages sent before the dock existed.
+  surface TEXT,
   created_at TEXT NOT NULL,
   UNIQUE (conversation_id, seq)
 );
@@ -524,7 +549,7 @@ CREATE TABLE "agent_runs" (
   -- always re-invokes the operator. NULL on runs nobody dispatched by hand.
   dispatched_by_name TEXT,
   dispatched_by_user_id TEXT,
-  -- Ruling 121: the CREDENTIAL PRINCIPAL — whose connected backend accounts this
+  -- Ruling 127: the CREDENTIAL PRINCIPAL — whose connected backend accounts this
   -- run billed. Task runs (operator, specialist, resume, scheduled, boot recovery,
   -- retry) carry the task owner; controller turns carry the asker. NULL only on a
   -- run refused before any credential was looked up (an unowned task, or one whose

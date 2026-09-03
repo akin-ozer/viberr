@@ -23,7 +23,7 @@ export const ERROR_CODES = {
   /** V11-4 (pass 32): the SSE subscribe route answers an unauthenticated
    *  caller with this — it used to emit a literal outside this catalog. */
   UNAUTHORIZED: "unauthorized",
-  /** Ruling 121: the run's credential principal has no usable account for the
+  /** Ruling 127: the run's credential principal has no usable account for the
    *  requested backend, so no agent process is started. Distinct from a plain
    *  CONFLICT because the remedy is always "connect the backend", never
    *  "retry" — the run service turns it into the honest `run·unavailable`

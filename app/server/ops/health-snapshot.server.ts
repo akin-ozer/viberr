@@ -27,7 +27,7 @@ import { maintenanceState, type MaintenanceState } from "./maintenance.server";
  */
 
 /**
- * Ruling 121: how many PEOPLE have connected this backend.
+ * Ruling 127: how many PEOPLE have connected this backend.
  *
  * There is no instance-level "the backend is configured" verdict any more — a
  * run bills the person it is for, so the only true instance-level number is a

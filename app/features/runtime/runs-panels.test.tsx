@@ -142,7 +142,7 @@ describe("AgentLogsPanel", () => {
   });
 
   /**
-   * Ruling 121: a run refused because the task has no owner is not a continuity
+   * Ruling 127: a run refused because the task has no owner is not a continuity
    * error, and no backend switch fixes it. The projection marks the run
    * `failedBackendUnavailable` (that is what happened) and withholds
    * `altBackend` (there is nobody to bill), so the footer must state the

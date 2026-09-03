@@ -105,10 +105,14 @@ const INVITE_BTN_STYLE = { alignSelf: "end" } as const;
 export function ProjectPanel({
   project,
   canManage,
+  busy = false,
   onSave,
 }: {
   project: SettingsViewData["project"];
   canManage: boolean;
+  /** The identity write is in flight — the panel is still mounted on the OLD
+   *  loader values until revalidation remounts it, so hold the Save control. */
+  busy?: boolean;
   onSave: (fields: { name: string; prefix: string; description: string }) => void;
 }) {
   // Revalidation resync (a save or an SSE-driven reload brings new values)
@@ -118,14 +122,34 @@ export function ProjectPanel({
   const [prefix, setPrefix] = useState(project.prefix);
   const [desc, setDesc] = useState(project.description);
 
-  const saveIfDirty = () => {
-    if (
-      name.trim() === project.name &&
-      prefix === project.prefix &&
-      desc.trim() === project.description
-    ) {
-      return; // only save when dirty (spec §7.2)
-    }
+  /* U33-9 (pass 33, owner): these three fields used to carry
+     `onBlur={saveIfDirty}` — the project name, the task prefix and the
+     description committed themselves the moment focus left, with no control to
+     press and nothing to confirm. The owner renamed a project by accident that
+     way: typed into what they took for the stage-name field, clicked elsewhere,
+     and the rename was governed state before they knew they had edited
+     anything. The prefix is the worse of the two — every future task key and
+     branch name is derived from it.
+
+     The rest of the product does not work like that ("no optimistic UI for
+     governed state", a confirm on every consequential act), so the trigger is
+     now an explicit Save, live only while the fields differ from the loader,
+     with Discard putting the loader's values back. The dirty test below is the
+     SAME comparison the blur handler used, and the payload handed to `onSave`
+     is unchanged — only what starts it moved. */
+  const dirty =
+    name.trim() !== project.name ||
+    prefix !== project.prefix ||
+    desc.trim() !== project.description;
+
+  const discard = () => {
+    setName(project.name);
+    setPrefix(project.prefix);
+    setDesc(project.description);
+  };
+
+  const save = () => {
+    if (!dirty || busy) return; // only save when dirty (spec §7.2)
     onSave({ name, prefix, description: desc });
   };
 
@@ -165,7 +189,6 @@ export function ProjectPanel({
               value={name}
               disabled={!canManage}
               onChange={(e) => setName(e.target.value)}
-              onBlur={saveIfDirty}
             />
           </div>
           <div className="field">
@@ -179,7 +202,6 @@ export function ProjectPanel({
               value={prefix}
               disabled={!canManage}
               onChange={(e) => setPrefix(e.target.value.toUpperCase().slice(0, 4))}
-              onBlur={saveIfDirty}
             />
           </div>
         </div>
@@ -193,15 +215,45 @@ export function ProjectPanel({
             value={desc}
             disabled={!canManage}
             onChange={(e) => setDesc(e.target.value)}
-            onBlur={saveIfDirty}
           ></textarea>
         </div>
       </div>
+      {/* U33-9: the explicit trigger the blur handler replaced. Withheld
+          entirely without the grant — the fields above are already `disabled`
+          there and the note names the grant, so a Save control would only offer
+          a role an act it cannot perform. `.confirm-actions` is the sheet's
+          existing commit/cancel row (app.css:2133): cancel first, primary last,
+          same order as every confirm in the product. */}
+      {canManage && (
+        <div className="confirm-actions">
+          <button
+            type="button"
+            className="btn ghost sm"
+            disabled={!dirty || busy}
+            onClick={discard}
+          >
+            Discard
+          </button>
+          <button
+            type="button"
+            className="btn primary sm"
+            disabled={!dirty || busy}
+            onClick={save}
+          >
+            Save changes
+          </button>
+        </div>
+      )}
       <div className="kv after-fields">
         <div className="kv-row">
           <span className="k">Task keys</span>
           <span className="v">
-            <span className="mono">{prefix}-###</span>
+            {/* U33-9: reads the LOADER's prefix, not the draft above it. While
+                the blur handler existed the two could not diverge; now they can,
+                and a "Task keys" row is a statement about the project, not a
+                preview of an uncommitted edit. Same rule as everywhere else on
+                this page: no optimistic UI for governed state. */}
+            <span className="mono">{project.prefix}-###</span>
           </span>
         </div>
         <div className="kv-row">
@@ -846,6 +898,7 @@ export function StagesPanel({
       </div>
       {confirmRemove && (
         <ConfirmDialog
+          screenLabel="Stage removal dialog"
           title={`Remove the ${confirmRemove.name} stage?`}
           body={
             <>
@@ -1075,6 +1128,7 @@ export function MembersPanel({
       </div>
       {confirmRemove && (
         <ConfirmDialog
+          screenLabel="Member removal dialog"
           title={`Remove ${confirmRemove.name} from ${projectName}?`}
           body={
             confirmRemove.missing
@@ -1644,6 +1698,7 @@ export function SettingsPage({
             key={`${data.project.name}\u0000${data.project.prefix}\u0000${data.project.description}`}
             project={data.project}
             canManage={canEditPolicy}
+            busy={identityFetcher.state !== "idle"}
             onSave={(fields) =>
               identityFetcher.submit(
                 { intent: "save-project", _csrf: csrf, ...fields },

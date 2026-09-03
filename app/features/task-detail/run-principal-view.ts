@@ -1,5 +1,5 @@
 /**
- * Ruling 121: whose accounts a run on THIS task would bill, and the one
+ * Ruling 127: whose accounts a run on THIS task would bill, and the one
  * sentence a control renders when the answer is "nobody's".
  *
  * Every agent run on a task bills its OWNER's connected backends, so the

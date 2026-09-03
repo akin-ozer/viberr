@@ -108,7 +108,7 @@ const envSchema = z.object({
     .min(8, "must be at least 8 characters")
     .optional(),
 
-  // Ruling 121: the deployment-wide agent-backend credentials are GONE
+  // Ruling 127: the deployment-wide agent-backend credentials are GONE
   // (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, VIBERR_CLAUDE_USE_CLI_AUTH,
   // CLAUDE_CONFIG_DIR, CODEX_ACCESS_TOKEN, CODEX_API_KEY, OPENAI_API_KEY,
   // CODEX_HOME, VIBERR_CODEX_USE_CLI_AUTH). Every person connects Claude and

@@ -23,7 +23,7 @@ import type { RecommendationView } from "./operator-recommendations";
 import { TaskDetailPage } from "./task-detail-page";
 import type { RunView } from "~/features/runtime/runtime-types";
 
-/** Ruling 121: the task owner whose accounts a run bills, both backends
+/** Ruling 127: the task owner whose accounts a run bills, both backends
  *  connected — the ordinary case, so the run controls render live and these
  *  tests keep testing what they are about. The refusal states are covered in
  *  execution-profile.test.tsx. */

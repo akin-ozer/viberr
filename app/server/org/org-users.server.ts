@@ -410,7 +410,7 @@ export async function deleteOrgUser(
   actor: AuditActor,
   ctx: {
     dataRoot?: string;
-    /** Ruling 121: the vendor binaries, when the caller already holds them.
+    /** Ruling 127: the vendor binaries, when the caller already holds them.
      *  Omitted, `retireUserBackends` resolves them itself; a test hands fakes
      *  so removing an account never spawns a real `claude auth logout`. */
     binaries?: BackendBinaries;
@@ -428,7 +428,7 @@ export async function deleteOrgUser(
   // UI-29: prune BEFORE the identity/user rows go, so a failure here leaves the
   // account intact rather than half-deleted with live memberships.
   const projectsPruned = await pruneUserFromProjects(db, userId, actor, ctx);
-  // Ruling 121: the `user_backend_credentials` rows cascade with the account,
+  // Ruling 127: the `user_backend_credentials` rows cascade with the account,
   // but the vendor's own sign-in FILE in this person's runtime home does not —
   // and nothing else on any path would ever remove it. Retire the accounts
   // first (vendor logout, then the credential file, then the row), or removing
@@ -452,7 +452,7 @@ export async function deleteOrgUser(
       email: existing.email,
       name: existing.name,
       projectsPruned,
-      // Ruling 121: which agent accounts were retired with this one, so the
+      // Ruling 127: which agent accounts were retired with this one, so the
       // revocation is auditable rather than silent.
       backendsRetired,
     },

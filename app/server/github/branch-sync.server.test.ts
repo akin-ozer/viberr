@@ -169,6 +169,9 @@ describe("ensureTaskBranch", () => {
       [`GET ${REPO_PATH}/git/ref/heads/main`]: {
         body: { object: { sha: "basesha00" } },
       },
+      // Ruling 122: the allocator asks whether any pull request ever used the
+      // name before it takes it. Nothing has.
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
       [`POST ${REPO_PATH}/git/refs`]: {
         status: 201,
         body: { object: { sha: "basesha00" } },
@@ -203,6 +206,93 @@ describe("ensureTaskBranch", () => {
       sha: "basesha00",
     });
     expect(listAuditEvents(store.db, { action: "github.branch.created" })).toHaveLength(1);
+  });
+
+  it("ruling 122: takes a suffixed name when a past pull request used the canonical one", async () => {
+    const store = setupWithCredential("VIB-210");
+    const gh = fakeGithubFetch({
+      // No ref anywhere: the canonical name is free as a REF and still taken.
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: {
+        body: { object: { sha: "basesha10" } },
+      },
+      [`GET ${REPO_PATH}/pulls`]: (call) =>
+        call.url.searchParams.get("head") === "akin-ozer:vib-210"
+          ? { body: [{ number: 265 }] }
+          : { body: [] },
+      [`POST ${REPO_PATH}/git/refs`]: {
+        status: 201,
+        body: { object: { sha: "basesha10" } },
+      },
+      [`GET ${REPO_PATH}/compare/main...vib-210`]: compareRoute([]),
+    });
+    const result = await ensureTaskBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-210" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result.status).toBe("synced");
+    const allocated = result.status === "synced" ? result.branch : "";
+    // The merged stranger PR on `vib-210` never blocks delivery again: the task
+    // simply takes a name nobody has used.
+    expect(allocated).not.toBe("vib-210");
+    expect(allocated).toMatch(/^vib-210-[0-9a-f]{4}$/);
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-210",
+      dataRoot: store.dataRoot,
+    });
+    expect(file?.parsed.frontmatter.branch).toBe(allocated);
+    expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)[0]!.body).toEqual({
+      ref: `refs/heads/${allocated}`,
+      sha: "basesha10",
+    });
+  });
+
+  it("ruling 122: takes a suffixed name when the canonical ref already exists", async () => {
+    const store = setupWithCredential("VIB-211");
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/vib-211`]: {
+        body: { object: { sha: "strangersha" } },
+      },
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: {
+        body: { object: { sha: "basesha11" } },
+      },
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/git/refs`]: {
+        status: 201,
+        body: { object: { sha: "basesha11" } },
+      },
+    });
+    const result = await ensureTaskBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-211" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result.status).toBe("synced");
+    const allocated = result.status === "synced" ? result.branch : "";
+    expect(allocated).toMatch(/^vib-211-[0-9a-f]{4}$/);
+  });
+
+  it("ruling 122: a 403 listing pull requests opens a repo scope violation", async () => {
+    const store = setupWithCredential("VIB-212");
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: {
+        status: 403,
+        body: { message: "Resource not accessible by personal access token" },
+      },
+    });
+    const result = await ensureTaskBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-212" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result).toMatchObject({ status: "scope_violation", scope: "repo" });
+    expect(
+      findOpenScopeViolation(store.db, store.slug, "repo", "VIB-212"),
+    ).not.toBeNull();
   });
 
   it("is idempotent: an existing branch is success without a create call", async () => {

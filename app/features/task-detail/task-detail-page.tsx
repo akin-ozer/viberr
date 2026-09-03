@@ -160,7 +160,7 @@ export function TaskDetailPage({
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
   operatorAutonomy: "supervised" | "full";
-  /** Ruling 121: whose accounts this task's agent runs bill (the OWNER's) and
+  /** Ruling 127: whose accounts this task's agent runs bill (the OWNER's) and
    *  what those accounts can run. `null` = unowned, so nothing runs here.
    *  P11-41's "would fail fast" gate, answered per person. */
   runPrincipal: TaskRunPrincipalView | null;
@@ -390,7 +390,7 @@ export function TaskDetailPage({
     runtime,
     myRole,
     canRunAgents,
-    // Ruling 121: the retry-on-the-other-backend offer bills the task owner,
+    // Ruling 127: the retry-on-the-other-backend offer bills the task owner,
     // so it follows their connected accounts, not the viewer's grant alone.
     runPrincipal,
     // F19-10: the merge control follows the SERVER's acceptance authority
@@ -951,6 +951,7 @@ export function TaskDetailPage({
       {/* D6: interrupt a live run — discards uncommitted in-flight work. */}
       {confirmInterrupt && (
         <ConfirmDialog
+          screenLabel="Interrupt run dialog"
           title="Interrupt this run?"
           body="The agent stops where it is. Anything it has not already committed or delivered is lost. You can start a new run afterward."
           confirmLabel="Interrupt run"
@@ -966,6 +967,7 @@ export function TaskDetailPage({
       {/* D6: dismiss an operator recommendation — a governed, audited decision. */}
       {confirmDismiss && (
         <ConfirmDialog
+          screenLabel="Dismiss recommendation dialog"
           title="Dismiss this recommendation?"
           body={
             <>

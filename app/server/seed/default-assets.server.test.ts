@@ -252,3 +252,94 @@ describe("shipped-asset refresh (B-OP1)", () => {
     })).toBe(true);
   });
 });
+
+// ------------------------------------------------------------ ruling 121
+
+describe("the controller doctrine and skill upgrade in place (ruling 121)", () => {
+  const assetsDir = path.join(import.meta.dirname, "assets");
+
+  it("lists the outgoing versions of both files, so an unedited store copy is refreshed at boot", async () => {
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited, assetHash } = await import(
+      "./default-assets.server"
+    );
+    const definitionRel = path.join("agents", "definitions", "controller.md");
+    const skillRel = path.join("skills", "controller-guide", "SKILL.md");
+    expect(PRIOR_SHIPPED_HASHES[definitionRel]).toContain(
+      "8dcb2d1bb8f3668bcc9337af2d07be196ed704b66d70b699b2ac55e39ebf258c",
+    );
+    expect(PRIOR_SHIPPED_HASHES[skillRel]).toContain(
+      "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
+    );
+    for (const [rel, hashes] of [
+      [definitionRel, PRIOR_SHIPPED_HASHES[definitionRel]!],
+      [skillRel, PRIOR_SHIPPED_HASHES[skillRel]!],
+    ] as const) {
+      for (const hash of hashes) expect(shippedCopyIsUnedited(rel, hash, {})).toBe(true);
+    }
+    // The shipped text is NEW: neither outgoing hash is the current one.
+    const definition = readFileSync(path.join(assetsDir, "controller.definition.md"), "utf8");
+    const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
+    expect(PRIOR_SHIPPED_HASHES[definitionRel]).not.toContain(assetHash(definition));
+    expect(PRIOR_SHIPPED_HASHES[skillRel]).not.toContain(assetHash(skill));
+  });
+
+  /**
+   * Review finding 33: the assertions above compare the constant with its own
+   * literals, which a WRONG hash would pass while every existing store kept
+   * the stale doctrine forever. The historical bytes cannot be re-derived once
+   * this change is committed (HEAD would hold the new text, and CI clones at
+   * depth 1), so what is asserted here is the MECHANISM the hash list feeds:
+   * a store copy this app is recorded as having written is really replaced by
+   * the shipped one, for the two ruling-121 assets specifically.
+   */
+  it("upgrades a recorded copy of the controller doctrine and skill in place", async () => {
+    const { seedDefaultAgentAssets, assetHash } = await import("./default-assets.server");
+    const definitionRel = path.join("agents", "definitions", "controller.md");
+    const skillRel = path.join("skills", "controller-guide", "SKILL.md");
+    const shipped = {
+      [definitionRel]: readFileSync(path.join(assetsDir, "controller.definition.md"), "utf8"),
+      [skillRel]: readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8"),
+    };
+    const root = mkdtempSync(path.join(tmpdir(), "viberr-ctl-upgrade-"));
+    roots.push(root);
+    const manifest: Record<string, string> = {};
+    for (const rel of [definitionRel, skillRel]) {
+      const older = `# an older shipped ${rel}\n`;
+      const dest = path.join(root, rel);
+      mkdirSync(path.dirname(dest), { recursive: true });
+      writeFileSync(dest, older, "utf8");
+      // What the app recorded when it last wrote that file — the same claim
+      // every entry in PRIOR_SHIPPED_HASHES makes about a released version.
+      manifest[rel] = assetHash(older);
+    }
+    mkdirSync(path.join(root, "state"), { recursive: true });
+    writeFileSync(
+      path.join(root, "state", "shipped-assets.json"),
+      JSON.stringify(manifest),
+      "utf8",
+    );
+
+    seedDefaultAgentAssets(root);
+
+    for (const rel of [definitionRel, skillRel]) {
+      expect(readFileSync(path.join(root, rel), "utf8")).toBe(shipped[rel]);
+    }
+    // A copy the app never wrote is still left alone.
+    writeFileSync(path.join(root, definitionRel), "# mine now\n", "utf8");
+    seedDefaultAgentAssets(root);
+    expect(readFileSync(path.join(root, definitionRel), "utf8")).toBe("# mine now\n");
+  });
+
+  it("names the tools that exist and the context read, and no longer a comment that starts runs", () => {
+    const definition = readFileSync(path.join(assetsDir, "controller.definition.md"), "utf8");
+    const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
+    for (const text of [definition, skill]) {
+      expect(text).not.toContain("list_projects");
+      expect(text).toContain("`whoami`");
+      expect(text).toContain("update_task");
+    }
+    expect(definition).toContain("context block the server gathered when the turn started");
+    expect(definition).toContain("A comment never starts a run by itself");
+    expect(skill).toContain("## The context you are handed");
+  });
+});

@@ -62,7 +62,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     );
   }
   const backend: RealBackend = run.backend === "codex" ? "codex" : "claude";
-  // Ruling 121: the transcript lives in the home of the person the run billed
+  // Ruling 127: the transcript lives in the home of the person the run billed
   // (`credential_user_id`), because that is the home the vendor binary wrote
   // it into. A run with no principal never spawned a process and has none.
   const located = locateTranscript(

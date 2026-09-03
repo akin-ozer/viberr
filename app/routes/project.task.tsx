@@ -118,7 +118,7 @@ import { Icon } from "~/ui/icon";
  */
 
 /**
- * Ruling 121: WHOSE accounts this task's agent runs would use, and what those
+ * Ruling 127: WHOSE accounts this task's agent runs would use, and what those
  * accounts can run. The page used to ship one deployment-wide "is this backend
  * configured" boolean; a run bills the task OWNER, so the honest answer is the
  * owner's own health, and the panels render copy that names them
@@ -356,7 +356,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // every project, contradicting the Review queue one click away. Same read
     // model the queue uses, so the two surfaces cannot disagree.
     acceptanceAuthority: resolveAcceptanceAuthority(params.slug),
-    // Ruling 121: every agent run on this task bills its OWNER's accounts, so
+    // Ruling 127: every agent run on this task bills its OWNER's accounts, so
     // "which backends can run here" is a question about the owner — not about
     // this deployment and not about the viewer. `null` means the task has no
     // owner at all, which is its own refusal (nobody to bill), and the panels
@@ -1156,7 +1156,7 @@ export default function TaskDetailRoute({
       deployedSpecialists={loaderData.deployedSpecialists}
       operatorBackend={loaderData.operatorBackend}
       operatorAutonomy={loaderData.operatorAutonomy}
-      // Ruling 121: the run picker's "would fail fast" gate answers for the
+      // Ruling 127: the run picker's "would fail fast" gate answers for the
       // task OWNER (whose accounts a run bills), and an unowned task can run
       // nothing at all. The panels render the refusal that names the person,
       // so the whole principal travels, not a pair of booleans that could only

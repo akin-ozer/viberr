@@ -10,7 +10,7 @@ import { userBackendHome } from "./user-homes.server";
  * inside the app's runtime (in Docker, on the data volume); each provider keeps
  * its own resumable transcript there, keyed by the session id the UI shows.
  *
- * Ruling 121: "there" is the CREDENTIAL PRINCIPAL's own runtime home — the run
+ * Ruling 127: "there" is the CREDENTIAL PRINCIPAL's own runtime home — the run
  * row's `credential_user_id` — because that is the home the binary was spawned
  * with:
  *
@@ -43,7 +43,7 @@ export interface LocatedTranscript {
 }
 
 /** The `…/sessions` dir of ONE person's codex home — the only place a run
- *  billed to them could have written a rollout (ruling 121). Empty when the
+ *  billed to them could have written a rollout (ruling 127). Empty when the
  *  home does not exist, or when the run had no principal. */
 function codexSessionDirs(userId: string | null, dataRoot?: string): string[] {
   if (!userId) return [];
@@ -233,7 +233,7 @@ const transcriptExistsCache = new Map<string, { ok: boolean; at: number }>();
 
 export function transcriptExists(
   backend: RealBackend,
-  /** Ruling 121: the run row's `credential_user_id` — whose home to look in.
+  /** Ruling 127: the run row's `credential_user_id` — whose home to look in.
    *  Null (a refused run) has no transcript by construction. */
   userId: string | null,
   sessionId: string,
@@ -305,7 +305,7 @@ export const SESSION_MISSING_RE =
  */
 export function probeSessionContinuity(
   backend: RealBackend,
-  /** Ruling 121: whose home holds the transcript — the principal of the RESUMED
+  /** Ruling 127: whose home holds the transcript — the principal of the RESUMED
    *  turn, which is the task owner as of now, so this never reads one person's
    *  transcript on behalf of another (agents-and-runtime.md §3.6). An owner
    *  CHANGE is not decided here: `resumeRun` treats a principal that differs
@@ -335,7 +335,7 @@ export function probeSessionContinuity(
  */
 export function locateTranscript(
   backend: RealBackend,
-  /** Ruling 121: the run row's `credential_user_id`. A run with none never
+  /** Ruling 127: the run row's `credential_user_id`. A run with none never
    *  spawned a process, so it has no transcript to export. */
   userId: string | null,
   sessionId: string,

@@ -21,7 +21,7 @@ import {
 } from "./user-homes.server";
 
 /**
- * Personal agent-backend credentials (ruling 121) — the store, and the ONE
+ * Personal agent-backend credentials (ruling 127) — the store, and the ONE
  * per-person availability answer every surface reads.
  *
  * A person connects Claude and Codex on Profile → Agent accounts in one of two
@@ -382,7 +382,7 @@ const MAX_SECRET_LEN = 512;
 
 /**
  * Which pasted credentials each backend accepts, and the ONE home of that fact
- * (ruling 121).
+ * (ruling 127).
  *
  * `setBackendApiKey` refuses anything outside it, and Profile → Agent accounts
  * builds its paste buttons from the same table
@@ -656,7 +656,7 @@ export interface RetireUserBackendsDeps {
 
 /**
  * Retire EVERY agent account a person holds on this server, for the one case
- * that is not a disconnect: the ACCOUNT itself is being removed (ruling 121).
+ * that is not a disconnect: the ACCOUNT itself is being removed (ruling 127).
  *
  * `DELETE FROM users` cascades the `user_backend_credentials` rows away, but a
  * foreign key cannot reach the filesystem — and a `login` row's credential is a

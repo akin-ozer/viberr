@@ -128,7 +128,7 @@ describe("projectRunsForTask grouping", () => {
       kind: "primary",
       backend: "codex",
       state: "error",
-      // Ruling 121: a run that actually spawned billed somebody, so the retry
+      // Ruling 127: a run that actually spawned billed somebody, so the retry
       // offer is about THAT person's other account.
       credentialUserId: "u_owner",
     });
@@ -150,7 +150,7 @@ describe("projectRunsForTask grouping", () => {
     // signatures. The projection must key off the tag so the "retry on the
     // other backend" affordance still renders.
     //
-    // Ruling 121: this is the refusal the other backend CAN fix — the task's
+    // Ruling 127: this is the refusal the other backend CAN fix — the task's
     // owner is known (the row records whose account it would have billed) and
     // has simply not connected Claude.
     const refusal =
@@ -177,7 +177,7 @@ describe("projectRunsForTask grouping", () => {
     expect(view!.altBackend).toBe("codex"); // claude failed → offer codex
   });
 
-  it("withholds the retry offer when NO principal was resolvable (ruling 121)", () => {
+  it("withholds the retry offer when NO principal was resolvable (ruling 127)", () => {
     // An unowned task (or one whose owner account is gone) has nobody to bill
     // on EITHER backend, and the run service records that as a null
     // `credential_user_id`. Offering "Retry on Codex" here would promise a

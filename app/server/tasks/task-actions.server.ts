@@ -150,8 +150,7 @@ import type { FileActorRef } from "~/schemas/task-file.schema";
 import { logger } from "~/server/logging/logger.server";
 import { withheldAgentGrants } from "~/features/agents/capability-catalog";
 import {
-  ambiguousMentionHandles,
-  ambiguousMentionNote,
+  mentionNonDeliveryNote,
   mentionedUserIdsOf,
   mentionNotifiesUser,
   notifyMentionedUsers,
@@ -405,7 +404,7 @@ function humanActorRef(db: DatabaseSync, actor: TaskActor) {
 
 /**
  * The `assign` timeline event every ownership change writes — `setOwner`'s
- * take/hand-off, and (ruling 121) creation seating the creator.
+ * take/hand-off, and (ruling 127) creation seating the creator.
  *
  * ONE builder because the owner seat is now load-bearing beyond bookkeeping:
  * every agent run on the task bills the owner's accounts, so "who owns this and
@@ -511,7 +510,7 @@ export async function createTask(
     );
   }
   const stageId = stage.id;
-  // Ruling 121: only a HUMAN can be seated as owner — the seat is an account
+  // Ruling 127: only a HUMAN can be seated as owner — the seat is an account
   // to bill and a person to hold review authority. A controller-driven human
   // IS a human (the controller acts as them, with their user id); the operator
   // toolkit's placeholder actor is not, and neither is any other in-process
@@ -543,9 +542,9 @@ export async function createTask(
     heldAtStage: null,
     readiness: "input_required",
     waiting: "human",
-    // Ruling 121: creation SEATS the creator as owner. Every agent run on a
+    // Ruling 127: creation SEATS the creator as owner. Every agent run on a
     // task bills the OWNER's own Claude/Codex accounts, so a task with no owner
-    // cannot run agents at all — and the pre-121 default (`null`) meant every
+    // cannot run agents at all — and the pre-127 default (`null`) meant every
     // brand-new task was born unable to do the one thing it exists for, with
     // an "Assign me" ceremony standing between a person and their own work. An
     // OPERATOR-created task keeps a null seat: the operator is not a person and
@@ -583,7 +582,7 @@ export async function createTask(
     goal: input.goal?.trim() || DEFAULT_GOAL,
   };
   // The same `assign` event a take through `setOwner` writes, so the timeline
-  // reads the same however the seat was filled (ruling 121).
+  // reads the same however the seat was filled (ruling 127).
   if (creator) {
     createInput.timeline = [
       ownerAssignEvent(
@@ -1086,16 +1085,24 @@ export async function appendComment(
   // author is the only one who can retag and is still on the page, so the
   // non-delivery lands next to their comment in the same write — resolved
   // BEFORE it, since the fan-out below runs after the file is already saved.
-  const ambiguousHandles = ambiguousMentionHandles(db, text);
+  //
+  // F33-9 (pass 33): "matched several people" is no longer the only way a tag
+  // reaches nobody. A handle that names exactly one real person who is NOT a
+  // member of this project is now a non-delivery too — it used to be a
+  // notification that named the project, the task and the comment to someone the
+  // members-only 404 then refused (ruling 25 read backwards). Both reasons come
+  // from ONE seam so the author gets one note and a third reason lands there
+  // rather than here.
+  const nonDeliveryNote = mentionNonDeliveryNote(db, text, input.projectSlug);
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift(event);
-    if (ambiguousHandles.length > 0) {
+    if (nonDeliveryNote.length > 0) {
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
         type: "note",
         actor: { kind: "system", systemId: "policy-engine" },
         title: null,
-        text: ambiguousMentionNote(ambiguousHandles),
+        text: nonDeliveryNote,
         toAgent: false,
         evidence: null,
       });
@@ -1179,7 +1186,7 @@ export interface CommentToAgentResult extends AppendCommentResult {
   /**
    * A8 (pass 23): the comment is recorded BEFORE any run starts, so a SPECIALIST
    * run-start failure (single-flight conflict, a backend the task owner has not
-   * connected (ruling 121), stage ineligibility) used to throw out of here — the
+   * connected (ruling 127), stage ineligibility) used to throw out of here — the
    * commenter saw a bare error and could not tell their comment HAD posted. This
    * carries the reason the run did not start (the comment did), so the route
    * toasts "comment posted, run not started: <reason>" instead of an error that
@@ -1577,7 +1584,7 @@ export async function commentToAgent(
 
   // A8 (pass 23): the comment is ALREADY on the timeline. A run-start failure
   // (single-flight conflict, a backend the task owner has not connected (ruling
-  // 121), stage ineligibility) below used to throw straight out of here, so the
+  // 127), stage ineligibility) below used to throw straight out of here, so the
   // commenter saw only an error and could not tell their comment HAD posted.
   // Catch it and return the partial success — comment recorded, run not started,
   // reason attached — rather than throwing. (The operator @mention refusal is a
@@ -1619,7 +1626,7 @@ export async function commentToAgent(
       ctx.dataRoot,
       target.isPrimary ? undefined : { profileId: target.profileId },
     );
-    // Ruling 121: a resumed task run bills the task owner AS OF NOW — the
+    // Ruling 127: a resumed task run bills the task owner AS OF NOW — the
     // caller resolves the principal, `resumeRun` re-resolves nothing. When the
     // seat changed hands since the original run, `resumeRun` takes the existing
     // continuity-reset path: one fresh run re-anchored on task.md, with the
@@ -2581,6 +2588,16 @@ async function withdrawSupersededStuckPacket(
  * reject-recovery packet ("PR closed without merging") uses `archive_task`
  * instead and is deliberately left alone, as is any `accept_completion` packet.
  * Best-effort; never turns the open PR into an error.
+ *
+ * F33-3 (pass 33): the `type === "blocked"` requirement binds only the
+ * `discard_branch` half. Live (VIB-1) a COLLISION packet survived a by-hand
+ * delivery that opened PR #270 on `vib-1` at the first attempt, and its confirm
+ * dialog then offered to delete "the stale branch `vib-1` … the unrelated one
+ * squatting on this task's branch name" — the task's own live branch, carrying
+ * its own commit and its own open PR. A `resolve_remote_collision` option says
+ * one thing only: another PR holds this task's branch name. A review PR that
+ * just opened ON that branch falsifies exactly that, whatever `type` the
+ * operator gave the packet, so the collision kind is moot on its own.
  */
 async function withdrawSupersededDeliveryPacket(
   db: DatabaseSync,
@@ -2592,12 +2609,10 @@ async function withdrawSupersededDeliveryPacket(
     type: string;
     options: readonly { kind: string }[];
   }): boolean =>
-    p.type === "blocked" &&
     !p.options.some((o) => o.kind === "accept_completion") &&
-    p.options.some(
-      (o) =>
-        o.kind === "discard_branch" || o.kind === "resolve_remote_collision",
-    );
+    (p.options.some((o) => o.kind === "resolve_remote_collision") ||
+      (p.type === "blocked" &&
+        p.options.some((o) => o.kind === "discard_branch")));
   try {
     const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
     const packet = existing?.parsed.packet;
@@ -3661,7 +3676,7 @@ export async function applyAgentCompletionEffects(
         : failure?.kind === "auth"
           ? `${backendLabel} rejected the credentials`
           : failure?.kind === "unavailable"
-            // Ruling 121: the refusal sentence is `principalRefusalMessage`'s,
+            // Ruling 127: the refusal sentence is `principalRefusalMessage`'s,
             // written by the resolver and already naming the person and the
             // remedy. Repeating a generic "no usable credential configured"
             // here would tell a second, wronger story about the same refusal.
@@ -3742,7 +3757,7 @@ export async function applyAgentCompletionEffects(
     const altBackend: RealBackend = input.backend === "codex" ? "claude" : "codex";
     const altLabel = altBackend === "claude" ? "Claude" : "Codex";
     const failedProfileId = input.profileId;
-    // Ruling 121: "retry on the other backend" is only a recovery if the TASK
+    // Ruling 127: "retry on the other backend" is only a recovery if the TASK
     // OWNER has that other backend connected — the retry run would bill them.
     // Offering it otherwise promises a one-click fix that fails identically the
     // moment it is clicked, which is the worst kind of packet option: it looks
@@ -5307,10 +5322,27 @@ export async function performDelivery(
     if (result.status === "ok") {
       // R17-2: a real PR now stands for review — clear any stale no-change flag
       // from an earlier empty-branch attempt (a later delivery produced commits).
+      //
+      // F33-3 (pass 33): the R15-15 collision record goes with it. `unownedPr`
+      // means "a PR stands on this task's branch and it is not ours"; `openTaskPr`
+      // refuses outright (`branch_collision`) while that is true, so an `ok` here
+      // IS the proof that the branch is this task's again. Nothing re-checked it:
+      // live (VIB-1) the record from an earlier collision outlived the delivery
+      // that resolved it, and the GitHub card plus the packet ceremony went on
+      // describing the task's own branch as an unrelated squatter. The next
+      // reconcile poll would clear it; the delivery knows sooner.
       const cur = readTaskFile(taskRef(ctx, projectSlug, taskKey));
-      if (cur?.parsed.frontmatter.noChanges) {
+      const staleNoChanges = cur?.parsed.frontmatter.noChanges === true;
+      const staleCollision =
+        (cur?.parsed.frontmatter.github?.unownedPr ?? null) !== null;
+      if (staleNoChanges || staleCollision) {
         await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
           delete parsed.frontmatter.noChanges;
+          // Only ever CLEARS: writing the key where it was absent would persist
+          // a "checked, no collision" fact this path never established.
+          if (parsed.frontmatter.github?.unownedPr != null) {
+            parsed.frontmatter.github.unownedPr = null;
+          }
         });
         reprojectTask(db, ctx, projectSlug, taskKey);
       }
@@ -6577,14 +6609,18 @@ export async function resolvePacket(
         "approve-transition",
         "discard this task's branch",
       );
+      // F33-2 (pass 33): the decision event states the DECISION, never its
+      // effect. The discard runs after this write and can refuse (`on_remote`,
+      // `no_workspace`, a git failure), and its own note carries the outcome —
+      // so a sentence asserting "the branch is discarded" here put a claim on
+      // the canonical timeline one millisecond above the note that contradicts
+      // it. `option.ev` still overrides, as it does on every other kind.
       event = {
         occurredAt: now,
         type: "transition",
         actor: human,
         title: null,
-        text:
-          option.ev ??
-          `**Decision:** ${option.t}. The task's local workspace branch is discarded.`,
+        text: option.ev ?? `**Decision:** ${option.t}.`,
         toAgent: false,
         evidence: null,
       };
@@ -6606,14 +6642,20 @@ export async function resolvePacket(
         "approve-transition",
         "resolve this task's branch collision",
       );
+      // F33-2 (pass 33): the decision event states the DECISION, never its
+      // effect. This text was written unconditionally and BEFORE any GitHub
+      // work — so when the remedy refused (the delete-first ordering's whole
+      // point), the canonical timeline held the refusal note ("The branch
+      // collision was **not** cleared … Nothing was re-delivered.") directly
+      // above an event asserting the branch WAS removed and the work re-
+      // delivered, one millisecond apart. The outcome note is the only writer
+      // of the outcome; `option.ev` still overrides.
       event = {
         occurredAt: now,
         type: "transition",
         actor: human,
         title: null,
-        text:
-          option.ev ??
-          `**Decision:** ${option.t}. The stale remote branch is removed and this task's local work is re-delivered.`,
+        text: option.ev ?? `**Decision:** ${option.t}.`,
         toAgent: false,
         evidence: null,
       };
@@ -7095,6 +7137,41 @@ export async function resolvePacket(
       );
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     }
+    // F33-4 (pass 33): ruling 110 ends "And it never strands", and F32-7 hung
+    // that guarantee on the RE-DELIVERY — so the arm where no re-delivery runs
+    // inherited none of it. A refusal is the safe outcome the delete-first
+    // ordering exists to produce, and live (VIB-1) it left the task at `impl`,
+    // `waiting: human`, no packet, no recommendation, and PR #270 open on the
+    // branch: the exact strand ruling 110 quotes. The refusal is also the arm
+    // where a review PR is most likely to already stand — `deleteTaskRemoteBranch`
+    // refuses precisely because the task's OWN open PR sits on the ref — so the
+    // follow-up is the same "Move to <review>" card the success arm records, over
+    // the PR the task already carries. `recordDeliveredNextStep` is the ONE writer
+    // of that card and re-checks everything under the lock (already-actionable,
+    // stage at/past review, no workflow edge, archived), so this cannot double up
+    // with the success arm above nor invent a move the board would refuse. No PR
+    // means no honest card: the refusal note names the remedy instead.
+    if (!delivered) {
+      const openPr =
+        readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed
+          .frontmatter.pr ?? null;
+      // "review" and "accepted" are the two OPEN states (a human-set "accepted"
+      // is merge-pending, still open on GitHub — the reconciler reads them the
+      // same way). A merged or closed PR is nothing to move a task to review for.
+      const prNumber =
+        openPr && (openPr.state === "review" || openPr.state === "accepted")
+          ? openPr.number
+          : null;
+      if (prNumber !== null) {
+        await recordDeliveredNextStep(
+          db,
+          ctx,
+          input.projectSlug,
+          input.taskKey,
+          prNumber,
+        );
+      }
+    }
   }
 
   // retry_other_backend: actually start the promised run. Operator-authorized
@@ -7418,6 +7495,21 @@ function forceIrreducibleRefusal(
       `not for a pull request GitHub has already closed.`
     );
   }
+  // Ruling 123: the archive is the second thing force may not jump. Everywhere
+  // else archive is terminal — `transitionStage` refuses an archived task with a
+  // 409 and the lifecycle doc says "an archived task cannot be moved" — but
+  // `force` skips the shared refusal helper that holds the archived gate, so an
+  // admin could accept an archived task straight to Done and leave it both
+  // archived AND accepted (pass 33, F33-6, proven live on SBX-1). The confirm
+  // dialog already told them to restore it first; this makes that sentence true.
+  const archived = archivedTaskBlockedReason(fm, taskKey);
+  if (archived) {
+    return (
+      `${archived} Force-accept cannot override that: restore the task first, then ` +
+      `accept it. Force exists for a wedged review gate, not for a disposition a ` +
+      `human already made.`
+    );
+  }
   return null;
 }
 
@@ -7731,6 +7823,12 @@ export function resolveAcceptanceAffordance(
     null;
   if (terminalId !== null && fm.stage === terminalId) {
     return { ...denied, hasAuthority };
+  }
+  // Ruling 123: an archived task is terminally blocked for acceptance, so the
+  // force-accept affordance is WITHDRAWN rather than disabled (ruling 37's
+  // precedent). The server refuses it too — `forceIrreducibleRefusal`.
+  if (fm.archived) {
+    return { ...denied, hasAuthority, terminallyBlocked: true };
   }
   const atBoundary =
     !fm.archived && acceptanceStageBlockedReason(project, fm.stage, input.taskKey) === null;

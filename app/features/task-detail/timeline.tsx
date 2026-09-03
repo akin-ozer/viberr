@@ -370,6 +370,7 @@ export function Timeline({
   runPrincipal,
   onAgentLog,
   taskClosed,
+  runLive,
   attachmentNames,
   attachmentsBase,
 }: {
@@ -383,7 +384,7 @@ export function Timeline({
   ask: number;
   /** @-mention autocomplete directory (loader) — agents/users/reserved. */
   mentionables: Mentionables;
-  /** Ruling 121: the task owner whose accounts an `@claude` / `@codex` mention
+  /** Ruling 127: the task owner whose accounts an `@claude` / `@codex` mention
    *  would bill, so the menu can mark a handle that would refuse. */
   runPrincipal?: TaskRunPrincipalView | null;
   /** BUG 3: when an @agent comment triggers a run, the server returns the
@@ -392,6 +393,14 @@ export function Timeline({
   /** Terminal-stage task (R7-6): comments stay ENABLED — only a subtle hint
    *  above the composer says the task is closed. */
   taskClosed?: boolean;
+  /** U33-1: a run is live (queued or running) on this task RIGHT NOW — the same
+   *  projection fact the Live-run strip renders from, ~400px up the same page.
+   *  Ruling 87(b) exists so a healthy pre-run phase reads as healthy, and the
+   *  no-events empty state below undid half of it: it declared "this task
+   *  hasn't started its operator loop" while the strip above said "Preparing
+   *  workspace · Cloning akin-ozer/viberr · 13%". Absent (bare renders) ⇒ the
+   *  original copy, which is honest exactly when nothing is running. */
+  runLive?: boolean;
   /** R19-19: the task's real attachment filenames — evidence labels citing one
    *  become links to the serving route. Absent ⇒ plain text (bare renders,
    *  non-members whose list the loader withheld). */
@@ -578,7 +587,15 @@ export function Timeline({
         {items.length === 0 ? (
           <div className="empty">
             {events.length === 0
-              ? "No activity yet. This task hasn't started its operator loop."
+              ? runLive
+                ? // U33-1: the loop HAS started — the Live-run strip on this
+                  //  same page is showing its progress. Saying "hasn't started"
+                  //  here contradicted it, and contradicted ruling 87(b)'s whole
+                  //  point (a healthy pre-run phase must be distinguishable from
+                  //  a wedged one). An empty timeline under a live run is the
+                  //  normal first seconds: the run has not reported yet.
+                  "The loop has started. Its first events land here as the live run above reports in."
+                : "No activity yet. This task hasn't started its operator loop."
               : f === "comment"
                 ? "No comments in the loaded history. Switch to All, or load older events."
                 : // F18-14: "governance" is a banned UI word (design/CONVERSATION-SUMMARY

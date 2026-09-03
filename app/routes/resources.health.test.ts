@@ -172,8 +172,8 @@ describe("/resources/health — honest status (gap 17)", () => {
     expect(body.lock).toBeNull();
   });
 
-  it("reports a per-backend CONNECTED-USER count, and zero is never degraded (R17-5, ruling 121)", async () => {
-    // Ruling 121 replaced "is this backend configured on the instance" with the
+  it("reports a per-backend CONNECTED-USER count, and zero is never degraded (R17-5, ruling 127)", async () => {
+    // Ruling 127 replaced "is this backend configured on the instance" with the
     // only instance-level fact that survives a per-person credential model: how
     // many people have connected it. Nobody has here, and an instance where
     // nobody uses Codex is a CORRECT deployment — alarming would train the

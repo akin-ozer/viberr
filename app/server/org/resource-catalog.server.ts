@@ -49,12 +49,20 @@ export function buildResourceCatalog(
   for (const s of safe(() => listSkills(db))) skillIds.add(s.name);
 
   const kbIds = new Set<string>(subDirNames(kbRootDir(dataRoot)));
+  const kbNames = new Map<string, string>();
   // SAFETY: `dir` is TEXT NOT NULL UNIQUE on `org_knowledge_bases`
   // (0001_baseline.sql), so every row of this one-column SELECT carries a string.
   for (const row of safe(() =>
-    db.prepare(`SELECT dir FROM org_knowledge_bases`).all() as { dir: string }[],
+    db.prepare(`SELECT dir, name FROM org_knowledge_bases`).all() as {
+      dir: string;
+      name: string;
+    }[],
   )) {
     kbIds.add(row.dir);
+    // U33-7: the store keeps a display name beside the directory; carry it so
+    // the project editor can read like the other two editors. A KB folder with
+    // no row (E7: a directory nobody registered) keeps its dir as its name.
+    if (row.name.trim()) kbNames.set(row.dir, row.name.trim());
   }
 
   // P14-KM-14: the registry only, for BOTH profile kinds. `viberr` used to be
@@ -87,7 +95,12 @@ export function buildResourceCatalog(
       group: "Knowledge bases",
       key: "kb",
       mono: false,
-      items: [...kbIds].sort().map((id) => ({ id, def: false })),
+      items: [...kbIds].sort().map((id) => {
+        const label = kbNames.get(id);
+        // Statements, not a conditional spread — the anti-slop rule.
+        if (label && label !== id) return { id, def: false, label };
+        return { id, def: false };
+      }),
     },
   ];
 }

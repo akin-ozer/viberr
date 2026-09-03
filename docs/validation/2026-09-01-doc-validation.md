@@ -272,10 +272,10 @@ modules, 18 feature surfaces, 25 `app/server` directories, 12 operator tools, 37
 controller tools + 3 ops tools, 11 packet option kinds, 4 recommendation kinds, 11
 timeline event types, 14 SSE wire events, 108 rulings.
 
-## 13. Superseded by ruling 121 (appended 2026-09-02)
+## 13. Superseded by ruling 127 (appended 2026-09-02)
 
 *This ledger is a dated record of what was true on `main` @ `68b5480` and is NOT rewritten.
-Ruling 121 (branch `claude/per-user-codex-auth-difdnn`) then made three of its lines false.
+Ruling 127 (branch `claude/per-user-codex-auth-difdnn`) then made three of its lines false.
 They are listed here rather than edited above.*
 
 | Line above | Why it is no longer true |
@@ -285,4 +285,5 @@ They are listed here rather than edited above.*
 | B-14, "raw NDJSON under `runtimes/claude-home/`" | The correction column is unchanged (`runtimes/<backend>/<runId>.jsonl` is still the raw run log), but `runtimes/claude-home/` no longer exists as a path at all, so the claimed location is now doubly wrong. |
 
 §12's count "108 rulings" was a count of the numbered rulings as of 2026-09-01 and is
-likewise a dated statement; `decisions.md` holds 120 today (1 to 121, with 117 never used).
+likewise a dated statement; `decisions.md` runs 1 to 127 today, with 117
+recorded as a number that was never used (126 actual rulings).

@@ -154,7 +154,7 @@ describe("curated catalog", () => {
 });
 
 /**
- * Ruling 121: the enhanced probe reads the VIEWER's OWN Claude account. There
+ * Ruling 127: the enhanced probe reads the VIEWER's OWN Claude account. There
  * is no instance account left to enumerate against, so "available" is replaced
  * by "the caller handed us a credential" — and a caller that hands none gets
  * the curated list, which is a complete answer for somebody who has not
@@ -309,7 +309,7 @@ describe("the live probe is CONFINED like a real run (A1, F10-02 regression)", (
       expect(env.VIBERR_SECRET_ENCRYPTION_KEY).toBeUndefined();
       // …and it reads/writes the VIEWER's own home, carrying THEIR key and no
       // other — the probe bills nothing, but it does read a personal account,
-      // so it reads the account of the person who asked (ruling 121).
+      // so it reads the account of the person who asked (ruling 127).
       expect(env.CLAUDE_CONFIG_DIR).toBe(VIEWER_CREDENTIAL.homeDir);
       expect(env.ANTHROPIC_API_KEY).toBe(VIEWER_CREDENTIAL.secrets[0]);
     } finally {

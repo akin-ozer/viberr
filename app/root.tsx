@@ -26,6 +26,7 @@ import {
 
 import type { Route } from "./+types/root";
 import { RoutePendingBar } from "./features/shell/route-pending-bar";
+import { ControllerDock } from "./features/controller/controller-dock";
 import { ToastProvider } from "./ui/toast";
 import { getCsrfToken } from "./server/auth/csrf.server";
 import { requestContextMiddleware } from "./server/logging/request-context.server";
@@ -172,6 +173,10 @@ export default function App() {
           Outlet so it survives every route change. */}
       <RoutePendingBar />
       <Outlet />
+      {/* Ruling 121: the controller dock, one mount for every signed-in
+          surface. A csrf token in the root payload is the signed-in signal;
+          the dock hides itself on the login and controller pages. */}
+      {rootData?.csrf ? <ControllerDock /> : null}
     </ToastProvider>
   );
 }

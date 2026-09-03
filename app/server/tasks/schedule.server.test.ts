@@ -169,7 +169,7 @@ beforeEach(async () => {
   // Project the project so getProject() has its stages (terminal-stage checks).
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   installFakeRuntime();
-  // Ruling 121: an agent run bills the TASK OWNER's own accounts, so a run
+  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
   // only reaches an adapter when the owner has that backend connected. Arda
   // owns the tasks in this file; connecting both backends for him is the
   // ordinary state of somebody using the product.

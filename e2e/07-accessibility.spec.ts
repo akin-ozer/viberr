@@ -128,6 +128,26 @@ const DIALOGS: {
       await page.getByRole("button", { name: "New profile" }).click();
     },
   },
+  {
+    // Ruling 121 (review G2). The dock is the app's newest role="dialog" — a
+    // composer, a threads list, four icon buttons, a scope pill, a status row
+    // and 110 lines of new CSS — and only its CLOSED trigger rode along on the
+    // page sweep above. It is NON-modal, so it is queried by its screen label
+    // rather than a <dialog> element.
+    name: "controller dock",
+    path: "/projects/viberr-core/board",
+    ready: "section.column",
+    dialog: '[data-screen-label="Controller dock"]',
+    async open(page) {
+      const trigger = page.getByRole("button", { name: /^Controller · / });
+      await expect(async () => {
+        if ((await trigger.getAttribute("aria-expanded")) !== "true") await trigger.click();
+        await expect(page.locator('[data-screen-label="Controller dock"]')).toBeVisible({
+          timeout: 1000,
+        });
+      }).toPass({ timeout: 15_000 });
+    },
+  },
 ];
 
 /** axe samples computed colours, so never audit a mid-animation frame. */

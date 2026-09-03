@@ -19,9 +19,9 @@ process.env.VIBERR_SECRET_ENCRYPTION_KEY ??=
   Buffer.alloc(32, 7).toString("base64");
 
 /**
- * Fail closed against ambient real-backend credentials (F10-10, ruling 121).
+ * Fail closed against ambient real-backend credentials (F10-10, ruling 127).
  *
- * Since ruling 121 no deployment-wide credential is DECLARED any more — a run's
+ * Since ruling 127 no deployment-wide credential is DECLARED any more — a run's
  * env is built from the credential of the ONE person it bills. But the spawn
  * env still starts from `process.env` (`filteredSpawnEnv`), and a developer's
  * `.env` or a CI host may carry a real provider key under one of these names.

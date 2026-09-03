@@ -28,7 +28,7 @@ import type {
  *      to the latest model of that tier the account can use (claude), or a
  *      small hand-maintained model list (codex, which has NO list endpoint).
  *   2. ENHANCED (claude only) — when the CALLER supplies a Claude
- *      `RunCredential` (ruling 121: the VIEWER's own, resolved by the route
+ *      `RunCredential` (ruling 127: the VIEWER's own, resolved by the route
  *      with `requireUser`), a lightweight `query()` + `.supportedModels()`
  *      returns the LIVE list for THAT account/subscription, mapped to the same
  *      shape, cached in-process with a short TTL. With no credential the
@@ -338,7 +338,7 @@ export interface SdkModelInfo {
 interface CatalogDeps {
   /** Injected Claude SDK `query` (tests). Default: the real SDK, lazily loaded. */
   claudeQueryFn?: ClaudeQueryFn;
-  /** Ruling 121: the VIEWER's Claude credential, resolved by the caller
+  /** Ruling 127: the VIEWER's Claude credential, resolved by the caller
    *  (`runCredentialFor` after `requireUser`). Absent — the viewer has not
    *  connected Claude — means the curated list IS the answer; there is no
    *  instance account left to enumerate against. */
@@ -380,7 +380,7 @@ const LIVE_TIMEOUT_MS = 15_000;
 interface CacheEntry {
   at: number;
   catalog: ModelCatalog;
-  /** Ruling 121: WHOSE account produced this list. A live catalog is what one
+  /** Ruling 127: WHOSE account produced this list. A live catalog is what one
    *  person's Claude subscription offers, so serving it to a second viewer
    *  would show them models their own account may refuse. The home dir is the
    *  per-person identity `runCredentialFor` already hands us; a hit for a
@@ -416,7 +416,7 @@ export function resetModelCatalogCache(): void {
 
 /**
  * The model ids the LIVE catalog last offered for a backend (P13-RT-07).
- * Deliberately ignores the TTL — and, since ruling 121, whose account produced
+ * Deliberately ignores the TTL — and, since ruling 127, whose account produced
  * the entry: the TTL governs when to REFETCH, and the owner governs what to
  * SHOW; neither governs whether a value the picker already offered (and a
  * profile already stored) is a real model id. On a cold process the cache is
@@ -475,7 +475,7 @@ async function realQueryFn(): Promise<ClaudeQueryFn> {
  * is allowed to use, and the host-isolation trio the adapter sets
  * (`settingSources`/`skills`/`plugins`).
  *
- * Ruling 121: that credential is the VIEWER's — their home and, if they pasted
+ * Ruling 127: that credential is the VIEWER's — their home and, if they pasted
  * one, their key, exactly as `runCredentialFor` assembles it for a run. The
  * probe spends nothing (listing models is free), but it does read a personal
  * account, so it reads the account of the person who asked.
@@ -571,7 +571,7 @@ export async function getModelCatalog(
   if (!credential) return stamp(curatedCatalog("claude"));
 
   // Serve a fresh cached live result — but only the one this viewer's own
-  // account produced (ruling 121).
+  // account produced (ruling 127).
   const cache = getCache();
   const hit = cache.get("claude");
   if (

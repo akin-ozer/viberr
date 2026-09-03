@@ -227,7 +227,7 @@ describe("edit / role / reset / remove", () => {
   });
 
   /**
-   * Ruling 121: the credential ROWS cascade with the account, but the vendor's
+   * Ruling 127: the credential ROWS cascade with the account, but the vendor's
    * own sign-in file lives on the filesystem, where no foreign key reaches. Left
    * behind it is a live Claude.ai / ChatGPT credential on this server that no
    * row accounts for, that the person can never again reach `disconnectBackend`

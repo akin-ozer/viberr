@@ -6,7 +6,7 @@ import type { BackendBinaries } from "~/server/runtimes/backend-credentials.serv
 
 /**
  * Executable stand-ins for the vendors' own `claude` and `codex` binaries
- * (ruling 121, spec §3.4).
+ * (ruling 127, spec §3.4).
  *
  * The sign-in driver's whole job is to drive a REAL child process: spawn it with
  * one home variable and no credentials, read what it prints, write a code to its

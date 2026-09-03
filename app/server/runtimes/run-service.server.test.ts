@@ -70,7 +70,7 @@ beforeEach(async () => {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
   installFakeRuntime();
-  // Ruling 121: a run bills a PERSON, so "this backend can run" is a fact about
+  // Ruling 127: a run bills a PERSON, so "this backend can run" is a fact about
   // the principal. Arda owns VIB-1 in this file and is every run's principal
   // unless a test says otherwise; connecting both backends for him is the
   // ordinary state of somebody using the product.
@@ -102,7 +102,7 @@ type TestRunInput = Omit<
   "agentProfileId" | "credentialUserId"
 > & {
   agentProfileId?: string;
-  /** Ruling 121: defaults to arda, VIB-1's owner. Pass `null` for the refused
+  /** Ruling 127: defaults to arda, VIB-1's owner. Pass `null` for the refused
    *  run these tests exercise separately. */
   credentialUserId?: string | null;
 };
@@ -383,7 +383,7 @@ describe("run-service lifecycle", () => {
   });
 });
 
-describe("a run with no credential principal (ruling 121)", () => {
+describe("a run with no credential principal (ruling 127)", () => {
   /** The owner has not connected the backend — the ordinary refusal. */
   async function startWithoutCredential() {
     await disconnectFakeBackend(store.db, store.users.arda.id, "claude");
@@ -470,7 +470,7 @@ describe("a run with no credential principal (ruling 121)", () => {
   });
 
   it("hands the principal's credential to the adapter and redacts it from the log", async () => {
-    // The two halves of ruling 121's spawn hygiene, on one run: the child env
+    // The two halves of ruling 127's spawn hygiene, on one run: the child env
     // carries this person's key, and the sink scrubs that same value out of
     // every persisted line — the run console is visible to every project
     // member, and the key is not theirs.
@@ -944,7 +944,7 @@ describe("D4 — allowedTools reaches the run and survives a resume", () => {
 
 describe("resumeRun — continuity recovery", () => {
   /**
-   * Ruling 121: the transcript store is the PRINCIPAL's own runtime home, not a
+   * Ruling 127: the transcript store is the PRINCIPAL's own runtime home, not a
    * deployment-wide `CLAUDE_CONFIG_DIR` — so the probe reads
    * `<dataRoot>/runtimes/users/<owner>/claude-home/projects`. The consequence
    * the ruling makes explicit is exercised at the bottom of this block: an
@@ -1106,7 +1106,7 @@ describe("resumeRun — continuity recovery", () => {
   });
 
   /**
-   * Ruling 121, stated as behaviour: a resumed turn bills the task owner AS OF
+   * Ruling 127, stated as behaviour: a resumed turn bills the task owner AS OF
    * NOW, and the continuity probe reads THAT person's home. So a seat that
    * changed hands between the original run and the reply cannot resume the
    * previous owner's conversation inside the new owner's account — the
@@ -1145,7 +1145,7 @@ describe("resumeRun — continuity recovery", () => {
    * — whose contract is "resume as before". The previous owner's session id
    * then went to the SDK inside the new owner's home and failed at the vendor
    * ("No conversation found with session ID …"), producing a blocked packet
-   * instead of the one fresh re-anchored run ruling 121 promises.
+   * instead of the one fresh re-anchored run ruling 127 promises.
    */
   it("re-anchors for a new principal who has never had a run here", async () => {
     const { specs, resume } = await startThenResume();
@@ -1238,7 +1238,7 @@ describe("getRunLog paging", () => {
   });
 });
 
-describe("backendUnavailableMessage (ruling 121)", () => {
+describe("backendUnavailableMessage (ruling 127)", () => {
   it("renders the resolver's own refusal sentence for a refusal", () => {
     // ONE builder for the error-run line, the packet body and the disabled
     // control, so a person cannot be told three stories about one refusal.

@@ -2,10 +2,11 @@
 
 > Every URL the app serves, who may reach it, what it renders and which form intents
 > it accepts. Source of truth: `app/routes.ts`, `app/routes/*`, `app/features/shell/*`.
-> Verified against `main` @ `68b5480` (2026-09-01). The behaviour behind each intent is
-> in the domain docs linked per row.
+> Verified against `main` @ `68b5480` (2026-09-01); the ruling-121 rows and the shell
+> note re-verified against the working tree on 2026-09-03, after the ruling's adversarial
+> review. The behaviour behind each intent is in the domain docs linked per row.
 >
-> Updated 2026-09-02 for ruling 121 (branch `claude/per-user-codex-auth-difdnn`):
+> Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`):
 > `/profile` gained the **Agent accounts** panel and its five intents, and
 > `/resources/backend-login` is a new fetcher target that answers the CALLER's own
 > hosted sign-in session. Agent backends are connected per person there, never per
@@ -29,7 +30,7 @@ POST.
 | `/projects/:slug` | `project.tsx` + `project._index.tsx` | user → member (404 parity) | workspace shell (rail, topbar, palette, live updates); index redirects to the board | |
 | `/projects/:slug/board` | `project.board.tsx` | member, form | board by stage, filters in the URL (`filter`, `view`, `q`), drag-and-drop, accept-from-board confirm | `create-task`, `reorder`, `rescan` (admin/maintainer) |
 | `/projects/:slug/review` | `project.review.tsx` | member | review queue split into "Waiting on your acceptance" and "Still in review" | |
-| `/projects/:slug/controller` | `project.controller.tsx` | member, form | the instance controller addressed inside this project; goal chain controls | `send`, `goal-op` (`pause`, `resume`, `cancel`, `skip_link`, `retry_link`) |
+| `/projects/:slug/controller` | `project.controller.tsx` | member (CSRF checked as a result, not a throw) | the instance controller addressed inside this project; goal chain controls | `send`, `goal-op` (`pause`, `resume`, `cancel`, `skip_link`, `retry_link`) |
 | `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail, capability matrix modal | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile` |
 | `/projects/:slug/policy` | `project.policy.tsx` | member, form | role matrix (rendered from `rbac.ts`), member roles, transition boundaries, guardrails (ruling 112) | `set-role`, `set-boundary`, `set-guardrail` |
 | `/projects/:slug/github` | `project.github.tsx` | member, form | credential card, repo state, branched tasks, scope violations, update status | `set-credential`, `clear-credential`, `grant-scope`, `reconcile` |
@@ -39,9 +40,9 @@ POST.
 | `/projects/:slug/tasks/:key/attachments/:file` | `task-attachment.ts` | member | raw bytes, whitelist renders inline, `?download=1` forces the save dialog (ruling 105) | |
 | `/org/settings` | `org.settings.tsx` | org admin | tabs: Users & access, GitHub connections, Sign-in & SSO, Agent resources, Controller settings; audit export card; concurrency | see §3 |
 | `/org/settings/audit-export` | `org.settings.audit-export.ts` | org admin | CSV/JSON download, 100 000-row cap | |
-| `/controller` | `controller.tsx` | user, form | instance controller conversation (per user) | `send` |
+| `/controller` | `controller.tsx` | user (CSRF checked as a result, not a throw) | instance controller conversation (per user) | `send` |
 | `/insights` | `insights.tsx` | org admin | run analytics: counts, cost, tokens, outcomes, backend quota readings | |
-| `/profile` | `profile.tsx` | user | identity, password, **Agent accounts** (ruling 121: connect Claude and Codex for yourself), GitHub identity disconnect, theme, motion, notification and timeline prefs | `identity`, `change-password`, `github-disconnect`, `set-motion`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
+| `/profile` | `profile.tsx` | user | identity, password, **Agent accounts** (ruling 127: connect Claude and Codex for yourself), GitHub identity disconnect, theme, motion, notification and timeline prefs | `identity`, `change-password`, `github-disconnect`, `set-motion`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
 | `/notifications` | `notifications.tsx` | user | newest 200, auto-read on viewing the target | |
 | `/notifications/read` | `notifications.read.tsx` | user | fetcher target | `read-all` |
 | `/prefs/theme` | `prefs.theme.tsx` | user | theme cookie + user row | |
@@ -50,6 +51,7 @@ POST.
 | `/resources/health` | `resources.health.ts` | public | liveness; `?probe=readiness` → 503 when degraded | |
 | `/resources/search` | `resources.search.ts` | user | ⌘K palette query over visible projects | |
 | `/resources/model-catalog` | `resources.model-catalog.ts` | user | models and efforts per backend (Claude enhanced with the VIEWER's own account) | |
+| `/resources/controller` | `resources.controller.ts` | user; a project or task scope the viewer cannot reach answers an empty `unavailable` view (GET) or `{ ok:false }` (POST), never a thrown response — it feeds a root-owned fetcher | the controller dock's view for the scope the person is standing in (ruling 121) | `send` (`text`, `conversationId`, `project`, `task`, `surface`) |
 | `/resources/backend-login` | `resources.backend-login.ts` | user | `?backend=claude\|codex` → the CALLER's own hosted sign-in session (`{ login, health }`), polled every 2 s by Profile → Agent accounts; an unknown backend is a 400 `{ error: { code: "validation_failed", message } }`, and it reads nobody else's session | |
 | `/resources/session-export` | `resources.session-export.ts` | member / conversation owner | resume-script download | |
 
@@ -85,6 +87,14 @@ Intents behind `project.task.tsx` are explained in
 - **Live updates** are mounted by the workspace layout, Home, Notifications and the
   controller page; every governed change arrives by loader revalidation. The rail
   shows "live updates paused" while the stream reconnects.
+- **The controller dock** (ruling 121) is mounted once by `root.tsx` on every signed-in
+  surface except the two controller pages, `/login`, and `/profile` and `/notifications`
+  (both render their whole page inside a `showModal()` overlay, which would leave the
+  dock inert behind it): a floating bottom-right button named `Controller · <scope>`
+  opening a non-modal panel bound to the current instance, board or task (a bottom sheet
+  at ≤ 720 px). Its composer is disabled, with the same sentence the full page uses,
+  when the VIEWER has not connected Claude (ruling 127). Details in
+  [../domain/controller-and-goals.md §2.1](../domain/controller-and-goals.md#21-the-dock-ruling-121).
 - **Theme**: light / dark / system, per user plus the `viberr_theme` cookie for
   first paint. Motion preference is a user pref.
 - **Responsive**: same surface, reflowed; the rail collapses at ≤ 720 px, the topbar
@@ -127,8 +137,20 @@ modal`, `Board`, `Empty state`, `Review queue`, `Controller`, `Agents`, `Policy`
 discard dialog`, `Packet collision dialog`, `Attachment lightbox`, `Command palette`,
 `Notifications`, `Notifications popover`, `Profile & preferences`, `Instance settings`,
 `Settings · Users & access`, `Settings · GitHub connections`, `Settings · Sign-in &
-SSO`, `Settings · Agent resources`, `Controller settings`. The task page's own label
-comes from the shell model.
+SSO`, `Settings · Agent resources`, `Controller settings`, `Controller dock` (the
+panel, ruling 121), `Insights`, `Capability matrix modal`, `Agent profile modal`, and
+the six confirms the shared `ConfirmDialog` now names: `Resource removal dialog`,
+`Stage removal dialog`, `Member removal dialog`, `Schedule cancel dialog`,
+`Interrupt run dialog`, `Dismiss recommendation dialog`. The task page's own label comes
+from the shell model. Three labels are composed at render time rather than listed here:
+`Files · <resource>` (the store browser), `Project card · <name>` / `Project row · <name>`
+(home) and `<page> · overlay` (`PageOverlay`).
+
+*(Corrected 2026-09-03, pass 33 — D33-2/D33-3. This section stated the contract as
+universal while the shared `ConfirmDialog` backing seven confirms carried no label at all,
+`InsightsPage` was the one full-page surface without one, and two agent modals were
+unlabelled. `screenLabel` is now a REQUIRED prop on `ConfirmDialog`, so a new call site
+cannot rejoin the gap silently — the typecheck refuses it.)*
 
 ## 5. Copy rules that tests enforce
 
@@ -156,7 +178,7 @@ comes from the shell model.
   `{day} · {time}`, relative forms.
 - Settings headings name their scope: "Instance settings" versus "<project> · settings"
   (ruling 32).
-- **No surface gates AUTHORING on the viewer's own agent account** (ruling 121): a run
+- **No surface gates AUTHORING on the viewer's own agent account** (ruling 127): a run
   bills the task owner, so the agent profile editor's Execution backend chips are always
   live (a fresh instance where nobody has connected anything must still be able to create
   profiles) and an unconnected viewer gets a rendered note under the chips, never a
@@ -165,7 +187,7 @@ comes from the shell model.
   account … Connect <Backend> on your Profile → Agent accounts to run it on the tasks you
   own." The Agents roster states the rule plus a count ("Runs use the task owner's Codex
   account · 3 of 7 members connected"); the loader ships that one `backendHealth` probe
-  and no second availability pair. *(Added 2026-09-02 for ruling 121 — the editor
+  and no second availability pair. *(Added 2026-09-02 for ruling 127 — the editor
   initially inherited the pre-ruling "disable an unconfigured backend" rule, which now
   reads as the author's own credential and blocked profile creation outright.)*
 - A "Retry on <other backend>" offer is rendered only where the retry could actually run,

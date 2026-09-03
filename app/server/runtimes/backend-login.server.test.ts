@@ -36,7 +36,7 @@ import { CREDENTIAL_ENV_RE } from "./runtime-registry.server";
 import { userBackendHome } from "./user-homes.server";
 
 /**
- * The hosted sign-in driver (ruling 121, spec §3.4), driven against REAL child
+ * The hosted sign-in driver (ruling 127, spec §3.4), driven against REAL child
  * processes.
  *
  * Every test here spawns an actual executable (`test-support/fake-vendor-binary`

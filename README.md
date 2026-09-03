@@ -28,7 +28,7 @@ audit, notifications, run history — never canonical business truth.
 Stack: React Router 8 (framework mode, SSR) · Node >= 26 · TypeScript 7 · `node:sqlite` (WAL)
 · Zod v4 · SSE for live updates (no websockets) · the ported `viberr.css` design system
 (no Tailwind). Agent runtimes: Claude Agent SDK + Codex SDK. Each person connects their
-own Claude and Codex accounts on Profile → Agent accounts (ruling 121), and every run
+own Claude and Codex accounts on Profile → Agent accounts (ruling 127), and every run
 bills exactly one person: the task owner on a task, the asker on a controller
 conversation. A backend nobody connected simply has no runs; a run whose principal has
 not connected it fails fast with an honest error and starts no process.
@@ -111,7 +111,7 @@ Details for each: [`docs/development/scripts.md`](docs/development/scripts.md).
 
 ## Enabling real agent backends
 
-There is nothing to put in `.env` (ruling 121). **Every person connects Claude and Codex
+There is nothing to put in `.env` (ruling 127). **Every person connects Claude and Codex
 for themselves**, in the app, on **Profile → Agent accounts**. Every agent run then bills
 exactly one person: a run on a task uses the **task owner's** accounts, and a controller
 conversation uses the **asker's** Claude account. A task with no owner cannot run agents;

@@ -206,7 +206,7 @@ describe("Codex structured operator completion", () => {
       codex: adapter,
     };
     configureRunServiceForTests(adapters);
-    // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+    // Ruling 127: an operator drive bills the TASK OWNER, so the owner has to
     // have this backend connected or the drive is refused before it starts.
     await connectFakeBackend(store.db, store.users.arda.id, "codex");
   });
@@ -1314,7 +1314,7 @@ describe("stranded auto-stage resume", () => {
       resetOperatorLeasesForTests();
       adapter2 = new ControlledAdapter();
       configureRunServiceForTests({ claude: adapter2, codex: adapter2 });
-      // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+      // Ruling 127: an operator drive bills the TASK OWNER, so the owner has to
       // have this backend connected or the drive is refused before it starts.
       await connectFakeBackend(store2.db, store2.users.arda.id, "codex");
     });
@@ -1926,7 +1926,7 @@ describe("pending trigger queue", () => {
     resetOperatorLeasesForTests();
     adapter3 = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter3, codex: adapter3 });
-    // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+    // Ruling 127: an operator drive bills the TASK OWNER, so the owner has to
     // have this backend connected or the drive is refused before it starts.
     await connectFakeBackend(store3.db, store3.users.arda.id, "codex");
   });
@@ -2192,7 +2192,7 @@ describe("stranded codex plan recovery", () => {
     resetOperatorLeasesForTests();
     adapter4 = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter4, codex: adapter4 });
-    // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+    // Ruling 127: an operator drive bills the TASK OWNER, so the owner has to
     // have this backend connected or the drive is refused before it starts.
     await connectFakeBackend(store4.db, store4.users.arda.id, "codex");
   });
@@ -2345,7 +2345,7 @@ describe("runOperator — authority, ordering, orphans", () => {
     resetOperatorLeasesForTests();
     adapter5 = new ProbeAdapter();
     configureRunServiceForTests({ claude: adapter5, codex: adapter5 });
-    // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+    // Ruling 127: an operator drive bills the TASK OWNER, so the owner has to
     // have the backend connected or the drive is refused before it starts.
     await connectFakeBackends(store5.db, store5.users.arda.id);
   });
@@ -2391,7 +2391,7 @@ describe("runOperator — authority, ordering, orphans", () => {
   });
 
   /**
-   * Ruling 121 — an operator drive bills the TASK OWNER's own accounts, so a
+   * Ruling 127 — an operator drive bills the TASK OWNER's own accounts, so a
    * task with no owner (or an owner who has not connected the backend) cannot
    * coordinate at all. The refusal is recorded as the drive's whole outcome:
    * a run row in `error` carrying the one refusal sentence, no clone, no
@@ -2790,7 +2790,7 @@ describe("stranded-resume shares the transition chain cap (B4)", () => {
     resetOperatorLeasesForTests();
     adapter6 = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter6, codex: adapter6 });
-    // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+    // Ruling 127: an operator drive bills the TASK OWNER, so the owner has to
     // have this backend connected or the drive is refused before it starts.
     await connectFakeBackend(store6.db, store6.users.arda.id, "codex");
   });
@@ -3001,7 +3001,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
     resetOperatorLeasesForTests();
     adapter7 = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter7, codex: adapter7 });
-    // Ruling 121: an operator drive bills the TASK OWNER, so the owner has to
+    // Ruling 127: an operator drive bills the TASK OWNER, so the owner has to
     // have the backend connected or the drive is refused before it starts.
     await connectFakeBackends(store7.db, store7.users.arda.id);
   });

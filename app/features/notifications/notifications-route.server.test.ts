@@ -24,7 +24,7 @@ beforeAll(async () => {
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
-  // Ruling 121: resolving VIB-142's packet re-queues its operator, and that
+  // Ruling 127: resolving VIB-142's packet re-queues its operator, and that
   // drive bills the TASK OWNER (arda). With the backend unconnected the drive
   // is refused and escalates a NEW blocked packet onto the very task this file
   // just resolved one on — which is a true behaviour, but not the one under

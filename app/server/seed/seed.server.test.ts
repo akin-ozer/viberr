@@ -216,7 +216,7 @@ describe("runSeed (clean-sheet product seed)", () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
     await runSeed(db, { dataRoot });
-    // Ruling 121: the sign-ins live in each PERSON's own runtime home. A reset
+    // Ruling 127: the sign-ins live in each PERSON's own runtime home. A reset
     // that took those with it would sign everybody out of their own Claude and
     // Codex accounts — the P11-04 defect, one directory level deeper.
     const codexAuth = join(dataRoot, "runtimes", "users", "u_arda", "codex-home", "auth.json");

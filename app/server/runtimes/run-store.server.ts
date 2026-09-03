@@ -56,7 +56,7 @@ export type AgentRunRow = {
    *  without the guaranteed operator re-invoke. Null on every other run. */
   dispatched_by_name: string | null;
   dispatched_by_user_id: string | null;
-  /** Ruling 121: the credential principal — the person whose connected backend
+  /** Ruling 127: the credential principal — the person whose connected backend
    *  account this run bills, and whose runtime home holds its transcript. Task
    *  runs carry the task owner, controller turns the asker. Null only on a run
    *  refused before any credential was looked up (an unowned task). */
@@ -90,7 +90,7 @@ export interface InsertRunInput {
   outputTokens?: number;
   totalCostUsd?: number | null;
   interruptedBy?: string | null;
-  /** Ruling 121: the credential principal (see `AgentRunRow.credential_user_id`).
+  /** Ruling 127: the credential principal (see `AgentRunRow.credential_user_id`).
    *  Optional at THIS layer — the store is a plain writer, also driven by
    *  fixtures that build a row directly, and an omitted principal stores NULL.
    *  The rule "a run that spawned a process has a principal" is enforced one
@@ -182,7 +182,7 @@ export interface RunPatch {
   /** See `AgentRunRow.dispatched_by_name` (pass 32, C02-R11). */
   dispatchedByName?: string | null;
   dispatchedByUserId?: string | null;
-  /** Ruling 121: the credential principal, patchable like `backend` is — the
+  /** Ruling 127: the credential principal, patchable like `backend` is — the
    *  start path stamps it onto the row a reservation already inserted, without
    *  re-writing every other column of a run that is already live. */
   credentialUserId?: string | null;

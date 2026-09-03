@@ -67,7 +67,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!project) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
-  // Ruling 121: "is this backend configured?" has no instance-level answer any
+  // Ruling 127: "is this backend configured?" has no instance-level answer any
   // more — a run bills a PERSON. So the page gets two person-shaped facts per
   // backend, from the one store every surface reads
   // (`backend-credentials.server`): whether the VIEWER connected it (they are
@@ -115,7 +115,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // unconditionally — a toggle for it would be one an admin could flip with no
     // effect. No profile grants it either, as of B7 (pass 16).
     resourceCatalog: buildResourceCatalog(db),
-    // Ruling 121: ONE backend answer for this page. The roster line reads the
+    // Ruling 127: ONE backend answer for this page. The roster line reads the
     // count, and the create/edit modal reads `viewerConnected` for its advisory
     // note. It is deliberately not a second `backendAvailable` pair: authoring a
     // profile is not running one (a run bills the TASK OWNER), so nothing on

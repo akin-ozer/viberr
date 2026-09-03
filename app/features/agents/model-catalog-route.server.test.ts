@@ -11,7 +11,7 @@ import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
  * returns the curated catalog shape per backend, and defaults an unknown
  * backend to claude so the modal always renders.
  *
- * Ruling 121 gave this route BOTH arms to answer, and which one it takes is a
+ * Ruling 127 gave this route BOTH arms to answer, and which one it takes is a
  * fact about the person asking: Claude's live `supportedModels()` list is what
  * ONE account offers, so the route resolves the VIEWER's own credential
  * (`runCredentialFor`) and hands it to the catalog. A viewer who has not
@@ -32,7 +32,7 @@ beforeAll(async () => {
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
-  // Ruling 121: the enhanced probe needs the VIEWER's own Claude credential,
+  // Ruling 127: the enhanced probe needs the VIEWER's own Claude credential,
   // and the demo seed connects nobody — so the route takes the curated path by
   // construction and never spawns a live supportedModels() query. That is the
   // product's real behaviour for a person who has not connected Claude, not a
@@ -109,7 +109,7 @@ describe("resources/model-catalog", () => {
   });
 
   /**
-   * Ruling 121, the OTHER arm: a viewer who HAS connected Claude gets the list
+   * Ruling 127, the OTHER arm: a viewer who HAS connected Claude gets the list
    * their own account offers.
    *
    * Nothing here spawns a binary or opens a socket. The catalog caches a live

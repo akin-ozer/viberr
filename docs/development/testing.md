@@ -5,7 +5,7 @@
 > `scripts/e2e.ts`, `compose.e2e.yml`, `.github/workflows/ci.yml`, `test-support/*`.
 > Verified against `main` @ `68b5480` (2026-09-01); §2 and §4 re-verified 2026-09-02
 > against `pass32/implementation` @ `478bed0`. Requires Node 26+ and `npm ci`.
-> Updated 2026-09-02 for ruling 121 (branch `claude/per-user-codex-auth-difdnn`): the
+> Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): the
 > `setup-env.ts` list, the `backend-credentials` harness and the fake-binary sign-in
 > harness.
 
@@ -41,7 +41,7 @@ on failure. No secrets are needed: the unit setup file seeds synthetic ones and
   risk it guards against is a paid provider call from `npm test`. Then
   `GIT_ALLOW_PROTOCOL=file` so nothing can clone over the network. It does **not** set
   `VIBERR_DATA_ROOT`; every harness below uses its own `mkdtemp` root, so `VIBERR_DATA_ROOT=$(mktemp -d) npm test` is unnecessary unless you write a harness-less test that calls `getEnv()`.
-  *(Corrected 2026-09-02, ruling 121 — the file used to blank `VIBERR_CLAUDE_USE_CLI_AUTH`
+  *(Corrected 2026-09-02, ruling 127 — the file used to blank `VIBERR_CLAUDE_USE_CLI_AUTH`
   / `VIBERR_CODEX_USE_CLI_AUTH` and point `CLAUDE_CONFIG_DIR` / `CODEX_HOME` at empty temp
   dirs. Those variables no longer exist: a run reads its home from the credential
   principal's `runtimes/users/<id>/…`, which every harness roots in its own temp data root,
@@ -69,7 +69,7 @@ on failure. No secrets are needed: the unit setup file seeds synthetic ones and
 | `fake-runtime.ts` | `installFakeRuntime()`, `queueFakeRun({ lines, backend, outcome, keepRunning, sessionId })`, `startedRunSpecs()`, `lastRunSpec()` |
 | `fake-github.ts` | `fakeGithubFetch({ "GET /user": spec \| fn })` → `{ fetchImpl, calls, callsTo }`; unmatched → 404; `unreachableFetch()` |
 | `demo-seed.ts`, `demo-data.ts`, `custom-board.ts` | the demo fixture (arda & co, three projects, twelve tasks) and its 3-stage custom board |
-| `backend-credentials.ts` | `connectFakeBackend(db, userId, backend)`, `connectFakeBackends(db, userId)`, `disconnectFakeBackend(db, userId, backend)`, `fakeBackendSecret(backend)` — the ruling-121 replacement for `setBackendAvailability` |
+| `backend-credentials.ts` | `connectFakeBackend(db, userId, backend)`, `connectFakeBackends(db, userId)`, `disconnectFakeBackend(db, userId, backend)`, `fakeBackendSecret(backend)` — the ruling-127 replacement for `setBackendAvailability` |
 | `fake-vendor-binary.ts` | `writeFakeVendorBinaries()` → executable `claude` / `codex` stand-ins (mode 0o755) for `deps.binaries`, with `cleanup()`; `setFakeVendorMode("success" \| "fail" \| "hang")`, `setFakeVendorLoggedOut()`, `setFakeVendorLogoutExit()`, `resetFakeVendorEnv()`; the evidence readers `fakeVendorEnv/Argv/Stdin/Terminated/Logout(home)`; `FAKE_DEVICE_CODE`, `FAKE_CLAUDE_URL`, `FAKE_CODEX_URL` |
 | `audit-log.ts` | `listAuditEvents(db, { limit, action })` |
 
@@ -124,7 +124,7 @@ ctx.cleanup();
   (`meaningful-comment`, `evidence-separation`, `no-duplicate-summary`,
   `compression-threshold`) are enforced per project through `project.md` `guardrails`,
   edited on the Policy page's Guardrails card (ruling 112).
-- **A run needs a connected principal, not a flipped switch (ruling 121).** A test that
+- **A run needs a connected principal, not a flipped switch (ruling 127).** A test that
   wants a real-looking run connects the backend for the person who will pay for it, with
   `connectFakeBackend`. A test that wants the refusal asserts the sentence
   `principalRefusalMessage` produces, for one of three shapes: an unowned task, a disabled

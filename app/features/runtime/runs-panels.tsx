@@ -296,7 +296,7 @@ function SessionIdChip({
     }
   };
   // The id identifies the provider session (claude session_id / codex thread),
-  // stored inside the app's runtime — since ruling 121 in the runtime home of
+  // stored inside the app's runtime — since ruling 127 in the runtime home of
   // the person the run billed (`runtimes/users/<id>/{claude,codex}-home` on the
   // data volume). It IS resumable on your own machine with
   // your own subscription — use Export to download an installer that places the
@@ -438,7 +438,7 @@ export function AgentLogsPanel({
    *  failed run so the caller can dispatch it (run-agent + the run's own
    *  profileId + the backend override). */
   onRetryBackend?: (backend: "claude" | "codex", run: RunView) => void;
-  /** Ruling 121: which backends a retry on this task could actually RUN on —
+  /** Ruling 127: which backends a retry on this task could actually RUN on —
    *  the task owner's connected accounts, because every run bills them. A
    *  backend absent from this list gets no button and no "a maintainer can
    *  retry it" advice: dispatching it would produce a second, identically
@@ -560,7 +560,7 @@ export function AgentLogsPanel({
     (cur!.kind === "primary" || cur!.kind === "reviewer") &&
     cur!.state === "error" &&
     !!cur!.failedBackendUnavailable;
-  // Ruling 121: the retry OFFER needs somebody to bill, which is a different
+  // Ruling 127: the retry OFFER needs somebody to bill, which is a different
   // question from why this run failed. The projection withholds `altBackend`
   // when the run had no principal at all (an unowned task), and `retryBackends`
   // is the task owner's live connection set — the same question the blocked
@@ -573,7 +573,7 @@ export function AgentLogsPanel({
     (retryBackends?.includes(altBackend) ?? false);
   const canRetryBackend = retryPossible && !!onRetryBackend;
   const altLabel = altBackend === "codex" ? "Codex" : "Claude";
-  // Ruling 121: the offer, and when there is none, WHY there is none. A run
+  // Ruling 127: the offer, and when there is none, WHY there is none. A run
   // that failed on quota with an owner who never connected the other backend
   // gets no button on any surface (the blocked packet withholds
   // `retry_other_backend` for the same reason), so the console names the
@@ -603,7 +603,7 @@ export function AgentLogsPanel({
               "; thread can be re-engaged"
             : cur!.state === "error"
               ? backendUnavailable
-                ? // Ruling 121: the same `run·unavailable` classification now
+                ? // Ruling 127: the same `run·unavailable` classification now
                   // also covers "the account this run bills has not connected
                   // the backend", so the footer states the CLASS and lets the
                   // run's own error line (which names the person and the

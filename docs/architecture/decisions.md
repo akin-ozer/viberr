@@ -9,7 +9,7 @@ against the tree for several passes and is stale in places; the code-verified re
 [`../validation/2026-09-01-doc-validation.md`](../validation/2026-09-01-doc-validation.md).
 Where `architecture.md` and the code disagree, the code wins.)*
 
-*Updated 2026-09-02 for ruling 121 (branch `claude/per-user-codex-auth-difdnn`): ruling 121 is
+*Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): ruling 127 is
 recorded below, the route map gains `/resources/backend-login`, and rulings 49, 84 and 107 carry
 dated correction notes where their text described the deployment-wide backend credentials or the
 shared runtime homes as current.*
@@ -524,7 +524,7 @@ inventory is not regenerated automatically and has drifted; the verified module 
     (`stripUngovernedRepoCatalog` in `app/server/runtimes/skill-mount.server.ts` — moved there
     from `specialist-run.server.ts`, path corrected 2026-09-01;
     `app/server/runtimes/claude-runtime.server.ts`)
-    *(Corrected 2026-09-02, ruling 121 — the isolation stands but its owner changed. There is
+    *(Corrected 2026-09-02, ruling 127 — the isolation stands but its owner changed. There is
     no app-owned deployment-wide `CLAUDE_CONFIG_DIR` or `CODEX_HOME` any more: a run's child
     gets the CREDENTIAL PRINCIPAL's own home,
     `<dataRoot>/runtimes/users/<userId>/{claude-home,codex-home}`, from `runCredentialFor`
@@ -1101,7 +1101,7 @@ inventory is not regenerated automatically and has drifted; the verified module 
     `auth.json` into the container so the Codex parity legs could run — is deliberately NOT promoted:
     it is an operational step taken during the pass, not a rule that binds the product, and canon that
     absorbs run-log entries stops being readable as law.)*
-    *(Corrected 2026-09-02, ruling 121 — that R21-1 step is now HISTORY, not a fallback anybody
+    *(Corrected 2026-09-02, ruling 127 — that R21-1 step is now HISTORY, not a fallback anybody
     can repeat: there is no shared `runtimes/codex-home` to copy an `auth.json` into, no
     `/host-codex` mount and no entrypoint that seeds one. A person signs Codex in for themselves
     on Profile → Agent accounts and the vendor binary writes the credential into
@@ -1665,7 +1665,7 @@ the quieter packet or the bare owner cell as drift.)*
     explains an unusable credential by naming the config directory it looked in
     and what to set instead: that is deployment configuration, and this review
     found a member of no project reading a host path through an ungated tool),
-    *(Corrected 2026-09-02, ruling 121 — the org-admin credential-detail arm is
+    *(Corrected 2026-09-02, ruling 127 — the org-admin credential-detail arm is
     DELETED, not narrowed. `backendCredentialHealth` is gone with the
     instance-level credential it described, so there is no host path left for a
     tool to leak: `instance_health` now reports, per backend, `connectedUsers`
@@ -1867,6 +1867,14 @@ the quieter packet or the bare owner cell as drift.)*
     not log secrets**, the same rule the credential-less Codex MCP mount already applies
     to their argv. Recorded as a residual so it is not re-discovered as a defect.
 
+117. **The number 117 was never used (recorded 2026-09-03).** Pass 33's canon re-read found
+    this file running 1–116 and then resuming at 118, with no `ruling 117` cited anywhere in
+    the tree — no dangling code comment, and nothing lost. The pass-32 promotion simply
+    skipped a number. Ruling numbers are stable and never reused, so the hole is recorded
+    here rather than closed by renumbering 118–121, which code comments cite by number
+    (owner, 2026-09-03: "record the gap as intentional"). If you are looking for ruling 117,
+    stop: there is nothing to find.
+
 ## Owner decisions recorded outside this file (2026-08-20 → 2026-09-01)
 
 *(Added 2026-09-01 by the documentation validation pass. Each item below is an owner decision
@@ -1945,7 +1953,215 @@ ruling 44 says every one should be. Where recorded today is named per item.)*
     in the project editor; a template whose stored role repeats its name prefills empty
     with an inline hint, so the one-time cost is a typed role, never a mystery grey Save.
 
-121. **Agent backends authenticate per person, never per instance (owner, 2026-09-02).** The
+121. **The controller dock: the controller is available on every signed-in surface, with
+    the context of where the person is standing (owner, 2026-09-02).** Owner ask: "make
+    controller available as a helper hover icon across the app; controller gets context
+    wherever it is; on a board it does the work on that board; on a task it gathers the
+    task.md into context and does the work." Four owner answers (all the recommendations):
+    a floating bottom-right button opening a docked, NON-MODAL panel (not a topbar popover,
+    not a drawer); the panel reopens the newest thread of the current scope; the toolkit
+    gains `update_task`; every user message records the page it was sent from. The pieces:
+    **(a) Scope.** A conversation is bound, at creation and forever, to one of three places:
+    the instance (`project_slug` and `task_key` null), one board (slug alone) or one task
+    (slug + key; `CHECK (task_key IS NULL OR project_slug IS NOT NULL)`). The dock derives
+    the scope from the matched routes (`controller-dock-context.ts`): a task page anchors to
+    that task, any workspace view binds to that board, everything else is instance scope;
+    the two full controller pages and `/login` carry no dock. The dock lists ONE scope's
+    threads at a time (a board scope excludes its tasks' threads); the project Controller
+    page lists both with a task chip.
+    **(b) The context read.** "The controller gets context" is a SERVER read
+    (`controller-context.server.ts`), gathered at the start of every turn and labelled as a
+    read taken at that instant, placed above the transcript digest and the message: for a
+    task, a derived header (stage, next stages with their boundaries, owner, engaged agents,
+    PR, open packet) plus the canonical `task.md` VERBATIM, fenced, bounded by
+    `TASK_FILE_CONTEXT_CHARS` (24 000) — over budget the head stays whole and the NEWEST
+    timeline entries are kept with a marker naming the omitted count; for a board, stages
+    with counts, boundaries, members, the open-task table (40 rows / 12 000 chars) and the
+    goal chains; for the instance, the projects the person can see. The block never exceeds
+    `CONTEXT_BLOCK_CHARS` (32 000). It is a same-turn read, so the doctrine's rule holds by
+    construction; every action still runs through a tool, gated live. The doctrine and the
+    `controller-guide` skill say so, and were hash-upgraded in place (their outgoing hashes
+    are in `PRIOR_SHIPPED_HASHES`); the same rewrite removed the two recorded drifts (the
+    non-existent `list_projects`; "a comment mention can start a run").
+    **(c) Tool defaults and `update_task`.** On a task-anchored conversation every task
+    tool's `taskKey` defaults to the anchored task (`keyOf`, the `slugOf` twin); `whoami`
+    reports both bindings. `update_task` edits the goal (`updateTaskGoal`, gated
+    `update-goal`) and/or priority, labels, due date (`setTaskMetadata`, gated
+    `edit-task-meta`, full replace as the page editor submits) — the same two writers and
+    gates the task page uses, each reporting on its own so a metadata write is never hidden
+    behind a goal refusal. No title edit (no writer exists); the no-delete and always-human
+    invariants are untouched.
+    **(d) The surface.** `controller_messages.surface` records the pathname + query the
+    person was looking at when they sent a USER message (normalized: an in-app path only,
+    400 chars, no control characters); the turn prompt carries it as "They are looking at:
+    …" and the full page renders it as a "from Board" chip. Controller rows never carry one.
+    **(e) The dock itself** (`controller-dock.tsx`, mounted once in `root.tsx` when the root
+    payload carries a csrf token): a 44 px trigger named `Controller · <scope>` with the
+    `.live-dot` while a turn works; a `role="dialog" aria-modal="false"` panel
+    (`data-screen-label="Controller dock"`) that grows from its trigger
+    (`transform-origin: bottom right`, .18s in, .12s out, Escape instant, reduced motion
+    fades), no scrim, no focus trap, no scroll lock; the composer takes focus on open and
+    the trigger gets it back on close; an outside press does NOT close it; one context line
+    says what the controller knows here; Threads / New / Open page / Close in the header;
+    open state and the per-scope thread selection survive a reload (`sessionStorage`,
+    per tab). Data is a root-owned `fetcher.load` of `/resources/controller` (GET the
+    scope's view, POST `send`), which React Router re-runs on every revalidation, so every
+    surface streaming the `user` scope refreshes the dock for free; while open the dock
+    holds its own `user` stream for the surfaces without one and polls every 5 s while a
+    turn works. Under 720 px it is a bottom sheet entering and leaving along the bottom
+    edge; the trigger stays on screen (R19-12) above the sheet.
+    **(f) Authority.** Unchanged: the asking user's live permissions per tool call, the
+    same actor label, the same conversation ownership; the resource route applies the
+    members-only 404 (byte-identical to the layout's) and the task route's own 404, and a
+    thread from another scope is not found. CSRF failures on the dock AND on both full pages
+    now answer the toast-shaped `{ ok:false, error }` (UI-32) instead of a thrown 403 that
+    replaced the page with the root boundary.
+    (`app/server/controller/controller-context.server.ts`, `controller-conversations.server.ts`,
+    `controller-run.server.ts`, `controller-toolkit.server.ts`, `app/routes/resources.controller.ts`,
+    `app/features/controller/controller-dock*.ts(x)`, `controller-dock-query.server.ts`,
+    `app/root.tsx`, `db/migrations/0001_baseline.sql`; discovery ledger in
+    `planning/discovery-2026-09-02-controller-dock/`.)
+
+*(Corrected 2026-09-03, after an adversarial review of the ruling-121 change set — 8
+lensed reviewers, every finding refuted by 3 independent skeptics, then a synthesis and a
+completeness critic. 36 findings were confirmed and fixed in the same change; four of
+them adjust what (a), (e) and (f) above describe, so they are recorded here rather than
+by rewriting those paragraphs:*
+    *(i) **The dock is off `/profile` and `/notifications`** as well as the two
+    controller pages and login. Both render their whole page inside a `showModal()`
+    `PageOverlay`, which makes everything outside the dialog inert: the dock painted
+    there as a dimmed button that could not be clicked or focused, and a click on it
+    reached the overlay's backdrop and closed the page. (a)'s "every signed-in surface"
+    now means every surface that is not itself a modal.*
+    *(ii) **The dock's data route never throws.** (f) says the route applies the
+    members-only 404; it still authorizes exactly the same way, but it ANSWERS with a
+    benign empty view (`unavailable`) for a scope the person cannot reach and with this
+    scope's newest thread plus `staleSelection` for a selection it cannot honour. The
+    view feeds a root-owned fetcher, and React Router routes such a throw to the ROOT
+    boundary — replacing the whole page, which is the hazard (f) already names for CSRF.
+    Three ordinary paths reached it (a send answered after navigating away, a
+    revalidation after a project was deleted, a stale per-tab selection after an account
+    switch). The full pages keep their own 404s.*
+    *(iii) **A task anchor binds only inside its own project.** (c) says every task
+    tool's `taskKey` defaults to the anchored task; a call that overrides `projectSlug`
+    now has to name its task, because the default silently acted on a same-named task in
+    the other project. `update_task` also answers `[noop]` where a writer short-circuits
+    on an unchanged value, instead of reporting a write that never happened.*
+    *(iv) **The per-turn context read is gated.** (b) describes what it gathers; it now
+    re-proves the asking person's LIVE visibility of the bound project first, through the
+    same `assertProjectAction` chokepoint the board tools use. Without it, an ex-member
+    driving an old thread from either full page received that project's canonical
+    `task.md` in the prompt while every tool call in the same turn refused. The fence
+    around the file is also computed from its content (a five-backtick line inside a
+    comment could close a fixed five-backtick fence).*
+    *Two more fixes are behaviour the ruling never claimed and are noted for the record:
+    the store's conversation list gained a `rowid DESC` tie-break, without which
+    same-millisecond threads came back oldest-first and the route test failed most runs;
+    and `openDb` gained an additive backstop for `controller_conversations.task_key`,
+    `controller_messages.surface` and the scope index, without which every existing data
+    root — which never re-runs the squashed baseline — would have answered a 500 on the
+    dock's loader and shown the root error page on every signed-in surface.)*
+
+122. **A task's branch NAME is allocated, not derived — a name already spoken for gets a
+    suffix (owner, 2026-09-03).** Ruling 34 says a task-key branch is not an identifier
+    ("keys restart at 1 on a new data root"), and rulings 35 and 50 built a human-gated
+    collision packet around that fact. Pass 33 found what the packet costs on the very first
+    task of a fresh store: the Developer committed, the workspace reconcile found merged PR
+    #265 still pointing at `vib-1`, the policy engine wrote the collision note and the
+    operator opened a decision packet saying the collision "would block a clean push/PR" —
+    and pressing **Deliver** with that packet still open pushed and opened PR #270 on the
+    first try, no conflict, no remediation. Reproduced immediately on VIB-2 (PR #266 →
+    PR #271). Two code paths were asking GitHub different questions about the same branch:
+    `openTaskPr` lists `state: "open"` and cannot see a merged PR at all, while
+    `findPrForBranch` lists `state: "all"` and treats the newest match as a collision. The
+    refusal sentence conceded there was no hazard in the same breath — "already merged and
+    its work is on the base branch, so a fresh delivery fast-forwards cleanly" — and pass 17
+    (F17-L4) had already split `merged` from `closed` precisely because "the two carry
+    opposite delivery hazards"; the SENTENCES were split, the CONSEQUENCE was not.
+    The owner did not pick from the options offered (proceed-and-note, or keep the gate and
+    fix the copy) and ruled a third way: **"if branch previously exists, viberr creates a new
+    one with a unique suffix."** So the collision stops being a decision a human resolves and
+    becomes a name Viberr picks.
+    **(a) Taken means a ref OR any past pull request** (owner, asked directly, because in the
+    live case no ref existed — Viberr had created `vib-1` itself from `main` 35 seconds
+    earlier — and it was the merged PR alone that raised the collision). A name is free only
+    when `GET git/ref/heads/<name>` 404s AND `GET pulls?head=<owner>:<name>&state=all` is
+    empty.
+    **(b) Allocated once, at first branch creation, with a short-hash suffix** (owner):
+    `<key>-<4 hex>` off `randomBytes`, not a counter — a counter has to read the neighbours
+    to know it is next, and the thing being avoided is exactly a name whose history this data
+    root cannot see. The choice is persisted to `task.md` `branch:`, the field every reader
+    already prefers over the derived name, so delivery, reconcile and cleanup inherit it
+    unchanged and nothing in flight is ever renamed.
+    **(c) The delivery spine covers both dispatch paths.** The hook that allocates
+    (`ensureTaskBranchBestEffort`) ran only on the OPERATOR's dispatch; a human-dispatched
+    delivering run reached the agent prompt with no branch recorded and fell back to the
+    canonical key. It now runs on both, from one shared home in `branch-sync.server.ts`.
+    **(d) The collision packet survives** as the backstop ruling 50 wants — for a genuinely
+    unowned OPEN pull request, and for tasks whose branch was recorded before this ruling.
+    What goes away is the common path reaching it. The `prAdoptionRefusalNote` clause telling
+    a human to "give this task a different branch" is deleted with it: there was never an
+    in-app way to do that (pass 33, F33-5 — the operator dutifully built a packet option out
+    of it, twice), and now the product does it itself.
+    (`allocateTaskBranchName` / `ensureTaskBranchBestEffort` in
+    `app/server/github/branch-sync.server.ts`; the second call site in
+    `app/server/tasks/specialist-run.server.ts`.)
+
+123. **The archive is the second thing force-accept may not jump (owner, 2026-09-03).**
+    Ruling 59 enumerates what force may NOT bypass — ruling 37's terminal GitHub fact and
+    ruling 20's PR-head containment — and archive is not on that list. It should have been:
+    `acceptCompletion`'s own comment names the gates its shared helper holds ("graph position,
+    required reviewers, the R15-1 verdict gate, blocked packet, closed/conflicting PR,
+    **archived task**"), `force` skips that helper wholesale, and `forceIrreducibleRefusal`
+    covered only the closed PR. Pass 33 proved it live: an archived task was force-accepted
+    straight to Done, leaving `stage: done` + `archived: true` + `acceptance: forced` — a
+    combination every other path forbids (`transitionStage` refuses an archived task with a
+    409, and task-lifecycle §12 says "an archived task cannot be moved"). The disclosure was
+    exemplary — the dialog printed "BYPASSING: SBX-1 is archived. Restore it before accepting
+    the completion." — which is precisely why the bypass had to go: the product was giving
+    correct advice and then letting the admin ignore it. Force-accept now refuses an archived
+    task with that same sentence, and the affordance is WITHDRAWN rather than disabled
+    (ruling 37's precedent). Restore, then accept: both steps are audited.
+    (`forceIrreducibleRefusal` and `resolveAcceptanceAffordance` in
+    `app/server/tasks/task-actions.server.ts`.)
+
+124. **Force-accept is an escape hatch, not a standing offer (owner, 2026-09-03).**
+    Ruling 59 deliberately kept force-accept visible off-boundary — "a pre-work wedge must be
+    escapable; there is no off-boundary hiding" — and that produced an offer on EVERY
+    non-terminal task: an org admin opening a task created ten seconds ago saw "Force accept
+    (skips the remaining stages and the review gate)" in its GitHub card, directly above "No
+    branch yet" and directly under "Not acceptable yet … Move the task through the workflow
+    first." A task where nothing has happened cannot be wedged. The offer now appears once
+    there is something to accept — a branch, a pull request or a delivered revision — or once
+    the task is demonstrably wedged, which an open **blocked** packet proves (that case is
+    ruling 59's own, and it keeps working with no branch at all). Narrows ruling 59's
+    visibility rule; changes nothing about what force does once offered.
+    (`app/features/task-detail/task-side-panels.tsx`.)
+
+125. **The Policy page shows values to roles that cannot edit, not dead controls (owner,
+    2026-09-03).** Ruling 65 settled the pattern for the credential card — "withdrawn, not
+    disabled … a withdrawn affordance is honest, a disabled one invites a support question"
+    — and that same viewer correctly does not see it. The Policy page did the opposite: a
+    viewer met sixteen disabled member-role buttons and five disabled guardrail controls. The
+    page's other job is being the readable explanation of the policy, so the VALUE stays: a
+    role that cannot act reads the member's role and each guardrail's state as plain text, and
+    the controls render only for a role that can act. The predicate is the same `ACTION_ROLES`
+    entry the route's action guard enforces (`manage-members`, `edit-policy`), never a second
+    rule — ruling 65's third consequence, applied to the page it was not applied to.
+
+126. **Coordination overhead is the price, not a defect (owner, 2026-09-03).** Pass 33
+    measured what R29-1's "operator proactivity is intended (no throttle on the multi-run
+    cascade)" costs now that `/insights` can see it: two small single-file tasks produced 16
+    operator runs against 2 delivering and 2 reviewer runs, and Insights reported
+    **coordination overhead 69%** — operator and controller runs spent $2.27 of $3.30 (VIB-1:
+    7 operator runs at $0.78 against one $0.28 Developer run and one $0.25 Reviewer run;
+    VIB-2: 9 at $1.49 against $0.21 + $0.29). Offered a measurement-and-reduction pass or a
+    cheaper operator model, the owner ruled to accept it: the coordinator costing two to three
+    times the work it coordinates is what this governance model buys. R29-1 stands unchanged.
+    Recorded as DECIDED-NO-CHANGE (ruling 114's shape) so a later pass does not re-file the
+    number as a finding.
+
+127. **Agent backends authenticate per person, never per instance (owner, 2026-09-02).** The
     deployment-wide `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` / `VIBERR_CLAUDE_USE_CLI_AUTH`
     / `CLAUDE_CONFIG_DIR` / `CODEX_ACCESS_TOKEN` / `CODEX_API_KEY` / `OPENAI_API_KEY` /
     `CODEX_HOME` / `VIBERR_CODEX_USE_CLI_AUTH` credentials, the shared `runtimes/claude-home`
@@ -1994,7 +2210,8 @@ that pass and remains unnumbered.)*
 /profile   /notifications   /notifications/read   /prefs/theme
 /resources/events  (SSE)   /resources/health   /resources/run-log
 /resources/search   /resources/session-export   /resources/model-catalog
-/resources/backend-login                (ruling 121 — the signed-in viewer's own sign-in session)
+/resources/controller                   (ruling 121 — the dock's GET view + POST send)
+/resources/backend-login                (ruling 127 — the signed-in viewer's own sign-in session)
 ```
 
 *(Corrected 2026-08-06, pass 19, against `app/routes.ts`: `/projects`, `/notifications/read`,
@@ -2004,7 +2221,7 @@ were never added here.)*
 *(Corrected 2026-09-01: `/org/settings/audit-export` and `/insights` ship and were missing. The
 per-route guard and form-intent inventory is in [`../ui/surfaces.md`](../ui/surfaces.md).)*
 
-*(Updated 2026-09-02 for ruling 121, branch `claude/per-user-codex-auth-difdnn`:
+*(Updated 2026-09-02 for ruling 127, branch `claude/per-user-codex-auth-difdnn`:
 `/resources/backend-login` — `GET ?backend=claude|codex` behind `requireUser`, answering the
 CALLER's own live sign-in session plus the public half of their `userBackendHealth` (no
 `verification` verdict, no ids), so the Profile poller stops when the backend flips to

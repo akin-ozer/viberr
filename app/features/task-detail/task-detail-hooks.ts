@@ -70,7 +70,7 @@ export function useRunControls({
   runtime: RunView[];
   myRole: string | null;
   canRunAgents: boolean;
-  /** Ruling 121: whose accounts a run on this task would bill, and what those
+  /** Ruling 127: whose accounts a run on this task would bill, and what those
    *  accounts can run. `null` = nobody to bill (no owner, or a seat pointing at
    *  a gone/disabled account), which no backend switch fixes. */
   runPrincipal: TaskRunPrincipalView | null;
@@ -110,7 +110,7 @@ export function useRunControls({
     fd.set("runId", run.serverRunId);
     runFetcher.submit(fd, { method: "post" });
   };
-  // Ruling 121: which backends a retry could actually RUN on. A retry dispatch
+  // Ruling 127: which backends a retry could actually RUN on. A retry dispatch
   // bills the task owner exactly as the failed run did, so offering one on a
   // backend they have not connected promises a one-click fix that fails
   // identically the moment it is clicked — which is why the blocked packet

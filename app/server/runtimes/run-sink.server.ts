@@ -112,11 +112,11 @@ export const LINE_LOST_TAG = "run·line_lost";
  * credential-shaped variable from both spawn envs (F10-02) and Codex runs with
  * `shell_environment_policy.inherit: "core"`. But the app then deliberately
  * re-adds ONE credential to the agent's child env: the credential principal's
- * own (`runCredentialFor`, ruling 121). Claude has no counterpart to Codex's
+ * own (`runCredentialFor`, ruling 127). Claude has no counterpart to Codex's
  * shell-env policy, so one `env`-printing tool call put that credential
  * verbatim into a member-visible console, the `{ } raw` toggle, and the
  * persisted `.jsonl` — the one concrete leak path PRD-8/NFR7 forbid. Since
- * ruling 121 it is somebody's PERSONAL key, which makes the leak worse: the
+ * ruling 127 it is somebody's PERSONAL key, which makes the leak worse: the
  * people who can read a task's run console are not the person paying for it.
  *
  * Three rules, all cheap enough to run per emitted line:
@@ -154,7 +154,7 @@ function escapeRegExp(value: string): string {
  * PER-RUN secrets the run service resolved for this run's credential principal
  * — which together are exactly what that run's child env received.
  *
- * `extraSecrets` is the ruling-121 half and the load-bearing one now. A
+ * `extraSecrets` is the ruling-127 half and the load-bearing one now. A
  * personal API key lives sealed in `user_backend_credentials`, never in this
  * process's env, so the env sweep alone would not know it — and a run billed to
  * person A would then print person A's key verbatim into a member-visible
@@ -205,7 +205,7 @@ function redactDisplay(
 
 /** Per-run sink options. */
 export interface RunSinkOptions {
-  /** Ruling 121: the plaintext credentials this run's child env carries, from
+  /** Ruling 127: the plaintext credentials this run's child env carries, from
    *  `runCredentialFor`. Redacted from every persisted line and SSE payload. */
   secrets?: readonly string[];
 }
@@ -235,7 +235,7 @@ export function createRunSink(
   let totalCostUsd: number | null = null;
 
   // P13-U-1: built once per run — see createLineRedactor. `opts.secrets` is the
-  // principal's own credential (ruling 121), which lives sealed in the database
+  // principal's own credential (ruling 127), which lives sealed in the database
   // rather than in this process's env, so the env sweep could not find it.
   const redact = createLineRedactor(process.env, opts.secrets ?? []);
 

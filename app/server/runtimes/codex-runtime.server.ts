@@ -48,7 +48,7 @@ import { redactProviderText } from "~/server/secrets/git-output-redact.server";
  * in the SDK contract). The SDK spawns the codex binary internally; startup or
  * runtime failures are surfaced as sanitized failed runs.
  *
- * Auth: whatever the run's CREDENTIAL PRINCIPAL connected (ruling 121) — the
+ * Auth: whatever the run's CREDENTIAL PRINCIPAL connected (ruling 127) — the
  * `codex login` the vendor binary wrote into that person's `CODEX_HOME`, or a
  * `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN` they pasted. Both arrive on
  * `spec.env`, assembled by `runCredentialFor` in the run service; this adapter
@@ -85,7 +85,7 @@ interface CodexAdapterDeps {
    *  `apiKey` dep: the SDK's own `apiKey` option does nothing but set
    *  `env.CODEX_API_KEY` (verified in @openai/codex-sdk/dist/index.js), which
    *  is exactly what `runCredentialFor` already puts there for the ONE person
-   *  the run bills (ruling 121). */
+   *  the run bills (ruling 127). */
   env?: Record<string, string>;
   /** Extra supported CLI config overrides, primarily for test/deployment seams. */
   config?: CodexOptions["config"];
@@ -258,7 +258,7 @@ function shellExportedEnv(spec: RunSpec) {
  * ISOLATION (P13-LV-13 / LV-14 / RT-04): the CLI merges `--config` overrides
  * into whatever `$CODEX_HOME/config.toml` already declares, so config alone
  * cannot close the host channels — the run's PER-PERSON home
- * (`userBackendHome`, ruling 121) is what does. These keys are the
+ * (`userBackendHome`, ruling 127) is what does. These keys are the
  * second half of the same fence, because the CLI RE-INSTALLS its five bundled
  * `.system` skills into *any* home on startup (verified with
  * `codex debug prompt-input` on a pristine home: `imagegen`, `openai-docs`,

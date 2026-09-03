@@ -174,7 +174,7 @@ function projectRow(
   // signatures), so trust the tag directly and fall back to the prose scan for
   // real backend errors that carry no tag.
   //
-  // Ruling 121 added a refusal the other backend CANNOT fix: a run bills a
+  // Ruling 127 added a refusal the other backend CANNOT fix: a run bills a
   // person, and a task with no owner (or an owner whose account is gone) has
   // nobody to bill on either backend. `credential_user_id` is exactly that
   // distinction — the run service records the owner's id even when the refusal
@@ -213,7 +213,7 @@ function projectRow(
     // session id is present. `transcriptExists` is the cheap cached probe —
     // never the full locator, which reads whole files and is too heavy per run
     // row on a loader path.
-    // Ruling 121: probed in the home of the person the run billed — a run with
+    // Ruling 127: probed in the home of the person the run billed — a run with
     // no principal (refused before it started) never wrote one.
     exportable: row.session_id
       ? transcriptExists(backend, row.credential_user_id, row.session_id)
@@ -237,7 +237,7 @@ function projectRow(
   };
   // Absent entirely on a run that failed for any other reason. `altBackend` is
   // the D4 offer and rides only when there is a person for the retry to bill
-  // (ruling 121): without it the panel states the failure and offers nothing,
+  // (ruling 127): without it the panel states the failure and offers nothing,
   // which is the truth for an unowned task.
   if (failedBackendUnavailable) {
     view.failedBackendUnavailable = true;

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetEnvCacheForTests } from "~/server/config/env.server";
 import {
   closeDb,
-  ensureRunRowColumns,
+  ensureBaselineColumns,
   getDb,
   getProjectionDbPath,
   isDatabaseShuttingDown,
@@ -13,7 +13,7 @@ import {
   shutdownDatabase,
 } from "./sqlite.server";
 
-describe("ensureRunRowColumns (pass 32, C02-R11 additive drift backstop)", () => {
+describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)", () => {
   it("adds every baseline column a pre-existing root lacks, idempotently", () => {
     // A data root that applied 0001 BEFORE the columns existed never re-runs
     // the file (migrations stay squashed pre-prod), and `patchRun` naming a
@@ -31,20 +31,91 @@ describe("ensureRunRowColumns (pass 32, C02-R11 additive drift backstop)", () =>
           (c) => c.name,
         );
       expect(columns()).toEqual(["id", "outcome_key"]);
-      ensureRunRowColumns(db);
+      ensureBaselineColumns(db);
       expect(columns()).toEqual([
         "id",
         "outcome_key",
         "dispatched_by_name",
         "dispatched_by_user_id",
-        // Ruling 121: `upsertRun` names the credential principal on every
+        // Ruling 127: `upsertRun` names the credential principal on every
         // insert, so a root without this column could not start a run at all.
         "credential_user_id",
       ]);
       // Second boot: nothing to add, nothing thrown.
-      ensureRunRowColumns(db);
+      ensureBaselineColumns(db);
       expect(columns()).toHaveLength(5);
       db.prepare(`UPDATE agent_runs SET dispatched_by_name = ? WHERE id = ?`).run("x", "none");
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Ruling 121 (review G1). The dock's loader names `task_key` on the FIRST
+   * signed-in page of every surface, so on a root that applied 0001 before
+   * ruling 121 the missing column would 500 that loader and, fetcher errors
+   * going to the route's boundary, replace every page with the root error
+   * page. Reproduced here against the PRE-121 controller schema.
+   */
+  it("adds the ruling-121 controller columns and the scope index a pre-121 root lacks", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-ctlrow-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      // The exact shape 0001 created before ruling 121: no task_key, no
+      // surface, and only the per-user index.
+      db.exec(
+        `CREATE TABLE controller_conversations (
+           id TEXT PRIMARY KEY, user_id TEXT NOT NULL, user_label TEXT NOT NULL,
+           project_slug TEXT, title TEXT NOT NULL DEFAULT '',
+           created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_message_at TEXT);
+         CREATE INDEX idx_controller_conversations__user
+           ON controller_conversations (user_id, last_message_at DESC);
+         CREATE TABLE controller_messages (
+           id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, seq INTEGER NOT NULL,
+           author TEXT NOT NULL, user_id TEXT, text TEXT NOT NULL, run_id TEXT,
+           created_at TEXT NOT NULL, UNIQUE (conversation_id, seq));`,
+      );
+      const columns = (table: string) =>
+        // SAFETY: PRAGMA table_info rows always carry a TEXT `name`.
+        (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
+          (c) => c.name,
+        );
+      // The failure this backstop exists to prevent, proven first.
+      expect(() =>
+        db.prepare(`SELECT id FROM controller_conversations WHERE task_key IS NULL`).all(),
+      ).toThrow(/task_key/);
+
+      ensureBaselineColumns(db);
+
+      expect(columns("controller_conversations")).toContain("task_key");
+      expect(columns("controller_messages")).toContain("surface");
+      // SAFETY: sqlite_master rows carry a TEXT `name`; only `name` is read.
+      const indexes = (
+        db
+          .prepare(
+            `SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'controller_conversations'`,
+          )
+          .all() as { name: string }[]
+      ).map((r) => r.name);
+      expect(indexes).toContain("idx_controller_conversations__scope");
+      // The reads and writes the dock and the store make now work.
+      expect(
+        db.prepare(`SELECT id FROM controller_conversations WHERE task_key IS NULL`).all(),
+      ).toEqual([]);
+      db.prepare(
+        `INSERT INTO controller_conversations
+           (id, user_id, user_label, project_slug, task_key, title, created_at, updated_at)
+         VALUES ('c1', 'u1', 'a@b.dev', 'p', 'VIB-1', '', '2026-09-02', '2026-09-02')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO controller_messages
+           (id, conversation_id, seq, author, user_id, text, run_id, surface, created_at)
+         VALUES ('m1', 'c1', 1, 'user', 'u1', 'hi', NULL, '/projects/p/board', '2026-09-02')`,
+      ).run();
+      // Idempotent: a second boot adds nothing and throws nothing.
+      ensureBaselineColumns(db);
+      expect(columns("controller_conversations").filter((c) => c === "task_key")).toHaveLength(1);
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

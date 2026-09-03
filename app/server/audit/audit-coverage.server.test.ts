@@ -55,11 +55,11 @@ import {
 
 let ctx: TestDbContext;
 let store: TestStore;
-/** Ruling 121: the sign-in actions are audited by a driver that spawns the
+/** Ruling 127: the sign-in actions are audited by a driver that spawns the
  *  vendor's own binary, so the sweep drives real (fake) executables. */
 let vendors: FakeVendorBinaries;
 
-/** The vendors' free key probe, answered without a network (ruling 121). */
+/** The vendors' free key probe, answered without a network (ruling 127). */
 const acceptingProvider: typeof fetch = () =>
   Promise.resolve(new Response("{}", { status: 200 }));
 
@@ -100,7 +100,7 @@ beforeEach(async () => {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
   installFakeRuntime();
-  // Ruling 121: an agent run bills the TASK OWNER's own accounts, so a run
+  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
   // only reaches an adapter when the owner has that backend connected. Arda
   // owns the tasks in this file; connecting both backends for him is the
   // ordinary state of somebody using the product.
@@ -393,7 +393,7 @@ describe("governed actions record audit rows (table-driven)", () => {
           }),
       },
       {
-        // Ruling 121: connecting and disconnecting a PERSONAL agent account is
+        // Ruling 127: connecting and disconnecting a PERSONAL agent account is
         // governed — it changes whose provider account this instance's runs
         // bill — so both leave an audit row. Instance-wide: a personal
         // credential belongs to no project and no task.
@@ -429,7 +429,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 121: a hosted sign-in is a governed action at every step. The
+        // Ruling 127: a hosted sign-in is a governed action at every step. The
         // vendor's own binary is spawned here (a fake executable), so what the
         // sweep proves is the DRIVER's audit trail, not a stub's.
         name: "startBackendLogin",
@@ -521,7 +521,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         "github.credential.revalidated",
         "projection.rescan",
         "projection.rebuild",
-        // Ruling 121: a person's own agent account, connected on their profile.
+        // Ruling 127: a person's own agent account, connected on their profile.
         "profile.backend.connected",
         "profile.backend.disconnected",
         "profile.backend.login_started",

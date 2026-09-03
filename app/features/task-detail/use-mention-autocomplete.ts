@@ -56,7 +56,7 @@ export interface MentionAutocomplete {
 export function useMentionAutocomplete(
   mentionables: Mentionables,
   applyInsert: (result: InsertResult) => void,
-  /** Ruling 121: the task's run principal, so the `@claude` / `@codex` rows can
+  /** Ruling 127: the task's run principal, so the `@claude` / `@codex` rows can
    *  say whose account they would bill and whether it can pay. */
   runPrincipal?: TaskRunPrincipalView | null,
 ): MentionAutocomplete {

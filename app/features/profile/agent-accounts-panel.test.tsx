@@ -8,7 +8,7 @@ import type { ProfileBackend } from "./profile-query.server";
 import type { BackendLoginPollData } from "~/routes/resources.backend-login";
 
 /**
- * Profile → Agent accounts, rendered (ruling 121).
+ * Profile → Agent accounts, rendered (ruling 127).
  *
  * The card states are asserted as a reader meets them: not connected, signing
  * in (including while a credential already works), connected, a connection

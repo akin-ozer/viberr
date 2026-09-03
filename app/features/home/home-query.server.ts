@@ -4,6 +4,8 @@ import {
   listProjects,
 } from "~/server/projections/board-query.server";
 import { listGlobalAgentProfiles } from "~/server/org/gagents.server";
+import { readRepoHealthMany } from "~/server/github/repo-health.server";
+import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 import { listUsers } from "~/server/auth/user-store.server";
 import { listConnections } from "~/server/org/connections.server";
 import {
@@ -86,6 +88,13 @@ export interface HomeProjectCard {
    */
   updatedAt: string | null;
   accent: string;
+  /**
+   * U33-2: the LAST recorded repository probe for this project, or null when
+   * nothing has ever looked. Read from `project_github_health` in one query for
+   * the whole list — the card says a repository is unreachable WITHOUT this page
+   * calling GitHub, which is the constraint the table exists for.
+   */
+  repoAccess: RepoAccessResult | null;
 }
 
 /**
@@ -232,6 +241,11 @@ export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
   // cache means a user shown on multiple projects is looked up once.
   const resolve = createActorResolver(db);
 
+  // U33-2: one query for the whole list, not one per card.
+  const repoHealth = readRepoHealthMany(
+    db,
+    projects.map((p) => p.slug),
+  );
   return projects.map((project) => {
     const memberRecords = listProjectMembers(db, project.slug);
     const members: HomeMember[] = memberRecords.map((m) => {
@@ -273,6 +287,7 @@ export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
       // UI-02: NEVER fall back to `project.parsedAt` — that column is
       // `nowIso()` at projection time, not a change timestamp.
       updatedAt: agg?.updated_at ?? null,
+      repoAccess: repoHealth.get(project.slug)?.result ?? null,
       accent: accentForSlug(project.slug),
     };
   });

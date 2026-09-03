@@ -1,15 +1,19 @@
 import { data } from "react-router";
 import { pageTitle } from "~/shared/page-title";
 import type { Route } from "./+types/controller";
-import {
-  appErrorResponse,
-  requireFormAction,
-} from "~/server/auth/form-action.server";
-import { requireUser } from "~/server/auth/require-user.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
+import { requireAuth } from "~/server/auth/require-user.server";
+import { csrfError } from "~/features/shell/csrf-result.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { createConversation } from "~/server/controller/controller-conversations.server";
+import {
+  createConversation,
+  listConversations,
+} from "~/server/controller/controller-conversations.server";
 import { runControllerTurn } from "~/server/controller/controller-run.server";
-import { ControllerPage } from "~/features/controller/controller-page";
+import {
+  ControllerPage,
+  NEW_CONVERSATION_PARAM,
+} from "~/features/controller/controller-page";
 import { getControllerSurface } from "~/features/controller/controller-query.server";
 
 /**
@@ -23,8 +27,39 @@ export function meta() {
   return [{ title: pageTitle("Controller") }];
 }
 
+/**
+ * U33-8: which thread this visit opens.
+ *
+ * The dock's continuity rule (ruling 121) is "the newest thread of the scope
+ * you are standing in"; this page answered a blank composer instead, so one
+ * person on one scope got two different answers from the two entry points.
+ * Same rule here: no `?c=` opens this scope's newest thread, `?c=new` is the
+ * blank composer the New link asks for, and an explicit id still wins —
+ * `getControllerSurface` is what judges whether that id is theirs and in
+ * scope, and still 404s when it is not.
+ *
+ * The default is drawn from the viewer's OWN threads, exactly as the dock's
+ * is: an org admin reading everyone's (`?all=1`) lands on a thread they can
+ * actually talk in rather than on someone else's read-only transcript.
+ */
+function selectedConversationId(
+  db: ReturnType<typeof getDb>,
+  url: URL,
+  userId: string,
+): string | null {
+  const requested = url.searchParams.get("c");
+  if (requested === NEW_CONVERSATION_PARAM) return null;
+  if (requested !== null) return requested;
+  const newest = listConversations(db, {
+    userId,
+    projectSlug: null,
+    limit: 1,
+  })[0];
+  return newest?.id ?? null;
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await requireUser(request);
+  const { user } = await requireAuth(request);
   const url = new URL(request.url);
   const db = getDb();
   const view = getControllerSurface(
@@ -32,7 +67,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     { id: user.id, email: user.email },
     {
       projectSlug: null,
-      conversationId: url.searchParams.get("c"),
+      conversationId: selectedConversationId(db, url, user.id),
       all: url.searchParams.get("all") === "1",
     },
   );
@@ -40,7 +75,14 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const { auth, db, formData, intent } = await requireFormAction(request);
+  const auth = await requireAuth(request);
+  const db = getDb();
+  const formData = await request.formData();
+  // UI-32 (ruling 121 brought it here): a stale token answers a toast-shaped
+  // result, not a thrown 403 that replaces the page with the root boundary.
+  const csrfFailure = await csrfError(request, auth.sessionId, formData);
+  if (csrfFailure) return csrfFailure;
+  const intent = String(formData.get("intent") ?? "");
   try {
     if (intent === "send") {
       const text = String(formData.get("text") ?? "");
@@ -61,6 +103,10 @@ export async function action({ request }: Route.ActionArgs) {
           name: auth.user.name,
           orgRole: auth.user.role,
         },
+        // Ruling 121(d) records the page every USER message was sent from, and
+        // that includes the ones sent from here (review finding 23). The store
+        // normalizes it; a form without the field records null, as before.
+        surface: String(formData.get("surface") ?? "") || null,
       });
       if (result.state === "refused") {
         // The refusal is already recorded IN the conversation; the transcript

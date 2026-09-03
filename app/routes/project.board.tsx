@@ -173,6 +173,10 @@ export default function Board() {
       // move into the terminal stage is confirmed (task-detail already reads the
       // same fact from the project record).
       defaultBranch={layout.board.project.defaultBranch}
+      // U33-2: the remembered repository probe, so a project pointed at a
+      // repository GitHub will not serve says so where the work happens instead
+      // of only on its GitHub page.
+      repoAccess={layout.repoAccess ?? undefined}
     />
   );
 }

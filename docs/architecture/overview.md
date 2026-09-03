@@ -7,7 +7,7 @@
 > `68b5480` (2026-09-01). For the directory-by-directory map see
 > [codebase-map.md](codebase-map.md); for the storage model see
 > [data-model.md](data-model.md); for the binding rulings see
-> [decisions.md](decisions.md). Updated 2026-09-02 for ruling 121 (branch
+> [decisions.md](decisions.md). Updated 2026-09-02 for ruling 127 (branch
 > `claude/per-user-codex-auth-difdnn`): the data-root subdirectory list and the security
 > posture, both of which described deployment-wide agent credentials.
 
@@ -118,7 +118,7 @@ active loaders (300 ms debounce); run logs are fetched by reference from
    production origin is plain `http://`.
 3. `ensureDataRootDirs` (`projects`, `agents`, `agents/profiles`, `runtimes`,
    `runtimes/users`, `kb`, `skills`, `audit-exports`, `state`). *(Corrected 2026-09-02 —
-   `audit-exports` was missing, and ruling 121 replaced the shared
+   `audit-exports` was missing, and ruling 127 replaced the shared
    `runtimes/claude-home` / `runtimes/codex-home` with `runtimes/users`, under which each
    person's own `<userId>/{claude-home,codex-home}` is created 0o700 on demand.)*
 4. Take `state/writer.lock` (refuse with the holder named, exit 1) and arm the
@@ -200,10 +200,10 @@ with retention is in [data-model.md](data-model.md).
   non-members.
 - **Secrets**: env-only keys; AES-256-GCM sealed columns with lazy key rotation (GitHub
   PATs, MCP credentials, OAuth client secrets, the S3 key, and the personal backend API
-  keys of ruling 121); the PAT reaches git only through `GIT_ASKPASS`; git output and
+  keys of ruling 127); the PAT reaches git only through `GIT_ASKPASS`; git output and
   run-log lines are redacted, including each run's own credential value; SSE payloads are
   references, never content.
-- **Agent accounts are per person (ruling 121)**: there is no deployment-wide provider
+- **Agent accounts are per person (ruling 127)**: there is no deployment-wide provider
   credential. Each person connects Claude and Codex on Profile → Agent accounts; a hosted
   sign-in is executed by the unmodified vendor binary and its credential file stays in
   that person's own runtime home (`<dataRoot>/runtimes/users/<userId>/{claude-home,

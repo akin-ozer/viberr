@@ -240,7 +240,7 @@ export function chainRunCompletion(
 /**
  * Test-only: reset live handles and install explicitly supplied adapters.
  *
- * It no longer forces availability: since ruling 121 "available" is a fact
+ * It no longer forces availability: since ruling 127 "available" is a fact
  * about a PERSON, so a test that wants a run to reach its adapter seeds a
  * credential row for that run's principal (`connectFakeBackend` in
  * `test-support/`). Installing the fakes here still fails the runtime closed —
@@ -281,7 +281,7 @@ export interface StartRunInput {
   kind: RunKind;
   backend: RealBackend;
   /**
-   * Ruling 121: whose accounts this run bills — the task owner for a task run,
+   * Ruling 127: whose accounts this run bills — the task owner for a task run,
    * the asker for a controller turn. Required, and `null` ONLY for a run being
    * recorded as REFUSED (no principal could be resolved). A null principal
    * never spawns a process: `startRun` writes the honest error run instead.
@@ -383,7 +383,7 @@ export interface ReserveRunInput {
   role: string;
   kind: RunKind;
   backend: RealBackend;
-  /** Ruling 121: the principal `startRun` will bill when it adopts this row —
+  /** Ruling 127: the principal `startRun` will bill when it adopts this row —
    *  persisted here too so a reservation that is abandoned mid-preparation
    *  still records whose account the run was going to use. */
   credentialUserId: string | null;
@@ -692,7 +692,7 @@ type RunStartedAudit = {
   role: string;
   kind: RunKind;
   resumed: boolean;
-  /** Ruling 121: whose account this run bills. Null on a refused run — the
+  /** Ruling 127: whose account this run bills. Null on a refused run — the
    *  audit row then says, permanently, that nobody was billed. */
   credentialUserId: string | null;
   /** R7-2 fail-fast marker: the run never spawned a backend process. */
@@ -771,7 +771,7 @@ export async function startRun(
     });
   }
 
-  // Ruling 121: the credential comes BEFORE the adapter. A run with no
+  // Ruling 127: the credential comes BEFORE the adapter. A run with no
   // principal — or one whose principal has not connected this backend — is
   // refused here, and the refusal is the run's whole outcome: an honest error
   // row and no process. Resolved before the row is written so a caller bug
@@ -894,7 +894,7 @@ export async function startRun(
     spec.webSearchWithheld = true;
   }
   if (input.outputSchema) spec.outputSchema = input.outputSchema;
-  // Ruling 121: the credential's env (the principal's home, plus their pasted
+  // Ruling 127: the credential's env (the principal's home, plus their pasted
   // key when they have one) is the BASE; the caller's per-run overlay (the
   // specialist's GIT_* workspace confinement) goes on top. `resolveRunCredential`
   // has already refused a caller overlay that names a credential key, so the
@@ -949,7 +949,7 @@ type ResolvedRunCredential =
   | { ok: false; message: string };
 
 /**
- * Ruling 121: the credential of the ONE person this run bills, or the sentence
+ * Ruling 127: the credential of the ONE person this run bills, or the sentence
  * explaining why there is none.
  *
  * Three ways a run has no credential, and all three end in an honest error run
@@ -1079,7 +1079,7 @@ function failRunUnavailable(
  * the error run's `run·unavailable` line, the blocked packet's body and the
  * disabled dispatch control all read.
  *
- * Ruling 121 replaced the deployment-wide answer this used to give (which named
+ * Ruling 127 replaced the deployment-wide answer this used to give (which named
  * `ANTHROPIC_API_KEY`, `CODEX_HOME` and a pair of CLI-auth opt-ins that no
  * longer exist) with a PERSON: a run bills a person, so the only honest
  * refusal names that person and where THEY connect the backend. The two shapes
@@ -1273,7 +1273,7 @@ export interface ResumeRunInput {
   runId: string;
   prompt: string;
   /**
-   * Ruling 121: whose accounts the RESUMED turn bills — the task owner as of
+   * Ruling 127: whose accounts the RESUMED turn bills — the task owner as of
    * NOW, not whoever the original run billed. `resumeRun` re-resolves nothing
    * itself; the caller passes the principal it resolved.
    *
@@ -1409,7 +1409,7 @@ export async function resumeRun(
   const resumeThreadId =
     prev.thread_id + "-r" + newId("t").replace("t_", "").slice(0, 6);
 
-  // Ruling 121: an OWNER CHANGE decides continuity on its own, before any
+  // Ruling 127: an OWNER CHANGE decides continuity on its own, before any
   // filesystem is consulted. The probe below reads the principal's own runtime
   // home, and a home whose transcript store does not exist yet — the new owner
   // connected the backend but has never had a run on this server, so
@@ -1426,7 +1426,7 @@ export async function resumeRun(
     prev.credential_user_id !== input.credentialUserId;
   // P13-D-2: probe before handing the id to the SDK. `unknown` (no transcript
   // store to look in) resumes exactly as before — absence proves nothing there.
-  // Ruling 121: the transcript lives in the PRINCIPAL's own runtime home, so
+  // Ruling 127: the transcript lives in the PRINCIPAL's own runtime home, so
   // the probe has to be told whose. A resume with no principal (the task lost
   // its owner) has no home to look in and no run to start either — it falls
   // through to `startRun`, which records the refusal.
@@ -1589,7 +1589,7 @@ function launch(
   db: DatabaseSync,
   spec: RunSpec,
   adapter: RuntimeAdapter,
-  /** Ruling 121: the plaintext credentials THIS run's child env carries. The
+  /** Ruling 127: the plaintext credentials THIS run's child env carries. The
    *  sink redacts them from every persisted line — they belong to one person
    *  and the run console is visible to every project member. */
   secrets: readonly string[],

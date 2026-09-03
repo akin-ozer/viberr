@@ -47,7 +47,7 @@ beforeAll(async () => {
     deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
   };
 
-  // Ruling 121: these runs bill arda (the demo tasks' owner), so he needs the
+  // Ruling 127: these runs bill arda (the demo tasks' owner), so he needs the
   // backend connected — the same thing that makes a real dispatch reach an
   // adapter.
   const { connectFakeBackend } = await import(

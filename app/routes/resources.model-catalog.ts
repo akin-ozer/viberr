@@ -14,7 +14,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  * (reasoning) catalog for a backend, fetched by the agent create/edit modal
  * (useFetcher) on open and whenever the backend toggles. Claude enhances the
  * curated fallback with the LIVE `supportedModels()` list of the VIEWER's OWN
- * Claude account when they have connected one (ruling 121: there is no
+ * Claude account when they have connected one (ruling 127: there is no
  * instance account to enumerate, and one person's subscription must not decide
  * another's picker); codex is curated-only. Any signed-in user may read (V1
  * read RBAC: all app users see all projects; profile CRUD is the gated action,

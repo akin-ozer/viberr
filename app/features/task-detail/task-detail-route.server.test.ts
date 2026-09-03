@@ -79,7 +79,7 @@ beforeAll(async () => {
     selin: byEmail("selin@viberr.dev"),
     deniz: byEmail("deniz@viberr.dev"),
   };
-  // Ruling 121: an agent run bills the TASK OWNER's own accounts, so a
+  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a
   // dispatch (and the operator drive a packet resolution re-queues) only
   // reaches an adapter when that person has the backend connected. These five
   // are the demo humans this file acts as; connecting both backends for each
@@ -242,10 +242,10 @@ describe("loader — VIB-142 fidelity", () => {
   });
 });
 
-/* ---------------------------------------------- ruling 121 run principal */
+/* ---------------------------------------------- ruling 127 run principal */
 
 /**
- * Ruling 121 — the loader ships WHOSE accounts this task's agent runs would
+ * Ruling 127 — the loader ships WHOSE accounts this task's agent runs would
  * bill, not whether the deployment holds a credential.
  *
  * The old `backendAvailable` pair answered one question for every task in the
@@ -255,7 +255,7 @@ describe("loader — VIB-142 fidelity", () => {
  * backend connected, owner without, no owner at all) and the hard rule that
  * nothing about the credential itself reaches the browser.
  */
-describe("loader — runPrincipal (ruling 121)", () => {
+describe("loader — runPrincipal (ruling 127)", () => {
   it("names the OWNER and answers per backend from THEIR accounts", async () => {
     // VIB-142 is seeded owned by Arda, and the file's beforeAll connected both
     // backends for every demo human.
@@ -294,7 +294,7 @@ describe("loader — runPrincipal (ruling 121)", () => {
         available: true,
         detail: null,
       });
-      // Ruling 121 deleted the deployment credentials: no surface may send a
+      // Ruling 127 deleted the deployment credentials: no surface may send a
       // person hunting for one.
       const wire = JSON.stringify(data.runPrincipal);
       for (const dead of [
@@ -845,7 +845,7 @@ describe("loader — deployed specialists", () => {
 
 describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
   it("dispatching the developer AUTO-ENGAGES it as the deliverer and starts the run (streaming toast)", async () => {
-    // Ruling 121: VIB-166 is seeded UNOWNED, and an unowned task cannot run
+    // Ruling 127: VIB-166 is seeded UNOWNED, and an unowned task cannot run
     // agents at all — there is no account to bill, so the dispatch would be
     // refused before any adapter. Arda takes the seat first, which is exactly
     // what the refusal tells a human to do ("Own the task (Assign me)").

@@ -17,6 +17,8 @@ import { createProjectFile } from "~/server/files/project-writer.server";
 import { getConnection } from "~/server/org/connections.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { recordRepoAccess } from "~/server/github/repo-health.server";
+import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 import { getPatToken, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { proveAttachedCredential } from "~/features/github/github-actions.server";
 import {
@@ -353,22 +355,50 @@ async function createProjectImpl(
   }
   let defaultBranch = "main";
   let repoWarning: string | null = null;
+  // U33-2: the SAME probe, remembered. Creation is the other place that already
+  // knows whether GitHub can serve this repository, and until pass 33 it threw
+  // the answer away after one toast — so a project pointed at a repository that
+  // does not exist looked healthy on every surface except its GitHub page while
+  // every agent run in it died on the clone. Recorded after the project exists,
+  // below; mapped onto the shape the board and the home card already read.
+  let repoAccess: RepoAccessResult | null = null;
   {
     const token = getPatToken(db, connection.patId);
     if (token) {
       const probe = await probeRemoteRepo(token, repo);
       if (probe.status === "ok") {
+        repoAccess = {
+          status: "connected",
+          repo,
+          remoteDefaultBranch: probe.defaultBranch ?? null,
+          private: false,
+        };
         if (probe.defaultBranch) defaultBranch = probe.defaultBranch;
       } else if (probe.status === "read_only") {
         // The repo exists and is visible, so we can adopt its default branch —
         // but the token can't push, so delivery will fail until it's fixed.
         if (probe.defaultBranch) defaultBranch = probe.defaultBranch;
+        // Readable but not writable is a DELIVERY problem, not an unreachable
+        // repository: the board stays quiet (the GitHub page owns the scope
+        // story) and the connection reads as connected.
+        repoAccess = {
+          status: "connected",
+          repo,
+          remoteDefaultBranch: probe.defaultBranch ?? null,
+          private: false,
+        };
         repoWarning = `The ${owner} connection's token can read ${repo} but cannot push to it. Agents won't be able to open branches or PRs there until it's granted write access.`;
       } else if (probe.status === "not_found") {
+        repoAccess = { status: "repo_not_found", repo };
         repoWarning = `GitHub has no repository ${repo} that this connection can see. Check the name, or create it before agents start delivering.`;
       } else if (probe.status === "forbidden") {
+        repoAccess = { status: "forbidden", repo, message: `The ${owner} connection's token was refused for ${repo}.` };
         repoWarning = `The ${owner} connection's token was refused for ${repo}. Agents won't be able to deliver until it's replaced.`;
       } else {
+        // Transient: recorded so the surfaces can stay quiet about it (a board
+        // that cries wolf while GitHub is briefly down teaches people to ignore
+        // it), and overwritten by the next real probe.
+        repoAccess = { status: "network_unavailable", repo };
         repoWarning = `Couldn't reach GitHub to verify ${repo}. The project was created with the default branch "main".`;
       }
     }
@@ -449,6 +479,7 @@ async function createProjectImpl(
   if (ctx.fetchImpl) proveCtx.fetchImpl = ctx.fetchImpl;
   await proveAttachedCredential(db, slug, actor, proveCtx);
 
+  if (repoAccess) recordRepoAccess(db, slug, repoAccess);
   recordAudit(db, {
     action: "project.created",
     actor,

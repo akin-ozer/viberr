@@ -210,7 +210,7 @@ const HEALTH_REPLY = z.object({
   }),
   maintenance: z.object({ scheduled: z.boolean() }),
   build: z.object({ version: z.string().nullable() }),
-  // Ruling 121: strict, and NOTHING is authority-gated any more — the org-admin
+  // Ruling 127: strict, and NOTHING is authority-gated any more — the org-admin
   // detail arm named a deployment config path, and there is no such path left.
   // Every asker gets the same two facts, one of which is about their own
   // account.
@@ -434,10 +434,10 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     }
   });
 
-  it("answers every asker the same two facts, and `askerConnected` is about THEM (ruling 121)", async () => {
+  it("answers every asker the same two facts, and `askerConnected` is about THEM (ruling 127)", async () => {
     // Ruling 107 split this reading in two — everyone learned WHETHER a backend
     // could run, only org admins learned WHY — because the "why" sentence
-    // interpolated the deployment's config directory. Ruling 121 deleted that
+    // interpolated the deployment's config directory. Ruling 127 deleted that
     // sentence along with the instance credential it described, so the split
     // has nothing left to protect: the org-admin arm is gone, and no row here
     // names a host path, an environment variable or another person.

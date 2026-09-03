@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useFetcher, useRevalidator, useSearchParams } from "react-router";
+import {
+  Link,
+  useFetcher,
+  useLocation,
+  useRevalidator,
+  useSearchParams,
+} from "react-router";
 import type {
   ControllerSurfaceView,
   ConversationListItem,
@@ -20,10 +26,11 @@ import { sseScopes } from "~/features/live-updates/event-types";
  * sees and redirects every chain.
  *
  * Shared by `/controller` (instance scope) and `/projects/:slug/controller`
- * (board scope). The active conversation rides `?c=<id>`; sending with no
- * active conversation starts one. Live: the loader revalidates on the
- * owner-routed `controller.updated` SSE reference, with a slow fallback poll
- * while a turn is working.
+ * (board scope). The active conversation rides `?c=<id>`; a bare URL opens
+ * this scope's newest thread and `?c=new` the blank composer (U33-8, below),
+ * and sending with no active conversation starts one. Live: the loader
+ * revalidates on the owner-routed `controller.updated` SSE reference, with a
+ * slow fallback poll while a turn is working.
  */
 
 interface ActionResult {
@@ -34,18 +41,33 @@ interface ActionResult {
 }
 
 /**
- * Ruling 121: what a viewer whose Claude is not connected reads here.
+ * Ruling 127: what a viewer whose Claude is not connected reads here.
  *
  * The controller bills the ASKER, so this is never "the deployment has no
  * credential" — it is one person's account, and the remedy is theirs. The
  * words are the server's own (`controllerRefusalNote` in
  * controller-run.server.ts), so the disabled composer and the refusal the
- * transcript would record say the same thing.
+ * transcript would record say the same thing. Exported because the DOCK
+ * (ruling 121) is a second composer for the same turn and must not tell a
+ * second story about one refusal.
  */
-const CLAUDE_NOT_CONNECTED =
+export const CLAUDE_NOT_CONNECTED =
   "The controller runs on your own Claude account, and Claude isn't connected " +
   "for you yet. Connect it on your Profile → Agent accounts, then send your " +
   "message again.";
+
+/**
+ * U33-8: `?c=new` — the blank composer, asked for by name.
+ *
+ * Ruling 121 gave the DOCK a continuity rule: with nothing selected it opens
+ * the newest thread of the scope you are standing in. This page opened an
+ * empty composer instead, so the same person, on the same scope, got a
+ * different answer depending on which entry point they used. The page now
+ * follows the dock — which leaves "start a fresh thread" needing a token of
+ * its own. It is the same `"new"` the dock sends (`DOCK_NEW_CONVERSATION` in
+ * controller-dock-query.server.ts); the two route loaders resolve it.
+ */
+export const NEW_CONVERSATION_PARAM = "new";
 
 export function ControllerPage({
   view,
@@ -111,12 +133,14 @@ export function ControllerPage({
         <div>
           <h1>{view.controllerName}</h1>
           <p className="fine dim">
-            {projectSlug
-              ? `Managing the ${projectSlug} board with your own permissions.`
-              : "Managing this instance with your own permissions."}
+            {view.conversation?.taskKey
+              ? `Anchored to ${view.conversation.taskKey} on the ${view.projectName ?? projectSlug} board, with your own permissions.`
+              : projectSlug
+                ? `Managing the ${view.projectName ?? projectSlug} board with your own permissions.`
+                : "Managing this instance with your own permissions."}
           </p>
         </div>
-        {/* Ruling 121: a controller turn runs on the ASKER's own Claude
+        {/* Ruling 127: a controller turn runs on the ASKER's own Claude
             account, so this pill is about the person reading it. Another
             member with Claude connected converses normally while this one
             cannot, which the old instance-wide wording could not express. */}
@@ -155,14 +179,17 @@ export function ControllerPage({
 
 function ConversationList({ view }: { view: ControllerSurfaceView }) {
   const [params] = useSearchParams();
-  const active = params.get("c");
+  // U33-8: what is OPEN, not what the URL asked for. With no `?c=` the loader
+  // opens this scope's newest thread (the dock's rule), and the rail has to
+  // mark the row the transcript is actually showing.
+  const active = view.conversation?.id ?? null;
   const href = (c: ConversationListItem | null) => {
     const next = new URLSearchParams(params);
-    if (c) next.set("c", c.id);
-    else next.delete("c");
+    // A missing `c` now means "the newest thread here", so New has to ask for
+    // the blank composer explicitly.
+    next.set("c", c ? c.id : NEW_CONVERSATION_PARAM);
     if (!view.showingAll) next.delete("all");
-    const qs = next.toString();
-    return qs ? `?${qs}` : "?";
+    return `?${next.toString()}`;
   };
   return (
     <section className="panel ctl-convs">
@@ -194,7 +221,12 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
                 className={`ctl-conv${c.id === active ? " on" : ""}`}
                 to={href(c)}
               >
-                <span className="ctl-conv-title">{c.title}</span>
+                <span className="ctl-conv-title">
+                  {c.taskKey && (
+                    <span className="pill agent sm ctl-conv-task">{c.taskKey}</span>
+                  )}
+                  {c.title}
+                </span>
                 <span className="fine xs dim">
                   {!c.own && `${c.ownerLabel} · `}
                   {c.lastMessageAt ? (
@@ -254,6 +286,11 @@ function Transcript({ view }: { view: ControllerSurfaceView }) {
                 )}
               </span>
               <LocalDayDotTime iso={m.createdAt} />
+              {m.surface && (
+                <span className="ctl-msg-surface" title={m.surface}>
+                  from {surfaceLabel(m.surface)}
+                </span>
+              )}
             </header>
             <div className="md-body">
               <Markdown text={m.text} />
@@ -283,6 +320,7 @@ function Composer({
   conversationId: string | null;
 }) {
   const [text, setText] = useState("");
+  const location = useLocation();
   const busy = send.state !== "idle";
   const disabled =
     !view.available || (view.conversation !== null && !view.viewerOwnsActive);
@@ -293,6 +331,7 @@ function Composer({
     body.set("_csrf", csrf);
     body.set("intent", "send");
     body.set("text", value);
+    body.set("surface", `${location.pathname}${location.search}`);
     if (conversationId) body.set("conversationId", conversationId);
     send.submit(body, { method: "post" });
     setText("");
@@ -301,6 +340,7 @@ function Composer({
     <div className="ctl-composer">
       <textarea
         value={text}
+        autoFocus={!disabled}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -313,7 +353,7 @@ function Composer({
           disabled
             ? view.available
               ? "Read-only: only the conversation's owner can talk in it."
-              : // Ruling 121: the same sentence the refused turn records
+              : // Ruling 127: the same sentence the refused turn records
                 // (`controllerRefusalNote`), so the composer and the transcript
                 // cannot tell two stories about one refusal.
                 CLAUDE_NOT_CONNECTED
@@ -337,6 +377,25 @@ function Composer({
       </div>
     </div>
   );
+}
+
+/**
+ * Ruling 121: the surface a message was sent from, as a short word — the
+ * workspace view's name, a task key, or "Home". The full path stays in the
+ * title attribute.
+ */
+export function surfaceLabel(surface: string): string {
+  const path = surface.split("?")[0] ?? surface;
+  const task = path.match(/^\/projects\/[^/]+\/tasks\/([^/]+)/);
+  if (task?.[1]) return task[1];
+  const view = path.match(/^\/projects\/[^/]+(?:\/([^/]+))?/);
+  if (view) {
+    const segment = view[1] ?? "board";
+    return segment.charAt(0).toUpperCase() + segment.slice(1);
+  }
+  if (path === "/") return "Home";
+  const top = path.split("/").filter(Boolean)[0] ?? "";
+  return top ? top.charAt(0).toUpperCase() + top.slice(1) : "Home";
 }
 
 // ---------------------------------------------------------------- goals

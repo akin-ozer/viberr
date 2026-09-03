@@ -7,7 +7,7 @@ debounce) and the manual rescan reconcile them into projections. The UI
 always renders the REAL store-relative path (`projects/<slug>/tasks/<KEY>/task.md`),
 never the mock's `.viberr/…` (orchestrator ruling 3).
 
-*Updated 2026-09-02 for ruling 121 (branch `claude/per-user-codex-auth-difdnn`): the
+*Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): the
 data-root layout below. No canonical FILE FORMAT changed.*
 
 Data-root layout (created at boot by `app/server/files/file-store-root.server.ts`):
@@ -30,7 +30,7 @@ ${VIBERR_DATA_ROOT}/
   agents/profiles/<id>.md                 ← org-level agent profile templates
   agents/definitions/{operator,controller}.md ← shipped doctrine files
   runtimes/<backend>/<runId>.jsonl        ← raw NDJSON run logs (the truth for run logs)
-  runtimes/users/<userId>/claude-home/    ← one person's own agent home (ruling 121): the
+  runtimes/users/<userId>/claude-home/    ← one person's own agent home (ruling 127): the
   runtimes/users/<userId>/codex-home/       vendor's sign-in file, which only the vendor
                                             binary reads, plus their provider sessions,
                                             which session export serves and transcript
@@ -46,7 +46,7 @@ ${VIBERR_DATA_ROOT}/
 appear when first written, including each person's own
 `runtimes/users/<userId>/{claude-home,codex-home}` (created 0o700 by
 `ensureUserBackendHome` the first time they connect a backend). *(Layout corrected
-2026-09-02 for ruling 121, branch `claude/per-user-codex-auth-difdnn` — the shared
+2026-09-02 for ruling 127, branch `claude/per-user-codex-auth-difdnn` — the shared
 `runtimes/claude-home` and `runtimes/codex-home` are gone: a credential in a shared home
 is a credential every run bills to whoever owns it.)* There is no `cache/`, `auth/` or `logs/` directory — they were
 removed on purpose (P11-56); application logs are structured JSON on stdout, and the secrets

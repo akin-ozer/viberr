@@ -48,13 +48,17 @@ export default [
   // ⌘K palette query (R15-5) — tasks/branches/agents/projects across the
   // viewer's VISIBLE projects.
   route("resources/search", "routes/resources.search.ts"),
+  // Ruling 121: the controller DOCK's data route — the view for the scope the
+  // person is standing in (GET) and the send (POST). Mounted in root, so it is
+  // a resource route rather than a page.
+  route("resources/controller", "routes/resources.controller.ts"),
   // Model + effort catalog — the agent create/edit modal fetches this to
   // populate the model and effort (reasoning) pickers per backend.
   route("resources/model-catalog", "routes/resources.model-catalog.ts"),
   // Session export — downloads a bash installer that carries a run's provider
   // transcript so the conversation can be resumed locally (same subscription).
   route("resources/session-export", "routes/resources.session-export.ts"),
-  // Ruling 121: the signed-in viewer's OWN hosted sign-in session plus their
+  // Ruling 127: the signed-in viewer's OWN hosted sign-in session plus their
   // backend health. Profile → Agent accounts polls it while a `claude auth
   // login` / `codex login --device-auth` child is running, because that process
   // lives on the server and the browser has no other way to see what the vendor

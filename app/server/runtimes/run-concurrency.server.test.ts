@@ -46,7 +46,7 @@ beforeEach(async () => {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
   installFakeRuntime();
-  // Ruling 121: every run here bills VIB-1's owner, so he has to have the
+  // Ruling 127: every run here bills VIB-1's owner, so he has to have the
   // backend connected or the cap would never be reached — each run would be
   // refused before it took a slot.
   await connectFakeBackend(store.db, store.users.arda.id, "claude");

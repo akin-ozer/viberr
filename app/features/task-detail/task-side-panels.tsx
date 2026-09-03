@@ -118,8 +118,22 @@ export function GithubTrace({
   // unmerged PR is decided, not wedged — there is nothing to override).
   const isTerminal =
     task.displayReadiness === "accepted" || task.displayReadiness === "merged";
+  // Ruling 124: force-accept is an escape hatch, not a standing offer. It stays
+  // visible OFF-BOUNDARY (ruling 59 — a pre-work wedge must be escapable), but a
+  // task with nothing to accept cannot be wedged yet: before ruling 124 every
+  // non-terminal task showed an admin "skips the remaining stages and the review
+  // gate" in its GitHub card, ten seconds after creation, directly above "No
+  // branch yet" and directly under "Not acceptable yet … move it through the
+  // workflow first". "Escapable" is the test, so a task that IS wedged still
+  // offers it with no branch at all: an open BLOCKED packet is a wedge (a
+  // crashed run's recovery packet), and so is any work to accept — a branch, a
+  // pull request, or a delivered revision. What goes away is the standing offer
+  // on a task where nothing has happened yet.
+  const wedgedOrDelivering = Boolean(
+    task.branch ?? task.pr ?? task.workRevisionSha ?? null,
+  ) || task.packet?.type === "blocked";
   const forceAcceptReason =
-    isTerminal || acceptance.terminallyBlocked
+    isTerminal || acceptance.terminallyBlocked || !wedgedOrDelivering
       ? null
       : (acceptance.blockedReason ??
         (task.packet?.type === "blocked"
@@ -819,7 +833,7 @@ export function CurrentStatePanel({
             {owner ? (
               <span
                 className="rev-stack"
-                // Ruling 121 widened what this seat means: the owner is still
+                // Ruling 127 widened what this seat means: the owner is still
                 // the human reviewer and acceptance authority for this task,
                 // and is now also WHOSE Claude and Codex accounts its agent
                 // runs bill. The row that shows (and releases) the seat is

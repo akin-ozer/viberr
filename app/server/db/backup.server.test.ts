@@ -158,7 +158,7 @@ describe("createBackup", () => {
 
   it("carries runtimes/ only when asked", () => {
     const f = fixture();
-    // Ruling 121: the credential that makes `runtimes/` opt-in is a PERSON's
+    // Ruling 127: the credential that makes `runtimes/` opt-in is a PERSON's
     // own vendor sign-in, under their runtime home.
     const home = path.join(f.dataRoot, "runtimes", "users", "u_arda", "codex-home");
     mkdirSync(home, { recursive: true });

@@ -6,7 +6,7 @@
 > `app/server/tasks/agent-*.ts`, `app/shared/capabilities.ts`, `app/server/seed/*`.
 > Verified against `main` @ `68b5480` (2026-09-01); §2.5 and §4.3 re-verified
 > 2026-09-02 against `pass32/implementation` @ `478bed0`. Updated 2026-09-02 for
-> ruling 121 (branch `claude/per-user-codex-auth-difdnn`): §§2.1, 2.2, 2.3, 3.1, 3.5,
+> ruling 127 (branch `claude/per-user-codex-auth-difdnn`): §§2.1, 2.2, 2.3, 3.1, 3.5,
 > 3.6, 3.7 and gotcha 8 now describe the per-person credential principal, and the closing
 > paragraph no longer claims the credentials are environment variables. The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
@@ -32,7 +32,7 @@
 
 ## 2. Backends
 
-### 2.1 Credential principal and per-person availability (ruling 121)
+### 2.1 Credential principal and per-person availability (ruling 127)
 
 There is **no instance-level "the backend is configured"**. Every run bills ONE person —
 its **credential principal**, persisted as `agent_runs.credential_user_id`: the **task
@@ -93,7 +93,7 @@ alike. There is no fallback engine and no other account to fall back to.
 
 | Backend | Models (default first) | Efforts (default) | Rules |
 |---|---|---|---|
-| claude | `sonnet`, `opus`, `haiku` (aliases), plus any dated `claude-*` id containing a digit, plus the live `supportedModels()` list of the VIEWER's OWN connected Claude account (10 min cache keyed by that person's home, 15 s timeout; ruling 121) | `low medium high xhigh max` (`high`) | Alias or dated id runs verbatim; a string containing opus/haiku/sonnet maps to the alias; anything else falls back to the SDK default |
+| claude | `sonnet`, `opus`, `haiku` (aliases), plus any dated `claude-*` id containing a digit, plus the live `supportedModels()` list of the VIEWER's OWN connected Claude account (10 min cache keyed by that person's home, 15 s timeout; ruling 127) | `low medium high xhigh max` (`high`) | Alias or dated id runs verbatim; a string containing opus/haiku/sonnet maps to the alias; anything else falls back to the SDK default |
 | codex | `gpt-5.6-terra`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5` (closed list) | `low medium high xhigh` (`medium`); `minimal` accepted at run time, never offered | A model persisted for the other backend is **substituted silently** at start with only a `run·model_substituted` log line |
 
 `/resources/model-catalog?backend=` serves `{ models, efforts, defaultModel,
@@ -173,7 +173,7 @@ exhaustion expires after 6 h. Insights renders both; "no reading yet" is neutral
   started_at, finished_at, turns, input_tokens, cached_input_tokens, output_tokens,
   total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key,
   credential_user_id`.
-- `credential_user_id` (ruling 121) is the run's **credential principal**: whose account
+- `credential_user_id` (ruling 127) is the run's **credential principal**: whose account
   it billed. It is written on the reserved row and on the started row, carried in the
   `runtime.run.started` audit, and read back by the transcript locator and the run
   projection. It is NULL only on a run that was refused before any credential was looked
@@ -234,7 +234,7 @@ and a `continuity` timeline event is written, so a lost effect is visible.
 session_missing | unknown`, read from the terminal tag suffix first and regexes second.
 The completion pipeline opens a stuck-loop packet, notes model availability, and clears
 waiting to human. `retry_other_backend` is offered for `quota | auth | unavailable` only
-when the **task owner** has the other backend connected (ruling 121) — otherwise the
+when the **task owner** has the other backend connected (ruling 127) — otherwise the
 retry would be refused for the same reason, and the refusal sentence already names the
 real remedy.
 
@@ -246,7 +246,7 @@ real remedy.
   `runtime-continuity`) and starts a fresh run whose prompt carries a continuity-reset
   preamble anchored on `task.md`. Boot recovery reuses the same path.
 - The resumed turn bills the task owner **as of now**: `resumeRun` re-resolves nothing,
-  the caller passes `credentialUserId` (ruling 121). A task whose owner changed since
+  the caller passes `credentialUserId` (ruling 127). A task whose owner changed since
   the original run reads as a missing session and takes the continuity-reset path above
   — one fresh run re-anchored on `task.md`, with the timeline saying context was lost.
   The alternative would be resuming one person's conversation inside another person's
@@ -274,7 +274,7 @@ done or idle, queued/interrupted → idle. `failedBackendUnavailable` (tag
 `run·unavailable` or known signatures) marks every such run, whatever its principal, and
 the Agent-logs footer states that failure in those words; only the OTHER errored runs
 get the generic **"continuity error"** sentence. The retry OFFER travels separately
-(ruling 121). `altBackend` rides only when the run had a credential principal — a run
+(ruling 127). `altBackend` rides only when the run had a credential principal — a run
 refused because the task has no owner at all would be refused on the other backend for
 the same reason — and the "Retry on <other>" button additionally requires that the task
 owner has that other backend connected, the same test the packet's
@@ -562,7 +562,7 @@ full` and the project-effective grants.
    on every surface that shows the grant.
 7. The `MANAGED_SETTINGS` SDK option is inert; `settings.json` from skill-mount is the
    real exclusion mechanism.
-8. Agent backends are connected **per person** on Profile → Agent accounts (ruling 121):
+8. Agent backends are connected **per person** on Profile → Agent accounts (ruling 127):
    there is no deployment-wide key, no `CODEX_HOME`/`CLAUDE_CONFIG_DIR` to set and no
    host `~/.codex` mount. A wiped runtime volume signs each person out of their own
    vendor sign-in (a sealed pasted key survives in the database).
@@ -572,5 +572,5 @@ full` and the project-effective grants.
 The tuning knobs above (turn caps, timeouts, concurrency, the browser executable) are
 environment variables and are listed in
 [../operations/configuration.md](../operations/configuration.md). The agent CREDENTIALS
-are not: since ruling 121 each person connects Claude and Codex on Profile → Agent
+are not: since ruling 127 each person connects Claude and Codex on Profile → Agent
 accounts, and nothing about a backend account is read from the deployment environment.

@@ -39,7 +39,7 @@ import {
 } from "./user-homes.server";
 
 /**
- * Ruling 121: a person's own agent accounts. Every seam here is real — a
+ * Ruling 127: a person's own agent accounts. Every seam here is real — a
  * migrated SQLite file, a temp data root, the actual secret box, and the shared
  * fake VENDOR BINARIES (`test-support/fake-vendor-binary.ts`, the same pair the
  * sign-in driver's tests drive), which are real executable scripts, so the

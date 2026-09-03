@@ -4,7 +4,7 @@ Viberr is a single-node, self-hosted monolith: one Node process serving the SSR 
 SSE live updates, and an embedded SQLite projection database, with all authoritative
 state on the local filesystem. There is no external database, cache, or queue to run.
 
-*Updated 2026-09-02 for ruling 121 (branch `claude/per-user-codex-auth-difdnn`): agent
+*Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): agent
 backends are connected per person in the app, not configured in the deployment
 environment. "Agent backends in the container" below was rewritten; the persistence tree,
 the backup notes and the health example follow it.*
@@ -42,7 +42,7 @@ at which removing the old key is known to be safe.
 Optional integrations, enabled only when their vars are present:
 `GITHUB_OAUTH_*` / `GOOGLE_OAUTH_*` (OAuth sign-in) and `VIBERR_SEED_ADMIN_*` (bootstrap
 admin on first boot of an empty DB). Agent backends are **not** among them: since ruling
-121 they carry no environment variables at all, and are connected per person in the app
+127 they carry no environment variables at all, and are connected per person in the app
 (below). `VIBERR_SECRET_ENCRYPTION_KEY` also seals the personal backend API keys people
 paste, so losing it costs those too.
 
@@ -86,7 +86,7 @@ Two proxy details worth getting right:
 
 HSTS, certificate renewal and redirect-to-https all belong to the proxy layer.
 
-## Agent accounts are per person (ruling 121)
+## Agent accounts are per person (ruling 127)
 
 The image ships everything needed to run real agents: the Claude/Codex SDKs' native
 linux binaries (installed by `npm ci` in the linux build stage) plus, in the runtime
@@ -175,7 +175,7 @@ degraded: it means nobody has connected that backend yet. It is not a validity c
 either, and it cannot answer "can this task run", which is a fact about the task's owner
 and is shown on the task page, in the packet and on the Agents page.
 
-*(Rewritten 2026-09-02 for ruling 121. This section used to be titled "Agent backends in
+*(Rewritten 2026-09-02 for ruling 127. This section used to be titled "Agent backends in
 the container" and told an operator to run `claude setup-token`, paste
 `CLAUDE_CODE_OAUTH_TOKEN` / `CODEX_ACCESS_TOKEN` into `.env`, or copy `~/.codex/auth.json`
 into a shared `runtimes/codex-home` and set `VIBERR_CODEX_USE_CLI_AUTH=1`. All nine
@@ -194,9 +194,9 @@ docker compose logs -f app  # boot integrity log: dirs, migrations, counts, user
 - On an **empty** users table the bootstrap admin is created from `VIBERR_SEED_ADMIN_EMAIL`
   / `VIBERR_SEED_ADMIN_PASSWORD` (or a random password logged once).
 - Connect an agent backend for yourself on **Profile → Agent accounts** before expecting
-  any agent to run (ruling 121). Nothing in `.env` does it, and an instance with nobody
+  any agent to run (ruling 127). Nothing in `.env` does it, and an instance with nobody
   connected refuses every agent run honestly rather than starting one. See
-  [Agent accounts are per person](#agent-accounts-are-per-person-ruling-121).
+  [Agent accounts are per person](#agent-accounts-are-per-person-ruling-127).
 - Seed BEFORE the app starts (or stop it first) — `npm run seed` takes the
   single-writer lock and refuses against a running container.
   `npm run seed` seeds the product baseline — the built-in agent
@@ -205,7 +205,7 @@ docker compose logs -f app  # boot integrity log: dirs, migrations, counts, user
 - Health: `GET /resources/health` → `{ ok, status, degraded[], projections: { projects,
   tasks }, watcher, kbWatcher, lock, backends, browser, disk, maintenance, build }` (key
   order is part of the contract; `backends` is `{ claude: { connectedUsers }, codex: {
-  connectedUsers } }` since ruling 121). The bare URL is a **liveness** probe: `200` even when
+  connectedUsers } }` since ruling 127). The bare URL is a **liveness** probe: `200` even when
   `status: "degraded"`. For a **readiness** probe call `?probe=readiness`: it returns
   `503` with the same body while anything is degraded (a dead watcher, no lock, low disk).
   `503 { ok: false, status: "down" }` means SQLite is unreachable. Compose's own
@@ -226,7 +226,7 @@ projects/       canonical project.md, task.md, goals/*.md (the source of truth �
 agents/         agents/profiles/*.md templates + agents/definitions/ doctrine files
 kb/ skills/     knowledge-base and skill files
 runtimes/       raw NDJSON run logs per backend; users/<userId>/{claude-home,codex-home}/,
-                one person's vendor sign-in file plus their provider sessions (ruling 121);
+                one person's vendor sign-in file plus their provider sessions (ruling 127);
                 uv-cache/ and uv-python/ in the container
 audit-exports/  audit-events-<date>.jsonl written before each 90-day purge
 state/          projection.sqlite (users, sessions, projections, audit, PATs, notifications,
@@ -237,7 +237,7 @@ Boot creates the nine `DATA_ROOT_SUBDIRS` (`projects`, `agents`, `agents/profile
 `runtimes`, `runtimes/users`, `kb`, `skills`, `audit-exports`, `state`); the rest
 appear when first written, including each person's own
 `runtimes/users/<userId>/{claude-home,codex-home}` (mode 0700, created by
-`ensureUserBackendHome` the first time they connect). *(Corrected 2026-09-02, ruling 121 —
+`ensureUserBackendHome` the first time they connect). *(Corrected 2026-09-02, ruling 127 —
 the list used to hold the shared `runtimes/claude-home` and `runtimes/codex-home`, which
 no longer exist.)* *(Corrected 2026-09-02, pass 32 — A00-6: `audit-exports/`
 joined the list, so the folder the runbook, the backup and `file-formats.md` all name

@@ -8,7 +8,7 @@ import { setBackendApiKey } from "~/server/runtimes/backend-credentials.server";
 import { getControllerSurface } from "./controller-query.server";
 
 /**
- * Ruling 121 — `available` on the controller surface is a fact about the PERSON
+ * Ruling 127 — `available` on the controller surface is a fact about the PERSON
  * looking at it.
  *
  * A controller turn runs on the ASKER's own Claude account (the run row records
@@ -54,7 +54,7 @@ function surfaceFor(user: { id: string; email: string }) {
   });
 }
 
-describe("getControllerSurface — availability is the viewer's own Claude (ruling 121)", () => {
+describe("getControllerSurface — availability is the viewer's own Claude (ruling 127)", () => {
   it("is false for a viewer who has connected nothing", () => {
     const view = surfaceFor(store.users.murat);
     expect(view.available).toBe(false);

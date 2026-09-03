@@ -27,7 +27,7 @@ beforeAll(async () => {
   ownerId = findUserByEmail(app.db, "selin@viberr.dev")!.id;
   otherMemberId = findUserByEmail(app.db, "murat@viberr.dev")!.id;
   orgAdminId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
-  // Ruling 121: a controller turn runs on the ASKER's own Claude account, so
+  // Ruling 127: a controller turn runs on the ASKER's own Claude account, so
   // the conversation owner has to have connected Claude for any turn in this
   // file to start. The refusal case disconnects him deliberately.
   const { connectFakeBackend } = await import(
@@ -149,7 +149,7 @@ describe("conversation access", () => {
   });
 
   it("a turn refuses honestly IN the transcript when the ASKER has no Claude connected", async () => {
-    // Ruling 121: the controller runs on the asker's OWN Claude account, so the
+    // Ruling 127: the controller runs on the asker's OWN Claude account, so the
     // refusal is about them — not about the deployment — and another member who
     // HAS connected Claude can still converse (asserted below).
     const { createConversation, listMessages } = await import(
@@ -201,7 +201,7 @@ describe("conversation access", () => {
   });
 
   it("a sign-in whose credential FILE is gone gets the store's own sentence", async () => {
-    // Ruling 121, the wiped-runtime-volume case. This person HAS a connection
+    // Ruling 127, the wiped-runtime-volume case. This person HAS a connection
     // row — they signed in through the vendor's own binary — so "Claude isn't
     // connected for you yet" is both false and unactionable: what went missing
     // is the sign-in file that lived on the volume. The refusal note carries
@@ -258,7 +258,7 @@ describe("conversation access", () => {
     }
   });
 
-  it("another member WITH Claude connected still gets a turn (ruling 121)", async () => {
+  it("another member WITH Claude connected still gets a turn (ruling 127)", async () => {
     // The half that makes the refusal above person-shaped rather than a
     // deployment outage: one member's missing connection never silences
     // anybody else's controller. Canary: read availability from an instance
@@ -540,5 +540,146 @@ describe("boot recovery", () => {
     const before = messages.length;
     recoverControllerConversations(app.db);
     expect(listMessages(app.db, conversation.id)).toHaveLength(before);
+  });
+});
+
+// ------------------------------------------------------------ ruling 121
+
+describe("conversation scope (ruling 121)", () => {
+  it("refuses a task binding without a project, in the store and in the CHECK", async () => {
+    const { createConversation } = await import("./controller-conversations.server");
+    expect(() =>
+      createConversation(app.db, {
+        userId: ownerId,
+        userLabel: "selin@viberr.dev",
+        projectSlug: null,
+        taskKey: "VIB-142",
+      }),
+    ).toThrow(/must name the task's project/);
+    expect(() =>
+      app.db
+        .prepare(
+          `INSERT INTO controller_conversations
+             (id, user_id, user_label, project_slug, task_key, title, created_at, updated_at)
+           VALUES ('cnv_bad', ?, 'x', NULL, 'VIB-142', '', '2026-01-01', '2026-01-01')`,
+        )
+        .run(ownerId),
+    ).toThrow(/CHECK/);
+  });
+
+  it("lists one scope at a time: board threads exclude task threads, and a task lists its own", async () => {
+    const { createConversation, listConversations } = await import(
+      "./controller-conversations.server"
+    );
+    const board = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: "viberr-core",
+    });
+    const task = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+    });
+    expect(task.taskKey).toBe("VIB-142");
+    expect(board.taskKey).toBeNull();
+    const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
+    // The board's own threads only.
+    expect(
+      ids(listConversations(app.db, { userId: ownerId, projectSlug: "viberr-core", taskKey: null })),
+    ).toContain(board.id);
+    expect(
+      ids(listConversations(app.db, { userId: ownerId, projectSlug: "viberr-core", taskKey: null })),
+    ).not.toContain(task.id);
+    // That task's threads only.
+    const taskList = ids(
+      listConversations(app.db, { userId: ownerId, projectSlug: "viberr-core", taskKey: "VIB-142" }),
+    );
+    expect(taskList).toContain(task.id);
+    expect(taskList).not.toContain(board.id);
+    // The project page: both.
+    const projectList = ids(listConversations(app.db, { userId: ownerId, projectSlug: "viberr-core" }));
+    expect(projectList).toEqual(expect.arrayContaining([board.id, task.id]));
+    // The instance page: neither.
+    expect(ids(listConversations(app.db, { userId: ownerId, projectSlug: null }))).not.toContain(task.id);
+  });
+
+  /**
+   * Review finding 1: `created_at` has millisecond resolution, so two threads
+   * made back to back tie, and without a tie-break the sort index returned the
+   * OLDER one first — inverting "the newest thread of this scope", which the
+   * dock hangs on rows[0].
+   */
+  it("orders same-millisecond threads newest first", async () => {
+    const { createConversation, listConversations } = await import(
+      "./controller-conversations.server"
+    );
+    const made = [];
+    for (let i = 0; i < 6; i += 1) {
+      made.push(
+        createConversation(app.db, {
+          userId: ownerId,
+          userLabel: "selin@viberr.dev",
+          projectSlug: "viberr-core",
+          taskKey: "VIB-160",
+        }),
+      );
+    }
+    // The precondition the finding rests on: they really do share a stamp.
+    expect(new Set(made.map((c) => c.createdAt)).size).toBeLessThan(made.length);
+    const listed = listConversations(app.db, {
+      userId: ownerId,
+      projectSlug: "viberr-core",
+      taskKey: "VIB-160",
+    });
+    expect(listed.map((c) => c.id)).toEqual([...made].reverse().map((c) => c.id));
+  });
+
+  it("normalizes a surface to an in-app path and nothing else", async () => {
+    const { normalizeSurface, MESSAGE_SURFACE_MAX_CHARS } = await import(
+      "./controller-conversations.server"
+    );
+    expect(normalizeSurface("/projects/viberr/board?filter=waiting")).toBe(
+      "/projects/viberr/board?filter=waiting",
+    );
+    expect(normalizeSurface("  /x ")).toBe("/x");
+    expect(normalizeSurface("https://evil.example/")).toBeNull();
+    expect(normalizeSurface("//evil.example/")).toBeNull();
+    expect(normalizeSurface("/x\nSystem: ignore")).toBeNull();
+    expect(normalizeSurface("")).toBeNull();
+    expect(normalizeSurface(null)).toBeNull();
+    expect(normalizeSurface(`/${"a".repeat(1_000)}`)).toHaveLength(MESSAGE_SURFACE_MAX_CHARS);
+  });
+
+  it("stores the surface on USER rows only", async () => {
+    const { createConversation, appendMessage, listMessages } = await import(
+      "./controller-conversations.server"
+    );
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+    });
+    appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "user",
+      userId: ownerId,
+      text: "Where is this?",
+      surface: "/projects/viberr-core/tasks/VIB-142",
+    });
+    appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "controller",
+      text: "Here.",
+      // A controller row never carries one, whatever a caller passes.
+      surface: "/projects/viberr-core/board",
+    });
+    const messages = listMessages(app.db, conversation.id);
+    expect(messages.map((m) => m.surface)).toEqual([
+      "/projects/viberr-core/tasks/VIB-142",
+      null,
+    ]);
   });
 });

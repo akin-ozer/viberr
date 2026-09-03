@@ -57,7 +57,7 @@ export interface ProfileMembership {
 }
 
 /**
- * One backend card on Profile → Agent accounts (ruling 121).
+ * One backend card on Profile → Agent accounts (ruling 127).
  *
  * `health` is the SAME per-person answer every other surface reads
  * (`userBackendHealth`), never a second opinion computed here; `login` is the
@@ -132,7 +132,7 @@ export interface ProfileView {
    * instead of warn scope chips + a doomed Connect button (mirrors R17-4).
    */
   githubConfigured: boolean;
-  /** Ruling 121: the viewer's own Claude and Codex accounts, one entry per
+  /** Ruling 127: the viewer's own Claude and Codex accounts, one entry per
    *  backend. Runs on tasks they own, and their controller turns, bill these. */
   backends: ProfileBackend[];
   prefs: {

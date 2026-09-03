@@ -37,6 +37,7 @@ describe("controller mounts (ruling 107)", () => {
     const mounts = buildControllerMounts(app.db, {
       user,
       projectSlug: null,
+      taskKey: null,
       orgServers: {},
       dataRoot: app.dataRoot,
     });
@@ -62,6 +63,7 @@ describe("controller mounts (ruling 107)", () => {
     const mounts = buildControllerMounts(app.db, {
       user,
       projectSlug: "viberr-core",
+      taskKey: null,
       orgServers,
       dataRoot: app.dataRoot,
     });
@@ -101,6 +103,7 @@ describe("controller mounts (ruling 107)", () => {
     const mounts = buildControllerMounts(app.db, {
       user,
       projectSlug: null,
+      taskKey: null,
       orgServers: servers,
       dataRoot: app.dataRoot,
     });
@@ -149,5 +152,163 @@ describe("controller mounts (ruling 107)", () => {
     // believes the categorical negative never calls the tools at all.
     expect(prompt).toContain("No org MCP servers are attached to you.");
     expect(prompt).not.toContain("No MCP servers are attached to you.");
+  });
+});
+
+// ------------------------------------------------------------ ruling 121
+
+describe("the turn carries the context read (ruling 121)", () => {
+  it("names the task binding in the system prompt, and the board one, and the instance one", async () => {
+    const { buildControllerSystemPrompt } = await import("./controller-run.server");
+    const { resolveControllerConfig } = await import("./controller-profile.server");
+    const config = resolveControllerConfig(app.dataRoot);
+    const base = {
+      id: "cnv_x",
+      userId: user.id,
+      userLabel: user.email,
+      title: "",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      lastMessageAt: null,
+    };
+    const asker = { ...user, orgRole: "admin" as const };
+    const task = buildControllerSystemPrompt(app.db, {
+      conversation: { ...base, projectSlug: "viberr-core", taskKey: "VIB-142" },
+      user: asker,
+      config,
+      mountedMcps: [],
+      unresolvedMcps: [],
+      dataRoot: app.dataRoot,
+    });
+    expect(task).toContain(
+      "This conversation is anchored to task `VIB-142` in project `viberr-core`: tools default to both, and every turn opens with the task's canonical file as a server read.",
+    );
+    const board = buildControllerSystemPrompt(app.db, {
+      conversation: { ...base, projectSlug: "viberr-core", taskKey: null },
+      user: asker,
+      config,
+      mountedMcps: [],
+      unresolvedMcps: [],
+      dataRoot: app.dataRoot,
+    });
+    expect(board).toContain("bound to the project `viberr-core`: tools default to it, and every turn opens with a board snapshot");
+    const instance = buildControllerSystemPrompt(app.db, {
+      conversation: { ...base, projectSlug: null, taskKey: null },
+      user: asker,
+      config,
+      mountedMcps: [],
+      unresolvedMcps: [],
+      dataRoot: app.dataRoot,
+    });
+    expect(instance).toContain("instance-scoped: name the project when acting on a board.");
+  });
+
+  it("puts the context read FIRST in the turn prompt, ahead of the digest and the message", async () => {
+    const { buildTurnPrompt } = await import("./controller-run.server");
+    const { createConversation, appendMessage } = await import(
+      "./controller-conversations.server"
+    );
+    const conversation = createConversation(app.db, {
+      userId: user.id,
+      userLabel: user.email,
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+    });
+    appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "user",
+      userId: user.id,
+      text: "earlier question",
+    });
+    const prompt = buildTurnPrompt(app.db, conversation, "now this", "CONTEXT BLOCK");
+    expect(prompt.indexOf("CONTEXT BLOCK")).toBe(0);
+    expect(prompt.indexOf("CONTEXT BLOCK")).toBeLessThan(prompt.indexOf("Recent exchange"));
+    expect(prompt.indexOf("Recent exchange")).toBeLessThan(prompt.indexOf(`${user.email} says:\n\nnow this`));
+    // Without a context read the prompt is exactly what it was.
+    const bare = buildTurnPrompt(app.db, conversation, "now this");
+    expect(bare.startsWith("Recent exchange")).toBe(true);
+  });
+
+  /**
+   * Review finding 12: everything above asserts the PIECES. This asserts the
+   * assembly — what the runtime was actually started with — through the fake
+   * adapter's captured RunSpec, so the context read, the task anchor and the
+   * surface hint cannot be unwired with the suite still green.
+   */
+  it("starts the run with the context read, the anchored task and the surface hint", async () => {
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    const { lastRunSpec } = await import("../../../test-support/fake-runtime");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    // Ruling 127: a controller turn bills the ASKER's own Claude account, so
+    // the way to make one start is to connect the asker's — there is no
+    // instance-level switch left to flip. Disconnected again below so the
+    // next case still meets the hermetic "nobody has connected" default.
+    await connectFakeBackend(app.db, user.id, "claude");
+    const conversation = createConversation(app.db, {
+      userId: user.id,
+      userLabel: user.email,
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+    });
+    try {
+      await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "what is this task?",
+        user: { ...user, orgRole: "admin" },
+        surface: "/projects/viberr-core/tasks/VIB-142?events=50",
+        dataRoot: app.dataRoot,
+      });
+    } finally {
+      await disconnectFakeBackend(app.db, user.id, "claude");
+    }
+    const spec = lastRunSpec();
+    expect(spec, "a controller run must have started").toBeTruthy();
+    // The context read is FIRST, and it is the task's own file.
+    expect(spec!.prompt.startsWith("Context gathered by the server when this turn started")).toBe(
+      true,
+    );
+    expect(spec!.prompt).toContain("## Task VIB-142");
+    expect(spec!.prompt).toContain("key: VIB-142");
+    expect(spec!.prompt).toContain(
+      "They are looking at: /projects/viberr-core/tasks/VIB-142?events=50",
+    );
+    // …and the message the person actually sent comes after it.
+    expect(spec!.prompt.indexOf("what is this task?")).toBeGreaterThan(
+      spec!.prompt.indexOf("## Task VIB-142"),
+    );
+    // The anchor reached the toolkit that runs under it.
+    expect(spec!.systemPrompt).toContain(
+      "anchored to task `VIB-142` in project `viberr-core`",
+    );
+    expect(Object.keys(spec!.mcpServers ?? {})).toContain("viberr_controller");
+  });
+
+  it("records the surface on the user message the turn was asked from", async () => {
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { createConversation, listMessages } = await import(
+      "./controller-conversations.server"
+    );
+    const conversation = createConversation(app.db, {
+      userId: user.id,
+      userLabel: user.email,
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+    });
+    // The hermetic default has no Claude credential: the turn is refused IN
+    // the transcript, which is enough to prove the user row's surface landed.
+    await runControllerTurn(app.db, {
+      conversationId: conversation.id,
+      text: "what is this task?",
+      user: { ...user, orgRole: "admin" },
+      surface: "/projects/viberr-core/tasks/VIB-142",
+      dataRoot: app.dataRoot,
+    });
+    const messages = listMessages(app.db, conversation.id);
+    expect(messages[0]?.author).toBe("user");
+    expect(messages[0]?.surface).toBe("/projects/viberr-core/tasks/VIB-142");
+    expect(messages.filter((m) => m.author === "controller").every((m) => m.surface === null)).toBe(true);
   });
 });

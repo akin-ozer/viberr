@@ -37,7 +37,7 @@ import { connectFakeBackend } from "../../../test-support/backend-credentials";
  * survives. Importing the registry above already ran that real module-scope
  * loadEnvFile.
  *
- * Ruling 121 changed WHAT is guarded, not why. There is no instance credential
+ * Ruling 127 changed WHAT is guarded, not why. There is no instance credential
  * to detect any more, so the invariant is stated where it now lives: the base
  * spawn env both adapters are built on must carry nothing credential-shaped,
  * and a run's child env must carry exactly ONE credential — the one belonging
@@ -92,7 +92,7 @@ describe("test-harness hermeticity", () => {
   });
 
   it("the base spawn env both adapters are built on carries no credential", () => {
-    // Ruling 121: this is what makes per-person credentials safe. A run's
+    // Ruling 127: this is what makes per-person credentials safe. A run's
     // child env is `filteredSpawnEnv()` plus exactly one principal's
     // credential, so anything credential-shaped surviving the filter would be
     // seen by every run, whoever it bills.
@@ -103,7 +103,7 @@ describe("test-harness hermeticity", () => {
   });
 
   it("the base spawn env carries neither vendor HOME", async () => {
-    // Ruling 121: `CLAUDE_CONFIG_DIR` / `CODEX_HOME` are not credential-SHAPED,
+    // Ruling 127: `CLAUDE_CONFIG_DIR` / `CODEX_HOME` are not credential-SHAPED,
     // so `CREDENTIAL_ENV_RE` lets both through — but a home is where a vendor
     // binary keeps its credential. An ambient one (a deployment upgrading onto
     // this branch with its old `.env`, which compose still injects) would ride
@@ -144,7 +144,7 @@ describe("test-harness hermeticity", () => {
 });
 
 /**
- * Ruling 121, the input-side invariant end to end: the process a run spawns
+ * Ruling 127, the input-side invariant end to end: the process a run spawns
  * sees the credential of the ONE person that run bills, and no other.
  *
  * Driven through the REAL pieces — a migrated database, the real credential
@@ -290,7 +290,7 @@ describe("a run's child env carries exactly its principal's credential", () => {
   });
 
   it("a codex Platform key never rides beside OPENAI_API_KEY", async () => {
-    // The billing trap ruling 121 closes by construction: a person's pasted
+    // The billing trap ruling 127 closes by construction: a person's pasted
     // Platform key arrives as CODEX_API_KEY, and OPENAI_API_KEY — which the
     // CLI would prefer, on a different account — is stripped by the filter and
     // never re-added.

@@ -6,7 +6,7 @@
 > `app/server/audit/*`, `app/server/db/retention.server.ts`. Verified against
 > `main` @ `68b5480` (2026-09-01).
 >
-> Updated 2026-09-02 for ruling 121 (branch `claude/per-user-codex-auth-difdnn`):
+> Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`):
 > §5 gains the `profile.backend.*` audit family and §7 describes the Agent accounts
 > panel. Agent backends now authenticate per person; there is no deployment-wide
 > Claude or Codex credential to administer.
@@ -153,7 +153,7 @@ the tabs sit the Audit log card and the run-concurrency control.
   role; reset password (revokes all sessions); disable/enable (disable revokes
   sessions); remove (prunes memberships, releases tasks, retires the person's agent
   accounts, deletes the identity). Removal runs the vendor's own logout and deletes the
-  sign-in file from that person's runtime home before the row cascades (ruling 121) —
+  sign-in file from that person's runtime home before the row cascades (ruling 127) —
   the row goes with the account either way, but nothing else would ever remove a live
   Claude.ai / ChatGPT credential from this server, and the person can no longer reach
   Disconnect to revoke it themselves; the audit detail lists `backendsRetired`, and
@@ -196,7 +196,7 @@ recommendations, quality, schedules, agent and operator actions), `goal.*`,
 `controller.authority.denied`, `projection.rescan|rebuild`, `seed.*`,
 `secrets.resealed`, `store.restored`.
 
-**`profile.backend.*` (ruling 121).** Connecting or dropping a personal agent account
+**`profile.backend.*` (ruling 127).** Connecting or dropping a personal agent account
 is governed, because it changes whose provider account this instance's runs bill. Five
 actions, all instance-scoped (no `project_slug`, no `task_key`), actor the person
 themselves: `profile.backend.login_started` {backend, method} when the vendor's own
@@ -250,7 +250,7 @@ password), and a self-service password change that keeps the current session and
 revokes every other one (audit `auth.password.changed`). Preferences other than theme
 live in `user_prefs`.
 
-### Agent accounts (ruling 121)
+### Agent accounts (ruling 127)
 
 The panel sits in the right column above GitHub identity, one `cred-card` per backend,
 and it is where a person connects the provider account their agent runs bill: runs on

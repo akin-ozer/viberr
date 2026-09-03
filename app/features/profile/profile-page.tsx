@@ -47,7 +47,7 @@ export interface ProfileData {
   accessRole: ProjectRole | null;
   /** F18-3: whether GitHub OAuth is configured on this deployment. */
   githubConfigured: boolean;
-  /** Ruling 121: the viewer's own Claude and Codex accounts. Type-only import
+  /** Ruling 127: the viewer's own Claude and Codex accounts. Type-only import
    *  of the loader's shape, so the panel and the query cannot drift apart. */
   backends: ProfileBackend[];
   prefs: {
@@ -896,7 +896,7 @@ export function ProfilePage({
     appearance: ProfileFetcher;
     password: ProfileFetcher;
     github: ProfileFetcher;
-    /** Ruling 121: the Agent-accounts intents. */
+    /** Ruling 127: the Agent-accounts intents. */
     backends: ProfileFetcher;
   };
   submitWith: (
@@ -947,7 +947,7 @@ export function ProfilePage({
               onNav={onNav}
               hasMembership={first !== null}
             />
-            {/* Ruling 121: above GitHub identity. This is the panel that
+            {/* Ruling 127: above GitHub identity. This is the panel that
                 decides whether this person's agents can run at all, so it
                 outranks the attribution card below it. */}
             <AgentAccountsPanel

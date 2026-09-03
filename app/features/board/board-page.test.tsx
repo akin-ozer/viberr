@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { BoardPage, type BoardColumnData, type BoardTask } from "./board-page";
+import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 
 /**
  * UI-26: `board-page.tsx` (1000+ lines) had no component test at all — only the
@@ -93,6 +94,9 @@ function renderBoard(
     search?: string;
     /** D3: the merge target the shared acceptance ceremony names. */
     defaultBranch?: string;
+    /** U33-2: GitHub's answer for the project's repository, when a caller has
+     *  one. Absent (the default) is the state every loader is in today. */
+    repoAccess?: RepoAccessResult;
     /** Server result for the board's own fetchers (reorder / rescan). The
      *  request is handed through so a case can read what the board actually
      *  POSTed (ruling 88's acknowledgment fields). */
@@ -115,6 +119,7 @@ function renderBoard(
           canTransition={opts.canTransition ?? true}
           canRescan
           {...(opts.defaultBranch ? { defaultBranch: opts.defaultBranch } : {})}
+          repoAccess={opts.repoAccess}
         />
       </ToastProvider>
     ),
@@ -2147,5 +2152,86 @@ describe("pass 30: the virgin entry lane teaches with a CTA", () => {
   it("keeps the CTA out of a filtered empty view", () => {
     const { container } = renderBoard([task()], { search: "zzz-no-match" });
     expect(container.querySelector(".empty .empty-cta")).toBeNull();
+  });
+});
+
+describe("U33-2: an unreachable repository has a home on the board", () => {
+  /** The banner only, never the unstaged-tasks strip that shares its class. */
+  const banner = (container: HTMLElement) =>
+    container.querySelector('.board-orphans[aria-label="Repository"]');
+
+  it("says nothing when no loader has established the fact", () => {
+    // The state EVERY board is in today: absent must read as silence, not as
+    // health, and must not paint a banner out of nothing.
+    expect(banner(renderBoard([task()]).container)).toBeNull();
+  });
+
+  it("names the repository, GitHub's own answer, and where the repair lives", () => {
+    const { container } = renderBoard([task()], {
+      repoAccess: { status: "repo_not_found", repo: "akin-ozer/sandbox" },
+    });
+    const strip = banner(container)!;
+    expect(strip).toBeTruthy();
+    // The repo the project actually points at — the whole point is that the
+    // autocompleted name is the thing nobody looked at.
+    expect(strip.textContent).toContain("akin-ozer/sandbox");
+    // The GitHub view's own vocabulary (`connectionPill`), not a second wording.
+    expect(strip.textContent).toContain("repo not found");
+    // The consequence, in the product's voice: this is why runs fail.
+    expect(strip.textContent).toContain("clone");
+    expect(
+      strip.querySelector("a")!.getAttribute("href"),
+    ).toBe("/projects/viberr-core/github");
+  });
+
+  it("survives a filter that empties every column", () => {
+    // The fact is about the project, not about what the filters are showing —
+    // a search with no hits is exactly when someone goes looking for a reason.
+    const { container } = renderBoard([task()], {
+      search: "zzz-no-match",
+      repoAccess: { status: "repo_not_found", repo: "akin-ozer/sandbox" },
+    });
+    expect(banner(container)).toBeTruthy();
+  });
+
+  it("speaks for a credential GitHub refuses, in that credential's words", () => {
+    const { container } = renderBoard([task()], {
+      repoAccess: {
+        status: "auth_failed",
+        repo: "akin-ozer/sandbox",
+        reason: "expired",
+      },
+    });
+    expect(banner(container)!.textContent).toContain("token expired");
+  });
+
+  it("stays quiet when GitHub serves the repository", () => {
+    const { container } = renderBoard([task()], {
+      repoAccess: {
+        status: "connected",
+        repo: "akin-ozer/viberr",
+        remoteDefaultBranch: "main",
+        private: true,
+      },
+    });
+    expect(banner(container)).toBeNull();
+  });
+
+  it("stays quiet while GitHub itself is unreachable", () => {
+    // Transient, and NOT evidence about the repository. A board that cries wolf
+    // every time GitHub blips is a board people learn to scroll past.
+    const { container } = renderBoard([task()], {
+      repoAccess: { status: "network_unavailable", repo: "akin-ozer/viberr" },
+    });
+    expect(banner(container)).toBeNull();
+  });
+
+  it("stays quiet for a project that configures no repository at all", () => {
+    // Already said, one line away, by the home card's "no repository" — and it
+    // is a legitimate configuration, not a degraded one.
+    const { container } = renderBoard([task()], {
+      repoAccess: { status: "no_repo_configured" },
+    });
+    expect(banner(container)).toBeNull();
   });
 });

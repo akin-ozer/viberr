@@ -2,7 +2,8 @@
 
 > The vocabulary the code, the UI and the rulings use. Where a term has an
 > enum behind it, the enum is the truth and is named. Verified against `main`
-> @ `68b5480` (2026-09-01). Updated 2026-09-02 for ruling 121 (branch
+> @ `68b5480` (2026-09-01); the ruling-121 terms re-verified against the
+> working tree on 2026-09-03. Updated 2026-09-02 for ruling 127 (branch
 > `claude/per-user-codex-auth-difdnn`): **Backend** rewritten, **Agent account** and
 > **Credential principal** added.
 
@@ -10,7 +11,7 @@
 
 **Actor reference** — how a file names who did something: `user:<id> (Name)`, `agent:<backend>/<profileId>`, `operator`, `controller`, `system:<id>`. Codec in `app/server/files/actor-ref.server.ts`.
 
-**Agent account** — one person's connection to one backend, on Profile → Agent accounts (ruling 121). One row per `(user, backend)` in `user_backend_credentials`, replaced when they connect a different way. Three `kind`s: `login` (a hosted sign-in run by the unmodified vendor binary; the credential file lives in that person's runtime home under `runtimes/users/<userId>/`, and Viberr holds no secret at all), `api_key` and `access_token` (a pasted value, sealed, shown only as its last 4 characters). `method` records which vendor flow signed in: `claudeai | console | device`.
+**Agent account** — one person's connection to one backend, on Profile → Agent accounts (ruling 127). One row per `(user, backend)` in `user_backend_credentials`, replaced when they connect a different way. Three `kind`s: `login` (a hosted sign-in run by the unmodified vendor binary; the credential file lives in that person's runtime home under `runtimes/users/<userId>/`, and Viberr holds no secret at all), `api_key` and `access_token` (a pasted value, sealed, shown only as its last 4 characters). `method` records which vendor flow signed in: `claudeai | console | device`.
 
 **Agent profile / template** — an org-level markdown file `agents/profiles/<id>.md` describing an agent: `kind` (`operator | specialist | controller`), backends, model, effort, eligible stages, resources (skills, MCPs, KBs), persona body. Templates are **deployed** into projects.
 
@@ -20,7 +21,7 @@
 
 **Autonomy** — the operator deployment's `supervised | full` setting. Supervised operators recommend at governed boundaries; full operators act. A per-run level is clamped to the configured ceiling (ruling 67).
 
-**Backend** — `claude` (Claude Agent SDK) or `codex` (Codex SDK). Since ruling 121 a backend is not "configured" or "unavailable" for the instance: it is connected, or not, **per person**, and a run's answer is the health of its own credential principal (`userBackendHealth`: `available` plus a `verification` of `credential | file | presence | none`). The only instance-level number is `connectedUsers`, on `/resources/health`. Display label for `claude` is "Claude" (ruling 92). *(Rewritten 2026-09-02 — the old entry said "`real` means a credential is present", which was an environment probe that no longer exists.)*
+**Backend** — `claude` (Claude Agent SDK) or `codex` (Codex SDK). Since ruling 127 a backend is not "configured" or "unavailable" for the instance: it is connected, or not, **per person**, and a run's answer is the health of its own credential principal (`userBackendHealth`: `available` plus a `verification` of `credential | file | presence | none`). The only instance-level number is `connectedUsers`, on `/resources/health`. Display label for `claude` is "Claude" (ruling 92). *(Rewritten 2026-09-02 — the old entry said "`real` means a credential is present", which was an environment probe that no longer exists.)*
 
 **Boundary** — the rule on a workflow edge: `auto` (the operator may cross it), `approval` (a human approves the operator's request), `human` (a human decides). The edge into the terminal stage is always `human` and `locked`.
 
@@ -28,11 +29,13 @@
 
 **Connection** — an org-level GitHub owner + PAT (`github_connections`). Distinct from a user's stored PAT (`github_pats`) and from a project's credential binding (`project_github_credentials`).
 
-**Controller** — the single instance-level conversational agent (`kind: controller`) reachable at `/controller` and `/projects/:slug/controller`. Every tool call runs under the asking user's live authority (ruling 99). Its configuration is deployment-locked by default (ruling 108).
+**Controller** — the single instance-level conversational agent (`kind: controller`) reachable at `/controller`, `/projects/:slug/controller` and, on every signed-in surface, through the controller dock. Every tool call runs under the asking user's live authority (ruling 99). Its configuration is deployment-locked by default (ruling 108).
 
-**Credential principal** — the ONE person an agent run bills, persisted as `agent_runs.credential_user_id` (ruling 121). Task runs (operator, specialist, resume, scheduled, boot recovery, retry) use the **task owner**; controller turns use the **asker**. Resolved by `run-principal.server.ts`, which either returns the principal and their backend health or a typed refusal (`unowned`, `owner-missing`, `no-credential`) whose single human sentence comes from `principalRefusalMessage`. A refused run writes an honest `run·unavailable` error run and starts no process; the column is NULL only on such a run.
+**Controller dock** — the floating Controller button (bottom-right, every signed-in surface except the controller pages and login) and its non-modal panel, bound to the place the person is standing (ruling 121). A **conversation scope** is that binding: instance, one board, or one task; the server gathers the scope as a **context read** at the start of every turn (the task's `task.md` verbatim and bounded, or a board snapshot, or the person's projects). A user message's **surface** is the page it was sent from.
 
-**Data root** — `VIBERR_DATA_ROOT`. Holds canonical files, SQLite, run logs, KBs, skills and the per-person agent homes under `runtimes/users/` (ruling 121). One app process per data root, enforced by `state/writer.lock`.
+**Credential principal** — the ONE person an agent run bills, persisted as `agent_runs.credential_user_id` (ruling 127). Task runs (operator, specialist, resume, scheduled, boot recovery, retry) use the **task owner**; controller turns use the **asker**. Resolved by `run-principal.server.ts`, which either returns the principal and their backend health or a typed refusal (`unowned`, `owner-missing`, `no-credential`) whose single human sentence comes from `principalRefusalMessage`. A refused run writes an honest `run·unavailable` error run and starts no process; the column is NULL only on such a run.
+
+**Data root** — `VIBERR_DATA_ROOT`. Holds canonical files, SQLite, run logs, KBs, skills and the per-person agent homes under `runtimes/users/` (ruling 127). One app process per data root, enforced by `state/writer.lock`.
 
 **Decision packet** — the one open structured question on a task (`## Packet` in `task.md`): `type` `input | blocked`, observations, and options whose `kind` is one of `PACKET_OPTION_KINDS` (`accept_completion`, `request_edit`, `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`, `archive_task`, `discard_branch`, `resolve_remote_collision`, `custom`). Resolution dispatches on the kind, never the title (ruling 7).
 
@@ -60,7 +63,7 @@
 
 **Org role** — `users.role`: `admin | member`. Governs instance surfaces (org settings, insights, audit export). Distinct from project roles.
 
-**Owner** — the one human on a task (`ownerUserId`), seated at creation as the creator (ruling 121). Contributor or above may take or release; the owner governs any open decision on their own task, including accepting completion (FR37, rulings 22), and every agent run on the task bills the owner's own agent accounts, so an unowned task cannot run agents at all.
+**Owner** — the one human on a task (`ownerUserId`), seated at creation as the creator (ruling 127). Contributor or above may take or release; the owner governs any open decision on their own task, including accepting completion (FR37, rulings 22), and every agent run on the task bills the owner's own agent accounts, so an unowned task cannot run agents at all.
 
 **PR state** — the `task.md` `pr.state` cache: `review` (open or draft), `merged`, `closed` (closed unmerged), `accepted` (a full-autonomy operator accepted; merge pending for a human). Sync pill precedence: merged > behind > synced.
 

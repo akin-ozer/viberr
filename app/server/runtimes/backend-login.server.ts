@@ -21,7 +21,7 @@ import { filteredSpawnEnv, type RealBackend } from "./runtime-registry.server";
 import { ensureUserBackendHome } from "./user-homes.server";
 
 /**
- * The hosted sign-in driver (ruling 121).
+ * The hosted sign-in driver (ruling 127).
  *
  * A person signs Claude or Codex in by driving the vendor's OWN unmodified
  * binary from this server: `claude auth login --claudeai|--console` and
@@ -107,7 +107,7 @@ const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
 
 /**
  * Which sign-in flows each vendor actually offers, and the ONE home of that
- * fact (ruling 121).
+ * fact (ruling 127).
  *
  * `startBackendLogin` validates against it, and Profile → Agent accounts builds
  * its "Sign in with …" buttons from the same table
@@ -370,7 +370,7 @@ function missingBinaryError(
 /**
  * The absolute path to ONE vendor's binary.
  *
- * Per backend on purpose (ruling 121): a host where only Anthropic's optional
+ * Per backend on purpose (ruling 127): a host where only Anthropic's optional
  * package installed must still be able to sign Claude in, and the person doing
  * it must not be told about a Codex package they were not asking for. Nothing
  * here ever falls back to a PATH lookup, which would run whatever a shell
@@ -396,7 +396,7 @@ export function resolveBackendBinary(
  * One vendor's binary when this deployment installed that vendor's optional
  * package, and `undefined` when it did not.
  *
- * The ONE home of that tolerance (ruling 121). A disconnect, a paste that
+ * The ONE home of that tolerance (ruling 127). A disconnect, a paste that
  * replaces a sign-in and an account removal all stay correct without a binary:
  * the local half — the credential file and the row — is what makes the account
  * unusable from this server, and each of those paths says in the log that the

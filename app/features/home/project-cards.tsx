@@ -5,6 +5,8 @@ import { Avatar } from "~/ui/avatar";
 import { useRelativeTime } from "~/ui/use-relative-time";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
+import { connectionPill } from "~/features/github/github-pills";
+import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 import type { HomeMember, HomeProjectCard } from "./home-query.server";
 
 /**
@@ -160,6 +162,53 @@ function ProjectStats({ p }: { p: HomeProjectCard }) {
   );
 }
 
+/**
+ * U33-2 — the repository line, and the one honest thing to say when GitHub
+ * refuses the repository behind it.
+ *
+ * The card used to render `owner/name` with no more doubt than a working repo
+ * gets, so a project pointing at a repository that does not exist (the
+ * autocompleted `owner/sandbox` nobody ever created) read as healthy from Home
+ * while every agent run in it failed its clone.
+ *
+ * The words are `connectionPill`'s — the same vocabulary the GitHub page's
+ * Connection row speaks — and visibility is derived from that shared pill's
+ * kind rather than a second list of statuses: `risk`/`blocked` are the arms
+ * where a repository IS configured and GitHub will not serve it.
+ * `no_repo_configured` stays quiet because the line beside it already says "no
+ * repository", and `network_unavailable` stays quiet because a card that
+ * flashes an alarm whenever GitHub blips teaches people to ignore it. The same
+ * two lines live in `features/board/board-page.tsx`; their home is beside
+ * `connectionPill`, which is another cluster's file this pass.
+ *
+ * The chip carries a `title` rather than a link: the whole card is already one
+ * anchor to the board, and an anchor inside an anchor is invalid. The board
+ * itself carries the linked version of this fact.
+ */
+function RepoLine({
+  repo,
+  access,
+}: {
+  repo: string | null;
+  access?: RepoAccessResult;
+}) {
+  const pill = access ? connectionPill(access) : null;
+  const degraded = pill && (pill.kind === "risk" || pill.kind === "blocked");
+  return (
+    <span className="repo">
+      <Icon name="github" />
+      {repo ?? "no repository"}
+      {degraded && (
+        <span title="GitHub won't serve this repository, so agent runs here fail their clone. The project's GitHub page has the detail and the repair.">
+          <Pill kind={pill.kind} sm>
+            {pill.label}
+          </Pill>
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function MemberStack({ members }: { members: HomeMember[] }) {
   return (
     <span className="stack" aria-label={members.map((m) => m.name).join(", ")}>
@@ -175,11 +224,16 @@ export function ProjectCard({
   starred,
   onStar,
   showDesc,
+  repoAccess,
 }: {
   p: HomeProjectCard;
   starred: boolean;
   onStar: (slug: string) => void;
   showDesc?: boolean;
+  /** U33-2: GitHub's answer for `p.repo`, when a caller has one. Optional and
+   *  absent by default — the home query does not carry this fact yet, and Home
+   *  must never probe GitHub once per card to get it. */
+  repoAccess?: RepoAccessResult;
 }) {
   return (
     <article className="pj-card" data-screen-label={"Project card · " + p.name}>
@@ -200,10 +254,7 @@ export function ProjectCard({
               {p.name}
               <span className="key">{p.key}</span>
             </span>
-            <span className="repo">
-              <Icon name="github" />
-              {p.repo ?? "no repository"}
-            </span>
+            <RepoLine repo={p.repo} access={repoAccess} />
           </span>
         </div>
         {showDesc && <p className="pj-desc">{p.desc}</p>}
@@ -231,10 +282,13 @@ export function ProjectRow({
   p,
   starred,
   onStar,
+  repoAccess,
 }: {
   p: HomeProjectCard;
   starred: boolean;
   onStar: (slug: string) => void;
+  /** U33-2: see `ProjectCard` — the list form carries the same fact. */
+  repoAccess?: RepoAccessResult;
 }) {
   return (
     <article className="pj-row" data-screen-label={"Project row · " + p.name}>
@@ -254,10 +308,7 @@ export function ProjectRow({
             {p.name}
             <span className="key">{p.key}</span>
           </span>
-          <span className="repo">
-            <Icon name="github" />
-            {p.repo ?? "no repository"}
-          </span>
+          <RepoLine repo={p.repo} access={repoAccess} />
         </span>
         <StageMeter stages={p.stages} dist={p.dist} />
         <ProjectStats p={p} />

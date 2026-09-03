@@ -35,7 +35,7 @@ import { healthSnapshot } from "~/server/ops/health-snapshot.server";
  *  - `disk.status` low/critical → degraded. Canonical state is files; a full
  *    volume is the corruption scenario this product cannot afford.
  *  - `backends.<b>.connectedUsers` is a COUNT, never a verdict, and zero is
- *    **NOT** degraded. Ruling 121 made agent backends per-person: there is no
+ *    **NOT** degraded. Ruling 127 made agent backends per-person: there is no
  *    instance credential to probe, so the only true instance-level fact is how
  *    many people have connected each backend (a sealed key, or a vendor
  *    sign-in whose credential file is on this server — still never a

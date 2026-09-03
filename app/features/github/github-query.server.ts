@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { formatRelative } from "~/shared/dates/format";
 import { deriveSyncState } from "~/server/github/branch-sync.server";
 import { githubWebHost } from "~/server/github/github-client.server";
+import { recordRepoAccess } from "~/server/github/repo-health.server";
 import {
   checkRepoAccess,
   type RepoAccessResult,
@@ -160,6 +161,11 @@ async function checkRepoAccessCached(
   if (hit && now - hit.at < REPO_ACCESS_TTL_MS) return hit.result;
   const result = await checkRepoAccess(db, projectSlug);
   byDb.set(projectSlug, { result, at: now });
+  // U33-2: this page is one of the two places that already knows the answer, so
+  // it is where the board and the home card get theirs from. The in-memory cache
+  // above is per process and per 30s; the row is what survives a restart and
+  // what a surface with no business calling GitHub reads.
+  recordRepoAccess(db, projectSlug, result);
   return result;
 }
 

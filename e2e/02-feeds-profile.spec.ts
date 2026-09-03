@@ -118,7 +118,7 @@ test("profile theme switch persists after reload", async ({ page }) => {
 });
 
 /**
- * Ruling 121: Profile → Agent accounts. Every agent run bills ONE person's
+ * Ruling 127: Profile → Agent accounts. Every agent run bills ONE person's
  * provider account, so a fresh instance must show the signed-in admin exactly
  * where to connect Claude and Codex, and must say honestly that neither is
  * connected yet.

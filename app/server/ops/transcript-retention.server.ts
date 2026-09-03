@@ -24,7 +24,7 @@ import { listUserRuntimeRoots } from "~/server/runtimes/user-homes.server";
  *    deleted by nothing except the destructive `npm run seed -- --reset`.
  *  - `runtimes/users/<userId>/claude-home/projects/<cwd-as-dashes>/<sid>.jsonl`
  *    and `runtimes/users/<userId>/codex-home/sessions/YYYY/MM/DD/rollout-…jsonl`
- *    — the per-person provider session homes (ruling 121), one rollout per run,
+ *    — the per-person provider session homes (ruling 127), one rollout per run,
  *    forever.
  *
  * The asymmetry this fixes is the dishonest part: `run_log_lines` is deleted at
@@ -37,7 +37,7 @@ import { listUserRuntimeRoots } from "~/server/runtimes/user-homes.server";
  * ## Rules
  *
  * - **Only under the data root, only under `runtimes/users/`.** The homes are
- *   app-owned per-person directories (`listUserRuntimeRoots`, ruling 121) and
+ *   app-owned per-person directories (`listUserRuntimeRoots`, ruling 127) and
  *   nothing else is walked — no host `~/.claude`, no personal `~/.codex`, no
  *   directory whose name is not a path-safe user id.
  * - **Only `*.jsonl` files.** `codex-home/auth.json` and
@@ -213,7 +213,7 @@ export function pruneRuntimeTranscripts(
 
   if (sessionDays > 0) {
     const cutoff = now - sessionDays * 86_400_000;
-    // Ruling 121: one pair of session trees PER PERSON, and only the ones the
+    // Ruling 127: one pair of session trees PER PERSON, and only the ones the
     // app itself created. `listUserRuntimeRoots` skips any directory whose name
     // is not a path-safe user id, so nothing a sweep did not put there can be
     // walked into.

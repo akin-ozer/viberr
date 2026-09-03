@@ -8,7 +8,7 @@ Rewritten 2026-09-01 against `main` @ `68b5480` and re-verified 2026-09-02 again
 listed in [`../validation/2026-09-01-doc-validation.md`](../validation/2026-09-01-doc-validation.md).
 Every environment variable named here is documented in
 [`configuration.md`](configuration.md).
-Updated 2026-09-02 for ruling 121 (branch `claude/per-user-codex-auth-difdnn`): the health
+Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): the health
 `backends` row, the whole "Agent runtimes" section, the session-home retention row and the
 backup note were rewritten for per-person agent accounts.
 
@@ -45,7 +45,7 @@ Key order is part of the contract:
 | `projections` | `{ projects, tasks }` row counts |
 | `watcher`, `kbWatcher` | store and knowledge-base watchers alive; a watcher error clears the handle, so `false` is a real dead watcher, not "never started" |
 | `lock` | `{ pid, hostname, startedAt }` of the single-writer holder, `null` if none |
-| `backends` | `{ claude: { connectedUsers }, codex: { connectedUsers } }` → how many PEOPLE have connected each backend (ruling 121), recounted on every call. `0` is a normal reading, not a fault, and never degrades health; it is not a validity check, and it does not answer "can this task run", which is a fact about the task owner. *(Corrected 2026-09-02 — this was `real` \| `unavailable` from an env probe that no longer exists.)* |
+| `backends` | `{ claude: { connectedUsers }, codex: { connectedUsers } }` → how many PEOPLE have connected each backend (ruling 127), recounted on every call. `0` is a normal reading, not a fault, and never degrades health; it is not a validity check, and it does not answer "can this task run", which is a fact about the task owner. *(Corrected 2026-09-02 — this was `real` \| `unavailable` from an env probe that no longer exists.)* |
 | `browser` | `{ status: "ready" }` or `{ status: "unavailable", reason }` for the governed browser |
 | `disk` | `{ freeBytes, totalBytes, usedPercent, status: ok\|low\|critical, lowThresholdBytes, criticalThresholdBytes }` or `null` when neither source could measure the root (not degraded); 5 s cache. The reading comes from POSIX `df -kP` (fragment-size aware), with `statfs(2)` only as the fallback — Node exposes `bsize` alone, and on Docker Desktop's virtiofs `f_bsize` ≠ `f_frsize`, which reported a near-full 229 GB volume as 62 TB with 1 TB free (F32-1, pass 32) |
 | `maintenance` | `{ intervalMs, diskCheckIntervalMs, lastPassAt, lastPassReason: boot\|interval\|disk-pressure, lastFreedBytes, scheduled }` |
@@ -152,7 +152,7 @@ a readiness downgrade (tolerant parsing):
 
 ## Agent runtimes
 
-- **Whose account a run uses is the first question (ruling 121).** There is no
+- **Whose account a run uses is the first question (ruling 127).** There is no
   instance-level "the backend is configured". Every run bills ONE person, persisted on
   the run row as `agent_runs.credential_user_id`: the **task owner** for anything on a
   task (operator, specialist, resume, scheduled, boot recovery, retry) and the **asker**
@@ -205,7 +205,7 @@ a readiness downgrade (tolerant parsing):
   `access_token` carry a sealed `secret_box` you must never select into a terminal. A row
   is necessary but not sufficient for a `login`: the file above must also exist.
 
-- **Removing an org account retires its agent accounts** (ruling 121): the vendor logout
+- **Removing an org account retires its agent accounts** (ruling 127): the vendor logout
   runs, the sign-in file is deleted from that person's runtime home, and the credential
   rows go, before the `users` row cascades. The audit detail on `org.user.removed` lists
   `backendsRetired`. Nothing else on any path removes that file, and a removed person can
@@ -228,7 +228,7 @@ a readiness downgrade (tolerant parsing):
   is why `task.agent.replied` and `runtime.operator.plan_executed` audit rows are exempt
   from retention.
 
-*(Rewritten 2026-09-02 for ruling 121. The old section listed "seven credential paths"
+*(Rewritten 2026-09-02 for ruling 127. The old section listed "seven credential paths"
 across `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` / `VIBERR_CLAUDE_USE_CLI_AUTH` and
 `CODEX_ACCESS_TOKEN` / `CODEX_API_KEY` / `OPENAI_API_KEY` / `VIBERR_CODEX_USE_CLI_AUTH`,
 and told an operator to `docker compose cp ~/.codex/auth.json` into a shared
@@ -269,7 +269,7 @@ is reported on `/resources/health` under `maintenance`.
 | `audit_events` | deleted after **90 days**, **exported first** (below), except the two recovery-marker actions | no |
 | `notifications` | trimmed to the **newest 500 per user** | no |
 | run transcripts `runtimes/<backend>/*.jsonl` | mtime older than **30 days** | `VIBERR_TRANSCRIPT_RETENTION_DAYS` (0 = forever) |
-| per-person provider session homes `runtimes/users/*/claude-home/projects/**/*.jsonl` and `runtimes/users/*/codex-home/sessions/**/*.jsonl` | mtime older than **30 days**. `*.jsonl` ONLY: `auth.json`, `.credentials.json` and `.claude.json` are the vendor-held sign-ins and are never touched, so retention can never sign anybody out (ruling 121) | `VIBERR_SESSION_HOME_RETENTION_DAYS` (0 = forever) |
+| per-person provider session homes `runtimes/users/*/claude-home/projects/**/*.jsonl` and `runtimes/users/*/codex-home/sessions/**/*.jsonl` | mtime older than **30 days**. `*.jsonl` ONLY: `auth.json`, `.credentials.json` and `.claude.json` are the vendor-held sign-ins and are never touched, so retention can never sign anybody out (ruling 127) | `VIBERR_SESSION_HOME_RETENTION_DAYS` (0 = forever) |
 | task `workspace/` directories | removed for tasks in the terminal stage, only when no run is queued or running | no |
 
 **Two audit actions are exempt from the 90-day delete** because boot recovery uses them
@@ -349,13 +349,13 @@ stop it first. Do **not** wipe `state/` while the app runs.
 INTO` from a read-only connection plus the store tree — `projects/`, `agents/`, `kb/`,
 `skills/` and `audit-exports/` — and a manifest) **without** taking the lock, so it works
 on a live instance. `runtimes/` is excluded unless you pass `--include-runtimes`, and
-since ruling 121 that directory holds every person's live vendor sign-in
+since ruling 127 that directory holds every person's live vendor sign-in
 (`runtimes/users/<userId>/…`), so an artefact taken with it is a secret. `npm run restore -- --from <artefact>` takes the
 lock, needs `--force` on an occupied root and moves displaced data to
 `<dataRoot>.replaced-<ts>/`; `--file <store path>` restores one canonical file without
 touching the database. Back up `VIBERR_SECRET_ENCRYPTION_KEY` separately: without it every
 sealed PAT, MCP credential and **personal backend API key** (`user_backend_credentials`,
-ruling 121) in the artefact is unreadable, and restoring the database without the key
+ruling 127) in the artefact is unreadable, and restoring the database without the key
 leaves every person who pasted a key having to connect that backend again. Rotating is
 safe: `npm run keys -- reseal` covers that store like the others. A raw copy of the live
 `projection.sqlite` misses committed rows still in the WAL; use the CLI. Details and the

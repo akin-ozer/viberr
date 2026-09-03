@@ -13,7 +13,7 @@ import type { LoginState } from "~/server/runtimes/backend-login.server";
 import type { LoginMethod } from "~/server/runtimes/backend-credentials.server";
 
 /**
- * Profile → Agent accounts (ruling 121).
+ * Profile → Agent accounts (ruling 127).
  *
  * Every agent run bills ONE person's provider account: a run on a task belongs
  * to the task owner, a controller turn to the asker. So "is Claude configured"

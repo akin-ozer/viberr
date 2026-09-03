@@ -37,7 +37,7 @@ export interface MentionSuggestion {
   operator?: boolean;
   /** Avatar initials for user rows. */
   initials?: string;
-  /** Ruling 121: a caveat about what this handle would actually DO, appended
+  /** Ruling 127: a caveat about what this handle would actually DO, appended
    *  to the sub-line. Today only the `@claude` / `@codex` backend handles carry
    *  one: mentioning them starts a run on the TASK OWNER's account, so a row
    *  whose backend the owner has not connected promises a run that refuses. */
@@ -48,7 +48,7 @@ export interface MentionSuggestion {
  * Flatten the loader's mentionables into one rankable list: agents, then
  * reserved, then users (the group precedence the goal specifies).
  *
- * `runPrincipal` (ruling 121) is the task owner whose accounts a mention-driven
+ * `runPrincipal` (ruling 127) is the task owner whose accounts a mention-driven
  * run would bill. The rows stay OFFERED when the owner cannot run a backend —
  * a comment posts either way, and hiding the handle would leave the human
  * guessing why `@codex` does nothing — but they carry the reason, in the same

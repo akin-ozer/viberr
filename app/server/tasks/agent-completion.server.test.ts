@@ -192,7 +192,7 @@ beforeEach(async () => {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
   installFakeRuntime();
-  // Ruling 121: an agent run bills the TASK OWNER's own accounts, so a run
+  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
   // only reaches an adapter when the owner has that backend connected. Arda
   // owns the tasks in this file; connecting both backends for him is the
   // ordinary state of somebody using the product.
@@ -1177,7 +1177,7 @@ describe("unavailable backend through the specialist start path", () => {
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    // Ruling 121: the refusal is about the TASK OWNER's account — arda owns
+    // Ruling 127: the refusal is about the TASK OWNER's account — arda owns
     // VIB-1 here, and taking his accounts away is what makes the dispatch
     // refuse. BOTH go, so the packet has no real "retry on the other backend"
     // to offer either (asserted below).
@@ -1213,7 +1213,7 @@ describe("unavailable backend through the specialist start path", () => {
     const failureEvent = parsed.timeline.find(
       (e) => e.type === "blocked" && blockedByRefusal(e.text),
     )!;
-    // Ruling 121: the packet body carries the resolver's OWN sentence — the one
+    // Ruling 127: the packet body carries the resolver's OWN sentence — the one
     // the run's error line carries — naming the owner and where THEY connect
     // the backend. It never names an environment variable, and it never tells
     // the reader to "configure a credential" on an instance that has none.
@@ -1234,7 +1234,7 @@ describe("unavailable backend through the specialist start path", () => {
   });
 
   it("offers 'retry on the other backend' only when the OWNER has that one connected", async () => {
-    // Ruling 121: the retry run would bill the same owner. Offering it when
+    // Ruling 127: the retry run would bill the same owner. Offering it when
     // they cannot run it promises a one-click fix that fails identically —
     // the worst kind of packet option, because it looks like the way out.
     const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;

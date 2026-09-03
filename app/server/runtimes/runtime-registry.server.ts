@@ -12,7 +12,7 @@ import {
  * Runtime registry: constructs the two provider adapters and hands one back
  * for a requested backend.
  *
- * Ruling 121 took the CREDENTIAL out of this module entirely. There used to be
+ * Ruling 127 took the CREDENTIAL out of this module entirely. There used to be
  * an availability probe here (`isBackendAvailable`, `backendCredentialHealth`
  * and their CLI-auth diagnostics) that answered "is this backend configured?"
  * by reading the deployment's own environment. That question no longer has an
@@ -50,7 +50,7 @@ const PRIVATE_RUNTIME_ENV_RE =
   /^(?:DATABASE_URL|REDIS_URL|SSH_AUTH_SOCK|GPG_AGENT_INFO)$/i;
 
 /**
- * Ruling 121: the two vendor HOME variables, stripped for the same reason the
+ * Ruling 127: the two vendor HOME variables, stripped for the same reason the
  * credentials are.
  *
  * Neither name is credential-shaped, so {@link CREDENTIAL_ENV_RE} lets both
@@ -77,7 +77,7 @@ const RUNTIME_HOME_ENV_RE = /^(?:CLAUDE_CONFIG_DIR|CODEX_HOME)$/;
  * survive so stdio MCP servers (`npx …`) and the CLIs' own machinery keep
  * working; nothing that looks like a secret does.
  *
- * Ruling 121: this base carries NO provider credential and NO home — the
+ * Ruling 127: this base carries NO provider credential and NO home — the
  * credential names go by {@link CREDENTIAL_ENV_RE}, the two home names by
  * {@link RUNTIME_HOME_ENV_RE}. A run adds back
  * exactly one principal's `CLAUDE_CONFIG_DIR`/`CODEX_HOME` (and, for a pasted
@@ -119,7 +119,7 @@ export interface AdapterDeps {
  * principal's home and, when they pasted one, their key — is merged onto it in
  * `startRun` from `runCredentialFor`, because it differs per run and this
  * factory runs once per process. Building a credential in here is what made
- * one deployment-wide account pay for everybody's runs (ruling 121).
+ * one deployment-wide account pay for everybody's runs (ruling 127).
  */
 export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
   const claudeDeps: NonNullable<Parameters<typeof createClaudeAdapter>[0]> = {
@@ -139,7 +139,7 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
 /**
  * The adapter for a backend.
  *
- * A plain lookup since ruling 121: whether a run may proceed is decided
+ * A plain lookup since ruling 127: whether a run may proceed is decided
  * upstream, by resolving its credential principal — `startRun` calls
  * `runCredentialFor` and takes the refusal path before it ever asks for an
  * adapter. The name stays because every caller reads as "pick the runtime for

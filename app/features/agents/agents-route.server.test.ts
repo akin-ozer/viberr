@@ -37,7 +37,7 @@ interface SeededActors {
 }
 let ids: SeededActors;
 
-/** Ruling 121: what the loader answers about backends. `backendHealth` is the
+/** Ruling 127: what the loader answers about backends. `backendHealth` is the
  *  ONE answer: the VIEWER's own connection (which the roster badge and the
  *  profile editor's advisory note read) plus the project-scoped count the
  *  roster line states. Authoring a profile is never gated on it, so there is no
@@ -318,13 +318,13 @@ describe("loader", () => {
   });
 
   /**
-   * Ruling 121 — this page used to ask the deployment "is Codex configured?".
+   * Ruling 127 — this page used to ask the deployment "is Codex configured?".
    * There is no such fact: a run bills a PERSON. The loader answers two
    * person-shaped questions instead, and the second one is scoped to THIS
    * project's members, because a member of another project connecting Codex
    * changes nothing about what can run here.
    */
-  describe("backend connections (ruling 121)", () => {
+  describe("backend connections (ruling 127)", () => {
     const memberCount = async (): Promise<number> => {
       const { listProjectMembers } = await import(
         "~/server/projections/board-query.server"
@@ -350,7 +350,7 @@ describe("loader", () => {
           membersTotal: total,
         },
       });
-      // Ruling 121: the page answers backends ONCE. A fresh instance where
+      // Ruling 127: the page answers backends ONCE. A fresh instance where
       // nobody has connected anything must still be able to author profiles
       // (runs bill the task owner, not the author), so the loader ships no
       // second boolean pair for a form gate to read.

@@ -16,7 +16,7 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import type { BackendLoginPollData } from "./resources.backend-login";
 
 /**
- * GET /resources/backend-login (ruling 121).
+ * GET /resources/backend-login (ruling 127).
  *
  * The Profile card polls this while a vendor sign-in runs on the server, so the
  * two things it must never get wrong are WHOSE session it answers with (the

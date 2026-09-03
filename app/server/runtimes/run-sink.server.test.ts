@@ -25,7 +25,7 @@ import { listRunLines, rawLogPath, upsertRun } from "./run-store.server";
  * environment landed the live key verbatim in a member-visible console, in the
  * `{ } raw` toggle, and in the persisted `.jsonl`.
  *
- * Ruling 121 moved that one credential out of this process's environment: it is
+ * Ruling 127 moved that one credential out of this process's environment: it is
  * the run PRINCIPAL's own, sealed in `user_backend_credentials` and opened per
  * run, so the env sweep alone can no longer see it. `createRunSink(db, spec,
  * { secrets })` is how the value reaches the redactor, and it is now the
@@ -45,7 +45,7 @@ const SAVED = {
 const CLAUDE_KEY = "sk-ant-api03-VERYSECRETVALUE0123456789abcdef";
 const CODEX_TOKEN = "codex-access-token-0123456789abcdef";
 /**
- * The ruling-121 shape: a credential that exists ONLY in a sealed row and in
+ * The ruling-127 shape: a credential that exists ONLY in a sealed row and in
  * the one run's spawn env, never in this process's environment. Deliberately a
  * ChatGPT-workspace ACCESS TOKEN rather than an `sk-…` key: the token patterns
  * would have caught an `sk-` prefix on sight, and then this file would be
@@ -117,7 +117,7 @@ function sinkFor(runId: string, threadId = "primary") {
 }
 
 /** The same row + sink, but carrying the per-run secrets `runCredentialFor`
- *  resolved for the run's principal (ruling 121). */
+ *  resolved for the run's principal (ruling 127). */
 function sinkWithSecrets(runId: string, secrets: string[], threadId = "primary") {
   upsertRun(store.db, {
     id: runId,
@@ -168,7 +168,7 @@ describe("createLineRedactor", () => {
   });
 
   /**
-   * Ruling 121: the run's own secret. A personal API key is sealed in
+   * Ruling 127: the run's own secret. A personal API key is sealed in
    * `user_backend_credentials` and decrypted for exactly one run, so it is
    * never in `process.env` — the env sweep above cannot know it, and without
    * this seam the first `env` a model ran would print one person's key into a
@@ -235,7 +235,7 @@ describe("the sink redacts before it persists", () => {
   });
 
   it("scrubs the PRINCIPAL's own credential, which lives only in the sealed row", () => {
-    // Ruling 121's leak path: the run bills one person, its child env carries
+    // Ruling 127's leak path: the run bills one person, its child env carries
     // that person's credential, and the console is visible to every project
     // member.
     const sink = sinkWithSecrets("run_personal", [PERSONAL_TOKEN]);

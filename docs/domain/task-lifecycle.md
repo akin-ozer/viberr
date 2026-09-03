@@ -5,7 +5,7 @@
 > `app/server/tasks/task-actions.server.ts`, `app/schemas/task-file.schema.ts`,
 > `app/shared/workflow/*`, `app/shared/rbac.ts`. File fields are in
 > [file-formats.md](../architecture/file-formats.md). Verified against `main`
-> @ `68b5480` (2026-09-01). Updated 2026-09-02 for ruling 121 (branch
+> @ `68b5480` (2026-09-01). Updated 2026-09-02 for ruling 127 (branch
 > `claude/per-user-codex-auth-difdnn`): §3 (creation seats the creator as owner)
 > and §7 (whose accounts a task's agent runs bill, and what an unowned task
 > refuses).
@@ -71,7 +71,7 @@ the goal (or the placeholder "Goal to be refined at the triage quality gate."),
 optional `priority | labels | dueDate`, optional `goalRef`, then auto-invokes the
 operator with the `create` trigger.
 
-**Creation seats the creator as owner** (ruling 121). `ownerUserId` is the human actor,
+**Creation seats the creator as owner** (ruling 127). `ownerUserId` is the human actor,
 and the file is written with the SAME `assign` timeline event a take through `setOwner`
 writes (one event builder, so the timeline reads identically however the seat was
 filled), with the audit's `task.created` details carrying `ownerUserId`. The reason is
@@ -162,7 +162,7 @@ declaration that names nothing on this board is treated as unrestricted.
   takeover of another owner needs the acceptance tier; `release-any-ownership` is
   admin). Ownership changes are `assign` timeline events; admin releases are audited.
   Removing a member releases their tasks.
-- **The owner is who a run bills** (ruling 121). Every task run — operator, specialist,
+- **The owner is who a run bills** (ruling 127). Every task run — operator, specialist,
   resume, scheduled, boot recovery, retry — resolves `resolveTaskRunPrincipal` first and
   spawns with the owner's own backend credential; the run row records them in
   `credential_user_id`. Three consequences a person can see:
@@ -184,7 +184,12 @@ declaration that names nothing on this board is treated as unrestricted.
     takes the continuity-reset path with a `continuity` timeline event
     ([agents-and-runtime.md §3.6](agents-and-runtime.md#36-resume-continuity-export)).
 - `appendComment` (any member) writes a `comment` event, applies mention routing and
-  fans out `mention` notifications. `@operator` queues an operator turn carrying the
+  fans out `mention` notifications. **Mentions stay inside the project** (pass 33, F33-9):
+  the picker offers project members only, and a handle that resolves to exactly one real
+  user who is NOT a member notifies nobody and is reported to the author as a visible
+  non-delivery, beside the ambiguity note it already had. Before that, tagging a
+  non-member wrote them an inbox row naming the project, the task and the comment — and
+  the link then served them the members-only 404, which is ruling 25 read backwards. `@operator` queues an operator turn carrying the
   comment as its steer; `@<agent name>`, `@claude` or `@codex` resumes that agent's
   session (auto-engaging a deployed but unengaged agent, ruling 98) and the reply
   posts back as a comment tagging the human. Mentions use one grammar shared by the
@@ -201,7 +206,14 @@ otherwise. At most one engagement delivers; it owns the workspace, branch and PR
 A supporting engagement snapshotted with `verdictCapable: true` (an explicit
 `report-validation-verdict: direct` grant at engage time) is a **required reviewer**.
 `release-agent` removes a supporting engagement; a delivery hand-off routes through
-`assignSpecialist`.
+`assignSpecialist`. **A closed task's seats are frozen** (pass 33, F33-10): `removeReviewer`
+refuses on a terminal or archived task and both panels withhold the ✕. Ruling 118 froze the
+owner seat there; the engagement seat earns it harder, because `validation` is derived from
+the required-reviewer set — releasing the approving reviewer of a merged, accepted task
+re-derived `healthy` → `changed` and left the board, the hero and the review queue calling a
+closed task never-validated while its own timeline said otherwise. Unlike the owner seat,
+this freeze has no admin escape: an admin reassigning an owner is bookkeeping, an admin
+releasing a reviewer restates history.
 
 A delivering run's reconcile mints a **work revision** (`{id, headSha, treeSha,
 branch, kind: delivered}`); a new head with a different tree mints a new revision and
@@ -260,7 +272,12 @@ Every writer to the terminal stage goes through one contract:
 4. **Verdict gate**: every required reviewer must have approved the current revision
    and none may request changes (ruling 20). Force-accept bypasses this and is
    audited `task.acceptance.forced` with what it bypassed, records `acceptance: forced`
-   and enumerates the stages it skips.
+   and enumerates the stages it skips. Force never bypasses two facts: a closed unmerged
+   PR (ruling 37) and, since ruling 123, an **archived** task — restore it first. Both are
+   `forceIrreducibleRefusal`, and on an archived task the affordance is withdrawn rather
+   than disabled. The offer itself appears only once the task has something to accept — a
+   branch, a PR or a delivered revision — or is demonstrably wedged by an open `blocked`
+   packet (ruling 124).
 5. **PR head containment**: the PR head must contain the delivered commit. A head
    ahead of the reviewed revision is accepted with a disclosed divergence ("N commits
    added since review", ruling 42); a diverged head refuses. Force never bypasses

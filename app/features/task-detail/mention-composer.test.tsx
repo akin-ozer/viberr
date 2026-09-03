@@ -57,7 +57,7 @@ interface ComposerOptions {
   /** Replace the stub action's reply (default `{ ok: true }`). */
   action?: () => ComposerActionReply | Promise<ComposerActionReply>;
   onPosted?: (text: string) => void;
-  /** Ruling 121: the task's run principal, which the `@claude` / `@codex` rows
+  /** Ruling 127: the task's run principal, which the `@claude` / `@codex` rows
    *  answer from. Undefined (the default) claims nothing either way. */
   runPrincipal?: TaskRunPrincipalView | null;
 }
@@ -144,7 +144,7 @@ function readText(editor: LexicalEditor): string {
 const listbox = () => document.querySelector('[role="listbox"]');
 
 /**
- * Ruling 121 — `@claude` / `@codex` name a RUNTIME, and a mention that engages
+ * Ruling 127 — `@claude` / `@codex` name a RUNTIME, and a mention that engages
  * one starts a run on the TASK OWNER's account. The menu therefore cannot go
  * on offering the handle as if the instance held a credential: the row says
  * whose account it would bill and whether that account can pay, in the same
@@ -153,7 +153,7 @@ const listbox = () => document.querySelector('[role="listbox"]');
  * nothing) — B-AG2 already established that a suggestion must not promise a
  * target the resolver refuses, and this is the honest half of that promise.
  */
-describe("ruling 121: the backend handles name whose account they would bill", () => {
+describe("ruling 127: the backend handles name whose account they would bill", () => {
   const rowFor = (handle: string) =>
     Array.from(document.querySelectorAll('[role="option"]')).find((o) =>
       o.querySelector(".ri-sub")?.textContent?.startsWith(`@${handle} `),
@@ -415,7 +415,11 @@ describe("Ask operator prefill", () => {
  * rendered directly below it.
  */
 describe("Timeline empty state (UI-40)", () => {
-  function renderTimeline(events: TimelineEventRender[], hasMore = false) {
+  function renderTimeline(
+    events: TimelineEventRender[],
+    hasMore = false,
+    runLive = false,
+  ) {
     const Stub = createRoutesStub([
       {
         path: "/t",
@@ -429,6 +433,7 @@ describe("Timeline empty state (UI-40)", () => {
               tlDefault="all"
               ask={0}
               mentionables={MENTIONABLES}
+              runLive={runLive}
             />
           </ToastProvider>
         ),
@@ -464,6 +469,42 @@ describe("Timeline empty state (UI-40)", () => {
     expect(getByText(/No comments in the loaded history/)).toBeTruthy();
     // The contradiction the old copy sat next to.
     expect(getByText(/Show older events/)).toBeTruthy();
+  });
+
+  /**
+   * U33-1 — the SECOND way this empty state lied, on the freshest task there
+   * is. Zero events is the honest input, so the UI-40 fix above (which keys off
+   * `events.length`) cannot help: seconds after creation the Live-run strip on
+   * this same page reads "Preparing workspace · Cloning akin-ozer/viberr · 13%"
+   * while the timeline underneath declared the loop had never started. Ruling
+   * 87(b) exists so a healthy pre-run phase is distinguishable from a wedged
+   * one; the copy undid half of it on the same screen.
+   */
+  it("U33-1: a LIVE run means the loop HAS started, not that it never did", () => {
+    const { getByText, queryByText } = renderTimeline([], false, true);
+    expect(queryByText(/hasn't started its operator loop/)).toBeNull();
+    expect(
+      getByText(
+        /The loop has started\. Its first events land here as the live run above reports in\./,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("U33-1: with NO live run the original 'hasn't started' copy is the honest one", () => {
+    const { getByText, queryByText } = renderTimeline([], false, false);
+    expect(queryByText(/The loop has started/)).toBeNull();
+    expect(
+      getByText(/No activity yet\. This task hasn't started its operator loop\./),
+    ).toBeTruthy();
+  });
+
+  it("U33-1 leaves the two FILTERED empty states alone (UI-40)", () => {
+    // A live run says nothing about why the active tab matched nothing — the
+    // filter copy stays exactly as UI-40 wrote it.
+    const { getByText, queryByText } = renderTimeline([typedEvent], true, true);
+    fireEvent.click(getByText("Comments"));
+    expect(getByText(/No comments in the loaded history/)).toBeTruthy();
+    expect(queryByText(/The loop has started/)).toBeNull();
   });
 });
 

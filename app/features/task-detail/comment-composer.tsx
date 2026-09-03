@@ -62,7 +62,7 @@ export interface CommentComposerHandle {
 
 interface CommentComposerProps {
   mentionables: Mentionables;
-  /** Ruling 121: the task's run principal (the owner whose accounts an
+  /** Ruling 127: the task's run principal (the owner whose accounts an
    *  `@claude` / `@codex` mention would bill), so the menu rows can name a
    *  backend that would refuse. Absent on renders with no task behind them. */
   runPrincipal?: TaskRunPrincipalView | null;

@@ -626,3 +626,323 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     expect(resumed).toContain("[done]");
   });
 });
+
+// ------------------------------------------------------------ ruling 121
+
+/** Build the toolkit AS one user with a task anchor and call one tool. */
+async function callAnchored(
+  userId: string,
+  toolName: string,
+  args: Record<string, JsonValue> = {},
+  taskKey: string | null = "VIB-142",
+): Promise<string> {
+  const { buildControllerToolkit } = await import("./controller-toolkit.server");
+  const { findUserById } = await import("~/server/auth/user-store.server");
+  const user = findUserById(app.db, userId)!;
+  const toolkit = buildControllerToolkit({
+    db: app.db,
+    ctx: { dataRoot: app.dataRoot },
+    user: { id: user.id, email: user.email, name: user.name },
+    projectSlug: SLUG,
+    taskKey,
+  });
+  const tool = toolkit.tools.find((t) => t.name === toolName);
+  expect(tool, `tool ${toolName} must exist`).toBeTruthy();
+  // SAFETY: every toolkit handler is wrapped by `run`, which always returns
+  // the `textResult` shape: { content: [{ type: "text", text }] }.
+  const result = (await tool!.handler(args, {})) as {
+    content: { text: string }[];
+  };
+  return result.content[0]!.text;
+}
+
+describe("task anchoring (ruling 121)", () => {
+  it("defaults every task tool's key to the anchored task, and asks for one when there is none", async () => {
+    expect(await call(ids.maintainer, "get_task", {})).toContain(
+      "[error] Name the task (this conversation is not anchored to one).",
+    );
+    const anchored = await callAnchored(ids.maintainer, "get_task", {});
+    expect(anchored).toContain('"key": "VIB-142"');
+    // An explicit key still wins over the anchor.
+    const explicit = await callAnchored(ids.maintainer, "get_task", { taskKey: "VIB-148" });
+    expect(explicit).toContain('"key": "VIB-148"');
+    expect(explicit).not.toContain('"key": "VIB-142"');
+  });
+
+  it("whoami reports the anchored task beside the project binding", async () => {
+    const text = await callAnchored(ids.contributor, "whoami", {});
+    expect(text).toContain(`"conversationProject": "${SLUG}"`);
+    expect(text).toContain('"conversationTask": "VIB-142"');
+    expect(await call(ids.contributor, "whoami", {})).toContain('"conversationTask": null');
+  });
+
+  it("update_task edits the goal under update-goal and the metadata under edit-task-meta, each on its own", async () => {
+    const { getTaskSummary } = await import("~/server/projections/task-query.server");
+    // Nothing to do is an error, not a silent no-op.
+    expect(await callAnchored(ids.maintainer, "update_task", {}, "VIB-148")).toContain(
+      "[error] Pass a goal and/or at least one metadata field",
+    );
+    // A viewer edits nothing.
+    expect(
+      await callAnchored(ids.viewer, "update_task", { labels: ["x"] }, "VIB-148"),
+    ).toMatch(/^\[denied\]/);
+    // A contributor holds edit-task-meta but not update-goal: the metadata
+    // lands, the goal refusal is reported beside it, nothing is hidden.
+    const partial = await callAnchored(
+      ids.contributor,
+      "update_task",
+      { goal: "A goal the contributor may not set.", labels: ["triaged"], priority: "high" },
+      "VIB-148",
+    );
+    expect(partial).toContain("[done] VIB-148 updated: priority, labels.");
+    expect(partial).toContain("Not applied: goal:");
+    let after = getTaskSummary(app.db, SLUG, "VIB-148")!;
+    expect(after.labels).toEqual(["triaged"]);
+    expect(after.priority).toBe("high");
+    expect(after.goal).not.toContain("the contributor may not set");
+    // A maintainer sets both; metadata is a full replace of what is passed.
+    const full = await callAnchored(
+      ids.maintainer,
+      "update_task",
+      { goal: "Deliver the widget with a passing e2e run.", labels: [], dueDate: "2026-12-31" },
+      "VIB-148",
+    );
+    expect(full).toBe("[done] VIB-148 updated: goal, labels, due date.");
+    after = getTaskSummary(app.db, SLUG, "VIB-148")!;
+    expect(after.goal).toBe("Deliver the widget with a passing e2e run.");
+    expect(after.labels).toEqual([]);
+    expect(after.dueDate).toBe("2026-12-31");
+    // Clearing the date is "" and a bad value throws before any write.
+    expect(
+      await callAnchored(ids.maintainer, "update_task", { dueDate: "" }, "VIB-148"),
+    ).toBe("[done] VIB-148 updated: due date.");
+    expect(getTaskSummary(app.db, SLUG, "VIB-148")!.dueDate).toBeNull();
+    expect(
+      await callAnchored(ids.maintainer, "update_task", { dueDate: "not-a-date" }, "VIB-148"),
+    ).toMatch(/^\[error\]/);
+  });
+
+  /**
+   * Review finding 4: the anchor belongs to ITS OWN project. A call that
+   * overrides projectSlug and omits taskKey used to inherit the anchored key
+   * and act on a same-named task in the other project — a write nobody named.
+   */
+  it("refuses to carry the anchored task key into another project", async () => {
+    const text = await callAnchored(
+      ids.orgAdmin,
+      "get_task",
+      { projectSlug: "deploy-pipeline" },
+      "VIB-142",
+    );
+    expect(text).toContain("[error] This conversation is anchored to VIB-142 in viberr-core");
+    expect(text).toContain("name the task in deploy-pipeline");
+    // Naming the task explicitly still works across projects.
+    const named = await callAnchored(
+      ids.orgAdmin,
+      "get_task",
+      { projectSlug: "deploy-pipeline", taskKey: "DEP-2" },
+      "VIB-142",
+    );
+    expect(named).not.toContain("[error] This conversation is anchored");
+  });
+
+  /**
+   * Review finding 14: both writers short-circuit when the value is already
+   * what was asked for — no file write, no timeline note, no audit row — and
+   * the tool reported "[done] updated" anyway.
+   */
+  it("says nothing was written when the value was already set", async () => {
+    const { getTaskSummary } = await import("~/server/projections/task-query.server");
+    await callAnchored(ids.maintainer, "update_task", { priority: "high" }, "VIB-151");
+    expect(getTaskSummary(app.db, SLUG, "VIB-151")!.priority).toBe("high");
+
+    const again = await callAnchored(
+      ids.maintainer,
+      "update_task",
+      { priority: "high" },
+      "VIB-151",
+    );
+    expect(again).toBe(
+      "[noop] VIB-151: priority already had that value; nothing was written.",
+    );
+
+    // A mixed call reports each half honestly.
+    const mixed = await callAnchored(
+      ids.maintainer,
+      "update_task",
+      { priority: "high", labels: ["fresh-label"] },
+      "VIB-151",
+    );
+    expect(mixed).toContain("[done] VIB-151 updated: labels.");
+    expect(mixed).toContain("Already set, nothing written: priority.");
+  });
+
+  it("update_task is a write tool, so the always-human and no-delete invariants still hold", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+    });
+    const names = toolkit.tools.map((t) => t.name);
+    expect(names).toContain("update_task");
+    expect(names.some((n) => /delete|remove_task|merge|accept|force|resolve_packet/.test(n))).toBe(false);
+  });
+});
+
+// ------------------------------------------ global agent template grants
+
+/**
+ * F33-8 / F33-7 (pass 33, found live): the template tool's resource grants.
+ *
+ * A grant is resolved at RUN time by the store key — the skill folder name, the
+ * MCP registry name (`byName.get(name)` drops an unmatched one), the KB store
+ * directory — but the controller's reads hand back catalog IDS, and every grant
+ * it made was stored verbatim: three red missing chips in the editor, a roster
+ * row counting "3 context resources", and a run that mounted none of them.
+ * And because `save_global_agent` rewrote all three lists on every call while
+ * `list_global_agents` showed none of them, a summary-only edit silently
+ * emptied the grants the template held.
+ */
+describe("save_global_agent: grants are store keys, and an omitted list is left alone", () => {
+  const AGENT_ID = "grant-probe-writer";
+  const catalog = {
+    kb: { id: "", key: "" },
+    skill: { id: "", key: "" },
+    mcp: { id: "", key: "" },
+  };
+
+  /** One list tool's answer, decoded. */
+  async function listJson<T>(toolName: string): Promise<T[]> {
+    const text = await call(ids.orgAdmin, toolName);
+    // SAFETY: every list tool answers through the toolkit's `json()`, i.e.
+    // `JSON.stringify` over an array of the object literal its `.map` builds;
+    // the shapes named here are fields of that literal.
+    return JSON.parse(text) as T[];
+  }
+
+  interface CatalogRow {
+    grantKey: string;
+    id: string;
+    name: string;
+  }
+
+  /** The named template as `list_global_agents` reports it (undefined = absent). */
+  async function listedAgent() {
+    const rows = await listJson<{
+      id: string;
+      summary: string;
+      skills: string[];
+      mcps: string[];
+      kbs: string[];
+    }>("list_global_agents");
+    return rows.find((r) => r.id === AGENT_ID);
+  }
+
+  beforeAll(async () => {
+    await call(ids.orgAdmin, "save_knowledge_base", { name: "Grant Probe Handbook" });
+    await call(ids.orgAdmin, "save_skill", {
+      name: "grant-probe-expertise",
+      summary: "A probe skill the grant test grants.",
+      body: "# Skill\n\nBody.",
+    });
+    await call(ids.orgAdmin, "save_mcp_server", {
+      name: "grant-probe-server",
+      transport: "HTTP",
+      target: "https://mcp.example.test/v1",
+    });
+    const kbs = await listJson<CatalogRow>("list_knowledge_bases");
+    const skills = await listJson<CatalogRow>("list_skills");
+    const mcps = await listJson<CatalogRow>("list_mcp_servers");
+    const kb = kbs.find((k) => k.name === "Grant Probe Handbook")!;
+    const skill = skills.find((s) => s.name === "grant-probe-expertise")!;
+    const mcp = mcps.find((m) => m.name === "grant-probe-server")!;
+    catalog.kb = { id: kb.id, key: kb.grantKey };
+    catalog.skill = { id: skill.id, key: skill.grantKey };
+    catalog.mcp = { id: mcp.id, key: mcp.grantKey };
+  });
+
+  it("each resource list carries the grantKey the runtime mounts by, next to the id", () => {
+    // The KB's key is its FOLDER, never the `kb_…` handle the editor tools take.
+    expect(catalog.kb.key).toBe("grant-probe-handbook");
+    expect(catalog.kb.key).not.toBe(catalog.kb.id);
+    expect(catalog.skill.key).toBe("grant-probe-expertise");
+    expect(catalog.skill.key).not.toBe(catalog.skill.id);
+    expect(catalog.mcp.key).toBe("grant-probe-server");
+  });
+
+  it("granting by the id a read tool returned stores the KEY, not the id", async () => {
+    const created = await call(ids.orgAdmin, "save_global_agent", {
+      name: "Grant Probe Writer",
+      backend: "claude",
+      summary: "Writes docs. Never touches app code.",
+      persona: "You are the Grant Probe Writer.",
+      stages: ["impl"],
+      skills: [catalog.skill.id],
+      mcps: [catalog.mcp.id],
+      kbs: [catalog.kb.id],
+    });
+    expect(created).toContain("[done]");
+    // What landed is what a run resolves by — the fixture that shipped this
+    // finding held `disk:…`, `mcp_…` and `kb_…` here and mounted nothing.
+    expect(await listedAgent()).toMatchObject({
+      skills: ["grant-probe-expertise"],
+      mcps: ["grant-probe-server"],
+      kbs: ["grant-probe-handbook"],
+    });
+  });
+
+  it("a grant nothing in the store answers to is refused by name, and nothing is written", async () => {
+    const refused = await call(ids.orgAdmin, "save_global_agent", {
+      id: AGENT_ID,
+      name: "Grant Probe Writer",
+      backend: "claude",
+      summary: "Writes docs. Never touches app code.",
+      stages: ["impl"],
+      skills: ["ghost-skill"],
+    });
+    expect(refused).toContain("[error]");
+    expect(refused).toContain('skill "ghost-skill"');
+    expect(refused).toContain("folder name");
+    // The refusal is total: the grants it already holds are untouched.
+    expect(await listedAgent()).toMatchObject({
+      skills: ["grant-probe-expertise"],
+      mcps: ["grant-probe-server"],
+      kbs: ["grant-probe-handbook"],
+    });
+  });
+
+  it("an edit that names no grant list keeps all three; an empty list clears just that one", async () => {
+    const edited = await call(ids.orgAdmin, "save_global_agent", {
+      id: AGENT_ID,
+      name: "Grant Probe Writer",
+      backend: "claude",
+      summary: "Writes and edits documentation files only.",
+      stages: ["impl"],
+    });
+    expect(edited).toContain("[done]");
+    expect(await listedAgent()).toMatchObject({
+      summary: "Writes and edits documentation files only.",
+      skills: ["grant-probe-expertise"],
+      mcps: ["grant-probe-server"],
+      kbs: ["grant-probe-handbook"],
+    });
+
+    const cleared = await call(ids.orgAdmin, "save_global_agent", {
+      id: AGENT_ID,
+      name: "Grant Probe Writer",
+      backend: "claude",
+      summary: "Writes and edits documentation files only.",
+      stages: ["impl"],
+      mcps: [],
+    });
+    expect(cleared).toContain("[done]");
+    expect(await listedAgent()).toMatchObject({
+      skills: ["grant-probe-expertise"],
+      mcps: [],
+      kbs: ["grant-probe-handbook"],
+    });
+  });
+});

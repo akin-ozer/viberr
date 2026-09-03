@@ -13,7 +13,7 @@ import { getEnv } from "../config/env.server";
  *                                          served member-only, cited as evidence)
  *   agents/profiles/<id>.md               (org-level agent profile templates)
  *   runtimes/                             (NDJSON run logs — Phase 8)
- *   runtimes/users/<userId>/claude-home   (ruling 121 — that person's own
+ *   runtimes/users/<userId>/claude-home   (ruling 127 — that person's own
  *   runtimes/users/<userId>/codex-home     vendor sign-in + provider sessions)
  *   kb/<dir>/                             (knowledge-base folders — Phase 9B;
  *                                          UI renders them as store://kb/<dir>/)
@@ -30,7 +30,7 @@ export const DATA_ROOT_SUBDIRS = [
   "agents",
   "agents/profiles",
   "runtimes",
-  // Ruling 121: the per-person runtime homes. The deployment-wide
+  // Ruling 127: the per-person runtime homes. The deployment-wide
   // `runtimes/claude-home` / `runtimes/codex-home` are gone — a credential in a
   // shared home is a credential every run bills to whoever owns it. Each
   // person's `runtimes/users/<userId>/{claude-home,codex-home}` is created

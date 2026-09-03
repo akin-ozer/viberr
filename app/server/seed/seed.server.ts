@@ -97,7 +97,7 @@ const DERIVED_TABLES = [
  * Wipe the store back to a clean sheet: projects/, agents/profiles, the raw
  * runtime .jsonl transcript truth, and every derived table. Scoped to the
  * per-backend RUN-LOG dirs (`runtimes/<backend>/<id>.jsonl`) and NEVER the
- * per-person runtime homes that also live under `runtimes/` — ruling 121 put
+ * per-person runtime homes that also live under `runtimes/` — ruling 127 put
  * every vendor sign-in there (`users/<id>/codex-home/auth.json`,
  * `users/<id>/claude-home/.credentials.json`), so deleting them would sign
  * every person on the instance out of their own accounts (P11-04, when the

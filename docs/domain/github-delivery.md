@@ -5,7 +5,7 @@
 > `app/server/github/*`, `app/server/secrets/*`, `app/server/org/connections.server.ts`,
 > `app/server/tasks/task-actions.server.ts` (delivery and acceptance),
 > `app/features/github/*`. Verified against `main` @ `68b5480` (2026-09-01).
-> Updated 2026-09-02 for ruling 121 (branch `claude/per-user-codex-auth-difdnn`):
+> Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`):
 > `SEALED_STORES` gained a fifth column, each person's agent-backend API keys.
 
 ## 1. Credentials
@@ -52,7 +52,7 @@ sealed under retired keys open; `getPatToken` re-seals them lazily; `npm run key
 status` counts what still opens only under a retired key and `npm run keys -- reseal
 [--dry-run]` finishes the job (takes the writer lock). `SEALED_STORES` enumerates
 every sealed column: PAT tokens, MCP credentials, OAuth client secrets, the S3
-secret, and each person's agent-backend API keys (ruling 121).
+secret, and each person's agent-backend API keys (ruling 127).
 
 **The token never reaches argv or a remote URL.** Git runs with a temporary
 `GIT_ASKPASS` helper fed from env (`createGitHubAskpassEnv`), `credential.helper`
@@ -86,9 +86,24 @@ Only github.com is supported; there is no GitHub Enterprise host configuration.
 
 ## 3. The delivery pipeline
 
-Branch name: `taskBranchName(key) = key.toLowerCase()` (`VIB-142` → `vib-142`).
-`ensureTaskBranch` (idempotent ref create from the default branch, audit
-`github.branch.created`) runs as a best-effort pre-dispatch hook.
+Branch name (ruling 122, 2026-09-03): **allocated once, not derived.** The canonical
+`taskBranchName(key) = key.toLowerCase()` (`VIB-142` → `vib-142`) is taken when it is
+free; when it is not, the task gets `<key>-<4 hex>` instead. "Not free" means a remote ref
+exists **or any pull request was ever opened on that name** — the PR half is the
+load-bearing one, because task keys restart at 1 on a new data root (ruling 34), so
+`vib-1` on GitHub can still carry a previous instance's merged PR while no ref exists at
+all. That was the state that used to stop the operator with a branch-collision packet for a
+delivery that then succeeded on the first press.
+
+`allocateTaskBranchName` picks the name; `ensureTaskBranch` persists it into `task.md`
+`branch:` (the field every reader already prefers over the derived name) and creates the
+ref from the default branch (idempotent, audit `github.branch.created`). A task that
+already carries a `branch:` keeps it verbatim — nothing in flight is renamed.
+`ensureTaskBranchBestEffort` is the shared pre-dispatch hook, called from **both** dispatch
+paths: the operator's (`operatorDispatchAgent`) and a human's (`dispatchAgentRun`), the
+second added by ruling 122(c) because a human-dispatched delivering run used to reach the
+agent prompt with no branch recorded and fall back to the canonical key. Both are
+best-effort: a task that cannot reach GitHub still runs.
 
 `performDelivery` is the shared core behind the operator's `deliver_for_review`
 (capability `deliver-review-pr`, audit `github.delivery.operator`), an applied

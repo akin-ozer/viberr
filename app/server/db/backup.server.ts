@@ -25,7 +25,7 @@ import { openDatabase } from "./sqlite.server";
  *
  * `state/projection.sqlite` is not a cache. It is the ONLY home of users,
  * better-auth credentials and sessions, AES-sealed PATs and personal
- * agent-backend API keys (ruling 121), audit events and notifications — none of it rebuildable from the canonical markdown. The
+ * agent-backend API keys (ruling 127), audit events and notifications — none of it rebuildable from the canonical markdown. The
  * product's own answer to FR33's 90-day audit hard-delete is "snapshot the
  * data root on a schedule", and to a bad hand-edit it is "restore the backup".
  * Both rested on a paragraph of prose: there was no backup command, and the
@@ -84,7 +84,7 @@ export const BACKED_UP_STORE_DIRS = [
 ] as const;
 
 /**
- * `runtimes/` holds LIVE agent credentials — since ruling 121 each person's own
+ * `runtimes/` holds LIVE agent credentials — since ruling 127 each person's own
  * (`users/<userId>/codex-home/auth.json`) — and run transcripts. Opt in with `includeRuntimes` when you want them; the default
  * is out, and the manifest says so rather than leaving an operator to guess
  * whether their artefact contains a credential.
@@ -293,7 +293,7 @@ function contains(hasProjection: boolean, dirs: string[]): string[] {
   const list = [
     ...(hasProjection
       ? [
-          "state/projection.sqlite — users, better-auth credentials and sessions, AES-sealed GitHub PATs, MCP credentials and personal agent-backend API keys (ruling 121), audit events, notifications, and every projection (a consistent point-in-time copy, WAL included)",
+          "state/projection.sqlite — users, better-auth credentials and sessions, AES-sealed GitHub PATs, MCP credentials and personal agent-backend API keys (ruling 127), audit events, notifications, and every projection (a consistent point-in-time copy, WAL included)",
         ]
       : []),
     ...dirs.map((dir) => `${dir}/ — the canonical files, copied verbatim`),

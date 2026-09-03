@@ -98,7 +98,7 @@ ENV VIBERR_BUILD_SHA=$VIBERR_BUILD_SHA
 ENV VIBERR_BUILD_TIME=$VIBERR_BUILD_TIME
 ENV NODE_ENV=production
 # Canonical file store + SQLite projections live here; compose mounts a
-# host directory (or named volume) at this path. Ruling 121: each person's own
+# host directory (or named volume) at this path. Ruling 127: each person's own
 # agent-backend sign-in and provider sessions live under
 # /data/runtimes/users/<userId>/{claude-home,codex-home}, created 0o700 on
 # demand, so they survive container restarts and a `docker compose up --build`.
@@ -138,7 +138,7 @@ USER node
 
 EXPOSE 3000
 
-# No ENTRYPOINT (ruling 121). There used to be one — `scripts/docker-entrypoint.sh`,
+# No ENTRYPOINT (ruling 127). There used to be one — `scripts/docker-entrypoint.sh`,
 # which seeded a Codex CLI login from a read-only host mount into a shared
 # $CODEX_HOME before exec'ing the CMD. Both the mount and the shared home are
 # gone: a credential seeded by the image is a credential every person's runs

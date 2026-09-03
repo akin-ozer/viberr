@@ -83,7 +83,7 @@ export const SEALED_STORES = [
     nameColumn: "bucket",
     idColumn: "id",
   },
-  // Ruling 121: the API keys and workspace access tokens people paste on
+  // Ruling 127: the API keys and workspace access tokens people paste on
   // Profile → Agent accounts. `login` rows carry no box (the vendor binary
   // holds that credential in the person's runtime home), which is why the box
   // column is nullable and the scans below filter on `IS NOT NULL`. The row's

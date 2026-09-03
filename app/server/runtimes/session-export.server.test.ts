@@ -18,7 +18,7 @@ import { userBackendHome } from "./user-homes.server";
  */
 
 let tmp: string;
-/** Ruling 121: transcripts live in the credential PRINCIPAL's own runtime home,
+/** Ruling 127: transcripts live in the credential PRINCIPAL's own runtime home,
  *  so every lookup names the person whose run wrote it. Two people here, so a
  *  probe that ignored the principal would be visible. */
 const OWNER = "u_owner";
@@ -108,7 +108,7 @@ describe("locateTranscript (claude)", () => {
   });
 
   it("never reaches into another person's home, and has none for a null principal", () => {
-    // Ruling 121: a session id names a conversation inside ONE person's
+    // Ruling 127: a session id names a conversation inside ONE person's
     // account. Searching every home for it would hand somebody else's
     // transcript to whoever could name the id — and a run refused before it
     // started (`credential_user_id` null) wrote no transcript at all.
@@ -237,7 +237,7 @@ describe("probeSessionContinuity", () => {
   });
 
   it("an owner change reads as MISSING — the resume never enters the old owner's account", () => {
-    // Ruling 121, stated as behaviour: a resumed task run bills the owner AS OF
+    // Ruling 127, stated as behaviour: a resumed task run bills the owner AS OF
     // NOW, and the probe looks in THAT person's home. So a task whose seat
     // changed hands since the original run reports the session gone and takes
     // the continuity-reset path (one fresh run, re-anchored on task.md, with

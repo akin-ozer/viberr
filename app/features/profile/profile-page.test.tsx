@@ -28,7 +28,7 @@ const BASE: ProfileData = {
   memberships: [{ slug: "viberr-core", name: "Viberr Core", role: "maintainer" }],
   accessRole: "maintainer",
   githubConfigured: true,
-  // Ruling 121: the viewer's own agent accounts, neither connected.
+  // Ruling 127: the viewer's own agent accounts, neither connected.
   backends: [
     {
       backend: "claude",
@@ -116,7 +116,7 @@ function renderProfile(data: ProfileData = BASE) {
 }
 
 /** The GitHub identity panel alone. Several of its assertions name classes the
- *  Agent accounts panel (ruling 121) also uses, and a page-wide query would
+ *  Agent accounts panel (ruling 127) also uses, and a page-wide query would
  *  read that panel's state as this one's. */
 function githubPanel(getByText: (text: string) => HTMLElement): HTMLElement {
   return getByText("GitHub identity").closest(".panel")!;
@@ -228,7 +228,7 @@ describe("ProfilePage", () => {
     expect(getByText("Policy → Human access")).toBeTruthy();
   });
 
-  it("mounts Agent accounts in the right column ABOVE GitHub identity (ruling 121)", () => {
+  it("mounts Agent accounts in the right column ABOVE GitHub identity (ruling 127)", () => {
     const { container, getByText, getAllByText } = renderProfile();
     expect(getByText("Agent accounts")).toBeTruthy();
     // Both backends read "Not connected" on a fresh account.
@@ -246,7 +246,7 @@ describe("ProfilePage", () => {
     const { getByText } = renderProfile();
     expect(getByText("GitHub identity")).toBeTruthy();
     expect(getByText("not connected")).toBeTruthy();
-    // Ruling 121: `.cred-warn` is no longer unique to this panel — the Agent
+    // Ruling 127: `.cred-warn` is no longer unique to this panel — the Agent
     // accounts cards above it use the same class for their unconnected state —
     // so these assertions are scoped to the GitHub panel rather than the page.
     const github = githubPanel(getByText);

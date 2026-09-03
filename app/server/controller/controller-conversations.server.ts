@@ -6,7 +6,7 @@ import { publishSseEvent } from "~/server/events/sse-broker.server";
 import { newId } from "~/shared/ids/new-id.server";
 
 /**
- * Controller conversation store (ruling 99).
+ * Controller conversation store (ruling 99; scope extended by ruling 121).
  *
  * App-owned SQLite, the notifications/sessions family (file-formats §5): a
  * transcript is single-writer app collaboration state, not board truth, so it
@@ -14,6 +14,13 @@ import { newId } from "~/shared/ids/new-id.server";
  * controller turn (tool calls, token usage, raw stream) lives on that turn's
  * `agent_runs` row + NDJSON exactly like every other run; these tables hold
  * what a human reads back — the messages.
+ *
+ * SCOPE (ruling 121): a conversation is bound, at creation and forever, to
+ * one of three places — the instance (`projectSlug` and `taskKey` both null),
+ * one board (`projectSlug` alone) or one task (`projectSlug` + `taskKey`).
+ * The binding is what the toolkit defaults to and what the server reads into
+ * every turn (controller-context.server.ts); the dock lists one scope at a
+ * time. A task binding without a project is refused here and by the CHECK.
  *
  * VISIBILITY: a conversation belongs to the user who started it — the one
  * person whose authority every action inside it is evaluated against — and is
@@ -28,6 +35,8 @@ export interface ControllerConversation {
   userLabel: string;
   /** Null = instance scope; a slug binds board-scope context. */
   projectSlug: string | null;
+  /** Ruling 121: with `projectSlug`, anchors the conversation to ONE task. */
+  taskKey: string | null;
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -42,6 +51,9 @@ export interface ControllerMessage {
   userId: string | null;
   text: string;
   runId: string | null;
+  /** Ruling 121: the page a USER message was sent from (pathname + query);
+   *  null on controller rows and on messages that predate the dock. */
+  surface: string | null;
   createdAt: string;
 }
 
@@ -52,6 +64,7 @@ const conversationRowSchema = z
     user_id: z.string(),
     user_label: z.string(),
     project_slug: z.string().nullable(),
+    task_key: z.string().nullable(),
     title: z.string(),
     created_at: z.string(),
     updated_at: z.string(),
@@ -63,6 +76,7 @@ const conversationRowSchema = z
       userId: r.user_id,
       userLabel: r.user_label,
       projectSlug: r.project_slug,
+      taskKey: r.task_key,
       title: r.title,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
@@ -80,6 +94,7 @@ const messageRowSchema = z
     user_id: z.string().nullable(),
     text: z.string(),
     run_id: z.string().nullable(),
+    surface: z.string().nullable(),
     created_at: z.string(),
   })
   .transform(
@@ -91,6 +106,7 @@ const messageRowSchema = z
       userId: r.user_id,
       text: r.text,
       runId: r.run_id,
+      surface: r.surface,
       createdAt: r.created_at,
     }),
   );
@@ -159,23 +175,47 @@ export function requireConversation(
   return conversation;
 }
 
+/** The three shapes a conversation can be bound to (ruling 121). */
+export type ConversationScope = "instance" | "board" | "task";
+
+export function conversationScopeOf(binding: {
+  projectSlug: string | null;
+  taskKey: string | null;
+}): ConversationScope {
+  if (binding.taskKey) return "task";
+  if (binding.projectSlug) return "board";
+  return "instance";
+}
+
 export interface CreateConversationInput {
   userId: string;
   userLabel: string;
   projectSlug?: string | null;
+  /** Ruling 121: anchors the conversation to one task of `projectSlug`. */
+  taskKey?: string | null;
 }
 
 export function createConversation(
   db: DatabaseSync,
   input: CreateConversationInput,
 ): ControllerConversation {
+  const projectSlug = input.projectSlug?.trim() || null;
+  const taskKey = input.taskKey?.trim() || null;
+  if (taskKey && !projectSlug) {
+    // THIS is the enforcement, not the schema: a fresh root also carries the
+    // CHECK, but a root upgraded by the additive backstop (sqlite.server.ts,
+    // review G1) cannot — ALTER TABLE adds columns, never constraints.
+    throw AppError.validation(
+      "A conversation anchored to a task must name the task's project.",
+    );
+  }
   const now = new Date().toISOString();
   const id = newId("cnv");
   db.prepare(
     `INSERT INTO controller_conversations
-       (id, user_id, user_label, project_slug, title, created_at, updated_at, last_message_at)
-     VALUES (?, ?, ?, ?, '', ?, ?, NULL)`,
-  ).run(id, input.userId, input.userLabel, input.projectSlug ?? null, now, now);
+       (id, user_id, user_label, project_slug, task_key, title, created_at, updated_at, last_message_at)
+     VALUES (?, ?, ?, ?, ?, '', ?, ?, NULL)`,
+  ).run(id, input.userId, input.userLabel, projectSlug, taskKey, now, now);
   // SAFETY: the row was just inserted under this id.
   return getConversation(db, id)!;
 }
@@ -184,8 +224,11 @@ export interface ListConversationsInput {
   /** Owner filter (the normal list). */
   userId?: string;
   /** Scope filter: undefined = all scopes; null = instance-only; slug = that
-   *  project's conversations. */
+   *  project's conversations (board AND task ones, unless `taskKey` narrows). */
   projectSlug?: string | null;
+  /** Ruling 121: undefined = any binding under `projectSlug`; null = the
+   *  board's own threads only; a key = that task's threads only. */
+  taskKey?: string | null;
   limit?: number;
 }
 
@@ -206,12 +249,25 @@ export function listConversations(
       params.push(input.projectSlug);
     }
   }
+  if (input.taskKey !== undefined) {
+    if (input.taskKey === null) where.push("task_key IS NULL");
+    else {
+      where.push("task_key = ?");
+      params.push(input.taskKey);
+    }
+  }
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
   const rows = db
     .prepare(
+      // Ruling 121 hangs "the newest thread of this scope" on rows[0], and
+      // `created_at` has millisecond resolution: two threads made in the same
+      // millisecond tie, and the sort index then breaks the tie by insertion
+      // order ASCENDING — returning the OLDER one first. `rowid DESC` is the
+      // repo's own tie-break (operator-actions.server.ts:1627) and makes the
+      // promise a property of the store rather than of the clock.
       `SELECT * FROM controller_conversations
        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-       ORDER BY COALESCE(last_message_at, created_at) DESC
+       ORDER BY COALESCE(last_message_at, created_at) DESC, rowid DESC
        LIMIT ${limit}`,
     )
     .all(...params);
@@ -245,12 +301,31 @@ export function recentMessages(
   return rows.map((row) => messageRowSchema.parse(row)).reverse();
 }
 
+/** The longest surface string a message keeps (a pathname plus a query). */
+export const MESSAGE_SURFACE_MAX_CHARS = 400;
+
+/** Ruling 121: a surface is an in-app path (`/…`) and nothing else — a stray
+ *  absolute URL, a protocol-relative one or control characters never reach
+ *  the row or the prompt. */
+export function normalizeSurface(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return null;
+  for (const ch of trimmed) {
+    const code = ch.charCodeAt(0);
+    if (code < 32 || code === 127) return null;
+  }
+  return trimmed.slice(0, MESSAGE_SURFACE_MAX_CHARS);
+}
+
 export interface AppendMessageInput {
   conversationId: string;
   author: "user" | "controller";
   userId?: string | null;
   text: string;
   runId?: string | null;
+  /** Stored on USER rows only; a controller row never carries one. */
+  surface?: string | null;
 }
 
 /** Append one message; bumps the conversation clock and derives a title from
@@ -279,10 +354,12 @@ export function appendMessage(
         )
         .get(input.conversationId),
     );
+  const surface =
+    input.author === "user" ? normalizeSurface(input.surface) : null;
   db.prepare(
     `INSERT INTO controller_messages
-       (id, conversation_id, seq, author, user_id, text, run_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, conversation_id, seq, author, user_id, text, run_id, surface, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.conversationId,
@@ -291,6 +368,7 @@ export function appendMessage(
     input.userId ?? null,
     input.text,
     input.runId ?? null,
+    surface,
     now,
   );
   const title =

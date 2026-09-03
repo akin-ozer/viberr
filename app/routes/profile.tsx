@@ -63,7 +63,7 @@ const overlayReturnState = z
   .catch({});
 
 /**
- * Ruling 121 form fields. Decoded, never coerced: `backend` names a directory
+ * Ruling 127 form fields. Decoded, never coerced: `backend` names a directory
  * segment and a spawn target, and `method` / `kind` decide which vendor flow
  * runs, so a value outside the vocabulary must be a refusal with a sentence,
  * not a silent default.
@@ -146,7 +146,7 @@ export async function action({ request }: Route.ActionArgs) {
         const { toast } = disconnectGithubIdentity(db, actor);
         return { ok: true as const, intent, toast };
       }
-      // Ruling 121: the five Agent-accounts intents. None of them toasts a
+      // Ruling 127: the five Agent-accounts intents. None of them toasts a
       // success here except the two that ARE complete when they return; a
       // sign-in is only connected once the vendor's own binary says so, which
       // the panel learns from /resources/backend-login.
@@ -254,7 +254,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   const appearanceFetcher = useFetcher<ProfileActionData>();
   const passwordFetcher = useFetcher<ProfileActionData>();
   const githubFetcher = useFetcher<ProfileActionData>();
-  // Ruling 121: the Agent-accounts panel's own action fetcher. Its POLLING is a
+  // Ruling 127: the Agent-accounts panel's own action fetcher. Its POLLING is a
   // separate per-card fetcher inside the panel (`/resources/backend-login`) —
   // a `fetcher.load` on this one would overwrite the intent RESULT the toast
   // and the inline error settle on.

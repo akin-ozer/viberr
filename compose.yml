@@ -21,7 +21,7 @@ services:
       # equivalents (VIBERR_DATA_ROOT=./data, NODE_ENV=development).
       NODE_ENV: production
       VIBERR_DATA_ROOT: /data
-      # No agent-backend credential is set here (ruling 121). Claude and Codex
+      # No agent-backend credential is set here (ruling 127). Claude and Codex
       # are connected PER PERSON in the app, on Profile → Agent accounts: a
       # hosted sign-in through the bundled vendor binary, or a pasted API key /
       # ChatGPT workspace access token sealed in the database. Each person's
@@ -49,7 +49,7 @@ services:
     volumes:
       # Everything stateful lives under the data root: canonical project/task
       # markdown, SQLite projections + app DB, run logs, KBs, and each person's
-      # agent-backend runtime home (runtimes/users/<userId>/…, ruling 121).
+      # agent-backend runtime home (runtimes/users/<userId>/…, ruling 127).
       # Back this up. Wiping it signs everyone out of Claude and Codex; they
       # reconnect on Profile → Agent accounts.
       - ./docker-data:/data

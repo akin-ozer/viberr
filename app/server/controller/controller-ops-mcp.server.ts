@@ -114,7 +114,7 @@ function notVisibleRun(runId: string): string {
 }
 
 /**
- * What `instance_health` says about one backend (ruling 121).
+ * What `instance_health` says about one backend (ruling 127).
  *
  * The org-admin-only DETAIL arm is gone, and with it the whole reason it
  * existed: `backendCredentialHealth` used to explain an unusable credential by
@@ -217,7 +217,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         // free bytes, build identity), plus availability booleans and three
         // integers about run load that carry no name, project or run in them.
         //
-        // Ruling 121 removed the org-admin-only credential DETAIL arm: it
+        // Ruling 127 removed the org-admin-only credential DETAIL arm: it
         // existed to withhold a deployment config path, and no such path
         // exists any more. The per-backend reading below is now two integers
         // and one boolean about the ASKER's own account — nothing that names
@@ -246,7 +246,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         // C05-A: the browser's configured executable PATH is deployment
         // configuration and stays org-admin-only, which is why `admin` is
         // still resolved above even though the per-backend reading beside it
-        // is now open to any asker (ruling 121 deleted the credential DETAIL
+        // is now open to any asker (ruling 127 deleted the credential DETAIL
         // arm this gate used to be paired with). The key is present only for
         // an org admin, never carried empty.
         const browserDetail = admin ? browserRuntimeStatus().detail : undefined;

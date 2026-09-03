@@ -306,7 +306,7 @@ describe("createTask", () => {
   });
 
   /**
-   * Ruling 121 — creation SEATS the creator as owner.
+   * Ruling 127 — creation SEATS the creator as owner.
    *
    * Every agent run on a task bills the OWNER's own Claude/Codex accounts, so
    * a task with no owner cannot run an agent at all. Being born unowned meant

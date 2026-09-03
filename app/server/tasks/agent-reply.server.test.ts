@@ -108,7 +108,7 @@ function deployDevSpecialist(): void {
  * answers `unknown`, which resumes exactly as before. A test that wants a LIVE
  * session materializes its transcript with `writeTranscript`.
  *
- * Ruling 121: the transcript lives in the RUN PRINCIPAL's own runtime home
+ * Ruling 127: the transcript lives in the RUN PRINCIPAL's own runtime home
  * (`<dataRoot>/runtimes/users/<id>/claude-home/projects/`), not in a shared
  * home a `CLAUDE_CONFIG_DIR` env var pointed at — so this writes into arda's
  * home under the test's own data root, which is also what makes the probe
@@ -139,7 +139,7 @@ beforeEach(async () => {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
   installFakeRuntime();
-  // Ruling 121: an agent run bills the TASK OWNER's own accounts, so a run
+  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
   // only reaches an adapter when the owner has that backend connected. Arda
   // owns the tasks in this file; connecting both backends for him is the
   // ordinary state of somebody using the product.
@@ -1074,7 +1074,7 @@ describe("commentToAgent", () => {
     // P13-D-2: this test's precondition is a LIVE session — give it a real
     // transcript so the resume-time continuity probe reports `present` and the
     // resume happens for the reason the test claims. Asserted, not assumed:
-    // written to the wrong home (ruling 121 moved it into the OWNER's) the
+    // written to the wrong home (ruling 127 moved it into the OWNER's) the
     // probe would answer `unknown` and the resume below would pass for the
     // wrong reason.
     writeTranscript(priorSessionId);

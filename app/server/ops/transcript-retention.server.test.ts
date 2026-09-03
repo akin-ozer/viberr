@@ -49,7 +49,7 @@ function makeRoot(): string {
   return dataRoot;
 }
 
-/** Ruling 121: session homes are PER PERSON, under `runtimes/users/<id>/`.
+/** Ruling 127: session homes are PER PERSON, under `runtimes/users/<id>/`.
  *  Two people here, so a sweep that visited only one would be visible. */
 const ALICE = "u_alice";
 const BOB = "u_bob";
@@ -145,7 +145,7 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
 
   it("NEVER deletes a credential or config file, only *.jsonl (P11-04)", () => {
     const root = makeRoot();
-    // Ruling 121: these are now ONE PERSON's vendor-held sign-ins. Deleting
+    // Ruling 127: these are now ONE PERSON's vendor-held sign-ins. Deleting
     // either signs that person out of their own Claude/Codex account.
     const auth = path.join(userHome(root, ALICE, "codex"), "auth.json");
     writeAged(auth, '{"token":"x"}', 400);

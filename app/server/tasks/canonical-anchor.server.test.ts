@@ -134,7 +134,7 @@ beforeEach(async () => {
     claude: recordingAdapter("claude"),
     codex: recordingAdapter("codex"),
   });
-  // Ruling 121: a resumed specialist bills the TASK OWNER's own account, so
+  // Ruling 127: a resumed specialist bills the TASK OWNER's own account, so
   // the resume only reaches an adapter when the owner (arda, who owns VIB-1
   // here) has the backend connected. Without it the reply is refused before a
   // prompt is ever built, and this file asserts on the prompt.

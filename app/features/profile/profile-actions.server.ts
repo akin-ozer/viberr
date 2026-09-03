@@ -210,12 +210,12 @@ export function disconnectGithubIdentity(
   };
 }
 
-// ------------------------------------------------ agent accounts (ruling 121)
+// ------------------------------------------------ agent accounts (ruling 127)
 
 /**
  * Profile → Agent accounts. Every run this instance starts bills ONE person's
  * provider account, so connecting Claude and Codex is a personal action taken
- * here, not a deployment setting (ruling 121).
+ * here, not a deployment setting (ruling 127).
  *
  * These wrappers exist for one reason each function states: the store and the
  * sign-in driver both need the absolute path of the UNMODIFIED vendor binary,

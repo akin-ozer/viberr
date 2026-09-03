@@ -5,7 +5,7 @@
 > plus the raw `process.env` reads listed in §3. `.env.example` documents the
 > operator-facing subset. Verified against `main` @ `68b5480` (2026-09-01);
 > §2 and §3 re-verified 2026-09-02 against `pass32/implementation` @ `478bed0`.
-> Updated 2026-09-02 for ruling 121 (branch `claude/per-user-codex-auth-difdnn`):
+> Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`):
 > the nine deployment-wide agent-backend variables are gone; agent backends are
 > connected per person and appear in §4, not here.
 
@@ -24,7 +24,7 @@ files, and the in-app OAuth provider rows that override the deployment env.
 | Variable | Rule | Purpose |
 |---|---|---|
 | `VIBERR_SESSION_SECRET` | ≥ 32 characters | Signs the session cookie (`viberr.session_token`) and the CSRF double-submit token. Generate with `openssl rand -base64 48`. |
-| `VIBERR_SECRET_ENCRYPTION_KEY` | base64 decoding to exactly 32 bytes | AES-256-GCM key for every sealed secret in SQLite: GitHub PATs, MCP credentials, OAuth client secrets, the S3 audit export key, and each person's agent-backend API keys (ruling 121). Generate with `openssl rand -base64 32`. Losing it makes every stored secret unreadable; rotate it with `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` + `npm run keys`. |
+| `VIBERR_SECRET_ENCRYPTION_KEY` | base64 decoding to exactly 32 bytes | AES-256-GCM key for every sealed secret in SQLite: GitHub PATs, MCP credentials, OAuth client secrets, the S3 audit export key, and each person's agent-backend API keys (ruling 127). Generate with `openssl rand -base64 32`. Losing it makes every stored secret unreadable; rotate it with `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` + `npm run keys`. |
 
 ## 2. Validated optional variables (the schema)
 
@@ -51,14 +51,14 @@ files, and the in-app OAuth provider rows that override the deployment env.
 
 ### Agent backends: none
 
-There are no agent-backend environment variables (ruling 121). The deployment-wide
+There are no agent-backend environment variables (ruling 127). The deployment-wide
 `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `VIBERR_CLAUDE_USE_CLI_AUTH`,
 `CLAUDE_CONFIG_DIR`, `CODEX_ACCESS_TOKEN`, `CODEX_API_KEY`, `OPENAI_API_KEY`,
 `CODEX_HOME` and `VIBERR_CODEX_USE_CLI_AUTH` were deleted from the schema, from
 `.env.example`, from the image and from `compose.yml`. Claude and Codex are connected
 **per person** on Profile → Agent accounts, and each run is built from the credential of
 the one person it bills; see §4 and
-[deployment.md](deployment.md#agent-accounts-are-per-person-ruling-121).
+[deployment.md](deployment.md#agent-accounts-are-per-person-ruling-127).
 
 Setting one of those names in the deployment environment does nothing useful: the schema
 does not read it, and `filteredSpawnEnv()` (`runtime-registry.server.ts`) strips every
@@ -66,7 +66,7 @@ credential-shaped variable from the base env both adapters spawn on, so an ambie
 never reaches an agent process either. The only credential env a child ever sees is the
 principal's, added by `runCredentialFor` for that one run.
 
-*(Corrected 2026-09-02, ruling 121 — this section used to be a seven-row table of
+*(Corrected 2026-09-02, ruling 127 — this section used to be a seven-row table of
 deployment credentials plus a presence-only availability rule. Both are gone: presence of
 a key on this server is no longer what makes a backend usable, and `isBackendAvailable`
 no longer exists.)*
@@ -189,7 +189,7 @@ away from the host config, `GIT_ALLOW_PROTOCOL` restricted, and
 | Controller model, effort, grants, instructions | `agents/profiles/controller.md` + `agents/definitions/controller.md` in the data root | Org admin, Controller tab; grant sections and instructions locked unless unlocked by env (§2) |
 | Per-project workflow, members, agent deployments, guardrails, credential policy | `projects/<slug>/project.md` | Project admins through Policy / Settings / Agents |
 | Per-user theme, motion, notification routing, timeline default, pins | `users.theme` + cookie `viberr_theme`; `user_prefs` table | The user, Profile overlay |
-| Personal backend credentials (ruling 121) | `user_backend_credentials` (sealed `secret_box` for a pasted key or token; a `login` row holds no secret) + the vendor's own file in `runtimes/users/<id>/{claude-home,codex-home}` | The person, Profile → Agent accounts |
+| Personal backend credentials (ruling 127) | `user_backend_credentials` (sealed `secret_box` for a pasted key or token; a `login` row holds no secret) + the vendor's own file in `runtimes/users/<id>/{claude-home,codex-home}` | The person, Profile → Agent accounts |
 | Which account a run bills (the credential principal) | derived per run and persisted as `agent_runs.credential_user_id` | Nobody sets it: task runs take the task owner, controller turns the asker (`run-principal.server.ts`) |
 
 ## 5. What the container image bakes in
@@ -204,7 +204,7 @@ From the `Dockerfile` runtime stage: `NODE_ENV=production`, `VIBERR_DATA_ROOT=/d
 The image bakes **no** backend credential and **no** runtime home, and it declares no
 `ENTRYPOINT`: the CMD is pid 1 and compose's `init: true` reaps orphans. Each person's
 home is created on demand at `/data/runtimes/users/<userId>/{claude-home,codex-home}`,
-mode 0700, by `ensureUserBackendHome`. *(Corrected 2026-09-02, ruling 121 — the image
+mode 0700, by `ensureUserBackendHome`. *(Corrected 2026-09-02, ruling 127 — the image
 used to bake `CLAUDE_CONFIG_DIR=/data/runtimes/claude-home` and
 `CODEX_HOME=/data/runtimes/codex-home` and to run `scripts/docker-entrypoint.sh`, which
 seeded `auth.json` from a read-only `/host-codex` mount. The variables, the script, the

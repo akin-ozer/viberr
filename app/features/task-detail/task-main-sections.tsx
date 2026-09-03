@@ -312,7 +312,7 @@ export function ExecutionSection({
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
   operatorAutonomy: "supervised" | "full";
-  /** Ruling 121: the task owner's accounts, which every run here bills
+  /** Ruling 127: the task owner's accounts, which every run here bills
    *  (null = unowned). */
   runPrincipal: TaskRunPrincipalView | null;
   canRunAgents: boolean;

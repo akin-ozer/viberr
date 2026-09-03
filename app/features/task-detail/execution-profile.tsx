@@ -248,6 +248,7 @@ function PendingSchedules({
       </ul>
       {confirmCancel && (
         <ConfirmDialog
+          screenLabel="Schedule cancel dialog"
           title="Cancel this scheduled run?"
           body={
             <>
@@ -353,7 +354,7 @@ function OperatorRunControl({
   /** R19-A: the project's configured operator autonomy — what this run WILL
    *  use. Full announces itself below; supervised is the quiet default. */
   configuredAutonomy: "supervised" | "full";
-  /** P11-41, now per-person (ruling 121): why a run on the operator's backend
+  /** P11-41, now per-person (ruling 127): why a run on the operator's backend
    *  would refuse, or null when it would start. An operator drive bills the
    *  task OWNER, so this sentence names them; it disables Run and renders,
    *  instead of the run failing fast after the click. */
@@ -369,7 +370,7 @@ function OperatorRunControl({
   const backendLabel = backendLabelOf(defaultBackend);
   // Hunt 2026-08-29: two different kinds of "off". `busy`/`disabled` (closed
   // task) kill the whole control; the open-packet refusal (F20-5) and a backend
-  // the owner cannot run (P11-41, ruling 121) refuse a run NOW — but
+  // the owner cannot run (P11-41, ruling 127) refuse a run NOW — but
   // scheduleTaskAction refuses neither (the packet resolves, the owner connects
   // the backend or the seat changes hands, and the fired run resolves the live
   // profile and the live owner anyway), so a picked delay keeps the button
@@ -423,7 +424,7 @@ function OperatorRunControl({
       </button>
       {runRefusal && (
         // P11-41's honesty without a picker: the run would fail fast, so say
-        // it here, where the fix is one hop away. Ruling 121 changed WHOSE fix
+        // it here, where the fix is one hop away. Ruling 127 changed WHOSE fix
         // it is — an operator drive bills the task owner's own account, so
         // there is no instance credential to configure and the sentence names
         // the person (`run-principal-view.ts`, the UI voice of the server's
@@ -487,7 +488,7 @@ function AgentRunControl({
 }: {
   agents: DeployedSpecialistView[];
   activeProfileIds: string[];
-  /** Ruling 121: whose accounts a dispatch would bill (null = unowned task).
+  /** Ruling 127: whose accounts a dispatch would bill (null = unowned task).
    *  A profile pinned to a backend the owner has not connected is still
    *  pickable — the roster is not a lie — but Run refuses before it is spent
    *  and the row and the control both say why. */
@@ -554,7 +555,7 @@ function AgentRunControl({
   const selected = agents.find((a) => a.id === selectedId) ?? null;
   const selectedRunning =
     !!selectedId && delay === "now" && activeProfileIds.includes(selectedId);
-  // Ruling 121: the picked profile runs on ITS backend, billed to the task
+  // Ruling 127: the picked profile runs on ITS backend, billed to the task
   // owner — so the refusal is per-pick, not per-page. Same split the operator
   // control makes: a run NOW is refused, a SCHEDULED one is not (the owner can
   // connect the backend, or the seat can change hands, before it fires).
@@ -633,7 +634,7 @@ function AgentRunControl({
       </button>
       {runRefusal && (
         // P14: a `title` never opens on a disabled control, so the reason a
-        // dispatch is dead is rendered copy. Ruling 121 makes it the OWNER's
+        // dispatch is dead is rendered copy. Ruling 127 makes it the OWNER's
         // refusal, named — the run would bill their account, not this
         // deployment's (which no longer has one).
         <span className="sub">{runRefusal}</span>
@@ -676,6 +677,7 @@ function EngagedAgents({
   deployedById,
   activeProfileIds,
   canRunAgents,
+  closed,
   releaseBusy,
   onRelease,
 }: {
@@ -683,6 +685,10 @@ function EngagedAgents({
   deployedById: Map<string, DeployedSpecialistView>;
   activeProfileIds: string[];
   canRunAgents: boolean;
+  /** F33-10: the panel's OWN closed fact (terminal stage or archived), passed
+   *  down rather than re-derived — the ledger and the run controls must not be
+   *  able to disagree about whether this task is closed. */
+  closed: boolean;
   releaseBusy: boolean;
   onRelease: (profileId: string) => void;
 }) {
@@ -747,7 +753,17 @@ function EngagedAgents({
                 </p>
               )}
             </span>
-            {canRunAgents && !delivers && (
+            {/* F33-10: a closed task's engagements are frozen — the server
+                refuses the release at the terminal stage, and every other
+                runtime control on this panel is already off. The ✕ was the one
+                exception: enabled, titled "Release this agent from the task",
+                and refused on click. Ruling 37's precedent settles which way to
+                fix it — a WITHDRAWN affordance is honest, a disabled one just
+                invites the support question — so the button is simply not
+                rendered. The panel head's "task closed" pill and the run cell's
+                "Task closed. Reopen it to run an agent." already carry the
+                reason; a third copy of it on every row would be noise. */}
+            {canRunAgents && !delivers && !closed && (
               <span className="right">
                 <button
                   type="button"
@@ -802,7 +818,7 @@ export function ExecutionProfile({
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
   operatorAutonomy: "supervised" | "full";
-  /** Ruling 121: whose accounts this task's runs bill, and what those accounts
+  /** Ruling 127: whose accounts this task's runs bill, and what those accounts
    *  can run. `null` = no owner (or a seat pointing at a disabled/deleted
    *  account), so nothing can run here at all. P11-41's fail-fast honesty, now
    *  answered per person instead of per deployment. */
@@ -951,6 +967,7 @@ export function ExecutionProfile({
               deployedById={deployedById}
               activeProfileIds={activeAgentProfileIds}
               canRunAgents={canRunAgents}
+              closed={closed}
               releaseBusy={releaseBusy}
               onRelease={onReleaseAgent}
             />

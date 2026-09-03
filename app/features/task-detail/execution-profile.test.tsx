@@ -71,7 +71,7 @@ function unownedTask(): TaskSummary {
 }
 
 /** The same row, OWNED by the viewer — the fixture for anything that presses a
- *  run control, since ruling 121 refuses every run on a task with no owner to
+ *  run control, since ruling 127 refuses every run on a task with no owner to
  *  bill. */
 function ownedTask(): TaskSummary {
   return {
@@ -86,7 +86,7 @@ function ownedTask(): TaskSummary {
   };
 }
 
-/** Ruling 121: the task owner whose accounts a run bills, both connected. The
+/** Ruling 127: the task owner whose accounts a run bills, both connected. The
  *  owner here is the VIEWER (`meId`), which is the ordinary case on a task
  *  somebody is working; the refusal tests below vary both halves. */
 function connectedPrincipal(
@@ -195,7 +195,7 @@ describe("ExecutionProfile — unowned copy matches the RBAC matrix (F19-11)", (
 describe("OperatorRunControl steer input — Enter submits, IME-guarded", () => {
   function renderWithRunSpy() {
     const calls: string[] = [];
-    // Ruling 121: a run needs an owner to bill, so the steer tests run on an
+    // Ruling 127: a run needs an owner to bill, so the steer tests run on an
     // OWNED task whose owner has connected both backends.
     const utils = renderExec({
       task: ownedTask(),
@@ -350,7 +350,7 @@ describe("model-unavailable warnings — run control + ledger rows", () => {
 });
 
 /**
- * Ruling 121 — every run control on this panel answers for the task OWNER.
+ * Ruling 127 — every run control on this panel answers for the task OWNER.
  *
  * The panel used to take one deployment-wide `backendAvailable` boolean pair,
  * so a disabled Run could only ever say "the backend isn't configured on this
@@ -365,7 +365,7 @@ describe("model-unavailable warnings — run control + ledger rows", () => {
  * (the owner can connect the backend, or the seat can change hands, before it
  * fires).
  */
-describe("ruling 121: the run controls answer for the task owner", () => {
+describe("ruling 127: the run controls answer for the task owner", () => {
   const operatorRun = (container: HTMLElement) =>
     [...container.querySelectorAll<HTMLButtonElement>(".op-run > button")].find(
       (b) => /Run operator|Schedule/.test(b.textContent ?? ""),

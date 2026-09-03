@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -14,6 +15,7 @@ import {
 import {
   deleteGlobalAgentProfile,
   listGlobalAgentProfiles,
+  resolveResourceGrants,
   saveGlobalAgentProfile,
   usedByProject,
 } from "./gagents.server";
@@ -350,5 +352,112 @@ describe("global agent profiles", () => {
     expect(() => deleteGlobalAgentProfile(db, "operator", ACTOR, ctx)).toThrowError(
       /system profile/,
     );
+  });
+});
+
+/**
+ * Resource grants (pass 33, F33-7 + F33-8): what a template stores is the STORE
+ * KEY the runtime mounts by, and a save touches only the lists it was given.
+ */
+describe("resource grants on a template", () => {
+  /** Seed one skill row, one disk-only skill folder, one MCP row, one KB row. */
+  function seedCatalog(db: ReturnType<typeof dbCtx.makeDb>, dataRoot: string) {
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO org_skills (id, name, summary, created_at, updated_at)
+       VALUES ('sk_probe', 'developer-expertise', 'Ships features.', ?, ?)`,
+    ).run(now, now);
+    mkdirSync(join(dataRoot, "skills", "docs-style"), { recursive: true });
+    db.prepare(
+      `INSERT INTO org_mcp_servers (id, name, transport, target, created_at, updated_at)
+       VALUES ('mcp_IIWTf6kB6cdd', 'pass33-probe', 'HTTP', 'https://probe.test/mcp', ?, ?)`,
+    ).run(now, now);
+    db.prepare(
+      `INSERT INTO org_knowledge_bases (id, name, dir, refresh, created_at, updated_at)
+       VALUES ('kb_ilN51XiiPkJA', 'Pass 33 Handbook', 'pass33-handbook', 'on change', ?, ?)`,
+    ).run(now, now);
+  }
+
+  it("F33-8: a catalog id normalises to the store key; an unknown grant is refused by name", async () => {
+    const { db, dataRoot, ctx } = setup();
+    seedCatalog(db, dataRoot);
+
+    // The three ids the controller's own read tools hand back — the exact
+    // shapes that landed dangling in agents/profiles/docs-writer.md.
+    expect(
+      resolveResourceGrants(
+        db,
+        {
+          skills: ["disk:docs-style", "sk_probe"],
+          mcps: ["mcp_IIWTf6kB6cdd"],
+          kbs: ["kb_ilN51XiiPkJA"],
+        },
+        ctx,
+      ),
+    ).toEqual({
+      skills: ["docs-style", "developer-expertise"],
+      mcps: ["pass33-probe"],
+      kbs: ["pass33-handbook"],
+    });
+
+    // A key that is already the store key passes through untouched, and a KB
+    // display name repairs to its directory (P13-KM-01 parity).
+    expect(
+      resolveResourceGrants(
+        db,
+        { skills: ["developer-expertise"], kbs: ["Pass 33 Handbook"] },
+        ctx,
+      ),
+    ).toEqual({ skills: ["developer-expertise"], kbs: ["pass33-handbook"] });
+
+    // Nothing answers to it → refused, naming what it could not find, rather
+    // than written as a grant that mounts nothing.
+    expect(() =>
+      resolveResourceGrants(
+        db,
+        { skills: ["ghost-skill"], mcps: ["ghost-mcp"] },
+        ctx,
+      ),
+    ).toThrowError(/skill "ghost-skill", MCP server "ghost-mcp"/);
+  });
+
+  it("F33-8: a list the caller never sent is not resolved and not returned", async () => {
+    const { db, dataRoot, ctx } = setup();
+    seedCatalog(db, dataRoot);
+    expect(resolveResourceGrants(db, { mcps: ["pass33-probe"] }, ctx)).toEqual({
+      mcps: ["pass33-probe"],
+    });
+    expect(resolveResourceGrants(db, {}, ctx)).toEqual({});
+  });
+
+  it("F33-7: an omitted grant list keeps what is stored; an empty one clears it", () => {
+    const { db, dataRoot, ctx } = setup();
+    writeTemplate(dataRoot, "developer", "specialist");
+    const base = {
+      id: "developer",
+      name: "Developer",
+      backend: "claude" as const,
+      summary: "Implements stage work.",
+      persona: "",
+      stages: ["impl"],
+    };
+
+    // A summary-only edit: every stored grant survives it.
+    saveGlobalAgentProfile(db, base, ACTOR, ctx);
+    const kept = listGlobalAgentProfiles(db, ctx)[0]!;
+    expect(kept).toMatchObject({
+      skills: ["repo-write"],
+      mcps: ["github"],
+      kbs: ["Coding standards"],
+    });
+
+    // An empty list is still a decision: it clears that one list and no other.
+    saveGlobalAgentProfile(db, { ...base, kbs: [] }, ACTOR, ctx);
+    const cleared = listGlobalAgentProfiles(db, ctx)[0]!;
+    expect(cleared).toMatchObject({
+      skills: ["repo-write"],
+      mcps: ["github"],
+      kbs: [],
+    });
   });
 });

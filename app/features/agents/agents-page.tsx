@@ -76,7 +76,7 @@ const AUTO_BOUNDARY_LABEL =
 // ------------------------------------------------------------ small parts
 
 /**
- * Ruling 121: who on this project can actually run this backend.
+ * Ruling 127: who on this project can actually run this backend.
  *
  * There is no instance-level "the backend is configured" fact any more — a run
  * bills a PERSON, so the honest instance-level number is a count of the people
@@ -129,7 +129,7 @@ function BackendChip({
   // existing "this value is not what it looks like" badge (the model cell's
   // DEFAULT flag) — same amber, same alert glyph, same cursor:help, no new
   // class name with no rule behind it.
-  // Ruling 121: "not connected" is about the VIEWER's own account, not the
+  // Ruling 127: "not connected" is about the VIEWER's own account, not the
   // deployment's — the badge says what THEY have to do about it.
   const missing = health ? !health.viewerConnected : false;
   return (
@@ -146,7 +146,7 @@ function BackendChip({
   );
 }
 
-/** Ruling 121: what a person who has not connected a backend must do, in one
+/** Ruling 127: what a person who has not connected a backend must do, in one
  *  sentence, addressed to them. */
 function notConnectedNote(backend: string): string {
   const label = backend === "claude" ? "Claude" : "Codex";
@@ -154,7 +154,7 @@ function notConnectedNote(backend: string): string {
 }
 
 /**
- * Ruling 121: the billing rule, plus the only instance-level number that
+ * Ruling 127: the billing rule, plus the only instance-level number that
  * survives it.
  *
  * "Configured" was a property of the deployment; a run is a property of a
@@ -698,7 +698,7 @@ export function ProfileDetail({
   stages: StageView[];
   /** R14-1: the board's edges — eligibility resolves by structural role too. */
   workflow: WorkflowEdgeView[];
-  /** F16 + ruling 121: who can run each backend, from the one credential store
+  /** F16 + ruling 127: who can run each backend, from the one credential store
    *  (`connectedUserIds` / `isBackendAvailableFor`). */
   backendHealth?: BackendHealthMap | undefined;
   /** P14-KM-11: the live store catalog, so a grant naming a resource the store
@@ -724,11 +724,11 @@ export function ProfileDetail({
   // Codex profile whose backend nobody could run read "idle · available" here
   // while the task-level Execution panel, one click away, disagreed.
   // Availability is two claims, and only one of them is about engagements:
-  // nothing is running it, AND a run could start. Ruling 121 makes the second
+  // nothing is running it, AND a run could start. Ruling 127 makes the second
   // claim person-shaped — a run bills the task owner, and the person reading
   // this page is who would start one on the tasks they own.
   const runHealth = primaryBackendHealth(a, backendHealth);
-  // Ruling 121: the second claim is now about the VIEWER's own account — they
+  // Ruling 127: the second claim is now about the VIEWER's own account — they
   // are the person who would press Run.
   const backendMissing = runHealth !== null && !runHealth.viewerConnected;
   const backendLabel = runHealth?.backend === "claude" ? "Claude" : "Codex";
@@ -993,7 +993,7 @@ export function ProfileDetail({
                   </span>
                 )}
               </div>
-              {/* Ruling 121: WHOSE account a run on this profile spends. The
+              {/* Ruling 127: WHOSE account a run on this profile spends. The
                   page cannot answer "is this backend configured" any more (a
                   run bills the task owner, and this page is not on a task), so
                   it states the rule and the one honest instance-level number:
@@ -1053,7 +1053,7 @@ export function ProfileDetail({
             </div>
           </div>
         </div>
-        {/* Ruling 121: the actionable half, addressed to the person reading
+        {/* Ruling 127: the actionable half, addressed to the person reading
             it. There is no instance credential to name any more — a run bills
             the task owner, and this viewer's own account is what decides
             whether the profile runs on the tasks THEY own. */}
@@ -1352,7 +1352,7 @@ export function AgentsPage({
   myRole: ProjectRole | null;
   /** Live store resources for the profile-editor picker (F6/item-2). */
   resourceCatalog?: readonly ResCatalogGroup[];
-  /** F16 + ruling 121: per backend, whether the VIEWER connected it and how
+  /** F16 + ruling 127: per backend, whether the VIEWER connected it and how
    *  many project members have. One probe answers every backend claim on this
    *  page, including the editor's note (there is no second, quietly divergent
    *  `backendAvailable` pair any more). */
@@ -1365,7 +1365,7 @@ export function AgentsPage({
   const fetcher = useFetcher<ProfileActionResult>();
 
   const canManage = roleCan(myRole, "manage-agents");
-  // Ruling 121: the profile editor's advisory note, from the same probe the
+  // Ruling 127: the profile editor's advisory note, from the same probe the
   // roster reads. Undefined when connections were not probed on this surface,
   // so the editor claims nothing rather than inventing a second answer.
   const viewerConnected = backendHealth
@@ -1379,9 +1379,29 @@ export function AgentsPage({
   // reload — and a pasted `?tab=live` did nothing at all. The URL is the state:
   // selection reads from it and every click replaces it (replace: true keeps
   // one history entry per visit, the same rule the topbar search follows).
-  const sel = searchParams.get("profile") ?? "operator";
+  const urlSel = searchParams.get("profile") ?? "operator";
+  // U33-5: `setSearchParams` is a NAVIGATION — `useSearchParams` keeps handing
+  // back the COMMITTED location until the router (and this route's
+  // revalidation) lands, so for a beat after a roster click the whole detail
+  // pane — including the profile object "Edit profile" passes to the editor —
+  // was still the PREVIOUS selection. Live, clicking a roster entry and then
+  // Edit without a pause opened the editor for the profile selected before it,
+  // and saving wrote that form's grants onto the wrong profile (confirmed in
+  // project.md). The pick is recorded synchronously here and the URL follows,
+  // so the roster highlight, the detail pane and the editor's binding all
+  // resolve from ONE value in the SAME render. Deliberately not a debounce:
+  // the failure was silent and landed on governance data, so the shape has to
+  // make the stale read impossible rather than unlikely.
+  const [pendingSel, setPendingSel] = useState<string | null>(null);
+  const sel = pendingSel ?? urlSel;
   const tab = searchParams.get("tab") === "live" ? "live" : "profiles";
+  // A committed URL is the authority again: whatever put it there (this page's
+  // own navigation landing, a Back, a pasted link) supersedes the pending pick.
+  useEffect(() => {
+    setPendingSel(null);
+  }, [urlSel]);
   const setSel = (profileId: string) => {
+    setPendingSel(profileId);
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);

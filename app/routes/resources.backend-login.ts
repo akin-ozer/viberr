@@ -15,7 +15,7 @@ import {
 
 /**
  * GET /resources/backend-login?backend=claude|codex — the CALLER's own hosted
- * sign-in session, plus their current backend health (ruling 121).
+ * sign-in session, plus their current backend health (ruling 127).
  *
  * Profile → Agent accounts polls this every 2 s while a sign-in is running: the
  * vendor's process is driven server-side, so the browser has no other way to

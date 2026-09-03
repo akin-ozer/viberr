@@ -16,7 +16,7 @@ import {
 import { newId } from "~/shared/ids/new-id.server";
 
 /**
- * Ruling 121: one resolver for the per-person runtime homes. The failure this
+ * Ruling 127: one resolver for the per-person runtime homes. The failure this
  * guards against is the shared-home era's — two resolvers disagreeing, so the
  * credential the run reads and the transcript the exporter looks for live in
  * different directories.

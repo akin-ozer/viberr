@@ -26,7 +26,7 @@ import {
 } from "./user-homes.server";
 
 /**
- * Ruling 121: every run bills ONE person — the task owner on a task, the asker
+ * Ruling 127: every run bills ONE person — the task owner on a task, the asker
  * on the controller — and a run that cannot name that person does not start.
  */
 

@@ -6,9 +6,9 @@ import {
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 
 /**
- * Connect / disconnect an agent backend for a test's person (ruling 121).
+ * Connect / disconnect an agent backend for a test's person (ruling 127).
  *
- * Since ruling 121 there is no instance-level "the backend is available"
+ * Since ruling 127 there is no instance-level "the backend is available"
  * switch to flip — `setBackendAvailability` is gone. Whether a run may start is
  * a fact about the ONE person it bills, read from `user_backend_credentials`.
  * So a test that wants a run to reach its (fake) adapter connects the backend

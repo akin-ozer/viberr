@@ -44,14 +44,14 @@ describe("parseEnv", () => {
   });
 
   /**
-   * Ruling 121: agent backends authenticate PER PERSON. The nine
+   * Ruling 127: agent backends authenticate PER PERSON. The nine
    * deployment-wide credential variables are gone from the schema, and this
    * gate is what stops one creeping back in — a declared key would be an
    * instance credential every run could bill to whoever owns it, which is the
    * whole thing the ruling forbids. An ambient value must be ignored, not
    * carried through.
    */
-  it("declares no deployment-wide agent-backend credential (ruling 121)", () => {
+  it("declares no deployment-wide agent-backend credential (ruling 127)", () => {
     const removed = [
       "ANTHROPIC_API_KEY",
       "CLAUDE_CODE_OAUTH_TOKEN",

@@ -48,7 +48,7 @@ describe("runtime-registry", () => {
   });
 
   /**
-   * Ruling 121: this module no longer knows anything about credentials. The
+   * Ruling 127: this module no longer knows anything about credentials. The
    * availability probe, its CLI-auth diagnostics and the two credential-adding
    * spawn-env builders are gone — a run's credential is a fact about the ONE
    * person it bills, resolved by `backend-credentials.server` and assembled
@@ -123,7 +123,7 @@ describe("runtime-registry", () => {
   });
 
   it("createAdapters builds BOTH adapters on the credential-free base env", async () => {
-    // Ruling 121: no config dir, no key, no home — the factory runs once per
+    // Ruling 127: no config dir, no key, no home — the factory runs once per
     // process and could only ever bake in an INSTANCE credential, which is the
     // thing the ruling removes. Whatever a run needs arrives per run on
     // `spec.env` from `runCredentialFor`.
@@ -200,7 +200,7 @@ describe("runtime-registry", () => {
   });
 
   it("selectAdapter is a plain lookup — availability is not its business", () => {
-    // Ruling 121: whether a run may proceed is decided upstream, by resolving
+    // Ruling 127: whether a run may proceed is decided upstream, by resolving
     // its credential principal. `startRun` never reaches this function for a
     // run it refused, so an "unavailable" arm here would be a second, quieter
     // place for that decision to live.
