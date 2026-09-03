@@ -7,7 +7,7 @@ import {
   waitFor,
   type RenderResult,
 } from "@testing-library/react";
-import { createRoutesStub } from "react-router";
+import { createRoutesStub, useSearchParams } from "react-router";
 import type {
   AgentDeploymentView,
   AgentProfileView,
@@ -2351,5 +2351,173 @@ describe("CreateProfileModal — a provider-refused model is disabled + explaine
     expect(err).toBeTruthy();
     expect(err.textContent).toContain("not supported");
     expect(err.textContent).toContain("Pick another model.");
+  });
+});
+
+/**
+ * D33-2 — `docs/ui/surfaces.md` §4 states the screen-label contract as
+ * universal ("every top-level surface and dialog carries data-screen-label so
+ * tests and agents can address it by name"), and these two dialogs carried
+ * none: a sweep that addresses surfaces by name could not see the capability
+ * matrix or the profile editor at all.
+ */
+describe("D33-2: the agents dialogs carry a data-screen-label", () => {
+  it("the capability matrix names itself", () => {
+    const { container } = render(
+      <CapabilityMatrixModal
+        profiles={[mkProfile({})]}
+        projectName="Viberr Core"
+        onClose={() => {}}
+      />,
+    );
+    const dialog = container.querySelector("dialog")!;
+    expect(dialog.getAttribute("data-screen-label")).toBe("Capability matrix modal");
+  });
+
+  it("the profile editor names itself with ONE stable label in both modes", () => {
+    const label = "Agent profile modal";
+    const created = renderModal({ initial: null });
+    const createDialog = created.container.querySelector("dialog")!;
+    expect(createDialog.getAttribute("data-screen-label")).toBe(label);
+    // The accessible name stays mode-dependent (a reader wants to know which
+    // profile they opened); the screen label is the surface's stable name, so
+    // one string addresses the create and the edit case alike.
+    expect(createDialog.getAttribute("aria-label")).toBe("New agent profile");
+    cleanup();
+
+    const edited = renderModal({ initial: mkProfile({}) });
+    const editDialog = edited.container.querySelector("dialog")!;
+    expect(editDialog.getAttribute("data-screen-label")).toBe(label);
+    expect(editDialog.getAttribute("aria-label")).toBe("Edit profile");
+  });
+});
+
+/**
+ * U33-5 — selecting a roster entry and pressing "Edit profile" without a pause
+ * opened the editor for the profile selected BEFORE it, and saving from that
+ * form wrote its grants onto that other profile (confirmed live in project.md).
+ * The selection lives in the URL, and `setSearchParams` is a navigation:
+ * `useSearchParams` keeps returning the committed location until the router
+ * lands, so for a beat the detail pane — and the profile object its Edit button
+ * hands the editor — was still the previous one. A silent misbinding onto
+ * governance data has to be impossible, not merely unlikely, so the pick is
+ * recorded synchronously and the URL follows.
+ */
+describe("U33-5: Edit profile opens the profile the roster just selected", () => {
+  const OPERATOR = mkProfile({
+    id: "operator",
+    kind: "operator",
+    name: "Operator",
+    role: "Orchestration",
+    icon: "shield",
+  });
+  const DEVELOPER = mkProfile({ id: "developer", name: "Developer" });
+
+  /** The COMMITTED `?profile=` — the stub router is in memory, so the query
+   *  the page navigated to is readable only from inside it. */
+  function SelProbe() {
+    const [params] = useSearchParams();
+    return <p data-testid="url-profile">{params.get("profile") ?? ""}</p>;
+  }
+
+  /**
+   * The real `/projects/:slug/agents` has a LOADER, so a `?profile=`
+   * navigation is a `.data` round-trip the router must finish before the new
+   * location commits — the gap the two clicks fell into. A stub with no loader
+   * lands the navigation inside the click and reproduces nothing, so this one
+   * holds every navigation after the first until the test lets it land.
+   */
+  function renderPage() {
+    let opened = false;
+    let land = () => {};
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/agents",
+        loader: (): null | Promise<null> => {
+          if (!opened) {
+            opened = true;
+            return null;
+          }
+          return new Promise<null>((resolve) => {
+            land = () => resolve(null);
+          });
+        },
+        Component: () => (
+          <ToastProvider>
+            <AgentsPage
+              profiles={[OPERATOR, DEVELOPER]}
+              deployments={[]}
+              stages={STAGES}
+              workflow={WORKFLOW}
+              projectSlug="viberr-core"
+              projectName="Viberr Core"
+              myRole="admin"
+            />
+            <SelProbe />
+          </ToastProvider>
+        ),
+      },
+      {
+        path: "/resources/model-catalog",
+        loader: () => ({ data: CLAUDE_CATALOG }),
+      },
+    ]);
+    const view = render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
+    return { ...view, land: () => land() };
+  }
+
+  /** The roster row for a profile, by the name it renders. */
+  const rosterItem = (container: HTMLElement, name: string) =>
+    [...container.querySelectorAll(".profile-list .ag-item")].find(
+      (el) => el.querySelector(".nm")?.textContent === name,
+    )!;
+
+  it("clicking a roster entry and Edit in the same beat edits THAT profile", async () => {
+    const { container, getByText, getByTestId } = renderPage();
+    // The page opens on the operator (the `?profile=` default).
+    await waitFor(() =>
+      expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Operator"),
+    );
+
+    // No wait between the two clicks — the live sequence that misfired. The
+    // navigation the first click started is still in flight…
+    fireEvent.click(rosterItem(container, "Developer"));
+    fireEvent.click(getByText("Edit profile"));
+    expect(getByTestId("url-profile").textContent).toBe("");
+
+    // …and the editor is nevertheless bound to the profile that was clicked,
+    // not to the one the committed URL still names.
+    const dialog = document.querySelector(
+      'dialog[data-screen-label="Agent profile modal"]',
+    )!;
+    expect(dialog.querySelector("h2")!.textContent).toBe("Edit Developer");
+  });
+
+  it("the roster highlight and the detail pane move on the same click", async () => {
+    const { container } = renderPage();
+    await waitFor(() =>
+      expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Operator"),
+    );
+    fireEvent.click(rosterItem(container, "Developer"));
+    expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Developer");
+    expect(rosterItem(container, "Developer").className).toContain("on");
+    expect(rosterItem(container, "Operator").className).not.toContain("on");
+  });
+
+  it("the pick still reaches the URL, so the selection stays linkable", async () => {
+    const { container, getByTestId, land } = renderPage();
+    // The synchronous pick is a shortcut PAST the pending navigation, never
+    // instead of it: P13-UI-58 put the selection in the URL so it is linkable
+    // and survives a reload, and that has to keep happening.
+    await waitFor(() =>
+      expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Operator"),
+    );
+    fireEvent.click(rosterItem(container, "Developer"));
+    land();
+    await waitFor(() =>
+      expect(getByTestId("url-profile").textContent).toBe("developer"),
+    );
+    // …and once the URL is the authority again the pane has not drifted.
+    expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Developer");
   });
 });

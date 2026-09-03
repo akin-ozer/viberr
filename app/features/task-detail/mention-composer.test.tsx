@@ -356,7 +356,11 @@ describe("Ask operator prefill", () => {
  * rendered directly below it.
  */
 describe("Timeline empty state (UI-40)", () => {
-  function renderTimeline(events: TimelineEventRender[], hasMore = false) {
+  function renderTimeline(
+    events: TimelineEventRender[],
+    hasMore = false,
+    runLive = false,
+  ) {
     const Stub = createRoutesStub([
       {
         path: "/t",
@@ -370,6 +374,7 @@ describe("Timeline empty state (UI-40)", () => {
               tlDefault="all"
               ask={0}
               mentionables={MENTIONABLES}
+              runLive={runLive}
             />
           </ToastProvider>
         ),
@@ -405,6 +410,42 @@ describe("Timeline empty state (UI-40)", () => {
     expect(getByText(/No comments in the loaded history/)).toBeTruthy();
     // The contradiction the old copy sat next to.
     expect(getByText(/Show older events/)).toBeTruthy();
+  });
+
+  /**
+   * U33-1 — the SECOND way this empty state lied, on the freshest task there
+   * is. Zero events is the honest input, so the UI-40 fix above (which keys off
+   * `events.length`) cannot help: seconds after creation the Live-run strip on
+   * this same page reads "Preparing workspace · Cloning akin-ozer/viberr · 13%"
+   * while the timeline underneath declared the loop had never started. Ruling
+   * 87(b) exists so a healthy pre-run phase is distinguishable from a wedged
+   * one; the copy undid half of it on the same screen.
+   */
+  it("U33-1: a LIVE run means the loop HAS started, not that it never did", () => {
+    const { getByText, queryByText } = renderTimeline([], false, true);
+    expect(queryByText(/hasn't started its operator loop/)).toBeNull();
+    expect(
+      getByText(
+        /The loop has started\. Its first events land here as the live run above reports in\./,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("U33-1: with NO live run the original 'hasn't started' copy is the honest one", () => {
+    const { getByText, queryByText } = renderTimeline([], false, false);
+    expect(queryByText(/The loop has started/)).toBeNull();
+    expect(
+      getByText(/No activity yet\. This task hasn't started its operator loop\./),
+    ).toBeTruthy();
+  });
+
+  it("U33-1 leaves the two FILTERED empty states alone (UI-40)", () => {
+    // A live run says nothing about why the active tab matched nothing — the
+    // filter copy stays exactly as UI-40 wrote it.
+    const { getByText, queryByText } = renderTimeline([typedEvent], true, true);
+    fireEvent.click(getByText("Comments"));
+    expect(getByText(/No comments in the loaded history/)).toBeTruthy();
+    expect(queryByText(/The loop has started/)).toBeNull();
   });
 });
 

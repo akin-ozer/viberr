@@ -307,6 +307,18 @@ CREATE TABLE project_github_credentials (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+-- U33-2 (pass 33): the last repository-access probe per project. App-owned
+-- OBSERVATION, not a projection of project.md, so a rebuild must not clear it —
+-- which is why it is its own table rather than a `projects` column. It exists so
+-- the board and the home card can say "this project's repository is
+-- unreachable" without calling GitHub on a hot render path: every writer is a
+-- place that already had the answer in hand (the GitHub page's cached probe,
+-- project creation's own probe).
+CREATE TABLE project_github_health (
+  project_slug TEXT PRIMARY KEY,
+  result_json TEXT NOT NULL,
+  checked_at TEXT NOT NULL
+);
 CREATE TABLE scope_violations (
   id TEXT PRIMARY KEY,
   project_slug TEXT NOT NULL,

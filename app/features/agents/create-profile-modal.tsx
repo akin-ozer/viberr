@@ -1055,7 +1055,11 @@ function ResourcePicker({
           // Surface them so the count is honest AND they stay removable — the
           // catalog is profile-agnostic, so without this a ghost grant reads as
           // "N of 0" and can never be unchecked (there's no chip to click).
-          const displayItems: { id: string; missing?: boolean }[] = [
+          // U33-7: a chip reads its `label` when the store keeps one (knowledge
+          // bases are stored by DIRECTORY and displayed by NAME everywhere else
+          // — ruling 106) and falls back to the key otherwise. The value written
+          // into the grant is always `it.id`, the store key, unchanged.
+          const displayItems: { id: string; label?: string; missing?: boolean }[] = [
             ...g.items,
             ...sel
               .filter((id) => !catalogIds.has(id))
@@ -1109,7 +1113,9 @@ function ResourcePicker({
                         title={
                           it.missing
                             ? "No longer in the store. Click to remove this grant"
-                            : undefined
+                            : // U33-7: the label is what a human reads; the key
+                              // is what the run mounts by, so it stays readable.
+                              (it.label ? `Stored as ${it.id}` : undefined)
                         }
                         // F19-5: these grant chips are toggles like the backend,
                         // autonomy and stage chips above, but were the one family
@@ -1119,7 +1125,7 @@ function ResourcePicker({
                         onClick={() => toggleRes(g.key, it.id)}
                       >
                         {selSet.has(it.id) && <Icon name="check" />}
-                        {it.id}
+                        {it.label ?? it.id}
                       </button>
                     ))}
                   </div>
@@ -1413,6 +1419,12 @@ export function CreateProfileModal({
     <dialog
       className="modal-card"
       aria-label={editing ? "Edit profile" : "New agent profile"}
+      // D33-2: the other half of the screen-label gap (`docs/ui/surfaces.md`
+      // §4). The accessible name stays mode-dependent — a reader wants to know
+      // WHICH profile they opened — while the screen label is the STABLE name
+      // of the surface, so a test or an agent can address the create and the
+      // edit case with one string.
+      data-screen-label="Agent profile modal"
       ref={dialogRef}
     >
       <ModalHead

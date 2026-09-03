@@ -27,7 +27,7 @@ import {
   resolveDeclaredStages,
   stageEligible,
 } from "~/shared/workflow/stage-eligibility";
-import { stageName } from "~/shared/workflow/stage-roles";
+import { isTerminalStage, stageName } from "~/shared/workflow/stage-roles";
 import { buildAgentToolkit, type AgentToolkit } from "./agent-toolkit.server";
 import type {
   AgentDeployment,
@@ -85,7 +85,10 @@ import {
   resolveRunModel,
   resolveRunEffort,
 } from "~/server/runtimes/model-catalog.server";
-import { taskBranchName } from "~/server/github/branch-sync.server";
+import {
+  ensureTaskBranchBestEffort,
+  taskBranchName,
+} from "~/server/github/branch-sync.server";
 import {
   RUN_PHASE,
   type RunMcpServers,
@@ -1011,6 +1014,9 @@ export interface RemoveReviewerResult {
  * Releases a REVIEWER from a task: drops the matching AgentRef from `reviewers`
  * and appends a typed `agent` timeline event, then reprojects + audits. A
  * profile that isn't currently a reviewer is a no-op. RBAC: admin|maintainer.
+ *
+ * F33-10: refuses outright on a CLOSED task (terminal stage or archived) — see
+ * the gate below.
  */
 export async function removeReviewer(
   db: DatabaseSync,
@@ -1022,6 +1028,42 @@ export async function removeReviewer(
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+
+  // F33-10 / ruling 118 (owner, 2026-09-02): a task at the terminal stage is
+  // CLOSED — every runtime control on its page says so (G9) — and the roster's
+  // authority (delivery, review, acceptance) has nothing left to act on. Ruling
+  // 118 froze the OWNER seat there for exactly that reason; the ENGAGEMENT seat
+  // earns the freeze harder, because releasing it REWRITES the record rather
+  // than merely re-labelling it: `validation` is derived from the required-
+  // reviewer set, so dropping the approving reviewer of a merged, accepted task
+  // re-derives `healthy` → `changed` (the UX19-3 recompute below, correct for an
+  // OPEN task) and the hero, the board card and the review queue all render a
+  // closed task as never-validated while its own timeline and audit still say it
+  // was accepted on a healthy verdict. The approving verdict survives in
+  // `verdicts[]` — it is DISCONNECTED, which is worse than deleted.
+  //
+  // So this freeze has NO admin escape, where ruling 118's owner seat has one:
+  // the owner seat carries no derived consequence, so an admin reassignment
+  // there is a bookkeeping entry, while here the same click silently restates
+  // history. Archived seats are frozen the same way (D32-16), and a task moved
+  // back to an open stage releases agents again. Both panels withhold the ✕
+  // below; this fails CLOSED if one of them does not — including on the no-op
+  // path, so a closed task never answers "released nothing" to a click that
+  // should not have been offered.
+  if (existing.parsed.frontmatter.archived) {
+    throw AppError.validation(
+      `${input.taskKey} is archived — restore it before releasing an agent from it.`,
+    );
+  }
+  const board = projectBoard(ctx, input.projectSlug);
+  if (
+    board !== null &&
+    isTerminalStage(existing.parsed.frontmatter.stage, board.stages)
+  ) {
+    throw AppError.validation(
+      `${input.taskKey} is closed — move it back to an open stage before releasing an agent from it.`,
+    );
+  }
 
   const target = supportingEngagements(existing.parsed.frontmatter).find(
     (r) => r.profileId === input.profileId,
@@ -1284,6 +1326,23 @@ async function dispatchAgentRun(
     );
   }
   const delivers = engagement.delivers;
+
+  // Ruling 122: the branch name is ALLOCATED once, before the agent is told
+  // what to check out. The operator's own dispatch already ran this hook
+  // (FR31's delivery spine), but a human-dispatched delivering run reached the
+  // prompt with no branch recorded, so it fell back to the canonical key — the
+  // one name a reused task key can already have a stranger's pull request on.
+  // Best-effort by the same reasoning as the operator's: a task that cannot
+  // reach GitHub still runs, and delivery re-checks the name.
+  if (delivers && !existing.parsed.frontmatter.branch) {
+    await ensureTaskBranchBestEffort(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      auditActor,
+      { dataRoot: ctx.dataRoot },
+    );
+    existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey)) ?? existing;
+  }
 
   // Server-side single-flight for the DELIVERING agent (F7-OP1). Two racing
   // dispatches used to start two runs in the SAME tasks/<KEY>/workspace clone —

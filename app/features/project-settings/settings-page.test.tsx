@@ -98,25 +98,128 @@ const NO_CREDENTIAL: SettingsViewData["credential"] = {
 };
 
 describe("ProjectPanel", () => {
-  it("renders identity fields + the real store-relative task-file pattern, saves only when dirty", () => {
+  it("renders identity fields + the real store-relative task-file pattern", () => {
+    const { getByText } = render(
+      <ProjectPanel project={PROJECT} canManage onSave={() => {}} />,
+    );
+    expect(getByText("projects/viberr-core/tasks/<key>/task.md")).toBeTruthy();
+    expect(getByText("VIB-###")).toBeTruthy();
+  });
+
+  /**
+   * U33-9 (pass 33, owner). The three governed identity fields carried
+   * `onBlur={saveIfDirty}`: leaving the field WAS the commit. The owner renamed
+   * a project by accident — typed into what they took for the stage-name field,
+   * clicked away, and the rename was already governed state. The task prefix is
+   * the more consequential of the two, since every future task key and branch
+   * name derives from it, and the rest of the product refuses exactly this
+   * shape ("no optimistic UI for governed state").
+   *
+   * Blur must now be inert and the Save button must be the only trigger. The
+   * old test asserted the opposite — it pinned the auto-save — so it is gone
+   * rather than extended.
+   */
+  it("U33-9: blur no longer commits — Save is the only trigger, and only while dirty", () => {
     const onSave = vi.fn();
     const { getByText, getByDisplayValue } = render(
       <ProjectPanel project={PROJECT} canManage onSave={onSave} />,
     );
-    expect(getByText("projects/viberr-core/tasks/<key>/task.md")).toBeTruthy();
-    expect(getByText("VIB-###")).toBeTruthy();
+
+    // SAFETY: "Save changes"/"Discard" are the ProjectPanel action row's two
+    // `<button>`s and nothing else on the panel carries those strings; the
+    // `.disabled` reads below need the element kind RTL types as HTMLElement.
+    const save = getByText("Save changes") as HTMLButtonElement;
+    // SAFETY: the same action row's cancel control, per the same contract.
+    const discard = getByText("Discard") as HTMLButtonElement;
+    expect(save.disabled).toBe(true); // nothing edited yet
+    expect(discard.disabled).toBe(true);
 
     const nameInput = getByDisplayValue("Viberr Core");
-    fireEvent.blur(nameInput);
-    expect(onSave).not.toHaveBeenCalled(); // untouched → no save
-
     fireEvent.change(nameInput, { target: { value: "Viberr Core 2" } });
+    // The edit that used to persist itself the instant focus left.
     fireEvent.blur(nameInput);
+    expect(onSave).not.toHaveBeenCalled();
+
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    // Same action intent, same payload — only the trigger moved.
     expect(onSave).toHaveBeenCalledWith({
       name: "Viberr Core 2",
       prefix: "VIB",
       description: "Core platform work.",
     });
+  });
+
+  // The prefix and the description are governed by the same rule as the name:
+  // neither may reach the server because focus moved on.
+  it("U33-9: the prefix and the description do not commit on blur either", () => {
+    const onSave = vi.fn();
+    const { getByDisplayValue, getByText } = render(
+      <ProjectPanel project={PROJECT} canManage onSave={onSave} />,
+    );
+    const prefix = getByDisplayValue("VIB");
+    fireEvent.change(prefix, { target: { value: "core" } });
+    fireEvent.blur(prefix);
+    const desc = getByDisplayValue("Core platform work.");
+    fireEvent.change(desc, { target: { value: "Platform work." } });
+    fireEvent.blur(desc);
+    expect(onSave).not.toHaveBeenCalled();
+
+    fireEvent.click(getByText("Save changes"));
+    expect(onSave).toHaveBeenCalledWith({
+      name: "Viberr Core",
+      prefix: "CORE",
+      description: "Platform work.",
+    });
+  });
+
+  // U33-9: the way out of an accidental edit. Discard puts the loader's values
+  // back and the pair goes inert again — the panel is clean, not merely unsent.
+  it("U33-9: Discard restores the loader values and re-disables the pair", () => {
+    const onSave = vi.fn();
+    const { getByDisplayValue, getByText } = render(
+      <ProjectPanel project={PROJECT} canManage onSave={onSave} />,
+    );
+    fireEvent.change(getByDisplayValue("Viberr Core"), {
+      target: { value: "Oops" },
+    });
+    fireEvent.change(getByDisplayValue("VIB"), { target: { value: "OOPS" } });
+    fireEvent.click(getByText("Discard"));
+
+    expect(getByDisplayValue("Viberr Core")).toBeTruthy();
+    expect(getByDisplayValue("VIB")).toBeTruthy();
+    // SAFETY: the action row's Save control, per the contract asserted above.
+    expect((getByText("Save changes") as HTMLButtonElement).disabled).toBe(true);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  // U33-9: an identity write already in flight holds the control — the panel
+  // still shows the OLD loader values until revalidation remounts it, so a
+  // second press would resubmit the same governed rename.
+  it("U33-9: an in-flight save holds both controls", () => {
+    const onSave = vi.fn();
+    const { getByDisplayValue, getByText } = render(
+      <ProjectPanel project={PROJECT} canManage busy onSave={onSave} />,
+    );
+    fireEvent.change(getByDisplayValue("Viberr Core"), {
+      target: { value: "Viberr Core 2" },
+    });
+    // SAFETY: the action row's Save control, per the contract asserted above.
+    expect((getByText("Save changes") as HTMLButtonElement).disabled).toBe(true);
+    // SAFETY: the same row's Discard control, per that same contract.
+    expect((getByText("Discard") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  // U33-9: the "Task keys" row states what this project's keys ARE. While the
+  // blur handler existed it could not disagree with the server; now it can, so
+  // it reads the loader's prefix rather than the draft in the field above it.
+  it("U33-9: the task-key row shows the saved prefix, not the unsaved draft", () => {
+    const { getByDisplayValue, getByText, queryByText } = render(
+      <ProjectPanel project={PROJECT} canManage onSave={() => {}} />,
+    );
+    fireEvent.change(getByDisplayValue("VIB"), { target: { value: "core" } });
+    expect(queryByText("CORE-###")).toBeNull();
+    expect(getByText("VIB-###")).toBeTruthy();
   });
 
   it("uppercases and clips the prefix to 4 chars", () => {
@@ -135,9 +238,15 @@ describe("ProjectPanel", () => {
   // cannot explain itself — a contributor met a page of dead fields in silence
   // (the defect the Policy sheet already fixed under P14-LV-08).
   it("explains the read-only state to a role without the grant", () => {
-    const { container } = render(
+    const { container, queryByText } = render(
       <ProjectPanel project={PROJECT} canManage={false} onSave={() => {}} />,
     );
+    // U33-9: the read-only case renders exactly as it did before the explicit
+    // Save landed — dead fields plus the grant note, and no commit control to
+    // offer a role that cannot use it.
+    expect(queryByText("Save changes")).toBeNull();
+    expect(queryByText("Discard")).toBeNull();
+    expect(container.querySelector(".confirm-actions")).toBeNull();
     // Still inert…
     expect(
       Array.from(

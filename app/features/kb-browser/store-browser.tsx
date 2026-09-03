@@ -104,6 +104,7 @@ function BrowserToolbar({
   importing,
   dest,
   folders,
+  rootLabel,
   onDest,
   onImport,
   onUploadFiles,
@@ -118,6 +119,8 @@ function BrowserToolbar({
   dest: string[];
   /** Every folder in the tree, as store-relative paths (root excluded). */
   folders: string[][];
+  /** The browsed resource's own name — what `[]` actually writes into. */
+  rootLabel: string;
   onDest: (path: string[]) => void;
   onImport: () => void;
   onUploadFiles: () => void;
@@ -175,7 +178,14 @@ function BrowserToolbar({
             onDest(e.target.value ? e.target.value.split("/") : [])
           }
         >
-          <option value="">/ (store root)</option>
+          {/* U33-3: this read "/ (store root)", which is a place no toolbar
+              action here has ever written. A StoreBrowser is opened on ONE
+              resource (resources-panel mounts it per knowledge base or per
+              skill) and `resolveStoreTarget` resolves every path against that
+              resource's own folder — the kb dir / skill folder — so `[]` is
+              the RESOURCE root, not the store's. Copy only: the value stays
+              empty and the destination stays `[]`. */}
+          <option value="">{"/ (" + rootLabel + " root)"}</option>
           {folders.map((path) => (
             <option key={path.join("/")} value={path.join("/")}>
               {path.join("/")}/
@@ -1060,6 +1070,7 @@ export function StoreBrowser({
             importing={ops.importing}
             dest={dest}
             folders={folders}
+            rootLabel={title}
             onDest={target}
             onImport={() => ops.ghImport(dest)}
             onUploadFiles={() => ops.startUpload(dest)}

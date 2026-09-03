@@ -33,7 +33,9 @@ import {
 } from "~/server/org/resources.server";
 import {
   listGlobalAgentProfiles,
+  resolveResourceGrants,
   saveGlobalAgentProfile,
+  type SaveGagentInput,
 } from "~/server/org/gagents.server";
 import { writeStoreDoc } from "~/server/org/store-files.server";
 import { getInsightsSummary } from "~/server/insights/insights-query.server";
@@ -381,12 +383,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_knowledge_bases",
-      "List the org knowledge bases (name, folder, file count, refresh mode). Org admins only.",
+      "List the org knowledge bases (grant key, name, folder, file count, refresh mode). Org admins only. `grantKey` is the store DIRECTORY — the only form save_global_agent's `kbs` accepts; `id` is for save_knowledge_base.",
       {},
       run(() => {
         requireOrgAdmin("read the org knowledge bases");
         return json(
+          // F33-8: `grantKey` leads, because a grant is resolved at run time by
+          // the store directory and the model reached for `id` — the first field
+          // this list used to carry — and granted a dud on every template.
           listKnowledgeBases(db, { dataRoot }).map((kb) => ({
+            grantKey: kb.dir,
             id: kb.id,
             name: kb.name,
             dir: kb.dir,
@@ -450,12 +456,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_skills",
-      "List the org skills (name, summary). Org admins only.",
+      "List the org skills (grant key, name, summary). Org admins only. `grantKey` is the skill FOLDER NAME — the only form save_global_agent's `skills` accepts; `id` is for save_skill.",
       {},
       run(() => {
         requireOrgAdmin("read the org skills");
         return json(
+          // F33-8: a skill mounts by its folder name, so that is what a grant
+          // must carry; `id` (a `disk:`/`sk_` handle) leading the row is what
+          // the controller granted before, and it mounted nothing.
           listSkills(db, { dataRoot }).map((s) => ({
+            grantKey: s.name,
             id: s.id,
             name: s.name,
             summary: s.summary,
@@ -498,12 +508,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_mcp_servers",
-      "List the org MCP connections (name, transport, target, health). Org admins only. Credentials are never shown.",
+      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. Credentials are never shown. `grantKey` is the REGISTRY NAME — the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
       {},
       run(() => {
         requireOrgAdmin("read the MCP connections");
         return json(
+          // F33-8: a run resolves an MCP grant by registry name and drops an
+          // unmatched one silently, so the name — not the `mcp_…` id this row
+          // used to lead with — is what a grant must carry.
           listMcpServers(db).map((m) => ({
+            grantKey: m.name,
             id: m.id,
             name: m.name,
             transport: m.transport,
@@ -572,17 +586,24 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_global_agents",
-      "List the org's global agent templates (specialists a project can deploy). Org admins only.",
+      "List the org's global agent templates (specialists a project can deploy), each with the resource grants it holds. Org admins only. Read this before save_global_agent so an edit is not blind.",
       {},
       run(() => {
         requireOrgAdmin("read the global agent templates");
         return json(
+          // F33-7: the grants are HERE because `save_global_agent` rewrites
+          // every field it is given and this was the only read of a template —
+          // the model had no way to see what an edit was about to replace, and
+          // the controller (rightly) refused to edit blind.
           listGlobalAgentProfiles(db, { dataRoot }).map((g) => ({
             id: g.id,
             name: g.name,
             backend: g.backend,
             summary: g.summary,
             stages: g.stages,
+            skills: g.skills,
+            mcps: g.mcps,
+            kbs: g.kbs,
             usedByProjects: g.used,
           })),
         );
@@ -594,7 +615,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_global_agent",
-      "Create or update a global agent template (name, backend, summary, persona, eligible stages, resource grants). Org admins only. The controller itself and the operator are system profiles this tool cannot touch.",
+      "Create or update a global agent template (name, backend, summary, persona, eligible stages, resource grants). Org admins only. The controller itself and the operator are system profiles this tool cannot touch. Grant merge semantics: an omitted skills/mcps/kbs list leaves the stored grants unchanged, and an empty list clears them — read list_global_agents first, and grant by grantKey, never by id.",
       {
         id: z.string().optional().describe("Existing template id to update; omit to create."),
         name: z.string(),
@@ -602,9 +623,24 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         summary: z.string().describe("One scannable paragraph the operator selects by."),
         persona: z.string().optional().describe("The long persona/system-prompt body."),
         stages: z.array(z.string()).min(1).describe("Eligible stage ids, e.g. ready, impl."),
-        skills: z.array(z.string()).optional(),
-        mcps: z.array(z.string()).optional(),
-        kbs: z.array(z.string()).optional(),
+        skills: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Skill grants by grantKey — the skill FOLDER NAME from list_skills, never its id. Omit to keep the stored grants; [] clears them.",
+          ),
+        mcps: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "MCP grants by grantKey — the REGISTRY NAME from list_mcp_servers, never its id. Omit to keep the stored grants; [] clears them.",
+          ),
+        kbs: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Knowledge-base grants by grantKey — the store DIRECTORY from list_knowledge_bases, never its id or display name. Omit to keep the stored grants; [] clears them.",
+          ),
       },
       runWith(
         async (args: {
@@ -619,22 +655,30 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           kbs?: string[];
         }) => {
           requireOrgAdmin("manage global agent templates");
-          const saved = saveGlobalAgentProfile(
+          // F33-8: a grant is stored by store key, so a recognised id is
+          // normalised here and an unknown key is refused by name — the model
+          // used to hand back the ids `list_*` gave it and every grant landed
+          // dangling. F33-7: only the lists it actually sent are passed on, so
+          // an omitted one keeps what the template holds.
+          const grants = resolveResourceGrants(
             db,
-            {
-              id: args.id ?? null,
-              name: args.name,
-              backend: args.backend,
-              summary: prose(args.summary),
-              persona: prose(args.persona ?? ""),
-              stages: args.stages,
-              skills: args.skills ?? [],
-              mcps: args.mcps ?? [],
-              kbs: args.kbs ?? [],
-            },
-            auditActor,
+            { skills: args.skills, mcps: args.mcps, kbs: args.kbs },
             { dataRoot },
           );
+          const input: SaveGagentInput = {
+            id: args.id ?? null,
+            name: args.name,
+            backend: args.backend,
+            summary: prose(args.summary),
+            persona: prose(args.persona ?? ""),
+            stages: args.stages,
+          };
+          if (grants.skills) input.skills = grants.skills;
+          if (grants.mcps) input.mcps = grants.mcps;
+          if (grants.kbs) input.kbs = grants.kbs;
+          const saved = saveGlobalAgentProfile(db, input, auditActor, {
+            dataRoot,
+          });
           return `[done] ${saved.toast}.`;
         },
       ),

@@ -121,7 +121,19 @@ discard dialog`, `Packet collision dialog`, `Attachment lightbox`, `Command pale
 `Notifications`, `Notifications popover`, `Profile & preferences`, `Instance settings`,
 `Settings · Users & access`, `Settings · GitHub connections`, `Settings · Sign-in &
 SSO`, `Settings · Agent resources`, `Controller settings`, `Controller dock` (the
-panel, ruling 121). The task page's own label comes from the shell model.
+panel, ruling 121), `Insights`, `Capability matrix modal`, `Agent profile modal`, and
+the six confirms the shared `ConfirmDialog` now names: `Resource removal dialog`,
+`Stage removal dialog`, `Member removal dialog`, `Schedule cancel dialog`,
+`Interrupt run dialog`, `Dismiss recommendation dialog`. The task page's own label comes
+from the shell model. Three labels are composed at render time rather than listed here:
+`Files · <resource>` (the store browser), `Project card · <name>` / `Project row · <name>`
+(home) and `<page> · overlay` (`PageOverlay`).
+
+*(Corrected 2026-09-03, pass 33 — D33-2/D33-3. This section stated the contract as
+universal while the shared `ConfirmDialog` backing seven confirms carried no label at all,
+`InsightsPage` was the one full-page surface without one, and two agent modals were
+unlabelled. `screenLabel` is now a REQUIRED prop on `ConfirmDialog`, so a new call site
+cannot rejoin the gap silently — the typecheck refuses it.)*
 
 ## 5. Copy rules that tests enforce
 

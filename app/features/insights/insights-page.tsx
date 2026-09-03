@@ -53,8 +53,11 @@ function fmtPercent(rate: number | null): string {
 export function InsightsPage({ summary }: { summary: InsightsSummary }) {
   const { totals, outcomes } = summary;
   const empty = totals.runs === 0;
+  // D33-3: Insights was the one full-page surface with no screen label, so
+  // tests and agents could not address it by name like every other one
+  // (docs/ui/surfaces.md §4).
   return (
-    <main className="insights">
+    <main className="insights" data-screen-label="Insights">
       <div className="insights-head">
         <div>
           <h1>Insights</h1>

@@ -112,6 +112,7 @@ export function ConfirmDelete({
   // task/project confirmation sites share one grammar and one chrome.
   return (
     <ConfirmDialog
+      screenLabel="Resource removal dialog"
       title={`Remove ${what}?`}
       body={detail}
       confirmLabel={confirmLabel ?? `Remove ${what}`}

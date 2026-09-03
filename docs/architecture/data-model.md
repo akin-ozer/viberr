@@ -114,6 +114,7 @@ files) · **C** cache/operational (safe to lose).
 | `github_connections` | P | Org-level owner connections: `owner` → `pat_id`, `is_default`, `repos_count`, `expires_at`. |
 | `project_github_credentials` | P | Which PAT a project uses (one per project). |
 | `scope_violations` | P | Open/resolved PAT scope violations per project (and optional task); at most one open row per `(project, scope, task)`. |
+| `project_github_health` | P | The LAST repository-access probe per project (`result_json`, `checked_at`), one row overwritten in place. An app-owned OBSERVATION, not a projection — a rebuild must not clear it — so the board and the home card can say a repository is unreachable without calling GitHub on a render path (U33-2, pass 33). Written only where the answer was already in hand: project creation's own probe and the GitHub page's 30-second cached probe. |
 
 ### Org resources, models, controller
 

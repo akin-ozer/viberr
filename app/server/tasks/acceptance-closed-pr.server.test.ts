@@ -529,6 +529,43 @@ describe("F19-25 — the admin override is WITHDRAWN on the server too, not only
     });
   });
 
+  it("ruling 123: force-accept refuses an ARCHIVED task and says to restore it first", async () => {
+    // Pass 33 / F33-6, proven live on SBX-1: `force` skipped the shared refusal
+    // helper, which is where the archived gate lives, so an admin could leave a
+    // task both archived AND accepted — a state every other path forbids.
+    seedClosedPrTask({
+      archived: true,
+      pr: { number: 318, state: "review", title: "[VIB-1] Attach execution workspace" },
+    });
+    await expect(
+      forceAcceptCompletion(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        arda(),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Restore it before accepting"),
+    });
+    expect(task().frontmatter.stage).toBe("review");
+    expect(task().frontmatter.archived).toBe(true);
+    // And no "forced" row claiming a bypass that never happened.
+    expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(0);
+  });
+
+  it("ruling 123: the force affordance is WITHDRAWN on an archived task", async () => {
+    seedClosedPrTask({
+      archived: true,
+      pr: { number: 318, state: "review", title: "[VIB-1] Attach execution workspace" },
+    });
+    const affordance = resolveAcceptanceAffordance(
+      { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
+      { dataRoot: store.dataRoot },
+    );
+    expect(affordance.terminallyBlocked).toBe(true);
+    expect(affordance.canAccept).toBe(false);
+  });
+
   it("the override STILL works for the wedged process gate it exists for (DG-2)", async () => {
     // Same task, PR open, no approving verdict on the delivered revision — the
     // WEDGED case force-accept was granted for. It accepts, and the audit names

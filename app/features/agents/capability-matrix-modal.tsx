@@ -79,6 +79,11 @@ export function CapabilityMatrixModal({
     <dialog
       className="modal-card modal-wide"
       aria-label="Capability matrix"
+      // D33-2: `docs/ui/surfaces.md` §4 states the screen-label contract as
+      // universal ("every top-level surface and dialog"), and this dialog was
+      // one of two that carried none — so a sweep addressing surfaces by name
+      // could not see it at all. Fixed here, not by relaxing the contract.
+      data-screen-label="Capability matrix modal"
       ref={dialogRef}
     >
       <div className="modal-head">

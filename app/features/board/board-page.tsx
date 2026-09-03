@@ -11,6 +11,7 @@ import {
 import {
   Link,
   useFetcher,
+  useParams,
   useSearchParams,
 } from "react-router";
 import {
@@ -56,9 +57,11 @@ import {
 } from "~/ui/task-meta";
 import {
   checksPill,
+  connectionPill,
   prStatePill,
   reviewPill,
 } from "~/features/github/github-pills";
+import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 import { AcceptConfirm } from "~/features/task-detail/accept-confirm";
 import {
   acceptanceDisclosureFields,
@@ -1648,6 +1651,68 @@ function OrphanBanner({ orphanTasks }: { orphanTasks: TaskSummary[] }) {
   );
 }
 
+/**
+ * U33-2 — the repository fact, on the surface the work happens on.
+ *
+ * Creating a project pre-fills the repo name from the project name (pass-8 P1),
+ * so "Sandbox" produced `akin-ozer/sandbox`, which does not exist. Creation
+ * succeeded, the `repoWarning` toast fired once, and after that the fact had no
+ * home: only /projects/:slug/github said "repo not found", while every agent
+ * run failed its clone (`git exit 128`) with nothing on the board saying why.
+ *
+ * Two things are deliberately borrowed rather than invented. The strip is the
+ * board's OWN banner slot (`.board-orphans`, already carrying both the unstaged
+ * diagnosis and the archived-filter explainer), and the words come from
+ * `connectionPill` — the ONE connection vocabulary the GitHub page's Connection
+ * row speaks — so the two surfaces cannot word the same fact differently.
+ *
+ * VISIBILITY is derived from that shared pill instead of re-listing statuses:
+ * `risk`/`blocked` are exactly the arms where a repository IS configured and
+ * GitHub will not serve it, which is what makes every clone fail. `connected`,
+ * `no_repo_configured` (a legitimate choice, already rendered as "no
+ * repository"), `no_pat_configured` (setup, not breakage) and
+ * `network_unavailable` (transient) stay quiet — a board that cries wolf while
+ * GitHub is briefly down teaches people to ignore it.
+ *
+ * The same two lines live in `features/home/project-cards.tsx`. They belong
+ * beside `connectionPill` in `features/github/github-pills.ts`; that file is
+ * another cluster's, so the duplication is recorded here rather than smuggled
+ * in as a third vocabulary.
+ */
+function repoAccessNotice(access: RepoAccessResult) {
+  const pill = connectionPill(access);
+  if (pill.kind !== "risk" && pill.kind !== "blocked") return null;
+  // Discriminant, not an `in` probe: `no_repo_configured` is the one arm with
+  // no repo, and it never reaches here (its pill is neutral).
+  const repo = access.status === "no_repo_configured" ? null : access.repo;
+  return { repo, label: pill.label };
+}
+
+function RepoAccessBanner({
+  slug,
+  access,
+}: {
+  /** Route param, so the link works on a board with no tasks to borrow a slug
+   *  from (a brand-new project is exactly where this misconfiguration lands). */
+  slug: string;
+  access: RepoAccessResult;
+}) {
+  const notice = repoAccessNotice(access);
+  if (!notice) return null;
+  return (
+    <div className="board-orphans" role="region" aria-label="Repository">
+      <Icon name="github" />
+      <span className="board-orphans-label">
+        {notice.repo} · {notice.label}. Agents clone the repository before they
+        work, so runs in this project fail until GitHub can serve it.
+      </span>
+      <Link className="board-orphan-key" to={`/projects/${slug}/github`}>
+        GitHub
+      </Link>
+    </div>
+  );
+}
+
 function StageBoard({
   columns,
   visible,
@@ -1752,6 +1817,7 @@ export function BoardPage({
   canTransition,
   canRescan,
   defaultBranch = "main",
+  repoAccess,
 }: {
   columns: BoardColumnData[];
   orphanTasks: BoardTask[];
@@ -1766,7 +1832,17 @@ export function BoardPage({
    *  Defaults to "main" (the same fallback the task-detail page uses) so the
    *  ceremony always names a real target even before the loader wires it. */
   defaultBranch?: string;
+  /**
+   * U33-2: GitHub's own answer for this project's repository, as the GitHub
+   * view already computes it (`checkRepoAccess`). Optional and absent by
+   * default: no loader carries this fact yet, and the board must NOT reach for
+   * GitHub itself — the check is a live `GET /repos/:repo`, and project-scope
+   * SSE revalidates this view on every task event. `undefined` means "nobody
+   * has established it", which the banner reads as silence, never as health.
+   */
+  repoAccess?: RepoAccessResult;
 }) {
+  const { slug: projectSlug } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const rawFilter = searchParams.get("filter");
   const filter: BoardFilterId = isBoardFilterId(rawFilter) ? rawFilter : "all";
@@ -2301,6 +2377,13 @@ export function BoardPage({
           }
         }}
       />
+
+      {/* U33-2: directly under the header, above the filters — the fact is
+          about the whole project, not about whatever the filters are showing,
+          and it must survive a filter/search that empties every column. */}
+      {repoAccess && projectSlug && (
+        <RepoAccessBanner slug={projectSlug} access={repoAccess} />
+      )}
 
       {/* A brand-new board has nothing to filter or search — the machinery
           renders once there is anything for it to act on (the Archived chip is

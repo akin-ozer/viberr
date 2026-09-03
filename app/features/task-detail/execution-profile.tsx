@@ -243,6 +243,7 @@ function PendingSchedules({
       </ul>
       {confirmCancel && (
         <ConfirmDialog
+          screenLabel="Schedule cancel dialog"
           title="Cancel this scheduled run?"
           body={
             <>
@@ -646,6 +647,7 @@ function EngagedAgents({
   deployedById,
   activeProfileIds,
   canRunAgents,
+  closed,
   releaseBusy,
   onRelease,
 }: {
@@ -653,6 +655,10 @@ function EngagedAgents({
   deployedById: Map<string, DeployedSpecialistView>;
   activeProfileIds: string[];
   canRunAgents: boolean;
+  /** F33-10: the panel's OWN closed fact (terminal stage or archived), passed
+   *  down rather than re-derived — the ledger and the run controls must not be
+   *  able to disagree about whether this task is closed. */
+  closed: boolean;
   releaseBusy: boolean;
   onRelease: (profileId: string) => void;
 }) {
@@ -717,7 +723,17 @@ function EngagedAgents({
                 </p>
               )}
             </span>
-            {canRunAgents && !delivers && (
+            {/* F33-10: a closed task's engagements are frozen — the server
+                refuses the release at the terminal stage, and every other
+                runtime control on this panel is already off. The ✕ was the one
+                exception: enabled, titled "Release this agent from the task",
+                and refused on click. Ruling 37's precedent settles which way to
+                fix it — a WITHDRAWN affordance is honest, a disabled one just
+                invites the support question — so the button is simply not
+                rendered. The panel head's "task closed" pill and the run cell's
+                "Task closed. Reopen it to run an agent." already carry the
+                reason; a third copy of it on every row would be noise. */}
+            {canRunAgents && !delivers && !closed && (
               <span className="right">
                 <button
                   type="button"
@@ -912,6 +928,7 @@ export function ExecutionProfile({
               deployedById={deployedById}
               activeProfileIds={activeAgentProfileIds}
               canRunAgents={canRunAgents}
+              closed={closed}
               releaseBusy={releaseBusy}
               onRelease={onReleaseAgent}
             />

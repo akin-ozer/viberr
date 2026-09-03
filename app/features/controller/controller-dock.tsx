@@ -405,7 +405,14 @@ function DockShell({ context }: { context: DockContext }) {
   const pageHref =
     (current?.scope.pageHref ??
       (context.projectSlug ? `/projects/${context.projectSlug}/controller` : "/controller")) +
-    (current?.conversation ? `?c=${encodeURIComponent(current.conversation.id)}` : "");
+    // Ruling 121 + pass 33: the page now opens this scope's NEWEST thread when
+    // no `?c=` is given (U33-8), so a dock sitting on a fresh, unsent thread must
+    // say so explicitly — a bare link would hand the person an older
+    // conversation instead of the blank composer they were looking at. `?c=new`
+    // is the page's own token for "start empty".
+    (current?.conversation
+      ? `?c=${encodeURIComponent(current.conversation.id)}`
+      : "?c=new");
 
   return (
     <div className="dock" data-open={open ? "true" : "false"}>

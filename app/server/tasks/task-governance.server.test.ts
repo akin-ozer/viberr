@@ -1739,6 +1739,223 @@ describe("resolvePacket kind matrix", () => {
     expect(fm.github?.unownedPr).toBe(232);
   });
 
+  /**
+   * F33-2 (pass 33) — the decision event states the DECISION, not its effect.
+   *
+   * Both destructive arms wrote their outcome into the resolution event, which
+   * is written unconditionally and BEFORE the work it describes. Live (VIB-1)
+   * the remedy refused, and the canonical timeline then held the refusal note
+   * ("The branch collision was **not** cleared: PR #270 is still open on
+   * `vib-1` … Nothing was re-delivered.") one millisecond above a decision event
+   * asserting the branch had been removed and the work re-delivered.
+   */
+  it("F33-2: the collision decision event claims no outcome — the refusal note is the only writer of one", async () => {
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    await collisionCredential(store);
+    const github = fakeGithubFetch({});
+    // The task's own review PR stands on the ref, so the delete refuses — the
+    // safe outcome the C05-B ordering exists to produce.
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        branch: "vib-1-work",
+        workRevision: COLLISION_REVISION,
+        pr: { number: 270, state: "review", title: "VIB-1: own review PR" },
+        github: { commits: [], changed: null, unownedPr: 232 },
+      },
+      COLLISION_PACKET,
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+    );
+
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map(
+      (e) => e.text,
+    );
+    // The decision, in full, with nothing appended about what it achieved.
+    expect(texts).toContain(
+      "**Decision:** Delete the stale remote branch, then redeliver.",
+    );
+    expect(
+      texts.some((t) => t.includes("The stale remote branch is removed")),
+    ).toBe(false);
+    // …and the outcome is on the timeline exactly once, from the note.
+    expect(
+      texts.filter((t) => t.includes("The branch collision was **not** cleared")),
+    ).toHaveLength(1);
+  });
+
+  it("F33-2: the discard decision event claims no outcome either, and `ev` still overrides", async () => {
+    const store = prepared();
+    const packet: TaskPacket = {
+      type: "input",
+      kind: "Completion report",
+      from: "operator",
+      title: "The branch is empty — discard it?",
+      body: "b",
+      observations: [],
+      options: [
+        { kind: "discard_branch", t: "Discard the branch", d: "", rec: true },
+      ],
+    };
+    // No branch at all: the discard has nothing to do, and its own note says so.
+    withTask(store, { stage: "impl", waiting: "human" }, packet);
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map(
+      (e) => e.text,
+    );
+    expect(texts).toContain("**Decision:** Discard the branch.");
+    expect(
+      texts.some((t) => t.includes("local workspace branch is discarded")),
+    ).toBe(false);
+    expect(
+      texts.some((t) =>
+        t.includes("no workspace branch, so there is nothing to discard"),
+      ),
+    ).toBe(true);
+
+    // The operator's own `ev` override is untouched by the trim.
+    const store2 = prepared();
+    const evPacket: TaskPacket = {
+      ...packet,
+      options: [
+        {
+          kind: "discard_branch",
+          t: "Discard the branch",
+          d: "",
+          rec: true,
+          ev: "**Decision:** drop the dead branch. Murat confirmed it holds nothing.",
+        },
+      ],
+    };
+    withTask(store2, { stage: "impl", waiting: "human" }, evPacket);
+    await resolvePacket(
+      store2.db,
+      { projectSlug: store2.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store2.users.murat),
+      { dataRoot: store2.dataRoot },
+    );
+    expect(
+      getTaskDetail(store2.db, store2.slug, "VIB-1")!.timeline.map((e) => e.text),
+    ).toContain(
+      "**Decision:** drop the dead branch. Murat confirmed it holds nothing.",
+    );
+  });
+
+  /**
+   * F33-4 (pass 33) — ruling 110 ends "And it never strands", and F32-7 hung
+   * that guarantee on the RE-DELIVERY: full autonomy re-queues the operator,
+   * supervised records the "Move to <review>" card. The REFUSING arm runs no
+   * re-delivery, so it inherited neither. Live (VIB-1): `stage: impl`,
+   * `readiness: ready`, `waiting: human`, empty recommendations, no packet, and
+   * PR #270 open on the branch — the strand ruling 110 quotes, reached through
+   * the safe path the delete-first ordering exists to produce.
+   */
+  it("F33-4: a refused collision remedy still leaves the task actionable — the Move-to-review card over the PR it already carries", async () => {
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    await collisionCredential(store);
+    const github = fakeGithubFetch({});
+    withTask(
+      store,
+      {
+        // VIB-1's live shape: mid-flow, its own PR already open on the branch,
+        // which is exactly WHY `deleteTaskRemoteBranch` refuses the ref.
+        stage: "impl",
+        waiting: "human",
+        branch: "vib-1-work",
+        workRevision: COLLISION_REVISION,
+        pr: { number: 270, state: "review", title: "VIB-1: own review PR" },
+        github: { commits: [], changed: null, unownedPr: 232 },
+      },
+      COLLISION_PACKET,
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+    );
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // The remedy really did refuse — nothing reached GitHub, the record stands.
+    expect(github.calls).toHaveLength(0);
+    expect(fm.github?.unownedPr).toBe(232);
+    // …and the task is not stranded: one card, over the PR that IS open.
+    expect(fm.recommendations).toHaveLength(1);
+    expect(fm.recommendations[0]).toMatchObject({
+      kind: "transition",
+      toStageId: "review",
+      label: "Move the task to Review",
+    });
+    expect(fm.recommendations[0]!.detail).toContain("#270");
+    expect(fm.recommendations[0]!.detail).toContain("Recorded by Viberr");
+    expect(
+      listAuditEvents(store.db, { action: "github.delivery.next_step" }),
+    ).toHaveLength(1);
+  });
+
+  it("F33-4: no card is invented when the refusal leaves no open PR to move to review over", async () => {
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    await collisionCredential(store);
+    // No credential-free refusal here: the fake answers nothing, so the ref
+    // delete fails and the remedy refuses with no PR anywhere on the task.
+    const github = fakeGithubFetch({});
+    withTask(
+      store,
+      {
+        stage: "impl",
+        waiting: "human",
+        branch: "vib-1-work",
+        workRevision: COLLISION_REVISION,
+        github: { commits: [], changed: null, unownedPr: 232 },
+      },
+      COLLISION_PACKET,
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+    );
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // A "review pull request #N is open" card with no N would be a lie; the
+    // refusal note names the remedy instead.
+    expect(fm.recommendations).toHaveLength(0);
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map(
+      (e) => e.text,
+    );
+    expect(
+      texts.some((t) => t.includes("The branch collision was **not** cleared")),
+    ).toBe(true);
+  });
+
   // F20-6 (R20-2): the operator's discard option now EXECUTES on confirm.
   const DISCARD_PACKET: TaskPacket = {
     type: "input",

@@ -6,6 +6,7 @@ import {
   writeProject,
   writeTask,
   type TestStore,
+  type TestStoreUser,
 } from "../../../test-support/test-store";
 import type { AgentDeployment } from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -16,6 +17,9 @@ import { getMentionables } from "./mention-suggestions.server";
  * test-store fixture (arda=admin, murat=maintainer, selin=reviewer,
  * elif=viewer, deniz=registered non-member). A `dev` specialist is deployed
  * so the agents group is non-empty.
+ *
+ * The users group is MEMBERS ONLY (F33-9): deniz is the fixture's guest, so
+ * every users assertion below is also a boundary assertion.
  */
 
 let ctx: TestDbContext;
@@ -75,6 +79,9 @@ afterEach(() => ctx.cleanup());
 const call = () =>
   getMentionables(store.db, store.slug, "VIB-1", { dataRoot: store.dataRoot });
 
+/** The handle the composer offers (and the fan-out resolves) for a user. */
+const handleOf = (u: TestStoreUser) => u.email.split("@")[0]!.toLowerCase();
+
 describe("getMentionables", () => {
   it("returns the deployed specialists as agents (handle = name lowercased)", () => {
     const { agents } = call();
@@ -84,21 +91,58 @@ describe("getMentionables", () => {
     ]);
   });
 
-  it("returns registered users keyed by email local-part, members first", () => {
+  it("returns the project's MEMBERS keyed by email local-part, in membership order", () => {
     const { users } = call();
-    // Every seeded user is registered → all five appear.
-    const handles = users.map((u) => u.handle);
-    for (const u of Object.values(store.users)) {
-      expect(handles).toContain(u.email.split("@")[0]!.toLowerCase());
-    }
-    // Project members (arda…elif) sort ahead of the non-member (deniz).
-    const ardaHandle = store.users.arda.email.split("@")[0]!.toLowerCase();
-    const denizHandle = store.users.deniz.email.split("@")[0]!.toLowerCase();
-    expect(handles.indexOf(ardaHandle)).toBeLessThan(handles.indexOf(denizHandle));
+    expect(users.map((u) => u.handle)).toEqual([
+      handleOf(store.users.arda),
+      handleOf(store.users.murat),
+      handleOf(store.users.selin),
+      handleOf(store.users.elif),
+    ]);
     // The handle matches the server's resolver (email local-part), name kept.
-    const arda = users.find((u) => u.handle === ardaHandle)!;
+    const arda = users[0]!;
     expect(arda.name).toBe(store.users.arda.name);
     expect(arda.email).toBe(store.users.arda.email);
+  });
+
+  /**
+   * F33-9 — the picker used to append "any remaining registered app user" after
+   * the members, so it offered someone who cannot open the project at all. Live:
+   * an admin tagged a viewer of a DIFFERENT project, her inbox showed the
+   * project name, the task key and the comment text, and the link served her the
+   * members-only 404. Ruling 25 says a non-member gets the same bytes as an
+   * unknown slug precisely so "a probe cannot learn a project exists" — a
+   * suggestion whose only outcome is that disclosure must not be offered.
+   */
+  it("never offers a registered NON-member (F33-9)", () => {
+    const handles = call().users.map((u) => u.handle);
+    expect(handles).not.toContain(handleOf(store.users.deniz));
+    // …and the guest is a real, enabled account — the exclusion is membership,
+    // not existence.
+    expect(
+      store.db
+        .prepare(`SELECT disabled FROM users WHERE id = ?`)
+        .get(store.users.deniz.id),
+    ).toEqual({ disabled: 0 });
+  });
+
+  it("skips a member whose account is disabled, and a member id with no user row", () => {
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    // LV-04: project.md keeps the entry after the org account is deleted.
+    writeProject(store.dataRoot, {
+      ...fm,
+      members: [...fm.members, { userId: "u_ghost", role: "viewer" }],
+    });
+    store.db
+      .prepare(`UPDATE users SET disabled = 1 WHERE id = ?`)
+      .run(store.users.murat.id);
+    const handles = call().users.map((u) => u.handle);
+    expect(handles).toEqual([
+      handleOf(store.users.arda),
+      handleOf(store.users.selin),
+      handleOf(store.users.elif),
+    ]);
   });
 
   it("returns the reserved role handles, and names the profile each backend handle reaches", () => {

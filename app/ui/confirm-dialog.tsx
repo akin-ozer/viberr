@@ -27,6 +27,7 @@ export function ConfirmDialog({
   tone = "danger",
   icon = "alert",
   busy = false,
+  screenLabel,
   onCancel,
   onConfirm,
 }: {
@@ -40,13 +41,27 @@ export function ConfirmDialog({
   icon?: IconName;
   /** Disables the confirm while its mutation is in flight (double-submit guard). */
   busy?: boolean;
+  /** Pass-33 D33-2: the `data-screen-label` every other dialog in the product
+   *  carries. `docs/ui/surfaces.md §4` states the contract as universal — "Every
+   *  top-level surface and dialog carries `data-screen-label` so tests and agents
+   *  can address it by name" — and this shared confirm, which backs the stage
+   *  removal, the schedule cancel, the resource and credential deletions and the
+   *  project delete, was the one family with no name. Required, so a new call
+   *  site cannot quietly rejoin the gap. */
+  screenLabel: string;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const { ref, close } = useDialog(onCancel);
   return (
     // role="alertdialog" on a native <dialog> keeps the stronger semantics.
-    <dialog ref={ref} className="confirm-card" role="alertdialog" aria-label={title}>
+    <dialog
+      ref={ref}
+      className="confirm-card"
+      role="alertdialog"
+      aria-label={title}
+      data-screen-label={screenLabel}
+    >
       <div className="confirm-icon">
         <Icon name={icon} />
       </div>

@@ -12,10 +12,13 @@ import {
 } from "../../../test-support/test-store";
 import { insertUser } from "~/server/auth/user-store.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   ambiguousMentionNote,
   fanOutMentions,
+  mentionNonDeliveryNote,
+  nonMemberMentionNote,
   notifyMentionedUsers,
   resolveMentionTargets,
   withAmbiguityDisclosure,
@@ -243,10 +246,12 @@ describe("mention disambiguation (B-FD2)", () => {
     expect(resolveMentionTargets(users, "@selin @arda-kaya ship it")).toEqual({
       userIds: ["u1", "u2"],
       ambiguous: [],
+      nonMembers: [],
     });
     expect(resolveMentionTargets(users, "@arda ship it")).toEqual({
       userIds: [],
       ambiguous: ["arda"],
+      nonMembers: [],
     });
   });
 
@@ -274,6 +279,204 @@ describe("mention disambiguation (B-FD2)", () => {
     // A balanced text is left untouched apart from the appended note.
     const balanced = "@arda decide please.\n```\nlog\n```";
     expect(withAmbiguityDisclosure(store.db, balanced).startsWith(balanced)).toBe(true);
+  });
+});
+
+/**
+ * F33-9 — a mention may not cross the members-only boundary (ruling 25).
+ *
+ * Live: a project admin commented on `sandbox/SBX-3` tagging a viewer of a
+ * DIFFERENT project. Her inbox showed "mentioned you — '@Elif Maintainer can you
+ * look at this sandbox probe?'  Sandbox · SBX-3", and opening it gave "Page not
+ * found — No project at projects/sandbox". Two failures in one row: a
+ * notification that routes a person to a task the product then refuses to show
+ * them, and a disclosure that the layout loader and every action work to
+ * prevent — they return the SAME bytes for a non-member as for an unknown slug
+ * so "a probe cannot learn a project exists", and the row named the project, the
+ * task AND what someone wrote on it.
+ *
+ * The fixture's `deniz` is a registered, enabled, NON-member — the finding's
+ * shape exactly.
+ */
+describe("mentions stay inside the project (F33-9)", () => {
+  /** Project the fixture, i.e. put the store in the shape every RUNNING instance
+   *  is in (boot rebuild + reproject on every project write) — that is what lets
+   *  `project_members` answer the boundary question at all. */
+  function project(store: TestStore): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  const localPartOf = (email: string) => email.split("@")[0]!;
+
+  it("a non-member is NOT notified, and the handle comes back as a non-delivery", () => {
+    const store = setupTestStore(ctx);
+    project(store);
+    const handle = localPartOf(store.users.deniz.email);
+    const result = fanOutMentions(store.db, {
+      text: `@${handle} can you look at this sandbox probe?`,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+    });
+    expect(result.mentioned).toEqual([]);
+    expect(result.nonMembers).toEqual([handle]);
+    expect(result.ambiguous).toEqual([]);
+    // The whole point: no inbox row exists to leak the project, the task or the
+    // comment text to someone who cannot open any of them.
+    expect(notificationRows(store)).toHaveLength(0);
+  });
+
+  it("the human comment path writes the non-delivery next to the comment", async () => {
+    // The seam, not the note: `appendComment` used to call
+    // `ambiguousMentionHandles(db, text)` with no project, so the F33-9 half of
+    // the report never reached the author — proven live before this test existed
+    // (the comment landed, the notification was correctly withheld, and nothing
+    // on the page said the tag had gone nowhere).
+    const store = setupTestStore(ctx);
+    project(store);
+    await appendComment(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: `@${localPartOf(store.users.deniz.email)} post-fix probe: can you see this?`,
+      },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    const note = file.parsed.timeline.find(
+      (e) => e.type === "note" && /is not a member of this project/.test(e.text),
+    );
+    expect(note).toBeDefined();
+    expect(notificationRows(store)).toHaveLength(0);
+  });
+
+  it("the full-name form is refused too — it is membership, not the handle spelling", () => {
+    const store = setupTestStore(ctx);
+    project(store);
+    const result = fanOutMentions(store.db, {
+      text: `@${store.users.deniz.name} can you look at this?`,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+    });
+    expect(result.mentioned).toEqual([]);
+    expect(notificationRows(store)).toHaveLength(0);
+  });
+
+  it("members in the same comment are still notified", () => {
+    const store = setupTestStore(ctx);
+    project(store);
+    const result = fanOutMentions(store.db, {
+      text: `@${localPartOf(store.users.selin.email)} over to you — @${localPartOf(
+        store.users.deniz.email,
+      )} FYI.`,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+    });
+    expect(result.mentioned).toEqual([store.users.selin.id]);
+    expect(result.nonMembers).toEqual([localPartOf(store.users.deniz.email)]);
+    expect(notificationRows(store)).toHaveLength(1);
+  });
+
+  it("a non-member sharing a member's first name keeps the handle AMBIGUOUS, not deliverable", () => {
+    const store = setupTestStore(ctx);
+    project(store);
+    // Resolution runs over all enabled users on purpose: narrowing the ladder to
+    // members first would silently hand "@arda" to the member, which is the
+    // guess B-FD2 exists to refuse.
+    insertUser(store.db, {
+      id: "u_arda_outsider",
+      email: "arda.outsider@viberr.test",
+      name: "Arda Outsider",
+      role: "member",
+    });
+    const result = fanOutMentions(store.db, {
+      text: "@arda take it from here",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+    });
+    expect(result.mentioned).toEqual([]);
+    expect(result.ambiguous).toEqual(["arda"]);
+    expect(result.nonMembers).toEqual([]);
+  });
+
+  it("the note names the handle and says the person is not a member", () => {
+    expect(nonMemberMentionNote([])).toBe("");
+    const one = nonMemberMentionNote(["elif"]);
+    expect(one).toContain("@elif");
+    expect(one).toContain("is not a member of this project");
+    expect(one).toContain("nobody was notified");
+    expect(nonMemberMentionNote(["elif", "deniz"])).toContain(
+      "@elif, @deniz are not members",
+    );
+  });
+
+  it("mentionNonDeliveryNote reports BOTH reasons a tag reached nobody", () => {
+    const store = setupTestStore(ctx);
+    project(store);
+    insertUser(store.db, {
+      id: "u_arda_second",
+      email: "arda.yilmaz@viberr.test",
+      name: "Arda Yilmaz",
+      role: "member",
+    });
+    const deniz = localPartOf(store.users.deniz.email);
+    const note = mentionNonDeliveryNote(
+      store.db,
+      `@arda and @${deniz} — please pick this up.`,
+      store.slug,
+    );
+    expect(note).toContain("@arda matches more than one person");
+    expect(note).toContain(`@${deniz} is not a member of this project`);
+    // Nothing to say when every handle routed.
+    expect(
+      mentionNonDeliveryNote(
+        store.db,
+        `@${localPartOf(store.users.selin.email)} over to you`,
+        store.slug,
+      ),
+    ).toBe("");
+  });
+
+  it("a MACHINE author's comment carries the non-member disclosure", () => {
+    const store = setupTestStore(ctx);
+    project(store);
+    const deniz = localPartOf(store.users.deniz.email);
+    const text = `@${deniz} the reviewer approved — acceptance is yours.`;
+    // An agent cannot retag itself, so the comment is the only surface that can
+    // say the tag went nowhere (the withAmbiguityDisclosure rationale, widened).
+    expect(withAmbiguityDisclosure(store.db, text, store.slug)).toContain(
+      "is not a member of this project",
+    );
+    // …and without the slug the caller gets the app-wide answer it asked for.
+    expect(withAmbiguityDisclosure(store.db, text)).toBe(text);
+  });
+
+  it("a store with no projected project resolves app-wide (membership unknown)", () => {
+    // `projects` empty means nothing here has ever been projected — a file-only
+    // fixture, or a read before the boot rebuild. Scoping to an EMPTY member set
+    // there would stop every mention in the app, so the scope is left off; a
+    // projected project with zero members still refuses everyone.
+    const store = setupTestStore(ctx);
+    expect(
+      notifyMentionedUsers(store.db, {
+        text: `@${localPartOf(store.users.deniz.email)} ping`,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        from: OPERATOR_FROM,
+      }),
+    ).toEqual([store.users.deniz.id]);
   });
 });
 
