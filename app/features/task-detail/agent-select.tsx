@@ -5,6 +5,10 @@ import {
   type MentionSuggestion,
 } from "./mention-autocomplete";
 import type { DeployedSpecialistView } from "./execution-profile";
+import {
+  backendRunMark,
+  type TaskRunPrincipalView,
+} from "./run-principal-view";
 import { AgentGlyph } from "~/ui/identity";
 
 /**
@@ -35,11 +39,17 @@ interface AgentOption extends MentionSuggestion {
   modelUnavailable: boolean;
   /** This profile has a live (queued/running) run on the task right now. */
   running: boolean;
+  /** Ruling 121: the task OWNER has not connected this profile's backend (or
+   *  the task has no owner), so dispatching it would refuse before it spent
+   *  anything. Choosing an agent here commits a paid run, so the fact belongs
+   *  on the row — the same reason the row already carries "model unavailable". */
+  ownerCannotRun: string | null;
 }
 
 function toOptions(
   agents: readonly DeployedSpecialistView[],
   activeProfileIds: readonly string[],
+  runPrincipal: TaskRunPrincipalView | null,
 ): AgentOption[] {
   return agents.map((a) => ({
     kind: "agent",
@@ -52,6 +62,7 @@ function toOptions(
     gatesAcceptance: a.capabilities?.verdict === true,
     modelUnavailable: !!a.modelUnavailable,
     running: activeProfileIds.includes(a.id),
+    ownerCannotRun: backendRunMark(runPrincipal, a.backend),
   }));
 }
 
@@ -59,6 +70,7 @@ export function AgentSelect({
   agents,
   activeProfileIds,
   selectedId,
+  runPrincipal = null,
   disabled,
   onSelect,
 }: {
@@ -67,6 +79,11 @@ export function AgentSelect({
   activeProfileIds: readonly string[];
   /** The currently selected profile id (null = nothing picked). */
   selectedId: string | null;
+  /** Ruling 121: the task's run principal, so a row whose backend the OWNER
+   *  cannot run says so before the run is picked. Defaults to null (unowned),
+   *  which marks every row — a bare render with no principal is a task nobody
+   *  owns, and that is the honest reading. */
+  runPrincipal?: TaskRunPrincipalView | null;
   disabled?: boolean;
   onSelect: (profileId: string | null) => void;
 }) {
@@ -81,7 +98,7 @@ export function AgentSelect({
   // is -1 and Enter/Tab commit nothing.
   const [active, setActive] = useState(-1);
 
-  const options = toOptions(agents, activeProfileIds);
+  const options = toOptions(agents, activeProfileIds, runPrincipal);
   const selected = options.find((o) => o.id === selectedId) ?? null;
   // While a selection stands the input shows its name; typing replaces it with
   // a live query. An empty query lists the whole roster (focus-open).
@@ -210,6 +227,7 @@ export function AgentSelect({
                 ...(o.noRepoWrite ? ["no repo write"] : []),
                 ...(o.gatesAcceptance ? ["gates acceptance"] : []),
                 ...(o.modelUnavailable ? ["model unavailable"] : []),
+                ...(o.ownerCannotRun ? [o.ownerCannotRun] : []),
               ];
               return (
                 <button

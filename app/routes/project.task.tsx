@@ -66,7 +66,9 @@ import {
   runOperator,
   type RunOperatorInput,
 } from "~/server/runtimes/operator-run.server";
-import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
+import type { DatabaseSync } from "node:sqlite";
+import { userBackendHealth } from "~/server/runtimes/backend-credentials.server";
+import { findUserById } from "~/server/auth/user-store.server";
 import { unavailableModels } from "~/server/runtimes/model-availability.server";
 import {
   operatorAutonomyFor,
@@ -88,6 +90,7 @@ import {
   scheduleTaskAction,
 } from "~/server/tasks/schedule.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
+import type { TaskRunPrincipalView } from "~/features/task-detail/run-principal-view";
 import type { TaskMemberView } from "~/features/task-detail/execution-profile";
 import type { TimelineFilterId } from "~/features/task-detail/timeline";
 import {
@@ -113,6 +116,39 @@ import { Icon } from "~/ui/icon";
  *   run-interrupt · run-agent · release-agent · run-operator ·
  *   schedule-action · cancel-schedule
  */
+
+/**
+ * Ruling 121: WHOSE accounts this task's agent runs would use, and what those
+ * accounts can run. The page used to ship one deployment-wide "is this backend
+ * configured" boolean; a run bills the task OWNER, so the honest answer is the
+ * owner's own health, and the panels render copy that names them
+ * (`app/features/task-detail/run-principal-view.ts`).
+ *
+ * `null` = nobody to bill: no owner, or a seat pointing at an account that is
+ * disabled or gone. Never a secret and never a box: `available` plus the
+ * store's own actionable sentence, which the page shows only to the owner.
+ */
+function taskRunPrincipal(
+  db: DatabaseSync,
+  ownerUserId: string | null,
+): TaskRunPrincipalView | null {
+  if (!ownerUserId) return null;
+  const owner = findUserById(db, ownerUserId);
+  // A seat pointing at a deleted or disabled account is not an owner a run can
+  // bill, so it reads as unowned here — the same answer `resolveTaskRunPrincipal`
+  // gives the run service.
+  if (!owner || owner.disabled) return null;
+  const health = (backend: "claude" | "codex") => {
+    const h = userBackendHealth(db, ownerUserId, backend);
+    return { available: h.available, detail: h.detail };
+  };
+  return {
+    ownerUserId,
+    ownerName: owner.name,
+    claude: health("claude"),
+    codex: health("codex"),
+  };
+}
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const user = await requireUser(request);
@@ -320,12 +356,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // every project, contradicting the Review queue one click away. Same read
     // model the queue uses, so the two surfaces cannot disagree.
     acceptanceAuthority: resolveAcceptanceAuthority(params.slug),
-    // P11-41: which backends are actually configured, so the run picker can
-    // disable an option that would fail fast rather than offering it blindly.
-    backendAvailable: {
-      claude: isBackendAvailable("claude"),
-      codex: isBackendAvailable("codex"),
-    },
+    // Ruling 121: every agent run on this task bills its OWNER's accounts, so
+    // "which backends can run here" is a question about the owner — not about
+    // this deployment and not about the viewer. `null` means the task has no
+    // owner at all, which is its own refusal (nobody to bill), and the panels
+    // say "Own this task to run agents" rather than "backend unavailable".
+    runPrincipal: taskRunPrincipal(
+      db,
+      taskFile?.parsed.frontmatter.ownerUserId ?? null,
+    ),
     activeAgentProfileIds,
     /** UI-30: false → the console content above was withheld (non-member). */
     runsVisible,
@@ -1117,7 +1156,12 @@ export default function TaskDetailRoute({
       deployedSpecialists={loaderData.deployedSpecialists}
       operatorBackend={loaderData.operatorBackend}
       operatorAutonomy={loaderData.operatorAutonomy}
-      backendAvailable={loaderData.backendAvailable}
+      // Ruling 121: the run picker's "would fail fast" gate answers for the
+      // task OWNER (whose accounts a run bills), and an unowned task can run
+      // nothing at all. The panels render the refusal that names the person,
+      // so the whole principal travels, not a pair of booleans that could only
+      // ever say "no" without saying whose "no" it is.
+      runPrincipal={loaderData.runPrincipal}
       activeAgentProfileIds={loaderData.activeAgentProfileIds}
       runsVisible={loaderData.runsVisible}
       timelineHasMore={loaderData.timelineHasMore}

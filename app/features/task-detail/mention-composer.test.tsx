@@ -15,6 +15,7 @@ import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import { Timeline } from "./timeline";
 import { $setParagraphPlainText } from "./lexical-mention-plugin";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
+import type { TaskRunPrincipalView } from "./run-principal-view";
 
 /**
  * jsdom behavior tests for the Lexical comment composer: the @-mention
@@ -56,6 +57,9 @@ interface ComposerOptions {
   /** Replace the stub action's reply (default `{ ok: true }`). */
   action?: () => ComposerActionReply | Promise<ComposerActionReply>;
   onPosted?: (text: string) => void;
+  /** Ruling 121: the task's run principal, which the `@claude` / `@codex` rows
+   *  answer from. Undefined (the default) claims nothing either way. */
+  runPrincipal?: TaskRunPrincipalView | null;
 }
 
 /** Lexical stamps the live editor onto its contenteditable host element, and
@@ -81,6 +85,9 @@ function renderComposer(opts: ComposerOptions = {}) {
           tlDefault="all"
           ask={ask}
           mentionables={MENTIONABLES}
+          {...("runPrincipal" in opts
+            ? { runPrincipal: opts.runPrincipal ?? null }
+            : {})}
         />
       </ToastProvider>
     );
@@ -135,6 +142,58 @@ function readText(editor: LexicalEditor): string {
 }
 
 const listbox = () => document.querySelector('[role="listbox"]');
+
+/**
+ * Ruling 121 — `@claude` / `@codex` name a RUNTIME, and a mention that engages
+ * one starts a run on the TASK OWNER's account. The menu therefore cannot go
+ * on offering the handle as if the instance held a credential: the row says
+ * whose account it would bill and whether that account can pay, in the same
+ * words the run controls use. The row stays OFFERED (a comment posts either
+ * way, and hiding the handle would leave the human guessing why `@codex` does
+ * nothing) — B-AG2 already established that a suggestion must not promise a
+ * target the resolver refuses, and this is the honest half of that promise.
+ */
+describe("ruling 121: the backend handles name whose account they would bill", () => {
+  const rowFor = (handle: string) =>
+    Array.from(document.querySelectorAll('[role="option"]')).find((o) =>
+      o.querySelector(".ri-sub")?.textContent?.startsWith(`@${handle} `),
+    );
+
+  it("marks the backend the task owner has not connected, and leaves the other alone", async () => {
+    const { editor } = renderComposer({
+      runPrincipal: {
+        ownerUserId: "u-ada",
+        ownerName: "Ada Lovelace",
+        claude: { available: true, detail: null },
+        codex: { available: false, detail: null },
+      },
+    });
+    await setText(editor, "@c");
+    await waitFor(() => expect(listbox()).toBeTruthy());
+    expect(rowFor("codex")!.textContent).toContain(
+      "Codex not connected for Ada Lovelace",
+    );
+    expect(rowFor("claude")!.textContent).not.toContain("not connected");
+    // No deployment credential is named: there is none to name.
+    expect(listbox()!.textContent).not.toContain("on this instance");
+  });
+
+  it("an UNOWNED task marks both handles: there is nobody to bill", async () => {
+    const { editor } = renderComposer({ runPrincipal: null });
+    await setText(editor, "@c");
+    await waitFor(() => expect(listbox()).toBeTruthy());
+    expect(rowFor("codex")!.textContent).toContain("no task owner");
+    expect(rowFor("claude")!.textContent).toContain("no task owner");
+  });
+
+  it("claims nothing when no principal is supplied (a surface with no task)", async () => {
+    const { editor } = renderComposer();
+    await setText(editor, "@c");
+    await waitFor(() => expect(listbox()).toBeTruthy());
+    expect(rowFor("codex")!.textContent).not.toContain("not connected");
+    expect(rowFor("codex")!.textContent).not.toContain("no task owner");
+  });
+});
 
 describe("comment composer @-mention autocomplete", () => {
   it("opens a dropdown listing matching agents when typing @de", async () => {

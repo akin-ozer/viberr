@@ -9,6 +9,11 @@ import { AgentGlyph } from "~/ui/identity";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
 import { AgentSelect } from "./agent-select";
+import {
+  backendLabelOf,
+  backendRunRefusal,
+  type TaskRunPrincipalView,
+} from "./run-principal-view";
 
 /** Client-safe view of a deployed specialist the run-agent selector offers
  * (mirrors the loader's DeployedSpecialistView — kept here to avoid a server
@@ -329,7 +334,7 @@ function OperatorRunControl({
   blockedReason,
   defaultBackend,
   configuredAutonomy,
-  backendAvailable,
+  runRefusal,
   schedules,
   scheduleBusy,
   onRun,
@@ -348,9 +353,11 @@ function OperatorRunControl({
   /** R19-A: the project's configured operator autonomy — what this run WILL
    *  use. Full announces itself below; supervised is the quiet default. */
   configuredAutonomy: "supervised" | "full";
-  /** Which backends are configured (P11-41) — an unconfigured operator backend
-   *  disables Run and says so, instead of failing fast after the click. */
-  backendAvailable: { claude: boolean; codex: boolean };
+  /** P11-41, now per-person (ruling 121): why a run on the operator's backend
+   *  would refuse, or null when it would start. An operator drive bills the
+   *  task OWNER, so this sentence names them; it disables Run and renders,
+   *  instead of the run failing fast after the click. */
+  runRefusal: string | null;
   /** Pending run-operator schedules, listed under the control. */
   schedules: TaskSchedule[];
   scheduleBusy: boolean;
@@ -359,17 +366,16 @@ function OperatorRunControl({
 }) {
   const [steer, setSteer] = useState("");
   const [delay, setDelay] = useState<RunDelay>("now");
-  const backendLabel = defaultBackend === "claude" ? "Claude" : "Codex";
-  const backendMissing = !backendAvailable[defaultBackend];
+  const backendLabel = backendLabelOf(defaultBackend);
   // Hunt 2026-08-29: two different kinds of "off". `busy`/`disabled` (closed
-  // task) kill the whole control; the open-packet refusal (F20-5) and an
-  // unconfigured backend (P11-41) refuse a run NOW — but scheduleTaskAction
-  // refuses neither (the packet resolves, the backend gets configured, and
-  // the fired run resolves the live profile anyway), so a picked delay keeps
-  // the button alive as "Schedule" instead of blocking the one action that
-  // still works.
+  // task) kill the whole control; the open-packet refusal (F20-5) and a backend
+  // the owner cannot run (P11-41, ruling 121) refuse a run NOW — but
+  // scheduleTaskAction refuses neither (the packet resolves, the owner connects
+  // the backend or the seat changes hands, and the fired run resolves the live
+  // profile and the live owner anyway), so a picked delay keeps the button
+  // alive as "Schedule" instead of blocking the one action that still works.
   const hardOff = busy || !!disabled;
-  const runNowBlocked = !!blockedReason || backendMissing;
+  const runNowBlocked = !!blockedReason || !!runRefusal;
   const off = hardOff || (delay === "now" && runNowBlocked);
   const run = () => {
     if (off) return;
@@ -415,16 +421,14 @@ function OperatorRunControl({
         <Icon name={delay === "now" ? "shield" : "clock"} />
         {busy ? "Running…" : delay === "now" ? "Run operator" : "Schedule"}
       </button>
-      {backendMissing && (
-        // P11-41's honesty without a picker: the profile's backend is not
-        // configured on this instance, so the run would fail fast — say it
-        // here, where the fix (the operator profile, or instance credentials)
-        // is one hop away.
-        <span className="sub">
-          {backendLabel} isn&rsquo;t configured on this instance, so the
-          operator can&rsquo;t run. Configure it, or switch the operator
-          profile&rsquo;s backend.
-        </span>
+      {runRefusal && (
+        // P11-41's honesty without a picker: the run would fail fast, so say
+        // it here, where the fix is one hop away. Ruling 121 changed WHOSE fix
+        // it is — an operator drive bills the task owner's own account, so
+        // there is no instance credential to configure and the sentence names
+        // the person (`run-principal-view.ts`, the UI voice of the server's
+        // `principalRefusalMessage`).
+        <span className="sub">{runRefusal}</span>
       )}
       {configuredAutonomy === "full" && !disabled && (
         // F20-9's mirror, kept: full autonomy is the state that lets this run
@@ -472,6 +476,8 @@ function AgentRunControl({
   activeProfileIds,
   deliveringProfileId,
   engagedSupportingIds,
+  runPrincipal,
+  meId,
   busy,
   closed,
   schedules,
@@ -481,6 +487,14 @@ function AgentRunControl({
 }: {
   agents: DeployedSpecialistView[];
   activeProfileIds: string[];
+  /** Ruling 121: whose accounts a dispatch would bill (null = unowned task).
+   *  A profile pinned to a backend the owner has not connected is still
+   *  pickable — the roster is not a lie — but Run refuses before it is spent
+   *  and the row and the control both say why. */
+  runPrincipal: TaskRunPrincipalView | null;
+  /** The viewer, so the refusal is addressed to the owner in the second
+   *  person when they are the one reading it. */
+  meId: string;
   /** The current delivering engagement's profile id (null = none yet). */
   deliveringProfileId: string | null;
   /** Profiles already engaged as SUPPORTING — the dispatch keeps an existing
@@ -540,7 +554,15 @@ function AgentRunControl({
   const selected = agents.find((a) => a.id === selectedId) ?? null;
   const selectedRunning =
     !!selectedId && delay === "now" && activeProfileIds.includes(selectedId);
-  const off = busy || !selected || selectedRunning;
+  // Ruling 121: the picked profile runs on ITS backend, billed to the task
+  // owner — so the refusal is per-pick, not per-page. Same split the operator
+  // control makes: a run NOW is refused, a SCHEDULED one is not (the owner can
+  // connect the backend, or the seat can change hands, before it fires).
+  const runRefusal = selected
+    ? backendRunRefusal(runPrincipal, selected.backend, meId)
+    : null;
+  const off =
+    busy || !selected || selectedRunning || (delay === "now" && !!runRefusal);
   const run = () => {
     if (off || !selected) return;
     onRun(selected.id, prompt.trim(), delayMinutes(delay));
@@ -572,6 +594,7 @@ function AgentRunControl({
         agents={agents}
         activeProfileIds={activeProfileIds}
         selectedId={selectedId}
+        runPrincipal={runPrincipal}
         disabled={busy}
         onSelect={setSelectedId}
       />
@@ -601,13 +624,20 @@ function AgentRunControl({
             : selectedRunning
               ? "This agent already has a run in progress on this task"
               : delay === "now"
-                ? `Run ${selected.name} on this task`
+                ? runRefusal ?? `Run ${selected.name} on this task`
                 : `Schedule a ${selected.name} run`
         }
       >
         <Icon name={delay === "now" ? "bolt" : "clock"} />
         {delay === "now" ? "Run" : "Schedule"}
       </button>
+      {runRefusal && (
+        // P14: a `title` never opens on a disabled control, so the reason a
+        // dispatch is dead is rendered copy. Ruling 121 makes it the OWNER's
+        // refusal, named — the run would bill their account, not this
+        // deployment's (which no longer has one).
+        <span className="sub">{runRefusal}</span>
+      )}
       {posture && <span className="sub">{posture}</span>}
       {selected?.modelUnavailable && (
         // F20-4: availability warning BEFORE a run is spent. Informs, does not
@@ -747,7 +777,7 @@ export function ExecutionProfile({
   deployedSpecialists,
   operatorBackend,
   operatorAutonomy,
-  backendAvailable,
+  runPrincipal,
   canRunAgents,
   activeAgentProfileIds,
   runBusy,
@@ -772,8 +802,11 @@ export function ExecutionProfile({
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
   operatorAutonomy: "supervised" | "full";
-  /** Which backends are configured — unavailable ones are disabled (P11-41). */
-  backendAvailable: { claude: boolean; codex: boolean };
+  /** Ruling 121: whose accounts this task's runs bill, and what those accounts
+   *  can run. `null` = no owner (or a seat pointing at a disabled/deleted
+   *  account), so nothing can run here at all. P11-41's fail-fast honesty, now
+   *  answered per person instead of per deployment. */
+  runPrincipal: TaskRunPrincipalView | null;
   /** admin|maintainer — gates the run/schedule affordances (server re-checks). */
   canRunAgents: boolean;
   /** Profile ids of engagements with a live (queued/running) run. */
@@ -871,7 +904,11 @@ export function ExecutionProfile({
                   : {})}
                 defaultBackend={operatorBackend}
                 configuredAutonomy={operatorAutonomy}
-                backendAvailable={backendAvailable}
+                runRefusal={backendRunRefusal(
+                  runPrincipal,
+                  operatorBackend,
+                  meId,
+                )}
                 schedules={operatorSchedules}
                 scheduleBusy={scheduleBusy}
                 onRun={onRunOperator}
@@ -889,6 +926,8 @@ export function ExecutionProfile({
                 activeProfileIds={activeAgentProfileIds}
                 deliveringProfileId={task.specialist?.profileId ?? null}
                 engagedSupportingIds={task.reviewers.map((r) => r.profileId)}
+                runPrincipal={runPrincipal}
+                meId={meId}
                 busy={runBusy}
                 closed={closed}
                 schedules={agentSchedules}

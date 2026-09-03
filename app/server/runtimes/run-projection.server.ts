@@ -170,10 +170,26 @@ function projectRow(
   // rather than because the task genuinely failed. Detect that so the UI can
   // offer a one-click retry on the OTHER backend (D4) instead of leaving the
   // task stalled on an opaque error. The R7-2 fail-fast path emits a STRUCTURED
-  // `run·unavailable` err tag (its prose "…is unavailable — no usable
-  // credential…" doesn't match the quota/rate-limit signatures), so trust the
-  // tag directly and fall back to the prose scan for real backend errors that
-  // carry no tag.
+  // `run·unavailable` err tag (its prose does not match the quota/rate-limit
+  // signatures), so trust the tag directly and fall back to the prose scan for
+  // real backend errors that carry no tag.
+  //
+  // Ruling 121 added a refusal the other backend CANNOT fix: a run bills a
+  // person, and a task with no owner (or an owner whose account is gone) has
+  // nobody to bill on either backend. `credential_user_id` is exactly that
+  // distinction — the run service records the owner's id even when the refusal
+  // was "they have not connected this backend", and leaves it NULL only when no
+  // principal was resolvable at all.
+  //
+  // The two answers travel separately, because one flag cannot carry both. The
+  // FAILURE is real on every such run and is stated for every viewer;
+  // `altBackend` is the retry OFFER, and only that is withheld when no
+  // principal was resolvable. Folding the principal into
+  // `failedBackendUnavailable` made the console describe an unowned-task
+  // refusal as "stream ended on a continuity error" — the exact mislabelling
+  // UI-38 fixed once already, and false twice over here: nothing streamed and
+  // no session was lost.
+  const noPrincipal = row.credential_user_id === null;
   const failedBackendUnavailable =
     row.state === "error" &&
     !op &&
@@ -197,8 +213,10 @@ function projectRow(
     // session id is present. `transcriptExists` is the cheap cached probe —
     // never the full locator, which reads whole files and is too heavy per run
     // row on a loader path.
+    // Ruling 121: probed in the home of the person the run billed — a run with
+    // no principal (refused before it started) never wrote one.
     exportable: row.session_id
-      ? transcriptExists(backend, row.session_id)
+      ? transcriptExists(backend, row.credential_user_id, row.session_id)
       : false,
     state: renderStateOf(row.state, finished),
     lifecycle: row.state,
@@ -217,11 +235,13 @@ function projectRow(
     lineCount: logWindow.totalLines,
     logWindow,
   };
-  // Both fields are the D4 retry offer, so they travel together — absent
-  // entirely on a run that failed for any other reason.
+  // Absent entirely on a run that failed for any other reason. `altBackend` is
+  // the D4 offer and rides only when there is a person for the retry to bill
+  // (ruling 121): without it the panel states the failure and offers nothing,
+  // which is the truth for an unowned task.
   if (failedBackendUnavailable) {
     view.failedBackendUnavailable = true;
-    view.altBackend = backend === "codex" ? "claude" : "codex";
+    if (!noPrincipal) view.altBackend = backend === "codex" ? "claude" : "codex";
   }
   return view;
 }

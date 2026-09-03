@@ -141,6 +141,136 @@ describe("AgentLogsPanel", () => {
     expect(container.querySelector(".logs-bar .pill.blocked")).not.toBeNull();
   });
 
+  /**
+   * Ruling 121: a run refused because the task has no owner is not a continuity
+   * error, and no backend switch fixes it. The projection marks the run
+   * `failedBackendUnavailable` (that is what happened) and withholds
+   * `altBackend` (there is nobody to bill), so the footer must state the
+   * failure and advertise no retry at all.
+   */
+  it("refused-with-no-principal: states the failure, offers no retry", () => {
+    const run = mkRun({
+      state: "error",
+      lifecycle: "error",
+      failedBackendUnavailable: true,
+    });
+    const { container, getByText } = render(
+      <AgentLogsPanel
+        runtime={[run]}
+        sel="primary"
+        onSel={() => {}}
+        onRetryBackend={() => {}}
+        retryBackends={["claude", "codex"]}
+        linesByThread={{ primary: [] }}
+      />,
+    );
+    expect(
+      getByText(
+        "Claude could not run this (quota, rate limit, or an account that cannot run it)",
+      ),
+    ).toBeTruthy();
+    expect(container.querySelector(".logs-bar .btn.sm")).toBeNull();
+  });
+
+  it("withholds the retry button when the owner has not connected the other backend", () => {
+    // The blocked packet on the same task withholds `retry_other_backend` for
+    // exactly this reason; the button used to offer it anyway and produce a
+    // second identically refused run.
+    const run = mkRun({
+      state: "error",
+      lifecycle: "error",
+      failedBackendUnavailable: true,
+      altBackend: "codex",
+    });
+    const onRetryBackend = vi.fn();
+    const { container, getByText, queryByText, rerender } = render(
+      <AgentLogsPanel
+        runtime={[run]}
+        sel="primary"
+        onSel={() => {}}
+        onRetryBackend={onRetryBackend}
+        retryBackends={["claude"]}
+        linesByThread={{ primary: [] }}
+      />,
+    );
+    expect(queryByText("Retry on Codex")).toBeNull();
+    // …and the absent control is EXPLAINED, not merely missing: the same
+    // sentence the blocked packet's withheld `retry_other_backend` implies.
+    expect(
+      getByText(
+        "Claude could not run this (quota, rate limit, or an account that cannot run it). Codex isn't connected for the task owner, so there is no other backend to retry on",
+      ),
+    ).toBeTruthy();
+
+    // Owner connects Codex: the same run now carries a real offer.
+    rerender(
+      <AgentLogsPanel
+        runtime={[run]}
+        sel="primary"
+        onSel={() => {}}
+        onRetryBackend={onRetryBackend}
+        retryBackends={["claude", "codex"]}
+        linesByThread={{ primary: [] }}
+      />,
+    );
+    fireEvent.click(getByText("Retry on Codex"));
+    expect(onRetryBackend).toHaveBeenCalledWith("codex", run);
+    expect(container.querySelector(".logs-bar .btn.sm")).not.toBeNull();
+  });
+
+  it("tells a viewer without the grant that a maintainer can retry — only when one could", () => {
+    // UI-38: the failure explanation describes the RUN, so it renders for
+    // everyone; only the BUTTON is grant-gated. The retry CLAUSE follows the
+    // offer, so it appears only where a retry would actually run.
+    const run = mkRun({
+      state: "error",
+      lifecycle: "error",
+      failedBackendUnavailable: true,
+      altBackend: "codex",
+    });
+    const { getByText } = render(
+      <AgentLogsPanel
+        runtime={[run]}
+        sel="primary"
+        onSel={() => {}}
+        retryBackends={["codex"]}
+        linesByThread={{ primary: [] }}
+      />,
+    );
+    expect(
+      getByText(
+        "Claude could not run this (quota, rate limit, or an account that cannot run it). A maintainer can retry it on the other backend",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("claims nothing about the owner when the caller never asked (no retryBackends)", () => {
+    // Absent prop = this surface did not resolve a principal, which is not the
+    // same as "asked, and nobody can be billed". It offers nothing (a button
+    // would dispatch a run it cannot vouch for) and asserts nothing either.
+    const run = mkRun({
+      state: "error",
+      lifecycle: "error",
+      failedBackendUnavailable: true,
+      altBackend: "codex",
+    });
+    const { container, getByText } = render(
+      <AgentLogsPanel
+        runtime={[run]}
+        sel="primary"
+        onSel={() => {}}
+        onRetryBackend={() => {}}
+        linesByThread={{ primary: [] }}
+      />,
+    );
+    expect(
+      getByText(
+        "Claude could not run this (quota, rate limit, or an account that cannot run it)",
+      ),
+    ).toBeTruthy();
+    expect(container.querySelector(".logs-bar .btn.sm")).toBeNull();
+  });
+
   // F15-08: the stored `t` is a UTC wall clock and the timeline on the same
   // page is local. The zone is pinned (CI is UTC) so a console that rendered
   // `t` verbatim — the bug — cannot satisfy this.

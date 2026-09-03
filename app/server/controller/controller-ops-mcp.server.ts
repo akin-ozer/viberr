@@ -21,11 +21,11 @@ import { getRunLog, runConcurrencySnapshot } from "~/server/runtimes/run-service
 import type { RunLog, RunLogQuery } from "~/server/runtimes/run-service.server";
 import { getRun, runLineStats } from "~/server/runtimes/run-store.server";
 import type { AgentRunRow } from "~/server/runtimes/run-store.server";
+import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
-  backendCredentialHealth,
-  type BackendCredentialHealth,
-  type RealBackend,
-} from "~/server/runtimes/runtime-registry.server";
+  countConnectedUsers,
+  isBackendAvailableFor,
+} from "~/server/runtimes/backend-credentials.server";
 import { browserRuntimeStatus } from "~/server/tasks/specialist-browser-mcp.server";
 import { canReadControllerRunLog } from "./controller-conversations.server";
 import {
@@ -113,22 +113,40 @@ function notVisibleRun(runId: string): string {
   return `[denied] No run "${runId}" is visible to you.`;
 }
 
-/** What `instance_health` says about one backend, cut to the asker's authority.
- *  Everyone learns WHETHER a backend can run; only an org admin learns the
- *  sentence that says why, because it names the deployment's config paths.
- *  `verification` rides with it: alone it is unactionable, and it is the same
- *  configuration answer one word shorter. */
-type BackendCredentialReport =
-  | { backend: RealBackend; available: boolean }
-  | BackendCredentialHealth;
+/**
+ * What `instance_health` says about one backend (ruling 121).
+ *
+ * The org-admin-only DETAIL arm is gone, and with it the whole reason it
+ * existed: `backendCredentialHealth` used to explain an unusable credential by
+ * naming the deployment's config directory (`/Users/<owner>/.claude` under the
+ * CLI-auth opt-in) and which environment variable to set — deployment
+ * configuration, which is why only an org admin got it. Nothing here names a
+ * config path any more, because there is no instance credential to configure:
+ * each person connects their own on Profile → Agent accounts (ruling 107's
+ * "everyone learns whether, only admins learn why" split therefore no longer
+ * applies to this tool — see the dated correction on that ruling).
+ *
+ * What is left is two facts, both safe for any asker: how many people on this
+ * instance have connected the backend, and whether the ASKER has — which is
+ * the only one that changes what they can do next.
+ */
+interface BackendCredentialReport {
+  backend: RealBackend;
+  connectedUsers: number;
+  /** Whether the person asking can run this backend on their own tasks. */
+  askerConnected: boolean;
+}
 
 function backendCredential(
+  db: DatabaseSync,
   backend: RealBackend,
-  orgAdmin: boolean,
+  userId: string,
 ): BackendCredentialReport {
-  const health = backendCredentialHealth(backend);
-  if (orgAdmin) return health;
-  return { backend: health.backend, available: health.available };
+  return {
+    backend,
+    connectedUsers: countConnectedUsers(db, backend),
+    askerConnected: isBackendAvailableFor(db, userId, backend),
+  };
 }
 
 /** Build the diagnostics server for one controller turn. */
@@ -191,7 +209,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "instance_health",
-      "How this Viberr instance is doing right now: overall status and which subsystems are degraded, the store watchers and the single-writer lock, disk space, the maintenance pass, build identity, whether each model backend has a usable credential, and the run concurrency queue. The reading is open to anyone; the sentence explaining a backend's credential state names deployment configuration, so only org admins get that.",
+      "How this Viberr instance is doing right now: overall status and which subsystems are degraded, the store watchers and the single-writer lock, disk space, the maintenance pass, build identity, how many people have connected each model backend (and whether you have), and the run concurrency queue. Open to anyone: agent backends are connected per person, so nothing here names another person or any deployment configuration.",
       {},
       run(() => {
         // The READING is ungated: it is what `/resources/health` already serves
@@ -199,12 +217,11 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         // free bytes, build identity), plus availability booleans and three
         // integers about run load that carry no name, project or run in them.
         //
-        // The credential DETAIL is not: `backendCredentialHealth` explains an
-        // unusable credential by naming the config directory it looked in
-        // (`/Users/<owner>/.claude` under the CLI-auth opt-in) and what to set
-        // instead. That is deployment configuration, and the org-settings bar
-        // is where this product keeps configuration — so `detail` follows it,
-        // and everyone else gets the availability answer without the host path.
+        // Ruling 121 removed the org-admin-only credential DETAIL arm: it
+        // existed to withhold a deployment config path, and no such path
+        // exists any more. The per-backend reading below is now two integers
+        // and one boolean about the ASKER's own account — nothing that names
+        // another person, a host path or an environment variable.
         const admin = orgAdmin();
         const snapshot = healthSnapshot(db);
         auditRead("instance_health", "instance");
@@ -214,20 +231,24 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           browserDetail?: string;
         } = {
           ...snapshot,
-          // WHY a backend reads available or not — the health probe's
-          // `backends` is env presence only, and "unavailable" with no reason
-          // is the answer that sends someone hunting through the deployment.
+          // The asker-facing half of the health probe's connection counts: an
+          // instance where nobody has connected Codex is not broken, but an
+          // asker who has not connected it cannot run one — and only the
+          // second fact tells them what to do.
           backendCredentials: [
-            backendCredential("claude", admin),
-            backendCredential("codex", admin),
+            backendCredential(db, "claude", user.id),
+            backendCredential(db, "codex", user.id),
           ],
           // What the concurrency cap is doing this second: a queued run is the
           // usual answer to "why has nothing started".
           runs: runConcurrencySnapshot(db),
         };
         // C05-A: the browser's configured executable PATH is deployment
-        // configuration, gated exactly like the credential detail above — the
-        // key is present only for an org admin, never carried empty.
+        // configuration and stays org-admin-only, which is why `admin` is
+        // still resolved above even though the per-backend reading beside it
+        // is now open to any asker (ruling 121 deleted the credential DETAIL
+        // arm this gate used to be paired with). The key is present only for
+        // an org admin, never carried empty.
         const browserDetail = admin ? browserRuntimeStatus().detail : undefined;
         if (browserDetail) body.browserDetail = browserDetail;
         return json(body);

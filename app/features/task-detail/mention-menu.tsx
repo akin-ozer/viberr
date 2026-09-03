@@ -98,6 +98,9 @@ export function MentionMenu({
             </span>
             <span className="ri-sub">
               @<Highlighted label={s.handle} query={query} /> · {s.sub}
+              {/* Ruling 121: a backend handle whose run the task owner cannot
+                  pay for says so on the row, before the comment is written. */}
+              {s.note ? ` · ${s.note}` : ""}
             </span>
           </span>
         </button>

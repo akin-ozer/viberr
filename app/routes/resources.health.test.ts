@@ -36,7 +36,10 @@ interface HealthBody {
   watcher?: boolean;
   kbWatcher?: boolean;
   lock?: unknown;
-  backends?: { claude: string; codex: string };
+  backends?: {
+    claude: { connectedUsers: number };
+    codex: { connectedUsers: number };
+  };
   browser?: { status: "ready" | "unavailable"; reason?: string };
   disk?: DiskSpace | null;
   maintenance?: { intervalMs: number; lastPassAt: string | null };
@@ -169,26 +172,44 @@ describe("/resources/health — honest status (gap 17)", () => {
     expect(body.lock).toBeNull();
   });
 
-  it("does NOT treat an unconfigured backend as degraded (R17-5)", async () => {
-    // An instance that only ever uses Claude is a CORRECT deployment, and the
-    // probe is env-presence only — it has never checked a token's validity. A
-    // never-checked thing renders neutral; alarming here would train the
+  it("reports a per-backend CONNECTED-USER count, and zero is never degraded (R17-5, ruling 121)", async () => {
+    // Ruling 121 replaced "is this backend configured on the instance" with the
+    // only instance-level fact that survives a per-person credential model: how
+    // many people have connected it. Nobody has here, and an instance where
+    // nobody uses Codex is a CORRECT deployment — alarming would train the
     // operator to ignore the whole field.
-    const { setBackendAvailability } = await import(
-      "~/server/runtimes/runtime-registry.server"
+    const fresh = await probe();
+    expect(fresh.body.backends).toEqual({
+      claude: { connectedUsers: 0 },
+      codex: { connectedUsers: 0 },
+    });
+    expect(fresh.body.status).toBe("ok");
+    expect(fresh.body.degraded).toEqual([]);
+    expect(fresh.status).toBe(200);
+    expect((await probe("/resources/health?probe=readiness")).status).toBe(200);
+
+    // One person connects Claude: the count moves, the status does not.
+    const { insertUser } = await import("~/server/auth/user-store.server");
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../test-support/backend-credentials"
     );
-    setBackendAvailability("codex", false);
+    const person = insertUser(app.db, {
+      id: "u_health_connected",
+      email: "connected@viberr.test",
+      name: "Connected",
+      role: "member",
+    });
+    await connectFakeBackend(app.db, person.id, "claude");
     try {
-      const { body, status } = await probe();
-      expect(body.backends?.codex).toBe("unavailable");
+      const { body } = await probe();
+      expect(body.backends).toEqual({
+        claude: { connectedUsers: 1 },
+        codex: { connectedUsers: 0 },
+      });
       expect(body.status).toBe("ok");
       expect(body.degraded).toEqual([]);
-      expect(status).toBe(200);
-      expect(
-        (await probe("/resources/health?probe=readiness")).status,
-      ).toBe(200);
     } finally {
-      setBackendAvailability("codex", true);
+      await disconnectFakeBackend(app.db, person.id, "claude");
     }
   });
 

@@ -27,6 +27,7 @@ import {
 } from "lexical";
 import { mergeRegister } from "@lexical/utils";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
+import type { TaskRunPrincipalView } from "./run-principal-view";
 import { MentionMenu } from "./mention-menu";
 import {
   useMentionAutocomplete,
@@ -61,6 +62,10 @@ export interface CommentComposerHandle {
 
 interface CommentComposerProps {
   mentionables: Mentionables;
+  /** Ruling 121: the task's run principal (the owner whose accounts an
+   *  `@claude` / `@codex` mention would bill), so the menu rows can name a
+   *  backend that would refuse. Absent on renders with no task behind them. */
+  runPrincipal?: TaskRunPrincipalView | null;
   /** Fires with the raw (untrimmed) draft on every edit. */
   onChange: (raw: string) => void;
   /** ⌘/Ctrl+Enter — the parent decides whether a submit is possible. */
@@ -177,22 +182,29 @@ function ComposerKeysPlugin({
 }
 
 export const CommentComposer = forwardRef<CommentComposerHandle, CommentComposerProps>(
-  function CommentComposer({ mentionables, onChange, onSubmit }, ref) {
+  function CommentComposer(
+    { mentionables, runPrincipal, onChange, onSubmit },
+    ref,
+  ) {
     const editorRef = useRef<LexicalEditor | null>(null);
     const onChangeRef = useRef(onChange);
     const onSubmitRef = useRef(onSubmit);
 
-    const menu = useMentionAutocomplete(mentionables, (result) => {
-      const editor = editorRef.current;
-      if (!editor) return;
-      editor.update(() => {
-        const paragraph = $getRoot().getFirstChild();
-        if ($isParagraphNode(paragraph)) {
-          $setParagraphPlainText(paragraph, result.text, result.caret);
-        }
-      });
-      editor.focus();
-    });
+    const menu = useMentionAutocomplete(
+      mentionables,
+      (result) => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        editor.update(() => {
+          const paragraph = $getRoot().getFirstChild();
+          if ($isParagraphNode(paragraph)) {
+            $setParagraphPlainText(paragraph, result.text, result.caret);
+          }
+        });
+        editor.focus();
+      },
+      runPrincipal,
+    );
     const menuRef = useRef(menu);
     // Kept current in an effect, not during render (render must stay pure); all
     // three are read only from deferred Lexical command / onChange handlers.

@@ -37,12 +37,25 @@ interface SeededActors {
 }
 let ids: SeededActors;
 
+/** Ruling 121: what the loader answers about backends. `backendHealth` is the
+ *  ONE answer: the VIEWER's own connection (which the roster badge and the
+ *  profile editor's advisory note read) plus the project-scoped count the
+ *  roster line states. Authoring a profile is never gated on it, so there is no
+ *  second `backendAvailable` pair to drift from it. */
+interface BackendConnectionSummaryData {
+  backend: "codex" | "claude";
+  viewerConnected: boolean;
+  membersConnected: number;
+  membersTotal: number;
+}
+
 type LoaderData = {
   profiles: AgentProfileView[];
   library: LibraryProfileView[];
   deployments: AgentDeploymentView[];
   stages: { id: string; name: string; color: string }[];
   projectName: string;
+  backendHealth: Record<"codex" | "claude", BackendConnectionSummaryData>;
 };
 
 beforeAll(async () => {
@@ -302,6 +315,79 @@ describe("loader", () => {
       "waiting on human",
       "anchored · on call",
     ]);
+  });
+
+  /**
+   * Ruling 121 — this page used to ask the deployment "is Codex configured?".
+   * There is no such fact: a run bills a PERSON. The loader answers two
+   * person-shaped questions instead, and the second one is scoped to THIS
+   * project's members, because a member of another project connecting Codex
+   * changes nothing about what can run here.
+   */
+  describe("backend connections (ruling 121)", () => {
+    const memberCount = async (): Promise<number> => {
+      const { listProjectMembers } = await import(
+        "~/server/projections/board-query.server"
+      );
+      return listProjectMembers(app.db, "viberr-core").length;
+    };
+
+    it("nobody connected: zero for everyone, and no second availability pair", async () => {
+      const total = await memberCount();
+      expect(total).toBeGreaterThan(0);
+      const data = await runLoader(ids.arda);
+      expect(data.backendHealth).toEqual({
+        claude: {
+          backend: "claude",
+          viewerConnected: false,
+          membersConnected: 0,
+          membersTotal: total,
+        },
+        codex: {
+          backend: "codex",
+          viewerConnected: false,
+          membersConnected: 0,
+          membersTotal: total,
+        },
+      });
+      // Ruling 121: the page answers backends ONCE. A fresh instance where
+      // nobody has connected anything must still be able to author profiles
+      // (runs bill the task owner, not the author), so the loader ships no
+      // second boolean pair for a form gate to read.
+      expect("backendAvailable" in data).toBe(false);
+    });
+
+    it("counts MEMBERS who connected, tells each viewer about their own account, and ignores outsiders", async () => {
+      const { connectFakeBackend, disconnectFakeBackend } = await import(
+        "../../../test-support/backend-credentials"
+      );
+      const total = await memberCount();
+      // Arda is a member of viberr-core; Deniz is a registered user who is not.
+      await connectFakeBackend(app.db, ids.arda, "claude");
+      await connectFakeBackend(app.db, ids.deniz, "codex");
+      try {
+        const mine = await runLoader(ids.arda);
+        expect(mine.backendHealth.claude).toEqual({
+          backend: "claude",
+          viewerConnected: true,
+          membersConnected: 1,
+          membersTotal: total,
+        });
+
+        // Selin sees the same COUNT (a project fact) and a different answer
+        // about herself (a personal one).
+        const theirs = await runLoader(ids.selin);
+        expect(theirs.backendHealth.claude.membersConnected).toBe(1);
+        expect(theirs.backendHealth.claude.viewerConnected).toBe(false);
+
+        // Deniz connected Codex but is not a member here: the count stays 0.
+        expect(mine.backendHealth.codex.membersConnected).toBe(0);
+        expect(theirs.backendHealth.codex.membersConnected).toBe(0);
+      } finally {
+        await disconnectFakeBackend(app.db, ids.arda, "claude");
+        await disconnectFakeBackend(app.db, ids.deniz, "codex");
+      }
+    });
   });
 });
 

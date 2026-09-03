@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { data } from "react-router";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
-import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
+import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import {
   canAccessConversation,
   getConversation,
@@ -85,7 +85,13 @@ export function getControllerSurface(
 
   const config = resolveControllerConfig(input.dataRoot);
   return {
-    available: isBackendAvailable("claude"),
+    // Ruling 121: a controller turn runs on the ASKER's own Claude account, so
+    // "is the controller available" is a question about the person looking at
+    // it — not about this deployment. Another member with Claude connected can
+    // still converse while this viewer cannot.
+    available: isBackendAvailableFor(db, viewer.id, "claude", {
+      dataRoot: input.dataRoot,
+    }),
     controllerName: config.name,
     conversations: rows.map((c) => ({
       id: c.id,

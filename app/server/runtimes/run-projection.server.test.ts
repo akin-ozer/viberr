@@ -122,7 +122,16 @@ describe("projectRunsForTask grouping", () => {
   });
 
   it("flags a backend-availability failure so the UI can retry on the other backend (D4)", () => {
-    insert({ id: "run_q", threadId: "primary", kind: "primary", backend: "codex", state: "error" });
+    insert({
+      id: "run_q",
+      threadId: "primary",
+      kind: "primary",
+      backend: "codex",
+      state: "error",
+      // Ruling 121: a run that actually spawned billed somebody, so the retry
+      // offer is about THAT person's other account.
+      credentialUserId: "u_owner",
+    });
     insertRunLine(db, {
       runId: "run_q",
       seq: 0,
@@ -137,20 +146,70 @@ describe("projectRunsForTask grouping", () => {
 
   it("flags an R7-2 fail-fast 'unavailable' run via its structured tag (D4 retry)", () => {
     // The no-credential fail-fast (failRunUnavailable) emits an err line tagged
-    // `run·unavailable` whose prose ("…is unavailable — no usable credential…")
-    // matches none of the quota/rate-limit signatures. The projection must key
-    // off the tag so the "retry on the other backend" affordance still renders.
-    insert({ id: "run_u", threadId: "primary", kind: "primary", backend: "claude", state: "error" });
+    // `run·unavailable` whose prose matches none of the quota/rate-limit
+    // signatures. The projection must key off the tag so the "retry on the
+    // other backend" affordance still renders.
+    //
+    // Ruling 121: this is the refusal the other backend CAN fix — the task's
+    // owner is known (the row records whose account it would have billed) and
+    // has simply not connected Claude.
+    const refusal =
+      "Claude isn't connected for Ada Lovelace (ada@viberr.dev), the task owner. " +
+      "Runs on this task use the owner's accounts; they can connect Claude on " +
+      "Profile → Agent accounts. No agent process was started.";
+    insert({
+      id: "run_u",
+      threadId: "primary",
+      kind: "primary",
+      backend: "claude",
+      state: "error",
+      credentialUserId: "u_owner",
+    });
     insertRunLine(db, {
       runId: "run_u",
       seq: 0,
       occurredAt: "2026-07-16T00:00:00.000Z",
-      raw: JSON.stringify({ type: "error", source: "viberr", message: "Claude Code is unavailable — no usable credential is configured." }),
-      display: { t: "00:00:00", ev: "err", tag: "run·unavailable", text: "Claude Code is unavailable — no usable credential is configured." },
+      raw: JSON.stringify({ type: "error", source: "viberr", message: refusal }),
+      display: { t: "00:00:00", ev: "err", tag: "run·unavailable", text: refusal },
     });
     const [view] = projectRunsForTask(db, SLUG, TASK);
     expect(view!.failedBackendUnavailable).toBe(true);
     expect(view!.altBackend).toBe("codex"); // claude failed → offer codex
+  });
+
+  it("withholds the retry offer when NO principal was resolvable (ruling 121)", () => {
+    // An unowned task (or one whose owner account is gone) has nobody to bill
+    // on EITHER backend, and the run service records that as a null
+    // `credential_user_id`. Offering "Retry on Codex" here would promise a
+    // second identical refusal; the run still reports its failure, and the way
+    // out is a human taking the task, which the run's own line says.
+    const refusal =
+      "Claude runs on VIB-1 need a task owner: agent runs use the owner's accounts " +
+      "and this task has none. Own the task (Assign me) and run the agent again. " +
+      "No agent process was started.";
+    insert({
+      id: "run_n",
+      threadId: "primary",
+      kind: "primary",
+      backend: "claude",
+      state: "error",
+      credentialUserId: null,
+    });
+    insertRunLine(db, {
+      runId: "run_n",
+      seq: 0,
+      occurredAt: "2026-07-16T00:00:00.000Z",
+      raw: JSON.stringify({ type: "error", source: "viberr", message: refusal }),
+      display: { t: "00:00:00", ev: "err", tag: "run·unavailable", text: refusal },
+    });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.state).toBe("error");
+    // The FAILURE is still reported — it is a true statement about the run, and
+    // the console's footer selects its failure sentence from it. Only the
+    // ALTERNATIVE is withheld: with no `altBackend` the panel states what
+    // happened and offers no retry.
+    expect(view!.failedBackendUnavailable).toBe(true);
+    expect(view!.altBackend).toBeUndefined();
   });
 
   it("does NOT flag a genuine task failure as backend-unavailable", () => {

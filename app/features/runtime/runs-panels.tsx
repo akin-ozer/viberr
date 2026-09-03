@@ -296,8 +296,9 @@ function SessionIdChip({
     }
   };
   // The id identifies the provider session (claude session_id / codex thread),
-  // stored inside the app's runtime (in Docker, under CLAUDE_CONFIG_DIR /
-  // CODEX_HOME on the data volume). It IS resumable on your own machine with
+  // stored inside the app's runtime — since ruling 121 in the runtime home of
+  // the person the run billed (`runtimes/users/<id>/{claude,codex}-home` on the
+  // data volume). It IS resumable on your own machine with
   // your own subscription — use Export to download an installer that places the
   // transcript where the local CLI expects it and prints `claude --resume` /
   // `codex resume`. (Or continue in-app by @mentioning the agent.)
@@ -423,6 +424,7 @@ export function AgentLogsPanel({
   onSel,
   linesByThread,
   onRetryBackend,
+  retryBackends,
   retrying,
   streamError = null,
   olderByThread,
@@ -436,6 +438,15 @@ export function AgentLogsPanel({
    *  failed run so the caller can dispatch it (run-agent + the run's own
    *  profileId + the backend override). */
   onRetryBackend?: (backend: "claude" | "codex", run: RunView) => void;
+  /** Ruling 121: which backends a retry on this task could actually RUN on —
+   *  the task owner's connected accounts, because every run bills them. A
+   *  backend absent from this list gets no button and no "a maintainer can
+   *  retry it" advice: dispatching it would produce a second, identically
+   *  refused run, and the footer says so instead of staying silent about a
+   *  control that is not there. Omitted entirely means the caller did not ask
+   *  the question: then nothing is offered AND nothing is claimed about the
+   *  owner, which is not the same as an empty list ("asked, nobody to bill"). */
+  retryBackends?: readonly ("claude" | "codex")[] | undefined;
   retrying?: boolean;
   /** UI-03/UI-30: the live tail stopped (403 / dropped stream). Rendered in the
    *  footer so a frozen console never looks like a quiet one. */
@@ -548,10 +559,34 @@ export function AgentLogsPanel({
   const backendUnavailable =
     (cur!.kind === "primary" || cur!.kind === "reviewer") &&
     cur!.state === "error" &&
-    !!cur!.failedBackendUnavailable &&
-    !!cur!.altBackend;
-  const canRetryBackend = backendUnavailable && !!onRetryBackend;
-  const altLabel = cur!.altBackend === "codex" ? "Codex" : "Claude";
+    !!cur!.failedBackendUnavailable;
+  // Ruling 121: the retry OFFER needs somebody to bill, which is a different
+  // question from why this run failed. The projection withholds `altBackend`
+  // when the run had no principal at all (an unowned task), and `retryBackends`
+  // is the task owner's live connection set — the same question the blocked
+  // packet asks before offering `retry_other_backend` (task-actions.server.ts),
+  // so the button and the packet cannot tell two stories about one task.
+  const altBackend = cur!.altBackend ?? null;
+  const retryPossible =
+    backendUnavailable &&
+    altBackend !== null &&
+    (retryBackends?.includes(altBackend) ?? false);
+  const canRetryBackend = retryPossible && !!onRetryBackend;
+  const altLabel = altBackend === "codex" ? "Codex" : "Claude";
+  // Ruling 121: the offer, and when there is none, WHY there is none. A run
+  // that failed on quota with an owner who never connected the other backend
+  // gets no button on any surface (the blocked packet withholds
+  // `retry_other_backend` for the same reason), so the console names the
+  // owner's missing connection rather than leaving the absent control
+  // unexplained. `retryBackends === undefined` is "not asked", and claims
+  // nothing about the owner.
+  const retryClause = canRetryBackend
+    ? `. Retry on ${altLabel}`
+    : retryPossible
+      ? ". A maintainer can retry it on the other backend"
+      : altBackend !== null && retryBackends !== undefined
+        ? `. ${altLabel} isn't connected for the task owner, so there is no other backend to retry on`
+        : "";
   const footer =
     cur!.state === "running"
       ? "streaming: raw output stays here as evidence, never in the task record"
@@ -568,7 +603,18 @@ export function AgentLogsPanel({
               "; thread can be re-engaged"
             : cur!.state === "error"
               ? backendUnavailable
-                ? `${cur!.backend === "codex" ? "Codex" : "Claude"} was unavailable (quota / rate limit)${canRetryBackend ? `. Retry on ${altLabel}` : ". A maintainer can retry it on the other backend"}`
+                ? // Ruling 121: the same `run·unavailable` classification now
+                  // also covers "the account this run bills has not connected
+                  // the backend", so the footer states the CLASS and lets the
+                  // run's own error line (which names the person and the
+                  // remedy) carry the specifics, instead of asserting a quota
+                  // failure that may not have happened.
+                  // The retry clause follows the OFFER, not the viewer's
+                  // grant: with nobody to bill on the other backend there is
+                  // no retry to advertise, and the run's own error line
+                  // carries the real remedy (own the task, connect the
+                  // account).
+                  `${cur!.backend === "codex" ? "Codex" : "Claude"} could not run this (quota, rate limit, or an account that cannot run it)${retryClause}`
                 : "stream ended on a continuity error; see the blocked packet"
               : "thread alive, no run executing";
 
@@ -603,7 +649,7 @@ export function AgentLogsPanel({
             type="button"
             className="btn sm"
             disabled={retrying}
-            onClick={() => onRetryBackend!(cur!.altBackend!, cur!)}
+            onClick={() => onRetryBackend!(altBackend!, cur!)}
             title={`Re-run the ${cur!.kind === "reviewer" ? "reviewer" : "specialist"} on ${altLabel}. The current backend was unavailable`}
           >
             <Icon name="refresh" />

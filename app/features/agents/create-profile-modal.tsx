@@ -407,16 +407,25 @@ function IdentityFields({
 function BackendField({
   backend,
   setBackend,
-  available,
+  viewerConnected,
   seededBackends,
 }: {
   backend: "codex" | "claude" | "";
   setBackend: (v: "codex" | "claude") => void;
-  /** Per-backend credential availability (from the loader). An unconfigured
-   *  backend is disabled so a profile can't be pinned to a runtime whose every
-   *  run would fail — EXCEPT the one an edited profile already runs on, which
-   *  stays selectable so re-saving doesn't force a backend change (RU-2). */
-  available: Record<"codex" | "claude", boolean>;
+  /** Ruling 121: which backends the VIEWER has connected (from the loader).
+   *  It decides one thing only — whether the note under the chips is shown.
+   *
+   *  RU-2 used to DISABLE a chip whose backend was not configured, because
+   *  "configured" was a deployment fact and a profile pinned to an unconfigured
+   *  runtime could never run for anybody. Since ruling 121 there is no such
+   *  fact: a run bills the TASK OWNER, so whether this profile runs depends on
+   *  the person whose task it is dispatched on, not on the person writing the
+   *  profile. Keeping the gate on the author's own credential blocked profile
+   *  authoring outright on a fresh instance (nobody has connected anything yet,
+   *  so both chips were dead and Save could never be reached), and denied a
+   *  maintainer who configures profiles for the people who do run them. So the
+   *  chips are always live and the consequence is stated as copy instead. */
+  viewerConnected: Record<"codex" | "claude", boolean>;
   /** P13-UI-52: the backends the profile being edited ALREADY declares. A
    *  seeded profile can list two; this form is single-select and saving writes
    *  exactly one, so editing anything else on such a profile silently dropped
@@ -426,6 +435,12 @@ function BackendField({
   seededBackends?: readonly ("codex" | "claude")[];
 }) {
   const dropping = (seededBackends ?? []).filter((b) => b !== backend);
+  // The picked backend's label when the VIEWER has not connected it, "" when
+  // there is nothing to say (nothing picked yet, connected, or not probed).
+  const pickedLabel =
+    backend !== "" && !viewerConnected[backend]
+      ? (BACKENDS.find((b) => b.id === backend)?.label ?? "")
+      : "";
   // Chip groups have no labelable control — a `<label>` here names nothing.
   // role="group" + aria-labelledby gives screen readers the same caption.
   const capId = useId();
@@ -436,27 +451,18 @@ function BackendField({
         <span className="fhint">pick exactly one</span>
       </span>
       <div className="pick-chips">
-        {BACKENDS.map((b) => {
-          const usable = available[b.id] || backend === b.id;
-          return (
-            <button
-              type="button"
-              key={b.id}
-              className={"pick-chip" + (backend === b.id ? " on" : "")}
-              aria-pressed={backend === b.id}
-              onClick={() => setBackend(b.id)}
-              disabled={!usable}
-              title={
-                usable
-                  ? undefined
-                  : `${b.label} isn't configured. Add its credential to run agents on it`
-              }
-            >
-              <AgentGlyph backend={b.id} />
-              {b.label}
-            </button>
-          );
-        })}
+        {BACKENDS.map((b) => (
+          <button
+            type="button"
+            key={b.id}
+            className={"pick-chip" + (backend === b.id ? " on" : "")}
+            aria-pressed={backend === b.id}
+            onClick={() => setBackend(b.id)}
+          >
+            <AgentGlyph backend={b.id} />
+            {b.label}
+          </button>
+        ))}
       </div>
       {dropping.length > 0 && (
         <p className="deny-note">
@@ -469,6 +475,21 @@ function BackendField({
               .join(" and ")}
             ; {dropping.map((b) => (b === "claude" ? "Claude" : "Codex")).join(" and ")}{" "}
             will be dropped.
+          </span>
+        </p>
+      )}
+      {/* P14: the reason a control behaves the way it does is RENDERED copy.
+          The old gate hid this sentence in a `title` on a DISABLED button,
+          where no browser ever opens it. Ruling 121: it is advice, not a
+          denial, because the profile runs on the task owner's account. */}
+      {pickedLabel !== "" && (
+        <p className="def-note">
+          <Icon name="alert" />
+          <span>
+            <strong>You haven't connected {pickedLabel}.</strong> You can still
+            pin this profile to it: runs use the task owner's account, so it runs
+            on tasks owned by people who have connected it. Connect {pickedLabel}{" "}
+            on your Profile → Agent accounts to run it on the tasks you own.
           </span>
         </p>
       )}
@@ -1216,7 +1237,7 @@ export function CreateProfileModal({
   onClose,
   onSubmit,
   resourceCatalog,
-  backendAvailable,
+  viewerConnected,
 }: {
   /** Edit mode when set. */
   initial: AgentProfileView | null;
@@ -1230,10 +1251,10 @@ export function CreateProfileModal({
   /** Live store resources for the context-resource picker. Falls back to the
    *  built-in defaults when omitted (e.g. in isolated component tests). */
   resourceCatalog?: readonly ResCatalogGroup[];
-  /** Per-backend credential availability (from the loader). Omitted defaults to
-   *  both available (isolated component tests); the picker disables backends
-   *  that aren't configured so a new profile can't be pinned to a dead runtime. */
-  backendAvailable?: Record<"codex" | "claude", boolean>;
+  /** Ruling 121: which backends the VIEWER has connected (from the loader).
+   *  Advisory only, never a gate on authoring (see `BackendField`). Omitted
+   *  means "not probed on this surface", and nothing is claimed either way. */
+  viewerConnected?: Record<"codex" | "claude", boolean>;
 }) {
   const editing = initial !== null;
   const isOperator = initial?.kind === "operator";
@@ -1242,7 +1263,9 @@ export function CreateProfileModal({
   // R7-5: the specialist picker offers 3 honest modes (Allowed/Human-only/Off);
   // the operator keeps all 4 (`recommend` is real for the operator only).
   const capModes = isOperator ? OPERATOR_CAP_MODES : SPECIALIST_CAP_MODES;
-  const available = backendAvailable ?? { codex: true, claude: true };
+  // Absent = the surface did not probe connections (isolated component tests),
+  // so the note below claims nothing; it never gates the form either way.
+  const connected = viewerConnected ?? { codex: true, claude: true };
   const { ref: dialogRef, close } = useDialog(onClose);
   const uid = useId();
   const [name, setName] = useState(initial ? initial.name : "");
@@ -1435,7 +1458,7 @@ export function CreateProfileModal({
         <BackendField
           backend={backend}
           setBackend={pickBackend}
-          available={available}
+          viewerConnected={connected}
           {...(initial ? { seededBackends: initial.backends } : {})}
         />
 

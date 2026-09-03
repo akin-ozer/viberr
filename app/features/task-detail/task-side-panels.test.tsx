@@ -142,6 +142,31 @@ function renderAsContributor(patch: Partial<TaskDetail> = {}, myRole = "contribu
   return render(<Stub initialEntries={["/"]} />);
 }
 
+/**
+ * Ruling 121 — the owner seat is also the RUN PRINCIPAL: every agent run on a
+ * task bills the owner's own Claude and Codex accounts. The Current-state row
+ * is where a person sees and releases that seat, so it is where the widened
+ * meaning has to be stated; the run controls in the execution profile then
+ * name the owner when a backend of theirs is not connected.
+ */
+describe("the owner row states what the seat now means (ruling 121)", () => {
+  it("names the acceptance authority AND whose accounts the agents run on", () => {
+    const { container } = renderPanel({
+      owner: {
+        kind: "human",
+        userId: "u-arda",
+        name: "Arda Kaya",
+        initials: "AK",
+        tone: "",
+      },
+    });
+    const seat = container.querySelector(".rev-stack")!;
+    expect(seat.getAttribute("title")).toBe(
+      "Human owner: reviews and accepts this task, and its agent runs use their own Claude and Codex accounts",
+    );
+  });
+});
+
 describe("owner seat on closed and archived tasks (D32-16 / E32-9)", () => {
   it("offers Assign me on an open unowned task, withholds it once closed or archived", () => {
     const open = renderAsContributor({ owner: null });

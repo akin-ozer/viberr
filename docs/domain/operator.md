@@ -4,8 +4,10 @@
 > authority is gated, and the packets it opens. Source of truth:
 > `app/server/runtimes/operator-run.server.ts`, `app/server/tasks/operator-actions.server.ts`,
 > `app/server/tasks/operator-toolkit.server.ts`, `app/server/tasks/task-actions.server.ts`.
-> Verified against `main` @ `68b5480` (2026-09-01). Line numbers are omitted on
-> purpose; function names are stable, line numbers are not.
+> Verified against `main` @ `68b5480` (2026-09-01). Updated 2026-09-02 for ruling 121
+> (branch `claude/per-user-codex-auth-difdnn`): §2 now says whose account an operator
+> run bills. Line numbers are omitted on purpose; function names are stable, line
+> numbers are not.
 
 ## 1. Role
 
@@ -33,6 +35,13 @@ resources, persona, whether the operator is deployed, and `humanGatedBeforeWork`
   below the configured one; a clamp that bites writes the audit fact
   `task.operator.autonomy_clamped`. The run control shows the backend and keeps Run;
   it no longer picks backend or autonomy (ruling 92).
+- **An operator run bills the TASK OWNER** (ruling 121), like every other run on a task:
+  `runOperator` resolves `resolveTaskRunPrincipal` before it starts anything and spawns
+  with that person's own Claude or Codex credential. Authority is still the operator's
+  own capability policy — whose account pays and what the run may do are separate
+  questions — but a task with no owner, or an owner who has not connected the operator's
+  backend, gets an honest refusal run and no process, and the task page's Run control is
+  disabled with the same sentence.
 - **Three gates**, because two capabilities carry absent-means-granted polarity:
   `gate(authority, id)` (`direct` → act; `recommend` → act only under full autonomy,
   except `completion-for-acceptance`, which is never promoted; `human`/`off` → deny;
@@ -193,9 +202,9 @@ Resolution effects by option kind (`resolvePacket`):
 |---|---|
 | `accept_completion` | Runs the full acceptance contract (authority, disclosure echo, live no-change probe, refusal stack, PR head check, merge). Not re-queued. |
 | `request_edit`, `redirect`, `custom` | Task back to `waiting: agent`, `readiness: ready`, packet cleared, operator re-queued; an agent question routes to the asker's resumed session first. |
-| `block_on_policy` | "I fixed the policy or credential": `readiness: ready`, `waiting: agent`, re-queued (ruling 76). |
+| `block_on_policy` | "I fixed the policy or credential": `readiness: ready`, `waiting: agent`, re-queued (ruling 76). Since ruling 121 the credential half of that is a person connecting their own backend on Profile → Agent accounts, usually the task owner. |
 | `hold_runtime_debug` | `readiness: blocked`, `waiting: human`, packet cleared, not re-queued. |
-| `retry_other_backend` | Re-runs the failed agent on the named backend under operator authority; the switch sticks on the engagement's `pinnedBackend`. |
+| `retry_other_backend` | Re-runs the failed agent on the named backend under operator authority; the switch sticks on the engagement's `pinnedBackend`. Offered only when the TASK OWNER has that backend connected (ruling 121). |
 | `edit_goal` | The only kind that keeps its packet open (`awaiting: goal_edit`); cleared when the edited goal is saved. |
 | `archive_task` | The archive contract; with `deleteBranch: true` also deletes the remote branch (the product's only remote-branch deletion besides collision resolution). Requires `approve-transition`. |
 | `discard_branch` | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. Requires `approve-transition`. |

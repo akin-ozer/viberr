@@ -13,7 +13,6 @@ import {
   TRANSITION_TO_DONE_CAPABILITY_ID,
   TRANSITION_TO_DONE_EXCEPTION,
 } from "~/features/policy/policy-data";
-import type { BackendCredentialHealth } from "~/server/runtimes/runtime-registry.server";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName, storeIcon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
@@ -77,13 +76,25 @@ const AUTO_BOUNDARY_LABEL =
 // ------------------------------------------------------------ small parts
 
 /**
- * F16: per-backend credential health, as the server's ONE answer to it
- * (`backendCredentialHealth` in runtime-registry.server.ts — the same source the
- * run service and the logs read). Absent ⇒ unknown here, and nothing is claimed
+ * Ruling 121: who on this project can actually run this backend.
+ *
+ * There is no instance-level "the backend is configured" fact any more — a run
+ * bills a PERSON, so the honest instance-level number is a count of the people
+ * who connected it, and the honest per-viewer fact is whether THEY did. F16's
+ * rule survives the change: absent ⇒ unknown here, and nothing is claimed
  * either way; the page never invents a second, quietly divergent check.
  */
+export interface BackendConnectionSummary {
+  backend: "codex" | "claude";
+  /** The person looking at this page has connected this backend. */
+  viewerConnected: boolean;
+  /** Project members who have connected it, of how many members there are. */
+  membersConnected: number;
+  membersTotal: number;
+}
+
 export type BackendHealthMap = Partial<
-  Record<"codex" | "claude", BackendCredentialHealth>
+  Record<"codex" | "claude", BackendConnectionSummary>
 >;
 
 /** The backend a run would actually resolve — the profile's FIRST (the
@@ -98,7 +109,7 @@ function primaryBackend(a: AgentProfileView): "codex" | "claude" | null {
 function primaryBackendHealth(
   a: AgentProfileView,
   health: BackendHealthMap | undefined,
-): BackendCredentialHealth | null {
+): BackendConnectionSummary | null {
   const backend = primaryBackend(a);
   if (!backend || !health) return null;
   return health[backend] ?? null;
@@ -110,7 +121,7 @@ function BackendChip({
 }: {
   b: string;
   /** Undefined = not probed on this surface; nothing is claimed. */
-  health?: BackendCredentialHealth | undefined;
+  health?: BackendConnectionSummary | undefined;
 }) {
   // Mirrors the task-level Execution profile panel verbatim ("Codex — not
   // configured"), which was already telling this truth while this page said
@@ -118,21 +129,46 @@ function BackendChip({
   // existing "this value is not what it looks like" badge (the model cell's
   // DEFAULT flag) — same amber, same alert glyph, same cursor:help, no new
   // class name with no rule behind it.
-  const missing = health ? !health.available : false;
+  // Ruling 121: "not connected" is about the VIEWER's own account, not the
+  // deployment's — the badge says what THEY have to do about it.
+  const missing = health ? !health.viewerConnected : false;
   return (
     <span className="be-chip">
       <AgentGlyph backend={b} />
       {b === "claude" ? "Claude" : "Codex"}
       {missing && (
-        <span
-          className="model-sub"
-          {...(health?.detail ? { title: health.detail } : {})}
-        >
+        <span className="model-sub" title={notConnectedNote(b)}>
           <Icon name="alert" />
-          not configured
+          not connected
         </span>
       )}
     </span>
+  );
+}
+
+/** Ruling 121: what a person who has not connected a backend must do, in one
+ *  sentence, addressed to them. */
+function notConnectedNote(backend: string): string {
+  const label = backend === "claude" ? "Claude" : "Codex";
+  return `You haven't connected ${label}. Connect it on your Profile → Agent accounts to run this profile on your tasks.`;
+}
+
+/**
+ * Ruling 121: the billing rule, plus the only instance-level number that
+ * survives it.
+ *
+ * "Configured" was a property of the deployment; a run is a property of a
+ * PERSON, and which person depends on the task, which this page does not have.
+ * So the roster states the rule ("runs use the task owner's <Backend>
+ * account") and counts the members of THIS project who could satisfy it. The
+ * count is people, never a verdict: a project where one member has connected
+ * Codex is a project where this profile runs on that person's tasks.
+ */
+function runsUseOwnerNote(health: BackendConnectionSummary): string {
+  const label = health.backend === "claude" ? "Claude" : "Codex";
+  return (
+    `Runs use the task owner's ${label} account · ` +
+    `${health.membersConnected} of ${health.membersTotal} members connected`
   );
 }
 
@@ -190,9 +226,8 @@ function ProfileItem({
 }) {
   const backendHealth = primaryBackendHealth(a, health);
   const unusable =
-    backendHealth && !backendHealth.available
-      ? (backendHealth.detail ??
-        `${backendHealth.backend === "claude" ? "Claude" : "Codex"} is not configured on this instance, so runs for this profile would fail.`)
+    backendHealth && !backendHealth.viewerConnected
+      ? notConnectedNote(backendHealth.backend)
       : undefined;
   return (
     <button type="button" className={"ag-item" + (on ? " on" : "")} onClick={onClick}>
@@ -663,7 +698,8 @@ export function ProfileDetail({
   stages: StageView[];
   /** R14-1: the board's edges — eligibility resolves by structural role too. */
   workflow: WorkflowEdgeView[];
-  /** F16: per-backend credential health from `backendCredentialHealth`. */
+  /** F16 + ruling 121: who can run each backend, from the one credential store
+   *  (`connectedUserIds` / `isBackendAvailableFor`). */
   backendHealth?: BackendHealthMap | undefined;
   /** P14-KM-11: the live store catalog, so a grant naming a resource the store
    *  no longer holds renders as missing rather than healthy. */
@@ -685,13 +721,16 @@ export function ProfileDetail({
   ];
   const [confirm, setConfirm] = useState(false);
   // F16: "idle · available" was the page's answer no matter what — live, a
-  // Codex profile on an instance with no Codex credential read "idle ·
-  // available" here while the task-level Execution panel, one click away, read
-  // "Codex — not configured". Availability is two claims, and only one of them
-  // is about engagements: nothing is running it, AND a run could start. The
-  // second is the backend's to answer.
+  // Codex profile whose backend nobody could run read "idle · available" here
+  // while the task-level Execution panel, one click away, disagreed.
+  // Availability is two claims, and only one of them is about engagements:
+  // nothing is running it, AND a run could start. Ruling 121 makes the second
+  // claim person-shaped — a run bills the task owner, and the person reading
+  // this page is who would start one on the tasks they own.
   const runHealth = primaryBackendHealth(a, backendHealth);
-  const backendMissing = runHealth !== null && !runHealth.available;
+  // Ruling 121: the second claim is now about the VIEWER's own account — they
+  // are the person who would press Run.
+  const backendMissing = runHealth !== null && !runHealth.viewerConnected;
   const backendLabel = runHealth?.backend === "claude" ? "Claude" : "Codex";
   // F15-05/F15-06: the capability columns show GOVERNED policy only — the same
   // partition the matrix draws between its curated groups and "Other actions".
@@ -791,7 +830,7 @@ export function ProfileDetail({
               </span>
             ) : backendMissing ? (
               <Pill kind="risk" sm>
-                idle · {backendLabel} not configured
+                idle · {backendLabel} not connected
               </Pill>
             ) : activeKeys.length > 0 ? (
               // Engaged (assigned) but not executing a run right now — say so
@@ -954,6 +993,16 @@ export function ProfileDetail({
                   </span>
                 )}
               </div>
+              {/* Ruling 121: WHOSE account a run on this profile spends. The
+                  page cannot answer "is this backend configured" any more (a
+                  run bills the task owner, and this page is not on a task), so
+                  it states the rule and the one honest instance-level number:
+                  how many of this project's members have connected it. */}
+              {runHealth && (
+                <div className="sub fine md dim">
+                  {runsUseOwnerNote(runHealth)}
+                </div>
+              )}
             </div>
           </div>
           {a.kind === "operator" ? (
@@ -1004,16 +1053,21 @@ export function ProfileDetail({
             </div>
           </div>
         </div>
-        {/* F16: the actionable half of "not configured" — the registry's own
-            sentence naming the specific misconfiguration, rather than leaving
-            an admin to guess which of five env vars is missing. */}
+        {/* Ruling 121: the actionable half, addressed to the person reading
+            it. There is no instance credential to name any more — a run bills
+            the task owner, and this viewer's own account is what decides
+            whether the profile runs on the tasks THEY own. */}
         {backendMissing && (
           <div className="def-note">
             <Icon name="alert" />
             <span>
-              <b>{backendLabel} has no usable credential on this instance</b>. A
-              run assigned to this profile refuses before it starts.{" "}
-              {runHealth?.detail ?? ""}
+              <b>You haven't connected {backendLabel}</b>. Runs use the task
+              owner's account, so a run this profile is given on a task you own
+              refuses before it starts. Connect {backendLabel} on your Profile →
+              Agent accounts.{" "}
+              {runHealth
+                ? `${runHealth.membersConnected} of ${runHealth.membersTotal} project members have connected it.`
+                : ""}
             </span>
           </div>
         )}
@@ -1030,7 +1084,7 @@ export function ProfileDetail({
         {insts.length === 0 ? (
           <div className="empty sm">
             {backendMissing
-              ? `Not currently engaged on any task. This profile is approved, but ${backendLabel} is not configured, so assigning it would produce a refused run.`
+              ? `Not currently engaged on any task. This profile is approved, but you have not connected ${backendLabel}, so a run it is given on a task you own would be refused.`
               : "Not currently engaged on any task. This profile is approved and available for assignment."}
           </div>
         ) : (
@@ -1283,7 +1337,6 @@ export function AgentsPage({
   projectName,
   myRole,
   resourceCatalog,
-  backendAvailable,
   backendHealth,
 }: {
   profiles: AgentProfileView[];
@@ -1299,11 +1352,10 @@ export function AgentsPage({
   myRole: ProjectRole | null;
   /** Live store resources for the profile-editor picker (F6/item-2). */
   resourceCatalog?: readonly ResCatalogGroup[];
-  /** Per-backend credential availability — the create/edit modal disables a
-   *  backend that isn't configured so a profile can't be pinned to it (RU-2). */
-  backendAvailable?: Record<"codex" | "claude", boolean>;
-  /** F16: the SAME probe, with its reason — the roster says whether a profile
-   *  could actually run, not only whether anything is running it. */
+  /** F16 + ruling 121: per backend, whether the VIEWER connected it and how
+   *  many project members have. One probe answers every backend claim on this
+   *  page, including the editor's note (there is no second, quietly divergent
+   *  `backendAvailable` pair any more). */
   backendHealth?: BackendHealthMap | undefined;
 }) {
   const navigate = useNavigate();
@@ -1313,6 +1365,15 @@ export function AgentsPage({
   const fetcher = useFetcher<ProfileActionResult>();
 
   const canManage = roleCan(myRole, "manage-agents");
+  // Ruling 121: the profile editor's advisory note, from the same probe the
+  // roster reads. Undefined when connections were not probed on this surface,
+  // so the editor claims nothing rather than inventing a second answer.
+  const viewerConnected = backendHealth
+    ? {
+        claude: backendHealth.claude?.viewerConnected === true,
+        codex: backendHealth.codex?.viewerConnected === true,
+      }
+    : undefined;
   // P13-UI-58 residual: `?profile=`/`?tab=` were READ once at mount and never
   // written back, so the selection was unlinkable, un-bookmarkable and lost on
   // reload — and a pasted `?tab=live` did nothing at all. The URL is the state:
@@ -1643,7 +1704,7 @@ export function AgentsPage({
           busy={fetcher.state !== "idle"}
           error={formError}
           {...(resourceCatalog ? { resourceCatalog } : {})}
-          {...(backendAvailable ? { backendAvailable } : {})}
+          {...(viewerConnected ? { viewerConnected } : {})}
           onClose={() => {
             setCreating(false);
             setFormError(null);
@@ -1660,7 +1721,7 @@ export function AgentsPage({
           busy={fetcher.state !== "idle"}
           error={formError}
           {...(resourceCatalog ? { resourceCatalog } : {})}
-          {...(backendAvailable ? { backendAvailable } : {})}
+          {...(viewerConnected ? { viewerConnected } : {})}
           onClose={() => {
             setEditing(null);
             setFormError(null);

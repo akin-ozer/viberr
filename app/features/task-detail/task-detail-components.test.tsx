@@ -29,6 +29,7 @@ import {
   type DeployedSpecialistView,
   type TaskMemberView,
 } from "./execution-profile";
+import type { TaskRunPrincipalView } from "./run-principal-view";
 
 afterEach(cleanup);
 
@@ -601,6 +602,21 @@ function execTask(patch: Partial<TaskSummary> = {}): TaskSummary {
   return { ...taskFixture("u-arda", "Arda Kaya"), ...patch };
 }
 
+/** Ruling 121: the fixture task's OWNER (`u-arda`, who is also the viewer) and
+ *  what their accounts can run. A run on this task bills them, so this — not a
+ *  deployment probe — is what every run control here answers from. */
+function connectedPrincipal(
+  patch: Partial<TaskRunPrincipalView> = {},
+): TaskRunPrincipalView {
+  return {
+    ownerUserId: "u-arda",
+    ownerName: "Arda Kaya",
+    claude: { available: true, detail: null },
+    codex: { available: true, detail: null },
+    ...patch,
+  };
+}
+
 /** Renders the rebuilt panel (dynamic-dispatch rework 2026-08-29): the operator
  *  run control, the run-an-agent combobox + prompt, the engaged-agents ledger
  *  and the owner cell — every mutation callback spied so a pin can assert the
@@ -624,7 +640,7 @@ function renderExec(
         deployedSpecialists={deployedFixture}
         operatorBackend="claude"
         operatorAutonomy="supervised"
-        backendAvailable={{ claude: true, codex: true }}
+        runPrincipal={connectedPrincipal()}
         canRunAgents
         activeAgentProfileIds={[]}
         operatorRunActive={false}
@@ -1103,12 +1119,15 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     fireEvent.change(operatorSteer(container), { target: { value: "revisit" } });
     fireEvent.click(run);
     expect(onRunOperator).toHaveBeenCalledWith("revisit", 60);
-    // Same split for an unconfigured backend (P11-41): schedule-later stays
-    // alive — the fired run resolves the live profile anyway (R22).
+    // Same split for a backend the OWNER has not connected (P11-41, ruling
+    // 121): schedule-later stays alive — the fired run resolves the live
+    // profile, and the live owner, anyway (R22).
     cleanup();
     const missing = renderExec(execTask({ operator: attachedOperator }), {
       operatorBackend: "codex",
-      backendAvailable: { claude: true, codex: false },
+      runPrincipal: connectedPrincipal({
+        codex: { available: false, detail: null },
+      }),
     });
     expect(operatorRunBtn(missing.container).disabled).toBe(true);
     fireEvent.change(operatorDelay(missing.container), { target: { value: "60" } });
@@ -1131,12 +1150,22 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(container.textContent).toContain("still runs it");
   });
 
-  it("P11-41 without a picker: an unconfigured operator backend disables Run and says so", () => {
+  it("P11-41 without a picker: an operator backend the owner cannot run disables Run and says so", () => {
     const { container, onRunOperator } = renderExec(
       execTask({ operator: attachedOperator }),
       {
         operatorBackend: "codex",
-        backendAvailable: { claude: true, codex: false }, // configured, NOT available
+        // Ruling 121: the question is the task OWNER's Codex account, not a
+        // deployment credential probe — and the viewer here IS the owner, so
+        // the store's own second-person sentence is what they read.
+        meId: "u-arda",
+        runPrincipal: connectedPrincipal({
+          codex: {
+            available: false,
+            detail:
+              "Codex isn't connected. Connect it on your Profile → Agent accounts.",
+          },
+        }),
       },
     );
     expect(container.querySelector(".op-backend")!.textContent).toBe("Codex");
@@ -1146,15 +1175,20 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(onRunOperator).not.toHaveBeenCalled();
     // The reason is rendered copy, not a title on a dead control (P14).
     expect(container.textContent).toContain(
-      "Codex isn’t configured on this instance",
+      "Codex isn't connected. Connect it on your Profile → Agent accounts.",
     );
+    expect(container.textContent).toContain(
+      "Runs on this task use your own account",
+    );
+    // No instance credential is named: since ruling 121 there is none to name.
+    expect(container.textContent).not.toContain("on this instance");
   });
 
   it("F20-9 mirror: full autonomy announces itself on the run surface", () => {
     const { container } = renderExec(execTask({ operator: attachedOperator }), {
       operatorBackend: "claude",
       operatorAutonomy: "full" as const,
-      backendAvailable: { claude: true, codex: true },
+      runPrincipal: connectedPrincipal(),
     });
     expect(container.textContent).toContain(
       "Full autonomy: this run can move the task and accept completion",

@@ -23,6 +23,17 @@ import type { RecommendationView } from "./operator-recommendations";
 import { TaskDetailPage } from "./task-detail-page";
 import type { RunView } from "~/features/runtime/runtime-types";
 
+/** Ruling 121: the task owner whose accounts a run bills, both backends
+ *  connected — the ordinary case, so the run controls render live and these
+ *  tests keep testing what they are about. The refusal states are covered in
+ *  execution-profile.test.tsx. */
+const CONNECTED_PRINCIPAL = {
+  ownerUserId: "u-arda",
+  ownerName: "Arda Kaya",
+  claude: { available: true, detail: null },
+  codex: { available: true, detail: null },
+};
+
 afterEach(cleanup);
 
 /**
@@ -130,7 +141,7 @@ function renderPage(props: {
             deployedSpecialists={props.deployedSpecialists ?? []}
             operatorBackend="claude"
             operatorAutonomy="supervised"
-            backendAvailable={{ claude: true, codex: true }}
+            runPrincipal={CONNECTED_PRINCIPAL}
             activeAgentProfileIds={props.activeAgentProfileIds ?? []}
             timelineHasMore={false}
             timelineRemaining={0}
@@ -1763,7 +1774,7 @@ function renderExec(opts: {
         deployedSpecialists={opts.deployedSpecialists ?? []}
         operatorBackend="claude"
         operatorAutonomy="supervised"
-        backendAvailable={{ claude: true, codex: true }}
+        runPrincipal={CONNECTED_PRINCIPAL}
         canRunAgents={opts.canRunAgents ?? true}
         activeAgentProfileIds={opts.activeAgentProfileIds ?? []}
         operatorRunActive={false}

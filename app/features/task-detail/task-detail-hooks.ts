@@ -7,6 +7,7 @@ import {
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
 import type { RunView } from "~/features/runtime/runtime-types";
+import type { TaskRunPrincipalView } from "./run-principal-view";
 
 /**
  * Task-detail behaviour that is not markup: the once-per-settled-result toast
@@ -61,6 +62,7 @@ export function useRunControls({
   runtime,
   myRole,
   canRunAgents,
+  runPrincipal,
   acceptanceHasAuthority,
   acceptanceTerminallyBlocked,
 }: {
@@ -68,6 +70,10 @@ export function useRunControls({
   runtime: RunView[];
   myRole: string | null;
   canRunAgents: boolean;
+  /** Ruling 121: whose accounts a run on this task would bill, and what those
+   *  accounts can run. `null` = nobody to bill (no owner, or a seat pointing at
+   *  a gone/disabled account), which no backend switch fixes. */
+  runPrincipal: TaskRunPrincipalView | null;
   /** F19-10: `acceptance.hasAuthority` — the server's OWN answer to "may this
    *  viewer accept/merge THIS task", resolved by `resolveAcceptanceAffordance`
    *  with the same predicate `requireAcceptCompletion` enforces: the
@@ -104,6 +110,18 @@ export function useRunControls({
     fd.set("runId", run.serverRunId);
     runFetcher.submit(fd, { method: "post" });
   };
+  // Ruling 121: which backends a retry could actually RUN on. A retry dispatch
+  // bills the task owner exactly as the failed run did, so offering one on a
+  // backend they have not connected promises a one-click fix that fails
+  // identically the moment it is clicked — which is why the blocked packet
+  // already asks this same question before it offers `retry_other_backend`
+  // (`isBackendAvailableFor(db, ownerUserId, altBackend)` in
+  // task-actions.server.ts). The button was gated on the viewer's grant alone,
+  // so the two surfaces on one task disagreed. An unowned task (null principal)
+  // has nobody to bill on either backend.
+  const retryBackends = runPrincipal
+    ? (["claude", "codex"] as const).filter((b) => runPrincipal[b].available)
+    : [];
   // Retry the failed run's agent on the OTHER backend after a backend
   // availability / quota failure (D4). Routes by the failed run's kind —
   // a reviewer retries as THAT reviewer, not as the primary. The override
@@ -113,7 +131,7 @@ export function useRunControls({
   const onRetryBackend =
     canRunAgents && !anyRunActive
       ? (backend: "claude" | "codex", run: RunView) => {
-          if (runBusy) return;
+          if (runBusy || !retryBackends.includes(backend)) return;
           const fd = new FormData();
           fd.set("_csrf", csrf);
           // Dynamic-dispatch rework: one run-agent intent for every agent kind
@@ -191,6 +209,7 @@ export function useRunControls({
     canInterrupt,
     onInterrupt,
     onRetryBackend,
+    retryBackends,
     onCompleteMerge,
     onForceAccept,
   };

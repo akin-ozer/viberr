@@ -34,11 +34,15 @@ import { healthSnapshot } from "~/server/ops/health-snapshot.server";
  *    lock, so a serving process without one is not a normal state.
  *  - `disk.status` low/critical → degraded. Canonical state is files; a full
  *    volume is the corruption scenario this product cannot afford.
- *  - `backends` unavailable is **NOT** degraded. A deployment that only ever
- *    uses Claude is a correct deployment, and the probe is env-presence only —
- *    it has never checked a token's validity. Reporting a never-configured
- *    backend as a fault would make a normal instance alarm forever (R17-5: a
- *    never-checked thing renders neutral, not alarming).
+ *  - `backends.<b>.connectedUsers` is a COUNT, never a verdict, and zero is
+ *    **NOT** degraded. Ruling 121 made agent backends per-person: there is no
+ *    instance credential to probe, so the only true instance-level fact is how
+ *    many people have connected each backend (a sealed key, or a vendor
+ *    sign-in whose credential file is on this server — still never a
+ *    token-validity check). A deployment where nobody uses Codex is a correct
+ *    deployment, and reporting zero as a fault would make a normal instance
+ *    alarm forever (R17-5: a never-checked thing renders neutral, not
+ *    alarming).
  *  - `disk: null` (unmeasurable) is NOT degraded — "we could not measure" is
  *    not "there is no space", and `build` identity is informational only.
  *
