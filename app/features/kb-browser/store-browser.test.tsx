@@ -114,6 +114,32 @@ describe("StoreBrowser", () => {
     expect(getByText("drag files or folders onto a folder to upload there")).toBeTruthy();
   });
 
+  /**
+   * U33-3 — the destination picker offered "/ (store root)", a place no action
+   * in this dialog can write to. A StoreBrowser is opened on ONE resource and
+   * every path is resolved against that resource's own folder
+   * (`resolveStoreTarget` → kb dir / skill folder), so `[]` has always been the
+   * RESOURCE root. The write was right; the label named the wrong thing.
+   */
+  it("the root destination names the browsed resource, not the store", async () => {
+    const { getByText, getByLabelText } = renderBrowser();
+    const dest = control(getByLabelText("Destination folder"), HTMLSelectElement);
+    expect(dest.options[0]!.textContent).toBe("/ (Architecture notes root)");
+    expect(dest.textContent).not.toContain("store root");
+
+    // …and the destination it stands for is unchanged: picking a folder and
+    // coming back to the root still writes into the resource root (`[]`).
+    fireEvent.change(dest, { target: { value: "decisions" } });
+    fireEvent.change(dest, { target: { value: "" } });
+    fireEvent.click(getByText("New folder"));
+    const input = getByLabelText("New folder name");
+    fireEvent.change(input, { target: { value: "inbox" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({ intent: "store-mkdir", path: "[]", name: "inbox" }),
+    );
+  });
+
   it("empty tree renders the empty state", () => {
     const { getByText } = renderBrowser({ tree: [] });
     expect(

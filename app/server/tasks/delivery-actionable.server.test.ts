@@ -306,6 +306,140 @@ describe("F32-7 — a collision resolution's redelivery leaves a next step", () 
   });
 });
 
+/**
+ * F33-3 (pass 33) — a delivery that opens the review PR on the task's branch
+ * falsifies the collision, and both records of it have to go.
+ *
+ * Live (VIB-1): the reconciler had recorded `github.unownedPr: 265` and the
+ * operator had opened a collision packet. The delivery was then done by hand and
+ * PR #270 opened on `vib-1` at the FIRST attempt — yet `unownedPr` stayed 265
+ * and the packet stayed open, so its confirm dialog offered to delete "the stale
+ * branch `vib-1` … the unrelated one squatting on this task's branch name" and
+ * to close "its pull request #265": the task's own live branch, carrying its own
+ * commit and its own open PR.
+ */
+describe("F33-3 — a delivery that links a PR on the branch clears the collision", () => {
+  /** The operator's collision packet as VIB-1 carried it: an `input` decision,
+   *  not a `blocked` one — the type F29-7's withdrawal predicate required. */
+  const COLLISION_PACKET: TaskPacket = {
+    type: "input",
+    kind: "Blocked decision",
+    from: "operator",
+    title: "Branch vib-1 collides with an unrelated remote branch",
+    body: "An unrelated PR stands on this task's branch name.",
+    observations: [],
+    options: [
+      {
+        kind: "resolve_remote_collision",
+        t: "Delete the stale remote branch, then redeliver",
+        d: "",
+        rec: true,
+      },
+      { kind: "custom", t: "Something else", d: "", rec: false },
+    ],
+  };
+
+  function seedCollided(): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        readiness: "ready",
+        waiting: "human",
+        branch: "vib-1",
+        ownerUserId: store.users.arda.id,
+        github: { commits: [], changed: null, unownedPr: 265 },
+      }),
+      goal: "Prove the collision record dies with the collision.",
+      packet: COLLISION_PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  /** A HUMAN delivery — no `operatorAuthorized`, so no next-step card competes
+   *  for the assertions below. `openTaskPr` returning `ok` is the whole point:
+   *  it refuses with `branch_collision` while a foreign PR really holds the ref. */
+  async function humanDeliver(): Promise<string> {
+    const outcome = await performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot, deps: DEPS },
+      store.slug,
+      "VIB-1",
+      { userId: store.users.arda.id, label: "Arda" },
+    );
+    return outcome.status;
+  }
+
+  it("clears the stale `github.unownedPr` record", async () => {
+    seedCollided();
+    expect(await humanDeliver()).toBe("delivered");
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.github?.unownedPr ?? null).toBeNull();
+    // The rest of the GitHub cache is untouched — only the falsified fact goes.
+    expect(fm.github?.commits).toEqual([]);
+  });
+
+  it("withdraws the moot collision packet whatever `type` the operator gave it", async () => {
+    seedCollided();
+    expect(await humanDeliver()).toBe("delivered");
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.packet).toBeNull();
+    expect(
+      file.parsed.timeline.some(
+        (e) => e.text?.includes("**Packet withdrawn:**") === true,
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves an acceptance packet alone — only the collision kind is moot", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        readiness: "ready",
+        waiting: "human",
+        branch: "vib-1",
+        ownerUserId: store.users.arda.id,
+        github: { commits: [], changed: null, unownedPr: 265 },
+      }),
+      goal: "An acceptance packet survives a delivery.",
+      packet: {
+        type: "input",
+        kind: "Completion report",
+        from: "operator",
+        title: "Accept completion?",
+        body: "b",
+        observations: [],
+        options: [
+          { kind: "accept_completion", t: "Accept completion", d: "", rec: true },
+          {
+            kind: "resolve_remote_collision",
+            t: "…or clear the collision first",
+            d: "",
+            rec: false,
+          },
+        ],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(await humanDeliver()).toBe("delivered");
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.packet).not.toBeNull();
+    // …and the falsified record still goes: the two are independent.
+    expect(file.parsed.frontmatter.github?.unownedPr ?? null).toBeNull();
+  });
+});
+
 describe("F19-1 — a successful delivery leaves an actionable next step", () => {
   it("A. the VC-1 strand: a supervised delivery records exactly one transition recommendation to Review", async () => {
     deployOperator("supervised");

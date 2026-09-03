@@ -16,6 +16,11 @@ import {
   agentProfileFilePath,
   agentProfilesDir,
 } from "~/server/files/file-store-root.server";
+import {
+  listKnowledgeBases,
+  listMcpServers,
+  listSkills,
+} from "./resources.server";
 import { conservativeGrantsFor } from "~/shared/capabilities";
 import { slugify } from "~/shared/ids/slugify";
 
@@ -200,6 +205,121 @@ function projectsUsingProfileId(db: DatabaseSync, profileId: string): string[] {
   return out;
 }
 
+/**
+ * One resource as a grant sees it: the key that is stored, plus the other
+ * handles a caller might name it by.
+ */
+interface GrantEntry {
+  /** What the runtime keys off — the only form worth storing. */
+  key: string;
+  /** Catalog ids / display names normalised to `key` rather than stored. */
+  aliases: string[];
+}
+
+/** Grant lists by resource kind; an absent list is one the caller didn't send. */
+export interface ResourceGrants {
+  skills?: string[];
+  mcps?: string[];
+  kbs?: string[];
+}
+
+function resolveOne(
+  list: string[] | undefined,
+  kind: string,
+  catalog: () => GrantEntry[],
+  unresolved: string[],
+): string[] | undefined {
+  if (!list) return undefined;
+  const entries = catalog();
+  const keys = new Set(entries.map((e) => e.key));
+  const byAlias = new Map<string, string>();
+  for (const entry of entries) {
+    for (const alias of entry.aliases) byAlias.set(alias, entry.key);
+  }
+  const out: string[] = [];
+  for (const raw of list) {
+    const given = raw.trim();
+    if (!given) continue;
+    const key = keys.has(given) ? given : byAlias.get(given);
+    if (key === undefined) {
+      unresolved.push(`${kind} "${given}"`);
+      continue;
+    }
+    if (!out.includes(key)) out.push(key);
+  }
+  return out;
+}
+
+/**
+ * Normalise grant lists to the STORE KEYS the runtime resolves by, refusing
+ * anything the store does not answer to.
+ *
+ * A grant is keyed by the skill FOLDER NAME, the MCP REGISTRY NAME
+ * (`byName.get(name)` in specialist-mcp.server drops an unmatched one as "no
+ * MCP server by that name in the org registry") and the KB store DIRECTORY —
+ * never by the catalog id.
+ *
+ * F33-8: the controller granted resources by the ids its own `list_*` tools
+ * hand back (`disk:developer-expertise`, `mcp_IIWTf6kB6cdd`, `kb_ilN51XiiPkJA`)
+ * and this module stored them verbatim, so EVERY grant the controller ever made
+ * was dangling: the template editor drew three red missing chips, the roster row
+ * counted "3 context resources", and a run mounted none of them. A recognised id
+ * is normalised here; a key nothing answers to is refused by name rather than
+ * written as a silent dud.
+ *
+ * The org-settings modal deliberately does NOT come through here: it already
+ * picks keys from the live catalog, and it PRESERVES grants it cannot resolve
+ * (`kbLegacyOf`) so an admin can see and drop them — a refusal would turn a
+ * template with one stale grant into an unsaveable form.
+ */
+export function resolveResourceGrants(
+  db: DatabaseSync,
+  grants: ResourceGrants,
+  ctx: GagentContext = {},
+): ResourceGrants {
+  const unresolved: string[] = [];
+  // Each catalog is read only when its list was actually sent — `listSkills`
+  // reads every SKILL.md body from disk (F31-3).
+  const skills = resolveOne(
+    grants.skills,
+    "skill",
+    () => listSkills(db, ctx).map((s) => ({ key: s.name, aliases: [s.id] })),
+    unresolved,
+  );
+  const mcps = resolveOne(
+    grants.mcps,
+    "MCP server",
+    () => listMcpServers(db).map((m) => ({ key: m.name, aliases: [m.id] })),
+    unresolved,
+  );
+  const kbs = resolveOne(
+    grants.kbs,
+    "knowledge base",
+    () =>
+      // A KB's display name is an alias too: the modal's `kbDirsOf` already
+      // repairs a name-keyed grant on open (P13-KM-01), so accepting one here
+      // and writing the dir keeps the two paths saying the same thing.
+      listKnowledgeBases(db, ctx).map((kb) => ({
+        key: kb.dir,
+        aliases: [kb.id, kb.name],
+      })),
+    unresolved,
+  );
+  if (unresolved.length > 0) {
+    throw AppError.validation(
+      `Nothing in the store answers to ${unresolved.join(", ")}. ` +
+        "Grant a skill by its folder name, an MCP server by its registry name " +
+        "and a knowledge base by its store directory — the grantKey each " +
+        "resource list returns, never the id.",
+    );
+  }
+  const resolved: ResourceGrants = {};
+  if (skills) resolved.skills = skills;
+  if (mcps) resolved.mcps = mcps;
+  if (kbs) resolved.kbs = kbs;
+  return resolved;
+}
+
 export interface SaveGagentInput {
   id?: string | null;
   name: string;
@@ -213,9 +333,40 @@ export interface SaveGagentInput {
   /** Persona / system-prompt material → the markdown body. */
   persona: string;
   stages: string[];
-  skills: string[];
-  mcps: string[];
-  kbs: string[];
+  /**
+   * Resource grants, each by its STORE KEY (`resolveResourceGrants`): the
+   * skill folder name, the MCP registry name, the KB store directory.
+   *
+   * F33-7: all three are MERGE fields — omitted leaves the stored list alone,
+   * `[]` clears it. They used to be required, and every save rewrote all three,
+   * so a caller with no grants to change (the controller's `save_global_agent`,
+   * whose lists are optional) silently emptied them.
+   */
+  skills?: string[];
+  mcps?: string[];
+  kbs?: string[];
+}
+
+type ProfileResources = AgentProfileFrontmatter["resources"];
+
+/**
+ * The stored grants after one save: only the lists the caller sent change.
+ *
+ * F33-7: the merge used to be `{...existing.resources, ...resources}` over an
+ * object that ALWAYS carried all three keys, so an omitted list overwrote the
+ * stored one with `[]` rather than leaving it. The spread of `existing` stays —
+ * `resources` is a loose object and the keys this editor doesn't own must
+ * survive the round trip.
+ */
+function mergedResources(
+  existing: ProfileResources,
+  input: SaveGagentInput,
+): ProfileResources {
+  const next: ProfileResources = { ...existing };
+  if (input.skills) next.skills = input.skills;
+  if (input.mcps) next.mcps = input.mcps;
+  if (input.kbs) next.kb = input.kbs;
+  return next;
 }
 
 export interface SaveGagentResult {
@@ -236,11 +387,6 @@ export function saveGlobalAgentProfile(
   }
   const backend: "codex" | "claude" =
     input.backend === "claude" ? "claude" : "codex";
-  const resources = {
-    skills: input.skills,
-    mcps: input.mcps,
-    kb: input.kbs,
-  };
 
   if (input.id) {
     const existing = readTemplateFile(input.id, ctx);
@@ -260,7 +406,7 @@ export function saveGlobalAgentProfile(
         desc: input.summary.trim(),
         backends: [backend],
         stages: input.stages,
-        resources: { ...existing.frontmatter.resources, ...resources },
+        resources: mergedResources(existing.frontmatter.resources, input),
       },
       description: persona || existing.description,
     };
@@ -318,7 +464,12 @@ export function saveGlobalAgentProfile(
       // "never touches app code" was created holding all four delivery caps).
       capabilities: conservativeGrantsFor("agent"),
       extras: [],
-      resources,
+      // Nothing stored yet, so "omitted" and "empty" are the same list here.
+      resources: {
+        skills: input.skills ?? [],
+        mcps: input.mcps ?? [],
+        kb: input.kbs ?? [],
+      },
     },
     description: input.persona.trim() || input.summary.trim(),
   };

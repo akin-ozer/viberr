@@ -83,6 +83,22 @@ const FULL: InsightsSummary = {
 };
 
 describe("InsightsPage", () => {
+  // D33-3: every top-level surface is addressable by name (surfaces.md §4);
+  // Insights was the only one that was not, on the page AND in the empty state.
+  it("carries the Insights screen label", () => {
+    const noRuns: InsightsSummary = {
+      ...FULL,
+      totals: { runs: 0, costedRuns: 0, cost: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, turns: 0 },
+    };
+    for (const summary of [FULL, noRuns]) {
+      const { container } = renderPage(summary);
+      expect(
+        container.querySelector('main[data-screen-label="Insights"]'),
+      ).toBeTruthy();
+      cleanup();
+    }
+  });
+
   it("renders the headline stats", () => {
     const { getByText, container } = renderPage(FULL);
     expect(getByText("Insights")).toBeTruthy();

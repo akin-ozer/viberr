@@ -19,7 +19,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  *                resolves only while exactly one specialist runs on that
  *                backend (B-AG2), which is why the reserved group below is
  *                derived from the deployment rather than fixed.
- *   - users    : project members + every registered app user, keyed by the
+ *   - users    : the project's MEMBERS — nobody else (F33-9) — keyed by the
  *                handle the fan-out resolves on: the email local-part (before
  *                `@`) OR the first name, both lowercased. We surface the email
  *                local-part as the canonical handle (stable, unambiguous) and
@@ -115,7 +115,8 @@ function emailLocalPart(email: string): string {
  * `taskKey` is accepted for parity with the other task-scoped queries and to
  * leave room for per-task narrowing later; today the mentionable agents/users
  * are project-scoped (a comment can @mention any deployed specialist and any
- * registered user, matching the server-side resolver's scope).
+ * project MEMBER, matching the server-side resolver's scope — see
+ * mention-notify.server.ts, which refuses to notify across the same boundary).
  */
 export function getMentionables(
   db: DatabaseSync,
@@ -143,30 +144,35 @@ export function getMentionables(
     });
   }
 
-  // Users: project members first (in membership order), then any remaining
-  // registered, non-disabled app users. Keyed by email local-part; skipped
-  // when a member id has no matching user row or the handle collides.
-  const memberOrder = new Map<string, number>();
+  // Users: the project's MEMBERS, in membership order — and nobody else
+  // (F33-9). The picker used to append "any remaining registered app user"
+  // after the members, so it offered people who cannot open the project: the
+  // comment posted, the fan-out created the `mention` row, and the inbox link
+  // took a non-member to the members-only 404. Ruling 25 is not only "may you
+  // open it" — the layout loader and every action return the SAME bytes for a
+  // non-member as for an unknown slug so a probe cannot learn the project
+  // exists, and that notification named the project, the task AND the comment
+  // text. A suggestion the resolver must refuse is not a suggestion, so the
+  // roster the composer offers is exactly the roster the fan-out will deliver
+  // to.
+  //
+  // project.md is the canonical membership store (ruling 6 / R19-B), so the
+  // order comes from the file and the `users` table only supplies the display
+  // fields. A member id with no live row (LV-04 ghost member), a disabled
+  // account, an empty handle or a handle that collides with an earlier member
+  // is skipped — the resolver could not route any of them either.
   const file = readProjectFile({ projectSlug, ...ctx });
-  if (file) {
-    file.parsed.frontmatter.members.forEach((m, i) => {
-      memberOrder.set(m.userId, i);
-    });
-  }
+  const enabledById = new Map(
+    listUsers(db)
+      .filter((u) => !u.disabled)
+      .map((u) => [u.id, u] as const),
+  );
 
   const userSeen = new Set<string>();
   const users: MentionableUser[] = [];
-  const rows = listUsers(db)
-    .filter((u) => !u.disabled)
-    .sort((a, b) => {
-      const am = memberOrder.has(a.id);
-      const bm = memberOrder.has(b.id);
-      if (am && bm) return memberOrder.get(a.id)! - memberOrder.get(b.id)!;
-      if (am) return -1;
-      if (bm) return 1;
-      return 0; // listUsers is already created_at ASC for the non-member tail
-    });
-  for (const u of rows) {
+  for (const member of file?.parsed.frontmatter.members ?? []) {
+    const u = enabledById.get(member.userId);
+    if (!u) continue;
     const handle = emailLocalPart(u.email);
     if (!handle || userSeen.has(handle)) continue;
     userSeen.add(handle);

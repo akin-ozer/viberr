@@ -170,6 +170,24 @@ const BASELINE_COLUMNS: readonly {
   },
 ];
 
+/**
+ * Tables the baseline gained after a root applied it. Same reasoning as the
+ * columns above and the indexes below: the squashed baseline never re-runs, so
+ * a store created before this table exists would answer a 500 the first time a
+ * reader named it. `IF NOT EXISTS` makes each free on a fresh root.
+ */
+const BASELINE_TABLES: readonly string[] = [
+  // U33-2 (pass 33): the last repository-access probe per project, so the board
+  // and the home card can say a repo is unreachable WITHOUT calling GitHub on a
+  // hot path. App-owned observation, not derived from any file — a rebuild must
+  // not clear it, which is why it is its own table and not a `projects` column.
+  `CREATE TABLE IF NOT EXISTS project_github_health (
+     project_slug TEXT PRIMARY KEY,
+     result_json TEXT NOT NULL,
+     checked_at TEXT NOT NULL
+   )`,
+];
+
 /** Indexes the baseline gained after a root applied it. `IF NOT EXISTS` makes
  *  each free on a fresh root; on an upgraded one it follows the column above. */
 const BASELINE_INDEXES: readonly string[] = [
@@ -201,6 +219,16 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
       logger.warn(
         "baseline columns could not be ensured — writers that name them will fail until the root is re-baselined",
         { table, err: error instanceof Error ? error : new Error(String(error)) },
+      );
+    }
+  }
+  for (const ddl of BASELINE_TABLES) {
+    try {
+      db.exec(ddl);
+    } catch (error) {
+      logger.warn(
+        "a baseline table could not be ensured — readers that name it degrade until the root is re-baselined",
+        { err: error instanceof Error ? error : new Error(String(error)) },
       );
     }
   }

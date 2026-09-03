@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
@@ -44,6 +45,136 @@ import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
  */
 export function taskBranchName(taskKey: string): string {
   return taskKey.toLowerCase();
+}
+
+/**
+ * Ruling 122 — how many names the allocator will try before giving up. The
+ * first is the canonical key; the rest carry a random suffix, so six is far
+ * past the point where a collision is chance rather than a bug.
+ */
+const BRANCH_NAME_ATTEMPTS = 6;
+
+/**
+ * Ruling 122 — the suffix that makes a reused task key harmless. Four hex
+ * characters off `randomBytes`, not a counter: a counter has to READ the
+ * neighbours to know it is next, and the thing being avoided is precisely a
+ * name whose history this data root cannot see.
+ */
+function branchNameSuffix(): string {
+  return randomBytes(2).toString("hex");
+}
+
+/** The n-th candidate name for a task: canonical first, then suffixed. */
+export function taskBranchCandidate(taskKey: string, attempt: number): string {
+  const canonical = taskBranchName(taskKey);
+  return attempt === 0 ? canonical : `${canonical}-${branchNameSuffix()}`;
+}
+
+/**
+ * Ruling 122 — is this branch name already spoken for on the remote?
+ *
+ * "Taken" is a REF **or any pull request ever opened on the name** (owner,
+ * 2026-09-03). The PR half is the load-bearing one: task keys restart at 1 on a
+ * new data root (ruling 34), so `vib-1` on GitHub can still carry a previous
+ * instance's merged PR while no ref exists at all — which is exactly the state
+ * that used to raise a branch collision, stop the operator and demand a human
+ * decision for a delivery that then succeeded on the first press (pass 33,
+ * F33-1, reproduced on VIB-1 and VIB-2).
+ */
+type BranchNameProbe =
+  | { kind: "free" }
+  | { kind: "taken" }
+  | { kind: "forbidden"; what: string }
+  | { kind: "auth"; message: string }
+  | { kind: "network"; message: string };
+
+async function probeBranchName(
+  client: GithubClient,
+  repo: string,
+  branch: string,
+): Promise<BranchNameProbe> {
+  const ref = await client.request(
+    "GET",
+    `/repos/${repo}/git/ref/${encodeRefPath(`heads/${branch}`)}`,
+    z.unknown(),
+  );
+  if (ref.ok) return { kind: "taken" };
+  if (ref.kind === "network") return { kind: "network", message: ref.message };
+  if (ref.kind === "http" && ref.status === 401) {
+    return { kind: "auth", message: ref.message };
+  }
+  if (ref.kind === "http" && ref.status === 403) {
+    return { kind: "forbidden", what: `Reading branch \`${branch}\` was refused.` };
+  }
+  if (!(ref.kind === "http" && ref.status === 404)) {
+    return { kind: "network", message: githubFailureMessage(ref) };
+  }
+
+  // No ref. Any pull request that ever used the name still makes it taken.
+  const owner = repo.split("/")[0] ?? repo;
+  const pulls = await client.request(
+    "GET",
+    `/repos/${repo}/pulls`,
+    z.array(z.unknown()),
+    { searchParams: { head: `${owner}:${branch}`, state: "all", per_page: 1 } },
+  );
+  if (pulls.ok) return pulls.data.length > 0 ? { kind: "taken" } : { kind: "free" };
+  if (pulls.kind === "network") {
+    return { kind: "network", message: pulls.message };
+  }
+  if (pulls.kind === "http" && pulls.status === 401) {
+    return { kind: "auth", message: pulls.message };
+  }
+  if (pulls.kind === "http" && pulls.status === 403) {
+    return {
+      kind: "forbidden",
+      what: `Listing pull requests on \`${branch}\` was refused.`,
+    };
+  }
+  return { kind: "network", message: githubFailureMessage(pulls) };
+}
+
+/** The outcome of picking a name for a task that has never had one. */
+export type BranchAllocation =
+  | { status: "ok"; branch: string; suffixed: boolean }
+  | { status: "forbidden"; what: string }
+  | { status: "auth_failed"; message: string }
+  | { status: "network_unavailable"; message: string };
+
+/**
+ * Ruling 122 — pick the task's branch name once, on first creation.
+ *
+ * The canonical `taskBranchName` wins whenever it is free. When it is not, the
+ * task gets `<key>-<4 hex>` instead of colliding, and the caller persists the
+ * choice into `task.md` `branch:` — the field every reader already prefers over
+ * the derived name (`pr-open`, `push-workspace`, this module). The remedy that
+ * used to be a human decision is now a name nobody has to think about.
+ */
+export async function allocateTaskBranchName(
+  client: GithubClient,
+  repo: string,
+  taskKey: string,
+): Promise<BranchAllocation> {
+  for (let attempt = 0; attempt < BRANCH_NAME_ATTEMPTS; attempt += 1) {
+    const candidate = taskBranchCandidate(taskKey, attempt);
+    const probe = await probeBranchName(client, repo, candidate);
+    if (probe.kind === "free") {
+      return { status: "ok", branch: candidate, suffixed: attempt > 0 };
+    }
+    if (probe.kind === "forbidden") {
+      return { status: "forbidden", what: probe.what };
+    }
+    if (probe.kind === "auth") {
+      return { status: "auth_failed", message: probe.message };
+    }
+    if (probe.kind === "network") {
+      return { status: "network_unavailable", message: probe.message };
+    }
+  }
+  return {
+    status: "network_unavailable",
+    message: `Could not find a free branch name for ${taskKey} after ${BRANCH_NAME_ATTEMPTS} tries.`,
+  };
 }
 
 // -------------------------------------------------------------- compare
@@ -213,6 +344,25 @@ export function deriveSyncState(input: {
 
 // -------------------------------------------------------- ensure branch
 
+/**
+ * The delivery spine's pre-dispatch hook (FR31), shared by the operator's
+ * dispatch and a human's: make sure the task owns a branch name before anyone
+ * is told what to check out. Non-fatal by design — a task that cannot reach
+ * GitHub still runs, and delivery re-checks the name.
+ */
+export async function ensureTaskBranchBestEffort(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: AuditActor,
+  ctx: EnsureBranchContext = {},
+): Promise<void> {
+  try {
+    await ensureTaskBranch(db, input, actor, ctx);
+  } catch {
+    // Non-fatal: coordination proceeds without a branch when GitHub is absent.
+  }
+}
+
 export type EnsureBranchResult =
   | {
       status: "synced";
@@ -270,8 +420,39 @@ export async function ensureTaskBranch(
   const gh = getProjectGithubContext(db, input.projectSlug, ghOptions);
   if (gh.status !== "ok") return gh;
 
-  const branch =
-    file.parsed.frontmatter.branch ?? taskBranchName(input.taskKey);
+  // Ruling 122: a task that has never had a branch gets one ALLOCATED here —
+  // the canonical key when it is free, `<key>-<4 hex>` when a ref or any past
+  // pull request already speaks for that name. A task that already carries a
+  // `branch:` keeps it verbatim, so nothing in flight is renamed.
+  const recorded = file.parsed.frontmatter.branch;
+  let branch = recorded ?? taskBranchName(input.taskKey);
+  if (!recorded) {
+    const allocated = await allocateTaskBranchName(
+      gh.client,
+      gh.repo,
+      input.taskKey,
+    );
+    if (allocated.status === "forbidden") {
+      const { violation } = await flagScopeViolation(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          scope: "repo",
+          detail: policyViolationText("repo", allocated.what),
+          actor,
+        },
+        { dataRoot: ctx.dataRoot },
+      );
+      return {
+        status: "scope_violation",
+        scope: "repo",
+        violationId: violation.id,
+      };
+    }
+    if (allocated.status !== "ok") return allocated;
+    branch = allocated.branch;
+  }
 
   // 1. Does the ref already exist? (idempotency first)
   const existing = await gh.client.request(

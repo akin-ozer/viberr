@@ -214,7 +214,7 @@ must name its task, or it is refused. `whoami` reports both bindings):
 | Scope | Tools | Gate |
 |---|---|---|
 | Instance reads | `whoami`, `list_users`, `list_knowledge_bases`, `list_skills`, `list_mcp_servers`, `list_global_agents`, `inspect_audit_log` (limit 50, max 200), `inspect_run_analytics` | `whoami`: signed-in; the rest: org admin |
-| Instance writes | `create_user` (relays the one-time temp password), `update_user`, `set_user_org_role`, `save_knowledge_base`, `save_skill`, `save_mcp_server` (takes no credential; reserved names refused), `test_mcp_server`, `save_global_agent` (specialists only) | org admin |
+| Instance writes | `create_user` (relays the one-time temp password), `update_user`, `set_user_org_role`, `save_knowledge_base`, `save_skill`, `save_mcp_server` (takes no credential; reserved names refused), `test_mcp_server`, `save_global_agent` (specialists only; **grants are store keys and an omitted list is left alone** — see below) | org admin |
 | Project creation | `create_project` (any shape: stages, boundaries, members, description) | any signed-in user; the asker is seeded project admin (FR5) |
 | Board reads | `get_project`, `list_tasks`, `get_task` (events 12, max 50), `get_github_state`, `list_goals`, `get_goal` | `requireVisible` |
 | Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier), `update_task` (ruling 121: the goal under `update-goal`, priority / labels / due date under `edit-task-meta` as a full replace — the task page's two writers and gates, each part reported on its own, and an axis already holding the asked-for value answers `[noop]` rather than claiming a write nobody made), `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `terminal-stage` / queued honestly, else `startAgentRun`), `update_project_settings`, `update_stages`, `set_transition_boundary` (`edit-policy`), `invite_member`, `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
@@ -228,6 +228,29 @@ list, they do not delete a project, task, user or resource). Policy edits **are*
 offered, gated on the asker's `edit-policy`, because the controller never initiates:
 it executes an explicit human directive with the same authorization a settings form
 carries (ruling 100 confirmed the missing confirm ceremony as intended).
+
+### 4.1 Grants through the toolkit (pass 33, F33-7 / F33-8)
+
+Two defects made every resource grant the controller wrote inert, and made every
+partial edit destructive. Both are fixed and both are worth knowing when reading the
+tool descriptions.
+
+- **Grants are STORE KEYS.** `save_global_agent`'s `skills` / `mcps` / `kbs` take the
+  skill **folder name**, the MCP **registry name** and the knowledge-base **directory** —
+  the same keys the runtime mounts by (`mountGrantedSkills` by folder,
+  `byName.get(name)` for MCP, the glossary's "grants reference the directory" for KBs).
+  They used to store whatever they were handed, and the model handed them the **ids** its
+  own read tools returned, so a template created through chat carried
+  `disk:developer-expertise` / `mcp_…` / `kb_…` and mounted nothing while the roster
+  counted "3 context resources". `resolveResourceGrants` now normalizes a recognised id
+  to its key and refuses one nothing in the store answers to, naming it. The three list
+  tools lead each row with `grantKey` for the same reason.
+- **An omitted list is left alone.** The three lists are merge fields now, matching the
+  sibling `update_agent_deployment` ("only the fields you pass change"); `[]` clears one
+  explicitly. They used to default to `[]` inside a full replace, so "change the summary"
+  erased every grant — and `list_global_agents` returned no grants at all, so the model
+  could not see what it was about to erase. That tool now returns `skills`, `mcps` and
+  `kbs`.
 
 ## 5. The `viberr_ops` diagnostics server (ruling 107)
 

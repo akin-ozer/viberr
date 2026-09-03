@@ -2560,10 +2560,15 @@ dialog[data-closing]::backdrop {
   transition: border-color .14s ease, transform .14s ease;
 }
 .pcap-row:hover { border-color: var(--border); transform: translateY(-1px); }
-.pcap-main { flex: 1; min-width: 0; }
+/* U33-10 (pass 33): the name kept a floor. `.pcap-counts` was `flex: none`, so a
+   row whose counts carry the extra "advisory on Codex" badge (ruling 109) grew
+   past the row, squeezed this box to ZERO width, and the profile name painted
+   straight over the counts — live on a project with a Codex-primary profile
+   ("Codex Developer"). The counts shrink and wrap now; the name never collapses. */
+.pcap-main { flex: 1 1 auto; min-width: 7rem; }
 .pcap-main .nm { display: block; font-family: var(--font-display); font-weight: 800; font-size: .86rem; }
 .pcap-main .sub { display: block; font-size: .74rem; color: var(--faint); }
-.pcap-counts { display: inline-flex; gap: .5rem; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.pcap-counts { display: inline-flex; gap: .5rem; flex: 0 1 auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
 .pcap-counts .cs { display: inline-flex; align-items: center; gap: .25rem; font-family: var(--font-mono); font-size: .68rem; color: var(--faint); }
 .pcap-counts .cs .d { width: .5rem; height: .5rem; border-radius: 50%; flex: none; }
 

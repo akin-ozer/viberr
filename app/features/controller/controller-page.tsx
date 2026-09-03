@@ -26,10 +26,11 @@ import { sseScopes } from "~/features/live-updates/event-types";
  * sees and redirects every chain.
  *
  * Shared by `/controller` (instance scope) and `/projects/:slug/controller`
- * (board scope). The active conversation rides `?c=<id>`; sending with no
- * active conversation starts one. Live: the loader revalidates on the
- * owner-routed `controller.updated` SSE reference, with a slow fallback poll
- * while a turn is working.
+ * (board scope). The active conversation rides `?c=<id>`; a bare URL opens
+ * this scope's newest thread and `?c=new` the blank composer (U33-8, below),
+ * and sending with no active conversation starts one. Live: the loader
+ * revalidates on the owner-routed `controller.updated` SSE reference, with a
+ * slow fallback poll while a turn is working.
  */
 
 interface ActionResult {
@@ -38,6 +39,19 @@ interface ActionResult {
   toast?: string;
   conversationId?: string;
 }
+
+/**
+ * U33-8: `?c=new` — the blank composer, asked for by name.
+ *
+ * Ruling 121 gave the DOCK a continuity rule: with nothing selected it opens
+ * the newest thread of the scope you are standing in. This page opened an
+ * empty composer instead, so the same person, on the same scope, got a
+ * different answer depending on which entry point they used. The page now
+ * follows the dock — which leaves "start a fresh thread" needing a token of
+ * its own. It is the same `"new"` the dock sends (`DOCK_NEW_CONVERSATION` in
+ * controller-dock-query.server.ts); the two route loaders resolve it.
+ */
+export const NEW_CONVERSATION_PARAM = "new";
 
 export function ControllerPage({
   view,
@@ -147,14 +161,17 @@ export function ControllerPage({
 
 function ConversationList({ view }: { view: ControllerSurfaceView }) {
   const [params] = useSearchParams();
-  const active = params.get("c");
+  // U33-8: what is OPEN, not what the URL asked for. With no `?c=` the loader
+  // opens this scope's newest thread (the dock's rule), and the rail has to
+  // mark the row the transcript is actually showing.
+  const active = view.conversation?.id ?? null;
   const href = (c: ConversationListItem | null) => {
     const next = new URLSearchParams(params);
-    if (c) next.set("c", c.id);
-    else next.delete("c");
+    // A missing `c` now means "the newest thread here", so New has to ask for
+    // the blank composer explicitly.
+    next.set("c", c ? c.id : NEW_CONVERSATION_PARAM);
     if (!view.showingAll) next.delete("all");
-    const qs = next.toString();
-    return qs ? `?${qs}` : "?";
+    return `?${next.toString()}`;
   };
   return (
     <section className="panel ctl-convs">

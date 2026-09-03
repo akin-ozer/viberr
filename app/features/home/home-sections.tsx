@@ -307,6 +307,7 @@ export function ProjectSections({
             p={p}
             starred={!!stars[p.slug]}
             onStar={onStar}
+            repoAccess={p.repoAccess ?? undefined}
             showDesc
           />
         ))}
@@ -317,6 +318,7 @@ export function ProjectSections({
           <ProjectRow
             key={p.slug}
             p={p}
+            repoAccess={p.repoAccess ?? undefined}
             starred={!!stars[p.slug]}
             onStar={onStar}
           />
@@ -359,6 +361,7 @@ export function ProjectSections({
                 p={p}
                 starred={!!stars[p.slug]}
                 onStar={onStar}
+                repoAccess={p.repoAccess ?? undefined}
                 showDesc
               />
             ))}
@@ -378,6 +381,7 @@ export function ProjectSections({
                 <ProjectRow
                   key={p.slug}
                   p={p}
+                  repoAccess={p.repoAccess ?? undefined}
                   starred={!!stars[p.slug]}
                   onStar={onStar}
                 />
@@ -414,6 +418,7 @@ export function ProjectSections({
               <ProjectRow
                 key={p.slug}
                 p={p}
+                repoAccess={p.repoAccess ?? undefined}
                 starred={!!stars[p.slug]}
                 onStar={onStar}
               />

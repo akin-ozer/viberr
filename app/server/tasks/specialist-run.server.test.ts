@@ -932,6 +932,113 @@ describe("assignReviewer / removeReviewer", () => {
   });
 
   /**
+   * F33-10 — the ✕ on a supporting engagement was the last ENABLED runtime
+   * control on a closed task, and one click rewrote its record. `validation` is
+   * derived from the required-reviewer set (UX19-3, below), so releasing the
+   * approving reviewer of a merged, accepted task re-derives `healthy` →
+   * `changed`: the hero, the board card and the review queue all render it as
+   * never-validated while the approving verdict still sits in `verdicts[]` and
+   * the timeline still says it was accepted. Disconnected history, not deleted.
+   *
+   * Ruling 118 froze the OWNER seat on a closed task; this seat carries a
+   * derived consequence the owner seat does not, so its freeze has no admin
+   * escape. The gate must not be over-broad either: the UX19-3 cases below run
+   * the same call on an OPEN task at `review` and must stay green.
+   */
+  describe("F33-10: a closed task's engagement seats are frozen", () => {
+    const REV = {
+      id: "rev-1",
+      headSha: "b".repeat(40),
+      treeSha: null,
+      branch: "viberr/VIB-1",
+      createdAt: "2026-09-02T09:00:00.000Z",
+      sourceProfileId: "dev",
+    };
+
+    /** VIB-1 as the live task the finding was confirmed on: accepted, its PR
+     *  merged, an honest `validation: healthy` resting on `critic`'s approval of
+     *  the delivered revision. `stage`/`archived` are what each case varies. */
+    function writeAcceptedTask(where: { stage: string; archived: boolean }): void {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: where.stage,
+          archived: where.archived,
+          ownerUserId: store.users.arda.id,
+          title: "Attach execution workspace",
+          engagements: [
+            { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+            { profileId: "critic", backend: "claude", role: "reviewer", delivers: false, verdictCapable: true },
+          ],
+          workRevision: REV,
+          verdicts: [
+            {
+              profileId: "critic",
+              revisionId: REV.id,
+              headSha: REV.headSha,
+              result: "approve",
+              reason: "",
+              at: "2026-09-02T10:00:00.000Z",
+            },
+          ],
+          validation: "healthy",
+        }),
+        goal: "Let the operator attach a repo and run the specialist.",
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }
+
+    const readFm = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+
+    const release = (profileId: string) =>
+      removeReviewer(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId },
+        // A project ADMIN — the tier ruling 118 lets reassign a closed task's
+        // owner "for the record". It buys nothing here.
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+
+    it("refuses at the terminal stage and leaves the accepted record intact", async () => {
+      // "done" is the last stage of the seeded board, resolved through
+      // `isTerminalStage` — a renamed/reordered terminal stage freezes the same.
+      writeAcceptedTask({ stage: "done", archived: false });
+      await expect(release("critic")).rejects.toThrow(
+        /VIB-1 is closed — move it back to an open stage before releasing an agent/,
+      );
+
+      const fm = readFm();
+      // The seat, the cache and the timeline are all exactly as they were: the
+      // refusal happens before the roster mutation, not after it.
+      expect(supportingEngagements(fm).map((e) => e.profileId)).toEqual(["critic"]);
+      expect(fm.validation).toBe("healthy");
+      expect(
+        readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+          .parsed.timeline,
+      ).toEqual([]);
+      expect(listAuditEvents(store.db, { action: "task.reviewer.removed" })).toEqual([]);
+    });
+
+    it("refuses on the no-op path too, so a closed task never answers a click it should not have offered", async () => {
+      // An unengaged profile used to return `removed: false` — a quiet success
+      // for an affordance that must not exist on a closed task at all. Fails
+      // CLOSED: the stage decides, not what happens to be in the roster.
+      writeAcceptedTask({ stage: "done", archived: false });
+      await expect(release("ghost")).rejects.toThrow(/VIB-1 is closed/);
+    });
+
+    it("refuses on an archived task (D32-16), whatever stage it rests at", async () => {
+      writeAcceptedTask({ stage: "review", archived: true });
+      await expect(release("critic")).rejects.toThrow(
+        /VIB-1 is archived — restore it before releasing an agent/,
+      );
+      expect(readFm().validation).toBe("healthy");
+    });
+  });
+
+  /**
    * UX19-3 (mechanism 2) — `validation` is a DERIVED cache with exactly ONE
    * writer, `deriveValidation` (F10-15). The required-reviewer set is one of its
    * inputs, so ANY roster change invalidates it. `assignReviewer` and

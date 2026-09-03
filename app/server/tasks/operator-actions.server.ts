@@ -2190,17 +2190,12 @@ async function ensureTaskBranchBestEffort(
   projectSlug: string,
   taskKey: string,
 ): Promise<void> {
-  try {
-    const { ensureTaskBranch } = await import("~/server/github/branch-sync.server");
-    await ensureTaskBranch(
-      db,
-      { projectSlug, taskKey },
-      OPERATOR_AUDIT_ACTOR,
-      { dataRoot: ctx.dataRoot },
-    );
-  } catch {
-    // Non-fatal: coordination proceeds without a branch when GitHub is absent.
-  }
+  const { ensureTaskBranchBestEffort: shared } = await import(
+    "~/server/github/branch-sync.server"
+  );
+  await shared(db, { projectSlug, taskKey }, OPERATOR_AUDIT_ACTOR, {
+    dataRoot: ctx.dataRoot,
+  });
 }
 
 // ------------------------------------------------- generic agent dispatch

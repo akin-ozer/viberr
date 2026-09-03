@@ -180,7 +180,14 @@ export interface ResCatalogGroup {
   group: string;
   key: "skills" | "mcps" | "kb";
   mono: boolean;
-  items: { id: string; def: boolean }[];
+  /** `id` is the STORE KEY the grant is written as — a skill folder, an MCP
+   *  registry name, a knowledge-base directory. `label` is what a human reads
+   *  when the store keeps a separate display name for it; absent means the key
+   *  is the name. Ruling 106 settled this for the controller tab and the global
+   *  template editor ("KBs displayed by name and stored by dir"); pass 33's
+   *  U33-7 found the PROJECT editor was never brought along, so one concept had
+   *  two vocabularies depending on which editor you opened. */
+  items: { id: string; def: boolean; label?: string }[];
 }
 
 export interface ResourceSelection {

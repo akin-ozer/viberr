@@ -12,6 +12,7 @@ import type { loader as rootLoader } from "../root";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getBoard } from "~/server/projections/board-query.server";
+import { readRepoHealth } from "~/server/github/repo-health.server";
 import { decisionsRequiring } from "~/server/projections/decisions.server";
 import {
   countUnreadNotifications,
@@ -136,6 +137,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     board,
     myRole,
     orgAdminOverride,
+    // U33-2: the LAST recorded repository probe, never a fresh one — the board
+    // is the surface people live on and it must not call GitHub to render. The
+    // row is written where the answer was already known (project creation and
+    // the GitHub page's cached probe); null means nothing has ever looked.
+    repoAccess: readRepoHealth(db, params.slug)?.result ?? null,
     taskCount: liveTasks.length,
     reviewCount: (() => {
       // F25-2 (pass 25): an ARCHIVED project has no review boundary — the server

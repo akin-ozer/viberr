@@ -942,6 +942,7 @@ export function TaskDetailPage({
       {/* D6: interrupt a live run — discards uncommitted in-flight work. */}
       {confirmInterrupt && (
         <ConfirmDialog
+          screenLabel="Interrupt run dialog"
           title="Interrupt this run?"
           body="The agent stops where it is. Anything it has not already committed or delivered is lost. You can start a new run afterward."
           confirmLabel="Interrupt run"
@@ -957,6 +958,7 @@ export function TaskDetailPage({
       {/* D6: dismiss an operator recommendation — a governed, audited decision. */}
       {confirmDismiss && (
         <ConfirmDialog
+          screenLabel="Dismiss recommendation dialog"
           title="Dismiss this recommendation?"
           body={
             <>

@@ -41,8 +41,11 @@ import { isClaudeOnlyEnforcedLabel } from "~/shared/capabilities";
  * Agent capability (per-profile direct/recommend/human counts + the
  * always-human invariant list), Workflow rules (stage flow + per-transition
  * boundaries, review→done locked human), and the shared
- * CapabilityMatrixModal. Non-admins see everything read-only (controls
- * disabled — spec §8.2 recommendation); the server enforces regardless.
+ * CapabilityMatrixModal. A role without the grant a control's action needs
+ * reads the page rather than driving it: U33-4 (owner, 2026-09-03) turned the
+ * member-role picker and the guardrail controls into plain values for that
+ * reader, ruling 65's withdrawn-not-disabled precedent. The server enforces
+ * regardless.
  */
 
 type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
@@ -120,8 +123,13 @@ export function HumanAccess({
       {/* P14-LV-08: the four role radios rendered live for a contributor and
           swallowed every click — they were `disabled`, but nothing in the sheet
           expressed that and `title` cannot open on a disabled control, so the
-          only feedback was silence. The stylesheet now dims them; this states
-          the reason where the reader can actually see it. */}
+          only feedback was silence.
+          U33-4 (owner, 2026-09-03): the dimmed radios are gone entirely. A
+          reader without `manage-members` gets the member's role as a value
+          instead (below) — ruling 65's precedent, that a withdrawn affordance
+          is honest where a disabled one invites a support question. This note
+          stays, and now explains the control's ABSENCE while naming the grant
+          the reader would have to ask for. */}
       {!canManage && (
         <div className="pol-note">
           <Icon name="lock" />
@@ -165,31 +173,40 @@ export function HumanAccess({
                   : m.email}
               </div>
             </span>
-            {/* UXA-7: a radiogroup promises arrow-key traversal; this one
-                declared the role and never wired the keys. */}
-            <div
-              className="mini-seg"
-              role="radiogroup"
-              aria-label={"Role for " + m.name}
-              onKeyDown={rovingRadioKeyDown}
-            >
-              {ROLE_IDS.map((r) => (
-                <button
-                  type="button"
-                  key={r}
-                  role="radio"
-                  aria-checked={m.role === r}
-                  tabIndex={m.role === r ? 0 : -1}
-                  className={m.role === r ? "on" : ""}
-                  // A deleted account cannot hold a role: the control is dead,
-                  // so it no longer pretends to be live (UI-29).
-                  disabled={!canManage || busy || m.missing}
-                  onClick={() => setRole(m, r)}
-                >
-                  {ROLE_LABEL[r]}
-                </button>
-              ))}
-            </div>
+            {canManage ? (
+              /* UXA-7: a radiogroup promises arrow-key traversal; this one
+                 declared the role and never wired the keys. */
+              <div
+                className="mini-seg"
+                role="radiogroup"
+                aria-label={"Role for " + m.name}
+                onKeyDown={rovingRadioKeyDown}
+              >
+                {ROLE_IDS.map((r) => (
+                  <button
+                    type="button"
+                    key={r}
+                    role="radio"
+                    aria-checked={m.role === r}
+                    tabIndex={m.role === r ? 0 : -1}
+                    className={m.role === r ? "on" : ""}
+                    // A deleted account cannot hold a role: the control is dead,
+                    // so it no longer pretends to be live (UI-29). `canManage`
+                    // is no longer part of this test — the branch above owns it.
+                    disabled={busy || m.missing}
+                    onClick={() => setRole(m, r)}
+                  >
+                    {ROLE_LABEL[r]}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              /* U33-4: the reading seat. The same fact the picker encoded, in
+                 words — rendered for a removed account too, so the reader and a
+                 manager see the same stored role rather than a blank where the
+                 ghost's row is. */
+              <span className="fine sm">{ROLE_LABEL[m.role]}</span>
+            )}
           </div>
         ))}
       </div>
@@ -662,6 +679,8 @@ type GuardrailSubmit = {
  * (compression-threshold), and inert rows for what this card does not own —
  * the branch-cleanup row (Settings → GitHub) and any retired/unknown id,
  * which is removable so a stale hand edit does not linger as a phantom rule.
+ * U33-4: every one of those controls is withdrawn (not disabled) without
+ * `edit-policy` — the row then reads as the state it reports.
  */
 export function Guardrails({
   guardrails,
@@ -728,40 +747,58 @@ export function Guardrails({
                   {g.desc || (g.kind === "unknown" ? "A guardrail id the runtime does not know." : "")}
                 </span>
               </div>
-              {g.kind === "default" && (
-                <label className="guard-toggle">
-                  <input
-                    type="checkbox"
-                    checked={g.on}
-                    disabled={!canManage || busy}
-                    aria-label={`${g.label} guardrail`}
-                    onChange={(e) => onSet(g.id, e.target.checked ? "on" : "off")}
-                  />
-                  {g.on ? "on" : "off"}
-                </label>
-              )}
-              {g.kind === "default" && g.unit !== null && (
-                <span className="guard-ctl">
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={draft}
-                    disabled={!canManage || busy}
-                    aria-label={`${g.label} value (${g.unit})`}
-                    onChange={(e) => setDrafts((d) => ({ ...d, [g.id]: e.target.value }))}
-                  />
-                  {g.unit}
-                  <button
-                    type="button"
-                    className="btn sm"
-                    disabled={!canManage || busy || !valueChanged}
-                    onClick={() => onSet(g.id, "value", draftValue)}
-                  >
-                    Apply
-                  </button>
-                </span>
-              )}
+              {/* U33-4 (owner, 2026-09-03): without `edit-policy` this row is a
+                  READING of the guardrail, never a dead control — ruling 65's
+                  withdrawn-not-disabled precedent, the same shape the GitHub-
+                  owned row below has always had. Nothing is hidden: the state
+                  (and the threshold with its unit) still renders, as text. */}
+              {g.kind === "default" &&
+                (canManage ? (
+                  <label className="guard-toggle">
+                    <input
+                      type="checkbox"
+                      checked={g.on}
+                      disabled={busy}
+                      aria-label={`${g.label} guardrail`}
+                      onChange={(e) => onSet(g.id, e.target.checked ? "on" : "off")}
+                    />
+                    {g.on ? "on" : "off"}
+                  </label>
+                ) : (
+                  <span className="guard-ctl">{g.on ? "on" : "off"}</span>
+                ))}
+              {g.kind === "default" &&
+                g.unit !== null &&
+                (canManage ? (
+                  <span className="guard-ctl">
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={draft}
+                      disabled={busy}
+                      aria-label={`${g.label} value (${g.unit})`}
+                      onChange={(e) => setDrafts((d) => ({ ...d, [g.id]: e.target.value }))}
+                    />
+                    {g.unit}
+                    <button
+                      type="button"
+                      className="btn sm"
+                      disabled={busy || !valueChanged}
+                      onClick={() => onSet(g.id, "value", draftValue)}
+                    >
+                      Apply
+                    </button>
+                  </span>
+                ) : (
+                  <span className="guard-ctl">
+                    {/* A hand-edited project.md can carry the unit without the
+                        number; the editable field shows that as an empty box,
+                        so the reading says it in words — and drops the unit,
+                        which measures nothing on its own. */}
+                    {g.value === null ? "not set" : `${g.value} ${g.unit}`}
+                  </span>
+                ))}
               {g.kind === "github" && (
                 <span className="guard-ctl">
                   {g.on ? "on" : "off"} · managed on Settings → GitHub
@@ -770,15 +807,19 @@ export function Guardrails({
               {g.kind === "unknown" && (
                 <span className="guard-ctl">
                   {g.on ? "on" : "off"}
-                  <button
-                    type="button"
-                    className="btn ghost sm danger"
-                    disabled={!canManage || busy}
-                    onClick={() => onSet(g.id, "remove")}
-                  >
-                    <Icon name="x" />
-                    Remove
-                  </button>
+                  {/* U33-4: the stale row stays visible to everyone — only the
+                      destructive control is reserved for who can act. */}
+                  {canManage && (
+                    <button
+                      type="button"
+                      className="btn ghost sm danger"
+                      disabled={busy}
+                      onClick={() => onSet(g.id, "remove")}
+                    >
+                      <Icon name="x" />
+                      Remove
+                    </button>
+                  )}
                 </span>
               )}
             </div>

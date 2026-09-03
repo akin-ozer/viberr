@@ -163,8 +163,13 @@ describe("HumanAccess", () => {
     expect(onSetRole).not.toHaveBeenCalled();
   });
 
-  it("disables the role picker for non-admins", () => {
-    const { container } = render(
+  /* U33-4 (owner, 2026-09-03): this used to assert the sixteen role buttons
+     were `disabled` — and it would have kept passing forever once they were
+     gone, because `[].every()` is true. It now pins the shape the owner ruled
+     (ruling 65's withdrawn-not-disabled precedent): no picker at all for a
+     reader, the member's role as a value, and the grant still named. */
+  it("withdraws the role picker for a reader and renders the role as a value (U33-4)", () => {
+    const { container, getAllByText, queryByText } = render(
       <HumanAccess
         projectName="Viberr Core"
         members={MEMBERS}
@@ -173,8 +178,64 @@ describe("HumanAccess", () => {
         onSetRole={() => {}}
       />,
     );
+    // No control of any kind: not a disabled one, not an empty radiogroup.
+    expect(container.querySelectorAll(".mini-seg")).toHaveLength(0);
+    expect(container.querySelectorAll('[role="radiogroup"]')).toHaveLength(0);
+    expect(container.querySelectorAll(".member-row button")).toHaveLength(0);
+    // …and the page stays the explanation: every row still states its role.
+    const values = Array.from(container.querySelectorAll(".member-row .fine")).map(
+      (v) => v.textContent,
+    );
+    expect(values).toEqual(["Admin", "Admin", "Maintainer", "Contributor"]);
+    // The role words are the VALUES, not the table headers (those read "Admin · 2").
+    expect(getAllByText("Admin")).toHaveLength(2);
+    expect(queryByText("Viewer")).toBeNull(); // no member holds it → no dead chip
+    // The note that used to explain a dimmed control now explains its absence,
+    // and still names the grant the reader would have to ask for.
+    const note = Array.from(container.querySelectorAll(".pol-note")).find((n) =>
+      n.textContent!.includes("Read-only:"),
+    );
+    expect(note!.textContent).toContain("Manage members & roles");
+  });
+
+  // The reader's row loses the control, never the fact: a ghost membership
+  // still reports the role it stores, exactly as a manager's view does.
+  it("states the stored role for a removed account too (U33-4)", () => {
+    const { container } = render(
+      <HumanAccess
+        projectName="Viberr Core"
+        members={[{ ...MEMBERS[2]!, missing: true }]}
+        canManage={false}
+        busy={false}
+        onSetRole={() => {}}
+      />,
+    );
+    expect(container.querySelector(".member-row .fine")!.textContent).toBe(
+      "Maintainer",
+    );
+  });
+
+  it("keeps the full editable picker for a role that can manage members", () => {
+    const { container } = render(
+      <HumanAccess
+        projectName="Viberr Core"
+        members={MEMBERS}
+        canManage
+        busy={false}
+        onSetRole={() => {}}
+      />,
+    );
+    // 4 members × 4 roles, live — and the a11y shape UXA-7 fixed is intact.
+    expect(container.querySelectorAll(".mini-seg")).toHaveLength(4);
     const buttons = container.querySelectorAll<HTMLButtonElement>(".mini-seg button");
-    expect(Array.from(buttons).every((b) => b.disabled)).toBe(true);
+    expect(buttons).toHaveLength(16);
+    expect(Array.from(buttons).some((b) => b.disabled)).toBe(false);
+    expect(
+      container.querySelector('.mini-seg[aria-label="Role for Elif Demir"]'),
+    ).not.toBeNull();
+    expect(container.querySelectorAll('.mini-seg [aria-checked="true"]')).toHaveLength(4);
+    // No denial note for someone who can act.
+    expect(container.textContent).not.toContain("Read-only:");
   });
 });
 
@@ -615,6 +676,15 @@ describe("Guardrails card (E32-6, pass 32)", () => {
     { id: "operator-brevity", label: "operator-brevity", desc: "", on: true, value: null, unit: null, kind: "unknown", present: true },
   ];
 
+  /** Each row's read-only value spans, in order — the reading a role without
+   *  `edit-policy` gets instead of the controls (U33-4). */
+  const rowValues = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll(".guard-row")).map((r) =>
+      Array.from(r.querySelectorAll(".guard-ctl"))
+        .map((c) => c.textContent!.replace(/\s+/g, " ").trim())
+        .join(" | "),
+    );
+
   it("renders one row per guardrail with the right control per kind", () => {
     const onSet = vi.fn();
     const { container, getByText, getByLabelText } = render(
@@ -651,13 +721,58 @@ describe("Guardrails card (E32-6, pass 32)", () => {
     expect(container.querySelectorAll(".guard-row.inert")).toHaveLength(2);
   });
 
-  it("a non-manager gets every control disabled AND a visible reason", () => {
-    const { container, getByText } = render(
+  /* U33-4 (owner, 2026-09-03): the predecessor of this test walked
+     `querySelectorAll("input, button")` asserting each was disabled — a loop
+     that passes vacuously the moment the controls are withdrawn, so it could
+     never have told the two shapes apart. It now asserts the withdrawal AND
+     that no state went with it: every row still reads its own value. */
+  it("withdraws every guardrail control for a reader and reads the state as values (U33-4)", () => {
+    const { container, getByText, queryByText } = render(
       <Guardrails guardrails={rows} canManage={false} busy={false} onSet={() => {}} />,
     );
     expect(getByText(/Read-only: changing a guardrail needs the/)).toBeTruthy();
-    for (const ctl of container.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button")) {
-      expect(ctl.disabled).toBe(true);
-    }
+    // Not one control survives — no dimmed toggle, number field, Apply or Remove.
+    expect(container.querySelectorAll("input")).toHaveLength(0);
+    expect(container.querySelectorAll("button")).toHaveLength(0);
+    expect(queryByText("Apply")).toBeNull();
+    expect(queryByText("Remove")).toBeNull();
+    // …and every row still says what it is set to, threshold and unit included.
+    expect(rowValues(container)).toEqual([
+      "on",
+      "on | 40 events",
+      "off",
+      "on · managed on Settings → GitHub",
+      "on",
+    ]);
+    // The stale-row diagnosis stays legible to the reader; only the destructive
+    // control is reserved for who can act.
+    expect(getByText("nothing reads this")).toBeTruthy();
+    expect(getByText("not in project.md")).toBeTruthy();
+  });
+
+  // A hand-edited project.md can carry the unit with no number. The editable
+  // field renders that as an empty box; the reading has to say it in words.
+  it("reads a unit-carrying guardrail with no stored number as 'not set' (U33-4)", () => {
+    const { container } = render(
+      <Guardrails
+        guardrails={[{ ...rows[1]!, value: null }]}
+        canManage={false}
+        busy={false}
+        onSet={() => {}}
+      />,
+    );
+    // The unit is dropped with the number: "40 events" measures something,
+    // "not set events" measures nothing.
+    expect(rowValues(container)).toEqual(["on | not set"]);
+  });
+
+  it("keeps every control for a role that can edit policy", () => {
+    const { container, getByText } = render(
+      <Guardrails guardrails={rows} canManage busy={false} onSet={() => {}} />,
+    );
+    expect(container.querySelectorAll("input")).toHaveLength(4); // 3 toggles + 1 number
+    expect(getByText("Apply")).toBeTruthy();
+    expect(getByText("Remove")).toBeTruthy();
+    expect(container.textContent).not.toContain("Read-only:");
   });
 });

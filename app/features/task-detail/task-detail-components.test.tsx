@@ -1291,6 +1291,59 @@ describe("ExecutionProfile — a closed task offers no run controls (P14-WL-07)"
   });
 });
 
+/**
+ * F33-10 (UI half) — the release ✕ was the last runtime affordance a closed
+ * task still offered. The panel head wears the "task closed" pill, the
+ * run-an-agent cell has replaced itself with "Task closed. Reopen it to run an
+ * agent.", the operator Run is disabled with its reason rendered — and one row
+ * down the ledger sat an ENABLED ✕ titled "Release this agent from the task",
+ * which the server refuses at the terminal stage. Ruling 37 settles the shape
+ * of the fix: a WITHDRAWN affordance is honest, a disabled one just invites the
+ * support question. The ledger ROW keeps rendering either way — it is the
+ * record of who was engaged, and a closed task has the most reason to keep it.
+ */
+describe("ExecutionProfile — a closed task withholds the release ✕ (F33-10)", () => {
+  const withSupporting = (patch: Partial<TaskSummary> = {}) =>
+    execTask({
+      reviewers: [
+        {
+          kind: "agent",
+          profileId: "reviewer",
+          backend: "claude",
+          name: "Claude",
+          role: "Code review",
+        },
+      ],
+      ...patch,
+    });
+
+  it("an OPEN task still offers it (withheld on closed, not deleted outright)", () => {
+    const { container } = renderExec(withSupporting());
+    expect(container.querySelectorAll(".rev-agent")).toHaveLength(1);
+    expect(container.querySelector(".rev-agent .rev-x")).not.toBeNull();
+  });
+
+  it("a MERGED task keeps the ledger row and drops the ✕", () => {
+    const { container } = renderExec(withSupporting({ displayReadiness: "merged" }));
+    expect(container.querySelectorAll(".rev-agent")).toHaveLength(1);
+    expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
+  });
+
+  it("an ACCEPTED task drops it too", () => {
+    const { container } = renderExec(
+      withSupporting({ displayReadiness: "accepted" }),
+    );
+    expect(container.querySelectorAll(".rev-agent")).toHaveLength(1);
+    expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
+  });
+
+  it("an ARCHIVED task drops it too (F15-11)", () => {
+    const { container } = renderExec(withSupporting({ archived: true }));
+    expect(container.querySelectorAll(".rev-agent")).toHaveLength(1);
+    expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
+  });
+});
+
 describe("ExecutionProfile — owner cell (owner request 2026-08-21)", () => {
   it("an OWNED task shows the owner chip alone — no Manage popover", () => {
     // Release stays one panel away on the Current-state Owner row (own-x); a
@@ -1588,6 +1641,32 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     expect(btn).toBeDefined();
     fireEvent.click(btn);
     expect(onForceAccept).toHaveBeenCalled();
+  });
+
+  it("ruling 124: NO force-accept on a task with nothing to accept and no wedge", () => {
+    // The standing offer this removes: a task created seconds ago — no branch,
+    // no PR, no revision, no blocked packet — showed an admin "skips the
+    // remaining stages and the review gate" directly above "No branch yet"
+    // (pass 33, Q33-2). Ruling 59's escape hatch is kept by the case above.
+    const { container, getByText } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({ branch: null, pr: null, blockReason: null, packet: null })}
+          acceptance={traceAcceptance({
+            atBoundary: false,
+            blockedReason: "VIB-142 is at Triage, not Review.",
+          })}
+          onForceAccept={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(getByText(/No branch yet/)).toBeTruthy();
+    expect(
+      Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+        b.textContent?.includes("Force accept"),
+      ),
+    ).toBeUndefined();
   });
 
   it("shows NO force-accept control for a non-admin (onForceAccept undefined), even when blocked", () => {
