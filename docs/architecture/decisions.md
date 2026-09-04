@@ -2568,6 +2568,34 @@ by rewriting those paragraphs:*
     so, so an operator never phrases them as an instruction to the human. Extends R20-1 (a made
     decision is un-re-confirmable) and F17-L3 (the editor prefills with the chosen deliverable).
 
+139. **The controller's catalogued writes read first and refuse by name (owner, 2026-09-04, pass 34
+    F34-2 / G34-1).** Every `viberr_controller` write that takes a catalogued identifier (a capability
+    id and mode, a stage id, a resource grant key, a model id or effort tier, a project role) validates
+    it against the catalogue the runtime resolves by and refuses an unknown or impossible value BY NAME,
+    listing what is valid, before anything is written. `[done]` is never answered for a write the store
+    did not make: pass 34 watched `update_agent_deployment` answer `[done]` twelve times for capability
+    ids that do not exist while every grant stayed off, the same class F33-8 closed for resource grants
+    one tool over. The refusal covers the whole vocabulary of that call: an id outside the deployment's
+    KIND, a mode the kind does not take, a non-human mode on an always-human id, a mode other than
+    direct or off on the explicit-only verdict grant, a matrix-only capability that has no toggle at
+    all (refused as such, never as "no such id"), and a stage the project does not declare. For every
+    such catalogue there is a read the same person may call first, and the write's description names
+    it: `list_capabilities` (any signed-in person) for the capability ids and, per kind, the mode an
+    ABSENT grant actually resolves to (`absentGrantMode`, the roster's own rule), not the catalogue's
+    create-seed default; `get_project` for a deployment's resolved grants, model, effort and operator
+    autonomy, derived by the Agents page's own roster so the controller reads what the roster renders;
+    `list_skills`, `list_mcp_servers`, `list_knowledge_bases` for grant keys (F33-8). Effort is
+    settable wherever model is: `deploy_agent` takes `model` and `effort`, `update_agent_deployment`
+    takes `effort`, and both check the tier against the backend's list at save time rather than
+    clamping at run time, because a silent clamp is the same lie as a silent drop; the profile editor
+    shares the check for a CHANGED value only, so a deployment that legitimately stores a preserved
+    tier stays editable, and the editor stops offering a stale tier it cannot save. The refusal lives
+    in the controller tools and the shared validators, not in `grantsFor`: the project editor
+    legitimately preserves advisory and retired ids that a strict catalogue check would refuse.
+    (`controller-toolkit.server.ts`, `capability-catalog.ts` `capabilityPatchRefusal`,
+    `agents-query.server.ts` `absentGrantMode`, `agent-profile-actions.server.ts`,
+    `model-catalog.server.ts` `assertEffortForBackend`.)
+
 141. **A scheduled operator re-run is refused while a decision packet is open, and no occurrence is
     recorded as fired when no run happened (2026-09-04, pass 34 F34-8).** Ruling 76 refuses a
     human-pressed "Run operator" while a packet is open because coordination is paused and the turn

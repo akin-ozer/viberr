@@ -1128,3 +1128,119 @@ describe("update_agent_deployment refuses catalogued values by name (ruling 139)
     expect(reply).toContain("[done]");
   });
 });
+
+/**
+ * Ruling 139 (pass 34, F34-2, the read half): `get_project` reports each
+ * deployment's RESOLVED grants at the mode the roster renders, and
+ * `list_capabilities` publishes the catalogue with the absent-grant rule.
+ */
+describe("get_project and list_capabilities read the catalogue (ruling 139)", () => {
+  interface ProjectRead {
+    agents: {
+      profileId: string;
+      kind: string;
+      model: string;
+      effort: string;
+      autonomy?: string;
+      capabilities: { capabilityId: string; mode: string; label: string }[];
+    }[];
+  }
+  interface CatalogueRead {
+    kinds: Record<
+      "operator" | "agent",
+      { modes: string[]; capabilities: { id: string; whenUngranted: string; alwaysHuman: boolean }[] }
+    >;
+    alwaysHuman: string[];
+  }
+  const modeOf = (row: ProjectRead["agents"][number], id: string) =>
+    row.capabilities.find((c) => c.capabilityId === id)?.mode;
+
+  it("get_project reports resolved grants, model, effort and autonomy at the mode the roster renders", async () => {
+    // Canary: revert the agents map to the five-field literal.
+    // Canary 2 (policy): read `effectiveProfileView(a, dataRoot, VIEW_WITHOUT_POLICY)`
+    // instead of the roster — the operator's ABSENT deliver-review-pr reads `direct`.
+    const { updateProjectFile, readProjectFile } = await import("~/server/files/project-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    // A fixture that can move: strip the operator's stored deliver-review-pr
+    // grant and human-gate the pre-work boundary, so the absent mode resolves
+    // to `recommend` (ruling 28).
+    await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+      for (const a of p.frontmatter.agents) {
+        a.capabilities = a.capabilities.filter((g) => g.capabilityId !== "deliver-review-pr");
+      }
+    });
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    // `humanGatesPreWorkAdvance` holds only when EVERY pre-terminal boundary
+    // is human-gated, so gate each one the project declares.
+    const fm = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter;
+    const terminalId = fm.stages[fm.stages.length - 1]!.id;
+    for (const edge of fm.workflow.filter((b) => b.to !== terminalId)) {
+      const gated = await call(ids.projectAdmin, "set_transition_boundary", { from: edge.from, to: edge.to, boundary: "approval" });
+      expect(gated).toContain("[done]");
+    }
+
+    // SAFETY: the tool answers the JSON it built; the fields asserted below are its own.
+    const read = JSON.parse(await call(ids.viewer, "get_project")) as ProjectRead;
+    const operator = read.agents.find((a) => a.kind === "operator")!;
+    expect(["supervised", "full"]).toContain(operator.autonomy);
+    expect(modeOf(operator, "deliver-review-pr")).toBe("recommend");
+    const developer = read.agents.find((a) => a.profileId === "developer")!;
+    expect(developer.model.length).toBeGreaterThan(0);
+    expect(developer).toHaveProperty("effort");
+    expect(developer.autonomy).toBeUndefined();
+    // Anchored to project.md, not to the function the tool calls: the
+    // developer's create-task-branch mode equals what the FILE stores, `off`
+    // when the grant is absent (the grant-required family).
+    const stored =
+      readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+        .parsed.frontmatter.agents.find((a) => a.profileId === "developer")!
+        .capabilities.find((g) => g.capabilityId === "create-task-branch")?.mode ?? "off";
+    expect(modeOf(developer, "create-task-branch")).toBe(stored);
+    expect(developer.capabilities.every((c) => c.label.length > 0)).toBe(true);
+  });
+
+  it("list_capabilities lists every governed id per kind with whenUngranted, for any signed-in person", async () => {
+    // Canary: return the union of kinds (`c.kinds.includes(kind)` → true).
+    // SAFETY: the tool answers the JSON it built; the fields asserted below are its own.
+    const read = JSON.parse(await call(ids.nonMember, "list_capabilities", {}, null)) as CatalogueRead;
+    const operatorIds = read.kinds.operator.capabilities.map((c) => c.id);
+    const agentIds = read.kinds.agent.capabilities.map((c) => c.id);
+    expect(operatorIds).toContain("dispatch-agents");
+    expect(operatorIds).not.toContain("use-browser");
+    expect(agentIds).toContain("use-browser");
+    expect(agentIds).not.toContain("dispatch-agents");
+    expect(agentIds).not.toContain("read-repo-diff"); // matrix-only: no toggle
+    expect(read.kinds.operator.modes).toEqual(["direct", "recommend", "human", "off"]);
+    expect(read.kinds.agent.modes).toEqual(["direct", "human", "off"]);
+    const when = (kind: "operator" | "agent", id: string) =>
+      read.kinds[kind].capabilities.find((c) => c.id === id)?.whenUngranted;
+    // The ABSENT-grant mode, not the create-seed default.
+    expect(when("agent", "create-task-branch")).toBe("off");
+    expect(when("agent", "comment-on-task")).toBe("direct");
+    expect(when("operator", "dispatch-agents")).toBe("direct");
+    expect(when("operator", "generate-packets")).toBe("off");
+    expect(when("operator", "deliver-review-pr")).toBe("project policy (see get_project)");
+    expect(when("agent", "merge-pull-request")).toBe("human");
+    expect(read.alwaysHuman).toEqual(["merge-pull-request", "transition-to-done", "change-project-policy"]);
+  });
+
+  it("a write then a read in one session reports the new grant", async () => {
+    // Canary: drop the reproject in updateAgentProfile — the roster reads the
+    // projection and would report the OLD mode.
+    const set = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      capabilities: [{ capabilityId: "comment-on-task", mode: "off" }],
+    });
+    expect(set).toContain("[done]");
+    // SAFETY: the tool answers the JSON it built; the fields asserted below are its own.
+    let read = JSON.parse(await call(ids.projectAdmin, "get_project")) as ProjectRead;
+    expect(modeOf(read.agents.find((a) => a.profileId === "developer")!, "comment-on-task")).toBe("off");
+    await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      capabilities: [{ capabilityId: "comment-on-task", mode: "direct" }],
+    });
+    // SAFETY: as above.
+    read = JSON.parse(await call(ids.projectAdmin, "get_project")) as ProjectRead;
+    expect(modeOf(read.agents.find((a) => a.profileId === "developer")!, "comment-on-task")).toBe("direct");
+  });
+});

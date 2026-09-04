@@ -229,7 +229,7 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
 - Every handler maps a 401/403 to `[denied] <sentence>` and anything else to
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 
-The 38 tools (ruling 121: `projectSlug` defaults to the bound project and, on a
+The 39 tools (ruling 121: `projectSlug` defaults to the bound project and, on a
 task-anchored conversation, every task tool's `taskKey` defaults to the anchored task —
 **only within the anchor's own project**: a call that names a different `projectSlug`
 must name its task, or it is refused. `whoami` reports both bindings):
@@ -289,6 +289,21 @@ an always-human id, `report-validation-verdict` at any mode but `direct` or `off
 in the same call, a stage id the project does not declare (listed with the project's
 stage ids). The check lives in the tool, not in `grantsFor`: the project editor
 legitimately preserves advisory and retired ids a strict catalogue check would refuse.
+
+For every such catalogue there is a read the same person may call first, and the write's
+description names it. `get_project` returns each deployment's RESOLVED grants (every
+governed id at the mode the runtime applies, with its label), model, effort and, for the
+operator, autonomy, derived by the Agents page's own `assembleAgentRoster` from the
+projection (every agent writer reprojects before it returns), so the controller reads what
+the roster renders: an absent `deliver-review-pr` at the project's delivery-gate mode, the
+grant-required family at `off`. `list_capabilities` (instance scope, any signed-in person,
+like `whoami`) serves the ids per kind with their labels, the modes each kind takes, the
+always-human three, and `whenUngranted`: the mode a deployment resolves to when project.md
+carries NO grant for the id, which is `absentGrantMode` in `agents-query.server.ts`, the one
+home the roster also materialises absent grants with, never the catalogue's create-seed
+default (`create-task-branch` seeds `direct` and resolves `off` when absent). The two
+policy-dependent operator grants (`deliver-review-pr`, `update-task-branch`) are named as
+such and read from `get_project`.
 
 ## 5. The `viberr_ops` diagnostics server (ruling 107)
 

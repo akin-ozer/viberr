@@ -532,7 +532,10 @@ workflow strictness; the grant-required family absent ⇒ withheld.
 The controller's `update_agent_deployment` validates every capability patch against
 this catalogue per KIND and refuses an unknown or impossible id or mode by name before
 writing (ruling 139, `capabilityPatchRefusal`); the advisory row above has no toggle and
-is refused as such.
+is refused as such. The absent-grant polarity has ONE home, `absentGrantMode` in
+`agents-query.server.ts`: the roster materialises absent grants with it and the
+controller's `list_capabilities` publishes it as `whenUngranted`, so the Default column
+above is the create-seed value and never the runtime's answer for a missing grant.
 
 ## 6. Context mounting
 

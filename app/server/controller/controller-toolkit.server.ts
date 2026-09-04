@@ -1,5 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
-import { capabilityPatchRefusal } from "~/features/agents/capability-catalog";
+import {
+  ALWAYS_HUMAN_CAPABILITY_IDS,
+  UNIFIED_CAP_CATALOG,
+  capabilityById,
+  type CapabilityKind,
+} from "~/shared/capabilities";
+import { capabilityPatchRefusal,
+  OPERATOR_CAP_MODES,
+  SPECIALIST_CAP_MODES,
+} from "~/features/agents/capability-catalog";
 import { z } from "zod";
 import {
   createSdkMcpServer,
@@ -56,6 +65,9 @@ import {
 import {
   effectiveProfileView,
   VIEW_WITHOUT_POLICY,
+  assembleAgentRoster,
+  absentGrantMode,
+  POLICY_DEPENDENT_CAPABILITY_IDS,
 } from "~/features/agents/agents-query.server";
 import {
   addStage,
@@ -248,6 +260,45 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       }),
     ),
     "whoami",
+  );
+
+  add(
+    tool(
+      "list_capabilities",
+      "The capability catalogue the deployments are written against (ruling 139): for each kind (the operator, a specialist) the governed ids with their label, the modes that kind takes, and `whenUngranted`, the mode a deployment RESOLVES to when project.md carries no grant for the id (not the create-seed default). `deliver-review-pr` and `update-task-branch` depend on the project's workflow policy: read get_project for a deployment's resolved mode. Any signed-in person; instance scope.",
+      {},
+      run(() => {
+        const policyDependent = new Set(POLICY_DEPENDENT_CAPABILITY_IDS);
+        const kindRows = (kind: CapabilityKind) =>
+          UNIFIED_CAP_CATALOG.filter((c) => c.kinds.includes(kind) && c.group !== null).map(
+            (c) => ({
+              id: c.id,
+              label: c.label,
+              whenUngranted:
+                kind === "operator" && policyDependent.has(c.id)
+                  ? "project policy (see get_project)"
+                  : absentGrantMode(kind, c),
+              alwaysHuman: ALWAYS_HUMAN_CAPABILITY_IDS.includes(c.id),
+            }),
+          );
+        return json({
+          note:
+            "whenUngranted is the mode a deployment resolves to when the grant is ABSENT from project.md. update_agent_deployment refuses an id outside the kind's list, a mode the kind does not take, a non-human mode on an always-human id, and report-validation-verdict at any mode but direct or off.",
+          kinds: {
+            operator: {
+              modes: OPERATOR_CAP_MODES.map((m) => m.id),
+              capabilities: kindRows("operator"),
+            },
+            agent: {
+              modes: SPECIALIST_CAP_MODES.map((m) => m.id),
+              capabilities: kindRows("agent"),
+            },
+          },
+          alwaysHuman: [...ALWAYS_HUMAN_CAPABILITY_IDS],
+        });
+      }),
+    ),
+    "list_capabilities",
   );
 
   add(
@@ -840,7 +891,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents, goals summary. Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every governed capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment), goals summary. Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -871,15 +922,32 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             name: users.get(m.userId)?.name ?? m.userId,
             email: users.get(m.userId)?.email ?? null,
           })),
-          agents: fm.agents.map((a) => {
-            const view = effectiveProfileView(a, dataRoot, VIEW_WITHOUT_POLICY);
-            return {
-              profileId: a.profileId,
-              name: view.name,
-              kind: view.kind,
-              backends: view.backends,
-              stages: view.stages,
+          // Ruling 139: the deployments come from the Agents page's own roster
+          // (the projection, which every agent writer reprojects before it
+          // returns), so the controller reads exactly what the roster renders:
+          // an absent `deliver-review-pr` at the project's delivery-gate mode,
+          // the grant-required family at `off`, the model marks applied.
+          agents: assembleAgentRoster(db, slug, { dataRoot }).map((row) => {
+            const entry = {
+              profileId: row.id,
+              name: row.name,
+              kind: row.kind,
+              backends: row.backends,
+              stages: row.stages,
+              model: row.model,
+              modelLabel: row.modelLabel,
+              effort: row.effort,
+              capabilities: row.capabilities.map((c) => ({
+                capabilityId: c.capabilityId,
+                mode: c.mode,
+                // A retired id that is no longer in the catalogue keeps its
+                // id as its label; nothing here assumes the lookup succeeds.
+                label: capabilityById(c.capabilityId)?.label ?? c.capabilityId,
+              })),
             };
+            return row.kind === "operator"
+              ? { ...entry, autonomy: row.autonomy ?? "supervised" }
+              : entry;
           }),
           goals: listGoals(db, slug).map((g) => ({
             id: g.id,
