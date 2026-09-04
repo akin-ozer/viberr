@@ -351,7 +351,7 @@ function PacketArchiveConfirm({
       {/* C3 (pass 34, U34-8): this dialog reaches the same server refusal the
           collision ceremony does, and used to only INFER that no PR stands
           (from the operator's authoring rule). It says it outright now. */}
-      {deletesBranch && <OpenPrRefusalRow openPr={disclosure?.openPr ?? null} />}
+      {deletesBranch && <OpenPrRow openPr={disclosure?.openPr ?? null} ceremony="archive" />}
       <div className="obs">
         <span className="k">After</span>
         <span>
@@ -435,23 +435,44 @@ function PacketDiscardConfirm({
 }
 
 /**
- * C3 (pass 34, U34-8): the refusal a remote-branch deletion will hit, said
- * BEFORE the button rather than after the click. `deleteTaskRemoteBranch`
- * refuses while this task's own PR is open, and both ceremonies that delete a
- * remote ref reach it.
+ * C3 (pass 34, U34-8): what this task's OWN open pull request means for the
+ * ceremony about to run, said BEFORE the button rather than after the click.
+ * The two ceremonies reach different server rules, so they say different
+ * things (pass 34 review found one sentence used for both, and it was wrong
+ * on each): an ARCHIVE still archives and only keeps the branch, and a
+ * COLLISION resolution is not a deletion at all under ruling 136(b) — it
+ * pushes the delivered revision to that PR.
  */
-function OpenPrRefusalRow({ openPr }: { openPr: number | null }) {
+function OpenPrRow({
+  openPr,
+  ceremony,
+}: {
+  openPr: number | null;
+  ceremony: "archive" | "collision";
+}) {
   if (openPr === null) return null;
+  const pr = <span className="mono">#{openPr}</span>;
   return (
     <div className="obs warn" data-open-pr-warning="">
-      <span className="k">Refused while open</span>
-      <span>
-        This task&rsquo;s own pull request{" "}
-        <span className="mono">#{openPr}</span> is still open, and Viberr never
-        deletes a branch a pull request is open on. Merge or close{" "}
-        <span className="mono">#{openPr}</span> on GitHub first; confirming now
-        is refused and nothing changes.
+      <span className="k">
+        {ceremony === "archive" ? "Branch kept" : "No deletion"}
       </span>
+      {ceremony === "archive" ? (
+        <span>
+          This task&rsquo;s own pull request {pr} is still open, and Viberr never
+          deletes a branch a pull request is open on. The task is still archived;
+          the branch and {pr} stay exactly as they are. Merge or close {pr} on
+          GitHub first if you want the branch gone too.
+        </span>
+      ) : (
+        <span>
+          The pull request on this branch, {pr}, is this task&rsquo;s OWN review
+          pull request, so there is no stranger to clear: nothing is deleted and
+          nothing is closed. Confirming pushes this task&rsquo;s delivered
+          revision to {pr} and lifts the block; if the remote has diverged from
+          it, the block stays and a person reconciles the history.
+        </span>
+      )}
     </div>
   );
 }
@@ -539,7 +560,7 @@ function PacketCollisionConfirm({
           </span>
         )}
       </div>
-      <OpenPrRefusalRow openPr={openPr} />
+      <OpenPrRow openPr={openPr} ceremony="collision" />
       <div className="obs">
         <span className="k">Keeps</span>
         <span>

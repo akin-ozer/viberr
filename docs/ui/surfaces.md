@@ -205,10 +205,11 @@ cannot rejoin the gap silently — the typecheck refuses it.)*
   recorded it names the stranger, its pull request and the stale branch ("Clear collision
   & redeliver"); with none it describes THIS task's own remote branch and says no pull
   request is closed ("Delete branch & redeliver"), because that is what
-  `resolveRemoteBranchCollision` actually does then. In BOTH shapes, and in the archive
-  dialog's delete-the-branch variant, an OPEN pull request of the task's own raises a warn
-  row naming the refusal (`deleteTaskRemoteBranch` never deletes a branch a PR is open on)
-  before the button is pressed, rather than after the click.
+  `resolveRemoteBranchCollision` actually does then. An OPEN pull request of
+  the task's own raises a warn row in both dialogs, before the button, and each says what
+  its OWN ceremony does with it: the archive still archives and keeps the branch (only the
+  deletion is refused), while the collision resolution deletes nothing at all under ruling
+  136(b) and pushes the delivered revision to that pull request.
 - Settings headings name their scope: "Instance settings" versus "<project> · settings"
   (ruling 32).
 - **No surface gates AUTHORING on the viewer's own agent account** (ruling 127): a run

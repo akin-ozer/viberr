@@ -2351,10 +2351,12 @@ describe("C3: the collision confirm describes the right branch, and warns before
     expect(findButton(container, "Clear collision & redeliver")).toBeTruthy();
   });
 
-  it("an OPEN pull request of this task's own warns before the button, read off the task", () => {
+  it("an OPEN pull request of this task's own says what the ceremony really does, read off the task", () => {
     // Canary: hardcode `openPr: null` in the page's archiveDisclosure literal
-    // (or drop the warn row) — the person confirms a deletion the server
-    // refuses, which is what JC-6 and JC-3 did.
+    // (or drop the row) — the person is told nothing about the PR the
+    // ceremony is actually about.
+    // Pass 34 review: the row used to promise a refusal, which ruling 136(b)
+    // replaced with a real delivery to that same PR.
     const { container } = renderPage({
       task: {
         packet: collisionPacket,
@@ -2365,8 +2367,9 @@ describe("C3: the collision confirm describes the right branch, and warns before
     fireEvent.click(findButton(container, "Confirm decision")!);
     const text = dialogText(container);
     expect(text).toContain("#77");
-    expect(text).toContain("never deletes a branch a pull request is open on");
-    expect(text).toContain("confirming now is refused and nothing changes");
+    expect(text).toContain("this task’s OWN review pull request");
+    expect(text).toContain("pushes this task’s delivered revision");
+    expect(text).not.toContain("confirming now is refused and nothing changes");
   });
 
   it("a MERGED pull request is no refusal, so no warning is shown", () => {
@@ -2379,5 +2382,49 @@ describe("C3: the collision confirm describes the right branch, and warns before
     });
     fireEvent.click(findButton(container, "Confirm decision")!);
     expect(dialogText(container)).not.toContain("never deletes a branch a pull request is open on");
+  });
+});
+
+/**
+ * Pass 34 review: the archive dialog's open-PR row used to promise "confirming
+ * now is refused and nothing changes" while the archive always runs — only the
+ * branch deletion is refused.
+ */
+describe("C3: the archive dialog's open-PR row tells the truth about what still happens", () => {
+  const archivePacket: PacketRender = {
+    type: "blocked",
+    kind: "blocked decision",
+    from: "Operator",
+    title: "The PR was closed without merging",
+    body: "",
+    observations: [],
+    options: [
+      {
+        kind: "archive_task",
+        t: "Archive the task and delete its branch",
+        d: "The work is abandoned.",
+        rec: true,
+        deleteBranch: true,
+      },
+    ],
+  };
+
+  it("says the task is still archived and only the branch is kept", () => {
+    // Canary: use one sentence for both ceremonies again — the archive dialog
+    // then claims nothing changes, and the task is archived anyway.
+    const { container } = renderPage({
+      task: {
+        packet: archivePacket,
+        branch: "vib-151",
+        pr: { number: 91, state: "review", title: "VIB-151 work" },
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Packet archive dialog"]',
+    )!;
+    expect(dialog.textContent).toContain("#91");
+    expect(dialog.textContent).toContain("The task is still archived");
+    expect(dialog.textContent).not.toContain("confirming now is refused and nothing changes");
   });
 });
