@@ -1,3 +1,4 @@
+import { describeRevisionDrift } from "~/shared/revision-drift";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -3308,15 +3309,30 @@ function triageQualityGate(snapshot: OperatorTaskSnapshot): string {
  */
 function driftInstruction(snapshot: OperatorTaskSnapshot): string {
   const drift = snapshot.pr?.revisionDrift ?? null;
-  if (!drift || drift.aheadBy <= 0) return "";
-  const n = drift.aheadBy;
+  const described = describeRevisionDrift(drift);
+  if (!drift || described.kind === "none") return "";
+  const head = `\`${drift.headSha.slice(0, 12)}\``;
+  // Ruling 132 (pass 34, F34-14): a base refresh Viberr made is NOT unreviewed
+  // work — say what it is, and say UNREVIEWED only for authored commits.
+  if (!described.unreviewed) {
+    return (
+      `FACT about the PR head (${head}): ${described.sentence}. That is a base refresh Viberr ` +
+      "itself merged (or fast-forwarded) onto the branch after the review; it carries NO authored " +
+      "commits outside the reviewed revision, so the recorded verdict still stands. Describe it as a " +
+      "base refresh, never as unreviewed work, and never send the task back for a second review of it. "
+    );
+  }
+  const n = drift.authored;
   return (
-    `FACT you must carry into whatever you write: the PR head (\`${drift.headSha.slice(0, 12)}\`) is ` +
-    `AHEAD of the last reviewed revision by ${n === 1 ? "1 commit" : `${n} commits`} — ` +
-    `${n === 1 ? "it was" : "they were"} pushed AFTER the review, so ${n === 1 ? "it is" : "they are"} ` +
-    "UNREVIEWED. A review verdict recorded before those commits does NOT cover them: never describe " +
-    "this PR as \"reviewed clean\" without saying so in the same breath. Include it as an explicit " +
-    "packet observation (e.g. k: \"Unreviewed commits\") so the human deciding sees it. " +
+    `FACT you must carry into whatever you write: the PR head (${head}) carries ` +
+    `${n === 1 ? "1 authored commit" : `${n} authored commits`} pushed AFTER the last reviewed ` +
+    `revision (${described.sentence}), so ${n === 1 ? "it is" : "they are"} UNREVIEWED. A review ` +
+    "verdict recorded before those commits does NOT cover them: never describe this PR as " +
+    "\"reviewed clean\" without saying so in the same breath. Include it as an explicit packet " +
+    "observation (e.g. k: \"Unreviewed commits\") so the human deciding sees it. " +
+    (drift.baseRefresh
+      ? "The base refresh named in the same sentence is Viberr's own merge and is NOT part of the unreviewed work. "
+      : "") +
     "Do not treat those commits as an out-of-band merge or a policy breach by themselves — pushing to " +
     "an open task branch is ordinary; the point is only that nobody has reviewed them. "
   );

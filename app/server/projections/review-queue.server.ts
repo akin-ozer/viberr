@@ -1,3 +1,4 @@
+import type { RevisionDrift } from "~/shared/revision-drift";
 import type { DatabaseSync } from "node:sqlite";
 import {
   conflictingPrBlockedReason,
@@ -75,10 +76,10 @@ export interface ReviewQueueRow {
      *  cannot be merged at all. Same convention as `prRefSchema`: an ABSENT key
      *  means never read, which is NOT "merges cleanly". */
     mergeable?: PrMergeable;
-    /** R17-1 (F17-L12): the PR head is ahead of the reviewed revision by
-     *  `aheadBy` commits — the queue subline warns that accepting merges them
-     *  unreviewed. Absent when the head equals the reviewed revision. */
-    revisionDrift?: { aheadBy: number };
+    /** R17-1 (F17-L12) as amended by ruling 132 (pass 34): the WHOLE drift
+     *  record (authored count + base refresh), so the subline can print the
+     *  canonical sentence. Absent when the head equals the reviewed revision. */
+    revisionDrift?: RevisionDrift;
   } | null;
   validation: Validation;
   /** F10-11/F10-15: null = the current revision is acceptance-ready (all
@@ -174,9 +175,9 @@ export function getReviewQueue(
       // Omitted rather than nulled when GitHub was never asked — the key's
       // absence is the "never read" signal the file format itself uses.
       if (t.pr.mergeable) pr.mergeable = t.pr.mergeable;
-      if (t.pr.revisionDrift) {
-        pr.revisionDrift = { aheadBy: t.pr.revisionDrift.aheadBy };
-      }
+      // Ruling 132: the whole record rides through — projecting only a count
+      // here is what dropped `baseRefresh` before the row was built.
+      if (t.pr.revisionDrift) pr.revisionDrift = t.pr.revisionDrift;
     }
     return {
       key: t.key,

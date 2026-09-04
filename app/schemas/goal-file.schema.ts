@@ -62,6 +62,13 @@ export const goalLinkSchema = z.object({
   status: z.enum(GOAL_LINK_STATUS_VALUES).default("pending"),
   /** Failure reason / redirect note, shown on the chain card. */
   note: z.string().nullable().default(null),
+  /** Ruling 131(c) (pass 34): what this link's task WAITS ON, in the canonical
+   *  spellings of `app/shared/dependencies.ts` (`JC-6`, `goal-2 link 1`).
+   *  Copied onto the task the chain creates for this link and validated then,
+   *  so a link that waits on a sibling chain's link is born held instead of
+   *  paying a triage turn that has to discover the wait. Spelling-checked at
+   *  write time by the goal writer; the strict parser only requires strings. */
+  blockedBy: z.array(z.string()).default([]),
 });
 export type GoalLink = z.infer<typeof goalLinkSchema>;
 

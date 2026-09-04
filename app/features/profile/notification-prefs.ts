@@ -21,6 +21,11 @@ export const NOTIF_PREF_CATEGORIES = [
   "quality",
   // Ruling 99: controller replies and chained-goal progress notes.
   "controller",
+  // Ruling 131: a task this person owns or supervises was released from (or
+  // stranded on) the work it waited for.
+  "dependencies",
+  // Ruling 140: this person's owner seat on a task changed hands.
+  "ownership",
 ] as const;
 
 export type NotifPrefCategory = (typeof NOTIF_PREF_CATEGORIES)[number];
@@ -43,6 +48,8 @@ function defaultNotifPrefs() {
     policy: { app: true },
     quality: { app: true },
     controller: { app: true },
+    dependencies: { app: true },
+    ownership: { app: true },
   } satisfies NotifPrefs;
 }
 
@@ -63,13 +70,17 @@ const KIND_TO_CATEGORY = {
   policy: "policy",
   quality: "quality",
   controller: "controller",
+  dependency: "dependencies",
+  ownership: "ownership",
 } satisfies Record<NotificationKind, NotifPrefCategory>;
 
 export function notifCategoryForKind(kind: NotificationKind): NotifPrefCategory {
   return KIND_TO_CATEGORY[kind];
 }
 
-/** The 5 routing categories — PROFILE_NTF, verbatim from profile.jsx. */
+/** The routing categories — PROFILE_NTF (the first five verbatim from
+ *  profile.jsx; `controller` per ruling 99, `dependencies` per ruling 131 and
+ *  `ownership` per ruling 140). */
 export const PROFILE_NTF: {
   id: NotifPrefCategory;
   n: string;
@@ -105,6 +116,16 @@ export const PROFILE_NTF: {
     n: "Controller updates",
     d: "Replies from the controller and progress on goal chains you defined.",
   },
+  {
+    id: "dependencies",
+    n: "Dependency releases",
+    d: "A task you own or supervise was released from the work it waited on, or that work can no longer complete.",
+  },
+  {
+    id: "ownership",
+    n: "Ownership changes",
+    d: "A task's owner seat was handed to you or taken from you; the owner's accounts run its agents and accept its completion.",
+  },
 ];
 
 const notifPrefCategorySchema = z.enum(NOTIF_PREF_CATEGORIES);
@@ -135,7 +156,7 @@ const storedChannelPrefsSchema = z
 
 /** Tolerant decode of a stored (possibly partial/malformed) pref value:
  *  unknown keys are dropped by `z.object`'s strip, and the per-category
- *  `.catch` keeps one junk entry from discarding the other four. */
+ *  `.catch` keeps one junk entry from discarding the others. */
 const storedNotifPrefsSchema = z.object({
   packets: storedChannelPrefsSchema,
   approvals: storedChannelPrefsSchema,
@@ -145,6 +166,9 @@ const storedNotifPrefsSchema = z.object({
   // Ruling 99: absent on prefs stored before the controller shipped — the
   // per-field catch reads it as ON, the opt-out default every category has.
   controller: storedChannelPrefsSchema,
+  // Rulings 131 / 140 (pass 34): same posture — absent reads ON.
+  dependencies: storedChannelPrefsSchema,
+  ownership: storedChannelPrefsSchema,
 });
 
 /** Tolerant merge of a stored (possibly partial/malformed) pref value over

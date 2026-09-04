@@ -1,3 +1,4 @@
+import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
@@ -564,10 +565,12 @@ export async function createTask(
     // never disagree with the graded scale. Derived purely here (no separate input)
     // so the two cannot desync; the edit path (`setTaskMetadata`) does the same.
     urgent: input.priority === "urgent",
+    blockedBy: [],
     archived: false,
     validation: "none",
     workRevision: null,
     verdicts: [],
+    baseRefreshes: [],
     branch: null,
     pr: null,
     github: null,
@@ -7877,13 +7880,12 @@ function mergePendingCause(merge: AcceptanceMergeOutcome): string {
  * is honest about what merged. Every acceptance path appends this.
  */
 export function revisionDriftNote(fm: TaskFrontmatter): string {
-  const drift = fm.pr?.revisionDrift;
-  if (!drift || drift.aheadBy <= 0) return "";
-  const n = drift.aheadBy;
-  // F19-23: the noun was switched and the VERB was not, so a single-commit drift
-  // rendered "1 commit were added to the PR head" — live on VC-4's timeline and
-  // in the Activity stream, on the one sentence a Done task's record leans on.
-  return ` ${n === 1 ? "1 commit was" : `${n} commits were`} added to the PR head (\`${drift.headSha.slice(0, 12)}\`) after the review, outside the reviewed revision.`;
+  // Ruling 132 (pass 34, F34-14): the permanent record uses the SAME words as
+  // every live surface — authored commits were added outside the reviewed
+  // revision; a base refresh is recorded as a base refresh and never as
+  // unreviewed work (JC-8's timeline said "5 commits were added" for 4 base
+  // commits and Viberr's own merge). F19-23's noun/verb agreement rides along.
+  return sharedRevisionDriftNote(fm.pr?.revisionDrift);
 }
 
 /**

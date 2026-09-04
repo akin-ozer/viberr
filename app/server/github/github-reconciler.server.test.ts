@@ -344,7 +344,7 @@ describe("reconcileTask", () => {
       taskKey: "VIB-301",
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
-    expect(fm.pr?.revisionDrift).toEqual({ aheadBy: 2, headSha: "headsha318" });
+    expect(fm.pr?.revisionDrift).toEqual({ headSha: "headsha318", authored: 2, baseRefresh: null });
   });
 
   it("F21-17: the drift fact SURVIVES the PR closing — the recovery packet can still state it", async () => {
@@ -398,7 +398,7 @@ describe("reconcileTask", () => {
       actor,
       { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(openRoutes).fetchImpl },
     );
-    expect(readFm().pr?.revisionDrift).toEqual({ aheadBy: 2, headSha: "headsha318" });
+    expect(readFm().pr?.revisionDrift).toEqual({ headSha: "headsha318", authored: 2, baseRefresh: null });
 
     // Pass 2 — a human CLOSES the PR on GitHub. A settled PR deliberately buys
     // no compare call, and NO drift compare route is registered here, so the
@@ -429,7 +429,7 @@ describe("reconcileTask", () => {
     );
     const closed = readFm();
     expect(closed.pr?.state).toBe("closed");
-    expect(closed.pr?.revisionDrift).toEqual({ aheadBy: 2, headSha: "headsha318" });
+    expect(closed.pr?.revisionDrift).toEqual({ headSha: "headsha318", authored: 2, baseRefresh: null });
 
     // …and it reaches the operator on the surface where that packet is written:
     // `get_task` carries the same fact after the close, not just the task file.
@@ -442,7 +442,7 @@ describe("reconcileTask", () => {
     );
     expect(snapshot.pr).toMatchObject({
       state: "closed",
-      revisionDrift: { aheadBy: 2, headSha: "headsha318" },
+      revisionDrift: { headSha: "headsha318", authored: 2, baseRefresh: null },
     });
   });
 
@@ -1884,6 +1884,7 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
         { id: "pull_request:write", ok: true, source: "assumed" },
       ],
       missingScopes: [],
+      headerScopes: null,
       detail: "Authenticated.",
     });
     const scopeSource = () =>

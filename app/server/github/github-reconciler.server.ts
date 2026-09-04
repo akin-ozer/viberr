@@ -481,7 +481,11 @@ async function reconcileTaskUnlocked(
       driftCompare.compare.status === "ahead" &&
       driftCompare.compare.aheadBy > 0
     ) {
-      revisionDrift = { aheadBy: driftCompare.compare.aheadBy, headSha: pr.headSha };
+      revisionDrift = {
+        headSha: pr.headSha,
+        authored: driftCompare.compare.aheadBy,
+        baseRefresh: null,
+      };
     }
   }
   // R19-B (owner ruling): a project member's GitHub approval on the PR IS the

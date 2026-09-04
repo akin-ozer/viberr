@@ -63,6 +63,7 @@ import {
   createTestDbContext,
   type TestDbContext,
 } from "../../../test-support/test-db";
+import { createLocalOrigin, withLocalGithub } from "../../../test-support/git-origin";
 import { listAuditEvents } from "../../../test-support/audit-log";
 
 interface PendingRun {
@@ -1089,7 +1090,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       openPacket: false,
       packet: null,
       recentTimeline: [],
-      pr: { number: 318, state: "closed", title: "PR", revisionDrift: null },
+      pr: { number: 318, state: "closed", title: "PR", revisionDrift: null, revisionDriftSentence: "" },
       branch: "vib-9",
       liveRuns: [],
       autonomy: "supervised",
@@ -1111,7 +1112,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
 
   it("merged out-of-band → acceptance is the next state, no packet demanded", () => {
     const prompt = buildOperatorTurnPrompt(
-      snapshot({ pr: { number: 318, state: "merged", title: "PR", revisionDrift: null } }),
+      snapshot({ pr: { number: 318, state: "merged", title: "PR", revisionDrift: null, revisionDriftSentence: "" } }),
       "pr-diverged",
     );
     expect(prompt).toContain("merged OUT-OF-BAND");
@@ -1121,7 +1122,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
 
   it("PR live again → withdraw the moot packet and continue", () => {
     const prompt = buildOperatorTurnPrompt(
-      snapshot({ pr: { number: 318, state: "review", title: "PR", revisionDrift: null } }),
+      snapshot({ pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "" } }),
       "pr-diverged",
     );
     expect(prompt).toContain("live again");
@@ -1159,14 +1160,15 @@ describe("pr-diverged turn instruction (both backends)", () => {
           number: 318,
           state,
           title: "PR",
-          revisionDrift: { aheadBy: 2, headSha: "cab10477beef1234" },
+          revisionDrift: { headSha: "cab10477beef1234", authored: 2, baseRefresh: null },
+          revisionDriftSentence: "2 authored commits since review merge unreviewed",
         },
       });
 
     it("names the unreviewed commits and demands them as a packet observation", () => {
       // Canary: drop `drift` from the closed-PR arm and every line fails.
       const prompt = buildOperatorTurnPrompt(drifted(), "pr-diverged");
-      expect(prompt).toContain("2 commits");
+      expect(prompt).toContain("2 authored commits");
       expect(prompt).toContain("cab10477beef");
       expect(prompt).toContain("UNREVIEWED");
       expect(prompt).toContain("Unreviewed commits");
@@ -1192,12 +1194,13 @@ describe("pr-diverged turn instruction (both backends)", () => {
               number: 318,
               state: "closed",
               title: "PR",
-              revisionDrift: { aheadBy: 1, headSha: "cab10477beef1234" },
+              revisionDrift: { headSha: "cab10477beef1234", authored: 1, baseRefresh: null },
+              revisionDriftSentence: "1 authored commit since review merges unreviewed",
             },
           }),
           "pr-diverged",
         ),
-      ).toContain("1 commit");
+      ).toContain("1 authored commit");
       expect(buildCodexOperatorPrompt(drifted(), "pr-diverged")).toContain("UNREVIEWED");
     });
   });
@@ -2933,29 +2936,20 @@ describe("R19-1 — the operator's read-only repository view", () => {
   const systemPrompt = () => adapter7.pending?.spec.systemPrompt ?? "";
 
   /**
-   * A local origin for `acme/widgets`, carrying the two things the live
-   * confabulation denied existed (a README and a `docs/` folder) plus a
-   * `.claude` catalog, which a clone Viberr creates must strip (R18-3).
+   * A local origin for `acme/widgets` (test-support/git-origin.ts), carrying
+   * the two things the live confabulation denied existed (a README and a
+   * `docs/` folder) plus a `.claude` catalog, which a clone Viberr creates must
+   * strip (R18-3).
    */
   async function makeOrigin(): Promise<void> {
-    const bare = path.join(origins, "acme", "widgets.git");
-    mkdirSync(path.dirname(bare), { recursive: true });
-    await exec("git", ["init", "-q", "--bare", "-b", "main", bare]);
-    const seed = path.join(origins, "seed");
-    mkdirSync(path.join(seed, "docs"), { recursive: true });
-    mkdirSync(path.join(seed, ".claude", "skills", "repo-own"), { recursive: true });
-    writeFileSync(path.join(seed, "README.md"), "# widgets\n");
-    writeFileSync(path.join(seed, "docs", "guide.md"), "the guide\n");
-    writeFileSync(
-      path.join(seed, ".claude", "skills", "repo-own", "SKILL.md"),
-      "# ungoverned\n",
-    );
-    await exec("git", ["init", "-q", "-b", "main", seed]);
-    await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
-    await exec("git", ["-C", seed, "config", "user.name", "T"]);
-    await exec("git", ["-C", seed, "add", "-A"]);
-    await exec("git", ["-C", seed, "commit", "-qm", "init"]);
-    await exec("git", ["-C", seed, "push", "-q", bare, "HEAD:refs/heads/main"]);
+    await createLocalOrigin(origins, {
+      repo: "acme/widgets",
+      files: {
+        "README.md": "# widgets\n",
+        "docs/guide.md": "the guide\n",
+        ".claude/skills/repo-own/SKILL.md": "# ungoverned\n",
+      },
+    });
   }
 
   /**
@@ -2963,35 +2957,8 @@ describe("R19-1 — the operator's read-only repository view", () => {
    * — an existing one for the success arm, a missing one to make the real clone
    * fail instantly and offline.
    */
-  async function withOrigin<T>(root: string, work: () => Promise<T>): Promise<T> {
-    const configPath = path.join(origins, `gitconfig-${path.basename(root)}`);
-    writeFileSync(
-      configPath,
-      `[url "${root}${path.sep}"]\n\tinsteadOf = https://github.com/\n`,
-    );
-    const saved = {
-      global: process.env.GIT_CONFIG_GLOBAL,
-      system: process.env.GIT_CONFIG_SYSTEM,
-      protocol: process.env.GIT_ALLOW_PROTOCOL,
-    };
-    process.env.GIT_CONFIG_GLOBAL = configPath;
-    process.env.GIT_CONFIG_SYSTEM = "/dev/null";
-    // Belt and braces: if the rewrite ever stopped applying, git must FAIL
-    // rather than quietly reach github.com from a unit test.
-    process.env.GIT_ALLOW_PROTOCOL = "file";
-    try {
-      return await work();
-    } finally {
-      for (const [key, value] of [
-        ["GIT_CONFIG_GLOBAL", saved.global],
-        ["GIT_CONFIG_SYSTEM", saved.system],
-        ["GIT_ALLOW_PROTOCOL", saved.protocol],
-      ] as const) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    }
-  }
+  const withOrigin = <T,>(root: string, work: () => Promise<T>): Promise<T> =>
+    withLocalGithub(root, work);
 
   beforeEach(async () => {
     ctx7 = createTestDbContext();

@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { NotificationsPage } from "./notifications-page";
+import { ntfMeta } from "./notification-meta";
 import {
   needsYouTime,
   splitNotifications,
@@ -431,5 +432,26 @@ describe("NotificationsPage", () => {
     const { getByText, onReadAll } = renderPage();
     fireEvent.click(getByText("Mark all read"));
     expect(onReadAll).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Rulings 131 / 140 (pass 34): the two new kinds get their own glyph and
+ * palette. Asserted EXPLICITLY because `ntfMeta` has a catch-all (`alert` +
+ * `act-policy`) and would degrade silently — an ownership hand-off rendered as
+ * a policy violation is the exact wrong reading.
+ *
+ * Canary: map `ownership` into the `packet` branch (or delete its arm) and the
+ * user-glyph assertion fails.
+ */
+describe("ntfMeta — the pass-34 kinds", () => {
+  it("ownership: the user glyph on the transition palette", () => {
+    expect(ntfMeta({ kind: "ownership" })).toEqual({ icon: "user", cls: "act-transition" });
+  });
+  it("dependency: the lock glyph on the transition palette", () => {
+    expect(ntfMeta({ kind: "dependency" })).toEqual({ icon: "lock", cls: "act-transition" });
+  });
+  it("an unknown kind still falls back to alert/policy (UI-57)", () => {
+    expect(ntfMeta({ kind: "whatever" })).toEqual({ icon: "alert", cls: "act-policy" });
   });
 });

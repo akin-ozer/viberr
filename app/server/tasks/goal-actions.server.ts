@@ -137,6 +137,7 @@ export async function createGoal(
         taskKey: null,
         status: "pending",
         note: null,
+        blockedBy: [],
       }),
     )
     .filter((l) => l.title.length > 0);
@@ -376,6 +377,7 @@ export async function updateGoal(
             taskKey: null,
             status: "pending",
             note: null,
+            blockedBy: [],
           });
           advanceAfter = true;
           message = `Link ${fm.links.length} added.`;

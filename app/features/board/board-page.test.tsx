@@ -1128,12 +1128,12 @@ describe("F19-27: the board accept confirm discloses what it merges", () => {
         number: 124,
         state: "review",
         title: "Attach a credential",
-        revisionDrift: { aheadBy: 2, headSha: "a4c790ce63efbeef" },
+        revisionDrift: { headSha: "a4c790ce63efbeef", authored: 2, baseRefresh: null },
       },
     });
     expect(text).toContain("a4c790ce63ef");
-    expect(text).toContain("2 commits added since review");
-    expect(text).toContain("they merge unreviewed");
+    // Ruling 132: the ONE canonical sentence, verbatim.
+    expect(text).toContain("2 authored commits since review merge unreviewed");
   });
 
   // F19-23: the noun was already switched here; the VERB was not, so a single
@@ -1145,12 +1145,11 @@ describe("F19-27: the board accept confirm discloses what it merges", () => {
         number: 124,
         state: "review",
         title: "t",
-        revisionDrift: { aheadBy: 1, headSha: "a4c790ce63efbeef" },
+        revisionDrift: { headSha: "a4c790ce63efbeef", authored: 1, baseRefresh: null },
       },
     });
-    expect(text).toContain("1 commit added since review");
-    expect(text).toContain("it merges unreviewed");
-    expect(text).not.toContain("they merge unreviewed");
+    expect(text).toContain("1 authored commit since review merges unreviewed");
+    expect(text).not.toContain("commits since review merge unreviewed");
   });
 
   it("shows the verdict it is about to accept over", () => {
@@ -2010,14 +2009,14 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
         number: 124,
         state: "review",
         title: "t",
-        revisionDrift: { aheadBy: 2, headSha: "a4c790ce63efbeef" },
+        revisionDrift: { headSha: "a4c790ce63efbeef", authored: 2, baseRefresh: null },
       },
     })
       .container.querySelector("dialog")!
       .textContent!.replace(/\s+/g, " ");
     expect(text).toContain("PR #124 · in review");
     expect(text).toContain("a4c790ce63ef");
-    expect(text).toContain("2 commits added since review");
+    expect(text).toContain("2 authored commits since review merge unreviewed");
     expect(text).toContain("awaiting verdict"); // the ValidationPill verdict row
   });
 });

@@ -454,7 +454,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
       workRevisionSha: "aaaaaaaaaaaabbbbbbbbbbbb",
       task: {
         pr: acceptedPr({
-          revisionDrift: { headSha: "ccccccccccccdddddddddddd", aheadBy: 2 },
+          revisionDrift: { headSha: "ccccccccccccdddddddddddd", authored: 2, baseRefresh: null },
         }),
       },
     });
@@ -470,7 +470,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(dialog.textContent).toContain("main");
     // R17-1: the head really being merged, and that it is not the reviewed one.
     expect(dialog.textContent).toContain("cccccccccccc");
-    expect(dialog.textContent).toContain("2 commits added since review");
+    expect(dialog.textContent).toContain("2 authored commits since review merge unreviewed");
     fireEvent.click(findButton(container, "Merge PR #147")!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("complete-merge");

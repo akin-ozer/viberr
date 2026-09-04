@@ -1,3 +1,4 @@
+import { describeRevisionDrift } from "~/shared/revision-drift";
 import type { PrRef, Validation } from "~/schemas/task-file.schema";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import { prStatePill } from "~/features/github/github-pills";
@@ -231,6 +232,8 @@ export function AcceptConfirm({
           .map((s) => s.name)
       : [];
   const pr = task.pr;
+  // Ruling 132: the one canonical sentence for what moved on the PR head.
+  const drift = describeRevisionDrift(pr?.revisionDrift);
   // F19-14: the raw internal token ("accepted", "review") leaked into this
   // dialog while every other surface renders the canonical label through the one
   // PR-state map (ruling 12). "PR #12 accepted" and "PR #12 merge pending" are
@@ -378,21 +381,17 @@ export function AcceptConfirm({
               the merge head is NOT the revision pinned above. F19-24: this is
               the disclosure the bare "Complete merge" click never made, on the
               path that merges LAST — the one most likely to have drifted. */}
-          {pr?.revisionDrift && (
-            <div className="obs warn">
+          {drift.kind !== "none" && pr?.revisionDrift && (
+            // Ruling 132 (pass 34, F34-14): ONE sentence, printed verbatim from
+            // `describeRevisionDrift` — a base refresh reads as a base refresh
+            // (`obs`, not `warn`), only authored commits read as unreviewed.
+            <div className={drift.unreviewed ? "obs warn" : "obs"}>
               <span className="k">Merge head</span>
               <span>
                 <span className="mono">
                   {pr.revisionDrift.headSha.slice(0, 12)}
                 </span>{" "}
-                {/* F19-23: the noun was switched with the count and the verb
-                    was not — `aheadBy: 1` rendered "1 commit added since
-                    review; THEY MERGE unreviewed", on the row whose whole job
-                    is disclosing what ships unreviewed. */}
-                · {pr.revisionDrift.aheadBy} commit
-                {pr.revisionDrift.aheadBy === 1 ? "" : "s"} added since review;{" "}
-                {pr.revisionDrift.aheadBy === 1 ? "it merges" : "they merge"}{" "}
-                unreviewed.
+                · {drift.sentence}
               </span>
             </div>
           )}

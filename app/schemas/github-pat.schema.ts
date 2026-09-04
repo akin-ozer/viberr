@@ -64,6 +64,15 @@ export const patValidationSchema = z
     scopes: z.array(scopeCheckSchema).default([]),
     /** Scope ids with ok=false — convenience for insufficient_scope. */
     missingScopes: z.array(z.string()).default([]),
+    /** Ruling 144 (pass 34, G34-2): a CLASSIC token's full granted list, read
+     *  from the `x-oauth-scopes` header verbatim (an empty header records
+     *  `[]`). Null for fine-grained tokens, which expose nothing to read, and
+     *  for a run that never reached the header. Advisory only: the required
+     *  set is judged by `scopes`, never by this list — it exists so the
+     *  credential card can say that a token without `workflow` cannot push
+     *  `.github/workflows/*`, and so delivery can refuse such a push BEFORE
+     *  GitHub is asked. */
+    headerScopes: z.array(z.string()).nullable().default(null),
     /** Human-readable, secret-free summary of what happened. */
     detail: z.string().default(""),
   })

@@ -88,6 +88,14 @@ CREATE TABLE task_projections (
     CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
   labels_json TEXT NOT NULL DEFAULT '[]',
   due_date TEXT,
+  -- Ruling 131 (pass 34): the task file's `blockedBy` list, verbatim (JSON
+  -- array of canonical spellings). Projected so the release engine can select
+  -- held dependents and walk cycles without reading task files; the entries'
+  -- STATES are resolved at read time and never stored. Existing roots take the
+  -- additive `ALTER TABLE task_projections ADD COLUMN blocked_by_json TEXT NOT
+  -- NULL DEFAULT '[]'` that the boot drift WARN prescribes (never a re-baseline:
+  -- this file also holds users, sessions and sealed PATs).
+  blocked_by_json TEXT NOT NULL DEFAULT '[]',
   -- R14-3: the terminal disposition for abandoned work. Projected because every
   -- board/queue/inbox read model reads this table and each of them has to hide
   -- archived tasks without re-reading task files on a loader path.
@@ -249,7 +257,12 @@ CREATE TABLE notifications (
   user_id TEXT NOT NULL,
   -- 'controller' (ruling 99): a controller conversation reply or a chained-goal
   -- progress note addressed to the conversation owner / goal creator.
-  kind TEXT NOT NULL CHECK (kind IN ('packet', 'approval', 'mention', 'quality', 'policy', 'controller')),
+  -- 'dependency' (ruling 131): the work a task waited on landed (or can never).
+  -- 'ownership' (ruling 140): the reader's task-owner seat changed hands.
+  -- This list IS NOTIFICATION_KINDS in app/shared/mapping/notification.server.ts,
+  -- and the boot integrity check compares the live CHECK against it, because a root
+  -- that predates a kind would otherwise reject every INSERT of it silently.
+  kind TEXT NOT NULL CHECK (kind IN ('packet', 'approval', 'mention', 'quality', 'policy', 'controller', 'dependency', 'ownership')),
   -- packet kind only: input | blocked (card tint + pill).
   ptype TEXT CHECK (ptype IN ('input', 'blocked')),
   title TEXT,

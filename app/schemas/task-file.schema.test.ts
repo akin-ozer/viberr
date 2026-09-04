@@ -9,6 +9,8 @@ import {
   parseTaskFrontmatter,
   requiredReviewers,
   sanitizeEventAttachmentNames,
+  unpushedRevisionBlockedReason,
+  unpushedRevisionOf,
   type Engagement,
   type ReviewVerdict,
   type WorkRevision,
@@ -910,5 +912,195 @@ describe("parseTaskFrontmatter — per-entry verdict/schedule tolerance", () => 
     // The good occurrence survives its malformed neighbour.
     expect(frontmatter.schedules.map((s) => s.id)).toContain("s-2");
     expect(diagnostics.some((d) => d.path === "schedules[0]")).toBe(true);
+  });
+});
+
+/**
+ * Pass 34 — the frontmatter additions. Each field is parsed the way its loss
+ * would demand: the two LISTS per row (a bad row drops only itself), the
+ * optional PR facts with the absent-means-never-read convention.
+ */
+describe("pass 34 frontmatter additions", () => {
+  const base = { key: "VIB-9", title: "T", stage: "impl", readiness: "ready", waiting: "none" };
+
+  it("ruling 131: `blockedBy` round-trips canonicalized, absent reads [] with no diagnostic, a malformed row drops only itself", () => {
+    // Canary: delete the `blockedBy: tolerantRows(...)` line from the parse
+    // (falling back to `[]`) and the first assertion reads `[]`.
+    const ok = parseTaskFrontmatter({ ...base, blockedBy: ["jc-6", "Goal-1 link 3"] });
+    expect(ok.frontmatter.blockedBy).toEqual(["JC-6", "goal-1 link 3"]);
+    expect(ok.diagnostics.filter((d) => d.path?.startsWith("blockedBy"))).toEqual([]);
+
+    const absent = parseTaskFrontmatter(base);
+    expect(absent.frontmatter.blockedBy).toEqual([]);
+    expect(absent.diagnostics.filter((d) => d.path?.startsWith("blockedBy"))).toEqual([]);
+    // Not a frontmatter unknown either — it is a known key.
+    expect(absent.unknown).toEqual({});
+
+    const mixed = parseTaskFrontmatter({ ...base, blockedBy: ["nope", "JC-7"] });
+    expect(mixed.frontmatter.blockedBy).toEqual(["JC-7"]);
+    const diag = mixed.diagnostics.find((d) => d.code === "frontmatter.invalid_field");
+    expect(diag?.path).toBe("blockedBy[0]");
+    expect(diag?.message).toContain("nope");
+  });
+
+  it("ruling 132: `baseRefreshes` round-trips per row and absent reads []", () => {
+    const row = {
+      mergeSha: "m".repeat(40),
+      baseSha: "b".repeat(40),
+      base: "main",
+      commits: 4,
+      at: "2026-09-03T11:16:55.000Z",
+    };
+    const ok = parseTaskFrontmatter({ ...base, baseRefreshes: [row, { mergeSha: 1 }] });
+    expect(ok.frontmatter.baseRefreshes).toEqual([row]);
+    expect(ok.diagnostics.find((d) => d.path === "baseRefreshes[1]")).toBeTruthy();
+    expect(parseTaskFrontmatter(base).frontmatter.baseRefreshes).toEqual([]);
+  });
+
+  it("ruling 132: `pr.revisionDrift` is the authored/baseRefresh record, and a fast-forward refresh (merges: 0) is legal", () => {
+    const pr = {
+      number: 1,
+      state: "review",
+      title: "t",
+      revisionDrift: { headSha: "h".repeat(40), authored: 0, baseRefresh: { merges: 0, commits: 3 } },
+    };
+    expect(parseTaskFrontmatter({ ...base, pr }).frontmatter.pr?.revisionDrift).toEqual(
+      pr.revisionDrift,
+    );
+    // The OLD `{ aheadBy }` shape is garbage now: the field nulls, the ref survives.
+    const legacy = parseTaskFrontmatter({
+      ...base,
+      pr: { ...pr, revisionDrift: { aheadBy: 5, headSha: "h".repeat(40) } },
+    });
+    expect(legacy.frontmatter.pr?.number).toBe(1);
+    expect(legacy.frontmatter.pr?.revisionDrift).toBeNull();
+  });
+
+  it("ruling 135: `pr.headSha` and `pr.unpushedRevision` are optional keys that round-trip", () => {
+    const pr = {
+      number: 10,
+      state: "review",
+      title: "t",
+      headSha: "6".repeat(40),
+      unpushedRevision: { revisionSha: "3".repeat(40), prHeadSha: "6".repeat(40), relation: "unknown" },
+    };
+    const fm = parseTaskFrontmatter({ ...base, pr }).frontmatter;
+    expect(fm.pr?.headSha).toBe("6".repeat(40));
+    expect(fm.pr?.unpushedRevision).toEqual(pr.unpushedRevision);
+    const bare = parseTaskFrontmatter({ ...base, pr: { number: 10, state: "review", title: "t" } })
+      .frontmatter;
+    expect(bare.pr).not.toHaveProperty("headSha");
+    expect(bare.pr).not.toHaveProperty("unpushedRevision");
+  });
+
+  it("ruling 138: a packet records `decided` and an edit_goal option carries `goalDraft`", () => {
+    const parsed = parseTaskFileContent(
+      [
+        "---",
+        "key: VIB-9",
+        "title: T",
+        "stage: impl",
+        "readiness: input_required",
+        "waiting: human",
+        "---",
+        "## Goal",
+        "",
+        "g",
+        "",
+        "## Packet",
+        "",
+        "```yaml",
+        "type: input",
+        "kind: Decision required",
+        "title: Align the goal?",
+        "awaiting: goal_edit",
+        "decided:",
+        "  optionIndex: 1",
+        "  at: 2026-09-03T11:12:00.000Z",
+        "  byUserId: u_arda",
+        "options:",
+        "  - kind: custom",
+        "    t: Keep it",
+        "  - kind: edit_goal",
+        "    t: Align the goal",
+        "    d: why",
+        "    rec: true",
+        "    goalDraft: |",
+        "      Deliverable: the search page.",
+        "```",
+        "",
+        "## Timeline",
+        "",
+      ].join("\n"),
+      { fallbackKey: "VIB-9" },
+    );
+    const packet = parsed.parsed.packet!;
+    expect(packet.awaiting).toBe("goal_edit");
+    expect(packet.decided).toEqual({
+      optionIndex: 1,
+      at: "2026-09-03T11:12:00.000Z",
+      byUserId: "u_arda",
+    });
+    expect(packet.options[1]?.goalDraft).toBe("Deliverable: the search page.\n");
+    expect(packet.options[0]).not.toHaveProperty("goalDraft");
+  });
+
+  it("ruling 137: a recommendation carries `forHeadSha`", () => {
+    const fm = parseTaskFrontmatter({
+      ...base,
+      recommendations: [
+        { id: "r1", kind: "accept_completion", label: "Accept", forHeadSha: "a".repeat(40) },
+        { id: "r2", kind: "run_agent", label: "Run", profileId: "dev" },
+      ],
+    }).frontmatter;
+    expect(fm.recommendations[0]?.forHeadSha).toBe("a".repeat(40));
+    expect(fm.recommendations[1]).not.toHaveProperty("forHeadSha");
+  });
+});
+
+/**
+ * Ruling 135 (pass 34, F34-11): the unpushed-revision gate. Its answers depend
+ * on the CURRENT revision (a record for an older one is stale and reads as
+ * nothing) and its remedy is always "deliver", never "rebase".
+ *
+ * Canary: drop the `record.revisionSha !== currentRevisionSha` comparison in
+ * `unpushedRevisionOf` and the stale case answers the record.
+ */
+describe("unpushedRevisionOf / unpushedRevisionBlockedReason (ruling 135)", () => {
+  const rev = "385047c".padEnd(40, "0");
+  const old = "6004958".padEnd(40, "0");
+  const pr = (relation: "behind" | "diverged" | "unknown", revisionSha = rev) => ({
+    number: 10,
+    state: "review" as const,
+    title: "t",
+    headSha: old,
+    unpushedRevision: { revisionSha, prHeadSha: old, relation },
+  });
+
+  it("answers the record only for the task's current revision on a live PR", () => {
+    expect(unpushedRevisionOf(pr("behind"), rev)).toEqual(pr("behind").unpushedRevision);
+    // Stale: written for a revision that is no longer current.
+    expect(unpushedRevisionOf(pr("behind", "1215ab44".padEnd(40, "0")), rev)).toBeNull();
+    // No current revision, no PR, no record: nothing.
+    expect(unpushedRevisionOf(pr("behind"), null)).toBeNull();
+    expect(unpushedRevisionOf(null, rev)).toBeNull();
+    expect(unpushedRevisionOf({ number: 10, state: "review", title: "t" }, rev)).toBeNull();
+    // A merged or closed PR has no push to offer.
+    expect(unpushedRevisionOf({ ...pr("behind"), state: "merged" }, rev)).toBeNull();
+    expect(unpushedRevisionOf({ ...pr("behind"), state: "closed" }, rev)).toBeNull();
+  });
+
+  it("the refusal names the revision, the PR head and DELIVER, never rebase", () => {
+    const behind = unpushedRevisionBlockedReason(pr("behind"), rev, "JC-3")!;
+    expect(behind).toContain("JC-3's delivered revision `385047c` is not on PR #10");
+    expect(behind).toContain("`6004958`");
+    expect(behind).toContain("Deliver the branch to push it");
+    expect(behind).not.toMatch(/rebase/i);
+    expect(unpushedRevisionBlockedReason(pr("unknown"), rev, "JC-3")).toContain("Deliver the branch");
+    const diverged = unpushedRevisionBlockedReason(pr("diverged"), rev, "JC-3")!;
+    expect(diverged).toContain("holds commits this workspace does not");
+    expect(diverged).toContain("Resolve the branch history, then deliver the branch");
+    expect(diverged).not.toMatch(/rebase/i);
+    expect(unpushedRevisionBlockedReason(pr("behind", "x".repeat(40)), rev, "JC-3")).toBeNull();
   });
 });

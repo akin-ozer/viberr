@@ -201,18 +201,18 @@ describe("the revision-drift row agrees with its own number", () => {
           number: 150,
           state: "review",
           title: "[VIB-151] work",
-          revisionDrift: { aheadBy, headSha: "a".repeat(40) },
+          revisionDrift: { headSha: "a".repeat(40), authored: aheadBy, baseRefresh: null },
         },
       },
     });
 
   it("uses the singular verb for exactly one commit", () => {
-    expect(withDrift(1)).toContain("1 commit added since review; it merges unreviewed.");
-    expect(withDrift(1)).not.toContain("they merge");
+    expect(withDrift(1)).toContain("1 authored commit since review merges unreviewed");
+    expect(withDrift(1)).not.toContain("commits since review merge");
   });
 
   it("keeps the plural for more than one", () => {
-    expect(withDrift(3)).toContain("3 commits added since review; they merge unreviewed.");
+    expect(withDrift(3)).toContain("3 authored commits since review merge unreviewed");
   });
 });
 

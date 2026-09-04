@@ -106,6 +106,7 @@ describe("pat-store", () => {
       repo: "akin-ozer/viberr",
       scopes: [{ id: "repo", ok: true, source: "probe" }],
       missingScopes: [],
+      headerScopes: null,
       detail: "Authenticated as viberr-bot.",
     });
     const reloaded = getPatMetadata(store.db, pat.id);
@@ -135,6 +136,7 @@ describe("pat-store", () => {
         { id: "pull_request:write", ok: true, source: "assumed" },
       ],
       missingScopes: [],
+      headerScopes: null,
       detail: "Authenticated as viberr-bot.",
     });
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
@@ -174,6 +176,7 @@ describe("pat-store", () => {
           { id: "pull_request:write", ok: true, source: "assumed" },
         ],
         missingScopes: [],
+        headerScopes: null,
         detail: "Authenticated.",
       });
       return pat;
@@ -279,6 +282,7 @@ describe("pat-store", () => {
         { id: "pull_request:write", ok: true, source: "header" },
       ],
       missingScopes: ["repo"],
+      headerScopes: null,
       detail: "Missing scope: repo.",
     });
 

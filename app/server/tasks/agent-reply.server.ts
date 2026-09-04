@@ -549,42 +549,26 @@ export function fullReplyTextForRun(
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 export { PROVIDER_TEXT_MARKER };
 
-/** Classified failure classes for an errored run (F8 + R7-2 fail-fast). */
-export type RunFailureKind =
-  | "quota"
-  | "auth"
-  | "unavailable"
-  | "max_turns"
-  /** The stream produced nothing for the whole idle window — the run was HUNG,
-   *  not failed by the task. Both adapters emit it (P13-RT-11). */
-  | "idle_timeout"
-  /** P13-D-2 (FR22 / NFR17): the provider session this run tried to resume no
-   *  longer exists — Claude Code's ~30-day transcript retention, or a wiped
-   *  `$CODEX_HOME/sessions`. Its own class because it is neither a credential
-   *  problem nor a task failure: the honest recovery is a fresh run
-   *  re-anchored on task.md, which `resumeRun` performs automatically when its
-   *  pre-flight probe catches it. This class is what survives when the SDK
-   *  reports the vanished session first. */
-  | "session_missing"
-  | "unknown";
-
-/** The classes an adapter can tag on its own `err` line (`error·quota`), and
- *  the single list the tag is matched against. */
-const TAGGED_FAILURE_KINDS = [
-  "quota",
-  "auth",
-  "unavailable",
-  "max_turns",
-  "idle_timeout",
-  "session_missing",
-  "unknown",
-] as const satisfies readonly RunFailureKind[];
+/** Classified failure classes for an errored run (F8 + R7-2 fail-fast).
+ *  Ruling 130(a) (pass 34): the vocabulary lives in the client-safe leaf
+ *  `~/shared/run-failure` so the console's `LogLine.failure` can be typed
+ *  without a server import; re-exported here for the task layer's importers. */
+import {
+  TAGGED_FAILURE_KINDS,
+  type RunFailureFacts,
+  type RunFailureKind,
+} from "~/shared/run-failure";
+export type { RunFailureKind };
 
 export interface RunFailure {
   kind: RunFailureKind;
   text: string;
   /** R20-3: the provider's own redacted sentence, when the adapter sent one. */
   providerText?: string;
+  /** Ruling 130(a) (pass 34): the adapter's structured facts (reset instant,
+   *  window, API error code and status), read from the terminal line's
+   *  `failure` record. Absent when the adapter attached none. */
+  facts?: RunFailureFacts;
 }
 
 /**

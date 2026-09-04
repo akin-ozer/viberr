@@ -156,15 +156,16 @@ describe("ProfilePage", () => {
     });
   });
 
-  it("renders the 6 notification routing rows with app toggles that post", () => {
+  it("renders the 8 notification routing rows with app toggles that post", () => {
     const { container, getByText, queryByText } = renderProfile();
     expect(getByText("Notification routing")).toBeTruthy();
     const rows = container.querySelectorAll(".pref-row");
-    // 6 routing rows (controller joined, ruling 99) + 3 appearance rows.
-    expect(rows).toHaveLength(9);
+    // 8 routing rows (controller joined, ruling 99; dependencies, ruling 131;
+    // ownership, ruling 140) + 3 appearance rows.
+    expect(rows).toHaveLength(11);
     const toggles = container.querySelectorAll(".tgl[role='switch']");
-    // 6 category toggles + reduce motion.
-    expect(toggles).toHaveLength(7);
+    // 8 category toggles + reduce motion.
+    expect(toggles).toHaveLength(9);
 
     const packets = container.querySelector(
       ".tgl[aria-label='Decision packets for you']",

@@ -11,6 +11,11 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "~/server/logging/logger.server";
+import {
+  createLocalOrigin,
+  withLocalGithub,
+  type LocalOrigin,
+} from "../../../test-support/git-origin";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   cloneProgressStep,
@@ -45,65 +50,20 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
   const mirrorDir = () => projectRepoMirrorDir(SLUG, REPO, dataRoot)!;
   const workspace = (name: string) => path.join(dataRoot, "workspaces", name);
 
-  /** A local bare origin for `acme/widgets` with one commit. */
+  /** The `acme/widgets` origin (test-support/git-origin.ts), one commit on main. */
+  let origin: LocalOrigin;
   async function makeOrigin(): Promise<void> {
-    const bare = path.join(origins, "acme", "widgets.git");
-    mkdirSync(path.dirname(bare), { recursive: true });
-    await exec("git", ["init", "-q", "--bare", "-b", "main", bare]);
-    const seed = path.join(origins, "seed");
-    mkdirSync(seed, { recursive: true });
-    writeFileSync(path.join(seed, "README.md"), "# widgets\n");
-    await exec("git", ["init", "-q", "-b", "main", seed]);
-    await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
-    await exec("git", ["-C", seed, "config", "user.name", "T"]);
-    await exec("git", ["-C", seed, "add", "-A"]);
-    await exec("git", ["-C", seed, "commit", "-qm", "init"]);
-    await exec("git", ["-C", seed, "push", "-q", bare, "HEAD:refs/heads/main"]);
-    firstCommit = (await exec("git", ["-C", seed, "rev-parse", "HEAD"])).stdout.trim();
+    origin = await createLocalOrigin(origins, { repo: REPO });
+    firstCommit = origin.firstCommit;
   }
 
   /** Land another commit on the origin, so a stale mirror is detectable. */
-  async function advanceOrigin(): Promise<string> {
-    const seed = path.join(origins, "seed");
-    writeFileSync(path.join(seed, "CHANGELOG.md"), "second\n");
-    await exec("git", ["-C", seed, "add", "-A"]);
-    await exec("git", ["-C", seed, "commit", "-qm", "second"]);
-    await exec("git", [
-      "-C",
-      seed,
-      "push",
-      "-q",
-      path.join(origins, "acme", "widgets.git"),
-      "HEAD:refs/heads/main",
-    ]);
-    return (await exec("git", ["-C", seed, "rev-parse", "HEAD"])).stdout.trim();
-  }
+  const advanceOrigin = (): Promise<string> =>
+    origin.advance({ file: "CHANGELOG.md", message: "second" });
 
   /** Point `https://github.com/` at `root` for the duration of `work`. */
-  async function withOrigin<T>(root: string, work: () => Promise<T>): Promise<T> {
-    const configPath = path.join(origins, `gitconfig-${path.basename(root)}`);
-    writeFileSync(
-      configPath,
-      `[url "${root}${path.sep}"]\n\tinsteadOf = https://github.com/\n`,
-    );
-    const saved = {
-      global: process.env.GIT_CONFIG_GLOBAL,
-      system: process.env.GIT_CONFIG_SYSTEM,
-    };
-    process.env.GIT_CONFIG_GLOBAL = configPath;
-    process.env.GIT_CONFIG_SYSTEM = "/dev/null";
-    try {
-      return await work();
-    } finally {
-      for (const [key, value] of [
-        ["GIT_CONFIG_GLOBAL", saved.global],
-        ["GIT_CONFIG_SYSTEM", saved.system],
-      ] as const) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    }
-  }
+  const withOrigin = <T,>(root: string, work: () => Promise<T>): Promise<T> =>
+    withLocalGithub(root, work);
 
   const clone = (name: string) =>
     cloneWorkspaceRepo({
@@ -333,18 +293,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
   /** A second bare origin under `origins/acme/<name>.git` with one commit, so a
    *  project repointed to it builds a NEW mirror beside the old one. */
   async function makeBareOrigin(name: string): Promise<void> {
-    const bare = path.join(origins, "acme", `${name}.git`);
-    mkdirSync(path.dirname(bare), { recursive: true });
-    await exec("git", ["init", "-q", "--bare", "-b", "main", bare]);
-    const seed = path.join(origins, `seed-${name}`);
-    mkdirSync(seed, { recursive: true });
-    writeFileSync(path.join(seed, "README.md"), `# ${name}\n`);
-    await exec("git", ["init", "-q", "-b", "main", seed]);
-    await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
-    await exec("git", ["-C", seed, "config", "user.name", "T"]);
-    await exec("git", ["-C", seed, "add", "-A"]);
-    await exec("git", ["-C", seed, "commit", "-qm", "init"]);
-    await exec("git", ["-C", seed, "push", "-q", bare, "HEAD:refs/heads/main"]);
+    await createLocalOrigin(origins, { repo: `acme/${name}` });
   }
 
   it("E1: a HEALTHY mirror whose local clone fails falls back to a direct GitHub clone", async () => {

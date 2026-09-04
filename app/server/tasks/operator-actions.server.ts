@@ -1,3 +1,7 @@
+import {
+  describeRevisionDrift,
+  type RevisionDrift,
+} from "~/shared/revision-drift";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type {
@@ -1481,13 +1485,19 @@ export interface OperatorTaskSnapshot {
    *  The operator was structurally blind to it, so its PR-closed recovery packet
    *  could say "the review before closure was clean (Approve)" while an
    *  unreviewed out-of-band commit the reconciler had already seen went
-   *  unmentioned. Null when the head equals the reviewed revision. */
+   *  unmentioned. Null when the head equals the reviewed revision.
+   *
+   *  Ruling 132 (pass 34, F34-14): the WHOLE record, plus the canonical
+   *  sentence (`describeRevisionDrift`) the accept dialog prints, so the
+   *  operator's read and the ceremony can never say two different things. */
   pr:
     | {
         number: number;
         state: PrState;
         title: string;
-        revisionDrift: { aheadBy: number; headSha: string } | null;
+        revisionDrift: RevisionDrift | null;
+        /** `describeRevisionDrift(revisionDrift).sentence`, empty for none. */
+        revisionDriftSentence: string;
       }
     | null;
   /** The task's delivery branch (null before any delivery). Lets recovery
@@ -1862,15 +1872,13 @@ export function operatorSnapshot(
           number: fm.pr.number,
           state: fm.pr.state,
           title: fm.pr.title,
-          // F21-17: the unreviewed-drift fact, verbatim from the same field the
-          // acceptance ceremony reads.
+          // F21-17 / ruling 132: the drift record verbatim from the same field
+          // the acceptance ceremony reads, and the same sentence it prints.
           revisionDrift:
-            fm.pr.revisionDrift && fm.pr.revisionDrift.aheadBy > 0
-              ? {
-                  aheadBy: fm.pr.revisionDrift.aheadBy,
-                  headSha: fm.pr.revisionDrift.headSha,
-                }
+            describeRevisionDrift(fm.pr.revisionDrift).kind !== "none"
+              ? (fm.pr.revisionDrift ?? null)
               : null,
+          revisionDriftSentence: describeRevisionDrift(fm.pr.revisionDrift).sentence,
         }
       : null,
     // The task branch, so recovery copy can NAME what an `archive_task`

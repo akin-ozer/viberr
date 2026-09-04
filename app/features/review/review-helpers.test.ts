@@ -75,10 +75,10 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
   it("R17-1: an open PR whose head drifted ahead of the review warns it merges unreviewed", () => {
     const sub = reviewRowSub({
       ...base,
-      pr: { number: 130, state: "review", revisionDrift: { aheadBy: 2 } },
+      pr: { number: 130, state: "review", revisionDrift: { headSha: "a".repeat(40), authored: 2, baseRefresh: null } },
     });
-    expect(sub).toContain("2 commits added since review");
-    expect(sub).toContain("unreviewed");
+    // Ruling 132: the canonical sentence, verbatim.
+    expect(sub).toContain("2 authored commits since review merge unreviewed");
   });
 
   it("R17-1: a conflicting PR still takes precedence over the drift note", () => {
@@ -90,7 +90,7 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
           number: 130,
           state: "review",
           mergeable: "conflicting",
-          revisionDrift: { aheadBy: 1 },
+          revisionDrift: { headSha: "b".repeat(40), authored: 1, baseRefresh: null },
         },
       }),
     ).toContain("conflicts with the base branch");

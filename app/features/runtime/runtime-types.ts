@@ -11,6 +11,8 @@
  *   friendly console model. `runs.md` §3.2 is the authoritative shape.
  */
 
+import type { RunFailureFacts } from "~/shared/run-failure";
+
 /** Lifecycle stored in agent_runs.state (orchestrator ruling 11). */
 export type RunState =
   | "queued"
@@ -94,6 +96,11 @@ export interface LogLine {
   } | null;
   /** Codex file_change changes → raw `file_change.changes`. */
   changes?: { path: string; kind: "add" | "update" | "delete" }[] | null;
+  /** Ruling 130(a) (pass 34): the adapter's classified failure record, on the
+   *  terminal `err` line only (beside its `run·error·<kind>` tag). Every
+   *  reader of a failure consumes THIS, never a second regex over the raw
+   *  stream. Absent on every other line. */
+  failure?: RunFailureFacts;
 }
 
 /**

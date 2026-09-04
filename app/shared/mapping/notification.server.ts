@@ -23,6 +23,14 @@ export const NOTIFICATION_KINDS = [
   // Ruling 99: a controller conversation reply, or chained-goal progress
   // addressed to the goal's creator.
   "controller",
+  // Ruling 131 (pass 34): the work a task waited on reached Done and the task
+  // was released, or a dependency can never complete (its task was archived).
+  "dependency",
+  // Ruling 140 (pass 34): the reader's owner seat on a task changed hands — a
+  // hand-off to them, a creation that named them, a takeover of their seat, or
+  // an admin release. Under ruling 127 the seat is the credential principal
+  // and the acceptance authority, so it is never a silent write.
+  "ownership",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 

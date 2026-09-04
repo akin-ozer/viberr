@@ -2600,17 +2600,17 @@ describe("F19-23: the revision-drift note agrees with its own number", () => {
         number: 150,
         state: "review",
         title: "[VIB-4] work",
-        revisionDrift: { aheadBy, headSha: HEAD },
+        revisionDrift: { headSha: HEAD, authored: aheadBy, baseRefresh: null },
       },
     });
 
   it("uses the singular for exactly one commit", () => {
-    expect(revisionDriftNote(withDrift(1))).toContain("1 commit was added");
+    expect(revisionDriftNote(withDrift(1))).toContain("1 authored commit was added");
     expect(revisionDriftNote(withDrift(1))).not.toContain("commit were");
   });
 
   it("keeps the plural for more than one", () => {
-    expect(revisionDriftNote(withDrift(3))).toContain("3 commits were added");
+    expect(revisionDriftNote(withDrift(3))).toContain("3 authored commits were added");
   });
 
   it("says nothing at all when the merged head IS the reviewed one", () => {

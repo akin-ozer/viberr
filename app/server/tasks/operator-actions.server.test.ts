@@ -3275,7 +3275,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
           number: 318,
           state: "closed",
           title: "PR",
-          revisionDrift: { aheadBy: 2, headSha: "cab10477beef1234" },
+          revisionDrift: { headSha: "cab10477beef1234", authored: 2, baseRefresh: null },
         },
       },
       goal: file.parsed.goal,
@@ -3283,8 +3283,9 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     expect(snapshot().pr?.revisionDrift).toEqual({
-      aheadBy: 2,
       headSha: "cab10477beef1234",
+      authored: 2,
+      baseRefresh: null,
     });
   });
 });

@@ -875,3 +875,69 @@ describe("PAT revalidation cooldown (P13-D-33)", () => {
     expect([...cachedFlags].sort()).toEqual([false, true]);
   });
 });
+
+/**
+ * Ruling 144 (pass 34, G34-2): a CLASSIC token's full granted list is recorded
+ * beside the required-scope verdicts, so the credential card can say a token
+ * without `workflow` cannot push `.github/workflows/*` and delivery can refuse
+ * such a push BEFORE GitHub is asked. Advisory only: `workflow` stays optional
+ * (ruling 18) and a token without it is still `valid`.
+ *
+ * Canary: drop the `headerScopes` assignment in `validatePatToken` (leave the
+ * base's `null`) and the first case fails.
+ */
+describe("ruling 144 — the classic token's header list is recorded", () => {
+  it("records the full x-oauth-scopes list on a classic token, and the token without `workflow` stays valid", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "viberr-bot" },
+        headers: { "x-oauth-scopes": "repo, read:org" },
+      },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
+    });
+    const result = await validatePatToken(CLASSIC, {
+      repo: REPO,
+      requiredScopes: ["repo", "pull_request:write"],
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.status).toBe("valid");
+    expect(result.headerScopes).toEqual(["repo", "read:org"]);
+    expect(result.missingScopes).toEqual([]);
+  });
+
+  it("an EMPTY header on a classic token records [] (a positive fact), and a fine-grained token records null", async () => {
+    const empty = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" }, headers: { "x-oauth-scopes": "" } },
+    });
+    const emptyResult = await validatePatToken(CLASSIC, {
+      repo: null,
+      requiredScopes: ["repo"],
+      fetchImpl: empty.fetchImpl,
+    });
+    expect(emptyResult.headerScopes).toEqual([]);
+
+    const fine = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: true, pull: true } },
+      },
+    });
+    const fineResult = await validatePatToken(FINE, {
+      repo: REPO,
+      requiredScopes: ["repo"],
+      fetchImpl: fine.fetchImpl,
+    });
+    expect(fineResult.tokenKind).toBe("fine_grained");
+    expect(fineResult.headerScopes).toBeNull();
+  });
+
+  it("a network failure before the header is read records null", async () => {
+    const result = await validatePatToken(CLASSIC, {
+      repo: null,
+      requiredScopes: ["repo"],
+      fetchImpl: unreachableFetch(),
+    });
+    expect(result.status).toBe("network_error");
+    expect(result.headerScopes).toBeNull();
+  });
+});
