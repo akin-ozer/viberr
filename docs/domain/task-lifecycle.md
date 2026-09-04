@@ -91,6 +91,15 @@ underspecified goal with an `input` packet at triage; there is no mechanical blo
 moving a task past an open packet. `input_required` set at creation clears when the
 task leaves the entry stage.
 
+**Waiting on other work at birth** (ruling 131(c)): `createTask` accepts `blockedBy`
+(task keys and goal links in the same project, validated by
+`validateDependencyRefs` BEFORE the key is allocated, so a refused reference burns
+no counter value). The task is written with the list, `waiting: none`, a "Waits on
+other work" note, and its stored readiness at the birth value `input_required`; the
+`blocked` it shows is the derived floor. The controller's `create_task` and a goal
+link's declared `blockedBy` both come in through this door.
+
+
 ## 4. Stages and the workflow graph
 
 Stages are per project. Nothing hard-codes `triage`/`done`; `resolveStageRoles`
@@ -155,6 +164,23 @@ declaration that names nothing on this board is treated as unrestricted.
   verified no-change task with no required reviewer; otherwise `changed`. Never
   hand-edit it; the projection re-derives it from `workRevision`, `verdicts`,
   `engagements`, `noChanges` and `acceptance`.
+
+**Waiting on other work** (ruling 131). A task's `blockedBy` list is written by ONE
+writer, `setTaskDependencies` (`app/server/tasks/dependencies.server.ts`), whichever
+door it comes through: the task page's own "Blocked by" form (intent
+`set-task-dependencies`, gate `edit-task-meta`), the controller's `update_task`, or
+the operator's `set_dependencies` tool (in-process authority). Every write validates
+against the store, names the reference and the reason when it refuses (unparseable,
+self, unknown, archived, unknown goal or link, a cycle through stored and declared
+edges), writes a "Dependencies updated" note and a `task.dependencies.updated` audit
+row, and settles `waiting: none` when nothing else is pending. While the list is
+non-empty the derived readiness is `blocked` and the card, list row and task page
+say what it waits on and in what state. An emptied list clears `heldAtStage`; a
+PERSON emptying it is the release itself (ruling 131(e)): the same two halves the
+engine uses (`clearDependencies`, then `announceRelease`: the "Dependencies released"
+note naming who cleared it, a stored `blocked` lifted to `ready`, the
+`task.dependencies.released` audit row, a `dependency` notification to the owner and
+supervisors, and the operator re-invoked with `dependencies-released`).
 
 ## 7. Ownership, comments, mentions
 

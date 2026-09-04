@@ -153,6 +153,41 @@ describe("governed actions record audit rows (table-driven)", () => {
           ),
       },
       {
+        // Ruling 131: the dependency writer and the human release.
+        name: "setTaskDependencies",
+        action: "task.dependencies.updated",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { setTaskDependencies } = await import("~/server/tasks/dependencies.server");
+          await setTaskDependencies(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-2"] },
+            actorArda(),
+            fileCtx,
+          );
+        },
+      },
+      {
+        name: "setTaskDependencies (a person empties the list)",
+        action: "task.dependencies.released",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { setTaskDependencies } = await import("~/server/tasks/dependencies.server");
+          await setTaskDependencies(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-2"] },
+            actorArda(),
+            fileCtx,
+          );
+          await setTaskDependencies(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: [] },
+            actorArda(),
+            fileCtx,
+          );
+        },
+      },
+      {
         name: "appendComment",
         action: "task.comment",
         taskKey: "VIB-1",

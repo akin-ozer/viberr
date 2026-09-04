@@ -273,6 +273,38 @@ async function recordReviewerReply(
 }
 
 describe("createTask", () => {
+  it("ruling 131: createTask with blockedBy is born held; a bad reference refuses before a key is allocated", async () => {
+    // Canary: move the `validateDependencyRefs` call below `allocateTaskKey`
+    // and the refused create burns VIB-100 (the good one lands on VIB-101).
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await expect(
+      createTask(
+        store.db,
+        { projectSlug: store.slug, title: "Waits on nothing real", blockedBy: ["VIB-999"] },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("VIB-999 is not a task in this project") });
+    const held = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Waits on VIB-1", blockedBy: ["VIB-1"] },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(held.key).toBe("VIB-100");
+    expect(held.task.waiting).toBe("none");
+    expect(held.task.readiness).toBe("blocked");
+    expect(held.task.blockedBy.map((e) => [e.ref, e.state])).toEqual([["VIB-1", "open"]]);
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-100", dataRoot: store.dataRoot })!.parsed;
+    // The stored value stays at birth; the floor is derived, never stored.
+    expect(parsed.frontmatter.readiness).toBe("input_required");
+    expect(parsed.frontmatter.blockedBy).toEqual(["VIB-1"]);
+    expect(parsed.timeline[0]).toMatchObject({ type: "note", title: "Waits on other work" });
+    expect(parsed.timeline[0]!.text).toContain("Created waiting on VIB-1");
+  });
+
   it("writes task.md with the mock create defaults and projects it", async () => {
     const store = prepared();
     const result = await createTask(

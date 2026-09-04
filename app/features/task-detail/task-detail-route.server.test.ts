@@ -541,6 +541,34 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(decision!.text).toContain("unblocked");
   });
 
+  it("ruling 131 set-task-dependencies: sets the wait, clears it as a release, refuses a bad reference by name", async () => {
+    // Canary: drop the intent's `case` (every shape answers the unknown-intent
+    // refusal), or route it through `setTaskMetadata`.
+    const set = (await postIntent("VIB-153", ids.arda, {
+      intent: "set-task-dependencies", blockedBy: "VIB-142, VIB-142\n",
+    })) as { ok: true; toast: string };
+    expect(set.toast).toBe("Waits on VIB-142");
+    const held = await runLoader("VIB-153", ids.arda);
+    expect(held.task.blockedBy.map((e) => e.ref)).toEqual(["VIB-142"]);
+    expect(held.task.readiness).toBe("blocked");
+
+    // SAFETY: the validator refuses inside the try; the action answers through
+    // `appErrorResponse`.
+    const bad = (await postIntent("VIB-153", ids.arda, {
+      intent: "set-task-dependencies", blockedBy: "VIB-153",
+    })) as ActionRefusal;
+    expect(bad.init.status).toBe(400);
+    expect(bad.data.error).toContain("VIB-153: a task cannot wait on itself");
+
+    const cleared = (await postIntent("VIB-153", ids.arda, {
+      intent: "set-task-dependencies", blockedBy: "",
+    })) as { ok: true; toast: string };
+    expect(cleared.toast).toBe("No longer waits on other work");
+    const released = await runLoader("VIB-153", ids.arda);
+    expect(released.task.blockedBy).toEqual([]);
+    expect(released.task.timeline.some((e) => e.type === "note" && /Dependencies released/.test(e.title ?? ""))).toBe(true);
+  });
+
   it("request_edit: clears the packet, flips waiting to agent, writes option.ev", async () => {
     queueFakeRun({
       lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],

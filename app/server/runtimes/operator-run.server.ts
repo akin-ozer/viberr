@@ -183,6 +183,7 @@ export interface RunOperatorInput {
     | "pr-diverged"
     | "delivered"
     | "packet-resolved"
+    | "dependencies-released"
     | "scheduled"
     | "manual";
   /** packet-resolved trigger: the option the human chose and any note, so the

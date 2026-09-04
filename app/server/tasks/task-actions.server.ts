@@ -56,6 +56,7 @@ import {
   describeRunFailure,
   type DescribeRunFailureInput,
 } from "./run-failure-remedy.server";
+import { validateDependencyRefs } from "./dependencies.server";
 import {
   compactTimelineEvents,
   DEFAULT_COMPACTION,
@@ -488,6 +489,10 @@ export interface CreateTaskInput {
   dueDate?: string | null;
   /** Ruling 99: set only by goal-actions when this task is a chain link. */
   goalRef?: { goalId: string; linkIndex: number } | null;
+  /** Ruling 131: what the new task waits on, validated BEFORE a key is
+   *  allocated so a refusal burns no key; the task is born held
+   *  (`waiting: "none"`, readiness floored at `blocked` by derivation). */
+  blockedBy?: readonly string[];
 }
 
 /**
@@ -540,6 +545,12 @@ export async function createTask(
     throw AppError.validation("New tasks cannot be created in the done stage.");
   }
 
+  // Ruling 131: validate the wait BEFORE the key is allocated — a refused
+  // reference must not burn a counter value.
+  const blockedBy = input.blockedBy?.length
+    ? validateDependencyRefs(db, { projectSlug: input.projectSlug, self: null, entries: input.blockedBy })
+    : [];
+
   const projectRef = {
     projectSlug: input.projectSlug,
     dataRoot: ctx.dataRoot,
@@ -556,7 +567,8 @@ export async function createTask(
     previousStageId: null,
     heldAtStage: null,
     readiness: "input_required",
-    waiting: "human",
+    // Ruling 131(a): a task born waiting on other work owes nobody anything.
+    waiting: blockedBy.length > 0 ? "none" : "human",
     // Ruling 127: creation SEATS the creator as owner. Every agent run on a
     // task bills the OWNER's own Claude/Codex accounts, so a task with no owner
     // cannot run agents at all — and the pre-127 default (`null`) meant every
@@ -579,7 +591,7 @@ export async function createTask(
     // never disagree with the graded scale. Derived purely here (no separate input)
     // so the two cannot desync; the edit path (`setTaskMetadata`) does the same.
     urgent: input.priority === "urgent",
-    blockedBy: [],
+    blockedBy,
     archived: false,
     validation: "none",
     workRevision: null,
@@ -608,6 +620,18 @@ export async function createTask(
         "Took task ownership by creating the task. Agent runs on this task use the owner's own Claude and Codex accounts, and the owner is its human reviewer and acceptance authority.",
       ),
     ];
+  }
+  if (blockedBy.length > 0) {
+    const waitNote: TaskFileEvent = {
+      occurredAt: now,
+      type: "note",
+      actor: creator ? humanActorRef(db, creator) : { kind: "operator" },
+      title: "Waits on other work",
+      text: `Created waiting on ${blockedBy.join(", ")}. Held until every entry is done; Viberr releases it then.`,
+      toAgent: false,
+      evidence: null,
+    };
+    createInput.timeline = [waitNote, ...(createInput.timeline ?? [])];
   }
   await createTaskFile(taskRef(ctx, input.projectSlug, key), createInput);
 
@@ -952,7 +976,8 @@ export async function autoInvokeOperator(
     | "goal-updated"
     | "pr-diverged"
     | "delivered"
-    | "packet-resolved",
+    | "packet-resolved"
+    | "dependencies-released",
   /** Transition-chain depth to thread into the run (transition + delivered triggers —
    *  see OPERATOR_TRANSITION_CHAIN_CAP). Omitted → the run starts a fresh chain. */
   transitionDepth?: number,

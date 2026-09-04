@@ -104,7 +104,7 @@ the guards and the Policy page share:
 | Action | admin | maintainer | contributor | viewer |
 |---|---|---|---|---|
 | `view`, `comment` | ✓ | ✓ | ✓ | ✓ |
-| `create-task`, `own-task`, `edit-task-meta` | ✓ | ✓ | ✓ | |
+| `create-task`, `own-task`, `edit-task-meta` (priority, labels, due date and, ruling 131, what a task waits on) | ✓ | ✓ | ✓ | |
 | `approve-transition`, `resolve-packet`, `accept-completion`, `update-goal`, `run-agents`, `reorder-board`, `reconcile-github`, `grant-github-scope`, `rescan-project` | ✓ | ✓ | | |
 | `release-any-ownership`, `manage-members`, `manage-agents`, `edit-policy`, `force-accept-completion` | ✓ | | | |
 

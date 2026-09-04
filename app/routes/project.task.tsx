@@ -46,6 +46,8 @@ import {
   updateTaskGoal,
   userName,
 } from "~/server/tasks/task-actions.server";
+import { setTaskDependencies } from "~/server/tasks/dependencies.server";
+import { splitDependencyText } from "~/shared/dependencies";
 import { coercePriority } from "~/schemas/task-file.schema";
 import { resolveAcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -537,6 +539,24 @@ export async function action({ request, params }: Route.ActionArgs) {
         if (priority) metaInput.priority = priority;
         await setTaskMetadata(db, metaInput, actor);
         return { ok: true as const, intent, toast: "Task metadata updated" };
+      }
+      case "set-task-dependencies": {
+        // Ruling 131: the Details panel's own form. The FULL list is submitted
+        // (comma- or newline-separated); an empty field clears the wait, which
+        // for a person IS the release. Validation refuses by name before any
+        // write, and the refusal surfaces on this form, never swallowed by the
+        // metadata form's close-on-success.
+        const entries = splitDependencyText(String(formData.get("blockedBy") ?? ""));
+        const result = await setTaskDependencies(db, { projectSlug, taskKey, blockedBy: entries }, actor);
+        return {
+          ok: true as const,
+          intent,
+          toast: !result.changed
+            ? "Dependencies unchanged"
+            : result.blockedBy.length > 0
+              ? `Waits on ${result.blockedBy.join(", ")}`
+              : "No longer waits on other work",
+        };
       }
       case "resolve-packet": {
         const raw = Number(formData.get("option"));
