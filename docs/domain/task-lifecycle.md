@@ -204,7 +204,12 @@ waits are re-pointed by hand first. A PERSON emptying it is the release itself (
 engine uses (`clearDependencies`, then `announceRelease`: the "Dependencies released"
 note naming who cleared it, a stored `blocked` lifted to `ready`, the
 `task.dependencies.released` audit row, a `dependency` notification to the owner and
-supervisors, and the operator re-invoked with `dependencies-released`).
+supervisors, and the operator re-invoked with `dependencies-released`). A wait that can
+NEVER complete is noticed by the same sweep, whatever killed it (an archived task, a
+cancelled goal, a removed link, a reference to nothing): ONE "Waiting on work that cannot
+complete" note, one notification, `waiting: human`, and the list left for a person to
+edit. A task that already reached the terminal stage has its list cleared quietly — no
+note, no operator turn.
 
 ## 7. Ownership, comments, mentions
 

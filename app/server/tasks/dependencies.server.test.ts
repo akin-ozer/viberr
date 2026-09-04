@@ -376,13 +376,13 @@ describe("the release engine", () => {
     const held = file(store, "VIB-12");
     expect(held.frontmatter.blockedBy).toEqual(["VIB-5"]);
     expect(held.frontmatter.waiting).toBe("human");
-    const dead = held.timeline.filter((e) => e.title === "Waiting on archived work");
+    const dead = held.timeline.filter((e) => e.title === "Waiting on work that cannot complete");
     expect(dead).toHaveLength(1);
-    expect(dead[0]!.text).toContain("VIB-5 was archived, so VIB-5 can never complete");
+    expect(dead[0]!.text).toContain("VIB-5 can never complete");
     expect(getTaskSummary(store.db, store.slug, "VIB-12")!.blockedBy[0]!.state).toBe("failed");
     // Idempotent: a second pass writes nothing more.
     expect(await noteDeadDependency(store.db, ctxWith, store.slug, "VIB-5")).toEqual([]);
-    expect(file(store, "VIB-12").timeline.filter((e) => e.title === "Waiting on archived work")).toHaveLength(1);
+    expect(file(store, "VIB-12").timeline.filter((e) => e.title === "Waiting on work that cannot complete")).toHaveLength(1);
     // SAFETY: `user_id`, `kind` are NOT NULL on `notifications`.
     const rows = store.db
       .prepare(`SELECT user_id FROM notifications WHERE task_key = 'VIB-12' AND kind = 'dependency'`)
@@ -522,5 +522,45 @@ describe("the release engine speaks only for a task that is actually waiting", (
     expect(released).toEqual([]);
     expect(file(store, "VIB-12").frontmatter.blockedBy).toEqual(["VIB-2", "VIB-1"]);
     expect(runOperator.mock.calls).toHaveLength(0);
+  });
+});
+
+/**
+ * Pass 34 review: a wait that can NEVER complete used to be noticed only when
+ * a dependency TASK was archived — the one door that called the notice. A
+ * cancelled goal, a removed link or a lost task left the dependent held and
+ * silent forever.
+ */
+describe("the sweep notices a dead wait whatever killed it", () => {
+  it("a reference to a link that no longer exists is noted by the ordinary sweep", async () => {
+    // Canary: call `noteDeadDependency` only from the archive hook again —
+    // nothing ever tells the owner this task can never move.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-13", {
+        stage: "impl",
+        waiting: "none",
+        readiness: "blocked",
+        blockedBy: ["goal-1 link 9"],
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runOperator = runOperatorStub();
+    const ctxWith = { dataRoot: store.dataRoot, deps: { runOperator } };
+
+    expect(await releaseDependents(store.db, ctxWith, store.slug)).not.toContain("VIB-13");
+    const parsed = file(store, "VIB-13");
+    const dead = parsed.timeline.filter((e) => e.title === "Waiting on work that cannot complete");
+    expect(dead).toHaveLength(1);
+    expect(dead[0]!.text).toContain("can never complete");
+    expect(parsed.frontmatter.waiting).toBe("human");
+    expect(parsed.frontmatter.blockedBy).toEqual(["goal-1 link 9"]);
+    // Idempotent: a second sweep writes nothing more.
+    await releaseDependents(store.db, ctxWith, store.slug);
+    expect(
+      file(store, "VIB-13").timeline.filter((e) => e.title === "Waiting on work that cannot complete"),
+    ).toHaveLength(1);
   });
 });

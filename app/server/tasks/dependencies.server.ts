@@ -479,6 +479,16 @@ export async function releaseDependents(
   ctx: TaskActionContext,
   projectSlug: string,
 ): Promise<string[]> {
+  // Pass 34 review: the sweep also notices a wait that can NEVER complete,
+  // whatever killed it. The archive hook was the only caller that ever looked,
+  // so a cancelled goal, a removed link or a lost task left its dependent held
+  // and silent. Idempotent by note text, like the archive path.
+  await noteDeadDependency(db, ctx, projectSlug, null).catch((error) => {
+    logger.error("dead-dependency sweep failed", {
+      projectSlug,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  });
   const released: string[] = [];
   for (const held of listHeldTasks(db, projectSlug)) {
     try {
@@ -516,7 +526,7 @@ export function maybeReleaseDependents(db: DatabaseSync, ctx: TaskActionContext,
   });
 }
 
-const DEAD_NOTE_TITLE = "Waiting on archived work";
+const DEAD_NOTE_TITLE = "Waiting on work that cannot complete";
 
 /**
  * A dependency that can never complete (its task was archived) does not
@@ -531,18 +541,29 @@ export async function noteDeadDependency(
   db: DatabaseSync,
   ctx: TaskActionContext,
   projectSlug: string,
-  archivedKey: string,
+  /** The archived task this call is about, or null for the convergent sweep:
+   *  ANY entry that can never complete, whatever killed it (pass 34 review —
+   *  a cancelled goal, a removed link or a lost task left the dependent held
+   *  in silence, because only the archive hook ever looked). */
+  archivedKey: string | null,
 ): Promise<string[]> {
   const noted: string[] = [];
   for (const held of listHeldTasks(db, projectSlug)) {
     const entries = resolveDependencies(db, projectSlug, held.blockedBy);
-    const dead = deadDependencies(entries).filter((e) => e.taskKey === archivedKey);
+    const dead = deadDependencies(entries).filter(
+      (e) => archivedKey === null || e.taskKey === archivedKey,
+    );
     if (dead.length === 0) continue;
     const ref = taskRef(ctx, projectSlug, held.taskKey);
     const existing = readTaskFile(ref);
     if (!existing || existing.parsed.frontmatter.archived) continue;
     const spelled = dead.map((e) => e.label).join(", ");
-    const text = `${archivedKey} was archived, so ${spelled} can never complete. This task stays held; edit what it waits on (remove the entry or point it elsewhere) to release it.`;
+    // ONE spelling, whichever door noticed it: the archive hook and the
+    // convergent sweep must produce the same sentence, or the idempotence
+    // check below sees a different text and writes the same fact twice
+    // (caught while wiring the sweep, pass 34 review). What KILLED the entry
+    // is on the entry itself, rendered as its state.
+    const text = `${spelled} can never complete. This task stays held; edit what it waits on (remove the entry or point it elsewhere) to release it.`;
     const newestNote = existing.parsed.timeline.find((e) => e.type === "note" && e.title === DEAD_NOTE_TITLE);
     if (newestNote?.text === text) continue;
     await updateTaskFile(ref, (parsed) => {
