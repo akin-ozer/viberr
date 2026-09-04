@@ -190,6 +190,14 @@ cannot rejoin the gap silently — the typecheck refuses it.)*
   `e2e/06-activity-hydration.spec.ts`. *(Added 2026-09-04, pass 34 — `formatDayDotTimeUTC`
   used to sample `now` while documenting itself as the deterministic first pass, and four
   surfaces rendered a host-zone calendar date unguarded.)*
+- **The collision confirm renders TWO shapes** (pass 34, C3/U34-8): with an unowned PR
+  recorded it names the stranger, its pull request and the stale branch ("Clear collision
+  & redeliver"); with none it describes THIS task's own remote branch and says no pull
+  request is closed ("Delete branch & redeliver"), because that is what
+  `resolveRemoteBranchCollision` actually does then. In BOTH shapes, and in the archive
+  dialog's delete-the-branch variant, an OPEN pull request of the task's own raises a warn
+  row naming the refusal (`deleteTaskRemoteBranch` never deletes a branch a PR is open on)
+  before the button is pressed, rather than after the click.
 - Settings headings name their scope: "Instance settings" versus "<project> · settings"
   (ruling 32).
 - **No surface gates AUTHORING on the viewer's own agent account** (ruling 127): a run

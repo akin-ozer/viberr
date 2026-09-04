@@ -124,6 +124,15 @@ export interface PacketArchiveDisclosure {
    * is a slot a literal can silently skip; a required one fails typecheck.
    */
   unownedPr: number | null;
+  /**
+   * C3 (pass 34, U34-8): this task's OWN open review pull request, when one
+   * stands — the exact state `deleteTaskRemoteBranch` refuses on ("a PR is
+   * open on the branch"), which both remote-branch ceremonies reach. Null when
+   * no PR of this task's own is open. Both dialogs warn with it BEFORE the
+   * button, instead of letting a person confirm a deletion the server will
+   * refuse (live: JC-6 and JC-3, both confirmed, both refused).
+   */
+  openPr: number | null;
 }
 
 /**
@@ -339,6 +348,10 @@ function PacketArchiveConfirm({
           </span>
         </div>
       )}
+      {/* C3 (pass 34, U34-8): this dialog reaches the same server refusal the
+          collision ceremony does, and used to only INFER that no PR stands
+          (from the operator's authoring rule). It says it outright now. */}
+      {deletesBranch && <OpenPrRefusalRow openPr={disclosure?.openPr ?? null} />}
       <div className="obs">
         <span className="k">After</span>
         <span>
@@ -422,6 +435,28 @@ function PacketDiscardConfirm({
 }
 
 /**
+ * C3 (pass 34, U34-8): the refusal a remote-branch deletion will hit, said
+ * BEFORE the button rather than after the click. `deleteTaskRemoteBranch`
+ * refuses while this task's own PR is open, and both ceremonies that delete a
+ * remote ref reach it.
+ */
+function OpenPrRefusalRow({ openPr }: { openPr: number | null }) {
+  if (openPr === null) return null;
+  return (
+    <div className="obs warn" data-open-pr-warning="">
+      <span className="k">Refused while open</span>
+      <span>
+        This task&rsquo;s own pull request{" "}
+        <span className="mono">#{openPr}</span> is still open, and Viberr never
+        deletes a branch a pull request is open on. Merge or close{" "}
+        <span className="mono">#{openPr}</span> on GitHub first; confirming now
+        is refused and nothing changes.
+      </span>
+    </div>
+  );
+}
+
+/**
  * F31-6 — a `resolve_remote_collision` option asks first, like its destructive
  * siblings: it deletes a REMOTE ref (the stale branch squatting on this task's
  * branch name) and closes the unrelated PR recorded on it, then re-delivers
@@ -433,6 +468,7 @@ function PacketCollisionConfirm({
   option,
   branch,
   unownedPr,
+  openPr,
   busy,
   onCancel,
   onConfirm,
@@ -442,6 +478,8 @@ function PacketCollisionConfirm({
   branch: string | null;
   /** The unrelated PR recorded on that branch (R15-15), when known. */
   unownedPr: number | null;
+  /** C3: this task's own open PR, which refuses the deletion. */
+  openPr: number | null;
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -451,15 +489,25 @@ function PacketCollisionConfirm({
   ) : (
     <>this task&rsquo;s branch</>
   );
+  // C3 (pass 34, U34-8): with NO unowned PR recorded there is no stranger —
+  // `resolveRemoteBranchCollision` deletes THIS task's own remote branch and
+  // closes nothing. Describing that as "the unrelated one squatting on this
+  // task's branch name" asked a person to confirm the deletion of their own
+  // pushed branch under somebody else's description.
+  const stranger = unownedPr !== null;
   return (
     <PacketDestructiveConfirm
-      ariaLabel="Clear this task's branch collision"
+      ariaLabel={
+        stranger
+          ? "Clear this task's branch collision"
+          : "Delete this task's remote branch and redeliver"
+      }
       screenLabel="Packet collision dialog"
       icon="alert"
-      heading="Clear the branch collision?"
+      heading={stranger ? "Clear the branch collision?" : "Delete this task's remote branch?"}
       subhead={option.t}
       footHint="Recorded as timeline events and audit rows."
-      confirmLabel="Clear collision & redeliver"
+      confirmLabel={stranger ? "Clear collision & redeliver" : "Delete branch & redeliver"}
       busy={busy}
       onCancel={onCancel}
       onConfirm={onConfirm}
@@ -467,29 +515,36 @@ function PacketCollisionConfirm({
       <div className="obs">
         <span className="k">Decision</span>
         <span>
-          Confirming &ldquo;{option.t}&rdquo; reclaims the branch name for this
-          task.
+          Confirming &ldquo;{option.t}&rdquo;{" "}
+          {stranger
+            ? "reclaims the branch name for this task."
+            : "removes this task's own remote branch and pushes its local work again."}
         </span>
       </div>
       <div className="obs warn">
         <span className="k">Deletes</span>
-        <span>
-          The stale branch {branchLabel} on GitHub, the unrelated one squatting
-          on this task&rsquo;s branch name
-          {unownedPr !== null ? (
-            <>
-              , and closes its pull request{" "}
-              <span className="mono">#{unownedPr}</span>
-            </>
-          ) : null}
-          . <strong>Deleting the remote branch cannot be undone.</strong>
-        </span>
+        {stranger ? (
+          <span>
+            The stale branch {branchLabel} on GitHub, the unrelated one squatting
+            on this task&rsquo;s branch name, and closes its pull request{" "}
+            <span className="mono">#{unownedPr}</span>.{" "}
+            <strong>Deleting the remote branch cannot be undone.</strong>
+          </span>
+        ) : (
+          <span>
+            This task&rsquo;s own remote branch {branchLabel} on GitHub. No
+            unrelated pull request is recorded on it, so nothing of anyone
+            else&rsquo;s is touched and no pull request is closed.{" "}
+            <strong>Deleting the remote branch cannot be undone.</strong>
+          </span>
+        )}
       </div>
+      <OpenPrRefusalRow openPr={openPr} />
       <div className="obs">
         <span className="k">Keeps</span>
         <span>
-          This task&rsquo;s local delivery. After the stale ref is gone it is
-          pushed fresh and the real review PR opens.
+          This task&rsquo;s local delivery. After the {stranger ? "stale " : ""}
+          ref is gone it is pushed fresh and the real review PR opens.
         </span>
       </div>
     </PacketDestructiveConfirm>
@@ -1256,6 +1311,7 @@ export function DecisionPacket({
           option={pendingOption}
           branch={archiveDisclosure?.branch ?? null}
           unownedPr={archiveDisclosure?.unownedPr ?? null}
+          openPr={archiveDisclosure?.openPr ?? null}
           busy={busy}
           onCancel={cancelConfirm}
           onConfirm={commitConfirm}

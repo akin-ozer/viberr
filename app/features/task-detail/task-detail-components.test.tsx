@@ -2530,7 +2530,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canEditGoal
         canArchive
         canDiscardBranch
-        archiveDisclosure={{ taskKey: "VIB-1", branch: "vib-1", pendingRecommendations: 0, unownedPr: null }}
+        archiveDisclosure={{ taskKey: "VIB-1", branch: "vib-1", pendingRecommendations: 0, unownedPr: null, openPr: null }}
         onResolveCustom={() => {}} onResolve={onResolve}
         onAsk={() => {}}
       />,
@@ -2574,6 +2574,7 @@ describe("DecisionPacket — pass-20 governance", () => {
           branch: "vib-1",
           pendingRecommendations: 0,
           unownedPr: 232,
+          openPr: null,
         }}
         onResolveCustom={() => {}} onResolve={onResolve}
         onAsk={() => {}}
@@ -2734,6 +2735,7 @@ describe("DecisionPacket — pass-20 governance", () => {
             branch: "vib-1",
             pendingRecommendations: 0,
             unownedPr: 232,
+          openPr: null,
           }}
           onResolveCustom={() => {}} onResolve={() => {}}
           onAsk={() => {}}
@@ -2812,7 +2814,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canEditGoal={false}
         canArchive={false}
         canDiscardBranch={false}
-        archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0, unownedPr: null }}
+        archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0, unownedPr: null, openPr: null }}
         onResolveCustom={() => {}} onResolve={() => {}}
         onRequestMaintainer={onRequestMaintainer}
         onAsk={() => {}}

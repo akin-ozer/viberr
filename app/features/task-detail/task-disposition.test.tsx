@@ -1468,6 +1468,7 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
     branch: "vib-151",
     pendingRecommendations: 2,
     unownedPr: null,
+    openPr: null,
   };
 
   const archivePacket = (deleteBranch: boolean): PacketRender => {
@@ -2291,5 +2292,92 @@ describe("U7: the task detail's reading order matches its stacking rule", () => 
     expect(main.textContent).not.toContain("Accept completion → Done");
     // …and the timeline really is in the one that follows it.
     expect(main.querySelector(".tl-list, .timeline, .tl-wrap")).not.toBeNull();
+  });
+});
+
+/**
+ * C3 (pass 34, U34-8): the collision confirm describes the branch it is
+ * actually about, and both remote-branch ceremonies warn about the refusal
+ * `deleteTaskRemoteBranch` will hand back. Live: JC-6 at 10:33:06Z and JC-3 at
+ * 11:47:48Z were both confirmed and both refused, with the dialog promising
+ * the deletion of a stranger's branch.
+ */
+describe("C3: the collision confirm describes the right branch, and warns before the refusal", () => {
+  const collisionPacket: PacketRender = {
+    type: "blocked",
+    kind: "blocked decision",
+    from: "Operator",
+    title: "The remote vib-151 is not this task's work",
+    body: "The push was refused.",
+    observations: [],
+    options: [
+      {
+        kind: "resolve_remote_collision",
+        t: "Delete the stale remote branch, then redeliver",
+        d: "Reclaims the branch name for this task.",
+        rec: true,
+      },
+    ],
+  };
+  const dialogText = (container: HTMLElement) =>
+    container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Packet collision dialog"]',
+    )!.textContent!;
+
+  it("with NO unowned PR it describes THIS task's own remote branch, never a stranger", () => {
+    // Canary: restore the single shape — the person is told they are deleting
+    // "the unrelated one squatting on this task's branch name", which is their
+    // own pushed branch.
+    const { container } = renderPage({ task: { packet: collisionPacket, unownedPr: null } });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const text = dialogText(container);
+    expect(text).toContain("This task’s own remote branch");
+    expect(text).toContain("vib-151");
+    expect(text).toContain("No unrelated pull request is recorded on it");
+    expect(text).not.toContain("squatting");
+    expect(text).not.toContain("stale branch");
+    expect(text).toContain("cannot be undone");
+    expect(text).toContain("local delivery");
+    expect(findButton(container, "Delete branch & redeliver")).toBeTruthy();
+  });
+
+  it("with an unowned PR it still names the stranger and closes its PR", () => {
+    // Canary: make the no-collision branch unconditional.
+    const { container } = renderPage({ task: { packet: collisionPacket, unownedPr: 232 } });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const text = dialogText(container);
+    expect(text).toContain("squatting");
+    expect(text).toContain("#232");
+    expect(findButton(container, "Clear collision & redeliver")).toBeTruthy();
+  });
+
+  it("an OPEN pull request of this task's own warns before the button, read off the task", () => {
+    // Canary: hardcode `openPr: null` in the page's archiveDisclosure literal
+    // (or drop the warn row) — the person confirms a deletion the server
+    // refuses, which is what JC-6 and JC-3 did.
+    const { container } = renderPage({
+      task: {
+        packet: collisionPacket,
+        unownedPr: null,
+        pr: { number: 77, state: "review", title: "VIB-151 work" },
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const text = dialogText(container);
+    expect(text).toContain("#77");
+    expect(text).toContain("never deletes a branch a pull request is open on");
+    expect(text).toContain("confirming now is refused and nothing changes");
+  });
+
+  it("a MERGED pull request is no refusal, so no warning is shown", () => {
+    const { container } = renderPage({
+      task: {
+        packet: collisionPacket,
+        unownedPr: null,
+        pr: { number: 77, state: "merged", title: "VIB-151 work" },
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    expect(dialogText(container)).not.toContain("never deletes a branch a pull request is open on");
   });
 });
