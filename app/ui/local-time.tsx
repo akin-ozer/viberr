@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
+  formatCalendarDate,
   formatDayDotTime,
   formatDayDotTimeUTC,
   formatRelative,
+  utcDayKey,
 } from "~/shared/dates/format";
 
 /**
@@ -26,6 +28,29 @@ export function useHydrated(): boolean {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
   return hydrated;
+}
+
+/**
+ * Hydration-safe calendar date ("Jul 3, 2027"). `formatCalendarDate` is
+ * host-zone by construction — on the client the host IS the viewer, which is
+ * the point of a calendar date — so near midnight a UTC server and the viewer
+ * disagree on the DAY, the same text mismatch `LocalDayDotTime` guards. First
+ * paint is the timezone-neutral UTC day key, marked as such ("2027-07-03
+ * (UTC)", the insights page's form); the effect swaps in the local calendar
+ * date. A missing or unreadable value renders `fallback` (nothing by default),
+ * never the word "null". Pass 34, C6.
+ */
+export function LocalCalendarDate({
+  iso,
+  fallback = null,
+}: {
+  iso: string | null;
+  fallback?: ReactNode;
+}) {
+  const local = useHydrated();
+  const day = iso ? utcDayKey(iso) : "";
+  if (!day) return <>{fallback}</>;
+  return <>{local ? formatCalendarDate(iso) : `${day} (UTC)`}</>;
 }
 
 /**

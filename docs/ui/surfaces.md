@@ -175,7 +175,20 @@ cannot rejoin the gap silently — the typecheck refuses it.)*
   covers all three. *(Added 2026-09-02, pass 32 — A00-3: the docs described the panel
   as image thumbnails plus a lightbox, which was the pre-ruling-105 surface.)*
 - Timestamps render through `app/shared/dates/format.ts` only: zero-padded `HH:MM`,
-  `{day} · {time}`, relative forms.
+  `{day} · {time}`, relative forms. **The hydration contract** (pass 34, C6): a
+  timestamp's first pass depends on the timestamp alone — the `*UTC` formatters take no
+  `now` and render the absolute UTC day + UTC clock (`Jul 3 · 23:59`), identical on the
+  server and in any viewer's browser at any clock — and an effect swaps in the
+  viewer-local form after hydration (`LocalDayDotTime`, `LocalRelative`, `useHydrated`
+  in `app/ui/local-time.tsx`; the console's line clocks sit behind the same flag).
+  Calendar dates (`formatCalendarDate`, host-zone by construction) render through
+  `LocalCalendarDate` for the same reason: `YYYY-MM-DD (UTC)` first, the local calendar
+  date after hydration. Gated by `app/features/task-detail/hydration-determinism.test.tsx`
+  (a real `renderToString` → `hydrateRoot` of the task page across the UTC/Auckland zone
+  pair and the UTC-midnight clock pair, interrupted hydration included) and
+  `e2e/06-activity-hydration.spec.ts`. *(Added 2026-09-04, pass 34 — `formatDayDotTimeUTC`
+  used to sample `now` while documenting itself as the deterministic first pass, and four
+  surfaces rendered a host-zone calendar date unguarded.)*
 - Settings headings name their scope: "Instance settings" versus "<project> · settings"
   (ruling 32).
 - **No surface gates AUTHORING on the viewer's own agent account** (ruling 127): a run

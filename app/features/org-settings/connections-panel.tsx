@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { ConnectionRecord } from "~/server/org/connections.server";
 import { slugify } from "~/shared/ids/slugify";
-import { formatCalendarDate } from "~/shared/dates/format";
+import { utcDayKey } from "~/shared/dates/format";
 import { countLabel } from "~/shared/text/plural";
 import { Icon } from "~/ui/icon";
+import { LocalCalendarDate } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { ConfirmDelete, MiniModal } from "./mini-modal";
@@ -243,7 +244,12 @@ export function ConnectionsPanel({
       </div>
       <div className="conn-list">
         {connections.map((c) => {
-          const expiry = formatCalendarDate(c.expiresAt);
+          // An expiry the store cannot read renders "no expiry date", never a
+          // dangling "expires ". The date itself goes through the hydration-safe
+          // primitive: UTC day first, the viewer's calendar date after
+          // hydration (pass 34, C6).
+          const expiresAt =
+            c.expiresAt && utcDayKey(c.expiresAt) ? c.expiresAt : null;
           const verified = c.validationState === "valid";
           return (
             <div className="conn-row" key={c.id}>
@@ -265,7 +271,13 @@ export function ConnectionsPanel({
                     ? ` · ${countLabel(c.repos, "public repo")}`
                     : ""}{" "}
                   ·{" "}
-                  {expiry ? `expires ${expiry}` : "no expiry date"}
+                  {expiresAt ? (
+                    <>
+                      expires <LocalCalendarDate iso={expiresAt} />
+                    </>
+                  ) : (
+                    "no expiry date"
+                  )}
                 </span>
                 <span className="scope-chips">
                   {/* P13-UI-01 + owner ruling 2026-07-25: chips are PROVEN

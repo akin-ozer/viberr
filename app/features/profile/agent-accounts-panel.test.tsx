@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { createRoutesStub, useFetcher } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { AgentAccountsPanel } from "./agent-accounts-panel";
@@ -75,7 +76,7 @@ function runningLogin(
   };
 }
 
-function renderPanel(
+function panelElement(
   backends: ProfileBackend[],
   poll: BackendLoginPollData | null = null,
 ) {
@@ -105,7 +106,14 @@ function renderPanel(
       loader: () => poll,
     },
   ]);
-  return render(<Stub initialEntries={["/profile"]} />);
+  return <Stub initialEntries={["/profile"]} />;
+}
+
+function renderPanel(
+  backends: ProfileBackend[],
+  poll: BackendLoginPollData | null = null,
+) {
+  return render(panelElement(backends, poll));
 }
 
 describe("AgentAccountsPanel", () => {
@@ -277,6 +285,39 @@ describe("AgentAccountsPanel", () => {
       intent: "backend-disconnect",
       backend: "claude",
     });
+  });
+
+  it("C6: the connected-on and verified dates hydrate safely — the UTC day first, the viewer's calendar date after hydration", () => {
+    const backends = [
+      backend("claude", {
+        health: {
+          ...HEALTH_NONE,
+          backend: "claude",
+          userId: "u_arda",
+          available: true,
+          kind: "login",
+          method: "claudeai",
+          verification: "file",
+          verifiedAt: "2026-09-01T10:00:00.000Z",
+          connectedAt: "2026-09-01T10:00:00.000Z",
+          detail: null,
+        },
+      }),
+    ];
+    // The server pass depends on the timestamp alone: the SSR host's zone is
+    // not the viewer's, and a calendar date rendered in it hydrates to
+    // different text near midnight (React #418).
+    const ssr = renderToString(panelElement(backends));
+    expect(ssr).toContain(" on ");
+    expect(ssr).toContain("verified ");
+    expect(ssr.split("2026-09-01 (UTC)")).toHaveLength(3);
+    expect(ssr).not.toContain("Sep 1, 2026");
+    // After hydration the effect swaps in the viewer-local calendar date, on
+    // the sentence AND on the pill.
+    const { container } = renderPanel(backends);
+    expect(container.textContent).toContain("on Sep 1, 2026.");
+    expect(container.textContent).toContain("verified Sep 1, 2026");
+    expect(container.textContent).not.toContain("(UTC)");
   });
 
   it("a login whose credential file vanished warns with the server's own sentence", () => {

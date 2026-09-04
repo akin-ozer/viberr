@@ -208,9 +208,23 @@ the whole declared browser matrix (ruling 103).
 | `03-org-settings-store.spec.ts` | 3 | org settings tabs, heading scope, store browser creates a folder |
 | `04-palette-mobile.spec.ts` | 6 | ⌘K palette, board `?q=`, 375 px rail collapse, non-member 404 copy, touch targets |
 | `05-task-comment-composer.spec.ts` | 7 | Lexical composer keys, @-mention, undo, combobox a11y, zero page errors |
-| `06-activity-hydration.spec.ts` | 1 | clean hydration in `Pacific/Auckland` |
+| `06-activity-hydration.spec.ts` | 2 | clean hydration in `Pacific/Auckland`: the activity page and the task page (VIB-142 with its open accept card); both assert zero `pageerror` and a timestamp-only SSR first pass |
 | `07-accessibility.spec.ts` | 33 generated | axe WCAG 2.2 AA on 12 surfaces × 2 themes, dialogs, mobile rail, login |
 
-62 tests plus the setup project. The e2e gate is the only one that runs a real CLI
+63 tests plus the setup project. The e2e gate is the only one that runs a real CLI
 entrypoint, and only `npm run seed:demo`: `backup`, `restore`, `rescan`, `keys` and
 `store:check` are exercised by no gate.
+
+The task-page half of `06-activity-hydration.spec.ts` covers the open-accept-card shape
+only, because the e2e stack holds no provider credential and so never has a running run.
+The RUNNING-run shape is gated by the interrupted-hydration unit gate beside it,
+`app/features/task-detail/hydration-determinism.test.tsx` (pass 34, C6 + C8): a real
+`renderToString` of the task page in the server's environment (UTC, 23:59:59Z) hydrated
+with `hydrateRoot` in the viewer's (Pacific/Auckland, 00:00:01Z) with React's
+`onRecoverableError` collected, over a live run with a streaming console and an
+`accept_completion` card, plus the interrupted case that mirrors `entry.client.tsx`
+(hydration inside `startTransition`, a discrete event before the flush, then a
+`run.log-appended` update through the page's own EventSource and `/resources/run-log`
+tail fetch). The zones are applied per environment with `vi.resetModules()` and a dynamic
+import, because `shared/dates/format.ts` builds its `Intl.DateTimeFormat` instances at
+import time.

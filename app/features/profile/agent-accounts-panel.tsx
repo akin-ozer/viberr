@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { useFetcher, useRevalidator } from "react-router";
 import type { FetcherWithComponents } from "react-router";
 import { Icon } from "~/ui/icon";
+import { LocalCalendarDate } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
-import { formatCalendarDate } from "~/shared/dates/format";
+import { utcDayKey } from "~/shared/dates/format";
 import type { BackendLoginPollData } from "~/routes/resources.backend-login";
 import type { ProfileBackend } from "./profile-query.server";
 import type { ProfileActionData } from "./profile-page";
@@ -274,10 +275,14 @@ function AgentAccountCard({
    *  way wins over "connected": it is what the card is showing, and it is what
    *  the person is waiting on. */
   const badge = running ? "signing in" : connected ? "connected" : "−";
-  // `formatCalendarDate` returns null for a timestamp it cannot read; a card
-  // must then say nothing about the date rather than render the word "null".
-  const connectedOn = formatCalendarDate(health.connectedAt);
-  const verifiedOn = formatCalendarDate(health.verifiedAt);
+  // A timestamp the card cannot read is omitted together with its " on " /
+  // "verified " lead-in, never rendered as the word "null". The date itself
+  // renders through the hydration-safe primitive: UTC day first, the viewer's
+  // calendar date after hydration (pass 34, C6).
+  const connectedOn =
+    health.connectedAt && utcDayKey(health.connectedAt) ? health.connectedAt : null;
+  const verifiedOn =
+    health.verifiedAt && utcDayKey(health.verifiedAt) ? health.verifiedAt : null;
   const copyCode = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value);
@@ -432,7 +437,7 @@ function AgentAccountCard({
                 : health.kind === "access_token"
                   ? "Connected via workspace access token"
                   : `Connected via API key · ending in ${health.secretSuffix ?? ""}`}
-              {connectedOn ? ` on ${connectedOn}` : ""}.
+              {connectedOn ? <> on <LocalCalendarDate iso={connectedOn} /></> : ""}.
               {health.available ? "" : ` ${health.detail ?? ""}`}
             </span>
           </div>
@@ -440,7 +445,7 @@ function AgentAccountCard({
             {health.available ? (
               verifiedOn ? (
                 <Pill kind="ready" sm>
-                  verified {verifiedOn}
+                  verified <LocalCalendarDate iso={verifiedOn} />
                 </Pill>
               ) : (
                 <Pill kind="neutral" sm>

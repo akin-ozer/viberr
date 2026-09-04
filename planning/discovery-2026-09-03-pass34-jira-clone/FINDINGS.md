@@ -32,7 +32,7 @@ real person do something absurd get an `F`; cosmetic items are not filed.
 | U34-7 | run environment | medium | confirmed | The agent's shell inherits Viberr's own process env: `NODE_ENV=production` and `PORT=5173` (the container's) were visible inside the JC-6 Developer run (`env` probe at 10:21Z/10:23Z) and broke `vitest` and `next start` until the agent unset them — every JavaScript project's tooling will trip on the host app's NODE_ENV/PORT. `filteredSpawnEnv` strips credential-shaped keys and the vendor homes but passes the server's runtime settings through. |
 | U34-8 | packet collision dialog copy | medium | confirmed | When the operator authors `resolve_remote_collision` on a task with NO recorded unowned PR (JC-6, `unownedPr: null` — it used the option as the only way to push stranded commits), the "Packet collision dialog" still calls the task's OWN branch and PR "the stale branch jc-6 on GitHub, the unrelated one squatting on this task's branch name" and promises "the real review PR opens" — F33-3's copy defect in a new doorway: the dialog describes a collision that does not exist and the person confirms the deletion of their own PR under that description. |
 | U34-1 | run console | low | open | The same failed run's console prints `result · success · 1 turns` one line above `run·error·unknown`: the SDK result envelope says `subtype: success` with `is_error: true`, and the wire projector trusts the subtype. |
-| U34-2 | task page hydration | low | confirmed (2 sightings) | React error #418 (`args[]=text`, a text-content hydration mismatch) on the task detail page: once as Arda during the live run at ~10:3xZ, once as Maya on JC-4 at 11:07Z while an accept_completion card was showing. The page recovers by client re-render, so nothing is lost, but the console error is real and the pass-8 hydration fixes (absolute-UTC first-pass grouping) do not cover whatever text this is. |
+| U34-2 | task page hydration | low | fixed | React error #418 (`args[]=text`, a text-content hydration mismatch) on the task detail page: once as Arda during the live run at ~10:3xZ, once as Maya on JC-4 at 11:07Z while an accept_completion card was showing. The page recovers by client re-render, so nothing is lost, but the console error was real. C6 removed the page's one clock-dependent first pass (`formatDayDotTimeUTC` sampled `now`) and swept the host-zone `formatCalendarDate` sibling; C8 ran the page through a real `renderToString` → `hydrateRoot` across the zone and UTC-midnight pairs, interrupted, over both live shapes, and through the unminified app in Auckland: neither instrument reproduces a mismatch once C6 is in, the `Math.random()` list id is ruled out (it never reaches server markup), and both gates now name any text that recurs. Detail below. |
 | U34-3 | agents page / profile editor | medium | confirmed (code, 2026-09-04) | The Agent profile modal is a FULL-form submit and the save is last-write-wins on the whole governed grant set: `updateAgentProfile` rebuilds `deployment.capabilities` from the submitted form inside the writer callback (`app/features/agents/agent-profile-actions.server.ts:665-672`), the modal seeds its `caps` once at open time (`create-profile-modal.tsx:279-310`), and the `update-profile` intent (`app/routes/project.agents.tsx:205-227`) carries nothing that says which version the editor read. A modal opened before a concurrent write and saved after it silently reverts every grant that write changed, and still reports "Profile updated" and audits a successful save. Noticed live at 09:12Z while the controller was writing the same deployments (NOTES 09:12Z; the id was reserved there and is filed now, because pass 34's A32-A34 make the controller's writes land for real). |
 | U34-9 | insights copy | low | note only | "Branch & PR traceability · 7 of 8 delivered tasks carry branch + PR" counts every task with any footprint (revision, branch OR PR) as "delivered"; JC-7 had only its allocated branch and had never delivered. The definition is documented in `OversightSummary.traceability`; the rendered label is what lies. |
 | U34-10 | edit_goal draft | low | confirmed | Confirming an `edit_goal` option prefills the goal editor with the option's title + detail verbatim (`goalDraft`). When the operator authored the option as a proposal ("Rewrite the goal to match search.md exactly: …", JC-9) that is a usable draft; when it authored it as an instruction ("Confirming opens the goal editor: replace … I deliver straight after", JC-6) the person is handed an instruction as the goal. The operator prompt never says the detail becomes the draft. |
@@ -274,3 +274,72 @@ ordinary sequence rather than a curiosity.
 
 **Fix:** B5 — a `deploymentFingerprint` of the record the editor read, submitted with the save and
 compared against the freshly parsed deployment inside the writer, refusing a stale save by name.
+
+### U34-2 · The task page's #418: its one clock-dependent first pass is gone; nothing else reproduces
+
+**What the page owned.** `app/shared/dates/format.ts` `formatDayDotTimeUTC(iso, now = new
+Date())` — the first pass behind every `LocalDayDotTime` on the page (timeline rows,
+attachment producers, schedule rows) — branched on `sameUtcDay(d, now)` for "today" (a bare
+clock) and "yesterday", while documenting itself as "the deterministic first pass that SSR
+and hydration agree on byte-for-byte". A server and a viewer whose `now` fall on different
+UTC days render different text for the same stamp: the `args[]=text` variant of #418
+exactly. C6 removed the parameter (the function returns `${formatDayBucketUTC(iso)} ·
+${UTC clock}` for every stamp, and no caller can hand it a clock) and swept the
+`formatCalendarDate` sibling — host-zone by construction, rendered unguarded by
+`sso-panel.tsx`, `connections-panel.tsx`, `agent-accounts-panel.tsx` and
+`profile-page.tsx`, now through `LocalCalendarDate` (`YYYY-MM-DD (UTC)` first, the viewer's
+calendar date after hydration).
+
+**Instrument (a) — the unit gate, `app/features/task-detail/hydration-determinism.test.tsx`.**
+A real `renderToString` of `TaskDetailPage` in the server's environment (`TZ=UTC`, clock
+2026-07-03T23:59:59Z) hydrated with `hydrateRoot` inside `startTransition` in the viewer's
+(`TZ=Pacific/Auckland`, clock 2026-07-04T00:00:01Z; each environment imports the page after
+`vi.resetModules()`, because the module-level `Intl.DateTimeFormat` instances resolve their
+zone at import), with React's `onRecoverableError` and the DEV build's `console.error`
+collected, over both live shapes: a running Developer run with a nine-line console
+(init/text/tool/out/err/think×2/meta/text) beside a finished operator run; and an
+`accept_completion` packet plus recommendation at the acceptance boundary with the runs
+finished. The interrupted case mirrors `entry.client.tsx`: a discrete click on the
+server-rendered `{ } raw` toggle lands before the transition flushes (React 19 hydrates
+synchronously to answer it; the toggle reads `aria-pressed="true"` afterwards, so the
+interruption is observed, not assumed), then a `run.log-appended` frame through the page's
+own EventSource and the `/resources/run-log?runId=run_1&since=8` tail fetch appends a line.
+With C6 in: 0 recoverable errors and 0 warnings in all six cases, and the local swap ran
+(the 23:30Z row reads `11:30`, the Jul 2 16:04Z row `Yesterday · 04:04`, the console clock
+`11:31:05`). With the pre-C6 `formatDayDotTimeUTC` restored (canary): every case red — the
+server renders the 23:30Z row as `23:30` (its "today"), the viewer as `Yesterday · 23:30`,
+"Hydration failed because the server rendered text didn't match the client". A host-zone
+calendar date planted in the timeline row is caught the same way.
+
+**Instrument (b) — the unminified app.** `npm run dev` on a scratch data root seeded with the
+demo fixture (server `TZ=UTC`, port 5175), Playwright Chromium with `timezoneId:
+Pacific/Auckland`, signed in as Arda, `pageerror` plus console errors/warnings collected:
+`/projects/viberr-core/tasks/VIB-142` (the open `accept_completion` packet) plain, with the
+controller dock opened, reloaded with the dock remembered open, then the activity page and
+the board — 0 page errors, 0 console errors or warnings on every load. The SSR document's
+nine `.tl-time` stamps were all `Mon D · HH:MM`; after hydration all nine read the
+Auckland-local form. The running-run shape cannot be built on the scratch server without a
+provider credential (the adapters resolve their own executable; there is no fake to point
+them at), so that shape is carried by instrument (a).
+
+**Ruled out by reading** — every render-time clock or zone read on the task page tree:
+`use-mention-autocomplete.ts`'s `Math.random()` list id never reaches server markup
+(`MentionMenu` renders nothing while closed; `aria-controls` and `aria-activedescendant` are
+undefined while closed), and an attribute mismatch would be a DEV warning rather than
+`args[]=text`, so it is not a hydration hazard and is left alone; `localLogClock`
+(`runs-panels.tsx:761/786/802`) and `finishedClock` sit behind `useHydrated`; `useElapsed`
+seeds `now` to null; `LocalRelative` renders a non-breaking space on both sides;
+`DueDatePill` withholds "overdue" until hydration; the bell's notification list
+(`formatDayTime`, local) renders only while open; the controller dock restores its per-tab
+`sessionStorage` state in an effect. No `Suspense` boundary exists on the page, so an
+update cannot reach a dehydrated subtree (#421) either.
+
+**Why the row is `fixed`, and what it does not claim.** The two sightings (10:3xZ, 11:07Z)
+were not near UTC midnight, and neither instrument reproduces a mismatch from anything the
+page renders today, so the sighted text is NOT named here. What is true: the only mechanism
+this page's own code had for a `text` mismatch — a first pass that read the wall clock — is
+removed, the calendar-date sibling of the same class is swept, and two permanent gates now
+run the exact scenario (zone pair, midnight pair, both shapes, interrupted hydration) and
+print the offending text verbatim if the class returns. A recurrence arrives as a finding
+with its text attached, not as a probe to be named.
+

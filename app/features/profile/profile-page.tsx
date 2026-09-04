@@ -8,7 +8,7 @@ import { Pill } from "~/ui/pill";
 import { TglP } from "~/ui/toggle";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
-import { formatCalendarDate } from "~/shared/dates/format";
+import { LocalCalendarDate } from "~/ui/local-time";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
 import { RBAC_ROWS } from "~/features/policy/policy-data";
 import type { ProjectRole } from "~/shared/rbac";
@@ -217,8 +217,12 @@ function ProfileIdentity({
           {/* UXA-10: `formatDayBucket` is the TIMELINE form — it yields
               "Today"/"Yesterday" for a new account and a year-less "Mar 30"
               forever after, so an account opened last year read as though it
-              were opened this one. A join date is a calendar fact. */}
-          <span className="v">{formatCalendarDate(user.createdAt)}</span>
+              were opened this one. A join date is a calendar fact — rendered
+              through the hydration-safe primitive: UTC day first, the viewer's
+              calendar date after hydration (pass 34, C6). */}
+          <span className="v">
+            <LocalCalendarDate iso={user.createdAt} />
+          </span>
         </div>
       </div>
     </div>

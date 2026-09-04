@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { createRoutesStub, useFetcher } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { DEFAULT_NOTIF_PREFS } from "./notification-prefs";
@@ -73,7 +74,7 @@ const BASE: ProfileData = {
 let lastSubmit: Record<string, string> | null = null;
 let lastTheme: string | null = null;
 
-function renderProfile(data: ProfileData = BASE) {
+function profileElement(data: ProfileData = BASE) {
   lastSubmit = null;
   lastTheme = null;
   const Stub = createRoutesStub([
@@ -112,7 +113,11 @@ function renderProfile(data: ProfileData = BASE) {
       },
     },
   ]);
-  return render(<Stub initialEntries={["/profile"]} />);
+  return <Stub initialEntries={["/profile"]} />;
+}
+
+function renderProfile(data: ProfileData = BASE) {
+  return render(profileElement(data));
 }
 
 /** The GitHub identity panel alone. Several of its assertions name classes the
@@ -140,6 +145,20 @@ describe("ProfilePage", () => {
     expect(getByText("Viberr Core")).toBeTruthy();
     expect(getByText("local account")).toBeTruthy();
     expect(container.querySelector(".avatar.xl")!.textContent).toBe("AK");
+  });
+
+  it("C6: the Joined date hydrates safely — the UTC day first, the viewer's calendar date after hydration", () => {
+    // The server pass depends on the timestamp alone: the SSR host's zone is
+    // not the viewer's, and a calendar date rendered in it hydrates to
+    // different text near midnight (React #418).
+    const ssr = renderToString(profileElement());
+    expect(ssr).toContain("Joined");
+    expect(ssr).toContain("2026-02-18 (UTC)");
+    expect(ssr).not.toContain("Feb 18, 2026");
+    // After hydration the effect swaps in the viewer-local calendar date.
+    const { getByText, container } = renderProfile();
+    expect(getByText("Feb 18, 2026")).toBeTruthy();
+    expect(container.textContent).not.toContain("(UTC)");
   });
 
   it("identity blur-commit only fires when dirty", () => {
