@@ -1188,6 +1188,9 @@ inventory is not regenerated automatically and has drifted; the verified module 
     time a run was working — is actually driven, with a "preparing workspace" phase covering the
     clone. Closes G5 (FR28:
     current progress without opening the raw provider console) together with OBS-8/OBS-9.
+    *(Extended 2026-09-04, pass 34, ruling 129: the mirror is also what a REUSED checkout is
+    refreshed from before every delivering dispatch — the cache that made cloning cheap is what
+    made a stale checkout survive across runs.)*
     (the mirror cache is `cloneWorkspaceRepo` + `projectRepoMirrorDir` in
     `app/server/tasks/repo-mirror.server.ts`, called by the private `cloneRepo` in
     `app/server/tasks/specialist-run.server.ts`; `onPhase` in `app/server/runtimes/adapter.server.ts`
@@ -2245,6 +2248,32 @@ by rewriting those paragraphs:*
     `ensureTaskBranch` in `branch-sync.server.ts`; `isMissingRefAnswer` in `github-client.server.ts`;
     the 422 arms in `pr-open.server.ts`; the pre-push gate and the rendering in
     `task-actions.server.ts`.)
+
+129. **A reused delivering workspace is refreshed from the project mirror on every dispatch (owner,
+    2026-09-03, pass 34 Q34-5).** Live (JC-2 to JC-5): the task workspaces were cloned once, by the
+    operators' first triage at 09:00Z, from a repository that was still empty; every later run reused
+    them as they stood, agents hold no credential so they could not fetch, and while the operator read
+    a bootstrapped `main` through the mirror and told the spec writers so, the spec writers found zero
+    commits in their checkouts and committed unrelated root commits on `jc-2` and `jc-5`. Two sources
+    of truth in one task, and `update_branch_from_base` could only answer "refusing to merge unrelated
+    histories". The rule: before a delivering run starts in an existing checkout, Viberr fetches the
+    mirror's heads into the checkout's `origin/*`; a checkout whose HEAD is unborn, or that sits clean
+    on the default branch, is fast-forwarded to `origin/<default>`; a task branch that has diverged is
+    left exactly as it is, because `update_branch_from_base` (N19-9) owns that move and a conflict
+    there is a human decision; a dirty tree and a detached HEAD are never touched; and a branch that
+    shares NO history with the default branch is named as such in the run's inputs and in the agent's
+    workspace contract rather than silently left alone. The refresh is not defeated by a cold cache:
+    the dispatch creates the mirror if it must, and falls back to a server-side credentialed fetch of
+    the remote heads if it cannot. The refresh is disclosed in the run's `run·inputs` line and in the
+    agent's workspace contract, and a mirror that could not itself be refreshed from GitHub says so
+    there. Supporting checkouts keep their fetch-only refresh (pass 32, C32-2), now the same function.
+    The operator's read-only view of the same directory is refreshed on the same terms when no
+    delivering run is live for the task, because the operator holds `Read`, `Grep` and `Glob` over it;
+    its default-branch reads remain mirror-anchored (F21-21). A cache still never blocks a task: a
+    failed refresh degrades with a warning and the run proceeds. Extends ruling 87(a), whose mirror
+    cache made the stale-checkout window possible by making the first clone cheap enough to keep.
+    (`app/server/tasks/workspace-refresh.server.ts`, called from `cloneRepo` in
+    `app/server/tasks/specialist-run.server.ts`.)
 
 130. **A refused run's packet names the cause Viberr classified and the remedy the person actually
     has (owner, 2026-09-03, pass 34 Q34-7; F34-1, F34-12).** Live: a five-hour session limit and a
