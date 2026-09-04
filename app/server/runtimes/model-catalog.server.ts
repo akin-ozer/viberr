@@ -1,7 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import { AppError } from "~/server/errors/app-error.server";
 import { logger } from "~/server/logging/logger.server";
-import { DATED_CLAUDE_ID_RE } from "~/shared/model-ids";
+import {
+  CLAUDE_ALIAS_VARIANT_RE,
+  DATED_CLAUDE_ID_RE,
+  splitClaudeVariant,
+} from "~/shared/model-ids";
 import type { RunCredential } from "./backend-credentials.server";
 import { unavailableModels } from "./model-availability.server";
 import {
@@ -272,6 +276,11 @@ export function isKnownModel(backend: RealBackend, model: string): boolean {
   if (cat.models.some((m) => m.value === model)) return true;
   if (backend === "codex") return false;
   if (DATED_CLAUDE_ID_RE.test(model)) return true;
+  // Pass 34 (F34-7): a family alias with a context-window variant (`opus[1m]`)
+  // is what the live catalog offers and what a profile stores; it is known
+  // BEFORE the live cache is consulted, so a cold process never substitutes
+  // the catalog default for a value the picker itself offered.
+  if (CLAUDE_ALIAS_VARIANT_RE.test(model)) return true;
   return liveCatalogModelValues("claude").has(model);
 }
 
@@ -363,11 +372,27 @@ export function resolveRunEffort(
   return cat.defaultEffort;
 }
 
-/** The friendly display name for a model id (from the curated catalog), or the
- *  id itself when it is not a curated model (e.g. a live-only or legacy value). */
+/**
+ * The friendly display name for a model id: the curated name; else the LIVE
+ * catalog row's name whenever the cache holds the id ("Opus (1M context)" for
+ * `opus[1m]`, pass 34 F34-7); else, for a family alias carrying a
+ * context-window variant, the curated family name plus the variant ("Claude
+ * Opus [1m]"), which is only the cold-process fallback; else the id itself
+ * (a live-only or legacy value; the UI pairs that with a substitution flag).
+ */
 export function modelDisplayName(backend: RealBackend, model: string): string {
   const cat = backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED;
-  return cat.models.find((m) => m.value === model)?.displayName ?? model;
+  const curated = cat.models.find((m) => m.value === model)?.displayName;
+  if (curated) return curated;
+  if (backend === "codex") return model;
+  const live = liveCatalogDisplayName("claude", model);
+  if (live) return live;
+  if (CLAUDE_ALIAS_VARIANT_RE.test(model)) {
+    const { base, variant } = splitClaudeVariant(model);
+    const family = cat.models.find((m) => m.value === base)?.displayName;
+    if (family && variant) return `${family} ${variant}`;
+  }
+  return model;
 }
 
 // ------------------------------------------------------------ live (claude)
@@ -474,6 +499,13 @@ export function resetModelCatalogCache(): void {
 function liveCatalogModelValues(backend: RealBackend): Set<string> {
   const entry = getCache().get(backend);
   return new Set(entry?.catalog.models.map((m) => m.value) ?? []);
+}
+
+/** The LIVE catalog's display name for an id it last offered, else null; the
+ *  same TTL-blind read as {@link liveCatalogModelValues}. */
+function liveCatalogDisplayName(backend: RealBackend, model: string): string | null {
+  const entry = getCache().get(backend);
+  return entry?.catalog.models.find((m) => m.value === model)?.displayName ?? null;
 }
 
 /** Map a `supportedModels()` row to a catalog model. */

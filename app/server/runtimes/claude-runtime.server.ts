@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { withProviderText } from "~/shared/provider-marker";
 import { emptyRunFailureFacts, type RunFailureFacts, type RunFailureKind } from "~/shared/run-failure";
+import { splitClaudeVariant } from "~/shared/model-ids";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -124,7 +125,23 @@ interface ClaudeAdapterDeps {
  */
 export function resolveClaudeModel(model?: string): string | undefined {
   if (!model) return undefined;
+  // Pass 34 (F34-7): split the bracketed context-window variant off FIRST,
+  // resolve the base through the ordinary rules (dated test included) and
+  // re-append the variant verbatim. `opus[1m]` used to hit the
+  // `includes("opus")` arm and reach the SDK as `opus`, so the person who
+  // picked a 1M-context model ran a 200k one; and `claude-opus[1m]` would
+  // otherwise match the dated branch on the digit inside the bracket and be
+  // forwarded unchanged, which is not an SDK id.
+  const { base, variant } = splitClaudeVariant(model.trim());
+  const resolved = resolveClaudeBase(base);
+  if (resolved === undefined) return undefined;
+  return variant ? `${resolved}${variant}` : resolved;
+}
+
+/** The variant-free half of {@link resolveClaudeModel}. */
+function resolveClaudeBase(model: string): string | undefined {
   const m = model.toLowerCase().trim();
+  if (!m) return undefined;
   // A versioned/dated real id (e.g. claude-sonnet-4-5) — use as-is.
   if (m.startsWith("claude-") && /\d/.test(m)) return model;
   if (m.includes("opus")) return "opus";

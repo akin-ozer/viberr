@@ -30,6 +30,16 @@ describe("resolveClaudeModel", () => {
     expect(resolveClaudeModel(undefined)).toBeUndefined();
     expect(resolveClaudeModel("codex-large")).toBeUndefined();
   });
+
+  it("pass 34 (F34-7): a bracketed context-window variant is split off first and re-appended verbatim", () => {
+    // Live: the JC-2 operator's run row said `opus[1m]` and the SDK got `opus`.
+    // Canary: put `if (m.includes("opus")) return "opus"` ahead of the split.
+    expect(resolveClaudeModel("opus[1m]")).toBe("opus[1m]");
+    expect(resolveClaudeModel("claude-opus[1m]")).toBe("opus[1m]");
+    expect(resolveClaudeModel("claude-sonnet-4-5[1m]")).toBe("claude-sonnet-4-5[1m]");
+    expect(resolveClaudeModel("sonnet")).toBe("sonnet");
+    expect(resolveClaudeModel("codex-large[1m]")).toBeUndefined();
+  });
 });
 
 /** A fake Query: yields the given messages, records interrupt() calls.
@@ -71,6 +81,8 @@ interface CapturedOptions {
   /** The system prompt as the adapter handed it over (preset+append for a
    *  specialist) — read through a zod parse where a test needs its text. */
   systemPrompt?: unknown;
+  /** The model id as forwarded to the SDK. */
+  model?: string;
 }
 
 /**
@@ -382,6 +394,12 @@ describe("claude adapter (SDK, injected fake query)", () => {
     await drain();
     return captured ?? {};
   }
+
+  it("pass 34 (F34-7): the context-window variant reaches the SDK options verbatim", async () => {
+    // Canary: the same resolver edit as above; the run would start on `opus`.
+    const captured = await optionsFor({ ...SPEC, model: "opus[1m]" });
+    expect(captured.model).toBe("opus[1m]");
+  });
 
   it("isolates a run with NO granted skills from the host ~/.claude (settingSources + skills empty, strict MCP)", async () => {
     const captured = await optionsFor(SPEC);

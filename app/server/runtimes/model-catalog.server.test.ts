@@ -380,6 +380,42 @@ describe("isKnownModel agrees with what the picker offered (P13-RT-07)", () => {
     expect(resolveRunModel("claude", "claude-sonnet")).toBe("sonnet");
   });
 
+  it("pass 34 (F34-7): a family alias with a context-window variant is known on a COLD process", () => {
+    // The live catalog offers `opus[1m]` ("Opus (1M context)"); a profile
+    // stores it; ten minutes later the cache is gone. The validator used to
+    // substitute the catalog default and the editor rewrote the stored value.
+    // Canary: remove the `CLAUDE_ALIAS_VARIANT_RE` clause from isKnownModel.
+    resetModelCatalogCache();
+    expect(isKnownModel("claude", "opus[1m]")).toBe(true);
+    expect(resolveRunModel("claude", "opus[1m]")).toBe("opus[1m]");
+    expect(isKnownModel("claude", "sonnet[1m]")).toBe(true);
+    expect(isKnownModel("claude", "opus[]")).toBe(false);
+    expect(isKnownModel("codex", "opus[1m]")).toBe(false);
+  });
+
+  it("pass 34 (F34-7): the variant's display name is the LIVE row's when cached, else the family name plus the variant", async () => {
+    // Canary: delete the variant branch in modelDisplayName (the cold case
+    // echoes the id) or the live lookup (the warm case does).
+    resetModelCatalogCache();
+    expect(modelDisplayName("claude", "opus[1m]")).toBe("Claude Opus [1m]");
+    expect(modelDisplayName("claude", "opus-next")).toBe("opus-next");
+    await getModelCatalog("claude", {
+      credential: VIEWER_CREDENTIAL,
+      claudeQueryFn: makeFakeQuery([
+        {
+          value: "opus[1m]",
+          displayName: "Opus (1M context)",
+          description: "",
+          supportsEffort: true,
+          supportedEffortLevels: ["low", "high"],
+        },
+      ]),
+    });
+    expect(modelDisplayName("claude", "opus[1m]")).toBe("Opus (1M context)");
+    // Codex has no live endpoint and no variants.
+    expect(modelDisplayName("codex", "gpt-5.5[1m]")).toBe("gpt-5.5[1m]");
+  });
+
   it("accepts a non-dated value the live catalog actually listed", async () => {
     const catalog = await getModelCatalog("claude", {
       credential: VIEWER_CREDENTIAL,
