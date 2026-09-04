@@ -260,7 +260,10 @@ a readiness downgrade (tolerant parsing):
 - Raw run logs are append-only under `$VIBERR_DATA_ROOT/runtimes/<backend>/<runId>.jsonl`;
   the log panel projects them. Provider session transcripts live in the principal's own
   home. Interrupt is admin/maintainer-gated and audited.
-- Quota and rate-limit state per backend is on `/insights` (org admin); a quota-refused
+- Quota and rate-limit state per backend is on `/insights` (org admin), and it says WHOSE
+  account the refusal was (ruling 130(d)): a spent window or a rejected credential is one
+  person's, not the instance's; the same person sees it on their Profile → Agent accounts
+  card, and `/resources/health` names nobody. A quota-refused
   run opens a packet with a `retry_other_backend` option, offered only when the task owner
   has the other backend connected, and the switch sticks on the engagement
   (`pinnedBackend`). The Agent-logs "Retry on <other>" button passes the same test, so a

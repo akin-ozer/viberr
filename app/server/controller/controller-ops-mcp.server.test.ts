@@ -231,8 +231,8 @@ const HEALTH_REPLY = z.object({
     z.object({
       backend: z.string(),
       reading: z.unknown().nullable(),
-      credentialRefused: z.object({ runId: z.string() }).nullable(),
-      exhausted: z.object({ runId: z.string() }).nullable(),
+      credentialRefused: z.object({ runId: z.string(), credentialLabel: z.string().nullable().optional() }).nullable(),
+      exhausted: z.object({ runId: z.string(), credentialLabel: z.string().nullable().optional() }).nullable(),
     }),
   ),
 });
@@ -345,6 +345,26 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     expect(body.quota.map((q) => q.backend)).toEqual(["claude", "codex"]);
   });
 
+  it("ruling 130(d): instance_health carries the refusal's principal, which the unauthenticated body strips", async () => {
+    // Canary: omit `{ principal: true }` from the tool's snapshot call.
+    const { recordBackendCredentialRefusal, clearBackendCredentialRefusal } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    recordBackendCredentialRefusal(app.db, "codex", {
+      providerText: "token revoked", runId: "run_p", observedAt: new Date().toISOString(),
+      credentialUserId: ids.nonMember, credentialLabel: "Non Member",
+    });
+    try {
+      const body = parsed(HEALTH_REPLY, await call(ids.nonMember, "instance_health"));
+      const codex = body.quota.find((q) => q.backend === "codex")!;
+      expect(codex.credentialRefused?.credentialLabel).toBe("Non Member");
+      const { healthSnapshot } = await import("~/server/ops/health-snapshot.server");
+      expect(healthSnapshot(app.db).quota.find((q) => q.backend === "codex")!.credentialRefused?.credentialLabel).toBeNull();
+    } finally {
+      clearBackendCredentialRefusal(app.db, "codex");
+    }
+  });
+
   it("leaves one `controller.ops.read` audit row per successful read, bound to the asker (owner ruling, pass 32)", async () => {
     const count = () =>
       (
@@ -404,11 +424,15 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
       recordBackendQuotaExhaustion,
     } = await import("~/server/runtimes/backend-quota.server");
     recordBackendCredentialRefusal(app.db, "codex", {
+      credentialUserId: null,
+      credentialLabel: null,
       providerText: "The provider reported: refresh token was already used",
       runId: "run_auth_probe",
       observedAt: new Date().toISOString(),
     });
     recordBackendQuotaExhaustion(app.db, "claude", {
+      credentialUserId: null,
+      credentialLabel: null,
       resetsAt: null,
       resetsAtPrecision: null,
       providerText: "The provider reported: You've hit your usage limit",

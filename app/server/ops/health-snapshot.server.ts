@@ -4,6 +4,7 @@ import { isFileWatcherAlive } from "~/server/files/file-watch.service.server";
 import { isKbWatcherAlive } from "~/server/files/kb-watch.service.server";
 import {
   latestBackendRateLimits,
+  stripQuotaPrincipals,
   type BackendQuotaRow,
 } from "~/server/runtimes/backend-quota.server";
 import { countConnectedUsers } from "~/server/runtimes/backend-credentials.server";
@@ -89,7 +90,12 @@ export interface HealthSnapshot {
  * Throws only when SQLite is unreachable — the one condition that means this
  * process cannot serve at all. The route turns that into its 503.
  */
-export function healthSnapshot(db: DatabaseSync): HealthSnapshot {
+export function healthSnapshot(
+  db: DatabaseSync,
+  /** Ruling 130(d): the unauthenticated route never names a person; the
+   *  signed-in `instance_health` read and Insights do. */
+  opts: { principal?: boolean } = {},
+): HealthSnapshot {
   // SAFETY: `SELECT count(*) AS c` is an aggregate with no GROUP BY — sqlite
   // answers it with exactly one row carrying the single integer column `c`.
   const projects = (
@@ -149,6 +155,6 @@ export function healthSnapshot(db: DatabaseSync): HealthSnapshot {
     disk,
     maintenance: maintenanceState(),
     build: getBuildInfo(),
-    quota,
+    quota: opts.principal ? quota : stripQuotaPrincipals(quota),
   };
 }

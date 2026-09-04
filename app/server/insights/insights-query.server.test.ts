@@ -496,6 +496,8 @@ describe("backend quota readings (pass 29)", () => {
     ]);
 
     recordBackendRateLimit(db, "claude", {
+      credentialUserId: null,
+      credentialLabel: null,
       status: "allowed_warning",
       rateLimitType: "seven_day",
       utilization: 0.91,
@@ -505,6 +507,8 @@ describe("backend quota readings (pass 29)", () => {
     });
     // A later reading REPLACES the earlier one — latest wins.
     recordBackendRateLimit(db, "claude", {
+      credentialUserId: null,
+      credentialLabel: null,
       status: "allowed",
       rateLimitType: "seven_day",
       utilization: 0.92,

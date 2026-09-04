@@ -6,11 +6,7 @@ import type {
 } from "~/server/insights/insights-query.server";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
-import {
-  formatCalendarDate,
-  formatDayDotTime,
-  utcDayKey,
-} from "~/shared/dates/format";
+import { formatDayDotTime, utcDayKey, formatClockUTC } from "~/shared/dates/format";
 
 /**
  * Insights: a read-only analytics dashboard over agent runs — totals, outcomes,
@@ -294,6 +290,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                 </span>
                 <span className="bar-val">
                   credential refused
+                  {credentialRefused.credentialLabel ? ` · ${credentialRefused.credentialLabel}'s account` : ""}
                   <span
                     className="bar-cost"
                     title={
@@ -365,8 +362,10 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                       // Say where this came from. It is NOT a utilization
                       // reading the provider volunteered, and a card that
                       // blurred the two would be claiming a live measurement it
-                      // never took.
-                      "from a refused run",
+                      // never took. Ruling 130(d): and WHOSE account it was.
+                      refusal.credentialLabel
+                        ? `from a refused run on ${refusal.credentialLabel}'s account`
+                        : "from a refused run",
                       // V9: only an `exact` reset is a real instant (the
                       // provider emitted a unix epoch). A `prose` one was
                       // reconstructed from wall-clock words in the ACCOUNT's
@@ -417,11 +416,13 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                       // UTC day, marked as such (P07-I), so the first paint is
                       // honest either way. D32-2: the shared formatter, not
                       // `toLocaleDateString`.
+                      // Ruling 130(d): the reading names the HOUR when the
+                      // provider sent one, not a bare calendar date.
                       reading.resetsAt != null
                         ? `resets ${
                             hydrated
-                              ? formatCalendarDate(new Date(reading.resetsAt * 1000).toISOString())
-                              : `${utcDayKey(new Date(reading.resetsAt * 1000).toISOString())} (UTC)`
+                              ? formatDayDotTime(new Date(reading.resetsAt * 1000).toISOString())
+                              : `${utcDayKey(new Date(reading.resetsAt * 1000).toISOString())} ${formatClockUTC(new Date(reading.resetsAt * 1000).toISOString())} (UTC)`
                           }`
                         : null,
                     ]

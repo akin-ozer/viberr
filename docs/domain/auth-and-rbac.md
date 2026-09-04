@@ -248,6 +248,11 @@ exists to show. *(Corrected 2026-09-04, pass 34 — U34-9: the denominator used 
 any task with a branch, and the card read "7 of 8 delivered tasks carry branch + PR"
 while one of the eight had delivered nothing.)*
 
+Ruling 130(d) (pass 34): the backend quota panel names whose account a refusal or an
+exhaustion was recorded on (`credentialLabel`). That is org-admin information: it names a
+person's provider account state, so it reaches this page, the signed-in `instance_health`
+read and the person's own Profile card, and never the unauthenticated health body.
+
 ## 7. Profile and preferences (`/profile`)
 
 Identity (name, title; audit `profile.updated`), notification routing (six in-app

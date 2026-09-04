@@ -119,10 +119,22 @@ real success. Never a synthetic probe (ruling 19 generalised).
 
 **Quota and rate limits** (`instance_settings`): the run sink folds Claude
 `rate_limit_event` envelopes into `backendRateLimit.<backend>`; a quota-refused failure
-(terminal tag ending `·quota`) records `backendQuotaExhausted.<backend>` with the
-provider's sentence and a parsed reset instant (Claude `usage limit reached|<epoch>` is
-exact; Codex "try again at …" prose is resolved in UTC). Grace 24 h; an undated
-exhaustion expires after 6 h. Insights renders both; "no reading yet" is neutral.
+(terminal tag ending `·quota`) records `backendQuotaExhausted.<backend>` when the
+terminal line's `failure.windowRejected` says the provider rejected the window OR the
+provider's own sentence names a spent limit (`session | weekly | monthly | usage limit`,
+never transient rate-limit wording), with only the PROVIDER half of the line as its
+evidence and a reset instant that is the SDK's exact `resetsAt`, a Claude
+`usage limit reached|<epoch>` (exact), a `resets 11:50am (UTC)` clock resolved to the
+next UTC occurrence (`clock`, retired with the prose grace) or Codex "try again at …"
+prose resolved in UTC (`prose`). Grace 24 h for prose and clock; an undated exhaustion
+expires after 6 h. Ruling 130(d): every record (reading, exhaustion, credential refusal)
+names the account it billed (`credentialUserId`, `credentialLabel`, the run's
+principal under ruling 127); one latest record per backend, and a completed run by
+ANY person retires an exhaustion or refusal. The principal reaches Insights (org
+admin), `instance_health` (signed in) and the person's own Profile card; it is stripped
+from the unauthenticated `/resources/health` body. Insights renders both; "no reading
+yet" is neutral; a refused row says whose account, and a reading row names the hour
+of its reset.
 
 ### 2.4 Claude adapter
 

@@ -72,6 +72,8 @@ const FULL: InsightsSummary = {
         resetsAt: 1_787_832_000,
         isUsingOverage: false,
         observedAt: "2026-08-23T11:59:00.000Z",
+        credentialUserId: null,
+        credentialLabel: null,
       },
       credentialRefused: null,
       exhausted: null,
@@ -177,6 +179,8 @@ describe("InsightsPage", () => {
             resetsAt: 1_787_848_800,
             isUsingOverage: false,
             observedAt: "2026-08-27T12:59:20.000Z",
+            credentialUserId: null,
+            credentialLabel: null,
           },
           credentialRefused: null,
           exhausted: null,
@@ -205,6 +209,8 @@ describe("InsightsPage", () => {
       "free trial of Plus today, or try again at Sep 18th, 2026 5:20 PM.",
     runId: "run_abc",
     observedAt: "2026-08-31T09:00:00.000Z",
+    credentialUserId: null,
+    credentialLabel: null,
   };
 
   it("says the window is exhausted when a run was refused, and names that as its source", async () => {
@@ -257,6 +263,8 @@ describe("InsightsPage", () => {
             resetsAt: null,
             isUsingOverage: false,
             observedAt: "2026-08-31T08:00:00.000Z",
+            credentialUserId: null,
+            credentialLabel: null,
           },
           credentialRefused: {
             providerText:
@@ -264,6 +272,8 @@ describe("InsightsPage", () => {
               "\n\nThe provider reported: Your access token could not be refreshed because your refresh token was already used.",
             runId: "run_auth",
             observedAt: "2026-08-31T09:00:00.000Z",
+            credentialUserId: null,
+            credentialLabel: null,
           },
           exhausted: null,
         },
@@ -336,6 +346,8 @@ describe("InsightsPage", () => {
             isUsingOverage: false,
             // An hour after the refusal: the window is demonstrably open.
             observedAt: "2026-08-31T10:00:00.000Z",
+            credentialUserId: null,
+            credentialLabel: null,
           },
           credentialRefused: null,
           exhausted: REFUSED,
@@ -367,6 +379,8 @@ describe("InsightsPage", () => {
             isUsingOverage: false,
             // BEFORE the refusal — stale, and the refusal is what happened next.
             observedAt: "2026-08-31T08:00:00.000Z",
+            credentialUserId: null,
+            credentialLabel: null,
           },
           credentialRefused: null,
           exhausted: REFUSED,
@@ -394,5 +408,55 @@ describe("InsightsPage", () => {
     });
     // Both the success-rate and avg-duration cards read the "n/a" placeholder.
     expect(getAllByText("n/a").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+/** Ruling 130(d): a refused or exhausted row says whose account, and the
+ *  reading row names the hour. Canary: drop the label interpolation. */
+describe("ruling 130(d): whose account, and the hour", () => {
+  it("an exhausted row names the account it billed; a reading row names the hour", () => {
+    const { getByText } = renderPage({
+      ...FULL,
+      backendQuota: [
+        {
+          backend: "claude",
+          reading: null,
+          credentialRefused: null,
+          exhausted: {
+            resetsAt: 1_788_781_800, resetsAtPrecision: "exact", providerText: "session limit", runId: "run_1",
+            observedAt: "2026-09-07T09:00:00.000Z", credentialUserId: "u_arda", credentialLabel: "Arda Kaya",
+          },
+        },
+        {
+          backend: "codex",
+          reading: {
+            status: "allowed", rateLimitType: "five_hour", utilization: 0.2, resetsAt: 1_788_781_800, isUsingOverage: false,
+            observedAt: "2026-09-07T09:00:00.000Z", credentialUserId: null, credentialLabel: null,
+          },
+          credentialRefused: null,
+          exhausted: null,
+        },
+      ],
+    });
+    expect(getByText(/from a refused run on Arda Kaya's account/)).toBeTruthy();
+    // The reading row names the HOUR (local once hydrated, UTC on the first
+    // paint), never a bare calendar date.
+    expect(getByText(/resets .+ · \d{1,2}:\d{2}/)).toBeTruthy();
+  });
+
+  it("a refused credential row names the account", () => {
+    const { getByText } = renderPage({
+      ...FULL,
+      backendQuota: [
+        {
+          backend: "claude",
+          reading: null,
+          credentialRefused: { providerText: "token revoked", runId: "run_2", observedAt: "2026-09-07T09:00:00.000Z", credentialUserId: "u_arda", credentialLabel: "Arda Kaya" },
+          exhausted: null,
+        },
+        { backend: "codex", reading: null, credentialRefused: null, exhausted: null },
+      ],
+    });
+    expect(getByText(/credential refused · Arda Kaya's account/)).toBeTruthy();
   });
 });

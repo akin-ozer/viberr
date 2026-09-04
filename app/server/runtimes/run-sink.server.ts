@@ -12,7 +12,10 @@ import {
   recordBackendCredentialRefusal,
   recordBackendQuotaExhaustion,
   recordBackendRateLimit,
+  providerSentence,
 } from "./backend-quota.server";
+import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
+import { findUserById } from "~/server/auth/user-store.server";
 import { publishRunLogAppended, publishRunStateChanged } from "./run-events.server";
 import { CREDENTIAL_ENV_RE } from "./runtime-registry.server";
 import {
@@ -21,6 +24,7 @@ import {
   nextSeq,
   patchRun,
   type RunPatch,
+  getRun,
 } from "./run-store.server";
 import {
   REDACTED,
@@ -238,6 +242,15 @@ export function createRunSink(
   // principal's own credential (ruling 127), which lives sealed in the database
   // rather than in this process's env, so the env sweep could not find it.
   const redact = createLineRedactor(process.env, opts.secrets ?? []);
+  // Ruling 130(d): whose account this run bills, for the quota and credential
+  // observation records (ruling 127: a run bills one person's credential).
+  const principal = (() => {
+    const row = getRun(db, spec.runId);
+    const userId = row?.credential_user_id ?? null;
+    if (!userId) return { credentialUserId: null, credentialLabel: null };
+    const user = findUserById(db, userId);
+    return { credentialUserId: userId, credentialLabel: user ? user.name || user.email : null };
+  })();
 
   const publishState = (state: RunState) => {
     publishRunStateChanged({
@@ -398,6 +411,7 @@ export function createRunSink(
           recordBackendRateLimit(db, effectiveBackend, {
             ...f.rateLimit,
             observedAt: line.occurredAt,
+            ...principal,
           });
         }
 
@@ -429,16 +443,39 @@ export function createRunSink(
         // sentence (only that half of the line, never the adapter's canonical
         // prose) has to evidence a usage window before this store hears about
         // it — see `quotaExhaustionEvidence`.
+        // Ruling 130(d): the gate is the REJECTION, structured or in the
+        // provider's own words. A rejected rate-limit reading attached to the
+        // line (`failure.windowRejected`) is the provider declaring the window
+        // spent even when its sentence names no limit word; a transient 429
+        // whose reading was merely `allowed` still records nothing. Only the
+        // provider half of the line is stored and rendered, never the
+        // adapter's canonical remedy or the marker.
         if (display?.tag?.endsWith("·quota") && display.text) {
-          const evidence = quotaExhaustionEvidence(display.text);
-          if (evidence) {
-            const reset = parseQuotaResetAt(evidence);
+          const facts = display.failure ?? null;
+          // The provider's own words are judged only when the line carries
+          // them behind the marker: without one the whole line is the
+          // adapter's canonical sentence, which names "usage quota" for every
+          // member of the class and must never satisfy its own gate.
+          const hasMarker = display.text.includes(PROVIDER_TEXT_MARKER);
+          const evidence = hasMarker ? quotaExhaustionEvidence(display.text) : null;
+          if (facts?.windowRejected || evidence) {
+            const providerText =
+              evidence ??
+              (hasMarker
+                ? providerSentence(display.text)
+                : `${(facts?.window ?? "usage").replace(/_/g, " ")} window rejected by the provider`);
+            const exactReset =
+              facts?.resetsAt && Number.isFinite(Date.parse(facts.resetsAt))
+                ? { at: Math.round(Date.parse(facts.resetsAt) / 1000), precision: "exact" as const }
+                : null;
+            const reset = exactReset ?? parseQuotaResetAt(providerText, line.occurredAt);
             recordBackendQuotaExhaustion(db, effectiveBackend, {
               resetsAt: reset?.at ?? null,
               resetsAtPrecision: reset?.precision ?? null,
-              providerText: display.text,
+              providerText,
               runId: spec.runId,
               observedAt: line.occurredAt,
+              ...principal,
             });
           }
         }
@@ -449,9 +486,10 @@ export function createRunSink(
         // quota flag rides, with the provider's sentence as its evidence.
         if (display?.tag?.endsWith("·auth") && display.text) {
           recordBackendCredentialRefusal(db, effectiveBackend, {
-            providerText: display.text,
+            providerText: providerSentence(display.text),
             runId: spec.runId,
             observedAt: line.occurredAt,
+            ...principal,
           });
         }
 

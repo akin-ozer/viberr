@@ -223,7 +223,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         // and one boolean about the ASKER's own account — nothing that names
         // another person, a host path or an environment variable.
         const admin = orgAdmin();
-        const snapshot = healthSnapshot(db);
+        // Ruling 130(d): a signed-in read carries whose account a refusal was.
+        const snapshot = healthSnapshot(db, { principal: true });
         auditRead("instance_health", "instance");
         const body: HealthSnapshot & {
           backendCredentials: BackendCredentialReport[];

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { RunFailureFacts } from "~/shared/run-failure";
 import { readFileSync, rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LogLine } from "~/features/runtime/runtime-types";
@@ -716,7 +717,9 @@ describe("quota exhaustion from a refused run (D5)", () => {
             t: "10:00:00",
             ev: "err",
             tag: "run·error·quota",
-            text: "Claude AI usage limit reached|1789741200",
+            text:
+              "The Claude account is over its usage quota." +
+              "\n\nThe provider reported: Claude AI usage limit reached|1789741200",
           },
           "{}",
         ),
@@ -794,7 +797,9 @@ describe("quota exhaustion from a refused run (D5)", () => {
             t: "10:00:00",
             ev: "err",
             tag: "error·quota",
-            text: "usage limit. try again at Jan 2nd, 2020 5:20 PM.",
+            text:
+              "The Claude account is over its usage quota." +
+              "\n\nThe provider reported: usage limit. try again at Jan 2nd, 2020 5:20 PM.",
           },
           "{}",
         ),
@@ -814,6 +819,126 @@ describe("quota exhaustion from a refused run (D5)", () => {
       ).toBeNull();
     } finally {
       rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+});
+
+/**
+ * Ruling 130(d) (pass 34): the quota store records the STRUCTURED refusal
+ * (a rejected window on the terminal line's `failure` record) and whose
+ * account it was. Canaries: delete the `failure` clause from the exhaustion
+ * gate; gate on `window` instead of `windowRejected`; remove the clock arm;
+ * stop reading the run's `credential_user_id`.
+ */
+describe("ruling 130(d): structured refusals and the principal", () => {
+  const facts = (over: Partial<RunFailureFacts>): RunFailureFacts => ({
+    kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, ...over,
+  });
+  function principalSink(runId: string) {
+    upsertRun(store.db, {
+      id: runId, projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary", role: "developer", kind: "primary",
+      backend: "claude", model: "sonnet", sdk: "Claude Agent SDK", agentProfileId: "dev", state: "queued",
+      credentialUserId: store.users.arda.id,
+    });
+    return createRunSink(store.db, spec(runId));
+  }
+  const quotaFor = (nowIso?: string) => latestBackendRateLimits(store.db, nowIso).find((q) => q.backend === "claude")!;
+
+  it("records exhaustion off the err line's rejected-window facts even when the provider sentence names no limit word", () => {
+    const runId = `run_rej_${randomBytes(6).toString("hex")}`;
+    const sink = principalSink(runId);
+    sink.markRunning();
+    try {
+      sink.line(emitted({
+        t: "10:00:00", ev: "err", tag: "run·error·quota",
+        text: "The Claude account is over its usage quota: its five hour window is spent.",
+        failure: facts({ windowRejected: true, window: "five_hour", resetsAt: "2026-09-07T11:50:00.000Z", apiErrorStatus: 429 }),
+      }, "{}", "2026-09-07T09:00:00.000Z"));
+      const row = quotaFor("2026-09-07T09:01:00.000Z");
+      expect(row.exhausted).toBeTruthy();
+      expect(row.exhausted!.resetsAt).toBe(Date.UTC(2026, 8, 7, 11, 50) / 1000);
+      expect(row.exhausted!.resetsAtPrecision).toBe("exact");
+      // Only the provider half is stored: no marker here, so the window fact.
+      expect(row.exhausted!.providerText).toBe("five hour window rejected by the provider");
+      expect(row.exhausted!.providerText).not.toContain("Retry");
+      // …and whose account it was.
+      expect(row.exhausted!.credentialUserId).toBe(store.users.arda.id);
+      expect(row.exhausted!.credentialLabel).toBeTruthy();
+    } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+
+  it("a transient 429 with facts attached but no REJECTED window still records nothing", () => {
+    const runId = `run_t429_${randomBytes(6).toString("hex")}`;
+    const sink = principalSink(runId);
+    sink.markRunning();
+    try {
+      sink.line(emitted({
+        t: "10:00:00", ev: "err", tag: "run·error·quota",
+        text: "The Claude account is over its usage quota.\n\nThe provider reported: 429 rate_limit_error per-minute rate limit",
+        failure: facts({ windowRejected: false, window: "five_hour", apiErrorStatus: 429 }),
+      }, "{}"));
+      expect(quotaFor().exhausted).toBeNull();
+    } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+
+  it("parses `resets 11:50am (UTC)` as the next UTC occurrence with precision `clock`", () => {
+    expect(parseQuotaResetAt("You've hit your session limit · resets 11:50am (UTC)", "2026-09-07T09:00:00.000Z")).toEqual({
+      at: Date.UTC(2026, 8, 7, 11, 50) / 1000,
+      precision: "clock",
+    });
+    // Already past today: tomorrow.
+    expect(parseQuotaResetAt("resets 11:50am (UTC)", "2026-09-07T12:00:00.000Z")).toEqual({
+      at: Date.UTC(2026, 8, 8, 11, 50) / 1000,
+      precision: "clock",
+    });
+    expect(parseQuotaResetAt("resets 7pm (UTC)", "2026-09-07T12:00:00.000Z")).toEqual({
+      at: Date.UTC(2026, 8, 7, 19, 0) / 1000,
+      precision: "clock",
+    });
+    // A clock-derived instant is retired with the prose grace, never at the minute.
+    const runId = `run_clock_${randomBytes(6).toString("hex")}`;
+    const sink = principalSink(runId);
+    sink.markRunning();
+    try {
+      sink.line(emitted({
+        t: "10:00:00", ev: "err", tag: "run·error·quota",
+        text: "The Claude account is over its usage quota.\n\nThe provider reported: You've hit your session limit · resets 11:50am (UTC)",
+      }, "{}", "2026-09-07T09:00:00.000Z"));
+      expect(quotaFor("2026-09-07T09:01:00.000Z").exhausted).toMatchObject({ resetsAtPrecision: "clock", providerText: "You've hit your session limit · resets 11:50am (UTC)" });
+      expect(quotaFor("2026-09-07T12:00:00.000Z").exhausted).toBeTruthy();
+      expect(quotaFor("2026-09-09T12:00:00.000Z").exhausted).toBeNull();
+    } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+
+  it("a credential refusal names the account it billed, and a run with no principal names none", () => {
+    const runId = `run_auth_p_${randomBytes(6).toString("hex")}`;
+    const sink = principalSink(runId);
+    sink.markRunning();
+    try {
+      sink.line(emitted({ t: "10:00:00", ev: "err", tag: "run·error·auth", text: "refused\n\nThe provider reported: token revoked" }, "{}"));
+      const refused = quotaFor().credentialRefused!;
+      expect(refused.credentialUserId).toBe(store.users.arda.id);
+      expect(refused.providerText).toBe("token revoked");
+    } finally {
+      rmSync(rawLogPath("claude", runId), { force: true });
+    }
+  });
+
+  it("a run with no principal names none", () => {
+    const bare = `run_auth_np_${randomBytes(6).toString("hex")}`;
+    const sink2 = sinkFor(bare);
+    sink2.markRunning();
+    try {
+      sink2.line(emitted({ t: "10:00:00", ev: "err", tag: "run·error·auth", text: "refused" }, "{}"));
+      expect(quotaFor().credentialRefused!.credentialUserId).toBeNull();
+    } finally {
+      rmSync(rawLogPath("claude", bare), { force: true });
     }
   });
 });
