@@ -2391,6 +2391,31 @@ describe("applyRecommendation / dismissRecommendation", () => {
     );
   }
 
+  it("ruling 131(d): the snapshot carries blockedBy with resolved states", async () => {
+    // Canary: omit `blockedBy` from `operatorSnapshot`'s return object.
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(snapshot().blockedBy).toEqual([]);
+    const { setTaskDependencies } = await import("./dependencies.server");
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-77", { stage: "done", waiting: "none" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-77", "goal-9 link 1"] },
+      { userId: "operator", label: "operator" },
+      { dataRoot: store.dataRoot, operatorAuthorized: true },
+    ).catch(() => {});
+    await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-77"] },
+      { userId: "operator", label: "operator" },
+      { dataRoot: store.dataRoot, operatorAuthorized: true },
+    );
+    expect(snapshot().blockedBy).toEqual([
+      { ref: "VIB-77", label: "VIB-77", state: "done", taskKey: "VIB-77", goalId: null },
+    ]);
+  });
+
   it("dismissing a recommendation writes a typed timeline event NAMING what was declined", async () => {
     const recId = await seedRecommendation();
     const label = task().frontmatter.recommendations[0]!.label;

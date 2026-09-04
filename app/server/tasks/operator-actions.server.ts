@@ -2,6 +2,8 @@ import {
   describeRevisionDrift,
   type RevisionDrift,
 } from "~/shared/revision-drift";
+import { resolveDependencies } from "~/server/projections/dependencies.server";
+import type { DependencyRender } from "~/shared/dependencies";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type {
@@ -1368,6 +1370,9 @@ export interface OperatorTaskSnapshot {
   priority: string;
   labels: string[];
   dueDate: string | null;
+  /** Ruling 131(d): what the task waits on, each entry with its live state.
+   *  Non-empty means the task is HELD: the doctrine replaces the stage rule. */
+  blockedBy: DependencyRender[];
   stage: string;
   stageName: string;
   /** Dynamic-dispatch rework (2026-08-29): where the task CAME from — the
@@ -1784,6 +1789,7 @@ export function operatorSnapshot(
     priority: fm.priority,
     labels: fm.labels,
     dueDate: fm.dueDate,
+    blockedBy: resolveDependencies(db, projectSlug, fm.blockedBy),
     stage: fm.stage,
     stageName: stageName(fm.stage),
     previousStage: fm.previousStageId

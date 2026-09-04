@@ -432,6 +432,28 @@ describe("cancelScheduledAction", () => {
 });
 
 describe("fireDueSchedules", () => {
+  it("ruling 131(d): a due run-operator occurrence on a HELD task is retired `fired` as skipped-held with no run; a run-agent occurrence stands", async () => {
+    // Canary: drop the `refusedHeld` branch (the note and the outcome vanish).
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        waiting: "none",
+        blockedBy: ["VIB-2"],
+        schedules: [rawSchedule({ id: "sch_held" })],
+      }),
+    });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(1);
+    await waitForSchedule("VIB-1", "sch_held", "fired");
+    expect(operatorRunCount()).toBe(0);
+    expect(timeline("VIB-1").some((e) => /Scheduled action skipped:.*waits on other work \(VIB-2\)/.test(e.text))).toBe(true);
+    const fired = listAuditEvents(store.db).filter((e) => e.action === "task.schedule.fired");
+    expect(fired.map((e) => e.details?.outcome).sort()).toEqual(["claimed", "skipped-held"]);
+  });
+
   it("fires a due pending schedule (marks fired + audits) and leaves a future one pending", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {

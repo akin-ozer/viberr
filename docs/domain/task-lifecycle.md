@@ -181,7 +181,11 @@ the state stack (its title lists every entry with its state; the readiness pill
 already carries the red), the hero renders one linked chip per entry, the
 Current-state row reads "Other work: …", the Details panel shows a "Blocked by" row
 with its own editor, and the operator run control carries a hold note with the
-button left enabled (a manual run still answers a person). An emptied list clears `heldAtStage`; a
+button left enabled (a manual run still answers a person). The operator holds without
+a packet (ruling 131(d)): `create`, `transition` and `scheduled` are refused at fire
+time (`refused: "blocked-by"`, the refusal settling `waiting` to `none` when nothing
+else is pending), the stranded backstop never nudges a held task, and every turn that
+does run is given the held doctrine in place of the stage rule. An emptied list clears `heldAtStage`; a
 PERSON emptying it is the release itself (ruling 131(e)): the same two halves the
 engine uses (`clearDependencies`, then `announceRelease`: the "Dependencies released"
 note naming who cleared it, a stored `blocked` lifted to `ready`, the
@@ -282,7 +286,11 @@ anything ambiguous fails closed with the reason recorded.
   before enqueuing (`pending → claimed → fired | failed`, `cancelled` by a human),
   never fires on a terminal or archived task, and resolves the **live** deployment at
   fire time (ruling 94). A fire-time refusal no retry can cure (profile undeployed,
-  stage-ineligible) is a terminal `failed` with the reason on the timeline.
+  stage-ineligible) is a terminal `failed` with the reason on the timeline. A
+  `run-operator` occurrence on a task that waits on other work (ruling 131(d)) is
+  retired `fired` with a "Scheduled action skipped" note and outcome `skipped-held`
+  (no run, no cost); a `run-agent` occurrence STANDS, because the ruling refuses
+  operator triggers only: a person who scheduled an agent run on a held task gets it.
 
 ## 10. Delivery
 

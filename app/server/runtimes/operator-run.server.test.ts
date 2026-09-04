@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import {
+  updateTaskFile, readTaskFile } from "~/server/files/task-writer.server";
 import type {
   AgentDeployment,
   AgentDeploymentDefinition,
@@ -1095,6 +1096,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       priority: "normal",
       labels: [],
       dueDate: null,
+      blockedBy: [],
       stage: "review",
       stageName: "Review",
       previousStage: null,
@@ -1270,6 +1272,7 @@ describe("stranded auto-stage resume", () => {
       stage: "triage",
       packet: null,
       recommendations: [],
+      blockedBy: [],
     };
     const { operatorLeftTaskStranded } = operatorPrompts;
     expect(operatorLeftTaskStranded(base, wf)).toBe(true);
@@ -1279,6 +1282,9 @@ describe("stranded auto-stage resume", () => {
     expect(operatorLeftTaskStranded({ ...base, archived: true }, wf)).toBe(false);
     expect(operatorLeftTaskStranded({ ...base, packet: { title: "?" } }, wf)).toBe(false);
     expect(operatorLeftTaskStranded({ ...base, recommendations: [{}] }, wf)).toBe(false);
+    // Ruling 131(d): a task waiting on other work is a RECORDED hold, never a
+    // stranding. Canary: delete the `blockedBy` early return.
+    expect(operatorLeftTaskStranded({ ...base, blockedBy: ["JC-3"] }, wf)).toBe(false);
   });
 
   it("goal-drafting is labeled SETUP in the turn instruction — the live stranding's exact misreading", () => {
@@ -1290,6 +1296,7 @@ describe("stranded auto-stage resume", () => {
         priority: "normal",
         labels: [],
         dueDate: null,
+        blockedBy: [],
         stage: "triage",
         stageName: "Triage",
         previousStage: null,
@@ -1645,6 +1652,7 @@ describe("transition trigger carries from → to and who moved it", () => {
     priority: "normal",
     labels: [],
     dueDate: null,
+    blockedBy: [],
     stage: "impl",
     stageName: "In Progress",
     previousStage: null,
@@ -1734,6 +1742,7 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     priority: "normal",
     labels: [],
     dueDate: null,
+    blockedBy: [],
     stage: "triage",
     stageName: "Triage",
     previousStage: null,
@@ -1859,6 +1868,62 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     });
     expect(withoutNote).not.toContain("the human added");
     expect(withoutNote).toContain("the collision was not cleared (GitHub refused the deletion (boom).); nothing was re-delivered and the block stays.");
+  });
+
+  it("ruling 131(d): a held prompt REPLACES the stage rule: no 'NEVER end your turn', no hold-packet exit, and it names set_dependencies", () => {
+    // Canary: append the held doctrine to the ordinary tail instead of
+    // returning it (both orders then appear in one prompt).
+    const held = snap({
+      stage: "impl",
+      stageName: "In Progress",
+      goal: "Ship it.",
+      blockedBy: [
+        { ref: "goal-1 link 2", label: "goal-1 link 2 (JC-3)", state: "open", taskKey: "JC-3", goalId: "goal-1" },
+        { ref: "JC-6", label: "JC-6", state: "failed", taskKey: "JC-6", goalId: null },
+      ],
+    });
+    for (const prompt of [
+      operatorPrompts.buildOperatorTurnPrompt(held, "manual"),
+      operatorPrompts.buildOperatorTurnPrompt(held, "agent-reply", undefined, "I finished.", undefined, undefined, undefined, undefined, true),
+      operatorPrompts.buildCodexOperatorPrompt(held, "manual"),
+    ]) {
+      expect(prompt).toContain("This task WAITS ON OTHER WORK and Viberr is holding it: goal-1 link 2 (JC-3) (open), JC-6 (archived, can never complete).");
+      expect(prompt).toContain("`set_dependencies`");
+      expect(prompt).toContain("do NOT open a decision packet about the wait");
+      expect(prompt).not.toContain("NEVER end your turn");
+      expect(prompt).not.toContain("asking the human to confirm the hold");
+      expect(prompt).not.toContain("You are at stage");
+    }
+    // A human's direct question still gets the answer branch, and the hold
+    // still binds what the answer may do.
+    const asked = operatorPrompts.buildOperatorTurnPrompt(held, "manual", "Why is this waiting?", undefined, "Arda");
+    expect(asked).toContain("addressed you directly");
+    expect(asked).toContain("This task waits on other work (goal-1 link 2 (JC-3) (open), JC-6 (archived, can never complete)) and Viberr is holding it: answer them");
+    expect(asked).not.toContain("NEVER end your turn");
+    // Every waking trigger, not only `manual`, gets the held doctrine.
+    for (const trigger of ["goal-updated", "pr-diverged", "packet-resolved", "delivered", "transition", "scheduled"] as const) {
+      const prompt = operatorPrompts.buildOperatorTurnPrompt(held, trigger);
+      expect(prompt, trigger).toContain("This task WAITS ON OTHER WORK");
+      expect(prompt, trigger).not.toContain("NEVER end your turn");
+    }
+  });
+
+  it("ruling 131(e): the dependencies-released doctrine names the entries, the base re-read and the moot packet, then continues with the stage rule", () => {
+    // Canary: return "" from `dependenciesInstruction`.
+    const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Ship it.", openPacket: true });
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(atWork, "dependencies-released", undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+      entries: ["goal-1 link 2", "goal-1 link 3"],
+      clearedBy: null,
+    });
+    expect(prompt).toContain("The work this task waited on has landed: goal-1 link 2, goal-1 link 3 is done.");
+    expect(prompt).toContain("The base branch has CHANGED since the hold");
+    expect(prompt).toContain("it is now MOOT: `resolve_decision_packet` it first");
+    expect(prompt).toContain("You are at stage \"In Progress\"");
+    const byHand = operatorPrompts.buildOperatorTurnPrompt(atWork, "dependencies-released", undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+      entries: ["JC-3"],
+      clearedBy: "arda@viberr.dev",
+    });
+    expect(byHand).toContain("arda@viberr.dev cleared the wait on JC-3");
   });
 
   it("ruling 130(c): the packet-resolved instruction bolds the decided title and claims no policy or credential fix", () => {
@@ -2561,6 +2626,66 @@ describe("runOperator — authority, ordering, orphans", () => {
    * recommended title and `ev`; (2) restore the generic body sentence and
    * every case fails on the body.
    */
+  describe("ruling 131(d): a held task refuses the coordinating triggers at no cost", () => {
+    const seedHeld = (over: Partial<Parameters<typeof baseTaskFrontmatter>[1]> = {}): void => {
+      writeTask(store5.dataRoot, store5.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          readiness: "ready",
+          waiting: "none",
+          ownerUserId: store5.users.arda.id,
+          blockedBy: ["VIB-2"],
+          ...over,
+        }),
+        goal: "Ship the parser.",
+      });
+      writeTask(store5.dataRoot, store5.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
+      rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+    };
+
+    it("create, transition and scheduled are refused `blocked-by` with no run row; reactive triggers still drive", async () => {
+      // Canary: remove "transition" from HELD_TRIGGERS.
+      deployAgents([operatorAgent()]);
+      seedHeld();
+      for (const trigger of ["create", "transition", "scheduled"] as const) {
+        const result = await drive({ trigger });
+        expect(result.refused, trigger).toBe("blocked-by");
+        expect(result.runId).toBeNull();
+        expect(adapter5.pending).toBeNull();
+      }
+      expect(operatorRuns()).toHaveLength(0);
+      const reactive = await drive({ trigger: "manual" });
+      expect(reactive.refused).toBeUndefined();
+      expect(adapter5.pending).not.toBeNull();
+    });
+
+    it("a transition drained off the lease queue and refused settles waiting to `none`, never `agent`", async () => {
+      // Canary: delete the settle from the `blocked-by` branch (waiting
+      // stays `agent` after the drained refusal).
+      deployAgents([operatorAgent()]);
+      seedHeld({ blockedBy: [] });
+      // A drive holds the lease; a transition queues behind it; THEN the task
+      // becomes held (the operator's own `set_dependencies` mid-drive is the
+      // live shape). The drained trigger is refused, and its settle is the
+      // only thing that turns `agent` back off.
+      await drive({ trigger: "manual" });
+      expect(adapter5.pending).not.toBeNull();
+      const queued = await drive({ trigger: "transition" });
+      expect(queued.queued).toBe(true);
+      expect(task().frontmatter.waiting).toBe("agent");
+      await updateTaskFile({ projectSlug: store5.slug, taskKey: "VIB-1", dataRoot: store5.dataRoot }, (parsed) => {
+        parsed.frontmatter.blockedBy = ["VIB-2"];
+      });
+      rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+      adapter5.finish(store5, JSON.stringify({ reasoning: "held", actions: [] }), "finished");
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(1);
+        expect(task().frontmatter.waiting).toBe("none");
+      });
+      expect(task().frontmatter.blockedBy).toEqual(["VIB-2"]);
+    });
+  });
+
   describe("ruling 130: a failed operator run's packet", () => {
     const RESET = "2026-09-07T11:50:00.000Z";
     const RESET_LABEL = "Sep 7, 2026 · 11:50 UTC";

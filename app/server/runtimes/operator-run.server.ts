@@ -267,9 +267,18 @@ export interface RunOperatorResult {
    *     legitimately run with a packet open (a `pr-diverged` recovery withdraws
    *     a moot packet — ruling 17; `agent-reply` reacts to a run already in
    *     flight). The route turns this into "resolve the decision first".
+   *   `blocked-by` (ruling 131(d), pass 34) — the task WAITS ON OTHER WORK
+   *     (`blockedBy` is non-empty). The `create`, `transition` and `scheduled`
+   *     triggers are refused at fire time: no run, no cost. Reactive triggers
+   *     (an agent report, a human's question, a resolved packet, a goal edit, a
+   *     PR change, a manual run) still drive, under the held doctrine. The
+   *     refusal settles the task's waiting flag itself.
    */
-  refused?: "terminal-stage" | "open-packet";
+  refused?: "terminal-stage" | "open-packet" | "blocked-by";
 }
+
+/** The operator triggers a held task refuses (ruling 131(d)). */
+const HELD_TRIGGERS: ReadonlySet<string> = new Set(["create", "transition", "scheduled"]);
 
 /**
  * Wall-clock ms at which THIS process started. A run row created before it
@@ -699,12 +708,17 @@ export function operatorLeftTaskStranded(
     stage: string;
     packet: unknown;
     recommendations: readonly unknown[];
+    /** Ruling 131(d): a non-empty `blockedBy` is a RECORDED hold. */
+    blockedBy: readonly unknown[];
   },
   workflow: readonly { from: string; to: string; boundary: string }[],
 ): boolean {
   if (task.archived) return false;
   if (task.packet) return false; // a decision IS pending — the human's move
   if (task.recommendations.length > 0) return false; // ditto
+  // Ruling 131(d): a task waiting on other work is holding on purpose; the
+  // paid nudge would only rediscover the wait (JC-9: five runs, no dispatch).
+  if (task.blockedBy.length > 0) return false;
   return workflow.some((w) => w.from === task.stage && w.boundary === "auto");
 }
 
@@ -793,6 +807,7 @@ export async function maybeResumeStrandedOperator(
       stage: file.parsed.frontmatter.stage,
       packet: file.parsed.packet,
       recommendations: file.parsed.frontmatter.recommendations,
+      blockedBy: file.parsed.frontmatter.blockedBy,
     },
     project.parsed.frontmatter.workflow,
   );
@@ -1344,6 +1359,35 @@ export async function runOperator(
         backend,
         autonomy: authority.autonomy,
         refused: "terminal-stage",
+      };
+    }
+  }
+
+  // Ruling 131(d) (pass 34, Q34-11): a task waiting on other work is held,
+  // not coordinated. The triggers that would start ordinary coordination are
+  // refused before any run row exists (no run, no cost); JC-9 paid five
+  // operator turns to rediscover the same wait. Reactive triggers still run
+  // under the held doctrine (`operatorTurnDoctrine`).
+  if (HELD_TRIGGERS.has(input.trigger ?? "manual")) {
+    const held = readTaskFile(taskFileRef(input))?.parsed.frontmatter.blockedBy ?? [];
+    if (held.length > 0) {
+      logger.info("operator run refused — the task waits on other work", {
+        taskKey: input.taskKey,
+        trigger: input.trigger,
+        blockedBy: held,
+      });
+      // Same settle the terminal branch performs: a trigger drained off the
+      // lease queue had its settle skipped by `releaseOperatorLease` precisely
+      // because a trigger existed to fire, so refusing without it would leave
+      // `waiting: "agent"` on a task with no agent forever. A held task with
+      // nothing else pending settles to `none` (`clearWaitingToHuman`).
+      settleWaitingAfterOperator(db, taskFileRef(input));
+      return {
+        runId: null,
+        queued: false,
+        backend,
+        autonomy: authority.autonomy,
+        refused: "blocked-by",
       };
     }
   }
@@ -1956,6 +2000,7 @@ async function startCodexOperatorRun(
     input.scheduleNote,
     input.resolvedOption,
     input.strandedResume,
+    input.dependencyRelease,
   );
   const orgMcpServers = mcp.servers;
 
@@ -2610,6 +2655,7 @@ async function startRealOperatorRun(
     input.scheduleNote,
     input.resolvedOption,
     input.strandedResume,
+    input.dependencyRelease,
   );
 
   const spec: StartRunInput = {
@@ -3378,6 +3424,7 @@ function operatorTurnDoctrine(
   scheduleNote?: string,
   resolvedOption?: ResolvedPacketOption,
   strandedResume?: boolean,
+  dependencyRelease?: DependencyReleasePayload,
 ): string {
   if (humanComment?.trim()) {
     const by = humanCommentBy?.trim();
@@ -3395,8 +3442,25 @@ function operatorTurnDoctrine(
       // lands on the timeline but never pings them.
       (by
         ? ` Address them by name in the reply you post — tag them "@${by}" so they are notified.`
+        : "") +
+      // Ruling 131(d): a question on a held task is answered, and the hold
+      // still binds what the answer may do.
+      (snapshot.blockedBy.length > 0
+        ? ` This task waits on other work (${heldEntries(snapshot)}) and Viberr is holding it: answer them, but do not advance the stage, dispatch delivery work, or open a packet about the wait; \`set_dependencies\` is the only way the wait changes.`
         : "")
     );
+  }
+
+  // Ruling 131(d) (pass 34): a task waiting on other work is HELD, whatever
+  // woke the operator (an agent report, a resolved packet, a goal edit, a PR
+  // change, a manual run). The held doctrine REPLACES the trigger's ordinary
+  // instruction and the stage-rule tail rather than following them, so the
+  // prompt never carries two contradictory orders ("never end your turn with
+  // nothing done and no packet" beside "do not advance and do not open a
+  // packet"); the stranded-resume packet exit is omitted for the same reason.
+  // The release trigger is the one turn that arrives with the list empty.
+  if (snapshot.blockedBy.length > 0 && trigger !== "dependencies-released") {
+    return scheduleContextFor(trigger, scheduleNote) + moveContextFor(trigger, transition) + heldDoctrine(snapshot);
   }
   if (trigger === "goal-updated") {
     return (
@@ -3484,6 +3548,10 @@ function operatorTurnDoctrine(
     );
   }
 
+  if (trigger === "dependencies-released") {
+    return dependenciesInstruction(snapshot, dependencyRelease) + triageQualityGate(snapshot) + stageRule(snapshot);
+  }
+
   if (trigger === "delivered") {
     // R18-2: the server just opened the review PR for a full-autonomy delivery.
     // Delivery is done — proceed ONE coordination step, never re-deliver.
@@ -3502,25 +3570,8 @@ function operatorTurnDoctrine(
   // Owner ruling 2026-07-26: a transition trigger says WHAT moved and WHO
   // moved it. The operator honors a human's visible steer — and when the
   // reason for a human move is not visible, it ASKS instead of guessing.
-  const moveContext =
-    trigger === "transition" && transition
-      ? transition.byHuman
-        ? `A human (${transition.byHuman}) moved this task from "${transition.fromName}" to "${transition.toName}". ` +
-          "Their reason should be in the newest timeline entries (a decision note, a comment, a resolver's steer) — honor it in what you do next; a move back to the work stage usually means re-prompting the delivering profile with that steer. " +
-          `If you cannot tell WHY the task moved, ask them in ONE comment — tag "@${transition.byHuman}" so they are notified — and stop. Never guess a rework direction. `
-        : `You moved this task from "${transition.fromName}" to "${transition.toName}" — continue coordinating at the new stage. `
-      : "";
-  // B-WF3: a scheduled re-run used to reach the operator as a bare `manual`
-  // trigger, so the reason a human scheduled it ("re-check the flaky test")
-  // existed only in a timeline note the turn never pointed at.
-  const scheduleContext =
-    trigger === "scheduled"
-      ? "This run fired from a SCHEDULED re-check a human set earlier" +
-        (scheduleNote?.trim()
-          ? `, for this stated reason: "${scheduleNote.trim()}". Honor that reason first — check what it asks about and act on what you find. `
-          : " with no stated reason. Re-read the live state and continue the stage below. ") +
-        "A schedule firing is not new evidence by itself: if nothing changed since the last turn, say so in one concise comment rather than re-prompting an agent that already reported. "
-      : "";
+  const moveContext = moveContextFor(trigger, transition);
+  const scheduleContext = scheduleContextFor(trigger, scheduleNote);
   const scope = goalIsUnspecified(snapshot.goal)
     ? "The goal is unspecified. First use `set_goal` to add concrete scope and acceptance criteria, or request genuinely missing scope with one decision packet. " +
       "Drafting the goal is SETUP, not this turn's action — after `set_goal`, continue with the stage rule below in the SAME run; nothing re-invokes you for your own `set_goal`. "
@@ -3539,6 +3590,13 @@ function operatorTurnDoctrine(
     moveContext +
     scope +
     triageQualityGate(snapshot) +
+    stageRule(snapshot)
+  );
+}
+
+/** The ordinary stage rule: what THIS stage calls for, from the live snapshot. */
+function stageRule(snapshot: OperatorTaskSnapshot): string {
+  return (
     `You are at stage "${snapshot.stageName}"` +
     (snapshot.previousStage
       ? `, arrived from "${snapshot.previousStage.name}"`
@@ -3553,6 +3611,69 @@ function operatorTurnDoctrine(
     "- DELIVERY (push the branch + open the review PR) is YOUR decision, made with `deliver_for_review` — it is no longer a stage side-effect, and a stage named \"Review\" delivers nothing by itself. Deliver when the deliverer's work is committed and plausible for review. Weigh the REMAINING stages: a later stage (e.g. QA) need not gate delivery for this task — offer or perform early delivery when so. When unsure whether the branch should be pushed, `open_decision_packet` and ask. The tool result is honest: a `push_conflict` means the remote branch diverged (a history problem, never a credential problem) and NO PR was opened — open a decision packet naming the branch, offering `resolve_remote_collision` (clear the stale remote branch and its recorded squatting PR, then re-deliver) or `archive_task`, instead of retrying blindly. Never offer `discard_branch` for a push conflict: it destroys the task's LOCAL commits and its authoring is refused while delivered work stands.\n" +
     "- A directive you sent earlier that never became a run is an UNDELIVERED hand-off — the timeline says so (\"did NOT start a run\"), or `liveRuns` is empty with no report after your prompt. Once the blocker is gone (e.g. the stage moved to one the profile works), re-send the prompt yourself; do not wait for a report that can never come.\n" +
     "Take exactly one such action and stop. NEVER end your turn leaving the task at a pre-work or `auto` stage with nothing done and no packet: either advance the boundary, hand off to a specialist, or `open_decision_packet` when a human must scope or unblock it. A pre-work stage that needs no human input must never be left waiting on a human."
+  );
+}
+
+/** Owner ruling 2026-07-26: a transition trigger says WHAT moved and WHO
+ *  moved it. The operator honors a human's visible steer — and when the
+ *  reason for a human move is not visible, it ASKS instead of guessing. */
+function moveContextFor(trigger: OperatorTrigger, transition: TransitionContext | undefined): string {
+  return trigger === "transition" && transition
+    ? transition.byHuman
+      ? `A human (${transition.byHuman}) moved this task from "${transition.fromName}" to "${transition.toName}". ` +
+        "Their reason should be in the newest timeline entries (a decision note, a comment, a resolver's steer) — honor it in what you do next; a move back to the work stage usually means re-prompting the delivering profile with that steer. " +
+        `If you cannot tell WHY the task moved, ask them in ONE comment — tag "@${transition.byHuman}" so they are notified — and stop. Never guess a rework direction. `
+      : `You moved this task from "${transition.fromName}" to "${transition.toName}" — continue coordinating at the new stage. `
+    : "";
+}
+
+/** B-WF3: a scheduled re-run used to reach the operator as a bare `manual`
+ *  trigger, so the reason a human scheduled it ("re-check the flaky test")
+ *  existed only in a timeline note the turn never pointed at. */
+function scheduleContextFor(trigger: OperatorTrigger, scheduleNote: string | undefined): string {
+  return trigger === "scheduled"
+    ? "This run fired from a SCHEDULED re-check a human set earlier" +
+      (scheduleNote?.trim()
+        ? `, for this stated reason: "${scheduleNote.trim()}". Honor that reason first — check what it asks about and act on what you find. `
+        : " with no stated reason. Re-read the live state and continue the stage below. ") +
+      "A schedule firing is not new evidence by itself: if nothing changed since the last turn, say so in one concise comment rather than re-prompting an agent that already reported. "
+    : "";
+}
+
+/** Every held entry with its live state, for the held doctrine. */
+function heldEntries(snapshot: OperatorTaskSnapshot): string {
+  return snapshot.blockedBy
+    .map((e) => `${e.label} (${e.state === "failed" ? "archived, can never complete" : e.state})`)
+    .join(", ");
+}
+
+/** Ruling 131(d): what the operator is told while the task waits on other
+ *  work. It names every entry with its live state and the ONE tool that
+ *  changes the wait, and forbids the three things a hold used to provoke. */
+function heldDoctrine(snapshot: OperatorTaskSnapshot): string {
+  const entries = heldEntries(snapshot);
+  return (
+    `This task WAITS ON OTHER WORK and Viberr is holding it: ${entries}. ` +
+    "While the list is non-empty: do NOT advance the stage, do NOT dispatch delivery work (no `run_agent` for a deliverer, no `deliver_for_review`), and do NOT open a decision packet about the wait; Viberr releases the task itself the moment every entry is done and re-invokes you then. " +
+    "The wait is a fact on the task, changed only with `set_dependencies` (the full list; `[]` clears it): use it if an entry is wrong, already satisfied by other means, or can never complete (an archived entry needs a person's or your edit). " +
+    "If a person asked you something, answer it in ONE concise comment and tag them. Otherwise state in ONE concise comment that the task is held and what it waits on, and stop. Ending this turn with nothing else done is correct here."
+  );
+}
+
+/** Ruling 131(e): the `dependencies-released` turn. */
+function dependenciesInstruction(
+  snapshot: OperatorTaskSnapshot,
+  release: DependencyReleasePayload | undefined,
+): string {
+  const entries = release?.entries.length ? release.entries.join(", ") : "everything it waited on";
+  const by = release?.clearedBy ? `${release.clearedBy} cleared the wait on ${entries}` : `${entries} is done`;
+  return (
+    `The work this task waited on has landed: ${by}. Viberr released the task (the list is empty, the hold is cleared) and re-invoked you. ` +
+    "The base branch has CHANGED since the hold: any specialist you dispatch must start from a fresh read of it (say so in the prompt), and delivered work from before the hold may need a rebase. " +
+    (snapshot.openPacket
+      ? "A decision packet is open on this task. If it is a hold packet you opened about this very wait, it is now MOOT: `resolve_decision_packet` it first and say why. "
+      : "") +
+    "Then continue with the stage rule below from the live snapshot. "
   );
 }
 
@@ -3583,6 +3704,7 @@ export function buildCodexOperatorPrompt(
   scheduleNote?: string,
   resolvedOption?: ResolvedPacketOption,
   strandedResume?: boolean,
+  dependencyRelease?: DependencyReleasePayload,
 ): string {
   return (
     "# Task snapshot\n\n```json\n" +
@@ -3600,6 +3722,7 @@ export function buildCodexOperatorPrompt(
       scheduleNote,
       resolvedOption,
       strandedResume,
+      dependencyRelease,
     ) +
     "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes; `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
@@ -3618,6 +3741,7 @@ export function buildOperatorTurnPrompt(
   scheduleNote?: string,
   resolvedOption?: ResolvedPacketOption,
   strandedResume?: boolean,
+  dependencyRelease?: DependencyReleasePayload,
 ): string {
   return (
     `You are operating ${snapshot.key}, "${snapshot.title}", at stage "${snapshot.stageName}".\n` +
@@ -3633,6 +3757,7 @@ export function buildOperatorTurnPrompt(
       scheduleNote,
       resolvedOption,
       strandedResume,
+      dependencyRelease,
     )
   );
 }

@@ -69,6 +69,7 @@ resources, persona, whether the operator is deployed, and `humanGatedBeforeWork`
 | `pr-diverged` | recover | the GitHub reconciler on an out-of-band PR change |
 | `delivered` | proceed | a full-autonomy delivery that opened a new PR, or whose push moved the head of the task's open PR (rulings 48 and 134) |
 | `packet-resolved` | proceed | `resolvePacket`, when no asking agent absorbed the answer. The payload carries the option (kind, title), the person's own note, and, for a ceremony that performs work of its own (`resolve_remote_collision`), Viberr's record of what it did in a separate `serverOutcome` field rendered as Viberr's sentence, never inside the quoted note (ruling 136(a)) |
+| `dependencies-released` | proceed after a hold | the release engine (ruling 131(e)): the payload names what was waited on and who cleared it; the doctrine says the base branch has changed since the hold and that a hold packet the operator opened itself is now moot |
 | `scheduled` | re-check | the schedule runner |
 | `manual` | coordinate | the Run-operator control, an `@operator` comment, boot recovery, the controller's `run_agent_on_task` |
 
@@ -77,9 +78,16 @@ operator is deployed and writes an honest timeline note if the hand-off throws b
 a run row exists.
 
 Fire-time refusals from `runOperator`: `terminal-stage` (a scheduled re-run never
-fires on a terminal task) and `open-packet` (a **human-pressed** Run operator while a
+fires on a terminal task), `open-packet` (a **human-pressed** Run operator while a
 packet is open is a paid no-op; machine triggers such as `pr-diverged` and
-`agent-reply` are not refused, ruling 76).
+`agent-reply` are not refused, ruling 76), and `blocked-by` (ruling 131(d): while the
+task's `blockedBy` list is non-empty the `create`, `transition` and `scheduled`
+triggers are refused before any run row exists, no run and no cost; the refusal
+settles the waiting flag itself, to `none` when nothing else is pending, so a
+transition drained off the lease queue never strands `waiting: agent`; a scheduled
+occurrence is retired `fired` with a "Scheduled action skipped" note and outcome
+`skipped-held`; a human-scheduled AGENT run is not refused). The stranded-coordination
+backstop treats a non-empty list as a recorded hold and never nudges.
 
 **Single-flight per task.** One drive at a time; queued triggers coalesce per kind:
 machine triggers keep only the latest, while reason-carrying triggers (a human
@@ -103,6 +111,13 @@ appends the capability-gap remedy clause (ruling 85: a packet must name the gran
 capability and where a human grants it, not only workarounds), and the backend prompt
 builders wrap it. The default arm states that `liveRuns` is the only proof a run is in
 flight: `waiting` is a display flag and a directive comment is not a running agent.
+While the snapshot's `blockedBy` is non-empty (ruling 131(d)) the held doctrine
+REPLACES the stage-rule tail rather than following it, so the prompt never carries
+two contradictory orders: it names every entry with its live state and the one tool
+that changes the wait (`set_dependencies`), forbids advancing the stage, dispatching
+delivery work and opening a packet about the wait, and says that ending the turn with
+one concise comment is correct. The "confirm the hold" packet exit stays only for
+holds a human directed.
 
 `get_task` returns the `OperatorTaskSnapshot`: stage and `previousStage` (so "back
 from Review" reads as rework), `validation` (derived), `reworkStages` (non-empty only
@@ -110,8 +125,9 @@ while validation is `failing`), PR facts including the head sha, revision drift 
 the current unpushed-revision record with the acceptance gate's own sentence (ruling
 135: an unpushed revision reaches its PR through `deliver_for_review`), `noChanges`,
 `liveRuns`, pending and recently declined recommendations (so a supervised operator
-does not re-propose a just-dismissed move), and its own `operatorPolicy` labelled with
-scope so it cannot mistake its own web grant for a specialist's.
+does not re-propose a just-dismissed move), `blockedBy` (ruling 131: each entry with
+its resolved state), and its own `operatorPolicy` labelled with scope so it cannot
+mistake its own web grant for a specialist's.
 
 Before triage the operator gets a **full read-only clone** of the project repository
 (ruling 55), the same per-task checkout a specialist run reuses; on the shared

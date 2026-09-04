@@ -1239,7 +1239,7 @@ export interface CommentToAgentResult extends AppendCommentResult {
    * operator branch reported `triggered: "started"` on a refused run, so the route
    * toasted "@Operator is picking it up" while nothing ran (the reply never came).
    */
-  operatorRefused: "open-packet" | "terminal-stage" | null;
+  operatorRefused: "open-packet" | "terminal-stage" | "blocked-by" | null;
   /**
    * A8 (pass 23): the comment is recorded BEFORE any run starts, so a SPECIALIST
    * run-start failure (single-flight conflict, a backend the task owner has not
@@ -4088,10 +4088,12 @@ export async function clearWaitingToHuman(
     const fm = existing.parsed.frontmatter;
     const { getProject } = await import("~/server/projections/board-query.server");
     const stages = getProject(db, projectSlug)?.stages ?? [];
+    // Ruling 131(d): a task waiting on other work with nothing else pending
+    // owes nobody anything either; "waiting on a human" would put a held task
+    // on every human-decision surface with nothing to decide.
+    const nothingPending = !existing.parsed.packet && fm.recommendations.length === 0;
     const settled =
-      isTerminalStage(fm.stage, stages) &&
-      !existing.parsed.packet &&
-      fm.recommendations.length === 0
+      nothingPending && (isTerminalStage(fm.stage, stages) || fm.blockedBy.length > 0)
         ? "none"
         : "human";
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {

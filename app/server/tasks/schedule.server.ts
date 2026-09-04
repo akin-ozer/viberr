@@ -549,6 +549,11 @@ export async function fireDueSchedules(
          *  nothing to retry — but the timeline already announced the start, so
          *  the retirement has to say what actually happened. */
         let refusedTerminal = false;
+        /** Ruling 131(d): the task waits on other work; the operator trigger
+         *  was refused at fire time. Retired `fired` with a note, outcome
+         *  `skipped-held`. A human-scheduled AGENT run is not refused: the
+         *  ruling refuses operator triggers only, so the run-agent arm stands. */
+        let refusedHeld = false;
         /** run-agent only: the dispatch refused for a reason a retry can never
          *  cure (profile undeployed, stage-ineligible, no repo-write for an
          *  explicit delivery ask). Terminal `failed` with the reason on the
@@ -636,6 +641,7 @@ export async function fireDueSchedules(
             if (t.prompt) runInput.scheduleNote = t.prompt;
             const result = await runOperator(db, runInput);
             refusedTerminal = result.refused === "terminal-stage";
+            refusedHeld = result.refused === "blocked-by";
             ok = true;
           }
         } catch (error) {
@@ -709,6 +715,13 @@ export async function fireDueSchedules(
                       `**Scheduled action skipped:** ${t.taskKey} reached Done before its scheduled run started — no run was started.`,
                     ),
                   );
+                } else if (refusedHeld) {
+                  parsed.timeline.unshift(
+                    scheduleEvent(
+                      { kind: "system", systemId: "schedule-runner" },
+                      `**Scheduled action skipped:** ${t.taskKey} waits on other work (${parsed.frontmatter.blockedBy.join(", ")}) — no operator run was started; Viberr releases the task when every entry is done.`,
+                    ),
+                  );
                 }
                 return;
               }
@@ -730,7 +743,7 @@ export async function fireDueSchedules(
             },
           );
           reproject(db, ctx, t.projectSlug, t.taskKey);
-          if (refusedTerminal) {
+          if (refusedTerminal || refusedHeld) {
             // The claim-time row for this occurrence says `outcome: "claimed"`
             // — true when it was written, and a lie by the time the drive
             // refused. The audit trail and the retirement note must not
@@ -746,7 +759,7 @@ export async function fireDueSchedules(
               taskKey: t.taskKey,
               details: {
                 scheduleId: t.scheduleId,
-                outcome: "skipped-done",
+                outcome: refusedHeld ? "skipped-held" : "skipped-done",
                 refusedAtStart: true,
               },
             });
