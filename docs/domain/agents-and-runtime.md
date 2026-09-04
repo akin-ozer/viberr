@@ -529,6 +529,11 @@ Absent-grant polarity is deliberately not uniform: `dispatch-agents` and
 `use-web-search-fetch` absent ⇒ granted; `deliver-review-pr` absent ⇒ derived from
 workflow strictness; the grant-required family absent ⇒ withheld.
 
+The controller's `update_agent_deployment` validates every capability patch against
+this catalogue per KIND and refuses an unknown or impossible id or mode by name before
+writing (ruling 139, `capabilityPatchRefusal`); the advisory row above has no toggle and
+is refused as such.
+
 ## 6. Context mounting
 
 - **Skills, Claude**: `mountGrantedSkills` copies each granted `skills/<slug>` folder

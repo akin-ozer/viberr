@@ -3,6 +3,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import { readFileSync } from "node:fs";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
@@ -1033,5 +1034,97 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
       mcps: [],
       kbs: ["grant-probe-handbook"],
     });
+  });
+});
+
+/**
+ * Ruling 139 (pass 34, F34-2): `update_agent_deployment` reads first and
+ * refuses a catalogued value it cannot store BY NAME, with nothing written —
+ * it used to answer `[done]` twelve times for capability ids that do not exist.
+ */
+describe("update_agent_deployment refuses catalogued values by name (ruling 139)", () => {
+  async function projectMd(): Promise<string> {
+    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
+    return readFileSync(resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot }), "utf8");
+  }
+  async function refused(args: Record<string, JsonValue>): Promise<string> {
+    const before = await projectMd();
+    const audits = listAuditEvents(app.db).length;
+    const reply = await call(ids.projectAdmin, "update_agent_deployment", args);
+    expect(reply.startsWith("[error] ")).toBe(true);
+    expect(reply).toContain("Nothing was written");
+    expect(await projectMd()).toBe(before);
+    expect(listAuditEvents(app.db)).toHaveLength(audits);
+    return reply;
+  }
+
+  it("an unknown id is refused by name with the valid ids, and nothing is written", async () => {
+    // Canary: make `capabilityPatchRefusal` return null.
+    const reply = await refused({
+      profileId: "developer",
+      capabilities: [{ capabilityId: "write-code", mode: "direct" }],
+    });
+    expect(reply).toContain('No capability answers to "write-code"');
+    expect(reply).toContain("execute-code-or-write-repo");
+    expect(reply).toContain("list_capabilities");
+  });
+
+  it("a specialist recommend, a non-human mode on an always-human id, and an operator id on a specialist are refused", async () => {
+    // Canary: validate against the union of both kinds.
+    expect(
+      await refused({ profileId: "developer", capabilities: [{ capabilityId: "comment-on-task", mode: "recommend" }] }),
+    ).toContain("cannot be set to recommend on a specialist");
+    expect(
+      await refused({ profileId: "developer", capabilities: [{ capabilityId: "merge-pull-request", mode: "direct" }] }),
+    ).toContain("reserved for humans");
+    expect(
+      await refused({ profileId: "developer", capabilities: [{ capabilityId: "dispatch-agents", mode: "direct" }] }),
+    ).toContain('"dispatch-agents" is an operator capability and cannot be set on a specialist');
+  });
+
+  it("the operator arm resolves the operator from project.md and refuses a specialist id on it", async () => {
+    // The KIND lives on the resolved profile, not the stored deployment row,
+    // so the operator is found the way the roster finds it.
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const { effectiveProfileView, VIEW_WITHOUT_POLICY } = await import("~/features/agents/agents-query.server");
+    const deployments = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.agents;
+    const operator = deployments.find(
+      (a) => effectiveProfileView(a, app.dataRoot, VIEW_WITHOUT_POLICY).kind === "operator",
+    );
+    expect(operator).toBeDefined();
+    const reply = await refused({
+      profileId: operator!.profileId,
+      capabilities: [{ capabilityId: "use-browser", mode: "direct" }],
+    });
+    expect(reply).toContain('"use-browser" is a specialist capability and cannot be set on the operator');
+  });
+
+  it("`report-validation-verdict` at human is refused", async () => {
+    // Canary: delete branch (e) — project.md stores `off` and the call answers `[done]`.
+    expect(
+      await refused({ profileId: "developer", capabilities: [{ capabilityId: "report-validation-verdict", mode: "human" }] }),
+    ).toContain("takes only direct or off");
+  });
+
+  it("an advisory id is refused as matrix-only, never as 'no such id'", async () => {
+    // Canary: fold it into branch (a).
+    const reply = await refused({ profileId: "developer", capabilities: [{ capabilityId: "read-repo-diff", mode: "off" }] });
+    expect(reply).toContain('"read-repo-diff" is a matrix-only capability with no toggle');
+    expect(reply).not.toContain("No capability answers to");
+  });
+
+  it("an unknown stage id is refused with the project's stage ids", async () => {
+    // Canary: drop the stage check (the write lands and the agent is eligible nowhere).
+    const reply = await refused({ profileId: "developer", stages: ["implementation"] });
+    expect(reply).toContain('"implementation" is not a stage of viberr-core');
+    expect(reply).toMatch(/stage ids are: .*impl/);
+  });
+
+  it("a legal patch still writes (the refusal is by name, not blanket)", async () => {
+    const reply = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      capabilities: [{ capabilityId: "comment-on-task", mode: "off" }],
+    });
+    expect(reply).toContain("[done]");
   });
 });

@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { capabilityPatchRefusal } from "~/features/agents/capability-catalog";
 import { z } from "zod";
 import {
   createSdkMcpServer,
@@ -1602,7 +1603,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_agent_deployment",
-      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, eligible stages, or operator autonomy. Project admin. Merge semantics: only the fields you pass change.",
+      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, eligible stages, or operator autonomy. Project admin. Merge semantics: only the fields you pass change. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, and every stage id must be one of the project's stages.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -1634,6 +1635,22 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             throw AppError.notFound(`No agent ${args.profileId} is deployed on ${slug}.`);
           }
           const view = effectiveProfileView(deployment, dataRoot, VIEW_WITHOUT_POLICY);
+          // Ruling 139 (pass 34, F34-2): read first, refuse by name, write
+          // nothing. The capability check is KIND-aware (the operator and a
+          // specialist take different ids and modes), which is why it lives
+          // here and not in the kind-blind form parser.
+          const refusal = capabilityPatchRefusal(
+            view.kind === "operator" ? "operator" : "agent",
+            args.capabilities ?? [],
+          );
+          if (refusal) throw AppError.validation(refusal);
+          const stageIds = file.parsed.frontmatter.stages.map((s) => s.id);
+          const unknownStages = (args.stages ?? []).filter((id) => !stageIds.includes(id));
+          if (unknownStages.length > 0) {
+            throw AppError.validation(
+              `${unknownStages.map((id) => `"${id}"`).join(", ")} ${unknownStages.length === 1 ? "is not a stage" : "are not stages"} of ${slug}. Nothing was written. The project's stage ids are: ${stageIds.join(", ")}.`,
+            );
+          }
           const caps: Record<string, string> = {};
           for (const grant of deployment.capabilities) caps[grant.capabilityId] = grant.mode;
           for (const patch of args.capabilities ?? []) caps[patch.capabilityId] = patch.mode;

@@ -275,6 +275,21 @@ tool descriptions.
   could not see what it was about to erase. That tool now returns `skills`, `mcps` and
   `kbs`.
 
+### 4.2 Catalogued writes read first and refuse by name (pass 34, ruling 139)
+
+Every controller write that takes a catalogued identifier validates it against the
+catalogue the runtime resolves by and refuses an unknown or impossible value BY NAME,
+listing what is valid, before anything is written; `[done]` is never answered for a
+write the store did not make. `update_agent_deployment` refuses, through
+`capabilityPatchRefusal` (`app/features/agents/capability-catalog.ts`): an id outside
+the deployment's KIND (an operator id on a specialist and the reverse are named as
+such), an id nothing in the catalogue answers to, a matrix-only advisory id (refused as
+"no toggle", never as "no such id"), `recommend` on a specialist, a non-`human` mode on
+an always-human id, `report-validation-verdict` at any mode but `direct` or `off`; and,
+in the same call, a stage id the project does not declare (listed with the project's
+stage ids). The check lives in the tool, not in `grantsFor`: the project editor
+legitimately preserves advisory and retired ids a strict catalogue check would refuse.
+
 ## 5. The `viberr_ops` diagnostics server (ruling 107)
 
 An in-process, read-only MCP server mounted on **every** controller turn with no
