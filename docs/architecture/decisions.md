@@ -1804,6 +1804,10 @@ the quieter packet or the bare owner cell as drift.)*
     `waiting: human`, with an open PR and nothing to click). Housekeeping recorded with
     the ruling: the stale task-key branches earlier instances left on the origin were
     deleted during pass 32; **`vib-5` is kept deliberately as the collision fixture.**
+    *(Amended 2026-09-04, pass 34, ruling 136: "it never strands" is now carried by the ceremony's
+    own single hand-off rather than by the re-delivery's follow-up alone; a refusal whose PR is the
+    task's own open review PR performs the push instead of keeping the block; and the delete
+    re-confirms a cached open PR against GitHub before refusing.)*
 
 111. **Every `viberr_ops` read is audited (owner, 2026-09-02).** The three read-only
     diagnostics tools of ruling 107 (`instance_health`, `read_run_log`,
@@ -2284,6 +2288,47 @@ by rewriting those paragraphs:*
     in `github-reconciler.server.ts`; `classifyUnpushedRevision` in
     `workspace-delivery.server.ts`; `writePrToTask` in `pr-open.server.ts`;
     `evaluateAcceptancePrHead` and `attemptAcceptanceMerge` in `task-actions.server.ts`.)
+
+136. **`resolve_remote_collision` never strands on either arm, and the ceremony reads GitHub before it
+    refuses (owner, 2026-09-04, pass 34 F34-10 / F34-11).** Ruling 110's "it never strands" was
+    carried by the re-delivery's own follow-up, which had two silent exits: `recordDeliveredNextStep`
+    records the "Move to <review>" card only when the board declares a `stage → review` edge (a
+    Backlog → Spec/Design → Implementation → QA → Review → Done board declares none from
+    Implementation), and ruling 48's re-queue fires only on a newly opened PR under full autonomy.
+    Live (JC-8) a fully successful ceremony, branch deleted, unowned PR closed, PR #9 opened, ended
+    `waiting: human` with no packet, no card and no run; the refusal arm (JC-6, JC-5) ended
+    `readiness: blocked · waiting: human` for a "collision" that was the task's own open review PR;
+    and (JC-3) a human who had closed the PR on GitHub seventy seconds earlier was refused because
+    `task.md` still said `review`. Three rules. **(a) The ceremony ends with exactly one hand-off.**
+    The kind stays out of the generic `packet-resolved` re-queue (that hand-off runs before the
+    ceremony and could not carry its outcome) and the ceremony fires its own at its end: the
+    ruling-48 `delivered` re-queue when the re-delivery fired it, otherwise a `packet-resolved`
+    re-queue whose payload carries the ceremony's outcome in its OWN field (`serverOutcome`),
+    rendered to the operator as Viberr's sentence and never inside the human's quoted note, so the
+    operator's next turn states what happened instead of re-deriving it and never reads a
+    server-composed fact as the person's own words. The in-ceremony reconcile of (c) runs with the
+    operator wake and the member divergence notice suppressed, so "exactly one hand-off" is
+    literally true. The server-recorded card stays where the board lets it apply, and one audit row
+    per ceremony (`github.collision.resolved`) carries the typed outcome. **(b) A refusal that finds
+    no collision does what the person asked for.** When the ref delete refuses because the PR on the
+    branch is this task's own open review PR, the packet's premise was false: a self-referencing
+    `github.unownedPr` is cleared, and for a remote the file does not record as diverged the
+    ceremony performs the delivery that pushes the work (the delivery is the authority on the
+    relation, so a diverged remote it meets refuses as `push_conflict` and the block stays); for a
+    remote recorded as diverged the block stays and the note says that the remote branch holds
+    commits this workspace does not and who resolves the history. Every other refusal keeps the
+    block and hands its typed reason to the operator. **(c) A cached open PR is re-confirmed before
+    it can refuse.** `deleteTaskRemoteBranch` runs a reconcile pass when `task.md` says the PR is
+    open, refuses only a PR GitHub still reports open (`own_pr_open`), proceeds on the refreshed
+    file when GitHub reports it closed or merged, and fails closed, "GitHub could not confirm", for
+    every degraded or unexpected reconcile status (the switch is exhaustive, so a later status can
+    never become a silent proceed); nothing is ever deleted on an unconfirmed state, and the
+    archive and empty-branch cleanup doors inherit the same live check and the same sentence.
+    Ruling 110's delete-first order, the human-only gate and the scope-violation on a refused close
+    are unchanged. (`resolvePacket`'s collision arm in `app/server/tasks/task-actions.server.ts`;
+    `resolveRemoteBranchCollision` and `deleteTaskRemoteBranch` in
+    `app/server/github/github-reconciler.server.ts`; `app/shared/packet-server-outcome.ts`; the
+    `packet-resolved` doctrine in `operator-run.server.ts`.)
 
 142. **A run's shell carries none of Viberr's own configuration (2026-09-04, pass 34 U34-7).**
     Ruling 127 built the spawn base around what a child must not learn about OTHER people's

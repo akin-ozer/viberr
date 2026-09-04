@@ -1795,6 +1795,29 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     }
   });
 
+  it("ruling 136(a): the human's note and the server's outcome render as different speakers", () => {
+    // Canary: embed the outcome in `resolvedOption.note` and the quoted note
+    // carries a sentence the person never wrote.
+    const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Ship it." });
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(atWork, "packet-resolved", undefined, undefined, undefined, undefined, undefined, {
+      kind: "resolve_remote_collision",
+      title: "Delete the stale remote branch, then redeliver",
+      note: "please get it onto the PR",
+      serverOutcome: { kind: "resolve_remote_collision", outcome: "own_pr_pushed", prNumber: 5 },
+    });
+    expect(prompt).toContain('the human added: "please get it onto the PR"');
+    expect(prompt).toContain("Viberr then performed that option's own steps and reports, in its own words and not the person's: there was no collision to clear (PR #5 is this task's own review PR); the delivered revision was pushed to it and the block is lifted.");
+    const quoted = /the human added: "([^"]*)"/.exec(prompt)![1]!;
+    expect(quoted).not.toContain("no collision");
+    const withoutNote = operatorPrompts.buildOperatorTurnPrompt(atWork, "packet-resolved", undefined, undefined, undefined, undefined, undefined, {
+      kind: "resolve_remote_collision",
+      title: "Delete the stale remote branch, then redeliver",
+      serverOutcome: { kind: "resolve_remote_collision", outcome: "refused", reason: "GitHub refused the deletion (boom)." },
+    });
+    expect(withoutNote).not.toContain("the human added");
+    expect(withoutNote).toContain("the collision was not cleared (GitHub refused the deletion (boom).); nothing was re-delivered and the block stays.");
+  });
+
   it("F15-14: the gate is stage-scoped — a work stage never carries it", () => {
     const prompt = operatorPrompts.buildOperatorTurnPrompt(
       snap({ stage: "impl", stageName: "In Progress", goal: "Ship the parser." }),

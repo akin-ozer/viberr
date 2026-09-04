@@ -102,6 +102,11 @@ export interface GithubActionContext {
   /** The pr-diverged operator wake below; injection hook for tests, same shape
    *  as `fetchImpl`. Defaults to the real `autoInvokeOperator`. */
   wakeOperator?: OperatorWake;
+  /** Ruling 136(c): the in-ceremony re-confirm inside `deleteTaskRemoteBranch`
+   *  runs a pass whose divergence NOTIFICATION must not fire (the ceremony is
+   *  replacing the PR; telling every member "PR #N closed: KEY needs a
+   *  decision" would be false). The timeline note still lands. */
+  suppressDivergenceNotice?: boolean;
   /** P11-14: the background poller reconciles every active project every 5 min;
    *  it suppresses the per-project summary audit (a human clicking "Update
    *  status" still audits) so poller ticks don't spam the audit log. The
@@ -837,7 +842,7 @@ async function reconcileTaskUnlocked(
     // the promised merge can no longer happen. It gets the same inbox alert as
     // the other two branches.
     const noticeText = divergenceText ?? acceptedClosedText ?? reopenedText;
-    if (noticeText) {
+    if (noticeText && !ctx.suppressDivergenceNotice) {
       const { notifyTaskWatchers } = await import(
         "~/server/tasks/task-actions.server"
       );
@@ -1481,14 +1486,33 @@ export async function mergeTaskPr(
 
 // ------------------------------------------------------- branch deletion
 
+/** Ruling 136: WHY a remote-branch delete refused, typed so the collision
+ *  ceremony can decide from the reason instead of parsing the sentence. */
+export type BranchDeleteRefusal =
+  | "no_actor"
+  | "default_branch"
+  /** The task's OWN review PR is open on the ref (confirmed against GitHub). */
+  | "own_pr_open"
+  /** GitHub could not confirm the cached open PR's state; fail closed. */
+  | "unconfirmed"
+  | "github_refused"
+  | "network";
+
 export type BranchDeleteResult =
   | { status: "deleted"; branch: string }
   /** GitHub reports the ref no longer exists — the cleanup already happened. */
   | { status: "already_gone"; branch: string }
   | { status: "no_branch" }
   /** Structural refusals (open PR / base branch) and GitHub failures alike:
-   *  the branch stays, `message` says why in human terms. */
-  | { status: "refused"; branch: string; message: string };
+   *  the branch stays, `message` says why in human terms, `reason` says it in
+   *  a word, and `prNumber` names the PR for the own-PR arms. */
+  | {
+      status: "refused";
+      reason: BranchDeleteRefusal;
+      branch: string;
+      message: string;
+      prNumber?: number;
+    };
 
 /**
  * Delete the task's remote branch — the discard half of the
@@ -1520,7 +1544,7 @@ export async function deleteTaskRemoteBranch(
   if (!userId) {
     // Branch deletion is a HUMAN decision (an archive_task packet option) —
     // there is no system path to it, so an anonymous actor is refused.
-    return { status: "refused", branch, message: "No acting user." };
+    return { status: "refused", reason: "no_actor", branch, message: "No acting user." };
   }
 
   const gh = getProjectGithubContext(db, input.projectSlug, githubOptionsOf(ctx));
@@ -1529,16 +1553,70 @@ export async function deleteTaskRemoteBranch(
   if (branch === gh.defaultBranch) {
     return {
       status: "refused",
+      reason: "default_branch",
       branch,
       message: `\`${branch}\` is the project's default branch. Viberr never deletes it.`,
     };
   }
   if (fm.pr && (fm.pr.state === "review" || fm.pr.state === "accepted")) {
-    return {
+    // Ruling 136(c) (pass 34, F34-10/F34-11): the cache is refreshed by the
+    // five-minute poller, so a PR closed on GitHub seventy seconds earlier
+    // still read `review` here (JC-3) and the ceremony refused a delete GitHub
+    // would have allowed. Re-confirm against GitHub BEFORE refusing, with the
+    // operator wake and the member notification suppressed (this ceremony is
+    // replacing the PR; the pass must not also announce "needs a decision" and
+    // wake the operator to open a rework packet about it). No caller of this
+    // function holds the task's reconcile lock, so this cannot deadlock. Every
+    // status but `reconciled` fails CLOSED: nothing is deleted on a state
+    // GitHub did not confirm, and a later status can never become a silent
+    // proceed (the switch is exhaustive).
+    const cachedPr = fm.pr;
+    const confirm = await reconcileTask(db, input, actor, {
+      ...ctx,
+      wakeOperator: async () => {},
+      suppressDivergenceNotice: true,
+    });
+    const unconfirmed = (why: string): BranchDeleteResult => ({
       status: "refused",
+      reason: "unconfirmed",
       branch,
-      message: `PR #${fm.pr.number} is still open on \`${branch}\`, and deleting the branch would silently close it. Close or merge the PR first.`,
-    };
+      prNumber: cachedPr.number,
+      message: `GitHub could not confirm whether PR #${cachedPr.number} is still open on \`${branch}\` (${why}), so the branch was not deleted. Try again when GitHub answers.`,
+    });
+    switch (confirm.status) {
+      case "reconciled":
+        break;
+      case "no_branch":
+        return unconfirmed("the task has no branch");
+      case "task_not_found":
+        return unconfirmed("the task file could not be read");
+      case "no_pat_configured":
+        return unconfirmed("the project has no credential");
+      case "no_repo_configured":
+        return unconfirmed("the project has no repository");
+      case "scope_violation":
+        return unconfirmed(`the credential lacks \`${confirm.scope}\``);
+      case "auth_failed":
+        return unconfirmed("GitHub rejected the credential");
+      case "network_unavailable":
+        return unconfirmed(confirm.message);
+      case "task_error":
+        return unconfirmed(confirm.message);
+      default: {
+        const exhaustive: never = confirm;
+        return exhaustive;
+      }
+    }
+    const fresh = readTaskFile(ref)?.parsed.frontmatter ?? null;
+    if (fresh?.pr && (fresh.pr.state === "review" || fresh.pr.state === "accepted")) {
+      return {
+        status: "refused",
+        reason: "own_pr_open",
+        branch,
+        prNumber: fresh.pr.number,
+        message: `PR #${fresh.pr.number} is still open on \`${branch}\` (confirmed against GitHub just now), and deleting the branch would silently close it. Close or merge the PR first.`,
+      };
+    }
   }
 
   // B11: this interpolated the branch raw, so it was correct only for
@@ -1594,6 +1672,7 @@ export async function deleteTaskRemoteBranch(
   }
   return {
     status: "refused",
+    reason: del.kind === "network" ? "network" : "github_refused",
     branch,
     message:
       del.kind === "network"
@@ -1607,9 +1686,12 @@ export async function deleteTaskRemoteBranch(
 /** Outcome of the F31-6 branch-collision remedy. `cleared` means the stale
  *  remote ref is gone (and the recorded unowned PR is closed or closing) —
  *  the caller may re-deliver; `refused` names the step that stood in the way. */
+/** Ruling 136: the delete's typed reason, plus the ceremony's own two. */
+export type CollisionRefusal = BranchDeleteRefusal | "no_branch" | "no_context";
+
 export type RemoteCollisionResult =
   | { status: "cleared"; branch: string; closedUnownedPr: number | null }
-  | { status: "refused"; message: string };
+  | { status: "refused"; reason: CollisionRefusal; message: string; prNumber?: number };
 
 /**
  * F31-6 — clear a task-key branch collision: the remote holds an unrelated
@@ -1633,7 +1715,7 @@ export async function resolveRemoteBranchCollision(
   const file = readTaskFile(ref);
   const branch = file?.parsed.frontmatter.branch;
   if (!file || !branch) {
-    return { status: "refused", message: "The task has no workspace branch." };
+    return { status: "refused", reason: "no_branch", message: "The task has no workspace branch." };
   }
   const unowned = file.parsed.frontmatter.github?.unownedPr ?? null;
   // C05-C (pass 32): closing someone else's PR is a HUMAN decision, exactly as
@@ -1642,13 +1724,14 @@ export async function resolveRemoteBranchCollision(
   // function is refused before any GitHub write, not after one.
   const userId = actor.userId;
   if (!userId) {
-    return { status: "refused", message: "No acting user." };
+    return { status: "refused", reason: "no_actor", message: "No acting user." };
   }
 
   const gh = getProjectGithubContext(db, input.projectSlug, githubOptionsOf(ctx));
   if (gh.status !== "ok") {
     return {
       status: "refused",
+      reason: "no_context",
       message: "This project has no GitHub repo or credential configured.",
     };
   }
@@ -1727,16 +1810,19 @@ export async function resolveRemoteBranchCollision(
     return { status: "cleared", branch, closedUnownedPr };
   }
   if (del.status === "no_branch") {
-    return { status: "refused", message: "The task has no workspace branch." };
+    return { status: "refused", reason: "no_branch", message: "The task has no workspace branch." };
   }
   if (del.status === "refused") {
-    return { status: "refused", message: del.message };
+    const refused: RemoteCollisionResult = { status: "refused", reason: del.reason, message: del.message };
+    if (del.prNumber !== undefined) refused.prNumber = del.prNumber;
+    return refused;
   }
   // GithubContextFailure — the context vanished between the check above and
   // the delete (credential detached mid-flight). Same words as the up-front
   // refusal: the human's remedy is identical.
   return {
     status: "refused",
+    reason: "no_context",
     message: "This project has no GitHub repo or credential configured.",
   };
 }

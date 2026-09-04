@@ -254,7 +254,9 @@ tree, refusing a non-fast-forward as a `push_conflict`; reading origin's head fi
 and answering `up_to_date` when there is nothing to push, ruling 134), detects a
 verified empty branch as a no-change outcome, opens or adopts the PR (adoption only
 when the PR is open **and** its head is the delivered revision; anything else is a
-branch collision), records `github.pr.opened` (or "Pushed `<sha>` to PR #N" when a
+branch collision, whose `resolve_remote_collision` ceremony re-confirms a cached open PR
+against GitHub before refusing and never strands on either arm, ruling 136), records
+`github.pr.opened` (or "Pushed `<sha>` to PR #N" when a
 push moved the head of the task's open PR), and either re-queues a full-autonomy
 operator (`delivered`: a new PR or a moved head) or ensures a supervised operator left
 a "Move to Review" recommendation. Rework on a task whose PR is already open is
@@ -316,6 +318,13 @@ and the review queue; the open packet and pending recommendations are withdrawn;
 pending schedules are cancelled; `restore-task` brings it back. Archiving through a
 `pr-diverged` recovery packet may also delete the remote branch. An archived task
 cannot be moved.
+
+An `archive_task` option with `deleteBranch: true` deletes the remote branch through the
+same door every branch cleanup uses: a cached open PR is re-confirmed against GitHub first
+(ruling 136(c)), a PR GitHub reports closed lets the delete proceed, and an unconfirmed
+state refuses with "GitHub could not confirm whether PR #N is still open", which the
+archive note repeats verbatim. The no-change acceptance's empty-branch cleanup inherits
+the same check.
 
 ## 13. Timeline and noise control
 

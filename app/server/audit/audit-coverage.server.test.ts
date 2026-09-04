@@ -451,6 +451,44 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
+        // Ruling 136: one row per collision ceremony with its typed outcome.
+        // No credential here, so the ceremony refuses (`no_context`) and is
+        // still audited; the fuller arms are locked in task-governance and
+        // delivery-actionable, which supply `fetchImpl` and the delivery deps.
+        name: "resolvePacket (resolve_remote_collision ceremony)",
+        action: "github.collision.resolved",
+        taskKey: "VIB-77",
+        run: async () => {
+          writeTask(store.dataRoot, store.slug, {
+            frontmatter: baseTaskFrontmatter("VIB-77", {
+              stage: "review",
+              waiting: "human",
+              readiness: "blocked",
+              branch: "vib-1-work",
+              github: { commits: [], changed: null, unownedPr: 232 },
+            }),
+            packet: {
+              type: "blocked",
+              kind: "Blocked decision",
+              from: "operator",
+              title: "Branch vib-1-work collides with an unrelated remote branch",
+              body: "b",
+              observations: [],
+              options: [
+                { kind: "resolve_remote_collision", t: "Delete the stale remote branch, then redeliver", d: "", rec: true },
+              ],
+            },
+          });
+          rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+          await resolvePacket(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-77", optionIndex: 0 },
+            actorArda(),
+            { dataRoot: store.dataRoot },
+          );
+        },
+      },
+      {
         name: "revalidateProjectCredential (grant-scope attempt, no PAT)",
         action: "github.credential.revalidated",
         run: () =>

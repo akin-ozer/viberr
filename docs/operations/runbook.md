@@ -144,6 +144,12 @@ a readiness downgrade (tolerant parsing):
   names the one case that needs a person: the credential cannot write the repository
   (a `repo` scope violation opens) or GitHub refused the create; fix that, then deliver
   again. A delivery never pushes a task branch as the repository's first ref.
+- **A branch collision packet whose PR is the task's own** (ruling 136, pass 34): the
+  `resolve_remote_collision` option performs the push the person asked for when origin's
+  copy is behind or absent, keeps the block only for a diverged remote, and every branch
+  delete re-confirms a cached open PR against GitHub before refusing. "GitHub could not
+  confirm whether PR #N is still open" means the check itself failed: nothing was deleted;
+  resolve the packet again when GitHub answers.
 - Accept-completion merges the review PR; a missing `pull_request:write` scope surfaces
   as an open scope violation with a Grant-scope action (re-validate the PAT, 60 s
   cooldown) rather than a silent failure. Write permission is proven read-only from the

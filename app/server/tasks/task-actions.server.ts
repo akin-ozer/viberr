@@ -1,4 +1,8 @@
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
+import type {
+  CollisionServerOutcome,
+  ResolvedPacketOption,
+} from "~/shared/packet-server-outcome";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { isMissingRefAnswer } from "~/server/github/github-client.server";
@@ -9,6 +13,7 @@ import {
   closedPrBlockedReason,
   conflictingPrBlockedReason,
   unpushedRevisionBlockedReason,
+  unpushedRevisionOf,
   deliveringEngagement,
   deriveValidation,
   normalizeEvidenceRows,
@@ -951,7 +956,7 @@ export async function autoInvokeOperator(
   transition?: { fromName: string; toName: string; byHuman: string | null },
   /** R20-1 (F20-5): packet-resolved trigger — the option the human chose (kind,
    *  title, optional note), so the turn instruction states the decision. */
-  resolvedOption?: { kind: string; title: string; note?: string },
+  resolvedOption?: ResolvedPacketOption,
 ): Promise<void> {
   try {
     const { resolveOperatorAuthority } = await import("./operator-actions.server");
@@ -7029,11 +7034,15 @@ export async function resolvePacket(
       const { deleteTaskRemoteBranch } = await import(
         "~/server/github/github-reconciler.server"
       );
+      // Ruling 136(c): this door now pays the live re-confirm of a cached open
+      // PR, so the transport hook is threaded like every other GitHub call.
+      const archiveDeleteCtx: GithubActionContext = { dataRoot: ctx.dataRoot };
+      if (ctx.fetchImpl) archiveDeleteCtx.fetchImpl = ctx.fetchImpl;
       const outcome = await deleteTaskRemoteBranch(
         db,
         { projectSlug: input.projectSlug, taskKey: input.taskKey },
         { userId: actor.userId, label: actor.label },
-        { dataRoot: ctx.dataRoot },
+        archiveDeleteCtx,
       );
       const outcomeText =
         outcome.status === "deleted"
@@ -7215,15 +7224,20 @@ export async function resolvePacket(
     }
   }
 
-  // resolve_remote_collision (F31-6): the decision IS the three-step remedy —
-  // close the recorded unowned PR, delete the stale remote branch, re-deliver
-  // this task's local work. Each step is best-effort AFTER the resolution
-  // write (the decision stands even when GitHub misbehaves), and every
-  // non-success lands on the timeline in plain words.
-  // P07-F (pass 32): no `&& actor.userId` guard — a resolver without a user id
-  // used to resolve+clear the packet and then do NOTHING (no close, no delete,
-  // no note). `resolveRemoteBranchCollision` refuses that actor itself
-  // ("No acting user.") and the refusal lands on the timeline below.
+  // resolve_remote_collision (F31-6, ruling 136): the decision IS the remedy —
+  // delete the stale remote branch, close the recorded unowned PR, re-deliver
+  // this task's local work — and the ceremony ends with EXACTLY ONE hand-off.
+  // Each step is best-effort AFTER the resolution write (the decision stands
+  // even when GitHub misbehaves) and every non-success lands on the timeline
+  // in plain words. The kind stays out of the generic `packet-resolved`
+  // re-queue above (that hand-off runs before the ceremony and could not carry
+  // its outcome): the ceremony fires its own at its end, the ruling-48
+  // `delivered` re-queue when the re-delivery fired it, otherwise a
+  // `packet-resolved` re-queue whose payload carries the outcome in its OWN
+  // field, never inside the human's quoted note.
+  // P07-F (pass 32): no `&& actor.userId` guard — `resolveRemoteBranchCollision`
+  // refuses a user-less actor itself ("No acting user.") and the refusal lands
+  // on the timeline below.
   if (option.kind === "resolve_remote_collision") {
     const { resolveRemoteBranchCollision } = await import(
       "~/server/github/github-reconciler.server"
@@ -7232,70 +7246,112 @@ export async function resolvePacket(
       dataRoot: ctx.dataRoot,
     };
     if (ctx.fetchImpl) collisionCtx.fetchImpl = ctx.fetchImpl;
+    const collisionRef = { projectSlug: input.projectSlug, taskKey: input.taskKey };
     const collision = await resolveRemoteBranchCollision(
       db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      collisionRef,
       { userId: actor.userId, label: actor.label },
       collisionCtx,
     );
+    const branchName = existing.parsed.frontmatter.branch ?? "";
     let noteText: string | null = null;
     let delivered = false;
+    let deliveredPr: number | null = null;
+    let liftBlock = false;
+    let operatorRequeued = false;
+    let serverOutcome: CollisionServerOutcome;
+    const outcomeOf = (
+      outcome: CollisionServerOutcome["outcome"],
+      facts: { prNumber?: number | null; reason?: string },
+    ): CollisionServerOutcome => {
+      const built: CollisionServerOutcome = { kind: "resolve_remote_collision", outcome };
+      if (facts.prNumber !== undefined && facts.prNumber !== null) built.prNumber = facts.prNumber;
+      if (facts.reason) built.reason = facts.reason;
+      return built;
+    };
+    // The delivery door the task page uses (maintainer+/owner gate; the
+    // approve-transition check above implies it for every resolver).
+    const deliverNow = () => manualDeliverForReview(db, collisionRef, actor, ctx);
     if (collision.status === "cleared") {
-      // The name is free again — re-deliver through the same audited door the
-      // task page's "Deliver branch & open PR" uses (maintainer+/owner gate;
-      // the approve-transition check above implies it for every resolver).
-      const delivery = await manualDeliverForReview(
-        db,
-        { projectSlug: input.projectSlug, taskKey: input.taskKey },
-        actor,
-        ctx,
-      );
-      if (delivery.status !== "delivered") {
-        noteText = `The stale remote branch was cleared, but the re-delivery did not complete: ${delivery.message} Deliver again from the task page when it is resolved.`;
-      } else {
+      // The name is free again — re-deliver through the audited human door.
+      const delivery = await deliverNow();
+      if (delivery.status === "delivered") {
         delivered = true;
-        // F32-7 (pass 32): the follow-up after THIS delivery is owned by
-        // nobody unless it is claimed here. `manualDeliverForReview` is the
-        // human's door, and `performDelivery` deliberately records no next
-        // step for a human who just clicked Deliver (R18-2/R19-4) — but the
-        // person here confirmed a packet ceremony, not a delivery, and this
-        // kind sits in NO_REQUEUE on the promise that "the re-delivery's own
-        // machinery owns the follow-up". Live (VIB-1): the task sat at In
-        // Progress, `waiting: human`, an open PR and nothing to click. Under
-        // FULL autonomy `performDelivery` already re-queues the operator for
-        // any newly opened PR (R18-2 — that arm never looked at who
-        // delivered), so only the SUPERVISED half is missing: record the
-        // server-attributed "Move to <review>" card here, exactly the one an
-        // operator-authorized delivery would have recorded.
-        const { resolveOperatorAuthority } = await import(
-          "./operator-actions.server"
-        );
-        const autonomy = resolveOperatorAuthority(ctx, input.projectSlug).autonomy;
-        if (autonomy !== "full") {
-          await recordDeliveredNextStep(
-            db,
-            ctx,
-            input.projectSlug,
-            input.taskKey,
-            delivery.prNumber,
-          );
+        deliveredPr = delivery.prNumber;
+        liftBlock = true;
+        operatorRequeued = delivery.operatorRequeued;
+        serverOutcome = outcomeOf("cleared_and_delivered", { prNumber: delivery.prNumber });
+      } else {
+        noteText = `The stale remote branch was cleared, but the re-delivery did not complete: ${delivery.message} Deliver again from the task page when it is resolved.`;
+        serverOutcome = outcomeOf("cleared_delivery_failed", { reason: delivery.message });
+      }
+    } else if (collision.reason === "own_pr_open") {
+      // Ruling 136(b): the packet's premise was false — the PR on the branch is
+      // this task's OWN review PR, so there is no collision to clear, and what
+      // the person asked for is the work reaching that PR. For a remote that
+      // is merely behind or absent, perform the delivery that pushes it (the
+      // delivery is the authority on the relation: a diverged remote it meets
+      // refuses as `push_conflict`, and the block stays). For a remote the file
+      // already records as DIVERGED, keep the block and say who resolves the
+      // history. A self-referencing collision record is cleared either way.
+      const fmNow =
+        readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter ?? null;
+      const ownPr = collision.prNumber ?? fmNow?.pr?.number ?? null;
+      const premise = `No collision to clear: PR #${ownPr} on \`${branchName}\` is ${input.taskKey}'s own review PR.`;
+      if (fmNow?.github?.unownedPr != null && fmNow.github.unownedPr === ownPr) {
+        await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+          if (parsed.frontmatter.github) parsed.frontmatter.github.unownedPr = null;
+        });
+      }
+      const record = fmNow
+        ? unpushedRevisionOf(fmNow.pr, fmNow.workRevision?.headSha ?? null)
+        : null;
+      if (record?.relation === "diverged") {
+        const head = record.prHeadSha ? `\`${record.prHeadSha.slice(0, 7)}\`` : "its head";
+        noteText = `${premise} Its remote copy (${head}) holds commits this workspace does not, so the delivered revision \`${record.revisionSha.slice(0, 7)}\` cannot be pushed as it stands. A person resolves the branch history, or archives the task; the block stays until then.`;
+        serverOutcome = outcomeOf("own_pr_diverged", {
+          prNumber: ownPr,
+          reason: "the remote branch holds commits this workspace does not",
+        });
+      } else {
+        const delivery = await deliverNow();
+        if (delivery.status === "delivered") {
+          delivered = true;
+          deliveredPr = delivery.prNumber;
+          liftBlock = true;
+          operatorRequeued = delivery.operatorRequeued;
+          const sha = delivery.headSha ? ` \`${delivery.headSha.slice(0, 7)}\`` : "";
+          const current = delivery.pushStatus === "up_to_date";
+          noteText = current
+            ? `${premise} It already carries the delivered revision${sha}; nothing needed pushing, and the block is lifted.`
+            : `${premise} The delivered revision${sha} was pushed to it, and the block is lifted.`;
+          serverOutcome = outcomeOf(current ? "own_pr_current" : "own_pr_pushed", {
+            prNumber: delivery.prNumber,
+          });
+        } else {
+          noteText = `${premise} The delivery that would push the delivered revision to it did not complete: ${delivery.message} The block stays.`;
+          serverOutcome = outcomeOf("own_pr_delivery_failed", {
+            prNumber: ownPr,
+            reason: delivery.message,
+          });
         }
       }
     } else {
       noteText = `The branch collision was **not** cleared: ${collision.message} Nothing was re-delivered.`;
+      serverOutcome = outcomeOf("refused", { reason: collision.message });
     }
-    if (noteText !== null || delivered) {
+    if (noteText !== null || liftBlock) {
       await updateTaskFile(
         taskRef(ctx, input.projectSlug, input.taskKey),
         (parsed) => {
           // The push-conflict packet held `readiness: blocked` down with it, and
           // nothing in the delivery path writes readiness (the F29-7 withdrawal
           // can't either — the resolution write already cleared the packet). A
-          // successful re-delivery falsifies the block, so lift it here; on the
-          // refused/failed arms the block is still real and stays. `waiting`
-          // stays "human": the resolver is present, and acceptance is
+          // delivery that reached the PR falsifies the block, so lift it here;
+          // on the refused/failed arms the block is still real and stays.
+          // `waiting` stays "human": the resolver is present, and acceptance is
           // verdict-gated regardless.
-          if (delivered && parsed.frontmatter.readiness === "blocked") {
+          if (liftBlock && parsed.frontmatter.readiness === "blocked") {
             parsed.frontmatter.readiness = "ready";
           }
           if (noteText !== null) {
@@ -7313,40 +7369,68 @@ export async function resolvePacket(
       );
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     }
-    // F33-4 (pass 33): ruling 110 ends "And it never strands", and F32-7 hung
-    // that guarantee on the RE-DELIVERY — so the arm where no re-delivery runs
-    // inherited none of it. A refusal is the safe outcome the delete-first
-    // ordering exists to produce, and live (VIB-1) it left the task at `impl`,
-    // `waiting: human`, no packet, no recommendation, and PR #270 open on the
-    // branch: the exact strand ruling 110 quotes. The refusal is also the arm
-    // where a review PR is most likely to already stand — `deleteTaskRemoteBranch`
-    // refuses precisely because the task's OWN open PR sits on the ref — so the
-    // follow-up is the same "Move to <review>" card the success arm records, over
-    // the PR the task already carries. `recordDeliveredNextStep` is the ONE writer
-    // of that card and re-checks everything under the lock (already-actionable,
-    // stage at/past review, no workflow edge, archived), so this cannot double up
-    // with the success arm above nor invent a move the board would refuse. No PR
-    // means no honest card: the refusal note names the remedy instead.
-    if (!delivered) {
+    // One audit row per ceremony, with its typed outcome.
+    recordAudit(db, {
+      action: "github.collision.resolved",
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: {
+        outcome: serverOutcome.outcome,
+        reason: serverOutcome.reason ?? null,
+        prNumber: serverOutcome.prNumber ?? null,
+        delivered,
+        blockLifted: liftBlock,
+      },
+    });
+    if (delivered && deliveredPr !== null) {
+      // F32-7 (pass 32): `manualDeliverForReview` is the human's door, and
+      // `performDelivery` records no next step for a human who just clicked
+      // Deliver (R18-2/R19-4) — but the person here confirmed a packet
+      // ceremony, not a delivery. Under FULL autonomy the delivery re-queues
+      // the operator itself (ruling 134(b)); the SUPERVISED half gets the
+      // server-attributed "Move to <review>" card, where the board lets it
+      // apply (`recordDeliveredNextStep` re-checks everything under the lock).
+      const { resolveOperatorAuthority } = await import("./operator-actions.server");
+      if (resolveOperatorAuthority(ctx, input.projectSlug).autonomy !== "full") {
+        await recordDeliveredNextStep(db, ctx, input.projectSlug, input.taskKey, deliveredPr);
+      }
+    } else {
+      // F33-4 (pass 33): the refusing arm runs no re-delivery, so the same
+      // "Move to <review>" card is recorded over the PR the task already
+      // carries, when one is open. No PR means no honest card: the refusal
+      // note names the remedy instead.
       const openPr =
-        readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed
-          .frontmatter.pr ?? null;
-      // "review" and "accepted" are the two OPEN states (a human-set "accepted"
-      // is merge-pending, still open on GitHub — the reconciler reads them the
-      // same way). A merged or closed PR is nothing to move a task to review for.
+        readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter.pr ??
+        null;
       const prNumber =
         openPr && (openPr.state === "review" || openPr.state === "accepted")
           ? openPr.number
           : null;
       if (prNumber !== null) {
-        await recordDeliveredNextStep(
-          db,
-          ctx,
-          input.projectSlug,
-          input.taskKey,
-          prNumber,
-        );
+        await recordDeliveredNextStep(db, ctx, input.projectSlug, input.taskKey, prNumber);
       }
+    }
+    // Ruling 136(a): EXACTLY ONE hand-off. The `delivered` re-queue, when the
+    // re-delivery fired it, already carries the outcome as a moved head;
+    // otherwise the operator is handed the decision with Viberr's own record
+    // of what the ceremony did, in its own field.
+    if (!operatorRequeued) {
+      const decisionNote = customDirective || input.note?.trim();
+      const handoff: ResolvedPacketOption = { kind: option.kind, title: option.t, serverOutcome };
+      if (decisionNote) handoff.note = decisionNote;
+      void autoInvokeOperator(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+        "packet-resolved",
+        undefined,
+        undefined,
+        handoff,
+      );
     }
   }
 

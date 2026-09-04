@@ -199,10 +199,10 @@ and the note itself, used to assert the reused-key origin alone.)*
 
 | Remedy | What it does | Gate |
 |---|---|---|
-| `resolve_remote_collision` packet option | Closes the recorded unowned PR (audit `github.pr.closed_unowned`), deletes the stale remote branch, re-delivers this task's local work, lifts `readiness` from `blocked`. | `approve-transition` |
+| `resolve_remote_collision` packet option | Deletes the stale remote branch first, closes the recorded unowned PR (audit `github.pr.closed_unowned`), re-delivers this task's local work, lifts `readiness` from `blocked`. Ruling 136: the ceremony ends with exactly ONE hand-off (the `delivered` re-queue when the re-delivery fired it, else a `packet-resolved` re-queue carrying the outcome in its own `serverOutcome` field); a refusal because the PR on the ref is this task's OWN open PR is no collision: a behind or absent remote gets the delivery that pushes the work and the block lifts, a diverged remote keeps the block and names who resolves the history; every other refusal keeps the block and hands the operator its typed reason. One audit row per ceremony: `github.collision.resolved {outcome, reason, prNumber, delivered, blockLifted}`. | `approve-transition` |
 | `discard_branch` packet option | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. The operator may not author it when a work revision exists. | `approve-transition` |
 | `update_branch_from_base` (operator, capability `update-task-branch`) | Merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, records the refresh in `baseRefreshes` and reconciles at once (ruling 132). Reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)). A conflict opens a human `blocked` packet (`redirect`, `custom`, `archive_task`). | operator gate; `recommend` is refused outright |
-| Branch cleanup | After a successful merge when the `delete-branch-after-merge` guardrail is on (absence means on); on `archive_task` with `deleteBranch: true`; after a no-change acceptance. Refuses the default branch and a branch whose PR is open or accepted. Audit `github.branch.deleted`. | human `userId` required |
+| Branch cleanup | After a successful merge when the `delete-branch-after-merge` guardrail is on (absence means on); on `archive_task` with `deleteBranch: true`; after a no-change acceptance. Refuses the default branch and a branch whose PR is open or accepted. Ruling 136(c): a CACHED open PR is re-confirmed against GitHub before it can refuse (a pass with the divergence notification and the operator wake suppressed); a PR GitHub reports closed or merged lets the delete proceed on the refreshed file, a PR still open refuses (`own_pr_open`), and every degraded or unexpected reconcile status refuses as `unconfirmed` ("GitHub could not confirm"), never deleting on an unconfirmed state. The archive and empty-branch doors inherit the same check and sentence. Audit `github.branch.deleted`. | human `userId` required |
 
 ## 5. Revisions, verdicts and acceptance
 
@@ -303,7 +303,7 @@ never gets the tool because a Codex mount would hand the child the credential.
 - Audit: `github.pat.*`, `github.credential.*`, `org.connection.*`, `secrets.resealed`,
   `project.repo.updated`, `github.repo.bootstrapped` (ruling 128, a repository-level
   change like `github.credential.assigned`), `github.branch.created|deleted`,
-  `github.branch_update.operator`, `github.pr.opened|adopted|merged|merge_refused|closed_unowned`,
+  `github.branch_update.operator`, `github.collision.resolved`, `github.pr.opened|adopted|merged|merge_refused|closed_unowned`,
   `github.reconcile.task|project`, `github.scope_violation.opened|resolved`,
   `github.workspace.branch_reconciled|pr_linked`,
   `github.delivery.manual|operator|next_step`, `task.agent.github_read`,

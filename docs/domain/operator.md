@@ -68,7 +68,7 @@ resources, persona, whether the operator is deployed, and `humanGatedBeforeWork`
 | `agent-reply` | react | the agent completion pipeline |
 | `pr-diverged` | recover | the GitHub reconciler on an out-of-band PR change |
 | `delivered` | proceed | a full-autonomy delivery that opened a new PR, or whose push moved the head of the task's open PR (rulings 48 and 134) |
-| `packet-resolved` | proceed | `resolvePacket`, when no asking agent absorbed the answer |
+| `packet-resolved` | proceed | `resolvePacket`, when no asking agent absorbed the answer. The payload carries the option (kind, title), the person's own note, and, for a ceremony that performs work of its own (`resolve_remote_collision`), Viberr's record of what it did in a separate `serverOutcome` field rendered as Viberr's sentence, never inside the quoted note (ruling 136(a)) |
 | `scheduled` | re-check | the schedule runner |
 | `manual` | coordinate | the Run-operator control, an `@operator` comment, boot recovery, the controller's `run_agent_on_task` |
 
@@ -231,7 +231,7 @@ Resolution effects by option kind (`resolvePacket`):
 | `edit_goal` | The only kind that keeps its packet open (`awaiting: goal_edit`); cleared when the edited goal is saved. |
 | `archive_task` | The archive contract; with `deleteBranch: true` also deletes the remote branch (the product's only remote-branch deletion besides collision resolution). Requires `approve-transition`. |
 | `discard_branch` | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. Requires `approve-transition`. |
-| `resolve_remote_collision` | Closes the recorded unowned PR, deletes the stale remote branch, re-delivers this task's local work. Requires `approve-transition`. |
+| `resolve_remote_collision` | Deletes the stale remote branch, closes the recorded unowned PR, re-delivers this task's local work; ends with exactly one operator hand-off carrying the outcome (ruling 136). When the PR on the ref turns out to be the task's own open review PR there is no collision: a behind or absent remote gets the push, a diverged one keeps the block. Requires `approve-transition`. |
 
 Who may resolve: `accept_completion` is guarded by `requireAcceptCompletion` (admin,
 maintainer, or the live task owner); every other kind by the owner exception or

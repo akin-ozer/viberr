@@ -1,4 +1,8 @@
 import { describeRevisionDrift } from "~/shared/revision-drift";
+import {
+  serverOutcomeSentence,
+  type ResolvedPacketOption,
+} from "~/shared/packet-server-outcome";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -180,7 +184,7 @@ export interface RunOperatorInput {
   /** packet-resolved trigger: the option the human chose and any note, so the
    *  turn instruction can tell the operator exactly what was decided rather than
    *  making it re-derive the answer from the timeline (R20-1). */
-  resolvedOption?: { kind: string; title: string; note?: string };
+  resolvedOption?: ResolvedPacketOption;
   /** `scheduled` trigger: the note the human wrote when they set the re-run
    *  ("re-check the flaky test"). It is the REASON the run exists, so it rides
    *  into the turn instruction — a scheduled run that arrives as a bare
@@ -3346,7 +3350,7 @@ function operatorTurnDoctrine(
   humanCommentBy?: string,
   transition?: TransitionContext,
   scheduleNote?: string,
-  resolvedOption?: { kind: string; title: string; note?: string },
+  resolvedOption?: ResolvedPacketOption,
   strandedResume?: boolean,
 ): string {
   if (humanComment?.trim()) {
@@ -3433,10 +3437,16 @@ function operatorTurnDoctrine(
     // R20-1 (F20-5): a human answered the decision packet, and the server
     // re-queued you with the decision in hand. Act on it — do NOT re-open the
     // packet you were just answered on.
+    // Ruling 136(a): the person's words and the server's record are two
+    // speakers. The note is quoted as theirs; what Viberr then did is stated
+    // as Viberr's, never folded into the quotation.
     const decided = resolvedOption
       ? `**${resolvedOption.title}**` +
         (resolvedOption.note
           ? ` — the human added: "${resolvedOption.note}"`
+          : "") +
+        (resolvedOption.serverOutcome
+          ? ` Viberr then performed that option's own steps and reports, in its own words and not the person's: ${serverOutcomeSentence(resolvedOption.serverOutcome)}`
           : "")
       : "their decision (see the newest timeline entry)";
     return (
@@ -3545,7 +3555,7 @@ export function buildCodexOperatorPrompt(
   humanCommentBy?: string,
   transition?: TransitionContext,
   scheduleNote?: string,
-  resolvedOption?: { kind: string; title: string; note?: string },
+  resolvedOption?: ResolvedPacketOption,
   strandedResume?: boolean,
 ): string {
   return (
@@ -3580,7 +3590,7 @@ export function buildOperatorTurnPrompt(
   humanCommentBy?: string,
   transition?: TransitionContext,
   scheduleNote?: string,
-  resolvedOption?: { kind: string; title: string; note?: string },
+  resolvedOption?: ResolvedPacketOption,
   strandedResume?: boolean,
 ): string {
   return (
