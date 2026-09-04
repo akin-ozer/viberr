@@ -980,3 +980,55 @@ PR #19).
   `controller-dock.test.tsx` "animates only a reply that arrives while the panel is open"
   (1087 ms; passes in isolation). Both recorded as the baseline delta.
 - Live project settled: 0 runs; 11 non-done tasks all waiting on humans.
+
+## Fix phase — close-out (2026-09-04)
+
+Every TODO item shipped on `pass34/implementation`, each with a canaried test and its docs
+page in the same commit. Rulings 128–144 are recorded in `docs/architecture/decisions.md`
+beside the item that carries them; the ruling count in `docs/README.md` moved 127 → 144.
+
+**Where the code contradicted the plan, and what won.**
+
+- **A2 (ruling 129).** The plan read as if `refreshWorkspaceFromMirror` already had a
+  caller. It had none: the export existed and nothing in production reached it, so the
+  ruling was documented but inert. The refresh is now wired into `cloneRepo`'s reuse and
+  support paths, its outcome rides `CloneOutcome.refreshed` into the prompt, and the
+  workspace contract discloses it in one sentence.
+- **B2 (F34-9, PR adoption).** The plan asked for a notification on every adoption. Only
+  the RECONCILER's adoption notifies — the door nobody is watching. The delivery door
+  writes the timeline event and the audit row without one, because whoever asked for the
+  delivery is reading its answer. `github-delivery.md` and `task-lifecycle.md` say that
+  now instead of promising both.
+- **C8 (hydration e2e).** The plan's raw-source assertions ran through an unauthenticated
+  `page.request.get`, which returns the sign-in page: both assertions passed against HTML
+  that never contained the app. The spec now carries a helper that attaches the browser
+  context's cookies and refuses a sign-in response, and the negative assertion is written
+  so it cannot pass vacuously.
+- **Ruling 131 projections.** Adding `blocked_by_json` was not enough for a live store: the
+  derivation-version stamp had to move, or an existing data root would keep serving
+  projections built before the column meant anything. Verified in the container — boot
+  reported "rebuilt every projection for a derivation change" (2 → 3) over all 16 tasks.
+- **testing.md.** The e2e inventory in the plan's docs was stale in three ways (a missing
+  spec file, two undercounted files, a total that predated both). Re-derived from
+  `playwright test --list`: 68 tests plus the setup project.
+
+**Adversarial review of this pass's own work.** A review round over the branch produced
+findings that were verified before being fixed; the confirmed ones ship here. The last
+batch: a specialist could be handed an autonomy level only the operator honours; the
+acceptance-offer withdrawal counted survivors before the caller's own filter ran; an
+invalid due date burned a task key; the effort re-seed judged a stored tier against a
+different list than the picker renders; `GOAL` was an allowed task prefix even though the
+dependency grammar reads `GOAL-1` as a goal reference; and a degraded history read
+reported "no workflow files" as though it had measured none.
+
+**Gates.** lint 0 · typecheck 0 · unit 5711 passed / 341 files · build ok · e2e 69 passed.
+One pre-existing failure was cleared on the way: the backend-login route test polled the
+route in the same tick as the spawned sign-in and asserted a URL the child had not printed
+yet. It fails the same way on `main`; it now waits for the URL with a deadline.
+
+**Live.** The container was rebuilt from this branch and boots clean: 16 tasks, 5 users,
+integrity check ok, no missing projection columns, `store:check` parses all 22 canonical
+files. The sign-in page renders in light and dark, desktop and mobile, with no console
+errors. Everything past the sign-in page in TESTPLAN's live bands is unrun: it needs a
+signed-in session, and entering a password to authenticate is not something this session
+does. The unit rows of the plan are covered by the canaried tests that ship with each item.
