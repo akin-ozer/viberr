@@ -1506,3 +1506,36 @@ describe("a controller write discloses its instrument on Activity (C5)", () => {
     expect(instrumented[0]!.text).toContain(`${elif.name} (via the controller)`);
   });
 });
+
+/**
+ * Pass 34 review (ruling 139, the read/write pairing): `update_agent_deployment`
+ * used to seed its form from the RAW stored grants, so `grantsFor` materialised
+ * every ABSENT id at its CATALOG default — an unrelated patch armed capabilities
+ * the deployment had withheld. Live in the review: `comment-on-task: off` on the
+ * seeded Reviewer stored `execute-code-or-write-repo`, `create-task-branch` and
+ * `open-review-pr` as `direct`.
+ */
+describe("update_agent_deployment never arms a capability it was not asked to", () => {
+  it("an unrelated patch leaves every withheld write grant withheld", async () => {
+    // Canary: seed `caps` from `deployment.capabilities` again.
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const stored = () =>
+      readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+        .parsed.frontmatter.agents.find((a) => a.profileId === "reviewer")!.capabilities;
+    const modeOf = (id: string) => stored().find((g) => g.capabilityId === id)?.mode ?? "absent";
+    // The seeded Reviewer stores none of the three write grants.
+    for (const id of ["execute-code-or-write-repo", "create-task-branch", "open-review-pr"]) {
+      expect(modeOf(id)).toBe("absent");
+    }
+    const reply = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "reviewer",
+      capabilities: [{ capabilityId: "comment-on-task", mode: "off" }],
+    });
+    expect(reply).toContain("[done]");
+    expect(modeOf("comment-on-task")).toBe("off");
+    // The point: none of the three became actionable.
+    for (const id of ["execute-code-or-write-repo", "create-task-branch", "open-review-pr"]) {
+      expect(modeOf(id), `${id} must not be armed by an unrelated patch`).toBe("off");
+    }
+  });
+});

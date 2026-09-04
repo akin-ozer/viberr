@@ -1775,8 +1775,21 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               `${unknownStages.map((id) => `"${id}"`).join(", ")} ${unknownStages.length === 1 ? "is not a stage" : "are not stages"} of ${slug}. Nothing was written. The project's stage ids are: ${stageIds.join(", ")}.`,
             );
           }
+          // Seed from the RESOLVED grants — the same view `get_project`
+          // reports and the same one the agents-page modal seeds from
+          // (`seedCaps`). Seeding from the RAW stored record instead let
+          // `grantsFor` materialise every ABSENT id at its CATALOG default, so
+          // an unrelated patch armed capabilities the deployment had withheld:
+          // live in this pass's review, `comment-on-task: off` on the seeded
+          // Reviewer stored `execute-code-or-write-repo`, `create-task-branch`
+          // and `open-review-pr` as `direct`. Ruling 139 pairs the read with
+          // the write; the write must not contradict the read.
+          const resolved =
+            assembleAgentRoster(db, slug, { dataRoot }).find((r) => r.id === args.profileId) ?? null;
           const caps: Record<string, string> = {};
-          for (const grant of deployment.capabilities) caps[grant.capabilityId] = grant.mode;
+          for (const grant of resolved?.capabilities ?? deployment.capabilities) {
+            caps[grant.capabilityId] = grant.mode;
+          }
           for (const patch of args.capabilities ?? []) caps[patch.capabilityId] = patch.mode;
           // Ruling 139: effort is settable wherever model is, judged by name
           // against the backend the deployment will run on, BEFORE the write.
