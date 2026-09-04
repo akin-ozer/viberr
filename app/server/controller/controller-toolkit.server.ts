@@ -1040,13 +1040,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "create_task",
-      "Create a task at the project's entry stage (every task passes the triage gate). Contributor or above.",
+      "Create a task at the project's entry stage (every task passes the triage gate). Contributor or above. `priority: urgent` IS the urgent flag (urgent is derived from priority, never a second input). Ruling 140: `owner` seats a member as owner in the same write that creates the task, BEFORE the first operator run, so that run bills the named owner; omit it to seat yourself. Use set_task_owner afterwards to release a seat; `none` is refused here.",
       {
         projectSlug: z.string().optional(),
         title: z.string(),
         goal: z.string().optional().describe("The task text: deliverable plus the done signal."),
-        priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
+        priority: z.enum(["low", "normal", "high", "urgent"]).optional().describe("urgent IS the urgent flag."),
         labels: z.array(z.string()).optional(),
+        owner: z
+          .string()
+          .optional()
+          .describe('A member email, or "me" (the default). Seated before the first operator run; "none" is refused at creation.'),
+        dueDate: z.string().optional().describe("YYYY-MM-DD, or empty for none."),
         blockedBy: z
           .array(z.string())
           .optional()
@@ -1059,6 +1064,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           goal?: string;
           priority?: "low" | "normal" | "high" | "urgent";
           labels?: string[];
+          owner?: string;
+          dueDate?: string;
           blockedBy?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
@@ -1075,12 +1082,31 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (args.goal) taskInput.goal = prose(args.goal);
           if (args.priority) taskInput.priority = args.priority;
           if (args.labels) taskInput.labels = args.labels;
+          if (args.dueDate !== undefined) taskInput.dueDate = args.dueDate.trim() || null;
           if (args.blockedBy?.length) taskInput.blockedBy = args.blockedBy;
+          // Ruling 140(a): the owner is resolved BEFORE the write and seated in
+          // it, so the operator's `create` trigger already reads the right
+          // principal. The release word the sibling `set_task_owner` accepts is
+          // refused by name here rather than falling through to a misleading
+          // "No Viberr user with the email none."
+          const who = (args.owner ?? "me").trim().toLowerCase();
+          if (who === "none") {
+            throw AppError.validation(
+              "A new task is created with an owner; use `set_task_owner` to release the seat afterwards.",
+            );
+          }
+          if (who !== "me") {
+            const target = listUsers(db).find((u) => u.email.toLowerCase() === who)?.id;
+            if (!target) throw AppError.notFound(`No Viberr user with the email ${args.owner}.`);
+            taskInput.ownerUserId = target;
+          }
           const created = await createTask(db, taskInput, actor, { dataRoot });
           const wait = created.task.blockedBy.length
             ? ` Waits on ${created.task.blockedBy.map((e) => e.label).join(", ")}; held until every entry is done.`
             : "";
-          return `[done] ${created.key} created in ${created.stageName}: ${created.task.title}.${wait}`;
+          const seated =
+            who !== "me" ? ` Owner: ${args.owner}, seated before the first operator run.` : "";
+          return `[done] ${created.key} created in ${created.stageName}: ${created.task.title}.${seated}${wait}`;
         },
       ),
     ),

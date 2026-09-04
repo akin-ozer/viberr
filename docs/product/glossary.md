@@ -65,7 +65,7 @@
 
 **Org role** — `users.role`: `admin | member`. Governs instance surfaces (org settings, insights, audit export). Distinct from project roles.
 
-**Owner** — the one human on a task (`ownerUserId`), seated at creation as the creator (ruling 127). Contributor or above may take or release; the owner governs any open decision on their own task, including accepting completion (FR37, rulings 22), and every agent run on the task bills the owner's own agent accounts, so an unowned task cannot run agents at all.
+**Owner** — the one human on a task (`ownerUserId`), seated at creation as the creator (ruling 127) or as the member named at creation, before the first operator run (ruling 140(a)). Contributor or above may take or release; the owner governs any open decision on their own task, including accepting completion (FR37, rulings 22), and every agent run on the task bills the owner's own agent accounts, so an unowned task cannot run agents at all.
 
 **PR state** — the `task.md` `pr.state` cache: `review` (open or draft), `merged`, `closed` (closed unmerged), `accepted` (a full-autonomy operator accepted; merge pending for a human). Sync pill precedence: merged > behind > synced.
 

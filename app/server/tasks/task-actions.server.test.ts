@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DatabaseSync } from "node:sqlite";
+import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import { describeRevisionDrift } from "~/shared/revision-drift";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -3915,5 +3917,151 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
     expect(rows).toHaveLength(1);
     expect(rows[0]!.details).toMatchObject({ cause: "stage_move", surviving: 1, removed: [{ id: "r-accept" }, { id: "r-done" }] });
     expect(rows[0]!.actorLabel).toBe(store.users.arda.email);
+  });
+});
+
+/**
+ * Ruling 140(a) (pass 34, G34-3): a named owner is seated in the SAME write
+ * that creates the task, before the operator's `create` trigger, so the first
+ * run bills the named owner; the hand-off rule is the ONE shared check.
+ */
+describe("ruling 140(a): a named owner at creation", () => {
+  it("the operator's create trigger reads the NAMED owner from the file, exactly once", async () => {
+    // Asserting right after `await createTask` proves nothing: the hand-off is
+    // fired with `void` and awaits a dynamic import first. The injected
+    // `runOperator` captures what the file said WHEN THE RUN STARTED.
+    // Canary: write the creator into the frontmatter and apply the named owner
+    // after `autoInvokeOperator` — the run reads arda, not murat.
+    const store = prepared();
+    // `autoInvokeOperator` returns early when no operator is deployed, so the
+    // hand-off this case is about needs one on the project.
+    const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...projectFile.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [{ capabilityId: "dispatch-agents", mode: "direct" as const }],
+          extras: [],
+          definition: {
+            kind: "operator" as const,
+            name: "Operator",
+            role: "Coordination",
+            icon: "shield",
+            backends: ["claude" as const],
+            model: "sonnet",
+            autonomy: "supervised" as const,
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const seen: { ownerUserId: string | null; trigger: string | undefined }[] = [];
+    let settle: (() => void) | null = null;
+    const observed = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const runOperator = vi.fn((_db: DatabaseSync, input: RunOperatorInput) => {
+      const file = readTaskFile({
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        dataRoot: store.dataRoot,
+      });
+      seen.push({
+        ownerUserId: file?.parsed.frontmatter.ownerUserId ?? null,
+        trigger: input.trigger,
+      });
+      settle?.();
+      return Promise.resolve({
+        runId: "run_seat",
+        queued: false,
+        backend: "claude" as const,
+        autonomy: "supervised" as const,
+      });
+    });
+    const created = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Seated at birth", ownerUserId: store.users.murat.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { runOperator } },
+    );
+    expect(created.task.owner).toMatchObject({ kind: "human", userId: store.users.murat.id });
+    await Promise.race([
+      observed,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("the create trigger never fired")), 5_000),
+      ),
+    ]);
+    expect(seen).toEqual([{ ownerUserId: store.users.murat.id, trigger: "create" }]);
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: created.key,
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    const assign = parsed.timeline.find((e) => e.type === "assign")!;
+    expect(assign.text).toContain(`Seated ${store.users.murat.name} as owner at creation.`);
+    expect(assign.actor).toMatchObject({ kind: "human", userId: store.users.arda.id });
+    expect(
+      listAuditEvents(store.db, { action: "task.created" })[0]!.details,
+    ).toMatchObject({ ownerUserId: store.users.murat.id, seat: "named" });
+  });
+
+  it("naming yourself records the creator seat with the creator text", async () => {
+    const store = prepared();
+    const created = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Mine to own", ownerUserId: store.users.arda.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: created.key,
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.frontmatter.ownerUserId).toBe(store.users.arda.id);
+    expect(parsed.timeline.find((e) => e.type === "assign")?.text).toContain(
+      "Took task ownership by creating the task.",
+    );
+    expect(
+      listAuditEvents(store.db, { action: "task.created" })[0]!.details,
+    ).toMatchObject({ seat: "creator" });
+  });
+
+  it("the hand-off refusals apply, before a key is allocated", async () => {
+    // Canary: drop `requireOwnable` from createTask.
+    const store = prepared();
+    const before = listAuditEvents(store.db).length;
+    await expect(
+      createTask(
+        store.db,
+        { projectSlug: store.slug, title: "To a viewer", ownerUserId: store.users.deniz.id },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(
+      "Ownership can only be handed to a project member who can own tasks (contributor or above).",
+    );
+    await expect(
+      createTask(
+        store.db,
+        { projectSlug: store.slug, title: "To a non member", ownerUserId: "u_nobody" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(
+      "Ownership can only be handed to a project member who can own tasks (contributor or above).",
+    );
+    await expect(
+      createTask(
+        store.db,
+        { projectSlug: store.slug, title: "By the operator", ownerUserId: store.users.murat.id },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, operatorAuthorized: true },
+      ),
+    ).rejects.toThrow(
+      "A named owner is seated by a person; an operator-created task starts unowned.",
+    );
+    expect(listAuditEvents(store.db).length).toBe(before);
   });
 });

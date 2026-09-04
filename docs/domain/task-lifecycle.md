@@ -71,7 +71,13 @@ the goal (or the placeholder "Goal to be refined at the triage quality gate."),
 optional `priority | labels | dueDate`, optional `goalRef`, then auto-invokes the
 operator with the `create` trigger.
 
-**Creation seats the creator as owner** (ruling 127). `ownerUserId` is the human actor,
+**Creation seats the creator as owner** (ruling 127), or the member named at creation
+(ruling 140(a): `CreateTaskInput.ownerUserId`, the controller's `create_task` `owner`,
+checked by the hand-off rule `requireOwnable` that `setOwner` shares, seated in the SAME
+`task.md` write and before the operator's `create` trigger, so the first triage run bills
+the named owner and is refused honestly when they have no credential; `task.created`
+details carry `seat: creator | named | none`, and the release word `none` is refused by
+name at creation). `ownerUserId` is the human actor,
 and the file is written with the SAME `assign` timeline event a take through `setOwner`
 writes (one event builder, so the timeline reads identically however the seat was
 filled), with the audit's `task.created` details carrying `ownerUserId`. The reason is
@@ -242,8 +248,11 @@ supervisors, and the operator re-invoked with `dependencies-released`).
   the link then served them the members-only 404, which is ruling 25 read backwards. `@operator` queues an operator turn carrying the
   comment as its steer; `@<agent name>`, `@claude` or `@codex` resumes that agent's
   session (auto-engaging a deployed but unengaged agent, ruling 98) and the reply
-  posts back as a comment tagging the human. Mentions use one grammar shared by the The resume door is stage-gated like every other door (ruling 133): the engaged deliverer resumes at any stage; a supporting or released agent at a stage its profile does not declare gets the comment posted and the run refused with the dispatcher's sentence.
-  composer and the server (`app/ui/mention-spans.ts`).
+  posts back as a comment tagging the human. Mentions use one grammar shared by the
+  composer and the server (`app/ui/mention-spans.ts`). The resume door is stage-gated
+  like every other door (ruling 133): the engaged deliverer resumes at any stage; a
+  supporting or released agent at a stage its profile does not declare gets the comment
+  posted and the run refused with the dispatcher's sentence.
 - Comment bodies are escaped so that a line that would read as file structure
   (`## `, `### `, `title:`, `to:`, `evidence:`) cannot forge a section or an event.
 

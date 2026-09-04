@@ -1,4 +1,5 @@
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
+import { findUserById } from "~/server/auth/user-store.server";
 import type {
   CollisionServerOutcome,
   ResolvedPacketOption,
@@ -502,6 +503,11 @@ export interface CreateTaskInput {
    *  allocated so a refusal burns no key; the task is born held
    *  (`waiting: "none"`, readiness floored at `blocked` by derivation). */
   blockedBy?: readonly string[];
+  /** Ruling 140(a): the member to seat as owner at creation, checked by the
+   *  same rule as a hand-off (`requireOwnable`) and written in the SAME
+   *  task.md write, before the operator's `create` trigger. Absent: the
+   *  creator is seated (ruling 127). */
+  ownerUserId?: string | null;
 }
 
 /**
@@ -510,11 +516,26 @@ export interface CreateTaskInput {
  * mock create defaults, reprojects, audits.
  * RBAC: any project member except viewers (board spec §5.1).
  */
+/**
+ * Ruling 140(a): the ONE rule for who may hold the owner seat, shared by a
+ * hand-off through `setOwner` and a named owner at creation, so the pinned
+ * sentence never forks. The ACTOR-side guard of `setOwner` (who may hand off)
+ * does not apply at creation: the creator is the implicit first owner.
+ */
+function requireOwnable(project: ProjectContext, targetUserId: string): void {
+  const targetRole = project.memberRoles.get(targetUserId);
+  if (!targetRole || !roleCan(targetRole, "own-task")) {
+    throw AppError.forbidden(
+      "Ownership can only be handed to a project member who can own tasks (contributor or above).",
+    );
+  }
+}
+
 export async function createTask(
   db: DatabaseSync,
   input: CreateTaskInput,
   actor: TaskActor,
-  ctx: TaskMutationContext = {},
+  ctx: TaskActionContext = {},
 ): Promise<{ key: string; task: TaskSummary; stageName: string }> {
   const project = loadProjectContext(ctx, input.projectSlug);
   requireAction(db, project, actor, "create-task", "create tasks");
@@ -554,6 +575,28 @@ export async function createTask(
     throw AppError.validation("New tasks cannot be created in the done stage.");
   }
 
+  // Ruling 140(a): a named owner is checked BEFORE the key is allocated, by
+  // the hand-off rule. The creator is the implicit first owner, so naming
+  // themselves records the creator seat; an operator-authorized creation has
+  // no person to seat and keeps its null seat.
+  const namedOwnerId = input.ownerUserId?.trim() || null;
+  if (namedOwnerId && !creator) {
+    throw AppError.validation(
+      "A named owner is seated by a person; an operator-created task starts unowned.",
+    );
+  }
+  const seat: "creator" | "named" | "none" =
+    namedOwnerId && creator && namedOwnerId !== creator.userId
+      ? "named"
+      : creator
+        ? "creator"
+        : "none";
+  if (seat === "named" && namedOwnerId) requireOwnable(project, namedOwnerId);
+  const namedOwner = seat === "named" && namedOwnerId ? findUserById(db, namedOwnerId) : null;
+  if (seat === "named" && !namedOwner) {
+    throw AppError.notFound("No Viberr user with that id.");
+  }
+
   // Ruling 131: validate the wait BEFORE the key is allocated — a refused
   // reference must not burn a counter value.
   const blockedBy = input.blockedBy?.length
@@ -585,7 +628,11 @@ export async function createTask(
     // an "Assign me" ceremony standing between a person and their own work. An
     // OPERATOR-created task keeps a null seat: the operator is not a person and
     // has no account to bill; a human has to take that one.
-    ownerUserId: creator?.userId ?? null,
+    // Ruling 140(a): a named owner is seated in this same write, before the
+    // operator's `create` trigger reads the file, so the first triage run
+    // bills the named owner and is refused honestly when they have no
+    // credential, instead of running once on the creator's account.
+    ownerUserId: seat === "named" ? namedOwnerId : (creator?.userId ?? null),
     engagements: [],
     recommendations: [],
     schedules: [],
@@ -621,7 +668,15 @@ export async function createTask(
   };
   // The same `assign` event a take through `setOwner` writes, so the timeline
   // reads the same however the seat was filled (ruling 127).
-  if (creator) {
+  if (creator && seat === "named" && namedOwner) {
+    createInput.timeline = [
+      ownerAssignEvent(
+        db,
+        creator,
+        `Seated ${namedOwner.name} as owner at creation. Agent runs on this task use the owner's own Claude and Codex accounts, and the owner is its human reviewer and acceptance authority.`,
+      ),
+    ];
+  } else if (creator) {
     createInput.timeline = [
       ownerAssignEvent(
         db,
@@ -657,7 +712,7 @@ export async function createTask(
     subjectId: key,
     projectSlug: input.projectSlug,
     taskKey: key,
-    details: { title, stage: stageId, ownerUserId: frontmatter.ownerUserId },
+    details: { title, stage: stageId, ownerUserId: frontmatter.ownerUserId, seat },
   });
 
   // A dedicated operator coordinates every active task (ADR-002): auto-invoke
@@ -4371,12 +4426,7 @@ export async function setOwner(
     if (currentOwnerId !== actor.userId && !roleCan(actorRole, "release-any-ownership")) {
       throw AppError.forbidden("Only the current owner or a project admin can hand off ownership.");
     }
-    const targetRole = project.memberRoles.get(input.targetUserId);
-    if (!targetRole || !roleCan(targetRole, "own-task")) {
-      throw AppError.forbidden(
-        "Ownership can only be handed to a project member who can own tasks (contributor or above).",
-      );
-    }
+    requireOwnable(project, input.targetUserId);
   }
 
   if (currentOwnerId === input.targetUserId) {

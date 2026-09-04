@@ -1317,3 +1317,48 @@ describe("effort and model at deploy are settable and refused by name (ruling 13
     expect(row.details).toMatchObject({ name: "Effort Probe", model: "opus", effort: "max" });
   });
 });
+
+/**
+ * Ruling 140(a) (pass 34, G34-3): `create_task` takes `owner` and `dueDate`;
+ * a named owner is seated before the first operator run; the release word is
+ * refused by name at creation.
+ */
+describe("create_task seats a named owner and takes dueDate (ruling 140)", () => {
+  it("seats the named owner in the creating write, records dueDate, derives urgent from priority", async () => {
+    // Canary: drop the owner pass-through (the seat becomes the caller); drop
+    // the dueDate pass-through.
+    const reply = await call(ids.contributor, "create_task", {
+      title: "Seated for the maintainer",
+      goal: "Prove the seat. Done when Murat owns it from birth.",
+      owner: "murat@viberr.dev",
+      dueDate: "2026-09-30",
+      priority: "urgent",
+    });
+    expect(reply).toContain("[done]");
+    expect(reply).toContain("Owner: murat@viberr.dev, seated before the first operator run.");
+    const key = /VIB-\d+/.exec(reply)![0];
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const fm = readTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.ownerUserId).toBe(ids.maintainer);
+    expect(fm.dueDate).toBe("2026-09-30");
+    expect(fm.priority).toBe("urgent");
+    expect(fm.urgent).toBe(true);
+    expect(
+      listAuditEvents(app.db, { action: "task.created" })[0]!.details,
+    ).toMatchObject({ ownerUserId: ids.maintainer, seat: "named" });
+  });
+
+  it("the release word is refused by name; an unknown email is named; a viewer cannot be seated", async () => {
+    const none = await call(ids.contributor, "create_task", { title: "Nobody owns this", owner: "none" });
+    expect(none).toContain(
+      "[error] A new task is created with an owner; use `set_task_owner` to release the seat afterwards.",
+    );
+    const ghost = await call(ids.contributor, "create_task", { title: "Ghost owns this", owner: "ghost@viberr.dev" });
+    expect(ghost).toContain("[error] No Viberr user with the email ghost@viberr.dev.");
+    const viewer = await call(ids.contributor, "create_task", { title: "Viewer owns this", owner: "viewer@viberr.test" });
+    expect(viewer).toContain(
+      "Ownership can only be handed to a project member who can own tasks (contributor or above).",
+    );
+  });
+});
