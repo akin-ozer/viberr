@@ -1,4 +1,28 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+/**
+ * The SERVER-rendered document for a signed-in reader.
+ *
+ * `page.request` does not carry this context's session, so a bare
+ * `page.request.get(...)` answers the sign-in page with status 200 — against
+ * which a "no now-relative text" assertion passes vacuously and a "count the
+ * stamps" assertion finds none. Both shapes were live here until the first
+ * real e2e run of pass 34 caught them. The cookies are attached explicitly and
+ * the sign-in page is refused by name, so an auth regression fails loudly
+ * instead of quietly satisfying every assertion below.
+ */
+async function serverHtml(page: Page, path: string): Promise<string> {
+  const cookies = await page.context().cookies();
+  const response = await page.request.get(path, {
+    headers: { cookie: cookies.map((c) => `${c.name}=${c.value}`).join("; ") },
+  });
+  expect(response.status()).toBe(200);
+  const html = await response.text();
+  expect(html, "the raw fetch must be signed in, not the login page").not.toContain(
+    "<title>Sign in",
+  );
+  return html;
+}
 
 /**
  * Hydration against the production image in a non-UTC viewer zone: the
@@ -52,10 +76,13 @@ test("activity page hydrates clean in a non-UTC viewer timezone", async ({
   // The mechanism, asserted at the source: the server-rendered document is
   // timezone-agnostic — day headers carry absolute days, never the
   // now-relative buckets a UTC server and a non-UTC viewer disagree on.
-  const ssr = await page.request.get("/projects/viberr-core/activity");
-  expect(await ssr.text()).not.toMatch(
-    /class="act-day"[^>]*>(Today|Yesterday)</,
-  );
+  const ssr = await serverHtml(page, "/projects/viberr-core/activity");
+  // Non-vacuity first: the document really does carry day headers, so the
+  // negative below is about their CONTENT and not about their absence.
+  const days = [...ssr.matchAll(/class="act-day"[^>]*>([^<]*)</g)].map((m) => m[1]);
+  expect(days.length).toBeGreaterThan(0);
+  expect(days).not.toContain("Today");
+  expect(days).not.toContain("Yesterday");
 });
 
 /**
@@ -99,10 +126,8 @@ test("task page hydrates clean in a non-UTC viewer timezone (open accept card)",
   // The mechanism, asserted at the source: every server-rendered stamp is the
   // absolute UTC day + UTC clock — depends on the timestamp alone, never on
   // when the server sampled "now" or on its zone.
-  const ssr = await page.request.get("/projects/viberr-core/tasks/VIB-142");
-  const stamps = [...(await ssr.text()).matchAll(/class="tl-time">([^<]*)</g)].map(
-    (m) => m[1],
-  );
+  const ssr = await serverHtml(page, "/projects/viberr-core/tasks/VIB-142");
+  const stamps = [...ssr.matchAll(/class="tl-time">([^<]*)</g)].map((m) => m[1]);
   expect(stamps.length).toBeGreaterThan(0);
   for (const stamp of stamps) {
     expect(stamp).toMatch(/^[A-Z][a-z]{2} \d{1,2} · \d{2}:\d{2}$/);
