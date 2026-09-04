@@ -3576,3 +3576,47 @@ describe("get_task exposes the rework license the operator was never told about"
     ).toBe(target.id);
   });
 });
+
+/**
+ * Ruling 135: `get_task` carries the PR head, the CURRENT unpushed record and
+ * the acceptance gate's own sentence, so the operator's read and the ceremony
+ * never disagree and the persona's "call `deliver_for_review` when `get_task`
+ * shows `pr.unpushedRevision`" has something to read. Canary: emit `null` for
+ * the record regardless of the file.
+ */
+describe("ruling 135: the operator snapshot and the unpushed revision", () => {
+  it("carries the record, the head and the sentence; a stale record reads as nothing", () => {
+    seedTask("review");
+    const record = { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" as const };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...task().frontmatter,
+        pr: { number: 7, state: "review" as const, title: "[VIB-1] Operator drive", headSha: "1".repeat(40), unpushedRevision: record },
+        workRevision: { id: "rev_1", headSha: "9".repeat(40), treeSha: null, branch: "vib-1-work", createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "dev" },
+      },
+      goal: "g",
+      timeline: [],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const snapshot = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("supervised"));
+    expect(snapshot.pr).toMatchObject({
+      number: 7,
+      headSha: "1".repeat(40),
+      unpushedRevision: record,
+      unpushedRevisionSentence: expect.stringContaining("Deliver the branch to push it"),
+    });
+
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...task().frontmatter,
+        workRevision: { id: "rev_2", headSha: "7".repeat(40), treeSha: null, branch: "vib-1-work", createdAt: "2026-09-04T01:00:00.000Z", sourceProfileId: "dev" },
+      },
+      goal: "g",
+      timeline: [],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const stale = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("supervised"));
+    expect(stale.pr?.unpushedRevision).toBeNull();
+    expect(stale.pr?.unpushedRevisionSentence).toBe("");
+  });
+});

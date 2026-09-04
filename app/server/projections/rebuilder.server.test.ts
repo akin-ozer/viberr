@@ -894,6 +894,29 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
     );
   });
 
+  it("ruling 135: an UNPUSHED delivered revision projects its own block reason ABOVE the conflict", () => {
+    // Canary: drop `unpushedRevisionBlockedReason` from `acceptanceBlockReason`
+    // and the column names a rebase for a branch that only needs a push.
+    const store = setupTestStore(ctx);
+    const task = seed(store, {
+      verdicts: [APPROVAL],
+      pr: {
+        number: 900, state: "review", title: "Work", mergeable: "conflicting", headSha: "1".repeat(40),
+        unpushedRevision: { revisionSha: REV.headSha, prHeadSha: "1".repeat(40), relation: "behind" },
+      },
+    });
+    expect(task.validation).toBe("healthy");
+    expect(task.blockReason).toBe(
+      `VIB-9's delivered revision \`${REV.headSha.slice(0, 7)}\` is not on PR #900 (its head is \`1111111\`). Deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`,
+    );
+    // A record for a revision that is no longer current is stale and silent.
+    const stale = seed(store, {
+      verdicts: [APPROVAL],
+      pr: { number: 900, state: "review", title: "Work", unpushedRevision: { revisionSha: "0".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" } },
+    });
+    expect(stale.blockReason).toBeNull();
+  });
+
   it("an OPEN BLOCKED PACKET blocks acceptance in the projected column", () => {
     const store = setupTestStore(ctx);
     const task = seed(

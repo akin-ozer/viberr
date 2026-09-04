@@ -490,6 +490,42 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
     ).toContain("conflicts");
   });
 
+  it("ruling 135: an admin forcing past a conflict on an UNPUSHED revision is told to deliver, never to rebase", async () => {
+    // Canary: keep the rebase sentence in `attemptAcceptanceMerge`'s
+    // not_mergeable arm regardless of the record.
+    const store = prepared();
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      branch: "vib-1-work",
+      workRevision: { id: "rev_1", headSha: "9".repeat(40), treeSha: null, branch: "vib-1-work", createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
+      pr: {
+        number: 103, state: "review", title: "PR", mergeable: "conflicting", headSha: "1".repeat(40),
+        unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" },
+      },
+    });
+    const reconciler = await import("~/server/github/github-reconciler.server");
+    vi.spyOn(reconciler, "mergeTaskPr").mockResolvedValue({
+      status: "not_mergeable",
+      prNumber: 103,
+      message: "PR #103 conflicts with `main` — rebase the branch, then merge.",
+      mergeable: "conflicting",
+    });
+    await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const file = taskFile(store);
+    expect(file.parsed.frontmatter.stage).toBe("done");
+    const text = file.parsed.timeline[0]!.text;
+    expect(text).toContain("accepted, merge pending");
+    expect(text).toContain("deliver the branch to push it");
+    expect(text).not.toMatch(/rebase/i);
+    expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(1);
+  });
+
   it("an unreachable merge still accepts, but names the honest cause", async () => {
     const store = prepared();
     seed(store, {

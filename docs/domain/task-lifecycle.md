@@ -274,7 +274,10 @@ Every writer to the terminal stage goes through one contract:
    `accept_disclosure_stale`. In-process callers (the full-autonomy operator) carry
    their own contract.
 3. **Terminal GitHub fact first**: a closed, unmerged PR refuses acceptance and
-   withdraws force-accept entirely (ruling 37); a conflicting PR refuses.
+   withdraws force-accept entirely (ruling 37). Lower in the stack, a delivered revision
+   that is not on the pull request refuses with "deliver the branch to push it" (ruling
+   135) and outranks a conflicting PR, whose `mergeable` describes the head GitHub has,
+   not the one that was reviewed; a conflicting PR refuses after it.
 4. **Verdict gate**: every required reviewer must have approved the current revision
    and none may request changes (ruling 20). Force-accept bypasses this and is
    audited `task.acceptance.forced` with what it bypassed, records `acceptance: forced`
@@ -286,8 +289,10 @@ Every writer to the terminal stage goes through one contract:
    packet (ruling 124).
 5. **PR head containment**: the PR head must contain the delivered commit. A head
    ahead of the reviewed revision is accepted with a disclosed divergence ("N commits
-   added since review", ruling 42); a diverged head refuses. Force never bypasses
-   this.
+   added since review", ruling 42); a diverged head refuses; a compare GitHub answers
+   404 to, confirmed by a 404 commit read, is a never-pushed revision and refuses with
+   the same "deliver the branch" sentence (ruling 135) rather than passing as
+   unverifiable. Force never bypasses this.
 6. **Live no-change probe**: a branch with no commits or no branch at all routes into
    the **Completed, no changes** ending (still verdict-gated, ruling 62); `noChanges`
    is re-verified against the remote inside the lock so a branch that gained commits

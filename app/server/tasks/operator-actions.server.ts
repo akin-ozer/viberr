@@ -25,8 +25,9 @@ import {
   type TaskFileEvent,
   type TaskPacket,
   unpushedRevisionOf,
+  type UnpushedRevision,
 } from "~/schemas/task-file.schema";
-import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
+import { PACKET_OPTION_KINDS, unpushedRevisionBlockedReason } from "~/schemas/task-file.schema";
 import {
   compactTimelineEvents,
   DEFAULT_COMPACTION,
@@ -1499,6 +1500,14 @@ export interface OperatorTaskSnapshot {
         revisionDrift: RevisionDrift | null;
         /** `describeRevisionDrift(revisionDrift).sentence`, empty for none. */
         revisionDriftSentence: string;
+        /** Ruling 135 (pass 34, F34-11): the PR head as last read, the CURRENT
+         *  unpushed record (null when the delivered revision is on the PR or
+         *  the fact was never measured), and the sentence the acceptance gate
+         *  refuses with ("" when none). An unpushed revision reaches its PR
+         *  through `deliver_for_review`; it is never a person's push. */
+        headSha: string | null;
+        unpushedRevision: UnpushedRevision | null;
+        unpushedRevisionSentence: string;
       }
     | null;
   /** The task's delivery branch (null before any delivery). Lets recovery
@@ -1880,6 +1889,10 @@ export function operatorSnapshot(
               ? (fm.pr.revisionDrift ?? null)
               : null,
           revisionDriftSentence: describeRevisionDrift(fm.pr.revisionDrift).sentence,
+          headSha: fm.pr.headSha ?? null,
+          unpushedRevision: unpushedRevisionOf(fm.pr, fm.workRevision?.headSha ?? null),
+          unpushedRevisionSentence:
+            unpushedRevisionBlockedReason(fm.pr, fm.workRevision?.headSha ?? null, taskKey) ?? "",
         }
       : null,
     // The task branch, so recovery copy can NAME what an `archive_task`

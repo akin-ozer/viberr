@@ -8,6 +8,7 @@ import {
   acceptanceBlockedReason,
   closedPrBlockedReason,
   conflictingPrBlockedReason,
+  unpushedRevisionBlockedReason,
   deliveringEngagement,
   deriveValidation,
   supportingEngagements,
@@ -368,6 +369,8 @@ function acceptanceBlockReason(
     (ctx.blockedPacket
       ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
       : null) ??
+    // Ruling 135: the delivered revision is not on the PR, above the conflict.
+    unpushedRevisionBlockedReason(fm.pr, fm.workRevision?.headSha ?? null, fm.key) ??
     // P14-LV-07: a PR GitHub cannot merge cannot be accepted.
     conflictingPrBlockedReason(fm, fm.key)
   );

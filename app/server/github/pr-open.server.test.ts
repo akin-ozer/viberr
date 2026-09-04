@@ -1086,3 +1086,61 @@ describe("openTaskPr", () => {
     expect(["no_pat_configured", "no_repo_configured"]).toContain(res.status);
   });
 });
+
+/**
+ * Ruling 135: the delivery door writes the PR head it read. A reuse of the
+ * SAME PR carries the head forward and clears a satisfied record; a DIFFERENT
+ * PR never inherits the old head. Canary: carry `existingPr.headSha`
+ * unconditionally (spread `existingPr` even when the number differs).
+ */
+describe("ruling 135: writePrToTask and the PR head", () => {
+  it("reusing the SAME PR writes the live head and clears a satisfied unpushed record", async () => {
+    const store = setupWithBranch();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-201", {
+        title: "Attach execution workspace to task runtime",
+        stage: "review",
+        branch: BRANCH,
+        workRevision: { id: "rev_1", headSha: "9".repeat(40), treeSha: null, branch: BRANCH, createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
+        pr: {
+          number: 42, state: "review", title: "old title", headSha: "1".repeat(40),
+          unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" },
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/42`]: {
+        body: { number: 42, html_url: "https://github.com/akin-ozer/viberr/pull/42", title: "new title", state: "open", merged: false, head: { sha: "9".repeat(40) } },
+      },
+    });
+    const res = await openTaskPr(store.db, { projectSlug: store.slug, taskKey: "VIB-201" }, { ...ACTOR, userId: store.users.arda.id }, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl });
+    expect(res).toMatchObject({ status: "ok", prNumber: 42, created: false });
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toEqual({ number: 42, state: "review", title: "new title", headSha: "9".repeat(40) });
+  });
+
+  it("a DIFFERENT PR does not inherit the old head", async () => {
+    const store = setupWithBranch();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-201", {
+        title: "Attach execution workspace to task runtime",
+        stage: "review",
+        branch: BRANCH,
+        pr: { number: 7, state: "closed", title: "[VIB-201] abandoned", headSha: "1".repeat(40) },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 43, html_url: "https://github.com/akin-ozer/viberr/pull/43", title: "[VIB-201] t", state: "open" },
+      },
+    });
+    const res = await openTaskPr(store.db, { projectSlug: store.slug, taskKey: "VIB-201" }, { ...ACTOR, userId: store.users.arda.id }, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl });
+    expect(res).toMatchObject({ status: "ok", prNumber: 43, created: true });
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toEqual({ number: 43, state: "review", title: "[VIB-201] t" });
+  });
+});

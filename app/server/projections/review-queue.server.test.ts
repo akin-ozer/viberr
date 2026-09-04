@@ -807,3 +807,46 @@ describe("the row carries GitHub's mergeability", () => {
     expect("mergeable" in row.pr!).toBe(false);
   });
 });
+
+/**
+ * Ruling 135: the row carries `pr.headSha` and the CURRENT `pr.unpushedRevision`
+ * from the REAL projection (a hand-built fixture would let `prStateSub`'s
+ * branch pass while the row carried nothing, the P14-LV-07 defect again), and
+ * such a task never sits under "Waiting on your acceptance". Canary: stop
+ * copying the two fields in the row builder.
+ */
+describe("ruling 135: the queue row and the unpushed revision", () => {
+  it("carries both fields through the projection and keeps the task out of `ready`", () => {
+    const store = setupTestStore(ctx);
+    const record = { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" as const };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-103", {
+        title: "Unpushed rework",
+        stage: "review",
+        waiting: "human",
+        branch: "vib-103",
+        workRevision: { id: "rev_1", headSha: "9".repeat(40), treeSha: null, branch: "vib-103", createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
+        pr: { number: 320, state: "review", title: "Unpushed rework", headSha: "1".repeat(40), unpushedRevision: record },
+      }),
+    });
+    // A stale record (older revision) reads as nothing.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-104", {
+        title: "Stale record",
+        stage: "review",
+        waiting: "human",
+        branch: "vib-104",
+        workRevision: { id: "rev_2", headSha: "7".repeat(40), treeSha: null, branch: "vib-104", createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
+        pr: { number: 321, state: "review", title: "Stale record", headSha: "1".repeat(40), unpushedRevision: record },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot, viewerUserId: store.users.arda.id });
+    const rows = [...queue.ready, ...queue.working];
+    const unpushed = rows.find((r) => r.key === "VIB-103")!;
+    expect(unpushed.pr).toEqual({ number: 320, state: "review", headSha: "1".repeat(40), unpushedRevision: record });
+    expect(queue.ready.map((r) => r.key)).not.toContain("VIB-103");
+    const stale = rows.find((r) => r.key === "VIB-104")!;
+    expect(stale.pr).toEqual({ number: 321, state: "review", headSha: "1".repeat(40) });
+  });
+});

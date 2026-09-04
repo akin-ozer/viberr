@@ -1090,7 +1090,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       openPacket: false,
       packet: null,
       recentTimeline: [],
-      pr: { number: 318, state: "closed", title: "PR", revisionDrift: null, revisionDriftSentence: "" },
+      pr: { number: 318, state: "closed", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" },
       branch: "vib-9",
       liveRuns: [],
       autonomy: "supervised",
@@ -1112,7 +1112,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
 
   it("merged out-of-band → acceptance is the next state, no packet demanded", () => {
     const prompt = buildOperatorTurnPrompt(
-      snapshot({ pr: { number: 318, state: "merged", title: "PR", revisionDrift: null, revisionDriftSentence: "" } }),
+      snapshot({ pr: { number: 318, state: "merged", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" } }),
       "pr-diverged",
     );
     expect(prompt).toContain("merged OUT-OF-BAND");
@@ -1122,7 +1122,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
 
   it("PR live again → withdraw the moot packet and continue", () => {
     const prompt = buildOperatorTurnPrompt(
-      snapshot({ pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "" } }),
+      snapshot({ pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" } }),
       "pr-diverged",
     );
     expect(prompt).toContain("live again");
@@ -1162,6 +1162,9 @@ describe("pr-diverged turn instruction (both backends)", () => {
           title: "PR",
           revisionDrift: { headSha: "cab10477beef1234", authored: 2, baseRefresh: null },
           revisionDriftSentence: "2 authored commits since review merge unreviewed",
+          headSha: null,
+          unpushedRevision: null,
+          unpushedRevisionSentence: "",
         },
       });
 
@@ -1196,6 +1199,9 @@ describe("pr-diverged turn instruction (both backends)", () => {
               title: "PR",
               revisionDrift: { headSha: "cab10477beef1234", authored: 1, baseRefresh: null },
               revisionDriftSentence: "1 authored commit since review merges unreviewed",
+              headSha: null,
+              unpushedRevision: null,
+              unpushedRevisionSentence: "",
             },
           }),
           "pr-diverged",

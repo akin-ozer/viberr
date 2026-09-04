@@ -2256,6 +2256,35 @@ by rewriting those paragraphs:*
     `operator-actions.server.ts`; `deliveryToast` in `app/features/task-detail/delivery-toast.ts`;
     `updateWorkspaceBranchFromBase`; the push control in `task-side-panels.tsx`.)
 
+135. **An unpushed delivered revision is its own acceptance gate, ranked above a conflicting PR, and
+    the PR head is recorded in `task.md` (owner, 2026-09-04, pass 34 F34-11).** The accept dialog on
+    JC-3 read "PR #10 conflicts with the base branch … Rebase the branch and re-review, or archive
+    the task" for a branch that was merged, resolved and merely unpushed: `mergeable: conflicting`
+    described the OLD head, the reviewer's verdict was bound to the workspace revision, and nothing
+    in the file could say that the delivered revision was not on the pull request. The reconciler
+    now records `pr.headSha` and, when the delivered revision is not reachable from that head,
+    `pr.unpushedRevision` (`behind`: a plain push fast-forwards; `diverged`: a push will be refused
+    as non-fast-forward; `unknown`: the two heads could not be related, which is what a
+    never-pushed sha actually looks like: the compare answers `missing_ref` and a direct commit
+    read answers 404). The workspace reconcile records the same fact the moment a delivering run
+    mints a new revision on a branch whose PR is open, relating the heads from the workspace's own
+    history, so the gate does not wait for the five-minute poll; a delivery that pushes clears it;
+    a verification revision never qualifies; a record for a revision that is no longer current
+    reads as nothing. `unpushedRevisionBlockedReason` is ONE helper, taking the PR ref and the
+    current revision sha so every caller can ask it from the shape it holds, consulted by every
+    writer and every surface that consults `conflictingPrBlockedReason`: the acceptance refusal
+    stack, the projection's block reason, the review queue (whose row carries the two new fields,
+    or the branch could never fire), the board ceremony, the accept-time merge sentence and the
+    forced acceptance's recorded cause, the review row subline, the operator's `get_task`. It
+    outranks the conflict sentence because it names the fact the person can act on: "deliver the
+    branch to push it", never "rebase". The live accept-time head check refuses on the same
+    evidence instead of answering "unverifiable". Ruling 42's "ahead" (`revisionDrift`) is the
+    mirror case and is unchanged. (`prRefSchema`, `unpushedRevisionOf`,
+    `unpushedRevisionBlockedReason` in `app/schemas/task-file.schema.ts`; `reconcileTaskUnlocked`
+    in `github-reconciler.server.ts`; `classifyUnpushedRevision` in
+    `workspace-delivery.server.ts`; `writePrToTask` in `pr-open.server.ts`;
+    `evaluateAcceptancePrHead` and `attemptAcceptanceMerge` in `task-actions.server.ts`.)
+
 142. **A run's shell carries none of Viberr's own configuration (2026-09-04, pass 34 U34-7).**
     Ruling 127 built the spawn base around what a child must not learn about OTHER people's
     credentials. Pass 34 found the other half: the base still handed every child this server's

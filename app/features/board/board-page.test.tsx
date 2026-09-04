@@ -1236,6 +1236,21 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
     expect(text).toContain("Rebase the branch and re-review");
   });
 
+  it("ruling 135: names an unpushed delivered revision ABOVE the conflict, through the server's own predicate", () => {
+    // Canary: drop `unpushedRevisionBlockedReason` from `acceptanceCeremonyRefusal`.
+    const text = openConfirm({
+      blockReason: null,
+      workRevisionSha: "9".repeat(40),
+      pr: {
+        number: 124, state: "review", title: "Attach a credential", mergeable: "conflicting", headSha: "1".repeat(40),
+        unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" },
+      },
+    });
+    expect(text).toContain("delivered revision `9999999` is not on PR #124");
+    expect(text).toContain("Deliver the branch to push it");
+    expect(text).not.toContain("Rebase the branch");
+  });
+
   it("stays silent on a PR that merges cleanly", () => {
     expect(
       openConfirm({

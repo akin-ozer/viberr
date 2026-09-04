@@ -39,6 +39,7 @@ import {
   closedPrBlockedReason,
   coercePriority,
   conflictingPrBlockedReason,
+  unpushedRevisionBlockedReason,
   PRIORITY_VALUES,
   type TaskPriority,
 } from "~/schemas/task-file.schema";
@@ -1007,6 +1008,8 @@ function boardAcceptRefusal(
     (task.readiness === "blocked" && task.packet?.type === "blocked"
       ? "An open blocked decision is holding this task."
       : null) ??
+    // Ruling 135: the delivered revision is not on the PR, above the conflict.
+    unpushedRevisionBlockedReason(task.pr, task.workRevisionSha ?? null, task.key) ??
     conflictingPrBlockedReason(task, task.key)
   );
 }

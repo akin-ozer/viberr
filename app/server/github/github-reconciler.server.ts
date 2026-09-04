@@ -33,7 +33,10 @@ import {
   type BranchCompare,
   type BranchSyncState,
 } from "./branch-sync.server";
-import { encodeRefPath, GITHUB_API_BASE } from "./github-client.server";
+import { encodeRefPath, GITHUB_API_BASE, isMissingRefAnswer } from "./github-client.server";
+
+/** Ruling 135: the one field the never-pushed probe reads. */
+const commitShaSchema = z.object({ sha: z.string() }).loose();
 import {
   getProjectGithubContext,
   type GithubContextFailure,
@@ -462,30 +465,60 @@ async function reconcileTaskUnlocked(
   // re-delivery that catches the head up clears a stale record.
   const driftMeasurable = prState === "review" || prState === "accepted";
   let revisionDrift: PrRef["revisionDrift"] = null;
-  if (
-    pr &&
-    ownsAPr &&
-    reviewedSha &&
-    pr.headSha &&
-    pr.headSha !== reviewedSha &&
-    driftMeasurable
-  ) {
-    const driftCompare = await getBranchCompare(
-      gh.client,
-      gh.repo,
-      reviewedSha,
-      pr.headSha,
-    );
-    if (
-      driftCompare.status === "ok" &&
-      driftCompare.compare.status === "ahead" &&
-      driftCompare.compare.aheadBy > 0
-    ) {
-      revisionDrift = {
-        headSha: pr.headSha,
-        authored: driftCompare.compare.aheadBy,
-        baseRefresh: null,
-      };
+  // Ruling 135 (pass 34, F34-11): the MIRROR of drift. `unpushed` is the record
+  // measured this pass (null = the delivered revision IS on the head);
+  // `unpushedMeasured` false means the pass could not tell, and the cached
+  // record for the SAME PR is carried forward instead of erased. A `verified`
+  // revision never qualifies: a no-change verification has nothing to push.
+  //
+  // The compare's base is a LOCAL workspace sha. GitHub answering 404 to it
+  // (`missing_ref`) is exactly what a never-pushed revision looks like, so that
+  // is the PRIMARY arm; one direct commit read confirms it before the record
+  // says GitHub has no such commit. A `behind`/`diverged` compare (the revision
+  // was pushed once and the head moved elsewhere) keeps the three-way mapping.
+  let unpushed: PrRef["unpushedRevision"] = null;
+  let unpushedMeasured = false;
+  const verifiedRevision = fm.workRevision?.kind === "verified";
+  if (pr && ownsAPr && reviewedSha && pr.headSha && driftMeasurable) {
+    if (pr.headSha === reviewedSha) {
+      unpushedMeasured = true;
+    } else {
+      const driftCompare = await getBranchCompare(
+        gh.client,
+        gh.repo,
+        reviewedSha,
+        pr.headSha,
+      );
+      if (driftCompare.status === "ok") {
+        const status = driftCompare.compare.status;
+        if (status === "ahead" && driftCompare.compare.aheadBy > 0) {
+          revisionDrift = {
+            headSha: pr.headSha,
+            authored: driftCompare.compare.aheadBy,
+            baseRefresh: null,
+          };
+          unpushedMeasured = true;
+        } else if (status === "identical") {
+          unpushedMeasured = true;
+        } else if (status === "behind" || status === "diverged") {
+          unpushedMeasured = true;
+          if (!verifiedRevision) {
+            unpushed = { revisionSha: reviewedSha, prHeadSha: pr.headSha, relation: status };
+          }
+        }
+      } else if (driftCompare.status === "missing_ref") {
+        const probe = await gh.client.request(
+          "GET",
+          `/repos/${gh.repo}/commits/${reviewedSha}`,
+          commitShaSchema,
+        );
+        if (!probe.ok && isMissingRefAnswer(probe)) {
+          unpushedMeasured = true;
+          if (!verifiedRevision) {
+            unpushed = { revisionSha: reviewedSha, prHeadSha: pr.headSha, relation: "unknown" };
+          }
+        }
+      }
     }
   }
   // R19-B (owner ruling): a project member's GitHub approval on the PR IS the
@@ -530,6 +563,15 @@ async function reconcileTaskUnlocked(
     const carriedDrift =
       revisionDrift ?? (driftMeasurable ? null : (cachedPr?.revisionDrift ?? null));
     if (carriedDrift) owned.revisionDrift = carriedDrift;
+    // Ruling 135: the head as GitHub reported it on THIS read, and the
+    // unpushed record: measured this pass, else the SAME PR's cached record.
+    // `unpushedRevisionOf` refuses a record for a revision that is no longer
+    // current, so carrying is never a lie about a later revision.
+    if (pr.headSha) owned.headSha = pr.headSha;
+    const carriedUnpushed = unpushedMeasured
+      ? unpushed
+      : (cachedPr?.unpushedRevision ?? null);
+    if (carriedUnpushed) owned.unpushedRevision = carriedUnpushed;
     if (humanApproval) owned[PR_HUMAN_APPROVAL_KEY] = humanApproval;
     newPr = owned;
   }

@@ -1106,6 +1106,87 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     expect(mergeMock).not.toHaveBeenCalled();
   });
 
+  it("ruling 135: an UNPUSHED delivered revision is refused BEFORE the conflict sentence", async () => {
+    // Canary: swap the gate order in `acceptanceRefusalReason` (conflict
+    // first) and the refusal names a rebase for a branch that only needs a push.
+    seed({
+      stage: "review",
+      branch: "vib-1",
+      engagements: [REVIEWER],
+      workRevision: revision(),
+      verdicts: [approval()],
+      pr: {
+        number: 114, state: "review", title: "[VIB-1] t", mergeable: "conflicting", headSha: "1".repeat(40),
+        unpushedRevision: { revisionSha: "a".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" },
+      },
+      validation: "healthy",
+    });
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        dataCtx(),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("delivered revision `aaaaaaa` is not on PR #114"),
+    });
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        dataCtx(),
+      ),
+    ).rejects.toMatchObject({ message: expect.not.stringContaining("Rebase") });
+    expect(fm().frontmatter.stage).toBe("review");
+    expect(mergeMock).not.toHaveBeenCalled();
+  });
+
+  it("ruling 135: a compare GitHub answers 404 to, confirmed by a 404 commit read, is a REFUSAL, not unverifiable", async () => {
+    // Canary: restore the plain `unverifiable` return on `!cmp.ok` and the
+    // never-pushed revision is accepted with an "unverified head" note.
+    healthySeed();
+    const patActor = actor(store.users.arda);
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0135" }, patActor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    const head = "f".repeat(40);
+    github = fakeGithubFetch({
+      "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
+      [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${head}`]: { status: 404, body: { message: "Not Found" } },
+      [`GET /repos/akin-ozer/viberr/commits/${"a".repeat(40)}`]: { status: 404, body: { message: "No commit found for SHA" } },
+    });
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        dataCtx(),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("is not on GitHub"),
+    });
+    expect(fm().frontmatter.stage).toBe("review");
+    expect(mergeMock).not.toHaveBeenCalled();
+
+    // The commit exists on GitHub: the 404 compare is unexplained, so the head
+    // stays unverifiable and the acceptance proceeds with its disclosure.
+    github = fakeGithubFetch({
+      "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
+      [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${head}`]: { status: 404, body: { message: "Not Found" } },
+      [`GET /repos/akin-ozer/viberr/commits/${"a".repeat(40)}`]: { body: { sha: "a".repeat(40) } },
+    });
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+      actor(store.users.arda),
+      dataCtx(),
+    );
+    expect(fm().frontmatter.stage).toBe("done");
+  });
+
   it("a head that CONTAINS the delivered revision (delivery + auto-commit) is accepted", async () => {
     healthySeed();
     githubReportsHead("f".repeat(40), "ahead");
@@ -1234,9 +1315,12 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       patActor,
     );
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
-    // Only the PR-head read is registered; the compare route 404s (unverifiable).
+    // The PR-head read answers; the compare fails in a way that is NOT the
+    // never-pushed evidence (ruling 135 reads a 404 compare confirmed by a 404
+    // commit read as a refusal), so the head stays unverifiable.
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: "f".repeat(40) } } },
+      [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${"f".repeat(40)}`]: { status: 500, body: { message: "boom" } },
     });
     mergeMock.mockResolvedValue({ status: "merged", prNumber: 114, sha: null });
 

@@ -106,7 +106,9 @@ flight: `waiting` is a display flag and a directive comment is not a running age
 
 `get_task` returns the `OperatorTaskSnapshot`: stage and `previousStage` (so "back
 from Review" reads as rework), `validation` (derived), `reworkStages` (non-empty only
-while validation is `failing`), PR facts including revision drift, `noChanges`,
+while validation is `failing`), PR facts including the head sha, revision drift and
+the current unpushed-revision record with the acceptance gate's own sentence (ruling
+135: an unpushed revision reaches its PR through `deliver_for_review`), `noChanges`,
 `liveRuns`, pending and recently declined recommendations (so a supervised operator
 does not re-propose a just-dismissed move), and its own `operatorPolicy` labelled with
 scope so it cannot mistake its own web grant for a specialist's.

@@ -1,12 +1,14 @@
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { isMissingRefAnswer } from "~/server/github/github-client.server";
 import {
   acceptanceBlockedReason,
   archivedTaskBlockedReason,
   archivedTaskMoveBlockedReason,
   closedPrBlockedReason,
   conflictingPrBlockedReason,
+  unpushedRevisionBlockedReason,
   deliveringEngagement,
   deriveValidation,
   normalizeEvidenceRows,
@@ -5965,7 +5967,21 @@ async function attemptAcceptanceMerge(
       case "no_pr":
       case "task_not_found":
         return { kind: "no_pr" };
-      case "not_mergeable":
+      case "not_mergeable": {
+        // Ruling 135: `mergeable: conflicting` describes the head GitHub has.
+        // When the delivered revision never reached it, the push is the
+        // remedy and the sentence says so instead of "rebase".
+        const fmNow = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed.frontmatter ?? null;
+        const unpushedReason = fmNow
+          ? unpushedRevisionBlockedReason(fmNow.pr, fmNow.workRevision?.headSha ?? null, taskKey)
+          : null;
+        if (unpushedReason) {
+          return {
+            kind: "unmergeable",
+            reason: unpushedReason,
+            cause: "the delivered revision is not on the PR; deliver the branch to push it, then merge",
+          };
+        }
         return {
           kind: "unmergeable",
           reason:
@@ -5977,6 +5993,7 @@ async function attemptAcceptanceMerge(
               ? "the PR conflicts with the base branch; rebase it, then merge"
               : `GitHub refuses the merge: ${result.message}`,
         };
+      }
       case "head_changed":
         return {
           kind: "unmergeable",
@@ -7597,6 +7614,10 @@ function acceptanceRefusalReason(
     (opts.blockedPacket
       ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
       : null) ??
+    // Ruling 135 (pass 34, F34-11): the delivered revision is not on the PR.
+    // Named ABOVE the conflict, which describes the head GitHub has, not the
+    // one that was reviewed; the remedy is to deliver, never to rebase.
+    unpushedRevisionBlockedReason(fm.pr, fm.workRevision?.headSha ?? null, taskKey) ??
     // P14-LV-07: a conflicting PR cannot be merged, so it cannot be accepted.
     conflictingPrBlockedReason(fm, taskKey)
   );
@@ -7763,6 +7784,8 @@ const pullHeadShaSchema = z
 /** `GET /compare/…` — only `status` is read; a body that doesn't carry a
  *  string one degrades to "no status", exactly as the raw read did. */
 const compareStatusSchema = z.object({ status: z.string().optional() }).catch({});
+/** Ruling 135: the one field the never-pushed probe reads. */
+const commitShaSchema = z.object({ sha: z.string() }).loose();
 
 /** @see acceptancePrHeadCheck — the refusal alone, for callers that need no pin. */
 export async function acceptancePrHeadMismatch(
@@ -7828,6 +7851,25 @@ async function evaluateAcceptancePrHead(
       compareStatusSchema,
     );
     if (!cmp.ok) {
+      // Ruling 135: the compare's base is the LOCAL delivered sha, so a 404
+      // is what a never-pushed revision looks like. One direct commit read
+      // confirms it, and that is a KNOWN mismatch, not an unverifiable head.
+      if (isMissingRefAnswer(cmp)) {
+        const probe = await gh.client.request(
+          "GET",
+          `/repos/${gh.repo}/commits/${rev.headSha}`,
+          commitShaSchema,
+        );
+        if (!probe.ok && isMissingRefAnswer(probe)) {
+          return {
+            refusal:
+              `${taskKey}'s delivered revision \`${rev.headSha.slice(0, 7)}\` is not on GitHub: ` +
+              `PR #${pr.number}'s head is \`${headSha.slice(0, 7)}\`. Deliver the branch to push it; ` +
+              `it cannot be accepted until the PR carries the reviewed revision.`,
+            verification: "verified",
+          };
+        }
+      }
       // Could not compare — unknown, not a refusal, but NOT a verification either.
       return { refusal: null, verification: "unverifiable" };
     }

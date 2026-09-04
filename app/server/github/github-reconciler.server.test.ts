@@ -25,6 +25,7 @@ import {
   findOpenScopeViolation,
   openScopeViolation,
 } from "~/server/projections/policy-violations.server";
+import type { PrRef, WorkRevision } from "~/schemas/task-file.schema";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import {
@@ -2816,5 +2817,144 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
       { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(dismissed).fetchImpl },
     );
     expect(readPrHumanApproval(readPr(store))).toBeNull();
+  });
+});
+
+/**
+ * Ruling 135 (pass 34, F34-11): the reconciler records the PR head and, when
+ * the delivered revision is not reachable from it, `pr.unpushedRevision`.
+ * The PRIMARY arm is the never-pushed one: the compare's base is a LOCAL sha,
+ * GitHub answers 404, and one direct commit read confirms the object is not
+ * there at all. Canary: keep only the `ahead` arm of the drift compare and
+ * every case below loses its record.
+ */
+describe("ruling 135: the unpushed delivered revision", () => {
+  const REV = "rev0delivered";
+  function seedOwned(opts: { unpushed?: PrRef["unpushedRevision"]; kind?: "delivered" | "verified" } = {}) {
+    const store = setupTestStore(ctx);
+    const pr: PrRef = { number: 318, state: "review", title: "Attach execution workspace" };
+    if (opts.unpushed) pr.unpushedRevision = opts.unpushed;
+    const workRevision: WorkRevision = {
+      id: "rev_1",
+      headSha: REV,
+      treeSha: null,
+      branch: "vib-301-workspace",
+      createdAt: "2026-08-04T08:00:00.000Z",
+      sourceProfileId: "developer",
+    };
+    if (opts.kind) workRevision.kind = opts.kind;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr,
+        workRevision,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler135" }, actor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    const run = async (routes: FakeRoutes) => {
+      await reconcileTask(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-301" },
+        actor,
+        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+      );
+      return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    };
+    return { store, run };
+  }
+  const compareRoute = `GET ${REPO_PATH}/compare/${REV}...headsha318`;
+  const commitRoute = `GET ${REPO_PATH}/commits/${REV}`;
+
+  it("PRIMARY: a 404 compare plus a 404 commit read records `unknown` and the PR head", async () => {
+    const { run } = seedOwned();
+    const routes = happyRoutes();
+    routes[compareRoute] = { status: 404, body: { message: "Not Found" } };
+    routes[commitRoute] = { status: 404, body: { message: "No commit found for SHA: rev0delivered" } };
+    const fm = await run(routes);
+    expect(fm.pr?.headSha).toBe("headsha318");
+    expect(fm.pr?.unpushedRevision).toEqual({ revisionSha: REV, prHeadSha: "headsha318", relation: "unknown" });
+    expect(fm.pr?.revisionDrift).toBeUndefined();
+  });
+
+  it("a 404 compare whose commit read answers 200 is NOT measured: nothing is invented, nothing cached is erased", async () => {
+    const cached = { revisionSha: REV, prHeadSha: "olderhead", relation: "behind" as const };
+    const { run } = seedOwned({ unpushed: cached });
+    const routes = happyRoutes();
+    routes[compareRoute] = { status: 404, body: { message: "Not Found" } };
+    routes[commitRoute] = { body: { sha: REV } };
+    const fm = await run(routes);
+    expect(fm.pr?.headSha).toBe("headsha318");
+    expect(fm.pr?.unpushedRevision).toEqual(cached);
+  });
+
+  it("SECONDARY: a `behind` compare records `behind`; a `diverged` one records `diverged`", async () => {
+    for (const status of ["behind", "diverged"] as const) {
+      const { run } = seedOwned();
+      const routes = happyRoutes();
+      routes[compareRoute] = { body: { ahead_by: 0, behind_by: 2, status, commits: [] } };
+      const fm = await run(routes);
+      expect(fm.pr?.unpushedRevision).toEqual({ revisionSha: REV, prHeadSha: "headsha318", relation: status });
+    }
+  });
+
+  it("a head that carries the revision (identical, ahead, or the same sha) CLEARS a cached record", async () => {
+    // Canary: never clear on identical — the stale record survives.
+    const cached = { revisionSha: REV, prHeadSha: "olderhead", relation: "behind" as const };
+    const identical = seedOwned({ unpushed: cached });
+    const routes = happyRoutes();
+    routes[compareRoute] = { body: { ahead_by: 0, behind_by: 0, status: "identical", commits: [] } };
+    expect((await identical.run(routes)).pr).not.toHaveProperty("unpushedRevision");
+
+    const ahead = seedOwned({ unpushed: cached });
+    const aheadRoutes = happyRoutes();
+    aheadRoutes[compareRoute] = { body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [] } };
+    const fm = await ahead.run(aheadRoutes);
+    expect(fm.pr).not.toHaveProperty("unpushedRevision");
+    expect(fm.pr?.revisionDrift).toEqual({ headSha: "headsha318", authored: 2, baseRefresh: null });
+
+    const same = seedOwned({ unpushed: cached });
+    const sameRoutes = happyRoutes();
+    for (const route of [`GET ${REPO_PATH}/pulls`, `GET ${REPO_PATH}/pulls/318`]) {
+      const entry = sameRoutes[route]!;
+      // SAFETY: the two happy routes are static bodies (no function form).
+      const body = (entry as { body: unknown }).body;
+      // SAFETY: `JSON.parse` of a re-serialised static fixture is the fixture's own shape; `unknown` widens, never narrows.
+      const patched = JSON.parse(JSON.stringify(body).replaceAll("headsha318", REV)) as unknown;
+      sameRoutes[route] = { body: patched };
+    }
+    sameRoutes[`GET ${REPO_PATH}/commits/${REV}/check-runs`] = sameRoutes[`GET ${REPO_PATH}/commits/headsha318/check-runs`]!;
+    const sameFm = await same.run(sameRoutes);
+    expect(sameFm.pr?.headSha).toBe(REV);
+    expect(sameFm.pr).not.toHaveProperty("unpushedRevision");
+  });
+
+  it("an unreadable compare and a settled PR CARRY the cached record; a `verified` revision never gets one", async () => {
+    const cached = { revisionSha: REV, prHeadSha: "olderhead", relation: "diverged" as const };
+    const unreadable = seedOwned({ unpushed: cached });
+    const routes = happyRoutes();
+    routes[compareRoute] = { status: 500, body: { message: "boom" } };
+    expect((await unreadable.run(routes)).pr?.unpushedRevision).toEqual(cached);
+
+    const closed = seedOwned({ unpushed: cached });
+    const closedRoutes = happyRoutes();
+    closedRoutes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: { number: 318, title: "Attach execution workspace", state: "closed", merged: false, merged_at: null, head: { sha: "headsha318" }, additions: 1, deletions: 1, changed_files: 1 },
+    };
+    closedRoutes[`GET ${REPO_PATH}/branches/vib-301-workspace`] = { body: { commit: { sha: "headsha318" } } };
+    const closedFm = await closed.run(closedRoutes);
+    expect(closedFm.pr?.state).toBe("closed");
+    expect(closedFm.pr?.unpushedRevision).toEqual(cached);
+
+    const verified = seedOwned({ kind: "verified" });
+    const vRoutes = happyRoutes();
+    vRoutes[compareRoute] = { status: 404, body: { message: "Not Found" } };
+    vRoutes[commitRoute] = { status: 404, body: { message: "Not Found" } };
+    expect((await verified.run(vRoutes)).pr).not.toHaveProperty("unpushedRevision");
   });
 });

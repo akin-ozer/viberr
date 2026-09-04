@@ -221,9 +221,27 @@ and the note itself, used to assert the reused-key origin alone.)*
   GitHub's own review-state pill is informational, not a gate.
 - **Acceptance gate order**: archived → closed PR (terminal, withdraws force-accept)
   → stage boundary → required reviewers → live no-change probe → verdict gate → open
-  blocked packet → conflicting PR. Human acceptance needs the disclosure echo
-  (ruling 88). Force-accept (admin only) bypasses process gates but never a closed PR
-  and never the PR-head containment check.
+  blocked packet → **unpushed delivered revision** (ruling 135) → conflicting PR. Human
+  acceptance needs the disclosure echo (ruling 88). Force-accept (admin only) bypasses
+  process gates but never a closed PR and never the PR-head containment check.
+- **The unpushed delivered revision** (ruling 135, pass 34): `pr.headSha` is the PR
+  head as GitHub last reported it, and `pr.unpushedRevision {revisionSha, prHeadSha,
+  relation}` says the delivered revision is not on the pull request: `behind` (origin's
+  copy is an ancestor, a plain push fast-forwards), `diverged` (origin holds commits
+  the workspace does not, a push is refused non-fast-forward) or `unknown` (the two
+  heads could not be related: GitHub has no such commit, which is what a never-pushed
+  revision looks like, or the workspace holds no copy of the PR head). The reconciler
+  writes it (a 404 compare confirmed by a 404 commit read is the primary arm; a
+  `behind`/`diverged` compare the secondary), the workspace reconcile writes it the
+  moment a delivering run mints a revision on a branch whose PR is open, a delivery that
+  pushes clears it, a `verified` revision never gets one, and a record for a revision
+  that is no longer current reads as nothing (`unpushedRevisionOf`). One helper,
+  `unpushedRevisionBlockedReason`, is consulted by every consumer of the conflict gate
+  (the refusal stack, the projected `blockReason`, the review queue row, the board
+  ceremony, the accept-time merge cause, the review row subline, the operator's
+  `get_task`) and outranks the conflict sentence because it names the fact a person can
+  act on: "deliver the branch to push it", never "rebase". The live accept-time head
+  check refuses on the same evidence instead of answering "unverifiable".
 - **Merge is always human.** A human acceptance attempts the real merge
   (`PUT /pulls/{n}/merge`, un-drafting first, refusing a conflicting PR); an
   unreachable GitHub leaves `pr.state: accepted` (merge pending) and a refusal
@@ -235,8 +253,9 @@ and the note itself, used to assert the reused-key origin alone.)*
 
 `reconcileTask` (serialized per task) fetches the branch compare
 (`rate_limited` is transient; another 403 opens a `repo` violation), the PR (state,
-checks summary, review state, mergeability, revision drift when the head is ahead of
-the reviewed revision, human approval), and writes the `pr` and `github` caches into
+checks summary, review state, mergeability, the head sha, revision drift when the head
+is ahead of the reviewed revision, the unpushed-revision record when it is not (ruling
+135), human approval), and writes the `pr` and `github` caches into
 `task.md` (the reconciler never mints a PR link and never downgrades `merged` or
 `accepted`). Out-of-band changes become typed `note` events from the policy engine
 ("Divergence": merged but not Done → accept; closed but active → rework or archive;

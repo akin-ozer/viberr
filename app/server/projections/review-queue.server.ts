@@ -2,6 +2,9 @@ import type { RevisionDrift } from "~/shared/revision-drift";
 import type { DatabaseSync } from "node:sqlite";
 import {
   conflictingPrBlockedReason,
+  unpushedRevisionBlockedReason,
+  unpushedRevisionOf,
+  type UnpushedRevision,
   type PrMergeable,
   type PrState,
   type TaskPriority,
@@ -80,6 +83,11 @@ export interface ReviewQueueRow {
      *  record (authored count + base refresh), so the subline can print the
      *  canonical sentence. Absent when the head equals the reviewed revision. */
     revisionDrift?: RevisionDrift;
+    /** Ruling 135: the PR head as last read, and the CURRENT unpushed record
+     *  (already filtered through `unpushedRevisionOf` against the row's own
+     *  revision, so the subline can trust it). Absent = on the PR, or unread. */
+    headSha?: string;
+    unpushedRevision?: UnpushedRevision;
   } | null;
   validation: Validation;
   /** F10-11/F10-15: null = the current revision is acceptance-ready (all
@@ -178,6 +186,11 @@ export function getReviewQueue(
       // Ruling 132: the whole record rides through — projecting only a count
       // here is what dropped `baseRefresh` before the row was built.
       if (t.pr.revisionDrift) pr.revisionDrift = t.pr.revisionDrift;
+      // Ruling 135: both fields ride through, or `prStateSub`'s branch is
+      // structurally unreachable (the same defect `mergeable` had, P14-LV-07).
+      if (t.pr.headSha) pr.headSha = t.pr.headSha;
+      const unpushed = unpushedRevisionOf(t.pr, t.workRevisionSha ?? null);
+      if (unpushed) pr.unpushedRevision = unpushed;
     }
     return {
       key: t.key,
@@ -257,6 +270,8 @@ export function getReviewQueue(
       // (task-actions.server.ts): an operator-raised blocked decision is still
       // open, and accepting would bury it.
       (t.readiness === "blocked" && t.packet?.type === "blocked") ||
+        // Ruling 135: the delivered revision is not on the PR.
+        unpushedRevisionBlockedReason(t.pr, t.workRevisionSha ?? null, t.key) !== null ||
         // P14-LV-07, via the SAME helper the server gate calls — a PR GitHub
         // cannot merge cannot be accepted.
         conflictingPrBlockedReason(t, t.key) !== null,

@@ -63,6 +63,23 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
     expect(sub).toContain("archive the task");
   });
 
+  it("ruling 135: an unpushed delivered revision outranks the conflict subline and names the push", () => {
+    // Canary: move the `unpushedRevision` branch below the `mergeable` one.
+    const behind = reviewRowSub({
+      ...base,
+      pr: { number: 103, state: "review", mergeable: "conflicting", headSha: "1".repeat(40), unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" } },
+    });
+    expect(behind).toContain("does not carry the delivered revision 9999999");
+    expect(behind).toContain("Deliver the branch to push it");
+    expect(behind).not.toContain("conflicts with the base branch");
+    const diverged = reviewRowSub({
+      ...base,
+      pr: { number: 103, state: "review", unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "diverged" } },
+    });
+    expect(diverged).toContain("holds commits the workspace does not");
+    expect(diverged).toContain("Resolve the history");
+  });
+
   it("surfaces a conflicting PR — the state that used to be invisible (LV-07)", () => {
     expect(
       reviewRowSub({

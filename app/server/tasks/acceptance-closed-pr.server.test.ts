@@ -377,6 +377,9 @@ describe("path 3 — operatorAcceptCompletion", () => {
       // when it is not, the fact travels into the recovery packet.
       revisionDrift: null,
       revisionDriftSentence: "",
+      headSha: null,
+      unpushedRevision: null,
+      unpushedRevisionSentence: "",
     });
   });
 

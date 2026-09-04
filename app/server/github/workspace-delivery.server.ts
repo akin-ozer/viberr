@@ -8,8 +8,7 @@ import type {
   FileActorRef,
   PrRef,
   TaskFileEvent,
-  TaskFrontmatter,
-} from "~/schemas/task-file.schema";
+  TaskFrontmatter, UnpushedRevision } from "~/schemas/task-file.schema";
 import {
   deriveValidation,
   nextWorkRevision,
@@ -186,6 +185,62 @@ function parseOneline(stdout: string): { sha: string; msg: string }[] {
         ? { sha: line, msg: "" }
         : { sha: line.slice(0, sp), msg: line.slice(sp + 1).trim() };
     });
+}
+
+/**
+ * Ruling 135: relate origin's copy of the task branch (the PR head `gh`
+ * reported) to the workspace revision, from the workspace's own history.
+ * `behind`: the PR head is an ancestor of the revision, a plain push
+ * fast-forwards. `diverged`: both are known here and neither contains the
+ * other. `unknown`: the workspace has no copy of the PR head, so the two
+ * cannot be related. Null when there is nothing to record: no revision, no
+ * head, a settled PR, a `verified` revision, or a head that already carries
+ * the revision (equal, or the revision is an ancestor of the head, which is
+ * ruling 42's drift and not this fact).
+ */
+async function classifyUnpushedRevision(
+  exec: CommandExec,
+  repoDir: string,
+  input: {
+    revisionSha: string | null;
+    prHeadSha: string | null;
+    prState: PrRef["state"];
+    verified: boolean;
+  },
+): Promise<UnpushedRevision | null> {
+  const { revisionSha, prHeadSha } = input;
+  if (!revisionSha || !prHeadSha || input.verified) return null;
+  if (input.prState !== "review" && input.prState !== "accepted") return null;
+  if (prHeadSha === revisionSha) return null;
+  const isAncestor = (older: string, newer: string) =>
+    exec("git", ["-C", repoDir, "merge-base", "--is-ancestor", older, newer], {
+      cwd: repoDir,
+      timeoutMs: 5_000,
+    });
+  if ((await isAncestor(prHeadSha, revisionSha)).ok) {
+    return { revisionSha, prHeadSha, relation: "behind" };
+  }
+  if ((await isAncestor(revisionSha, prHeadSha)).ok) return null;
+  const known = await exec(
+    "git",
+    ["-C", repoDir, "cat-file", "-e", `${prHeadSha}^{commit}`],
+    { cwd: repoDir, timeoutMs: 5_000 },
+  );
+  return { revisionSha, prHeadSha, relation: known.ok ? "diverged" : "unknown" };
+}
+
+/** The timeline line for a change of the unpushed-revision record alone. */
+function unpushedRevisionEventText(pr: PrRef): string {
+  const record = pr.unpushedRevision;
+  if (!record) {
+    return `**PR #${pr.number}** carries the workspace revision \`${(pr.headSha ?? "").slice(0, 7)}\`.`;
+  }
+  const rev = record.revisionSha.slice(0, 7);
+  const head = record.prHeadSha ? `\`${record.prHeadSha.slice(0, 7)}\`` : "an older head";
+  if (record.relation === "diverged") {
+    return `Revision \`${rev}\` from the specialist workspace is not on **PR #${pr.number}**: its head ${head} holds commits this workspace does not. Resolve the branch history, then deliver the branch to push it.`;
+  }
+  return `Revision \`${rev}\` from the specialist workspace is not on **PR #${pr.number}** (its head is ${head}). Delivering the branch pushes it.`;
 }
 
 /**
@@ -562,16 +617,43 @@ export async function reconcileWorkspaceDelivery(
           // the PR is still open on GitHub — that would silently hide the
           // "Complete merge" affordance. Only a real terminal state
           // (merged/closed) overrides it.
-          const detected: PrRef = {
-            number,
-            state:
-              samePr && cur.state === "accepted" && liveState === "review"
-                ? "accepted"
-                : liveState,
-            title: view.title,
-          };
-          const stale =
+          const detectedState: PrRef["state"] =
+            samePr && cur.state === "accepted" && liveState === "review"
+              ? "accepted"
+              : liveState;
+          // Ruling 135: a refresh of the SAME PR keeps the reconciler-owned
+          // facts (checks, review, mergeable, drift), as `writePrToTask` does;
+          // a different PR starts clean.
+          const detected: PrRef = samePr
+            ? { ...cur, number, state: detectedState, title: view.title }
+            : { number, state: detectedState, title: view.title };
+          // Ruling 135: the moment a delivering run mints a revision on a branch
+          // whose PR is open, the file says whether that PR carries it, so the
+          // acceptance gate does not wait for the five-minute poll.
+          const revisionNow = workRevisionPatch ?? fm.workRevision ?? null;
+          const unpushed = await classifyUnpushedRevision(exec, repoDir, {
+            revisionSha: revisionNow?.headSha ?? null,
+            prHeadSha: view.headRefOid,
+            prState: detectedState,
+            verified: revisionNow?.kind === "verified",
+          });
+          if (view.headRefOid) detected.headSha = view.headRefOid;
+          if (unpushed) detected.unpushedRevision = unpushed;
+          else delete detected.unpushedRevision;
+          const stateChanged =
             !cur || cur.number !== detected.number || cur.state !== detected.state;
+          const unpushedChanged =
+            JSON.stringify(cur?.unpushedRevision ?? null) !==
+            JSON.stringify(detected.unpushedRevision ?? null);
+          const headChanged = (cur?.headSha ?? null) !== (detected.headSha ?? null);
+          if (!stateChanged && !unpushedChanged && headChanged) {
+            // A head read for the first time (or moved with nothing else to
+            // say) is recorded without a timeline line.
+            await patchTaskFrontmatter(ref, { pr: detected });
+            rebuildPath(db, resolveTaskFilePath(ref), { dataRoot });
+            reconciledPr = detected;
+          }
+          const stale = stateChanged || unpushedChanged;
           if (stale) {
             await appendTimelineEvent(
               ref,
@@ -579,10 +661,12 @@ export async function reconcileWorkspaceDelivery(
                 actor,
                 // Honest copy: only a NEWLY linked PR "opened from the
                 // workspace"; a state change on the already-linked PR is a
-                // reconcile, not an open.
-                samePr
-                  ? `Reconciled **PR #${detected.number}** state → \`${detected.state}\` from the specialist workspace.`
-                  : `Linked **PR #${detected.number}** opened from the specialist workspace.`,
+                // reconcile, not an open; an unpushed-revision change names it.
+                !samePr
+                  ? `Linked **PR #${detected.number}** opened from the specialist workspace.`
+                  : stateChanged
+                    ? `Reconciled **PR #${detected.number}** state → \`${detected.state}\` from the specialist workspace.`
+                    : unpushedRevisionEventText(detected),
               ),
               { pr: detected },
             );
@@ -615,9 +699,11 @@ export async function reconcileWorkspaceDelivery(
                 branch: effectiveBranch,
                 prNumber: detected.number,
                 prState: detected.state,
+                headSha: detected.headSha ?? null,
+                unpushedRevision: detected.unpushedRevision?.relation ?? null,
               },
             });
-            prLinked = true;
+            prLinked = stateChanged;
             reconciledPr = detected;
           }
         }
