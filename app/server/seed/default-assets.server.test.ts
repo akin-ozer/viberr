@@ -138,6 +138,13 @@ describe("shipped-asset refresh (B-OP1)", () => {
       "utf8",
     );
 
+  it("pass 34 A13: the operator doctrine shipped before `set_dependencies` is a recorded prior hash, so a live store upgrades in place", async () => {
+    // Canary: remove the outgoing hash from PRIOR_SHIPPED_HASHES.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "9731f0a69b6a8b5824277c4d1a2d4ad18cc126c2ca827a844369f9f0ed9ef3f6", {})).toBe(true);
+    expect(shipped()).toContain("`set_dependencies`");
+  });
+
   it("refreshes an UNEDITED copy of an older shipped version", async () => {
     const { seedDefaultAgentAssets } = await import("./default-assets.server");
     const dataRoot = freshStore();

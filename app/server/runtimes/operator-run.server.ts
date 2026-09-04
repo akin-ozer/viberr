@@ -60,6 +60,7 @@ import {
   operatorDispatchAgent,
   operatorOpenPacket,
   operatorPostComment,
+  operatorSetDependencies,
   operatorSetGoal,
   operatorFlagContextConflict,
   operatorSnapshot,
@@ -1653,6 +1654,10 @@ const OPERATOR_PLAN_TOOLS = [
   // conflict as the same typed `quality` event + notification, not just a plain
   // comment. `kbSource`/`repoSource` name the two sides; `text` is the detail.
   "flag_context_conflict",
+  // Ruling 131(b) (pass 34): record what the task WAITS ON (the full list of
+  // task keys and goal links; `blockedBy: []` clears it) instead of opening a
+  // hold packet. The plan mirror of the Claude toolkit's `set_dependencies`.
+  "set_dependencies",
 ] as const;
 
 const OPERATOR_PACKET_TYPES = ["input", "blocked"] as const;
@@ -1681,6 +1686,9 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   accept_completion: ["completion-for-acceptance"],
   // F-P6 (pass 25): same gate as Claude's `flag_context_conflict` tool.
   flag_context_conflict: ["append-typed-events"],
+  // Ruling 131(b): the wait is the hold packet's replacement, so it rides the
+  // packet's own grant.
+  set_dependencies: ["generate-packets"],
 } satisfies Record<OperatorPlanTool, readonly string[]>;
 
 /**
@@ -1754,6 +1762,11 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
           kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees; else null." },
           repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative; else null." },
+          blockedBy: {
+            type: ["array", "null"],
+            items: { type: "string" },
+            description: "For set_dependencies ONLY: the FULL list of what this task waits on, as task keys (`JC-6`) and goal links (`goal-1 link 3`) in this project; an empty array clears the wait. Null for every other tool.",
+          },
           // P11-27: let the Codex operator AUTHOR the packet's option set from its
           // own reasoning (2–4 options), instead of always getting the canned
           // default set. Null → use the packet type's default options.
@@ -1793,7 +1806,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             },
           },
         },
-        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource"],
+        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy"],
       },
     },
   },
@@ -1819,6 +1832,9 @@ const operatorPlanActionSchema = z.strictObject({
   // (not just null) so plans persisted before these fields existed still replay.
   kbSource: z.string().nullable().optional(),
   repoSource: z.string().nullable().optional(),
+  // Ruling 131: set_dependencies — the FULL list; `.optional()` so plans
+  // persisted before the field existed still replay across a restart-resume.
+  blockedBy: z.array(z.string()).nullable().optional(),
   packetOptions: z
     .array(
       z.strictObject({
@@ -2323,6 +2339,19 @@ async function executeCodexPlan(
               ),
             );
           } else skippedMalformed(a.tool, "the packet title");
+          break;
+        }
+        case "set_dependencies": {
+          // Ruling 131(b): the plan mirror of the Claude tool. A null list is
+          // a malformed step (state), never a policy refusal.
+          if (a.blockedBy) {
+            const wait: Parameters<typeof operatorSetDependencies>[2] = {
+              ...base,
+              blockedBy: a.blockedBy,
+            };
+            if (a.reason) wait.reason = a.reason;
+            record(a.tool, await operatorSetDependencies(db, ctx, wait, authority));
+          } else skippedMalformed(a.tool, "the list of what the task waits on");
           break;
         }
         case "run_agent":

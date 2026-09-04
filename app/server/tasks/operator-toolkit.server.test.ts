@@ -224,6 +224,20 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
   // to the full in-Viberr set (never deliver/update — effects OUTSIDE Viberr)
   // and every action the operator then proposes is refused visibly by
   // narrateRefusedActions. Pins that this asymmetry stays the enum-only one.
+  it("ruling 131(b): set_dependencies is built under generate-packets, withheld when that grant is off, and the plan enum agrees", () => {
+    // Canary: gate the Claude tool under `append-typed-events` instead (the
+    // withheld case still builds it; the parity cases above also go red).
+    const granted = withPolicy(uniform("direct"));
+    expect(build(granted).allowedTools).toContain("mcp__viberr__set_dependencies");
+    expect(operatorPlanToolsFor(granted)).toContain("set_dependencies");
+    // Every grant direct EXCEPT packets: append-typed-events stays granted, so
+    // only the packet gate can explain the tool's absence.
+    const withheld = withPolicy({ ...uniform("direct"), "generate-packets": "off" });
+    expect(build(withheld).allowedTools).not.toContain("mcp__viberr__set_dependencies");
+    expect(build(withheld).allowedTools).toContain("mcp__viberr__post_comment");
+    expect(operatorPlanToolsFor(withheld)).not.toContain("set_dependencies");
+  });
+
   it("nothing granted: Claude builds no governed tool; the Codex plan enum falls back and never advertises delivery", () => {
     const auth = withPolicy(uniform("off"));
     expect([...claudeGovernedTools(build(auth).allowedTools)]).toEqual([]);

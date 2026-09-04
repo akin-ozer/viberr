@@ -255,6 +255,40 @@ describe("Codex structured operator completion", () => {
     expect(adapter.pending).not.toBeNull();
   }
 
+  it("ruling 131(b): the Codex set_dependencies step executes; a null list is a MALFORMED step narrated as state, never policy", async () => {
+    // Canary: delete the `set_dependencies` case from the executor switch
+    // (the step falls to the default arm and the wait never lands).
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const step = (blockedBy: string[] | null) => ({
+      tool: "set_dependencies",
+      profileId: null,
+      delivers: null,
+      toStageId: null,
+      packetType: null,
+      text: null,
+      reason: "the parser lands first",
+      packetOptions: null,
+      blockedBy,
+    });
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({ reasoning: "Wait for VIB-2.", actions: [step(["VIB-2"]), step(null)] }),
+      "finished",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(task().frontmatter.blockedBy).toEqual(["VIB-2"]);
+    expect(task().packet).toBeNull();
+    // The malformed sibling is narrated through the STATE arm.
+    const narration = task().timeline.find((e) => e.text.includes("The operator's plan was not carried out in full"));
+    expect(narration).toBeDefined();
+    expect(narration!.type).toBe("note");
+    expect(narration!.text).toContain("did not apply to the task's current state");
+    expect(narration!.text).toContain("`set_dependencies` — plan step omitted the list of what the task waits on");
+    expect(narration!.text).not.toContain("refused by its capability policy");
+  });
+
   it("narrates plan actions its policy refused, instead of a silent no-op (P13-RT-03)", async () => {
     // The finding's scenario: a project withholds `generate-packets` and
     // `stage-transitions`. The operator emits open_packet + transition_stage;
@@ -1037,8 +1071,10 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
       authority({ "deliver-review-pr": "off", "dispatch-agents": "off" }),
     );
     // Dynamic-dispatch rework: engage_agent + prompt_agent collapsed into ONE
-    // run_agent, so the fallback list shrank from 10 to 8.
-    expect(tools).toHaveLength(8);
+    // run_agent, so the fallback list shrank from 10 to 8; ruling 131 added
+    // `set_dependencies` (in-Viberr, no outside effect), so it is 9.
+    expect(tools).toHaveLength(9);
+    expect(tools).toContain("set_dependencies");
     expect(tools).not.toContain("deliver_for_review");
     expect(tools).toContain("flag_context_conflict");
   });

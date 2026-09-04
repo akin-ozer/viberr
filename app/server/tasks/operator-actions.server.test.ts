@@ -414,6 +414,47 @@ describe("operatorSetGoal — draft the goal at the triage gate", () => {
   });
 });
 
+describe("operatorSetDependencies (ruling 131(b))", () => {
+  it("done on a new list, noop on an unchanged one, noop with the VALIDATOR's own sentence on a bad reference, denied only when generate-packets is withheld", async () => {
+    // Canary: return `denied` for the validator's error (the LV-03 misblame
+    // rule: a state refusal must never accuse the project's policy).
+    deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-9", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const { operatorSetDependencies } = await import("./operator-actions.server");
+    const call = (blockedBy: string[], auth = authority("supervised")) =>
+      operatorSetDependencies(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", blockedBy, reason: "needs the parser first" }, auth);
+
+    const done = await call(["VIB-9"]);
+    expect(done.outcome).toBe("done");
+    expect(done.message).toContain("VIB-1 waits on VIB-9");
+    expect(done.message).toContain("Reason: needs the parser first");
+    expect(task().frontmatter.blockedBy).toEqual(["VIB-9"]);
+    expect(task().frontmatter.waiting).toBe("none");
+    expect(task().packet).toBeNull();
+    expect(task().timeline[0]).toMatchObject({ type: "note", title: "Dependencies updated", actor: { kind: "operator" } });
+    const audit = listAuditEvents(store.db, { action: "task.dependencies.updated" });
+    expect(audit[0]?.details).toMatchObject({ added: ["VIB-9"], removed: [] });
+
+    const same = await call(["vib-9"]);
+    expect(same.outcome).toBe("noop");
+    expect(same.message).toContain("already waits on VIB-9");
+
+    const bad = await call(["VIB-1"]);
+    expect(bad.outcome).toBe("noop");
+    expect(bad.message).toBe("VIB-1: a task cannot wait on itself.");
+    const missing = await call(["VIB-404"]);
+    expect(missing.outcome).toBe("noop");
+    expect(missing.message).toBe("VIB-404 is not a task in this project.");
+
+    deployRoster([{ capabilityId: "generate-packets", mode: "off" }, { capabilityId: "append-typed-events", mode: "direct" }]);
+    const denied = await call([], authority("supervised"));
+    expect(denied.outcome).toBe("denied");
+    expect(task().frontmatter.blockedBy).toEqual(["VIB-9"]);
+  });
+});
+
 describe("operatorDispatchAgent", () => {
   it("direct mode AUTO-ENGAGES the profile (capability-derived posture) and starts its run", async () => {
     // The pre-assignment ceremony is gone: a bare dispatch of an unengaged

@@ -18,6 +18,7 @@ import {
   operatorOpenPacket,
   operatorResolvePacket,
   operatorPostComment,
+  operatorSetDependencies,
   operatorSetGoal,
   operatorSnapshot,
   operatorTransitionStage,
@@ -507,6 +508,32 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         },
       ),
       "open_decision_packet",
+    );
+    // Ruling 131(b) (pass 34): the wait on other work has its own tool and is
+    // never a packet. Same grant as packets: it is the hold packet's replacement.
+    add(
+      tool(
+        "set_dependencies",
+        "Record what this task WAITS ON: the FULL list of task keys (`JC-6`) and goal links (`goal-1 link 3`) in this project; an empty list clears the wait. Use it whenever the task cannot proceed until OTHER work lands, INSTEAD of a decision packet: Viberr then holds the task (readiness `blocked`, the wait shown on the board, the coordinating triggers refused at no cost) and RELEASES it itself the moment every entry is done, re-invoking you with the base branch to re-read. Every reference is checked against the store: it must exist, must not be this task, an archived task, or close a cycle (declared goal-link waits count); a refusal names the reference and the reason and is a fact about the task, not a policy block. Never open a hold packet about a wait on other work.",
+        {
+          blockedBy: z
+            .array(z.string())
+            .describe("The FULL list of what the task waits on; [] clears it."),
+          reason: z
+            .string()
+            .optional()
+            .describe("One line: why the task waits on these (recorded with the result)."),
+        },
+        async (args) => {
+          const input: Parameters<typeof operatorSetDependencies>[2] = {
+            ...base,
+            blockedBy: args.blockedBy,
+          };
+          if (args.reason) input.reason = prose(args.reason);
+          return resultText(await operatorSetDependencies(db, ctx, input, authority));
+        },
+      ),
+      "set_dependencies",
     );
     add(
       tool(

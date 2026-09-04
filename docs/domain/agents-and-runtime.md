@@ -611,6 +611,10 @@ base templates (`app/server/seed/assets/`, refreshed by hash through
 | `reviewer` | specialist | claude | `sonnet` | impl, review | `reviewer-expertise` / `api-contracts` | direct: read diff, validation suites, tests, evidence, quality flags, comments, ask, verdict, approve, request changes; human: merge, done, commit/push |
 | `controller` | controller | claude | `sonnet` | n/a | `controller-guide` / `controller-handbook` | none (tools are gated by the asker's RBAC) |
 
+The shipped operator doctrine (`operator.definition.md`, upgraded in place through
+`PRIOR_SHIPPED_HASHES`) tells the operator, since ruling 131, that a wait on other work
+is a fact with its own tool, `set_dependencies`, and never a packet.
+
 `ensureBaseAgentsDeployed` runs at boot: the operator is ensured on every project;
 Developer and Reviewer are backfilled only into a project with **no** specialists.
 Profile files use `agentProfileFrontmatterSchema` (kind, icon default `cpu`, `resources

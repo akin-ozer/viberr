@@ -3,6 +3,8 @@ import {
   type RevisionDrift,
 } from "~/shared/revision-drift";
 import { resolveDependencies } from "~/server/projections/dependencies.server";
+import { setTaskDependencies } from "./dependencies.server";
+import type { TaskActor } from "./task-mutation.server";
 import type { DependencyRender } from "~/shared/dependencies";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -2053,6 +2055,64 @@ export async function operatorFlagContextConflict(
     outcome: "done",
     message: `Recorded: \`${repoSource}\` wins; a human will settle it.`,
   };
+}
+
+/** The in-process actor the operator's writes are attributed to when a task
+ *  writer wants one; RBAC is skipped under `operatorAuthorized`. */
+const OPERATOR_WRITE_ACTOR: TaskActor = { userId: "operator", label: "operator" };
+
+/**
+ * Ruling 131(b) (pass 34): the operator records what a task WAITS ON with a
+ * tool of its own instead of a hold packet (JC-9's "standing token"). Gated
+ * like packets (`generate-packets`: the wait is the packet's replacement, so
+ * it reuses the packet's own grant rather than minting a catalog id for one
+ * tool). A validator refusal is a `noop` carrying the validator's own
+ * sentence: the task's state ruled it out, not the project's policy (the
+ * LV-03 misblame rule); an unchanged list is a `noop`; success is `done`.
+ */
+export async function operatorSetDependencies(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; blockedBy: readonly string[]; reason?: string },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  if (gate(authority, "generate-packets") === "deny") {
+    return {
+      outcome: "denied",
+      message: "The operator cannot record what a task waits on in this project (the generate-packets grant is withheld).",
+    };
+  }
+  try {
+    const result = await setTaskDependencies(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, blockedBy: input.blockedBy },
+      OPERATOR_WRITE_ACTOR,
+      { ...ctx, operatorAuthorized: true },
+    );
+    const list = result.blockedBy.join(", ");
+    if (!result.changed) {
+      return {
+        outcome: "noop",
+        message: list
+          ? `Unchanged: ${input.taskKey} already waits on ${list}.`
+          : `Unchanged: ${input.taskKey} waits on nothing.`,
+      };
+    }
+    const why = input.reason?.trim() ? ` Reason: ${input.reason.trim()}` : "";
+    return {
+      outcome: "done",
+      message: list
+        ? `Recorded: ${input.taskKey} waits on ${list}. Viberr holds it and releases it when every entry is done.${why}`
+        : `Recorded: ${input.taskKey} no longer waits on other work.${why}`,
+    };
+  } catch (error) {
+    // The validator's refusal names the reference and the reason: a fact about
+    // the store, never a policy block.
+    if (error instanceof AppError && error.status === 400) {
+      return { outcome: "noop", message: error.userMessage };
+    }
+    throw error;
+  }
 }
 
 /** Fill only an unspecified goal; established scope remains human-controlled. */

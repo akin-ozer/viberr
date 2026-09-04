@@ -154,6 +154,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `flag_context_conflict` | `operatorFlagContextConflict` (repo convention vs KB, ruling 56) | `append-typed-events` |
 | `open_decision_packet` | `operatorOpenPacket` (appends the delegated-ask disclosure, ruling 84) | `generate-packets` |
 | `resolve_decision_packet` | `operatorResolvePacket` (refuses any packet not `from: operator` or carrying `askedBy`) | `generate-packets` |
+| `set_dependencies` | `operatorSetDependencies` → `setTaskDependencies` (ruling 131(b): the FULL `blockedBy` list, `[]` clears; a validator refusal is a `noop` carrying the validator's own sentence, an unchanged list a `noop`; the Codex plan verb is `set_dependencies` with `blockedBy`) | `generate-packets` (the wait is the hold packet's replacement) |
 | `run_agent` | `operatorDispatchAgent` | `dispatch-agents` |
 | `deliver_for_review` | `operatorDeliverForReview` → `performDelivery` | `deliver-review-pr` |
 | `update_branch_from_base` | `operatorUpdateBranchFromBase` (merge, never rebase; conflict → packet) | `update-task-branch` |
