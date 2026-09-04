@@ -24,6 +24,7 @@ import {
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { logger } from "~/server/logging/logger.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { startRun } from "~/server/runtimes/run-service.server";
 import { insertRunLine, upsertRun } from "~/server/runtimes/run-store.server";
@@ -683,6 +684,48 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * packet and assert evidence rows in a vanished profile's name, one layer
    * later and out of sight.
    */
+  it("ruling 137: the envelope's question packet withdraws the standing acceptance offer on the record", async () => {
+    // Canary: drop the withdrawal at the envelope-question site in
+    // recordAgentCompletion and the accept card outlives the question.
+    writeReviewTask({
+      recommendations: [
+        { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-1 to Done", detail: "", forHeadSha: "a".repeat(40) },
+        { id: "r-run", kind: "run_agent", profileId: "dev", label: "Run dev", detail: "" },
+      ],
+    });
+    const runId = await finishedRunWith(
+      JSON.stringify({
+        summary: "Reviewed the change; one thing is unclear.",
+        question: { title: "Which API surface should this use?", body: "Two candidates." },
+      }),
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "dev",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "finished" },
+    );
+    const parsed = taskFile().parsed;
+    expect(parsed.packet?.title).toBe("Which API surface should this use?");
+    expect(parsed.frontmatter.recommendations.map((r) => r.id)).toEqual(["r-run"]);
+    const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Recommendation withdrawn");
+    expect(note?.actor).toMatchObject({ kind: "agent", profileId: "dev" });
+    expect(note?.text).toContain('a decision packet opened ("Which API surface should this use?")');
+    const rows = listAuditEvents(store.db, { action: "task.recommendation.withdrawn" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actorLabel).toContain("agent:codex/dev");
+    expect(rows[0]!.details).toMatchObject({ cause: "packet", surviving: 1 });
+  });
+
   it("R15-7: an UNRESOLVABLE profile's finished run opens no question packet and asserts no evidence", async () => {
     const runId = await finishedRunWith(
       JSON.stringify({

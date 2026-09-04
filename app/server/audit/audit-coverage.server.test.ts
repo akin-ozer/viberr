@@ -188,6 +188,35 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
+        // Ruling 137: a withdrawal writes its own row. The accept card is
+        // seeded on a task with NO open packet, and the packet the question
+        // opens is cleared afterwards so later rows in this sequential store
+        // are unaffected.
+        name: "withdrawAcceptanceOffers (an agent question opens)",
+        action: "task.recommendation.withdrawn",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { openAgentQuestionPacket } = await import("~/server/tasks/agent-toolkit.server");
+          const { updateTaskFile } = await import("~/server/files/task-writer.server");
+          const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+          await updateTaskFile(ref, (parsed) => {
+            parsed.packet = null;
+            parsed.frontmatter.recommendations = [
+              { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "" },
+            ];
+          });
+          await openAgentQuestionPacket(store.db, fileCtx, {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            actorRef: { kind: "agent", backend: "claude", profileId: "reviewer", roleHint: "Reviewer" },
+            title: "Which base branch should this target?",
+          });
+          await updateTaskFile(ref, (parsed) => {
+            parsed.packet = null;
+          });
+        },
+      },
+      {
         name: "appendComment",
         action: "task.comment",
         taskKey: "VIB-1",

@@ -9,6 +9,8 @@ import {
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { createNotification } from "~/server/projections/notifications.server";
+import type { Recommendation } from "~/schemas/task-file.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
@@ -165,6 +167,81 @@ describe("reconcileWorkspaceDelivery", () => {
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain(
       "github.workspace.branch_reconciled",
     );
+  });
+
+  it("ruling 137: a new delivered revision withdraws the accept card, records why, keeps the Reconciled branch event, and leaves a surviving run_agent card's bell UNREAD", async () => {
+    // Canary: restore the blind branch patch (drop the withdrawal from the
+    // locked write) and the accept card survives the revision it no longer
+    // describes.
+    const accept: Recommendation = {
+      id: "r-accept",
+      kind: "accept_completion",
+      toStageId: "done",
+      label: "Accept completion and move ATL-3 to Done",
+      detail: "The review is clean.",
+      forHeadSha: "01d".padEnd(40, "0"),
+    };
+    const runAgent: Recommendation = {
+      id: "r-run",
+      kind: "run_agent",
+      profileId: "developer",
+      label: "Run Developer",
+      detail: "",
+    };
+    const store = setupTask("ATL-3", { stage: "review", recommendations: [accept, runAgent] });
+    createNotification(store.db, {
+      userId: store.users.murat.id,
+      kind: "approval",
+      text: "Run Developer",
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      bypassPrefs: true,
+    });
+    const workdir = makeWorkspaceRepo();
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      profileId: "developer",
+      workdir,
+      dataRoot: store.dataRoot,
+      backend: "codex",
+      role: "Developer",
+      exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
+    });
+    expect(res.status).toBe("reconciled");
+
+    const parsed = readFm(store);
+    expect(parsed.frontmatter.workRevision?.headSha).toBe(HEAD_SHA);
+    expect(parsed.frontmatter.recommendations.map((r) => r.id)).toEqual(["r-run"]);
+    // The branch-linked event the reconcile always wrote is still there…
+    expect(parsed.timeline.find((e) => e.type === "github")?.text).toContain(
+      `Reconciled branch \`${BRANCH}\``,
+    );
+    // …and the withdrawal is on the record, in the deliverer's name.
+    const note = parsed.timeline.find(
+      (e) => e.type === "note" && e.title === "Recommendation withdrawn",
+    );
+    expect(note?.actor).toMatchObject({ kind: "agent", profileId: "developer" });
+    expect(note?.text).toContain('"Accept completion and move ATL-3 to Done"');
+    expect(note?.text).toContain(`a new revision \`${HEAD_SHA.slice(0, 7)}\` was delivered`);
+    expect(note?.text).toContain("still stand");
+    const rows = listAuditEvents(store.db, { action: "task.recommendation.withdrawn" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({
+      cause: "revision",
+      surviving: 1,
+      removed: [{ id: "r-accept", kind: "accept_completion", forHeadSha: "01d".padEnd(40, "0") }],
+    });
+    // The surviving card's "Waiting on you" bell is NOT marked read.
+    // SAFETY: a `count(*) AS c` aggregate answers exactly one row with the integer `c`.
+    const unread = store.db
+      .prepare(
+        `SELECT count(*) AS c FROM notifications WHERE task_key = 'ATL-3' AND kind = 'approval' AND read_at IS NULL`,
+      )
+      .get() as { c: number };
+    expect(unread.c).toBe(1);
   });
 
   it("locates the repo via the conventional <taskDir>/workspace/<name> path when no workdir is given", async () => {

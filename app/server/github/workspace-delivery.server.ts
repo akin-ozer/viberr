@@ -22,7 +22,15 @@ import {
   patchTaskFrontmatter,
   readTaskFile,
   resolveTaskFilePath,
+  updateTaskFile,
 } from "~/server/files/task-writer.server";
+import {
+  recordRecommendationWithdrawal,
+  withdrawAcceptanceOffers,
+  type OfferWithdrawalSlot,
+  type OfferWithdrawalCause,
+} from "~/server/tasks/task-mutation.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
@@ -488,21 +496,50 @@ export async function reconcileWorkspaceDelivery(
       commitsChanged = true;
     }
     if (Object.keys(branchPatch).length > 0) {
-      if (branchLinked) {
-        await appendTimelineEvent(
-          ref,
-          githubEvent(
+      // Ruling 137: the write that mints a new work revision withdraws the
+      // acceptance offers authored against the old one, inside the same
+      // locked write, and keeps the branch-linked event it always wrote.
+      const revisionCause: OfferWithdrawalCause | null = workRevisionPatch
+        ? { kind: "revision", headSha: workRevisionPatch.headSha }
+        : null;
+      const terminalStageId = projectFile
+        ? resolveStageRoles(
+            projectFile.parsed.frontmatter.stages,
+            projectFile.parsed.frontmatter.workflow,
+          ).terminalId
+        : null;
+      const revisionWithdrawal: OfferWithdrawalSlot = { offers: null };
+      await updateTaskFile(ref, (parsed) => {
+        Object.assign(parsed.frontmatter, branchPatch);
+        if (branchLinked) {
+          parsed.timeline.unshift(
+            githubEvent(
+              actor,
+              `Reconciled branch \`${validBranch}\` from the specialist workspace.`,
+            ),
+          );
+        }
+        if (revisionCause) {
+          revisionWithdrawal.offers = withdrawAcceptanceOffers(
+            parsed,
+            terminalStageId,
+            revisionCause,
             actor,
-            `Reconciled branch \`${validBranch}\` from the specialist workspace.`,
-          ),
-          branchPatch,
-        );
-      } else {
-        await patchTaskFrontmatter(ref, branchPatch);
-      }
+          );
+        }
+      });
       rebuildPath(db, resolveTaskFilePath(ref), {
         dataRoot,
       });
+      if (revisionCause && revisionWithdrawal.offers) {
+        recordRecommendationWithdrawal(db, {
+          projectSlug,
+          taskKey,
+          withdrawal: revisionWithdrawal.offers,
+          cause: revisionCause,
+          actor: { userId: null, label: "system:workspace-reconcile" },
+        });
+      }
     }
     // The branch-reconciled audit fires only for a real BRANCH or COMMIT change,
     // not for a workRevision-only stamp (F10-15): re-reconciling an unchanged

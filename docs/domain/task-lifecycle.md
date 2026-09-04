@@ -281,7 +281,14 @@ anything ambiguous fails closed with the reason recorded.
   `run_agent`, `accept_completion`, `delivery`). `applyRecommendation` passes
   `recommendationAuthorized` into the inner mutation, whose own capability gate still
   applies; the owner may apply or dismiss any card on their own task. Any stage move
-  prunes pending transition cards; acceptance consumes every card.
+  prunes pending transition cards; acceptance consumes every card. An `accept_completion`
+  card is bound to the work revision it was authored against (`forHeadSha`, rendered
+  "for revision <sha7>") and is withdrawn on the record, with a `note` titled
+  "Recommendation withdrawn" and a `task.recommendation.withdrawn` audit row, when a new
+  revision is delivered, when any decision packet opens, or when the task moves away from
+  the acceptance boundary (ruling 137). The packet and stage causes also withdraw a
+  `transition` card targeting the terminal stage; `run_agent` and `delivery` cards survive
+  all three, and the "Waiting on you" bell is marked read only when no card survives.
 - **Schedules** live in `task.md` `schedules[]`: `run-operator` (optional steer) or
   `run-agent` (a profile id and prompt; the profile must be deployed when the entry is
   created). Creating one needs `run-agents`. Each run control carries a when-picker
@@ -396,7 +403,9 @@ the same check.
 `## Timeline` in `task.md` is newest-first, `### <UTC ISO> · <type> · <actor ref>`,
 with the eleven types in `TIMELINE_EVENT_TYPES`. `policy` is reserved for genuine
 violations and refusals; neutral system remarks are `note`; `continuity` marks a
-resumed session whose provider transcript was gone. The projection serves a bounded
+resumed session whose provider transcript was gone. A `note` titled "Recommendation
+withdrawn" records an acceptance offer that no longer holds and why (ruling 137); it is a
+system remark, never a `policy` event. The projection serves a bounded
 newest-first slice and the page asks for older events on demand (NFR5). The
 compaction guardrail collapses old routine comments into one marker once the
 configured threshold is passed, keeping every typed governance event.

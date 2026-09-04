@@ -38,6 +38,10 @@ export interface RecommendationView {
   toStageId?: string;
   label: string;
   detail: string;
+  /** accept_completion — ruling 137: the work revision the offer was authored
+   *  against; the card says "for revision <sha7>" so a reader can tell whether
+   *  the offer still describes the branch. */
+  forHeadSha?: string;
 }
 
 const KIND_ICON = {
@@ -102,6 +106,11 @@ export function OperatorRecommendations({
                     : ""}
                 </span>
                 <span className="op-rec-title">{r.label}</span>
+                {r.kind === "accept_completion" && r.forHeadSha && (
+                  <span className="op-rec-revision">
+                    for revision <code>{r.forHeadSha.slice(0, 7)}</code>
+                  </span>
+                )}
               </div>
               {r.detail && <div className="op-rec-detail">{r.detail}</div>}
               {/* Hunt 2026-08-29: `prompt` is the DIRECTIVE Apply hands the

@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { AppError } from "~/server/errors/app-error.server";
 import { resolveTaskFilePath, readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
   type CreateNotificationInput,
@@ -234,6 +235,26 @@ export interface OfferWithdrawal {
   surviving: number;
   /** The timeline note that was written, when anything was removed. */
   note: TaskFileEvent | null;
+}
+
+/**
+ * Ruling 137: the terminal stage id of a project, read from its file, for the
+ * writers that withdraw acceptance offers without a loaded project context
+ * (the packet writers, the delivery reconcile). Resolved from the workflow
+ * graph like every other role lookup. Null when the project file is
+ * unreadable: the withdrawal then removes `accept_completion` cards alone.
+ */
+export function terminalStageIdFor(ctx: TaskMutationContext, projectSlug: string): string | null {
+  const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  if (!project) return null;
+  const fm = project.parsed.frontmatter;
+  return resolveStageRoles(fm.stages, fm.workflow).terminalId;
+}
+
+/** A locked mutator's withdrawal result, carried out of the closure — a plain
+ *  `let` is narrowed to `null` past the callback that assigns it. */
+export interface OfferWithdrawalSlot {
+  offers: OfferWithdrawal | null;
 }
 
 function withdrawalCauseText(cause: OfferWithdrawalCause): string {

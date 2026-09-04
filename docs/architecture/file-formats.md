@@ -200,7 +200,9 @@ engagements:                      # ONE uniform list of engaged agents (G1),
 operator:                         # null in triage (ruling 16: store stage id;
   assignedAtStageId: triage       # UI renders "stage <1-based index>")
 recommendations: []               # pending operator recommendation cards; an
-                                  # accept_completion card carries `forHeadSha`
+                                  # accept_completion card carries `forHeadSha`, the
+                                  # work revision it binds to, and is withdrawn on the
+                                  # record when that changes (ruling 137)
                                   # (ruling 137), the work revision it was
                                   # authored against, and is withdrawn on the
                                   # record when that revision changes

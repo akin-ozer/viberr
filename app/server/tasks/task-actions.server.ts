@@ -117,6 +117,10 @@ import {
   type TaskWatcherNotice,
   type TaskMutationContext,
   type ProjectContext,
+  recordRecommendationWithdrawal,
+  withdrawAcceptanceOffers,
+  type OfferWithdrawalSlot,
+  type OfferWithdrawalCause,
 } from "./task-mutation.server";
 import {
   createTaskFile,
@@ -2916,6 +2920,15 @@ export async function recordAgentCompletion(
   const roleDisplay =
     actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
   let questionOpened = false;
+  // Ruling 137: the envelope's question packet withdraws the standing
+  // acceptance offers on the record, inside the same locked write.
+  const questionCause: OfferWithdrawalCause | null = question
+    ? { kind: "packet", title: question.title.trim() }
+    : null;
+  const questionTerminalStageId = question
+    ? terminalStageIdOf(loadProjectContext(ctx, projectSlug))
+    : null;
+  const questionWithdrawal: OfferWithdrawalSlot = { offers: null };
   /** Set when the envelope's question could not open a packet (one already is)
    *  — recorded as a timeline note instead of being dropped (P13-RT-06). */
   let questionDeferred: string | null = null;
@@ -3115,6 +3128,14 @@ export async function recordAgentCompletion(
       if (question && !parsed.packet) {
         parsed.packet = buildAgentQuestionPacket(actorRef, question);
         parsed.frontmatter.waiting = "human";
+        if (questionCause) {
+          questionWithdrawal.offers = withdrawAcceptanceOffers(
+            parsed,
+            questionTerminalStageId,
+            questionCause,
+            actorRef,
+          );
+        }
         parsed.timeline.unshift({
           occurredAt: new Date().toISOString(),
           type: "blocked",
@@ -3183,6 +3204,15 @@ export async function recordAgentCompletion(
       );
     }
     if (questionOpened) {
+      if (questionCause && questionWithdrawal.offers) {
+        recordRecommendationWithdrawal(db, {
+          projectSlug,
+          taskKey,
+          withdrawal: questionWithdrawal.offers,
+          cause: questionCause,
+          actor: { userId: null, label: encodeActorRef(actorRef) },
+        });
+      }
       recordAudit(db, {
         action: "task.agent.packet_opened",
         // P13-RT-06: the AGENT asked, not the operator. The Claude transport
@@ -4758,6 +4788,22 @@ export async function transitionStage(
   // file lock, so a retry … can never leave two cards"). `moved` carries the
   // in-lock verdict back out so the event, the audit row, the notification
   // read and the operator re-trigger all follow the ONE write that happened.
+  // Ruling 137: a move AWAY from the acceptance boundary (the review stage the
+  // workflow graph names, the same source `isAtAcceptanceBoundary` reads)
+  // withdraws the standing acceptance offers on the record. A move INTO the
+  // terminal stage is the acceptance itself and consumes every card.
+  const boundaryStageId = reviewStageIdOf(project);
+  const moveCause: OfferWithdrawalCause | null =
+    boundaryStageId !== null &&
+    fromStageId === boundaryStageId &&
+    input.toStageId !== terminalStageIdOf(project)
+      ? {
+          kind: "stage_move",
+          toStageId: input.toStageId,
+          toStageName: stageName(project, input.toStageId),
+        }
+      : null;
+  const moveWithdrawal: OfferWithdrawalSlot = { offers: null };
   let moved = false;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     const current = parsed.frontmatter.stage;
@@ -4817,6 +4863,14 @@ export async function transitionStage(
     if (input.toStageId === reviewStageIdOf(project)) {
       parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
     }
+    if (moveCause) {
+      moveWithdrawal.offers = withdrawAcceptanceOffers(
+        parsed,
+        terminalStageIdOf(project),
+        moveCause,
+        event.actor,
+      );
+    }
     // A stage move makes any pending transition recommendation stale — drop it
     // so a Done task never shows a "move to <stage>" card.
     parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
@@ -4849,6 +4903,17 @@ export async function transitionStage(
     taskKey: input.taskKey,
     details: transitionDetails,
   });
+  if (moveCause && moveWithdrawal.offers) {
+    recordRecommendationWithdrawal(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      withdrawal: moveWithdrawal.offers,
+      cause: moveCause,
+      actor: ctx.operatorAuthorized
+        ? OPERATOR_AUDIT_ACTOR
+        : { userId: actor.userId, label: actor.label },
+    });
+  }
 
   // Approving a requested transition resolves its approval notifications.
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);

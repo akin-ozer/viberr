@@ -79,7 +79,7 @@
 
 **Readiness** — the stored 4-value enum `ready | input_required | inconsistency_risk_detected | blocked` (ruling 1), derived only in `readiness-policy.server.ts`; a non-empty `blockedBy` floors the derived value at `blocked` (ruling 131). Surfaces additionally render the derived display value `agent_working` while `waiting === "agent"` (ruling 91) and "accepted" for done-stage tasks.
 
-**Recommendation** — a pending card the supervised operator leaves on a task: kinds `transition`, `run_agent`, `accept_completion`, `delivery`. Apply executes the same mutation a human would; Dismiss records it.
+**Recommendation** — a pending card the supervised operator leaves on a task: kinds `transition`, `run_agent`, `accept_completion`, `delivery`. Apply executes the same mutation a human would; Dismiss records it. An `accept_completion` card binds to the work revision it was made for (`forHeadSha`) and is withdrawn, on the record, when that revision is replaced, a packet opens, or the task leaves the acceptance boundary (ruling 137).
 
 **Revision (work revision)** — the immutable identity of the work under review: `{id, headSha, treeSha, branch, createdAt, sourceProfileId, kind: delivered | verified}`. A new head with a different tree mints a new revision, which stales every prior verdict.
 

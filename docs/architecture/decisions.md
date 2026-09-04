@@ -2516,6 +2516,32 @@ by rewriting those paragraphs:*
     `app/server/github/github-reconciler.server.ts`; `app/shared/packet-server-outcome.ts`; the
     `packet-resolved` doctrine in `operator-run.server.ts`.)
 
+137. **An acceptance offer is bound to the revision it was made for, and is withdrawn, on the record,
+    when that revision or the task's decision state changes (owner-directed fix of F34-15, 2026-09-04).**
+    The operator's `accept_completion` card ("the review is clean and the work meets the goal") stood on
+    JC-3 after the deliverer committed a new revision with no verdict and after the operator opened a
+    blocked conflict packet on top of it; only a non-healthy verdict, archive or acceptance had ever
+    dropped it, and a stage move dropped transition cards alone. Every `accept_completion` card now
+    carries `forHeadSha`, the work revision it was authored against, on both the authoring and the
+    re-authoring path (`addRecommendation`'s push and its in-place update, which re-binds), the
+    `task.operator.recommended_completion` row records it, and the card renders "for revision <sha>".
+    ONE helper, `withdrawAcceptanceOffers`, living in the leaf task mutation module
+    (`app/server/tasks/task-mutation.server.ts`) so every writer can call it without closing a module
+    cycle, removes `accept_completion` cards and `transition` cards targeting the terminal stage inside
+    the task file's own lock: it runs in the write that mints a new work revision (the delivery
+    reconcile, now a locked mutator that keeps its "Reconciled branch" event), in every writer that
+    opens a decision packet (the operator's, an agent's question, the completion-envelope question),
+    and in a stage move away from the acceptance boundary as the workflow graph defines it (the review
+    stage `resolveStageRoles` names, never a positional guess; a move INTO the terminal stage is the
+    acceptance itself). A withdrawal is never silent: a `note` event titled "Recommendation withdrawn"
+    names the card and the cause, an audit row `task.recommendation.withdrawn` records it (cause,
+    removed cards with their bindings, survivors), and the card's "Waiting on you" notification is
+    marked read only when no recommendation survives. `run_agent` and `delivery` cards survive all
+    three events: more work is compatible with rework. The operator re-recommends acceptance on its
+    next turn if the offer still holds. Extends the 2026-07-18 owner decision that a divergence
+    withdraws moot cards, and `applyRecommendation`'s F19-3 rule that a terminal transition card is an
+    acceptance.
+
 142. **A run's shell carries none of Viberr's own configuration (2026-09-04, pass 34 U34-7).**
     Ruling 127 built the spawn base around what a child must not learn about OTHER people's
     credentials. Pass 34 found the other half: the base still handed every child this server's

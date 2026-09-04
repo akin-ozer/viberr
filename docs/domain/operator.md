@@ -249,6 +249,14 @@ by hand is recommended and the body says why); and the
 `deleteBranch`; merged → no packet, accept instead; reopened → withdraw the moot
 packet).
 
+Every packet writer (the operator's `operatorOpenPacket`, an agent's `ask_human`, the Codex
+completion envelope's question) withdraws the task's standing acceptance offers inside the
+same locked write (ruling 137): the `accept_completion` card and any `transition` card
+targeting the terminal stage go, a "Recommendation withdrawn" note names them and the packet,
+a `task.recommendation.withdrawn` row records it, and the "Waiting on you" bell is marked read
+only when no card survives. The operator re-recommends acceptance on its next turn if the
+offer still holds.
+
 Resolution effects by option kind (`resolvePacket`):
 
 | Kind | Effect |

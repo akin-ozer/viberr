@@ -3870,3 +3870,50 @@ describe("ruling 134: the pushed-head event on a reused PR", () => {
     expect(audit?.details).toMatchObject({ status: "delivered", moved: true, headSha: "385047c".padEnd(40, "0") });
   });
 });
+
+/**
+ * Ruling 137 (pass 34, F34-15): a move AWAY from the acceptance boundary
+ * withdraws the standing acceptance offers on the record. The transition
+ * filter already dropped the cards; the point is the note and the audit row.
+ */
+describe("ruling 137: a move off the acceptance boundary withdraws the offers", () => {
+  it("review → impl withdraws the accept card and the terminal transition card, on the record; the run_agent card survives", async () => {
+    // Canary: drop the `transitionStage` withdrawal site — the cards still
+    // vanish (the transition filter), but silently: no note, no row.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        branch: "vib-1-work",
+        workRevision: workRev("rev_1"),
+        validation: "changed",
+        recommendations: [
+          { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-1 to Done", detail: "", forHeadSha: "a".repeat(40) },
+          { id: "r-done", kind: "transition", toStageId: "done", label: "Move to Done", detail: "" },
+          { id: "r-run", kind: "run_agent", profileId: "dev", label: "Run dev", detail: "" },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    expect(parsed.frontmatter.stage).toBe("impl");
+    expect(parsed.frontmatter.recommendations.map((r) => r.id)).toEqual(["r-run"]);
+    const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Recommendation withdrawn");
+    expect(note?.text).toContain('"Accept completion and move VIB-1 to Done"');
+    expect(note?.text).toContain('"Move to Done"');
+    expect(note?.text).toMatch(/moved to \*\*[^*]+\*\*, away from the acceptance boundary/);
+    expect(note?.text).toContain("1 recommendation still stands");
+    const rows = listAuditEvents(store.db, { action: "task.recommendation.withdrawn" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({ cause: "stage_move", surviving: 1, removed: [{ id: "r-accept" }, { id: "r-done" }] });
+    expect(rows[0]!.actorLabel).toBe(store.users.arda.email);
+  });
+});

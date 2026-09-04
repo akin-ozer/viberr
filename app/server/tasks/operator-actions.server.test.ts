@@ -12,9 +12,11 @@ import {
 import {
   deliveringEngagement,
   supportingEngagements,
+  type Recommendation,
+  type WorkRevision,
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
@@ -3786,5 +3788,117 @@ describe("ruling 135: the operator snapshot and the unpushed revision", () => {
     const stale = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("supervised"));
     expect(stale.pr?.unpushedRevision).toBeNull();
     expect(stale.pr?.unpushedRevisionSentence).toBe("");
+  });
+});
+
+/**
+ * Ruling 137 (pass 34, F34-15): an acceptance offer is bound to the revision
+ * it was made for and withdrawn, on the record, when a packet opens or the
+ * revision is replaced.
+ */
+describe("ruling 137: acceptance offers are bound to a revision and withdrawn on the record", () => {
+  function revision(headSha: string): WorkRevision {
+    return {
+      id: `rev_${headSha.slice(0, 4)}`,
+      headSha,
+      treeSha: headSha.split("").reverse().join(""),
+      branch: "vib-1-work",
+      createdAt: "2026-09-04T10:00:00.000Z",
+      sourceProfileId: "developer",
+      kind: "delivered",
+    };
+  }
+  /** A delivered revision the engaged reviewer approved, with its review PR:
+   *  the state an acceptance offer is made in. */
+  async function deliverReviewed(headSha: string): Promise<void> {
+    const rev = revision(headSha);
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.engagements = [
+        { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: true },
+      ];
+      parsed.frontmatter.workRevision = rev;
+      parsed.frontmatter.verdicts = [
+        { profileId: "reviewer", revisionId: rev.id, headSha, result: "approve", reason: "clean", at: "2026-09-04T10:05:00.000Z" },
+      ];
+      parsed.frontmatter.validation = "healthy";
+      parsed.frontmatter.branch = "vib-1-work";
+      parsed.frontmatter.pr = { number: 7, state: "review", title: "VIB-1 work" };
+    });
+  }
+
+  it("opening a packet withdraws the standing acceptance offer and the terminal transition card, and says so", async () => {
+    // Canary: delete the `withdrawAcceptanceOffers` call in operatorOpenPacket
+    // and both cards outlive the packet.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "generate-packets"),
+      { capabilityId: "generate-packets", mode: "direct" },
+    ]);
+    seedTask("review");
+    const cards: Recommendation[] = [
+      { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-1 to Done", detail: "", forHeadSha: "a".repeat(40) },
+      { id: "r-done", kind: "transition", toStageId: "done", label: "Move to Done", detail: "" },
+      { id: "r-run", kind: "run_agent", profileId: "developer", label: "Run Developer", detail: "" },
+    ];
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.recommendations = cards;
+    });
+    const r = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Branch conflicts with main",
+        options: [{ kind: "redirect", title: "Have the developer resolve the conflict" }],
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().packet?.title).toBe("Branch conflicts with main");
+    expect(task().frontmatter.recommendations.map((x) => x.id)).toEqual(["r-run"]);
+    const note = task().timeline.find((e) => e.type === "note" && e.title === "Recommendation withdrawn");
+    expect(note?.actor).toEqual({ kind: "operator" });
+    expect(note?.text).toContain('"Accept completion and move VIB-1 to Done"');
+    expect(note?.text).toContain('"Move to Done"');
+    expect(note?.text).toContain('a decision packet opened ("Branch conflicts with main")');
+    const rows = listAuditEvents(store.db, { action: "task.recommendation.withdrawn" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({ cause: "packet", surviving: 1 });
+  });
+
+  it("recommend accept on revision A, deliver revision B, recommend again: the stored card binds to B", async () => {
+    // Canary: leave the in-place update arm of addRecommendation alone (no
+    // forHeadSha re-bind) and the card keeps A.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    await deliverReviewed("a".repeat(40));
+    const first = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(first.outcome).toBe("recommended");
+    const cardA = task().frontmatter.recommendations.find((x) => x.kind === "accept_completion")!;
+    expect(cardA.forHeadSha).toBe("a".repeat(40));
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.recommended_completion" })[0]!.details,
+    ).toMatchObject({ forHeadSha: "a".repeat(40) });
+
+    // Revision B lands (the reconcile's own withdrawal is covered in
+    // workspace-delivery.server.test.ts); the operator recommends again.
+    await deliverReviewed("b".repeat(40));
+    const second = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(second.outcome).toBe("recommended");
+    const cards = task().frontmatter.recommendations.filter((x) => x.kind === "accept_completion");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.id).toBe(cardA.id); // the same card, re-bound in place
+    expect(cards[0]!.forHeadSha).toBe("b".repeat(40));
   });
 });

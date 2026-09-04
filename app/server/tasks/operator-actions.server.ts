@@ -5,6 +5,13 @@ import {
 import { resolveDependencies } from "~/server/projections/dependencies.server";
 import { setTaskDependencies } from "./dependencies.server";
 import type { TaskActor } from "./task-mutation.server";
+import {
+  recordRecommendationWithdrawal,
+  terminalStageIdFor,
+  withdrawAcceptanceOffers,
+  type OfferWithdrawalSlot,
+  type OfferWithdrawalCause,
+} from "./task-mutation.server";
 import type { DependencyRender } from "~/shared/dependencies";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -786,19 +793,23 @@ function recordCommentDrop(
  * comment. Sets waiting=human. Idempotent per (kind, target). This is what a
  * SUPERVISED operator does instead of performing a governed action itself.
  */
+interface RecommendationInput {
+  kind: RecommendationKind;
+  profileId?: string;
+  prompt?: string;
+  delivers?: boolean;
+  toStageId?: string;
+  label: string;
+  /** accept_completion — ruling 137: the work revision the offer binds to. */
+  forHeadSha?: string;
+}
+
 async function addRecommendation(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
-  rec: {
-    kind: RecommendationKind;
-    profileId?: string;
-    prompt?: string;
-    delivers?: boolean;
-    toStageId?: string;
-    label: string;
-  },
+  rec: RecommendationInput,
   reasoning: string,
 ): Promise<void> {
   const recommendation: Recommendation = {
@@ -813,6 +824,7 @@ async function addRecommendation(
   if (rec.prompt) recommendation.prompt = rec.prompt;
   if (rec.delivers !== undefined) recommendation.delivers = rec.delivers;
   if (rec.toStageId) recommendation.toStageId = rec.toStageId;
+  if (rec.forHeadSha) recommendation.forHeadSha = rec.forHeadSha;
   // Same disclosure the narration path carries (S5-G3): the reasoning is
   // operator prose and can tag a human, so an ambiguous handle must not vanish.
   const commentText = withAmbiguityDisclosure(
@@ -833,7 +845,8 @@ async function addRecommendation(
     } else if (
       existing.prompt !== recommendation.prompt ||
       existing.delivers !== recommendation.delivers ||
-      existing.label !== recommendation.label
+      existing.label !== recommendation.label ||
+      existing.forHeadSha !== recommendation.forHeadSha
     ) {
       // Hunt 2026-08-29: the per-target dedupe predates `prompt`/`delivers`
       // on run_agent cards, so a NEWER directive for the same agent was
@@ -850,6 +863,13 @@ async function addRecommendation(
         existing.delivers = recommendation.delivers;
       } else {
         delete existing.delivers;
+      }
+      // Ruling 137: a re-recommended acceptance re-binds to the revision it
+      // was authored against, or the card keeps a stale binding.
+      if (recommendation.forHeadSha !== undefined) {
+        existing.forHeadSha = recommendation.forHeadSha;
+      } else {
+        delete existing.forHeadSha;
       }
       wasNew = true;
     }
@@ -1156,12 +1176,21 @@ export async function operatorOpenPacket(
   };
 
   let opened = false;
+  // Ruling 137: a packet pauses coordination, so the standing acceptance
+  // offers (and the terminal transition cards, acceptances too) are withdrawn
+  // on the record inside the same locked write.
+  const packetCause: OfferWithdrawalCause = { kind: "packet", title };
+  const terminalStageId = terminalStageIdFor(ctx, input.projectSlug);
+  const packetWithdrawal: OfferWithdrawalSlot = { offers: null };
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     // Re-check inside the locked write — the read above raced other writers
     // (the same guard `openAgentQuestionPacket` makes).
     if (parsed.packet) return;
     parsed.packet = packet;
     opened = true;
+    packetWithdrawal.offers = withdrawAcceptanceOffers(parsed, terminalStageId, packetCause, {
+      kind: "operator",
+    });
     parsed.frontmatter.waiting = "human";
     if (input.packetType === "blocked") {
       // Blocked-ness lives on `readiness` alone (F7-VAL1). It used to ALSO set
@@ -1193,6 +1222,15 @@ export async function operatorOpenPacket(
     };
   }
   reproject(db, ctx, input.projectSlug, input.taskKey);
+  if (packetWithdrawal.offers) {
+    recordRecommendationWithdrawal(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      withdrawal: packetWithdrawal.offers,
+      cause: packetCause,
+      actor: OPERATOR_AUDIT_ACTOR,
+    });
+  }
   recordAudit(db, {
     action: "task.operator.packet_opened",
     actor: OPERATOR_AUDIT_ACTOR,
@@ -2984,18 +3022,23 @@ export async function operatorAcceptCompletion(
     // wording keys on the DURABLE claim (unchanged by F28-L1, which only reorders
     // the acceptance GATE so a verified-empty completion is not refused).
     const isNoChange = noChangeApplies(file.parsed.frontmatter);
+    // Ruling 137: the offer binds to the revision it describes, so a later
+    // delivery can withdraw it by name and the card can say which one.
+    const offer: RecommendationInput = {
+      kind: "accept_completion",
+      toStageId: doneStageId,
+      label: isNoChange
+        ? `Complete ${input.taskKey} with no changes and move it to ${doneName}`
+        : `Accept completion and move ${input.taskKey} to ${doneName}`,
+    };
+    const offeredHeadSha = file.parsed.frontmatter.workRevision?.headSha ?? null;
+    if (offeredHeadSha) offer.forHeadSha = offeredHeadSha;
     await addRecommendation(
       db,
       ctx,
       input.projectSlug,
       input.taskKey,
-      {
-        kind: "accept_completion",
-        toStageId: doneStageId,
-        label: isNoChange
-          ? `Complete ${input.taskKey} with no changes and move it to ${doneName}`
-          : `Accept completion and move ${input.taskKey} to ${doneName}`,
-      },
+      offer,
       isNoChange
         ? `The review is clean and there is nothing to deliver: no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
         : `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable; otherwise it records the PR as accepted (merge pending).`,
@@ -3007,7 +3050,7 @@ export async function operatorAcceptCompletion(
       subjectId: input.taskKey,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
-      details: { toStage: doneStageId },
+      details: { toStage: doneStageId, forHeadSha: offeredHeadSha },
     });
     return {
       outcome: "recommended",
