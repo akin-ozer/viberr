@@ -95,6 +95,7 @@ import {
   userName,
   type CreateTaskInput,
 } from "~/server/tasks/task-actions.server";
+import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { PRIORITY_VALUES } from "~/schemas/task-file.schema";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import type { StartAgentRunInput } from "~/server/tasks/specialist-run.server";
@@ -895,7 +896,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_tasks",
-      "A project's tasks: key, title, stage, readiness, waiting, owner, priority, goal-chain chip. Membership gated. Includes Done; archived only when asked.",
+      "A project's tasks: key, title, stage, readiness, waiting, owner, priority, goal-chain chip, and what each waits on (`waitsOn`, ruling 131). Membership gated. Includes Done; archived only when asked.",
       {
         projectSlug: z.string().optional(),
         stageId: z.string().optional().describe("Filter to one stage."),
@@ -922,6 +923,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             priority: t.priority,
             archived: t.archived,
             goal: t.goalRef ? { goalId: t.goalRef.goalId, link: t.goalRef.linkIndex } : null,
+            // Ruling 131: what the task waits on, each entry with its live state.
+            waitsOn: t.blockedBy.map((e) => `${e.label} (${e.state})`),
           })),
         );
       }),
@@ -969,6 +972,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         goal: z.string().optional().describe("The task text: deliverable plus the done signal."),
         priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
         labels: z.array(z.string()).optional(),
+        blockedBy: z
+          .array(z.string())
+          .optional()
+          .describe("Ruling 131: what the new task waits on (task keys like JC-6, goal links like 'goal-1 link 3', in this project). The task is born held and released by Viberr when every entry is done."),
       },
       runWith(
         async (args: {
@@ -977,6 +984,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           goal?: string;
           priority?: "low" | "normal" | "high" | "urgent";
           labels?: string[];
+          blockedBy?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
           // Visibility BEFORE the action gate. `createTask` refuses a
@@ -992,8 +1000,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (args.goal) taskInput.goal = prose(args.goal);
           if (args.priority) taskInput.priority = args.priority;
           if (args.labels) taskInput.labels = args.labels;
+          if (args.blockedBy?.length) taskInput.blockedBy = args.blockedBy;
           const created = await createTask(db, taskInput, actor, { dataRoot });
-          return `[done] ${created.key} created in ${created.stageName}: ${created.task.title}.`;
+          const wait = created.task.blockedBy.length
+            ? ` Waits on ${created.task.blockedBy.map((e) => e.label).join(", ")}; held until every entry is done.`
+            : "";
+          return `[done] ${created.key} created in ${created.stageName}: ${created.task.title}.${wait}`;
         },
       ),
     ),
@@ -1131,7 +1143,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_task",
-      "Edit a task's goal text and/or its metadata (priority, labels, due date) — the same two writers the task page uses, behind the same gates: the goal needs maintainer or above, metadata needs the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Never edits the title, stage, owner or engaged agents.",
+      "Edit a task's goal text, its metadata (priority, labels, due date) and/or what it waits on (blockedBy, ruling 131: the full list; [] clears it and RELEASES the task) — the same two writers the task page uses, behind the same gates: the goal needs maintainer or above, metadata needs the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Never edits the title, stage, owner or engaged agents.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -1139,6 +1151,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         priority: z.enum(PRIORITY_VALUES).optional(),
         labels: z.array(z.string()).optional().describe("The full label set; [] clears it."),
         dueDate: z.string().optional().describe("ISO date (YYYY-MM-DD), or \"\" to clear."),
+        blockedBy: z
+          .array(z.string())
+          .optional()
+          .describe("The FULL list of what the task waits on (task keys like JC-6, goal links like 'goal-1 link 3'); [] clears it and releases the task."),
       },
       runWith(
         async (args: {
@@ -1148,15 +1164,17 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           priority?: (typeof PRIORITY_VALUES)[number];
           labels?: string[];
           dueDate?: string;
+          blockedBy?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
           const key = keyOf(args.taskKey, slug);
           requireVisible(slug, "edit this task");
           const hasMeta =
             args.priority !== undefined || args.labels !== undefined || args.dueDate !== undefined;
-          if (args.goal === undefined && !hasMeta) {
+          const hasWait = args.blockedBy !== undefined;
+          if (args.goal === undefined && !hasMeta && !hasWait) {
             throw AppError.validation(
-              "Pass a goal and/or at least one metadata field (priority, labels, dueDate).",
+              "Pass a goal and/or at least one metadata field (priority, labels, dueDate, blockedBy).",
             );
           }
           // Two writers, two gates. Each part reports on its own so a goal that
@@ -1221,6 +1239,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               if (!(error instanceof AppError)) throw error;
               firstError ??= error;
               refused.push(`${fields.join(", ")}: ${error.userMessage}`);
+            }
+          }
+          // Ruling 131: the wait has its own writer and its own report line; a
+          // refusal names the reference and the reason in the validator's words.
+          if (hasWait) {
+            try {
+              const wait = await setTaskDependencies(
+                db,
+                { projectSlug: slug, taskKey: key, blockedBy: args.blockedBy ?? [] },
+                actor,
+                { dataRoot },
+              );
+              if (!wait.changed) unchanged.push("blocked by");
+              else if (wait.blockedBy.length === 0) applied.push("blocked by (cleared: the task is released)");
+              else applied.push(`blocked by (${wait.blockedBy.join(", ")})`);
+            } catch (error) {
+              if (!(error instanceof AppError)) throw error;
+              firstError ??= error;
+              refused.push(`blocked by: ${error.userMessage}`);
             }
           }
           if (applied.length === 0 && firstError) throw firstError;
@@ -1657,6 +1694,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             z.object({
               title: z.string(),
               goal: z.string().describe("Self-standing task text: deliverable plus the done signal."),
+              blockedBy: z
+                .array(z.string())
+                .optional()
+                .describe("Ruling 131(c): what this link's task waits on (task keys, or other goals' links like 'goal-1 link 3'); the task is born held when the chain creates it."),
             }),
           )
           .min(1)
@@ -1668,7 +1709,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           title: string;
           description?: string;
           onFailure?: "pause" | "continue";
-          links: { title: string; goal: string }[];
+          links: { title: string; goal: string; blockedBy?: string[] }[];
         }) => {
           const slug = slugOf(args.projectSlug);
           // Same reason as `create_task`: the action gate below would refuse a
@@ -1677,7 +1718,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const goalInput: CreateGoalInput = {
             projectSlug: slug,
             title: args.title,
-            links: args.links.map((l) => ({ title: l.title, goal: prose(l.goal) })),
+            links: args.links.map((l) => {
+              const link: CreateGoalInput["links"][number] = { title: l.title, goal: prose(l.goal) };
+              if (l.blockedBy?.length) link.blockedBy = l.blockedBy;
+              return link;
+            }),
           };
           if (args.description) goalInput.description = prose(args.description);
           if (args.onFailure) goalInput.onFailure = args.onFailure;
@@ -1709,6 +1754,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               title: l.title,
               status: l.status,
               taskKey: l.taskKey,
+              blockedBy: l.blockedBy,
             })),
           })),
         );
@@ -1754,6 +1800,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         title: z.string().optional(),
         goal: z.string().optional(),
         reason: z.string().optional(),
+        blockedBy: z
+          .array(z.string())
+          .optional()
+          .describe("edit_link / add_link: what the link's task waits on (the full list; [] clears; omit on edit_link to leave it)."),
       },
       runWith(
         async (args: {
@@ -1772,6 +1822,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           title?: string;
           goal?: string;
           reason?: string;
+          blockedBy?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "redirect this project's goals");
@@ -1807,13 +1858,22 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               };
               if (args.title) edit.title = args.title;
               if (args.goal) edit.goal = prose(args.goal);
+              // Ruling 131(c): absent leaves the link's wait; [] clears it.
+              if (args.blockedBy !== undefined) edit.blockedBy = args.blockedBy;
               action = edit;
               break;
             }
-            case "add_link":
+            case "add_link": {
               if (!args.title) throw AppError.validation("add_link needs a title.");
-              action = { op: "add_link", title: args.title, goal: prose(args.goal ?? "") };
+              const added: Extract<UpdateGoalOp, { op: "add_link" }> = {
+                op: "add_link",
+                title: args.title,
+                goal: prose(args.goal ?? ""),
+              };
+              if (args.blockedBy !== undefined) added.blockedBy = args.blockedBy;
+              action = added;
               break;
+            }
             case "remove_pending_link":
               action = { op: "remove_pending_link", index: args.index! };
               break;

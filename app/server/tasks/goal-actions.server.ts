@@ -34,6 +34,9 @@ import {
   requireProjectMutable,
   type ProjectContext,
 } from "./task-actions.server";
+import { validateDependencyRefs } from "./dependencies.server";
+import { formatDependencyRef, parseDependencyRef } from "~/shared/dependencies";
+import type { CreateTaskInput } from "./task-actions.server";
 import type { TaskActor, TaskMutationContext } from "./task-mutation.server";
 
 /**
@@ -69,6 +72,10 @@ export const GOAL_MAX_LINKS = 20;
 export interface GoalLinkInput {
   title: string;
   goal: string;
+  /** Ruling 131(c): what this link's task will wait on (task keys, or other
+   *  goals' links); spelling-checked and validated at write time, copied onto
+   *  the task when the chain creates it. */
+  blockedBy?: string[];
 }
 
 export interface CreateGoalInput {
@@ -114,6 +121,52 @@ function linkGoalText(
 
 // ------------------------------------------------------------------ create
 
+/**
+ * Ruling 131(c): validate one link's declared wait. References to THIS
+ * chain's own links are checked here (an existing link, never itself, never
+ * a later link of the same chain, which the chain order already forbids);
+ * everything else goes through the shared validator, whose cycle walk
+ * traverses declared goal-link edges as well as created tasks.
+ */
+function validateLinkWait(
+  db: DatabaseSync,
+  projectSlug: string,
+  goalId: string,
+  linkIndex: number,
+  links: readonly GoalLink[],
+  entries: readonly string[],
+): string[] {
+  const own: string[] = [];
+  const foreign: string[] = [];
+  for (const raw of entries) {
+    const ref = parseDependencyRef(raw);
+    if (ref?.kind === "goal" && ref.goal === goalId) {
+      if (ref.link === linkIndex) {
+        throw AppError.validation(`${formatDependencyRef(ref)}: a link cannot wait on itself.`);
+      }
+      if (!links.some((l) => l.index === ref.link)) {
+        throw AppError.validation(`${goalId} has no link ${ref.link} (it has ${links.length}).`);
+      }
+      if (ref.link > linkIndex) {
+        throw AppError.validation(
+          `${formatDependencyRef(ref)}: a link cannot wait on a LATER link of its own chain (the chain runs in order).`,
+        );
+      }
+      own.push(formatDependencyRef(ref));
+      continue;
+    }
+    foreign.push(raw);
+  }
+  const validated = validateDependencyRefs(db, {
+    projectSlug,
+    self: { kind: "goal", goal: goalId, link: linkIndex },
+    entries: foreign,
+  });
+  const out: string[] = [];
+  for (const entry of [...own, ...validated]) if (!out.includes(entry)) out.push(entry);
+  return out;
+}
+
 export async function createGoal(
   db: DatabaseSync,
   input: CreateGoalInput,
@@ -137,7 +190,7 @@ export async function createGoal(
         taskKey: null,
         status: "pending",
         note: null,
-        blockedBy: [],
+        blockedBy: l.blockedBy ?? [],
       }),
     )
     .filter((l) => l.title.length > 0);
@@ -160,6 +213,13 @@ export async function createGoal(
     ctx.dataRoot,
     async () => {
       const id = nextGoalId(input.projectSlug, ctx.dataRoot);
+      // Ruling 131(c): every declared wait is validated at DECLARATION time,
+      // against the store and against this chain's own links, so a mutual
+      // sibling-chain wait is refused here instead of producing two tasks born
+      // held forever.
+      for (const link of links) {
+        link.blockedBy = validateLinkWait(db, input.projectSlug, id, link.index, links, link.blockedBy);
+      }
       const now = new Date().toISOString();
       const fm: GoalFrontmatter = {
         id,
@@ -177,17 +237,15 @@ export async function createGoal(
       // requireAction inside createTask), so a refusal there leaves no orphan
       // goal file behind.
       const first = links[0]!;
-      const task = await createTask(
-        db,
-        {
-          projectSlug: input.projectSlug,
-          title: first.title,
-          goal: linkGoalText(fm, first, null),
-          goalRef: { goalId: id, linkIndex: 1 },
-        },
-        actor,
-        ctx,
-      );
+      const firstInput: CreateTaskInput = {
+        projectSlug: input.projectSlug,
+        title: first.title,
+        goal: linkGoalText(fm, first, null),
+        goalRef: { goalId: id, linkIndex: 1 },
+      };
+      // Ruling 131(c): link 1's declared wait rides onto its task at birth.
+      if (first.blockedBy.length > 0) firstInput.blockedBy = first.blockedBy;
+      const task = await createTask(db, firstInput, actor, ctx);
       first.taskKey = task.key;
       first.status = "active";
 
@@ -224,8 +282,10 @@ export type UpdateGoalOp =
   | { op: "cancel"; reason?: string }
   | { op: "skip_link"; index: number; reason?: string }
   | { op: "retry_link"; index: number }
-  | { op: "edit_link"; index: number; title?: string; goal?: string }
-  | { op: "add_link"; title: string; goal: string }
+  /** `blockedBy` ABSENT leaves the link's list alone; `[]` clears it (the
+   *  same absent-vs-empty contract `update_task` keeps, ruling 131(c)). */
+  | { op: "edit_link"; index: number; title?: string; goal?: string; blockedBy?: string[] }
+  | { op: "add_link"; title: string; goal: string; blockedBy?: string[] }
   | { op: "remove_pending_link"; index: number };
 
 export interface UpdateGoalInput {
@@ -358,8 +418,17 @@ export async function updateGoal(
           }
           if (op.title?.trim()) link.title = op.title.trim();
           if (op.goal?.trim()) link.goal = op.goal.trim();
-          message = `Link ${op.index} updated.`;
-          return `Link ${op.index} edited by ${by}.`;
+          // Ruling 131(c): absent leaves the list; `[]` clears it. Validated
+          // at declaration time, this chain's other links included.
+          if (op.blockedBy !== undefined) {
+            link.blockedBy = validateLinkWait(db, input.projectSlug, fm.id, link.index, fm.links, op.blockedBy);
+          }
+          const waitClause =
+            op.blockedBy !== undefined
+              ? `; waits on ${link.blockedBy.length ? link.blockedBy.join(", ") : "nothing"}`
+              : "";
+          message = `Link ${op.index} updated${waitClause}.`;
+          return `Link ${op.index} edited by ${by}${waitClause}.`;
         }
         case "add_link": {
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
@@ -370,14 +439,15 @@ export async function updateGoal(
           }
           const title = op.title.trim();
           if (!title) throw AppError.validation("Give the link a title.");
+          const nextIndex = fm.links.length + 1;
           fm.links.push({
-            index: fm.links.length + 1,
+            index: nextIndex,
             title,
             goal: op.goal.trim(),
             taskKey: null,
             status: "pending",
             note: null,
-            blockedBy: [],
+            blockedBy: validateLinkWait(db, input.projectSlug, fm.id, nextIndex, fm.links, op.blockedBy ?? []),
           });
           advanceAfter = true;
           message = `Link ${fm.links.length} added.`;
@@ -576,17 +646,18 @@ async function startLinkTaskLocked(
   const previous =
     fm.links.filter((l) => l.index < linkIndex).sort((a, b) => b.index - a.index)[0] ??
     null;
-  const created = await createTask(
-    db,
-    {
-      projectSlug,
-      title: link.title,
-      goal: linkGoalText(fm, link, previous),
-      goalRef: { goalId, linkIndex },
-    },
-    actor,
-    ctx,
-  );
+  const linkInput: CreateTaskInput = {
+    projectSlug,
+    title: link.title,
+    goal: linkGoalText(fm, link, previous),
+    goalRef: { goalId, linkIndex },
+  };
+  // Ruling 131(c): the link's declared wait is copied onto the task and
+  // validated there; a reference that can no longer be satisfied (its task
+  // archived since the declaration) refuses the create, and the caller parks
+  // the chain in `attention` with the validator's sentence.
+  if (link.blockedBy.length > 0) linkInput.blockedBy = link.blockedBy;
+  const created = await createTask(db, linkInput, actor, ctx);
   let attached = false;
   await updateGoalFile(ref, (goal) => {
     // Re-check under the goal-FILE lock: a cancel/pause may have committed during
@@ -599,7 +670,7 @@ async function startLinkTaskLocked(
     target.taskKey = created.key;
     target.status = "active";
     target.note = null;
-    return `Link ${linkIndex} (${target.title}) started as ${created.key}.`;
+    return `Link ${linkIndex} (${target.title}) started as ${created.key}${target.blockedBy.length > 0 ? `, waiting on ${target.blockedBy.join(", ")}` : ""}.`;
   });
   if (!attached) {
     // The chain went non-active mid-create. The task exists and carries a

@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { DatabaseSync } from "node:sqlite";
+import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import {
   setupAppTest,
   type AppTestContext,
@@ -49,6 +51,92 @@ async function closeTaskToDone(taskKey: string) {
   const { rebuildTaskFile } = await import("~/server/projections/rebuilder.server");
   rebuildTaskFile(app.db, SLUG, taskKey, { dataRoot: app.dataRoot });
 }
+
+describe("ruling 131(c): chain-created tasks inherit the link's declared wait", () => {
+  it("goal-2's link 1 declares a wait on goal-1 link 2: the created task carries it, waiting is none, the history says so, the create trigger is handed over (and refused, A12); a wait that can no longer be satisfied parks the chain", async () => {
+    // Canaries: drop `blockedBy` from `startLinkTaskLocked`'s createTask
+    // input (link 2's task is born free); swallow the validation error in
+    // `startLinkTask`'s catch (the chain never parks).
+    const { createGoal, getGoalView } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { setTaskArchived } = await import("./task-actions.server");
+    const runOperator = vi.fn((_db: DatabaseSync, _input: RunOperatorInput) =>
+      Promise.resolve({ runId: "run_x", queued: false, backend: "claude" as const, autonomy: "supervised" as const }),
+    );
+    const ctx = { dataRoot: app.dataRoot, deps: { runOperator } };
+    // The demo seed deploys no operator; `autoInvokeOperator` returns early
+    // without one, so deploy one for the hand-over to have a seam to reach.
+    const { readProjectFile, updateProjectFile } = await import("~/server/files/project-writer.server");
+    const pf = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!;
+    if (!pf.parsed.frontmatter.agents.some((a) => a.profileId === "operator")) {
+      await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (proj) => {
+        proj.frontmatter.agents.push({
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: { kind: "operator", name: "Operator", role: "Task coordinator", backends: ["claude"], model: "sonnet", autonomy: "supervised" },
+        });
+      });
+      const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    }
+    const goal1 = await createGoal(
+      app.db,
+      { projectSlug: SLUG, title: "Foundation", links: [{ title: "Base A", goal: "A. Done when merged." }, { title: "Base B", goal: "B. Done when merged." }] },
+      actorOf(contributorId, "selin@viberr.dev"),
+      ctx,
+    );
+    const goal2 = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Dependent",
+        links: [
+          { title: "Needs base B", goal: "C. Done when merged.", blockedBy: [`${goal1.goalId} link 2`] },
+          { title: "Needs base A", goal: "D. Done when merged.", blockedBy: [`${goal1.goalId} link 1`] },
+        ],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      ctx,
+    );
+    const first = readTaskFile({ projectSlug: SLUG, taskKey: goal2.activeTaskKey!, dataRoot: app.dataRoot })!.parsed;
+    expect(first.frontmatter.blockedBy).toEqual([`${goal1.goalId} link 2`]);
+    expect(first.frontmatter.waiting).toBe("none");
+    expect(first.timeline.some((e) => e.title === "Waits on other work")).toBe(true);
+    // The hand-over is fire-and-forget behind a dynamic import: poll for it.
+    const deadline = Date.now() + 4000;
+    while (!runOperator.mock.calls.some((c) => c[1].taskKey === goal2.activeTaskKey && c[1].trigger === "create")) {
+      if (Date.now() > deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const handed = runOperator.mock.calls.find((c) => c[1].taskKey === goal2.activeTaskKey && c[1].trigger === "create");
+    expect(handed, "the create trigger reached the seam (its refusal is A12's real-runOperator test)").toBeDefined();
+    // A declared wait on a later link of the SAME chain is refused at declaration.
+    await expect(
+      createGoal(
+        app.db,
+        { projectSlug: SLUG, title: "Backwards", links: [{ title: "L1", goal: "x", blockedBy: ["goal-999 link 1"] }] },
+        actorOf(contributorId, "selin@viberr.dev"),
+        ctx,
+      ),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("goal-999 is not a goal in this project") });
+
+    // Link 2 of goal-2 waits on goal-1 link 1 = goal1's first task. Archive
+    // that task, then complete goal-2 link 1 by hand: the chain tries to start
+    // link 2, the wait can never be satisfied, and the chain parks.
+    await setTaskArchived(app.db, { projectSlug: SLUG, taskKey: goal1.activeTaskKey!, archived: true }, actorOf(orgAdminId, "arda@viberr.dev"), ctx);
+    await closeTaskToDone(goal2.activeTaskKey!);
+    const { reconcileGoal } = await import("./goal-actions.server");
+    await reconcileGoal(app.db, SLUG, goal2.goalId, ctx);
+    const parked = getGoalView(SLUG, goal2.goalId, ctx)!;
+    expect(parked.status).toBe("attention");
+    expect(parked.history.some((h) => /Chain paused \(attention\): creating the next link's task failed \(.*is archived/.test(h.text))).toBe(true);
+    expect(parked.links[1]!.taskKey).toBeNull();
+  });
+});
 
 describe("chained goals", () => {
   let goalId = "";

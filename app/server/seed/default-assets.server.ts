@@ -183,12 +183,16 @@ interface PriorShippedHashes {
 
 export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   [path.join("agents", "definitions", "controller.md")]: [
+    // Pass 34 A14: before the blockedBy sentences (ruling 131).
+    "e600925f824e5ec43ca962c56304e5099ae76a1ad41dff8bc94a431666756712",
     // ruling 121 outgoing: named the non-existent `list_projects`, claimed a
     // comment mention could start a run, and knew nothing of the per-turn
     // context read or `update_task`.
     "8dcb2d1bb8f3668bcc9337af2d07be196ed704b66d70b699b2ac55e39ebf258c",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Pass 34 A14: before the blockedBy sentence (ruling 131).
+    "69805ce6bb7bd0180014e164ae6d863268813bd4fb6a0f61bfa4e333b6674608",
     // ruling 121 outgoing (same rewrite).
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],

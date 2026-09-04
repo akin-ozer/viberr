@@ -777,6 +777,93 @@ describe("task anchoring (ruling 121)", () => {
     expect(mixed).toContain("Already set, nothing written: priority.");
   });
 
+  it("ruling 131: create_task and update_task set the wait; [noop] on an unchanged list; refusal by name; [] clears and releases; a viewer is refused", async () => {
+    // Canary: drop `blockedBy` from the empty-call guard (the wait-only
+    // update answers "[error] Pass a goal…").
+    const { getTaskSummary } = await import("~/server/projections/task-query.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const created = await call(ids.contributor, "create_task", {
+      title: "Waits on the credential attach",
+      blockedBy: ["VIB-142"],
+    });
+    expect(created).toMatch(/^\[done\] VIB-\d+ created in Triage: Waits on the credential attach\. Waits on VIB-142; held until every entry is done\.$/);
+    const key = /VIB-\d+/.exec(created)![0];
+    let summary = getTaskSummary(app.db, SLUG, key)!;
+    expect(summary.blockedBy.map((e) => e.ref)).toEqual(["VIB-142"]);
+    expect(summary.waiting).toBe("none");
+    expect(summary.readiness).toBe("blocked");
+
+    // A bad reference refuses by name and burns no key: the next create lands on the next number.
+    expect(await call(ids.contributor, "create_task", { title: "Bad wait", blockedBy: ["VIB-9999"] })).toContain(
+      "[error] VIB-9999 is not a task in this project.",
+    );
+
+    expect(await callAnchored(ids.contributor, "update_task", { blockedBy: ["vib-142"] }, key)).toContain(
+      `[noop] ${key}: blocked by already had that value; nothing was written.`,
+    );
+    expect(await callAnchored(ids.contributor, "update_task", { blockedBy: ["VIB-142", "VIB-148"], priority: "high" }, key)).toContain(
+      `[done] ${key} updated: priority, blocked by (VIB-142, VIB-148).`,
+    );
+    const selfWait = await callAnchored(ids.contributor, "update_task", { blockedBy: [key] }, key);
+    expect(selfWait).toContain(`[error] ${key}: a task cannot wait on itself.`);
+    expect(await callAnchored(ids.viewer, "update_task", { blockedBy: [] }, key)).toMatch(/^\[denied\]/);
+    // A person emptying the list is the release itself.
+    expect(await callAnchored(ids.contributor, "update_task", { blockedBy: [] }, key)).toContain(
+      `[done] ${key} updated: blocked by (cleared: the task is released).`,
+    );
+    summary = getTaskSummary(app.db, SLUG, key)!;
+    expect(summary.blockedBy).toEqual([]);
+    const file = readTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot })!.parsed;
+    expect(file.timeline.some((e) => e.title === "Dependencies released")).toBe(true);
+    // The reads expose the wait.
+    // SAFETY: `list_tasks` answers `json(rows.map(...))` with exactly these
+    // two fields on every row (the tool's own mapping above).
+    const listed = JSON.parse(await call(ids.contributor, "list_tasks", {})) as { key: string; waitsOn: string[] }[];
+    expect(listed.find((t) => t.key === key)!.waitsOn).toEqual([]);
+    await callAnchored(ids.contributor, "update_task", { blockedBy: ["VIB-142"] }, key);
+    // SAFETY: same mapping as above.
+    const listedAgain = JSON.parse(await call(ids.contributor, "list_tasks", {})) as { key: string; waitsOn: string[] }[];
+    expect(listedAgain.find((t) => t.key === key)!.waitsOn).toEqual(["VIB-142 (open)"]);
+  });
+
+  it("ruling 131(c): create_goal links declare a wait, update_goal edit_link leaves it when absent and clears it with [], and list_goals/get_goal expose it", async () => {
+    // Canary: drop `blockedBy` from the `edit_link` op mapping (the [] clear
+    // is silently ignored).
+    const created = await call(ids.maintainer, "create_goal", {
+      title: "Chain with a declared wait",
+      links: [
+        { title: "First", goal: "Do the first thing. Done when merged." },
+        { title: "Second", goal: "Do the second thing. Done when merged.", blockedBy: ["VIB-142"] },
+      ],
+    });
+    expect(created).toMatch(/^\[done\] Goal goal-\d+ created with 2 links; link 1 is VIB-\d+\.$/);
+    const goalId = /goal-\d+/.exec(created)![0];
+    // SAFETY: `get_goal` answers `json(goalView)`, whose `links` are the
+    // schema-parsed GoalLink[] (index and blockedBy always present).
+    const goal = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { index: number; blockedBy: string[] }[] };
+    expect(goal.links.map((l) => l.blockedBy)).toEqual([[], ["VIB-142"]]);
+    // A title-only edit leaves the wait alone.
+    await call(ids.maintainer, "update_goal", { goalId, op: "edit_link", index: 2, title: "Second, renamed" });
+    // SAFETY: same shape as above.
+    let after = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { blockedBy: string[] }[] };
+    expect(after.links[1]!.blockedBy).toEqual(["VIB-142"]);
+    // A declared cycle is refused at declaration time.
+    expect(await call(ids.maintainer, "update_goal", { goalId, op: "edit_link", index: 2, blockedBy: [`${goalId} link 2`] })).toContain(
+      `[error] ${goalId} link 2: a link cannot wait on itself.`,
+    );
+    // [] clears.
+    expect(await call(ids.maintainer, "update_goal", { goalId, op: "edit_link", index: 2, blockedBy: [] })).toContain("waits on nothing");
+    after = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { blockedBy: string[] }[] };
+    expect(after.links[1]!.blockedBy).toEqual([]);
+    // SAFETY: `list_goals` maps every link to `{index, title, status, taskKey, blockedBy}`.
+    const listed = JSON.parse(await call(ids.maintainer, "list_goals", {})) as { id: string; links: { blockedBy: string[] }[] }[];
+    expect(listed.find((g) => g.id === goalId)!.links.map((l) => l.blockedBy)).toEqual([[], []]);
+    // add_link with a wait.
+    expect(await call(ids.maintainer, "update_goal", { goalId, op: "add_link", title: "Third", goal: "Third thing.", blockedBy: ["VIB-148"] })).toContain("[done] Link 3 added.");
+    after = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { blockedBy: string[] }[] };
+    expect(after.links[2]!.blockedBy).toEqual(["VIB-148"]);
+  });
+
   it("update_task is a write tool, so the always-human and no-delete invariants still hold", async () => {
     const { buildControllerToolkit } = await import("./controller-toolkit.server");
     const toolkit = buildControllerToolkit({

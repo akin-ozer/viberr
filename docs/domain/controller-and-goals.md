@@ -240,8 +240,8 @@ must name its task, or it is refused. `whoami` reports both bindings):
 | Instance writes | `create_user` (relays the one-time temp password), `update_user`, `set_user_org_role`, `save_knowledge_base`, `save_skill`, `save_mcp_server` (takes no credential; reserved names refused), `test_mcp_server`, `save_global_agent` (specialists only; **grants are store keys and an omitted list is left alone** — see below) | org admin |
 | Project creation | `create_project` (any shape: stages, boundaries, members, description) | any signed-in user; the asker is seeded project admin (FR5) |
 | Board reads | `get_project`, `list_tasks`, `get_task` (events 12, max 50), `get_github_state`, `list_goals`, `get_goal` | `requireVisible` |
-| Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier), `update_task` (ruling 121: the goal under `update-goal`, priority / labels / due date under `edit-task-meta` as a full replace — the task page's two writers and gates, each part reported on its own, and an axis already holding the asked-for value answers `[noop]` rather than claiming a write nobody made), `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `terminal-stage` / queued honestly, else `startAgentRun`), `update_project_settings`, `update_stages`, `set_transition_boundary` (`edit-policy`), `invite_member`, `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
-| Goals | `create_goal` (`create-task`, 1..20 links), `update_goal` (creator or `run-agents`) | `requireVisible` then the goal gate (§7) |
+| Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier), `update_task` (ruling 121: the goal under `update-goal`, priority / labels / due date under `edit-task-meta` as a full replace — the task page's two writers and gates, each part reported on its own, and an axis already holding the asked-for value answers `[noop]` rather than claiming a write nobody made; ruling 131: `blockedBy` is the FULL list of what the task waits on through `setTaskDependencies`, reported on its own arm, a refusal in the validator's words, `[]` clearing it and releasing the task), `create_task` also takes `blockedBy` (validated before a key is allocated; the task is born held), `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `terminal-stage` / queued honestly, else `startAgentRun`), `update_project_settings`, `update_stages`, `set_transition_boundary` (`edit-policy`), `invite_member`, `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
+| Goals | `create_goal` (`create-task`, 1..20 links, each with an optional `blockedBy`), `update_goal` (creator or `run-agents`; `edit_link` without `blockedBy` leaves the link's list, `[]` clears it; `add_link` takes one) | `requireVisible` then the goal gate (§7) |
 
 Invariants pinned by tests: there is **no** tool for merge, acceptance,
 force-accept, packet resolution or a move into the terminal stage (ruling 88's
@@ -389,14 +389,21 @@ pass reads every linked task's state from its canonical file and applies:
   `create-task` is re-proven (`creatorMayCreateTasks`, silent deny); lost authority
   parks the chain in `attention`. The task is created under the actor
   `{ userId: createdBy, label: "<label> · goal chain" }` inside a per-link lock that
-  re-checks the chain status before and after `createTask`.
+  re-checks the chain status before and after `createTask`. Ruling 131(c): the link's
+  declared `blockedBy` is copied into `createTask` and validated there, so the task is
+  born held (`waiting: none`, readiness floored at `blocked`) and the link history says
+  what it waits on; a wait that can no longer be satisfied (its task archived since the
+  declaration) refuses the create and parks the chain in `attention` with the
+  validator's sentence.
 
 ### 7.4 Redirecting
 
 `updateGoal` is gated by `requireGoalAuthority`: the creator (project mutable and any
 membership) **or** a member holding `run-agents`. Operations (terminal chains refuse
 all of them): `pause`, `resume`, `cancel`, `skip_link`, `retry_link` (failed links
-only; a fresh task under the present caller), `edit_link` (pending or failed),
+only; a fresh task under the present caller), `edit_link` (pending or failed; ruling
+131(c): `blockedBy` absent leaves the link's declared wait, `[]` clears it, any list is
+validated at declaration time, this chain's own links included),
 `add_link` (≤ 20), `remove_pending_link` (re-indexes). Audit `goal.updated {op}`.
 The project route's `goal-op` intent and the Goals panel expose only the first five;
 `edit_link`, `add_link` and `remove_pending_link` are controller-tool-only today.

@@ -47,6 +47,34 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
   };
 }
 
+describe("ruling 131(c): the Goals panel names what a link waits on", () => {
+  it("renders 'waits on …' under a link with a declared wait, and nothing under one without", async () => {
+    // Canary: remove the `data-link-wait` span.
+    const goal: NonNullable<ControllerSurfaceView["goals"]>[number] = {
+      id: "goal-2",
+      title: "Dependent chain",
+      status: "active",
+      createdBy: "u_arda",
+      createdByLabel: "Arda",
+      onFailure: "pause",
+      description: "",
+      links: [
+        { index: 1, title: "Needs base B", goal: "C.", taskKey: "JC-9", status: "active", note: null, blockedBy: ["goal-1 link 2", "JC-6"] },
+        { index: 2, title: "Free", goal: "D.", taskKey: null, status: "pending", note: null, blockedBy: [] },
+      ],
+      currentIndex: 1,
+      createdAt: null,
+      updatedAt: null,
+      history: [],
+    };
+    const { container } = renderPage(view({ goals: [goal] }));
+    // The stub's root loader is async: the page renders after it resolves.
+    await screen.findByText("waits on goal-1 link 2, JC-6");
+    const waits = [...container.querySelectorAll("[data-link-wait]")].map((n) => n.textContent);
+    expect(waits).toEqual(["waits on goal-1 link 2, JC-6"]);
+  });
+});
+
 function renderPage(v: ControllerSurfaceView, search = "") {
   const Stub = createRoutesStub([
     {

@@ -145,6 +145,14 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(shipped()).toContain("`set_dependencies`");
   });
 
+  it("pass 34 A14: the controller definition and guide shipped before `blockedBy` are recorded prior hashes, so both upgrade in place", async () => {
+    // Canary: omit the skill's hash.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    const path = await import("node:path");
+    expect(shippedCopyIsUnedited(path.join("agents", "definitions", "controller.md"), "e600925f824e5ec43ca962c56304e5099ae76a1ad41dff8bc94a431666756712", {})).toBe(true);
+    expect(shippedCopyIsUnedited(path.join("skills", "controller-guide", "SKILL.md"), "69805ce6bb7bd0180014e164ae6d863268813bd4fb6a0f61bfa4e333b6674608", {})).toBe(true);
+  });
+
   it("refreshes an UNEDITED copy of an older shipped version", async () => {
     const { seedDefaultAgentAssets } = await import("./default-assets.server");
     const dataRoot = freshStore();
