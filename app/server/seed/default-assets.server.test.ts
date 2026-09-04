@@ -138,6 +138,15 @@ describe("shipped-asset refresh (B-OP1)", () => {
       "utf8",
     );
 
+  it("pass 34 A19/A21: the operator doctrine says a hand-off is about who builds, never about stages, and its outgoing hash is recorded", async () => {
+    // Canaries: revert the rework paragraph; remove the outgoing hash.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "dd42d1a7614df74f937519f53a0e9690affa0e0eb8a89da07d38cac4fc580752", {})).toBe(true);
+    expect(shipped()).toContain("the deliverer owes the rework and it runs at EVERY stage");
+    expect(shipped()).toContain("Never hand delivery to another profile to get around a stage.");
+    expect(shipped()).not.toContain("does not work the CURRENT stage");
+  });
+
   it("pass 34 A13: the operator doctrine shipped before `set_dependencies` is a recorded prior hash, so a live store upgrades in place", async () => {
     // Canary: remove the outgoing hash from PRIOR_SHIPPED_HASHES.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");

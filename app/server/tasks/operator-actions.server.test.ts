@@ -537,7 +537,7 @@ describe("operatorDispatchAgent", () => {
     chosen: string;
     delivers: boolean;
     reason: string | null;
-    candidates: { profileId: string; chosen: boolean; eligibleForStage: boolean }[];
+    candidates: { profileId: string; chosen: boolean; eligibleForStage: boolean; alreadyEngaged: boolean; deliveringAtSelection: boolean }[];
   };
 
   it("F10-35: records a routing trace — candidates considered, chosen, reason", async () => {
@@ -576,6 +576,89 @@ describe("operatorDispatchAgent", () => {
     expect(
       d.candidates.find((c) => c.profileId === "developer")?.eligibleForStage,
     ).toBe(true);
+    // Ruling 133 (A19): the trace records the posture the dispatch will TAKE.
+    // This is a FIRST dispatch (auto-engage): not yet engaged, delivering at
+    // selection. Canary: derive `deliveringAtSelection` from the pre-dispatch
+    // file for the chosen profile (it reads false here).
+    const dev = d.candidates.find((c) => c.profileId === "developer")!;
+    expect(dev.alreadyEngaged).toBe(false);
+    expect(dev.deliveringAtSelection).toBe(true);
+    expect(d.candidates.find((c) => c.profileId === "reviewer")!.deliveringAtSelection).toBe(false);
+    await interruptRunningRuns("VIB-1");
+  });
+
+  it("ruling 133 (A19): the snapshot and the trace judge eligibility as 'may RUN here': the engaged deliverer is eligible at a stage it does not declare, with engagedAsDeliverer beside it", async () => {
+    // Canary: map `eligibleForCurrentStage` back to `specialistEligibleForStage`.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        { profileId: "operator", capabilities: DEFAULT_POLICY, extras: [], definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet", autonomy: "full" } },
+        { profileId: "developer", capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }], extras: [], definition: { kind: "specialist", name: "Dev", role: "Implementation", backends: ["claude"], model: "sonnet", stages: ["impl"] } },
+        { profileId: "helper", capabilities: [], extras: [], definition: { kind: "specialist", name: "Helper", role: "Support", backends: ["claude"], model: "sonnet", stages: ["impl"] } },
+      ],
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        engagements: [
+          { profileId: "developer", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+          { profileId: "helper", backend: "claude", role: "Support", delivers: false, verdictCapable: false },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+    const dev = snap.deployedSpecialists.find((s) => s.id === "developer")!;
+    const helper = snap.deployedSpecialists.find((s) => s.id === "helper")!;
+    expect(dev).toMatchObject({ eligibleForCurrentStage: true, engagedAsDeliverer: true });
+    expect(helper).toMatchObject({ eligibleForCurrentStage: false, engagedAsDeliverer: false });
+    // The trace agrees: a re-prompt of the deliverer at Review is eligible,
+    // and it is already delivering.
+    await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", prompt: "Address the review." },
+      authority("full"),
+    );
+    const trace = listAuditEvents(store.db, { action: "task.operator.agent_selected" })[0]!;
+    const d = trace.details as AgentSelectionTrace;
+    expect(d.candidates.find((c) => c.profileId === "developer")).toMatchObject({ eligibleForStage: true, alreadyEngaged: true, deliveringAtSelection: true });
+    expect(d.candidates.find((c) => c.profileId === "helper")).toMatchObject({ eligibleForStage: false, alreadyEngaged: true, deliveringAtSelection: false });
+    await interruptRunningRuns("VIB-1");
+  });
+
+  it("Q34-14 (owner, 2026-09-04): an explicit hand-off to another deployed deliverer still runs directly under direct autonomy after ruling 133", async () => {
+    // The regression guard for the owner's answer: it fails the moment
+    // somebody re-gates the hand-off with a refusal or a card.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", delivers: true },
+      authority("full"),
+    );
+    await interruptRunningRuns("VIB-1");
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: [
+        ...file.parsed.frontmatter.agents,
+        { profileId: "developer2", capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }], extras: [], definition: { kind: "specialist", name: "Dev Two", role: "Implementation", backends: ["claude"], model: "sonnet" } },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const r = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer2", delivers: true, prompt: "Take over the build." },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().frontmatter.engagements.find((e) => e.delivers)?.profileId).toBe("developer2");
+    expect(task().frontmatter.recommendations).toEqual([]);
     await interruptRunningRuns("VIB-1");
   });
 

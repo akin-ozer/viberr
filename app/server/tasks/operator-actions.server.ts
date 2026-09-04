@@ -101,7 +101,7 @@ import {
 import {
   listDeployedSpecialists,
   projectBoard,
-  specialistEligibleForStage,
+  runEligibilityFor,
   startAgentRun,
   type DeployedSpecialistView,
 } from "./specialist-run.server";
@@ -1426,9 +1426,13 @@ export interface OperatorTaskSnapshot {
   /** The implementation ("work") stage id (edge into review). */
   workStageId: string | null;
   deployedSpecialists: (DeployedSpecialistView & {
-    /** Whether this specialist may work the task's CURRENT stage (F1) — the
-     *  operator should only assign/prompt an eligible one. */
+    /** Whether this profile may RUN the task at its CURRENT stage: its
+     *  declared eligibility, or (ruling 133) it is the task's engaged
+     *  deliverer, which runs at every stage. Declared eligibility alone is
+     *  where a profile may be NEWLY engaged. */
     eligibleForCurrentStage: boolean;
+    /** Ruling 133: this profile is the task's delivering engagement. */
+    engagedAsDeliverer: boolean;
     /** F21-16: the specialist's OWN capabilities, resolved live from its
      *  deployment grants — the right place to look when a human asks whether an
      *  agent's grant took effect. `DeployedSpecialistView.capabilities` already
@@ -1836,10 +1840,17 @@ export function operatorSnapshot(
     workStageId: roles.workId,
     deployedSpecialists: listDeployedSpecialists(projectSlug, ctx).map((s) => ({
       ...s,
-      eligibleForCurrentStage: specialistEligibleForStage(
+      // Ruling 133: may this profile RUN here (declared, or the engaged
+      // deliverer), not only "may it be newly engaged here".
+      eligibleForCurrentStage: runEligibilityFor(
         s,
+        file.parsed.frontmatter.engagements,
+        s.id,
         file.parsed.frontmatter.stage,
         { stages, workflow },
+      ).ok,
+      engagedAsDeliverer: file.parsed.frontmatter.engagements.some(
+        (e) => e.profileId === s.id && e.delivers,
       ),
       // F21-16: the specialist's own egress row, so the operator has somewhere
       // TRUE to look when it is asked whether an agent's web grant took effect.
@@ -2307,16 +2318,25 @@ function recordAgentSelectionTrace(
   try {
     const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
     const stage = file?.parsed.frontmatter.stage;
-    const engaged = new Set(
-      (file?.parsed.frontmatter.engagements ?? []).map((e) => e.profileId),
-    );
+    const engagements = file?.parsed.frontmatter.engagements ?? [];
+    const engaged = new Set(engagements.map((e) => e.profileId));
+    const board = projectBoard(ctx, input.projectSlug);
     const candidates = listDeployedSpecialists(input.projectSlug, ctx).map(
       (s) => ({
         profileId: s.id,
+        // Ruling 133: may it RUN here (declared, or the engaged deliverer).
         eligibleForStage: stage
-          ? specialistEligibleForStage(s, stage, projectBoard(ctx, input.projectSlug))
+          ? runEligibilityFor(s, engagements, s.id, stage, board).ok
           : false,
         alreadyEngaged: engaged.has(s.id),
+        // The posture the dispatch will TAKE: for the chosen profile the
+        // resolved delivers intent (auto-engage included, so a first
+        // dispatch reads `true` while `alreadyEngaged` is false); for every
+        // other candidate its current engagement's posture.
+        deliveringAtSelection:
+          s.id === input.profileId
+            ? input.delivers
+            : engagements.some((e) => e.profileId === s.id && e.delivers),
         chosen: s.id === input.profileId,
       }),
     );

@@ -1962,6 +1962,18 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     expect(byHand).toContain("arda@viberr.dev cleared the wait on JC-3");
   });
 
+  it("ruling 133 (A19): the agent-reply doctrine re-prompts the deliverer in place on BOTH builders", () => {
+    // Canary: restore either builder's old rework sentence.
+    const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Ship it." });
+    for (const prompt of [
+      operatorPrompts.buildOperatorTurnPrompt(atWork, "manual"),
+      operatorPrompts.buildCodexOperatorPrompt(atWork, "manual"),
+    ]) {
+      expect(prompt).toContain("The engaged deliverer runs at EVERY stage (ruling 133): re-prompt it in place, never hand delivery to another profile to get around a stage");
+      expect(prompt).toContain("rework for the profile that built it (which runs at every stage, ruling 133)");
+    }
+  });
+
   it("ruling 130(c): the packet-resolved instruction bolds the decided title and claims no policy or credential fix", () => {
     // Live (JC-6): the old parenthetical "(a policy/credential fix means
     // re-check the work that was blocked)" plus a record saying "policy /

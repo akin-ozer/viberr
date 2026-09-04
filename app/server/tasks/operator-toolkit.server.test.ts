@@ -238,6 +238,17 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(operatorPlanToolsFor(withheld)).not.toContain("set_dependencies");
   });
 
+  it("ruling 133 (A19): get_task, run_agent and transition_stage say the engaged deliverer runs at every stage and a hand-off is never a stage workaround", () => {
+    // Canary: restore any one of the three original sentences.
+    const defs = build(withPolicy(uniform("direct"))).tools;
+    const desc = (name: string) => defs.find((t) => t.name === name)!.description;
+    expect(desc("get_task")).toContain("it is the engaged deliverer (`engagedAsDeliverer`), which runs at EVERY stage (ruling 133)");
+    expect(desc("run_agent")).toContain("A hand-off is a choice about WHO should build, never a way around a stage");
+    expect(desc("run_agent")).toContain("never hand delivery to another profile to get around a stage");
+    expect(desc("transition_stage")).toContain("never a workaround for a profile's stages");
+    expect(desc("transition_stage")).not.toContain("does not work the review stage");
+  });
+
   it("nothing granted: Claude builds no governed tool; the Codex plan enum falls back and never advertises delivery", () => {
     const auth = withPolicy(uniform("off"));
     expect([...claudeGovernedTools(build(auth).allowedTools)]).toEqual([]);

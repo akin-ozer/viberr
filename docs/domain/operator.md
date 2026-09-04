@@ -126,7 +126,9 @@ the current unpushed-revision record with the acceptance gate's own sentence (ru
 135: an unpushed revision reaches its PR through `deliver_for_review`), `noChanges`,
 `liveRuns`, pending and recently declined recommendations (so a supervised operator
 does not re-propose a just-dismissed move), `blockedBy` (ruling 131: each entry with
-its resolved state), and its own `operatorPolicy` labelled with scope so it cannot
+its resolved state), `deployedSpecialists[].eligibleForCurrentStage` meaning "may RUN
+here" (declared stages, or the engaged deliverer, ruling 133) beside
+`engagedAsDeliverer`, and its own `operatorPolicy` labelled with scope so it cannot
 mistake its own web grant for a specialist's.
 
 Before triage the operator gets a **full read-only clone** of the project repository

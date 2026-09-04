@@ -197,6 +197,8 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Pass 34 A19: before the ruling-133 rework paragraph.
+    "dd42d1a7614df74f937519f53a0e9690affa0e0eb8a89da07d38cac4fc580752",
     // Pass 34 A13: before the set_dependencies sentence (ruling 131).
     "9731f0a69b6a8b5824277c4d1a2d4ad18cc126c2ca827a844369f9f0ed9ef3f6",
     // pass-34 outgoing (ruling 134: rework reaches the open PR through
