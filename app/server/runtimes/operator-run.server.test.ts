@@ -2809,6 +2809,27 @@ describe("runOperator — authority, ordering, orphans", () => {
       for (const o of packet.options) expect(o.t).not.toMatch(/updated the policy|[–—]/);
     });
 
+    it("names the backend the run was LAUNCHED on, not a per-call override's default (pass 34 review)", async () => {
+      // Canary: `const backend = input.backend ?? "claude"` — every machine
+      // trigger (which carries no override) then names Claude on a Codex
+      // operator, in the packet body and in its options.
+      deployAgents([operatorAgent({ backends: ["codex"], model: "gpt-5.6-terra" })]);
+      seed("impl");
+      await drive({ trigger: "transition" });
+      expect(adapter5.pending).not.toBeNull();
+      adapter5.fail(store5, "Codex refused the run: usage limit reached.", {
+        ...emptyRunFailureFacts("quota"),
+        windowRejected: true,
+        window: "five_hour",
+        resetsAt: RESET,
+      });
+      await eventually(() => expect(task().packet).not.toBeNull());
+      const packet = task().packet!;
+      const rendered = [packet.body, ...packet.options.map((o) => `${o.t} ${o.d ?? ""} ${o.ev ?? ""}`)].join("\n");
+      expect(rendered).toContain("Codex");
+      expect(rendered).not.toContain("Claude");
+    });
+
     it("auth: names the org restriction and the account remedy; recommends 'I connected a different account or an API key'", async () => {
       const packet = await failed("Claude refused the run: the account was rejected.", {
         ...emptyRunFailureFacts("auth"),

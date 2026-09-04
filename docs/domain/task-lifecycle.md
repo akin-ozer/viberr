@@ -213,8 +213,10 @@ supervisors, and the operator re-invoked with `dependencies-released`).
   admin). Ownership changes are `assign` timeline events; admin releases are audited.
   Removing a member releases their tasks. **Every seat change tells the person whose
   seat it is** (ruling 140(b), `notifyOwnerSeatChange`): the new owner on a hand-off or
-  a creation that named them, the DISPLACED owner on a takeover, the released owner on
-  an admin release. Nobody is told about their own take or release, and a member removal
+  a creation that named them, the DISPLACED owner on a takeover OR on a third-party
+  hand-off (an admin moving the seat between two other people tells both sides, each on
+  its own audit key `notified` / `notifiedDisplaced`), the released owner on an admin
+  release. Nobody is told about their own take or release, and a member removal
   stays silent (the person is leaving). The row is kind `ownership` with its own routing
   toggle, opens the task page and never enters "Waiting on you"; the audit row carries
   `notified` — the user id, or `skipped: "silenced" | "failed"` — so a silenced

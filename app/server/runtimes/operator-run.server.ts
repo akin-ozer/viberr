@@ -2918,7 +2918,11 @@ async function escalateFailedOperatorRun(
   try {
     const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
     const failure = runFailureReason(db, runId);
-    const backend: RealBackend = input.backend ?? "claude";
+    // Pass 34 review: the run was launched on the RESOLVED deployment backend
+  // (`runOperator` reads `authority.backend`); `input.backend` is set only when
+  // a caller overrides it from the Run-operator picker, so every machine
+  // trigger fell back to "claude" and the packet named the wrong provider.
+  const backend: RealBackend = authority.backend;
     // Ruling 130(b) (pass 34, F34-12): the ONE failure-to-words mapping. A
     // quota or credential refusal names the person whose account was refused
     // (ruling 127's credential principal, the task owner) and their own move:

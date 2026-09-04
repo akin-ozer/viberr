@@ -4477,21 +4477,36 @@ export async function setOwner(
   // authority, so it is not a smaller fact than gaining it. Nobody is told
   // about their own act. The notifier runs BEFORE the audit row so the row can
   // say whether the person was told, and why not when they were not.
-  const seatRecipient = isTake ? currentOwnerId : input.targetUserId;
-  const notified = seatRecipient
-    ? notifyOwnerSeatChange(db, {
-        projectSlug: input.projectSlug,
-        recipientUserId: seatRecipient,
-        actor,
-        actorName: userName(db, actor.userId),
-        change: { kind: isTake ? "taken_over" : "handed_off", taskKey: input.taskKey },
-      })
-    : null;
+  // Both sides, independently. Choosing ONE recipient by `isTake` left a
+  // third-party hand-off (an admin moving the seat between two other people,
+  // which the gate above admits) telling the new owner and nobody else: the
+  // displaced owner lost the credential principal role, the review duty and
+  // the acceptance authority in silence, and the audit row named the wrong
+  // person as the one told (pass 34 review).
+  const actorName = userName(db, actor.userId);
+  const notified = notifyOwnerSeatChange(db, {
+    projectSlug: input.projectSlug,
+    recipientUserId: input.targetUserId,
+    actor,
+    actorName,
+    change: { kind: "handed_off", taskKey: input.taskKey },
+  });
+  const displaced =
+    currentOwnerId && currentOwnerId !== input.targetUserId
+      ? notifyOwnerSeatChange(db, {
+          projectSlug: input.projectSlug,
+          recipientUserId: currentOwnerId,
+          actor,
+          actorName,
+          change: { kind: "taken_over", taskKey: input.taskKey },
+        })
+      : null;
   const ownershipDetails: NonNullable<AuditEventInput["details"]> = {
     previousOwnerUserId: currentOwnerId,
     newOwnerUserId: input.targetUserId,
   };
   if (notified) ownershipDetails.notified = notified;
+  if (displaced) ownershipDetails.notifiedDisplaced = displaced;
   recordAudit(db, {
     action: isTake ? "task.ownership.taken" : "task.ownership.handed_off",
     actor: { userId: actor.userId, label: actor.label },

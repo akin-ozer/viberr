@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { createActorResolver } from "~/shared/mapping/actor.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { resolveTaskFilePath, readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -232,6 +233,14 @@ export function notifyOwnerSeatChange(
       kind: "ownership",
       title,
       text,
+      // Pass 34 review: every other notifier passes `from`, and the
+      // notifications stream renders the actor from it — without one the row
+      // showed a dash and never named who changed the seat.
+      from: createActorResolver(db)({
+        kind: "human",
+        userId: input.actor.userId,
+        nameHint: input.actorName,
+      }),
       projectSlug: input.projectSlug,
       taskKey: input.change.taskKey,
     });

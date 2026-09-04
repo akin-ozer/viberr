@@ -4074,6 +4074,10 @@ describe("ruling 140(a): a named owner at creation", () => {
  * his missing credential produced.
  */
 describe("ruling 140(b): a seat change notifies the person whose seat it is", () => {
+  /** Pass 34 review: BOTH sides of a hand-off are told, independently — an
+   *  admin moving the seat between two other people used to tell the new owner
+   *  and leave the displaced one to find out from a failure packet. */
+
   const ownershipRows = (store: TestStore, userId: string) =>
     listNotifications(store.db, userId).filter((n) => n.kind === "ownership");
 
@@ -4114,7 +4118,7 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
     expect(ownershipRows(store, store.users.arda.id)).toHaveLength(0);
     expect(
       listAuditEvents(store.db, { action: "task.ownership.taken" })[0]!.details,
-    ).toMatchObject({ notified: { userId: store.users.murat.id } });
+    ).toMatchObject({ notifiedDisplaced: { userId: store.users.murat.id } });
   });
 
   it("an admin release tells the released owner; a self-take and a self-release tell nobody", async () => {
@@ -4186,6 +4190,38 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
     expect(
       listAuditEvents(store.db, { action: "task.ownership.handed_off" })[0]!.details,
     ).toMatchObject({ notified: { skipped: "silenced" } });
+  });
+
+  it("a THIRD-PARTY hand-off tells both sides: the new owner and the displaced one", async () => {
+    // Canary: pick one recipient by `isTake` again — the displaced owner is
+    // told nothing and the audit row names the wrong person.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-4", { ownerUserId: store.users.murat.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // Arda (admin) moves the seat from Murat to Selin: neither is the actor.
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-4", targetUserId: store.users.selin.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const gained = ownershipRows(store, store.users.selin.id);
+    const lost = ownershipRows(store, store.users.murat.id);
+    expect(gained).toHaveLength(1);
+    expect(gained[0]!.title).toContain(`${store.users.arda.name} handed you VIB-4`);
+    expect(lost).toHaveLength(1);
+    expect(lost[0]!.title).toContain(`${store.users.arda.name} took over VIB-4`);
+    expect(ownershipRows(store, store.users.arda.id)).toHaveLength(0);
+    const row = listAuditEvents(store.db, { action: "task.ownership.handed_off" })[0]!;
+    expect(row.details).toMatchObject({
+      notified: { userId: store.users.selin.id },
+      notifiedDisplaced: { userId: store.users.murat.id },
+    });
+    // The row names WHO did it, so the stream is not a dash (pass 34 review).
+    expect(gained[0]!.from).toMatchObject({ kind: "human", name: store.users.arda.name });
   });
 
   it("a creation that names someone else tells them", async () => {
