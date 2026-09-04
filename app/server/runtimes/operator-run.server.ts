@@ -113,6 +113,7 @@ import {
   type StartRunInput,
 } from "./run-service.server";
 import { getRun, patchRun } from "./run-store.server";
+import type { DependencyReleasePayload } from "~/shared/dependencies";
 import {
   describeRunFailure,
   type DescribeRunFailureInput,
@@ -190,6 +191,10 @@ export interface RunOperatorInput {
    *  turn instruction can tell the operator exactly what was decided rather than
    *  making it re-derive the answer from the timeline (R20-1). */
   resolvedOption?: ResolvedPacketOption;
+  /** `dependencies-released` trigger (ruling 131(e)): what the task waited on
+   *  and who cleared it, so the turn instruction names the entries and says
+   *  the base branch has changed since the hold. */
+  dependencyRelease?: DependencyReleasePayload;
   /** `scheduled` trigger: the note the human wrote when they set the re-run
    *  ("re-check the flaky test"). It is the REASON the run exists, so it rides
    *  into the turn instruction — a scheduled run that arrives as a bare

@@ -373,8 +373,12 @@ link 1 `active`, writes the file, re-projects and audits `goal.created`.
 this goal now". It runs from three task write paths (stage transition, archive or
 restore, acceptance), after `resume | skip_link | add_link`, and from
 `startGoalRunner` (a boot catch-up, then every 60 seconds over goals in
-`active | attention`). Each pass reads every linked task's state from its canonical
-file and applies:
+`active | attention`). The same three hooks and the same tick (`goalRunnerTick`)
+also run the dependency release engine (ruling 131(e), `releaseDependents` /
+`releaseDueDependents`): every held task in the project whose `blockedBy` entries
+are all done is released, so a link finishing releases whatever waited on it within
+the same write, and a hand edit the hooks never saw releases within a minute. Each
+pass reads every linked task's state from its canonical file and applies:
 
 - a failed link (its task archived or missing) with `onFailure: pause` parks the
   chain in `attention` and notifies the creator; with `continue` it marks the link

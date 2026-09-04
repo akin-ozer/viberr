@@ -918,6 +918,22 @@ interface GoalRunnerHost {
   [GOAL_RUNNER_KEY]?: { timer: ReturnType<typeof setInterval> };
 }
 
+/**
+ * One tick of the runner: every live chain reconciled, then (ruling 131(e))
+ * every held task whose wait is satisfied released, so a hand edit or a
+ * rescan the write hooks never saw still releases within a minute. Exported
+ * so the tick's contract is tested without driving the interval singleton.
+ */
+export async function goalRunnerTick(
+  db: DatabaseSync,
+  ctx: TaskMutationContext = {},
+): Promise<{ goals: number; released: number }> {
+  const goals = await reconcileAllGoals(db, ctx);
+  const { releaseDueDependents } = await import("./dependencies.server");
+  const released = await releaseDueDependents(db, ctx);
+  return { goals, released };
+}
+
 /** Boot: catch up once, then reconcile on a non-overlapping interval.
  *  Idempotent; the timer is unref'd so it never blocks exit. */
 export function startGoalRunner(db: DatabaseSync): void {
@@ -929,7 +945,7 @@ export function startGoalRunner(db: DatabaseSync): void {
   const tick = () => {
     if (running) return;
     running = true;
-    void reconcileAllGoals(db)
+    void goalRunnerTick(db)
       .catch((error) => {
         logger.error("goal runner tick failed", {
           err: error instanceof Error ? error : new Error(String(error)),

@@ -24,6 +24,12 @@ import {
 } from "~/shared/dependencies";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import {
+  deadDependencies,
+  dependenciesSatisfied,
+  listHeldTasks,
+  resolveDependencies,
+} from "~/server/projections/dependencies.server";
+import {
   loadProjectContext,
   notifyTaskWatchers,
   reprojectTask,
@@ -401,11 +407,144 @@ export async function announceRelease(
   );
   try {
     const { autoInvokeOperator } = await import("./task-actions.server");
-    await autoInvokeOperator(db, ctx, projectSlug, taskKey, "dependencies-released");
+    await autoInvokeOperator(db, ctx, projectSlug, taskKey, "dependencies-released", {
+      dependencyRelease: { entries: [...input.entries], clearedBy: input.clearedBy ?? null },
+    });
   } catch (error) {
     logger.warn("dependency release could not re-invoke the operator", {
       taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
+}
+
+// ---------------------------------------------------------------- engine
+
+/**
+ * Release ONE task when every entry it waits on is done (ruling 131(e)).
+ * Idempotent and convergent: an empty list has nothing to release, an
+ * unsatisfied list is left alone, and a satisfied one goes through the same
+ * two halves a person's clear does. Returns true when a release happened.
+ */
+export async function releaseTask(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<boolean> {
+  const ref = taskRef(ctx, projectSlug, taskKey);
+  const existing = readTaskFile(ref);
+  if (!existing) return false;
+  const fm = existing.parsed.frontmatter;
+  if (fm.archived || fm.blockedBy.length === 0) return false;
+  const entries = resolveDependencies(db, projectSlug, fm.blockedBy);
+  if (!dependenciesSatisfied(entries)) return false;
+  let cleared: string[] = [];
+  await updateTaskFile(ref, (parsed) => {
+    cleared = clearDependencies(parsed);
+  });
+  if (cleared.length === 0) return false; // a concurrent write got there first
+  await announceRelease(db, ctx, projectSlug, taskKey, { entries: cleared });
+  return true;
+}
+
+/**
+ * Sweep a project's held tasks and release every one whose list is satisfied.
+ * Called from the same task-write hooks that advance goal chains (a
+ * transition, an archive or restore, an acceptance) and from the goal
+ * runner's minute tick, so a hand edit or a rescan still releases within a
+ * minute. Cheap: one projection read, then file work only for the few held.
+ */
+export async function releaseDependents(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+): Promise<string[]> {
+  const released: string[] = [];
+  for (const held of listHeldTasks(db, projectSlug)) {
+    try {
+      if (await releaseTask(db, ctx, projectSlug, held.taskKey)) released.push(held.taskKey);
+    } catch (error) {
+      logger.error("dependency release failed", {
+        projectSlug,
+        taskKey: held.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  return released;
+}
+
+/** Every live project, for the runner's tick. */
+export async function releaseDueDependents(db: DatabaseSync, ctx: TaskActionContext = {}): Promise<number> {
+  // SAFETY: `slug` TEXT PRIMARY KEY and `archived` INTEGER NOT NULL on `projects`.
+  const rows = db.prepare(`SELECT slug FROM projects WHERE archived = 0`).all() as { slug: string }[];
+  let count = 0;
+  for (const row of rows) count += (await releaseDependents(db, ctx, row.slug)).length;
+  return count;
+}
+
+/** Fire-and-forget hook beside `maybeReconcileGoalForTask`: a task changed in
+ *  a way that can satisfy someone's wait (reached Done, was archived or
+ *  restored, was accepted). The engine converges, so a spurious call is a
+ *  cheap no-op. */
+export function maybeReleaseDependents(db: DatabaseSync, ctx: TaskActionContext, projectSlug: string): void {
+  void releaseDependents(db, ctx, projectSlug).catch((error) => {
+    logger.error("dependency release sweep failed", {
+      projectSlug,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  });
+}
+
+const DEAD_NOTE_TITLE = "Waiting on archived work";
+
+/**
+ * A dependency that can never complete (its task was archived) does not
+ * release the dependent (ruling 131(e)): it is noted ONCE on the dependent's
+ * timeline, the owner and supervisors are told once, and the task is left
+ * `waiting: human`, because a person owes the list an edit. The derived
+ * `blocked` readiness stays, and the entry renders as "archived" until they
+ * make it. Idempotent: a dependent whose newest note already says so is
+ * skipped.
+ */
+export async function noteDeadDependency(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  archivedKey: string,
+): Promise<string[]> {
+  const noted: string[] = [];
+  for (const held of listHeldTasks(db, projectSlug)) {
+    const entries = resolveDependencies(db, projectSlug, held.blockedBy);
+    const dead = deadDependencies(entries).filter((e) => e.taskKey === archivedKey);
+    if (dead.length === 0) continue;
+    const ref = taskRef(ctx, projectSlug, held.taskKey);
+    const existing = readTaskFile(ref);
+    if (!existing || existing.parsed.frontmatter.archived) continue;
+    const spelled = dead.map((e) => e.label).join(", ");
+    const text = `${archivedKey} was archived, so ${spelled} can never complete. This task stays held; edit what it waits on (remove the entry or point it elsewhere) to release it.`;
+    const newestNote = existing.parsed.timeline.find((e) => e.type === "note" && e.title === DEAD_NOTE_TITLE);
+    if (newestNote?.text === text) continue;
+    await updateTaskFile(ref, (parsed) => {
+      parsed.frontmatter.waiting = "human";
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "dependency-release" },
+        title: DEAD_NOTE_TITLE,
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, projectSlug, held.taskKey);
+    notifyTaskWatchers(
+      db,
+      { projectSlug, taskKey: held.taskKey, kind: "dependency", title: `${held.taskKey} waits on archived work`, text },
+      ctx,
+    );
+    noted.push(held.taskKey);
+  }
+  return noted;
 }

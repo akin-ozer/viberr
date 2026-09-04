@@ -544,6 +544,8 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
   it("ruling 131 set-task-dependencies: sets the wait, clears it as a release, refuses a bad reference by name", async () => {
     // Canary: drop the intent's `case` (every shape answers the unknown-intent
     // refusal), or route it through `setTaskMetadata`.
+    // SAFETY: arda holds `edit-task-meta`, so a valid list returns the intent's
+    // ok arm with its toast.
     const set = (await postIntent("VIB-153", ids.arda, {
       intent: "set-task-dependencies", blockedBy: "VIB-142, VIB-142\n",
     })) as { ok: true; toast: string };
@@ -560,6 +562,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(bad.init.status).toBe(400);
     expect(bad.data.error).toContain("VIB-153: a task cannot wait on itself");
 
+    // SAFETY: same arm as above; an empty list is valid and clears.
     const cleared = (await postIntent("VIB-153", ids.arda, {
       intent: "set-task-dependencies", blockedBy: "",
     })) as { ok: true; toast: string };

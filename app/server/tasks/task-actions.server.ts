@@ -56,7 +56,12 @@ import {
   describeRunFailure,
   type DescribeRunFailureInput,
 } from "./run-failure-remedy.server";
-import { validateDependencyRefs } from "./dependencies.server";
+import {
+  maybeReleaseDependents,
+  noteDeadDependency,
+  validateDependencyRefs,
+} from "./dependencies.server";
+import type { DependencyReleasePayload } from "~/shared/dependencies";
 import {
   compactTimelineEvents,
   DEFAULT_COMPACTION,
@@ -960,6 +965,24 @@ async function answerAskingAgent(
   }
 }
 
+/** What a trigger carries into the run beside its name: ONE trailing options
+ *  object (ruling 131 folded the growing positional tail). */
+export interface AutoInvokeOptions {
+  /** Transition-chain depth to thread into the run (transition + delivered triggers —
+   *  see OPERATOR_TRANSITION_CHAIN_CAP). Omitted → the run starts a fresh chain. */
+  transitionDepth?: number;
+  /** Owner ruling 2026-07-26 — the transition trigger carries WHAT moved and
+   *  WHO moved it, so the operator picks the task up knowing from → to. A
+   *  human-authored move whose intent isn't visible on the timeline is
+   *  something the operator ASKS about instead of guessing. */
+  transition?: { fromName: string; toName: string; byHuman: string | null };
+  /** R20-1 (F20-5): packet-resolved trigger — the option the human chose (kind,
+   *  title, optional note), so the turn instruction states the decision. */
+  resolvedOption?: ResolvedPacketOption;
+  /** Ruling 131(e): dependencies-released trigger — what was waited on. */
+  dependencyRelease?: DependencyReleasePayload;
+}
+
 /** Best-effort operator handoff; dynamically imported to avoid a module cycle.
  *  Exported for the GitHub reconciler (P14 follow-up): an out-of-band PR state
  *  change (`pr-diverged`) is a coordination event like any other, so the
@@ -978,18 +1001,9 @@ export async function autoInvokeOperator(
     | "delivered"
     | "packet-resolved"
     | "dependencies-released",
-  /** Transition-chain depth to thread into the run (transition + delivered triggers —
-   *  see OPERATOR_TRANSITION_CHAIN_CAP). Omitted → the run starts a fresh chain. */
-  transitionDepth?: number,
-  /** Owner ruling 2026-07-26 — the transition trigger carries WHAT moved and
-   *  WHO moved it, so the operator picks the task up knowing from → to. A
-   *  human-authored move whose intent isn't visible on the timeline is
-   *  something the operator ASKS about instead of guessing. */
-  transition?: { fromName: string; toName: string; byHuman: string | null },
-  /** R20-1 (F20-5): packet-resolved trigger — the option the human chose (kind,
-   *  title, optional note), so the turn instruction states the decision. */
-  resolvedOption?: ResolvedPacketOption,
+  options: AutoInvokeOptions = {},
 ): Promise<void> {
+  const { transitionDepth, transition, resolvedOption, dependencyRelease } = options;
   try {
     const { resolveOperatorAuthority } = await import("./operator-actions.server");
     const authority = resolveOperatorAuthority(ctx, projectSlug);
@@ -1010,6 +1024,7 @@ export async function autoInvokeOperator(
       runInput.transitionByHuman = transition.byHuman;
     }
     if (resolvedOption) runInput.resolvedOption = resolvedOption;
+    if (dependencyRelease) runInput.dependencyRelease = dependencyRelease;
     await runOperator(db, runInput);
   } catch (error) {
     logger.error("auto operator invocation failed", {
@@ -4872,15 +4887,17 @@ export async function transitionStage(
         input.projectSlug,
         input.taskKey,
         "transition",
-        chainDepth,
         {
-          fromName: stageName(project, fromStageId),
-          toName: stageName(project, input.toStageId),
-          // Operator-authored moves need no explanation; a HUMAN's move tells
-          // the operator who to honor — or to ask — by name (NEW-4 tags).
-          byHuman: ctx.operatorAuthorized
-            ? null
-            : (humanActorRef(db, actor).nameHint ?? actor.label),
+          transitionDepth: chainDepth,
+          transition: {
+            fromName: stageName(project, fromStageId),
+            toName: stageName(project, input.toStageId),
+            // Operator-authored moves need no explanation; a HUMAN's move tells
+            // the operator who to honor — or to ask — by name (NEW-4 tags).
+            byHuman: ctx.operatorAuthorized
+              ? null
+              : (humanActorRef(db, actor).nameHint ?? actor.label),
+          },
         },
       );
     }
@@ -4893,6 +4910,9 @@ export async function transitionStage(
     const { maybeReconcileGoalForTask } = await import("./goal-actions.server");
     maybeReconcileGoalForTask(db, ctx, input.projectSlug, input.taskKey);
   })().catch(() => {});
+  // Ruling 131(e): a move into (or out of) the terminal stage can satisfy a
+  // dependent's wait. Same fire-and-forget posture; the engine converges.
+  maybeReleaseDependents(db, ctx, input.projectSlug);
 
   // R15-2 (owner ruling 2026-07-28): delivery (push + review PR) is an OPERATOR
   // decision, never a stage side-effect — the transitionStage auto-delivery hook
@@ -5543,7 +5563,7 @@ export async function performDelivery(
             projectSlug,
             taskKey,
             "delivered",
-            nextTransitionChainDepth(ctx),
+            { transitionDepth: nextTransitionChainDepth(ctx) },
           );
         }
       } else if (ctx.operatorAuthorized === true) {
@@ -6365,6 +6385,20 @@ export async function setTaskArchived(
         : { stage: existing.parsed.frontmatter.stage },
   });
 
+  // Ruling 131(e): a dependent waiting on THIS task can never be released by
+  // it now. Noted once on each dependent (and its watchers told) BEFORE the
+  // archive returns, so the person who archived sees the consequence at once.
+  if (input.archived) {
+    try {
+      await noteDeadDependency(db, ctx, input.projectSlug, input.taskKey);
+    } catch (error) {
+      logger.warn("dead-dependency notice failed", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+
   // Ruling 99: archiving a goal-chain link fails it (the chain pauses or
   // rides past, per the goal's own policy); a restore lets the reconciler
   // re-derive the truth. Fire-and-forget; the engine converges.
@@ -6372,6 +6406,8 @@ export async function setTaskArchived(
     const { maybeReconcileGoalForTask } = await import("./goal-actions.server");
     maybeReconcileGoalForTask(db, ctx, input.projectSlug, input.taskKey);
   })().catch(() => {});
+  // Ruling 131(e): a restore can satisfy a dependent's wait again.
+  maybeReleaseDependents(db, ctx, input.projectSlug);
 
   return {
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
@@ -7095,9 +7131,7 @@ export async function resolvePacket(
         input.projectSlug,
         input.taskKey,
         "packet-resolved",
-        undefined,
-        undefined,
-        resolvedOption,
+        { resolvedOption },
       );
     }
   }
@@ -7522,9 +7556,7 @@ export async function resolvePacket(
         input.projectSlug,
         input.taskKey,
         "packet-resolved",
-        undefined,
-        undefined,
-        handoff,
+        { resolvedOption: handoff },
       );
     }
   }
@@ -8651,6 +8683,8 @@ export async function applyAcceptanceWrite(
       const { maybeReconcileGoalForTask } = await import("./goal-actions.server");
       maybeReconcileGoalForTask(db, ctx, input.projectSlug, input.taskKey);
     })().catch(() => {});
+    // Ruling 131(e): an acceptance is the usual way a waited-on task is done.
+    maybeReleaseDependents(db, ctx, input.projectSlug);
   }
   // U3: `false` means a concurrent acceptance had already closed this task —
   // the caller's audit row and follow-up effects belong to THAT write, not to

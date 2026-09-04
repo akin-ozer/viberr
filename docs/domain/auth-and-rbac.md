@@ -255,9 +255,9 @@ read and the person's own Profile card, and never the unauthenticated health bod
 
 ## 7. Profile and preferences (`/profile`)
 
-Identity (name, title; audit `profile.updated`), notification routing (six in-app
-opt-out toggles: packets, approvals, mentions, policy, quality, controller; enforced
-inside `createNotification`), appearance (theme `light | dark | system` persisted to
+Identity (name, title; audit `profile.updated`), notification routing (eight in-app
+opt-out toggles: packets, approvals, mentions, policy, quality, controller,
+dependencies (ruling 131) and ownership; enforced inside `createNotification`), appearance (theme `light | dark | system` persisted to
 `users.theme` and the `viberr_theme` cookie; reduce motion; default timeline filter),
 a read-only "Your access" table rendered from the same RBAC rows, **Agent accounts**
 (below), GitHub identity (disconnect flips `idp` back to `local`, refused without a

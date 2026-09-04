@@ -144,7 +144,8 @@ declaration that names nothing on this board is treated as unrestricted.
    fact the operator weighs, ruling 98); terminal → `waiting = none`; leaving the
    entry stage attaches the operator and clears the triage gate; `task.transitioned`
    audit and a `transition` timeline event; the operator is re-triggered
-   (`transition`); goal chains reconcile.
+   (`transition`); goal chains reconcile; held dependents are swept
+   (`maybeReleaseDependents`, ruling 131(e)).
 
 ## 6. The three signals on a card
 
@@ -349,7 +350,8 @@ Every writer to the terminal stage goes through one contract:
    guardrail (default on) deletes the remote task branch.
 
 Post-acceptance: the task workspace is reclaimed once no run is live, goal chains
-reconcile, and the board renders "accepted".
+reconcile, held dependents are swept (ruling 131(e): a task whose every `blockedBy`
+entry is now done is released), and the board renders "accepted".
 
 ## 12. Archive and restore
 
@@ -358,7 +360,12 @@ file, its timeline and audit rows survive; the card leaves the board's default v
 and the review queue; the open packet and pending recommendations are withdrawn;
 pending schedules are cancelled; `restore-task` brings it back. Archiving through a
 `pr-diverged` recovery packet may also delete the remote branch. An archived task
-cannot be moved.
+cannot be moved. Archiving a task another task waits on does not release the
+dependent (ruling 131(e)): before the archive returns, `noteDeadDependency` writes
+one "Waiting on archived work" note on each dependent, notifies its owner and
+supervisors once (`dependency`), and sets it `waiting: human`, because a person owes
+the list an edit; the entry renders as archived until they make it. A restore sweeps
+the dependents again.
 
 An `archive_task` option with `deleteBranch: true` deletes the remote branch through the
 same door every branch cleanup uses: a cached open PR is re-confirmed against GitHub first
@@ -389,7 +396,11 @@ retention in
 
 Kinds: `packet` (a decision waits, `ptype` `input | blocked`), `approval` (a stage
 approval or acceptance waits), `mention`, `quality`, `policy` (a violation or
-refusal), and `controller` (goal progress). Recipients are the task owner plus
-project admins and maintainers, honouring each person's routing toggles. Loading a
+refusal), `controller` (goal progress), `dependency` (ruling 131: the work a task
+waited on landed and it was released, or a dependency can never complete because its
+task was archived; its own routing toggle, "dependencies"), and `ownership`.
+Recipients are the task owner plus project admins and maintainers, honouring each
+person's routing toggles; a toggle off drops only the row, never the note, the audit
+row or the operator re-invoke. Loading a
 task page marks all of the viewer's unread notifications for that task read
 (ruling 71); the bell and inbox mark-read explicitly.

@@ -108,3 +108,13 @@ export function splitDependencyText(text: string): string[] {
     .map((s) => s.trim())
     .filter(Boolean);
 }
+
+/**
+ * Ruling 131(e): what the `dependencies-released` operator trigger carries —
+ * the entries the task waited on, and the person who cleared the list by hand
+ * when it was not the engine (null for an engine release).
+ */
+export interface DependencyReleasePayload {
+  entries: string[];
+  clearedBy: string | null;
+}
