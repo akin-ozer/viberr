@@ -287,6 +287,71 @@ describe("AgentAccountsPanel", () => {
     });
   });
 
+  it("ruling 130(d): a connected card shows the last refusal Viberr observed on the account, or a spent window as a neutral pill", () => {
+    // Canary: remove the `lastRefusal` render branch and both pills vanish.
+    const connected = (name: "claude" | "codex") => ({
+      ...HEALTH_NONE,
+      backend: name,
+      userId: "u_arda",
+      available: true,
+      kind: "login" as const,
+      method: name === "claude" ? ("claudeai" as const) : ("device" as const),
+      verification: "file" as const,
+      verifiedAt: "2026-09-01T10:00:00.000Z",
+      connectedAt: "2026-09-01T10:00:00.000Z",
+      detail: null,
+    });
+    const { container } = renderPanel([
+      backend("claude", {
+        health: connected("claude"),
+        lastRefusal: {
+          kind: "credential",
+          providerText: "The account's organization does not allow Claude Code (oauth_org_not_allowed).",
+          observedAt: "2026-09-07T10:00:00.000Z",
+          runId: "run_refused",
+          resetsAt: null,
+        },
+      }),
+      backend("codex", {
+        health: connected("codex"),
+        lastRefusal: {
+          kind: "quota",
+          providerText: "You've hit your usage limit.",
+          observedAt: "2026-09-07T10:05:00.000Z",
+          runId: "run_spent",
+          resetsAt: "2026-09-07T11:50:00.000Z",
+        },
+      }),
+    ]);
+    const pills = Array.from(container.querySelectorAll(".pill")).map((p) => p.textContent ?? "");
+    expect(pills.some((t) => t.startsWith("refused by the provider · "))).toBe(true);
+    expect(pills.some((t) => t.startsWith("usage window spent · reopens "))).toBe(true);
+    // The credential refusal is a risk pill; the spent window is neutral.
+    const refused = Array.from(container.querySelectorAll(".pill")).find((p) => /refused by the provider/.test(p.textContent ?? ""))!;
+    expect(refused.className).toMatch(/risk/);
+    const spent = Array.from(container.querySelectorAll(".pill")).find((p) => /usage window spent/.test(p.textContent ?? ""))!;
+    expect(spent.className).not.toMatch(/risk/);
+    // The note carries the provider's own words and says what the pill is.
+    const note = container.querySelector('[data-refusal="credential"]')!;
+    expect(note.textContent).toContain("The account's organization does not allow Claude Code (oauth_org_not_allowed).");
+    expect(note.textContent).toContain("last refusal Viberr observed on this account");
+    expect(note.textContent).toContain("not proof the account works");
+    expect(note.textContent).toContain("any completed Claude run retires it");
+    const window_ = container.querySelector('[data-refusal="quota"]')!;
+    expect(window_.textContent).toContain("Spent as of");
+    expect(window_.textContent).toContain("reopens");
+    expect(window_.textContent).toContain("Any completed Codex run retires this notice");
+  });
+
+  it("ruling 130(d): no refusal, no pill and no note", () => {
+    const { container } = renderPanel([
+      backend("claude", { lastRefusal: null }),
+      backend("codex"),
+    ]);
+    expect(container.querySelector("[data-refusal]")).toBeNull();
+    expect(container.textContent).not.toMatch(/refused by the provider|usage window spent/);
+  });
+
   it("C6: the connected-on and verified dates hydrate safely — the UTC day first, the viewer's calendar date after hydration", () => {
     const backends = [
       backend("claude", {

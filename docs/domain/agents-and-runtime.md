@@ -134,7 +134,10 @@ ANY person retires an exhaustion or refusal. The principal reaches Insights (org
 admin), `instance_health` (signed in) and the person's own Profile card; it is stripped
 from the unauthenticated `/resources/health` body. Insights renders both; "no reading
 yet" is neutral; a refused row says whose account, and a reading row names the hour
-of its reset.
+of its reset. The Profile card (`getProfileBackends` → `lastRefusal`) shows the
+viewer's OWN record only: a `risk` "refused by the provider · <when>" pill with the
+provider's sentence, or a neutral "usage window spent · reopens <when>" pill, each
+stated as the last refusal Viberr observed, retired by any completed run.
 
 ### 2.4 Claude adapter
 

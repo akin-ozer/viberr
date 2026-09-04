@@ -415,6 +415,52 @@ describe("/profile agent accounts (ruling 127)", () => {
     resetFakeVendorEnv();
   }
 
+  it("ruling 130(d): the loader attaches the viewer's OWN last refusal and never another person's", async () => {
+    // Live (F34-1): every run on an account was refused with a 403 while the
+    // card said "connected · verified". Canary: drop the
+    // `credentialUserId === userId` filter in `ownRefusal` and Murat's card
+    // shows Arda's refusal.
+    const quota = await import("~/server/runtimes/backend-quota.server");
+    quota.recordBackendCredentialRefusal(app.db, "claude", {
+      credentialUserId: ardaId,
+      credentialLabel: "Arda Test",
+      providerText: "The account's organization does not allow Claude Code (oauth_org_not_allowed).",
+      runId: "run_refused",
+      observedAt: "2026-09-07T10:00:00.000Z",
+    });
+    quota.recordBackendQuotaExhaustion(app.db, "codex", {
+      credentialUserId: ardaId,
+      credentialLabel: "Arda Test",
+      resetsAt: 1_788_781_800,
+      resetsAtPrecision: "exact",
+      providerText: "You've hit your usage limit.",
+      runId: "run_spent",
+      observedAt: "2026-09-07T10:05:00.000Z",
+    });
+    try {
+      const arda = await backendsOf(ardaId);
+      expect(arda[0]!.lastRefusal).toEqual({
+        kind: "credential",
+        providerText: "The account's organization does not allow Claude Code (oauth_org_not_allowed).",
+        observedAt: "2026-09-07T10:00:00.000Z",
+        runId: "run_refused",
+        resetsAt: null,
+      });
+      expect(arda[1]!.lastRefusal).toEqual({
+        kind: "quota",
+        providerText: "You've hit your usage limit.",
+        observedAt: "2026-09-07T10:05:00.000Z",
+        runId: "run_spent",
+        resetsAt: "2026-09-07T11:50:00.000Z",
+      });
+      const murat = await backendsOf(murId);
+      expect(murat.map((b) => b.lastRefusal)).toEqual([null, null]);
+    } finally {
+      quota.clearBackendCredentialRefusal(app.db, "claude");
+      quota.clearBackendQuotaExhaustion(app.db, "codex");
+    }
+  });
+
   it("ships both backends unconnected, with no secret and no box in the payload", async () => {
     const backends = await backendsOf(murId);
     expect(backends.map((b) => b.backend)).toEqual(["claude", "codex"]);

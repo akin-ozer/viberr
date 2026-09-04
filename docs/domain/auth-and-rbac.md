@@ -298,6 +298,15 @@ Two routes in, both the vendor's own:
   card saying so. `backend-disconnect` runs the vendor's own logout, removes the
   credential file and drops the row (transcripts stay).
 
+**The last refusal Viberr observed** (ruling 130(d), pass 34 F34-1). A connected card
+also reads the quota store (`latestBackendRateLimits`) and shows, ONLY when the record's
+`credentialUserId` is the viewer, a `risk` pill "refused by the provider · <when>" with
+the provider's own sentence in a "Last refusal" row, or a neutral "usage window spent ·
+reopens <when>" pill with a "Usage window" row. The copy says what the pill is: the last
+refusal Viberr observed on this account, which any completed run on that backend
+retires, so the absence of a pill is not proof the account works. Another person's
+refusal, or a record written before principals were stored, never appears on this card.
+
 Viberr never implements the vendors' OAuth, never reads, copies or stores a Claude.ai or
 ChatGPT **session** token, and offers no setup-token field: Anthropic's Claude Code
 legal page requires a hosting platform to have each end user authenticate with their own

@@ -15,6 +15,11 @@ import {
   getBackendLogin,
   type LoginSessionView,
 } from "~/server/runtimes/backend-login.server";
+import {
+  latestBackendRateLimits,
+  providerSentence,
+  type BackendQuotaRow,
+} from "~/server/runtimes/backend-quota.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { ROLE_IDS } from "~/features/policy/policy-data";
 import type { ProjectRole } from "~/shared/rbac";
@@ -65,6 +70,26 @@ export interface ProfileMembership {
  * is what this vendor actually offers, so the card renders the buttons the
  * vendor supports instead of a hardcoded pair.
  */
+/**
+ * Ruling 130(d) (pass 34, F34-1): the last refusal Viberr OBSERVED on this
+ * person's OWN account, for their Agent-accounts card. Live, every run on an
+ * account was refused with a 403 while the card said "connected · verified".
+ * A completed run on the backend by anyone retires the record, so the absence
+ * of a refusal is not proof the account works; the card says so.
+ */
+export interface ProfileBackendRefusal {
+  /** `credential`: the provider rejected the account; `quota`: a usage window
+   *  is spent. */
+  kind: "credential" | "quota";
+  /** The provider's own sentence, the provider half only. */
+  providerText: string;
+  /** ISO instant of the failure line the record was read off. */
+  observedAt: string;
+  runId: string;
+  /** ISO instant the spent window reopens (quota only; null when undated). */
+  resetsAt: string | null;
+}
+
 export interface ProfileBackend {
   backend: RealBackend;
   health: UserBackendHealth;
@@ -73,6 +98,36 @@ export interface ProfileBackend {
     signIn: LoginMethod[];
     paste: PastedKind[];
   };
+  /** The viewer's own last observed refusal on this backend, or null. Optional
+   *  so fixtures that predate it stay valid; the loader always sets it. */
+  lastRefusal?: ProfileBackendRefusal | null;
+}
+
+/** The record is this person's only when the run it was read off billed them
+ *  (`credentialUserId`, ruling 127): another person's refusal, or a record
+ *  written before principals were stored, is never shown on this card. */
+function ownRefusal(row: BackendQuotaRow | undefined, userId: string): ProfileBackendRefusal | null {
+  const refused = row?.credentialRefused;
+  if (refused && refused.credentialUserId === userId) {
+    return {
+      kind: "credential",
+      providerText: providerSentence(refused.providerText),
+      observedAt: refused.observedAt,
+      runId: refused.runId,
+      resetsAt: null,
+    };
+  }
+  const spent = row?.exhausted;
+  if (spent && spent.credentialUserId === userId) {
+    return {
+      kind: "quota",
+      providerText: providerSentence(spent.providerText),
+      observedAt: spent.observedAt,
+      runId: spent.runId,
+      resetsAt: spent.resetsAt === null ? null : new Date(spent.resetsAt * 1000).toISOString(),
+    };
+  }
+  return null;
 }
 
 /** Both agent backends, in the order the panel renders them. */
@@ -88,10 +143,13 @@ export function getProfileBackends(
   db: DatabaseSync,
   userId: string,
 ): ProfileBackend[] {
+  // One read of the quota store for both cards (ruling 130(d)).
+  const limits = new Map(latestBackendRateLimits(db).map((row) => [row.backend, row]));
   return PROFILE_BACKENDS.map((backend) => ({
     backend,
     health: userBackendHealth(db, userId, backend),
     login: getBackendLogin(userId, backend),
+    lastRefusal: ownRefusal(limits.get(backend), userId),
     methods: {
       // The sign-in list is the DRIVER's own table, not a copy of it: a card
       // that offered a flow `startBackendLogin` refuses would post a button

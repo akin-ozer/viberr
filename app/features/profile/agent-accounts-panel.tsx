@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useFetcher, useRevalidator } from "react-router";
 import type { FetcherWithComponents } from "react-router";
 import { Icon } from "~/ui/icon";
-import { LocalCalendarDate } from "~/ui/local-time";
+import { LocalCalendarDate, LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
@@ -193,6 +193,10 @@ function AgentAccountCard({
 }) {
   const { backend, health, methods } = data;
   const label = BACKEND_LABEL[backend];
+  // Ruling 130(d) (pass 34, F34-1): the last refusal Viberr OBSERVED on this
+  // person's own account. The card used to say "connected · verified" while
+  // every run on the account was refused with a 403.
+  const lastRefusal = data.lastRefusal ?? null;
   const push = useToast();
   const revalidator = useRevalidator();
   const [paste, setPaste] = useState<"api_key" | "access_token" | null>(null);
@@ -457,7 +461,50 @@ function AgentAccountCard({
                 sign-in file missing
               </Pill>
             )}
+            {lastRefusal?.kind === "credential" ? (
+              <Pill kind="risk" sm>
+                refused by the provider · <LocalDayDotTime iso={lastRefusal.observedAt} />
+              </Pill>
+            ) : lastRefusal?.kind === "quota" ? (
+              <Pill kind="neutral" sm>
+                usage window spent
+                {lastRefusal.resetsAt ? (
+                  <>
+                    {" "}· reopens <LocalDayDotTime iso={lastRefusal.resetsAt} />
+                  </>
+                ) : null}
+              </Pill>
+            ) : null}
           </div>
+          {lastRefusal ? (
+            <div className="kv-row" data-refusal={lastRefusal.kind}>
+              <span className="k">
+                {lastRefusal.kind === "credential" ? "Last refusal" : "Usage window"}
+              </span>
+              <span className="v plain">
+                {lastRefusal.kind === "credential" ? (
+                  <>
+                    Refused by the provider on{" "}
+                    <LocalDayDotTime iso={lastRefusal.observedAt} />:{" "}
+                    {lastRefusal.providerText} This is the last refusal Viberr
+                    observed on this account; any completed {label} run retires
+                    it, so its absence is not proof the account works.
+                  </>
+                ) : (
+                  <>
+                    Spent as of <LocalDayDotTime iso={lastRefusal.observedAt} />
+                    {lastRefusal.resetsAt ? (
+                      <>
+                        ; reopens <LocalDayDotTime iso={lastRefusal.resetsAt} />
+                      </>
+                    ) : null}
+                    . Any completed {label} run retires this notice; until then,
+                    runs billed to this account are refused.
+                  </>
+                )}
+              </span>
+            </div>
+          ) : null}
           <div className="cred-manage">
             {/* The health detail for a vanished credential file ends "Sign in
                 again on your Profile → Agent accounts", which is THIS card: so
