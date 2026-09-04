@@ -310,6 +310,7 @@ describe("AgentAccountsPanel", () => {
           observedAt: "2026-09-07T10:00:00.000Z",
           runId: "run_refused",
           resetsAt: null,
+          resetsAtPrecision: null,
         },
       }),
       backend("codex", {
@@ -320,6 +321,7 @@ describe("AgentAccountsPanel", () => {
           observedAt: "2026-09-07T10:05:00.000Z",
           runId: "run_spent",
           resetsAt: "2026-09-07T11:50:00.000Z",
+          resetsAtPrecision: "exact",
         },
       }),
     ]);
@@ -545,5 +547,60 @@ describe("AgentAccountsPanel", () => {
       await vi.advanceTimersByTimeAsync(50);
     });
     expect(queryByText("Claude connected")).toBeTruthy();
+  });
+});
+
+/**
+ * Pass 34 review: a reset the provider gave in WORDS is a UTC calendar day,
+ * not a minute — the card rendered it as a to-the-minute local time, which can
+ * name the wrong day and claims precision the record never had.
+ */
+describe("the usage-window reset renders at the precision it has", () => {
+  const connectedHealth = (name: "claude" | "codex") => ({
+    ...HEALTH_NONE,
+    backend: name,
+    userId: "u_arda",
+    available: true,
+    kind: "login" as const,
+    method: name === "claude" ? ("claudeai" as const) : ("device" as const),
+    verification: "file" as const,
+    verifiedAt: "2026-09-01T10:00:00.000Z",
+    connectedAt: "2026-09-01T10:00:00.000Z",
+    detail: null,
+  });
+
+  it("a prose-derived reset shows the UTC day; an exact one keeps its clock", () => {
+    // Canary: drop `resetsAtPrecision` from the card (render every reset with
+    // `LocalDayDotTime`) — the prose case regains a minute it never had.
+    const prose = renderPanel([
+      backend("claude", {
+        health: connectedHealth("claude"),
+          lastRefusal: {
+            kind: "quota",
+            providerText: "Usage limit reached.",
+            observedAt: "2026-09-04T10:00:00.000Z",
+            runId: "run_a",
+            resetsAt: "2026-09-07T00:00:00.000Z",
+          resetsAtPrecision: "prose",
+        },
+      }),
+    ]);
+    expect(prose.container.textContent).toContain("2026-09-07 (UTC)");
+    prose.unmount();
+
+    const exact = renderPanel([
+      backend("claude", {
+        health: connectedHealth("claude"),
+          lastRefusal: {
+            kind: "quota",
+            providerText: "Usage limit reached.",
+            observedAt: "2026-09-04T10:00:00.000Z",
+            runId: "run_b",
+            resetsAt: "2026-09-07T11:50:00.000Z",
+          resetsAtPrecision: "exact",
+        },
+      }),
+    ]);
+    expect(exact.container.textContent).not.toContain("2026-09-07 (UTC)");
   });
 });

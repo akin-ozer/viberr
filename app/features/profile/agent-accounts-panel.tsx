@@ -8,7 +8,9 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
 import { utcDayKey } from "~/shared/dates/format";
 import type { BackendLoginPollData } from "~/routes/resources.backend-login";
-import type { ProfileBackend } from "./profile-query.server";
+import type { ProfileBackend,
+  ProfileBackendRefusal,
+} from "./profile-query.server";
 import type { ProfileActionData } from "./profile-page";
 import type { LoginState } from "~/server/runtimes/backend-login.server";
 import type { LoginMethod } from "~/server/runtimes/backend-credentials.server";
@@ -470,7 +472,7 @@ function AgentAccountCard({
                 usage window spent
                 {lastRefusal.resetsAt ? (
                   <>
-                    {" "}· reopens <LocalDayDotTime iso={lastRefusal.resetsAt} />
+                    {" "}· reopens <RefusalReset refusal={lastRefusal} />
                   </>
                 ) : null}
               </Pill>
@@ -591,6 +593,21 @@ function AgentAccountCard({
 }
 
 // ------------------------------------------------------------------- panel
+
+/**
+ * Pass 34 review: a reset the provider gave in WORDS is a UTC calendar day, not
+ * a minute. Rendering it as a local time claimed precision the record never
+ * had (and could name the wrong day); `exact` and `clock` are real instants and
+ * keep their hour, viewer-local after hydration.
+ */
+function RefusalReset({ refusal }: { refusal: ProfileBackendRefusal }) {
+  if (!refusal.resetsAt) return null;
+  return refusal.resetsAtPrecision === "exact" || refusal.resetsAtPrecision === "clock" ? (
+    <LocalDayDotTime iso={refusal.resetsAt} />
+  ) : (
+    <>{utcDayKey(refusal.resetsAt)} (UTC)</>
+  );
+}
 
 export function AgentAccountsPanel({
   backends,

@@ -445,6 +445,7 @@ describe("/profile agent accounts (ruling 127)", () => {
         observedAt: "2026-09-07T10:00:00.000Z",
         runId: "run_refused",
         resetsAt: null,
+        resetsAtPrecision: null,
       });
       expect(arda[1]!.lastRefusal).toEqual({
         kind: "quota",
@@ -452,6 +453,7 @@ describe("/profile agent accounts (ruling 127)", () => {
         observedAt: "2026-09-07T10:05:00.000Z",
         runId: "run_spent",
         resetsAt: "2026-09-07T11:50:00.000Z",
+        resetsAtPrecision: "exact",
       });
       const murat = await backendsOf(murId);
       expect(murat.map((b) => b.lastRefusal)).toEqual([null, null]);

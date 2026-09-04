@@ -374,7 +374,13 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                       // to-the-minute local time we cannot stand behind.
                       refusal.resetsAt != null
                         ? `retry after ${
-                            hydrated && refusal.resetsAtPrecision === "exact"
+                            // Pass 34 review: `clock` is a to-the-minute UTC
+                            // instant too (a provider's "resets 11:50am (UTC)"),
+                            // so it keeps its hour like `exact` — it used to
+                            // fall into the prose branch and lose it.
+                            hydrated &&
+                            (refusal.resetsAtPrecision === "exact" ||
+                              refusal.resetsAtPrecision === "clock")
                               ? formatDayDotTime(new Date(refusal.resetsAt * 1000).toISOString())
                               : // P07-I: a prose-derived date is a UTC calendar
                                 // day, and says so — it can be a day off locally.

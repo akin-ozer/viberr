@@ -88,6 +88,10 @@ export interface ProfileBackendRefusal {
   runId: string;
   /** ISO instant the spent window reopens (quota only; null when undated). */
   resetsAt: string | null;
+  /** How exact that instant is (pass 34 review): `exact`/`clock` carry a real
+   *  minute, `prose` is a UTC calendar DAY the provider named in words, and a
+   *  surface that renders it as a local time claims precision it never had. */
+  resetsAtPrecision: "exact" | "prose" | "clock" | null;
 }
 
 export interface ProfileBackend {
@@ -115,6 +119,7 @@ function ownRefusal(row: BackendQuotaRow | undefined, userId: string): ProfileBa
       observedAt: refused.observedAt,
       runId: refused.runId,
       resetsAt: null,
+      resetsAtPrecision: null,
     };
   }
   const spent = row?.exhausted;
@@ -125,6 +130,7 @@ function ownRefusal(row: BackendQuotaRow | undefined, userId: string): ProfileBa
       observedAt: spent.observedAt,
       runId: spent.runId,
       resetsAt: spent.resetsAt === null ? null : new Date(spent.resetsAt * 1000).toISOString(),
+      resetsAtPrecision: spent.resetsAtPrecision ?? null,
     };
   }
   return null;

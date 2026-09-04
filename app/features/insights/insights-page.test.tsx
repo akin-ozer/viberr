@@ -322,6 +322,26 @@ describe("InsightsPage", () => {
     // must NOT collapse to (its own rendering is the viewer's locale string).
     expect(exact.getByText(/retry after /)).toBeTruthy();
     expect(exact.queryByText(/retry after 2026-09-18/)).toBeNull();
+    cleanup();
+
+    // Pass 34 review: a `clock` reset is a to-the-minute UTC instant too (a
+    // provider's "resets 11:50am (UTC)"), so it keeps its hour like `exact`.
+    // Canary: drop the `clock` arm from the hydrated branch — the hour is lost
+    // and the row collapses to the bare UTC day.
+    const clock = renderPage({
+      ...FULL,
+      backendQuota: [
+        { backend: "claude", reading: null, credentialRefused: null, exhausted: null },
+        {
+          backend: "codex",
+          reading: null,
+          credentialRefused: null,
+          exhausted: { ...REFUSED, resetsAtPrecision: "clock" },
+        },
+      ],
+    });
+    expect(clock.getByText(/retry after /)).toBeTruthy();
+    expect(clock.queryByText(/retry after 2026-09-18/)).toBeNull();
   });
 
   /**
