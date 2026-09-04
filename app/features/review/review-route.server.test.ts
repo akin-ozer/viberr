@@ -118,6 +118,7 @@ describe("/projects/:slug/review", () => {
       dueDate: null,
       waiting: "none",
       packet: null,
+      goalEditPending: false,
       latestEventText: null,
       pr: null,
       validation: "none",

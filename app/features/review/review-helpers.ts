@@ -17,6 +17,8 @@ export interface ReviewRowView {
   dueDate: string | null;
   waiting: "human" | "agent" | "none";
   packet: { kind: string; title: string } | null;
+  /** Ruling 138: the packet is decided and waits for the edited goal. */
+  goalEditPending: boolean;
   latestEventText: string | null;
   pr: {
     number: number;
@@ -120,6 +122,11 @@ export function reviewRowSub(t: ReviewRowView): string {
   // F10-11: a not-yet-acceptable task states WHY (failing / awaiting a reviewer /
   // no delivered revision) instead of a generic "needs a human decision".
   if (t.blockReason) return t.blockReason;
+  // Ruling 138: a decided edit_goal packet is not a decision still owed — the
+  // row says what is owed instead of re-offering the packet.
+  if (t.goalEditPending) {
+    return "Goal edit pending: save the edited goal to clear the decision packet.";
+  }
   if (t.packet) return t.packet.kind + ": " + t.packet.title;
   // P14-LV-05: live PR state outranks the newest timeline note.
   if (t.pr) return prStateSub(t.pr);

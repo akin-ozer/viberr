@@ -45,6 +45,8 @@ import {
   operatorPlanToolsFor,
   resetOperatorLeasesForTests,
   runOperator,
+  authoredPacketOptions,
+  operatorPlanSchemaFor,
 } from "./operator-run.server";
 import * as operatorPrompts from "./operator-run.server";
 import { readDefaultBranchFile } from "~/server/tasks/operator-repo-read.server";
@@ -1119,6 +1121,33 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
       ),
     ).not.toContain("deliver_for_review");
   });
+
+  // Ruling 138 (pass 34, U34-10): goalDraft rides the plan and its schema requires the key.
+  it("authoredPacketOptions carries a trimmed goalDraft, and the plan schema requires the key", () => {
+    // Canary: remove the carry in `authoredPacketOptions`, or drop "goalDraft"
+    // from the option item's `required`.
+    const carried = authoredPacketOptions([
+      { kind: "edit_goal", title: "Ship the export", detail: null, recommended: true, goalDraft: " Deliver a CSV export. " },
+      { kind: "hold_runtime_debug", title: "Hold", detail: null, recommended: false, goalDraft: null },
+    ]);
+    expect(carried?.[0]?.goalDraft).toBe("Deliver a CSV export.");
+    expect(carried?.[1]?.goalDraft).toBeUndefined();
+
+    const schema = operatorPlanSchemaFor(
+      authority({
+        "append-typed-events": "direct",
+        "generate-packets": "direct",
+        "stage-transitions": "direct",
+        "dispatch-agents": "direct",
+        "completion-for-acceptance": "human",
+      }),
+    );
+    const item = schema.properties.actions.items.properties.packetOptions.items;
+    expect(item.required).toContain("goalDraft");
+    expect(item.properties.goalDraft.type).toEqual(["string", "null"]);
+    expect(item.properties.goalDraft.description).toContain("written AS a goal");
+  });
+
 });
 
 describe("pr-diverged turn instruction (both backends)", () => {
@@ -1291,6 +1320,15 @@ describe("pr-diverged turn instruction (both backends)", () => {
       expect(buildCodexOperatorPrompt(drifted(), "pr-diverged")).toContain("UNREVIEWED");
     });
   });
+
+  // Ruling 138: the open_packet paragraph says what becomes the goal editor's draft.
+  it("the open_packet paragraph tells the operator what becomes the draft, on a real trigger", () => {
+    // Canary: remove the sentence.
+    const prompt = operatorPrompts.buildCodexOperatorPrompt(snapshot(), "manual");
+    expect(prompt).toContain("give it `goalDraft`: the proposed goal text itself, written AS a goal");
+    expect(prompt).toContain("never phrase them as an instruction to the human");
+  });
+
 });
 
 /* ------- stranded-operator backstop (P14 follow-up, live-caught) ------- */

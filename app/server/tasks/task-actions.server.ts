@@ -7110,6 +7110,13 @@ export async function resolvePacket(
     // clears it when the edited goal lands.
     if (option.kind === "edit_goal" && parsed.packet) {
       parsed.packet.awaiting = "goal_edit";
+      // Ruling 138: the packet records WHICH option was chosen, so a reload
+      // renders it decided and rebuilds the same goal draft.
+      parsed.packet.decided = {
+        optionIndex: input.optionIndex,
+        at: new Date().toISOString(),
+        byUserId: actor.userId,
+      };
     }
     // P11-71: carry the human's free-text into the recorded decision so an
     // option that asked for input isn't resolved with an unstated reading — the

@@ -19,6 +19,7 @@ const rowHuman: ReviewRowView = {
     kind: "Completion report",
     title: "Accept completion, or send back for one fix?",
   },
+  goalEditPending: false,
   latestEventText: null,
   pr: { number: 318, state: "review" },
   validation: "changed",
@@ -36,6 +37,7 @@ const rowAgent: ReviewRowView = {
   dueDate: null,
   waiting: "agent",
   packet: null,
+  goalEditPending: false,
   latestEventText:
     "**Transition request:** move VIB-145 from In Progress to Review — evidence attached.",
   pr: { number: 311, state: "merged" },
@@ -207,6 +209,7 @@ describe("ReviewQueuePage", () => {
       ...rowAgent,
       key: "VIB-160",
       waiting: "none",
+      goalEditPending: false,
       latestEventText: null,
       pr: null,
     };
@@ -232,6 +235,7 @@ describe("ReviewQueuePage", () => {
       ...rowAgent,
       key: "VIB-170",
       waiting: "human",
+      goalEditPending: false,
       latestEventText: null,
       pr: { number: 420, state: "accepted" },
     };
@@ -289,6 +293,7 @@ describe("R16-3: a closed PR is stated as the terminal fact it is", () => {
     dueDate: null,
     waiting: "human",
     packet: null,
+    goalEditPending: false,
     latestEventText: null,
     pr: { number: 124, state: "closed" },
     validation: "changed",

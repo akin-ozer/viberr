@@ -2542,6 +2542,32 @@ by rewriting those paragraphs:*
     withdraws moot cards, and `applyRecommendation`'s F19-3 rule that a terminal transition card is an
     acceptance.
 
+138. **A decided `edit_goal` packet reads as decided everywhere, and the goal draft it opens is an
+    explicit, shared field (owner-directed fix of F34-13 and U34-10, 2026-09-04).** Confirming an
+    `edit_goal` option stamped `packet.awaiting: goal_edit` and opened the goal editor from the
+    in-memory action result only; after a reload the card rendered undecided with every option
+    selectable, a second confirm was a 409 shown as a passing toast, the readiness pill said "input
+    required", and the goal's Edit button was the undiscoverable way out. The packet now records the
+    decision itself, `decided: { optionIndex, at, byUserId }`, beside `awaiting`; both goal writers
+    keep clearing the packet when the edited goal lands. The decision-packet card renders a decided
+    packet with the chosen option locked, the words "Decision made · save the edited goal to clear
+    this packet" and one control, "Edit the goal", which opens the goal editor prefilled exactly as
+    the confirm did (a packet stamped `awaiting` with no recorded decision renders nothing special);
+    the display readiness is `goal_edit_pending` on the hero, the board card and the review queue
+    (the queue row carries `goalEditPending` and its subline says what is owed), derived in
+    `deriveDisplayReadiness` like every other display state and ranked below `agent_working` and
+    above `input_required` and a stored `blocked`, never over a terminal state; the side rail's
+    "Waiting on" says "a goal edit"; the operator's `get_task` sees `packet.awaiting`. The prefill is
+    `goalDraftForOption` in `app/shared/packet-goal-draft.ts`, the ONE composition, shared by the
+    confirm response and the reload path. An `edit_goal` option carries `goalDraft`, the proposed
+    goal text itself (capped at 4000 characters at the one chokepoint, `operatorOpenPacket`), which
+    both operator backends are told to write as a goal (deliverable plus acceptance criteria)
+    because it is what the editor opens with, which the Codex plan schema REQUIRES as a key (null
+    off `edit_goal`, so persisted plans replay), and which is refused by name on any other option
+    kind; an option without one prefills the option's title and detail verbatim, and the prompts say
+    so, so an operator never phrases them as an instruction to the human. Extends R20-1 (a made
+    decision is un-re-confirmable) and F17-L3 (the editor prefills with the chosen deliverable).
+
 142. **A run's shell carries none of Viberr's own configuration (2026-09-04, pass 34 U34-7).**
     Ruling 127 built the spawn base around what a child must not learn about OTHER people's
     credentials. Pass 34 found the other half: the base still handed every child this server's

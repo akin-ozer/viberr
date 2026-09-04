@@ -10,6 +10,7 @@ const base: ReviewRowView = {
   dueDate: null,
   waiting: "agent",
   packet: null,
+  goalEditPending: false,
   latestEventText: null,
   pr: null,
   validation: "none",
@@ -51,6 +52,7 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
     const sub = reviewRowSub({
       ...base,
       pr: { number: 103, state: "review" },
+      goalEditPending: false,
       latestEventText:
         "**Divergence:** PR #103 was closed on GitHub without merging, but VM-4 is still active.",
     });
@@ -127,6 +129,7 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
       reviewRowSub({
         ...base,
         pr: { number: 311, state: "merged" },
+        goalEditPending: false,
         latestEventText: "**Transition request:** move on",
       }),
     ).toContain("is merged on GitHub");
@@ -205,5 +208,30 @@ describe("reviewRowSub terminal GitHub facts (R16-3)", () => {
         packet: { kind: "Blocked decision", title: "Pick a recovery path" },
       }),
     ).toContain("closed on GitHub without merging");
+  });
+});
+
+describe("ruling 138: reviewRowSub on a decided edit_goal packet", () => {
+  it("says a goal edit is owed instead of re-offering the packet", () => {
+    // Canary: drop the `goalEditPending` branch.
+    const base = {
+      key: "VIB-9",
+      title: "t",
+      priority: "normal" as const,
+      labels: [],
+      dueDate: null,
+      waiting: "human" as const,
+      packet: { kind: "Blocked decision", title: "Scope needed" },
+      goalEditPending: true,
+      latestEventText: null,
+      pr: null,
+      validation: "none" as const,
+      blockReason: null,
+      lastActivityAt: null,
+      quiet: false,
+      continuity: null,
+    };
+    expect(reviewRowSub(base)).toBe("Goal edit pending: save the edited goal to clear the decision packet.");
+    expect(reviewRowSub({ ...base, goalEditPending: false })).toBe("Blocked decision: Scope needed");
   });
 });

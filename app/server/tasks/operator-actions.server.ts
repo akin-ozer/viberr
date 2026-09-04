@@ -924,6 +924,9 @@ async function addRecommendation(
 }
 
 /** One option the operator offers on a decision/blocking packet. */
+/** Ruling 138: the longest `goalDraft` an option may carry into task.md. */
+export const GOAL_DRAFT_MAX_CHARS = 4000;
+
 export interface OperatorPacketOptionInput {
   kind: PacketOptionKind;
   title: string;
@@ -937,6 +940,9 @@ export interface OperatorPacketOptionInput {
   profileId?: string;
   /** archive_task — also delete the task's remote branch (discard the work). */
   deleteBranch?: boolean;
+  /** edit_goal only — ruling 138: the proposed goal text itself, what the goal
+   *  editor opens with when the human confirms. Refused on any other kind. */
+  goalDraft?: string;
 }
 
 export interface OperatorOpenPacketInput {
@@ -1124,6 +1130,21 @@ export async function operatorOpenPacket(
     };
   }
 
+  // Ruling 138: `goalDraft` is the goal editor's prefill, which only an
+  // `edit_goal` option opens — on any other kind it is a claim nothing reads,
+  // so the authoring is refused by name (the ruling-115 precedent above).
+  const strayDraft = rawOptions.find(
+    (o) => o.kind !== "edit_goal" && (o.goalDraft ?? "").trim() !== "",
+  );
+  if (strayDraft) {
+    return {
+      outcome: "noop",
+      message:
+        `goalDraft only fits an edit_goal option — "${strayDraft.title}" is ${strayDraft.kind}. ` +
+        "Put the proposed goal text on the edit_goal option, or drop it.",
+    };
+  }
+
   // Exactly one recommended option (the parser expects this): honour the first
   // one the operator marked, else default to the first option.
   let recSeen = false;
@@ -1156,6 +1177,10 @@ export async function operatorOpenPacket(
     if (backend) option.backend = backend;
     if (profileId) option.profileId = profileId;
     if (o.deleteBranch) option.deleteBranch = true;
+    // Ruling 138: the draft is model-authored prose bound for task.md — capped
+    // here, the one chokepoint both operator backends reach.
+    const goalDraft = o.goalDraft?.trim();
+    if (goalDraft) option.goalDraft = goalDraft.slice(0, GOAL_DRAFT_MAX_CHARS);
     return option;
   });
   if (!recSeen && options[0]) options[0].rec = true;
@@ -1487,6 +1512,9 @@ export interface OperatorTaskSnapshot {
     title: string;
     body: string;
     options: string[];
+    /** Ruling 138: `goal_edit` once an edit_goal option was confirmed — the
+     *  packet is decided and waits for the edited goal, so do not re-ask. */
+    awaiting: "goal_edit" | null;
   } | null;
   recentTimeline: { type: string; actor: string; text: string }[];
   /** [1] The coordinator's OWN proposals — what it already asked for, and what a
@@ -1904,6 +1932,7 @@ export function operatorSnapshot(
           title: file.parsed.packet.title,
           body: file.parsed.packet.body,
           options: file.parsed.packet.options.map((o) => o.t),
+          awaiting: file.parsed.packet.awaiting ?? null,
         }
       : null,
     recentTimeline: file.parsed.timeline.slice(0, 6).map((e) => ({

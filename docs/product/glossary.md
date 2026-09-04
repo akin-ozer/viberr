@@ -105,6 +105,8 @@
 
 **Verdict** — a required reviewer's `approve | request_changes`, bound to a revision id. A project member's GitHub approval on the PR, bound to the delivered head, counts as an approving verdict (ruling 68).
 
+**Decided packet** — an `edit_goal` packet whose option was confirmed: `awaiting: goal_edit` plus `decided { optionIndex, at, byUserId }`. It reads as decided on every surface (display readiness `goal_edit_pending`), and its only way out is saving the edited goal, prefilled by `goalDraftForOption` from the option's `goalDraft` (ruling 138).
+
 **Waiting** — `human | agent | none`: whose turn it is. Forced to `none` in the terminal stage; `none` while a task waits on other work with no packet or recommendation open (ruling 131).
 
 **Workspace** — the delivering engagement's git clone under `tasks/<KEY>/workspace/<repo>`; supporting runs get `workspace/support/<profileId>/<repo>`. Cut from a per-project mirror; reclaimed once the task is terminal.

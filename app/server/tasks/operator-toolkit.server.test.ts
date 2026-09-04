@@ -501,3 +501,31 @@ describe("buildOperatorToolkit — mounts the caller's pre-flighted resolution (
     expect(Object.keys(toolkit.mcpServers).sort()).toEqual(["everything-mcp", "viberr"]);
   });
 });
+
+/** Ruling 138: the Claude tool declares `goalDraft` on packet options, with a
+ *  description that says to write it AS the goal. */
+describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruling 138)", () => {
+  it("the option schema carries goalDraft and says what it is", () => {
+    // Canary: remove the field from the option schema.
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const def = toolkit.tools.find((t) => t.name === "open_decision_packet");
+    expect(def).toBeDefined();
+    // SAFETY: the SDK types the raw input fields loosely; this tool's `options`
+    // is a zod array whose JSON Schema form carries `goalDraft` and its text.
+    const options = (def!.inputSchema as { options: z.ZodType }).options;
+    const declared = JSON.stringify(z.toJSONSchema(options));
+    expect(declared).toContain('"goalDraft"');
+    expect(declared).toContain("written AS a goal");
+    expect(declared).toContain("Refused on any other kind");
+  });
+});

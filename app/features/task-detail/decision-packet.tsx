@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
+import { goalDraftForOption } from "~/shared/packet-goal-draft";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -623,6 +624,7 @@ export function DecisionPacket({
   onResolveCustom,
   onRequestMaintainer,
   onAsk,
+  onEditGoal,
 }: {
   packet: PacketRender;
   busy: boolean;
@@ -654,6 +656,9 @@ export function DecisionPacket({
   /** UX19-9: what an `archive_task` resolution destroys, for its confirm. */
   archiveDisclosure?: PacketArchiveDisclosure;
   onResolve: (optionIndex: number, note: string) => void;
+  /** Ruling 138: a DECIDED `edit_goal` packet has one way out — the goal
+   *  editor, opened prefilled with the chosen option's draft. */
+  onEditGoal?: (draft: string) => void;
   /** Questionnaire packets (owner request 2026-08-20): resolve with the
    *  human's OWN directive instead of a canned option. The server runs it as
    *  the un-gated `custom` kind — sent back to an asking agent, requeued to
@@ -811,6 +816,81 @@ export function DecisionPacket({
     requestAnimationFrame(() => optionRefs.current[next]?.focus());
   };
 
+  // Ruling 138: a decided `edit_goal` packet reads as decided after a reload —
+  // the chosen option locked, no Confirm, and one control that opens the goal
+  // editor exactly as the confirm did. A packet stamped `awaiting` before the
+  // decision was recorded renders nothing special.
+  const decided = p.awaiting === "goal_edit" ? p.decided : undefined;
+  if (decided) {
+    const chosen = p.options[decided.optionIndex];
+    return (
+      <div className={"packet " + (isBlocked ? "blocked" : "input")} data-decided="">
+        <div className="packet-top">
+          <Pill kind={isBlocked ? "blocked" : "input"} dot sm>
+            {p.kind}
+          </Pill>
+          <span className="from">
+            from <Icon name="shield" />{" "}
+            <strong className="from-name">{p.from}</strong>
+          </span>
+        </div>
+        <div className="packet-body">
+          <h2>{p.title}</h2>
+          <p className="packet-lede">{renderInlineCode(p.body)}</p>
+          <div className="options" data-decided="">
+            {p.options.map((o, i) => (
+              <button
+                key={i}
+                type="button"
+                disabled
+                aria-disabled="true"
+                className={"opt" + (i === decided.optionIndex ? " sel" : "")}
+                data-chosen={i === decided.optionIndex ? "" : undefined}
+              >
+                <span className="radio" />
+                <span>
+                  <div className="ot">{o.t}</div>
+                  <div className="od">{o.d}</div>
+                </span>
+                {i === decided.optionIndex && (
+                  <span className="rec-tag">
+                    <Pill kind="info" sm>
+                      chosen
+                    </Pill>
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          <p className="deny-note spaced" data-decided-note="">
+            <Icon name="check" />
+            Decision made · save the edited goal to clear this packet
+          </p>
+          <div className="packet-actions">
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={onAsk}
+              title="Starts a comment mentioning @operator below. Send it to pull the operator in"
+            >
+              <Icon name="message" />
+              Ask operator
+            </button>
+            {canEditGoal && chosen && onEditGoal && (
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy}
+                onClick={() => onEditGoal(goalDraftForOption(chosen))}
+              >
+                Edit the goal
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={"packet " + (isBlocked ? "blocked" : "input")}>
       <div className="packet-top">

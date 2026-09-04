@@ -2072,6 +2072,62 @@ describe("UI-42/UI-44: the decision packet", () => {
     ],
   };
 
+  it("ruling 138: a DECIDED edit_goal packet renders the chosen option locked, no Confirm, and one 'Edit the goal' control that opens the shared draft", () => {
+    // Canary: ignore `p.awaiting`/`p.decided` in the card and the radiogroup +
+    // Confirm come back.
+    const onEditGoal = vi.fn();
+    const onResolve = vi.fn();
+    const decidedPacket: PacketRender = {
+      ...goalPacket,
+      awaiting: "goal_edit",
+      decided: { optionIndex: 0, at: "2026-09-04T10:00:00.000Z", byUserId: "u-arda" },
+    };
+    const { container, queryByRole, getByRole } = render(
+      <DecisionPacket
+        packet={decidedPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        onResolveCustom={() => {}}
+        onResolve={onResolve}
+        onAsk={() => {}}
+        onEditGoal={onEditGoal}
+      />,
+    );
+    expect(container.querySelector(".packet[data-decided]")).not.toBeNull();
+    expect(queryByRole("radiogroup")).toBeNull();
+    expect(queryByRole("button", { name: /^Confirm decision/ })).toBeNull();
+    const chosen = container.querySelector<HTMLButtonElement>(".opt[data-chosen]")!;
+    expect(chosen.textContent).toContain("A human refines the goal");
+    expect(chosen.textContent).toContain("chosen");
+    expect(chosen.disabled).toBe(true);
+    expect(container.querySelector("[data-decided-note]")?.textContent).toContain(
+      "Decision made · save the edited goal to clear this packet",
+    );
+    fireEvent.click(getByRole("button", { name: "Edit the goal" }));
+    expect(onEditGoal).toHaveBeenCalledWith("A human refines the goal\n\nRewrite it.");
+    expect(onResolve).not.toHaveBeenCalled();
+  });
+
+  it("ruling 138: an awaiting packet WITHOUT a recorded decision renders nothing special", () => {
+    const { queryByRole } = render(
+      <DecisionPacket
+        packet={{ ...goalPacket, awaiting: "goal_edit" }}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    expect(queryByRole("radiogroup")).not.toBeNull();
+  });
+
   it("blocks edit_goal for a resolver who cannot edit the goal", () => {
     const onResolve = vi.fn();
     const { container } = render(

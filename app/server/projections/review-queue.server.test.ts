@@ -872,3 +872,42 @@ describe("ruling 132: the queue row carries the whole drift record", () => {
     expect(row.pr?.revisionDrift).toEqual(record);
   });
 });
+
+/** Ruling 138: the row says a decided edit_goal packet owes a goal edit.
+ *  Canary: drop `goalEditPending` from the row build. */
+describe("ruling 138: the queue row flags a decided edit_goal packet", () => {
+  it("carries goalEditPending from the packet's awaiting stamp", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-105", { title: "Scope pending", stage: "review", waiting: "human", validation: "changed" }),
+      packet: {
+        type: "input",
+        kind: "Decision required",
+        from: "operator",
+        title: "Scope needed",
+        body: "",
+        observations: [],
+        options: [{ kind: "edit_goal", t: "Specify the goal", d: "", rec: true }],
+        awaiting: "goal_edit",
+        decided: { optionIndex: 0, at: "2026-09-04T10:00:00.000Z", byUserId: store.users.arda.id },
+      },
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-106", { title: "Undecided", stage: "review", waiting: "human", validation: "changed" }),
+      packet: {
+        type: "input",
+        kind: "Decision required",
+        from: "operator",
+        title: "Scope needed",
+        body: "",
+        observations: [],
+        options: [{ kind: "edit_goal", t: "Specify the goal", d: "", rec: true }],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot, viewerUserId: store.users.arda.id });
+    const rows = [...queue.ready, ...queue.working];
+    expect(rows.find((r) => r.key === "VIB-105")?.goalEditPending).toBe(true);
+    expect(rows.find((r) => r.key === "VIB-106")?.goalEditPending).toBe(false);
+  });
+});

@@ -155,7 +155,8 @@ cannot rejoin the gap silently — the typecheck refuses it.)*
 ## 5. Copy rules that tests enforce
 
 - Readiness pills come from one table (`READINESS_DISPLAY` in `app/ui/pill.tsx`);
-  "accepted", "merged" and "agent working" are display states, never stored.
+  "accepted", "merged", "agent working" and "goal edit pending" (a decided `edit_goal`
+  packet, ruling 138) are display states, never stored.
 - Backend label is "Claude", never "Claude Code", except for the product itself (CLI
   login, transcript retention) (ruling 92).
 - The retired "primary specialist" vocabulary may not appear in seeded assets, skills,

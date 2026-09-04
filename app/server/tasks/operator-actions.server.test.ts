@@ -57,6 +57,7 @@ import {
   operatorBackendFor,
   resolveOperatorAuthority,
   type OperatorAutonomy,
+  GOAL_DRAFT_MAX_CHARS,
 } from "./operator-actions.server";
 
 /**
@@ -3900,5 +3901,113 @@ describe("ruling 137: acceptance offers are bound to a revision and withdrawn on
     expect(cards).toHaveLength(1);
     expect(cards[0]!.id).toBe(cardA.id); // the same card, re-bound in place
     expect(cards[0]!.forHeadSha).toBe("b".repeat(40));
+  });
+});
+
+/**
+ * Ruling 138 (pass 34, U34-10): an `edit_goal` option carries `goalDraft`, the
+ * proposed goal text itself; it is refused on any other kind.
+ */
+describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
+  const packetsRoster = () =>
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "generate-packets"),
+      { capabilityId: "generate-packets", mode: "direct" },
+    ]);
+
+  it("stores goalDraft on an edit_goal option verbatim", async () => {
+    // Canary: drop the goalDraft mapping in operatorOpenPacket.
+    packetsRoster();
+    seedTask("impl");
+    const draft = "Deliver a CSV export of the board.\n\nAcceptance: every visible column downloads.";
+    const r = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Scope needed",
+        options: [
+          { kind: "edit_goal", title: "Ship the CSV export", detail: "Add the export.", recommended: true, goalDraft: ` ${draft} ` },
+          { kind: "hold_runtime_debug", title: "Hold" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().packet?.options[0]?.goalDraft).toBe(draft);
+    expect(task().packet?.options[1]?.goalDraft).toBeUndefined();
+  });
+
+  it("caps an over-long goalDraft at GOAL_DRAFT_MAX_CHARS instead of refusing it", async () => {
+    packetsRoster();
+    seedTask("impl");
+    await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Scope needed",
+        options: [{ kind: "edit_goal", title: "Ship it", recommended: true, goalDraft: "x".repeat(GOAL_DRAFT_MAX_CHARS + 500) }],
+      },
+      authority("full"),
+    );
+    expect(task().packet?.options[0]?.goalDraft).toHaveLength(GOAL_DRAFT_MAX_CHARS);
+  });
+
+  it("the operator's snapshot reports the decided packet's awaiting stamp, so it does not re-ask", async () => {
+    // Canary: drop `awaiting` from the snapshot's packet.
+    packetsRoster();
+    seedTask("impl");
+    await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Scope needed",
+        options: [{ kind: "edit_goal", title: "Specify the goal", recommended: true, goalDraft: "Deliver the export." }],
+      },
+      authority("full"),
+    );
+    const { resolvePacket } = await import("./task-actions.server");
+    const before = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+    expect(before.packet?.awaiting).toBeNull();
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    const after = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+    expect(after.packet?.awaiting).toBe("goal_edit");
+  });
+
+  it("refuses goalDraft on any other option kind, by name, and writes nothing", async () => {
+    // Canary: remove the stray-draft refusal.
+    packetsRoster();
+    seedTask("impl");
+    const r = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Pick a path",
+        options: [
+          { kind: "redirect", title: "Have the developer redo it", recommended: true, goalDraft: "not a goal" },
+          { kind: "edit_goal", title: "Refine the goal" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain('goalDraft only fits an edit_goal option — "Have the developer redo it" is redirect');
+    expect(task().packet).toBeNull();
   });
 });

@@ -457,6 +457,12 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   .describe(
                     "archive_task only: ALSO delete the task's remote branch (discard the rejected work entirely).",
                   ),
+                goalDraft: z
+                  .string()
+                  .optional()
+                  .describe(
+                    "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Refused on any other kind.",
+                  ),
               }),
             )
             .describe("The 2-4 resolvable options; exactly one recommended."),
@@ -476,6 +482,9 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               if (o.backend) option.backend = o.backend;
               if (o.profileId) option.profileId = o.profileId;
               if (o.deleteBranch) option.deleteBranch = true;
+              // Ruling 138: the goal draft is prose bound for the goal editor;
+              // `operatorOpenPacket` caps it and refuses it off edit_goal.
+              if (o.goalDraft) option.goalDraft = prose(o.goalDraft);
               return option;
             }),
           };

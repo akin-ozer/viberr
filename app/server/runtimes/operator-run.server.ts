@@ -1734,6 +1734,13 @@ export function operatorPlanToolsFor(
       );
 }
 
+/** The JSON schema the Codex operator run must answer with, for this
+ *  authority's permitted tools — exported so a test can read the emitted
+ *  shape (ruling 138: `goalDraft` is a REQUIRED option key). */
+export function operatorPlanSchemaFor(authority: OperatorAuthority) {
+  return buildOperatorPlanSchema(operatorPlanToolsFor(authority));
+}
+
 function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
   return {
   type: "object",
@@ -1801,8 +1808,16 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                   description:
                     "archive_task only: true = ALSO delete the task's remote branch (discard the rejected work). Null otherwise.",
                 },
+                // Ruling 138: the goal editor opens with this text when the
+                // human confirms an edit_goal option, so it is written AS a
+                // goal, never as an instruction to the human.
+                goalDraft: {
+                  type: ["string", "null"],
+                  description:
+                    "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Null on every other kind.",
+                },
               },
-              required: ["kind", "title", "detail", "recommended", "backend", "profileId", "deleteBranch"],
+              required: ["kind", "title", "detail", "recommended", "backend", "profileId", "deleteBranch", "goalDraft"],
             },
           },
         },
@@ -1847,6 +1862,7 @@ const operatorPlanActionSchema = z.strictObject({
         backend: z.enum(["claude", "codex"]).nullable().optional(),
         profileId: z.string().nullable().optional(),
         deleteBranch: z.boolean().nullable().optional(),
+        goalDraft: z.string().nullable().optional(),
       }),
     )
     .nullable(),
@@ -1882,6 +1898,7 @@ export function authoredPacketOptions(
         backend?: RealBackend | null;
         profileId?: string | null;
         deleteBranch?: boolean | null;
+        goalDraft?: string | null;
       }[]
     | null,
 ): OperatorPacketOptionInput[] | null {
@@ -1899,6 +1916,10 @@ export function authoredPacketOptions(
     // Carry the per-option detail line so a Codex-authored packet renders with
     // the same context a Claude-authored one does (AO-5 #12).
     if (detail) option.detail = detail;
+    // Ruling 138: the proposed goal rides with the option; `operatorOpenPacket`
+    // caps it and refuses it on any kind but edit_goal.
+    const goalDraft = o.goalDraft?.trim();
+    if (goalDraft) option.goalDraft = goalDraft;
     option.recommended = i === (recIdx >= 0 ? recIdx : 0);
     // B1: retry_other_backend only. An omitted backend is NOT defaulted here —
     // `operatorOpenPacket` fills in the opposite of the backend that failed,
@@ -2043,7 +2064,7 @@ async function startCodexOperatorRun(
     // kind lookup.
     disallowedTools: operatorDisallowedTools(authority),
     // P13-RT-03: advertise only the actions this operator's policy permits.
-    outputSchema: buildOperatorPlanSchema(operatorPlanToolsFor(authority)),
+    outputSchema: operatorPlanSchemaFor(authority),
     autonomous: true,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
     dataRoot: input.dataRoot,
@@ -3753,7 +3774,7 @@ export function buildCodexOperatorPrompt(
       strandedResume,
       dependencyRelease,
     ) +
-    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes; `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
+    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal (give it `goalDraft`: the proposed goal text itself, written AS a goal — the deliverable plus its acceptance criteria — because the goal editor opens with it when the human confirms; without one the editor prefills the option's title and detail verbatim, so never phrase them as an instruction to the human), `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes; `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
   );

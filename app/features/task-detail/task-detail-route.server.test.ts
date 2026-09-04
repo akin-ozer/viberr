@@ -487,6 +487,51 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   });
 
+  it("ruling 138: the resolve response prefers the option's goalDraft, and a reload rebuilds the SAME draft from the decided packet", async () => {
+    // Canary: compose title + detail inline again in the route (drop
+    // `goalDraftForOption`) — the response stops matching the option's draft.
+    // Canary 2: drop the `decided` stamp in resolvePacket — the reload path
+    // has nothing to rebuild from.
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { goalDraftForOption } = await import("~/shared/packet-goal-draft");
+    const draft = "Deliver a CSV export of the board.\n\nAcceptance: the export downloads every visible column.";
+    await updateTaskFile(
+      { projectSlug: "viberr-core", taskKey: "VIB-142", dataRoot: app.dataRoot },
+      (parsed) => {
+        parsed.packet = {
+          id: "pkt_scope",
+          type: "input",
+          kind: "Decision required",
+          from: "operator",
+          title: "Scope needed",
+          body: "",
+          observations: [],
+          options: [
+            { kind: "edit_goal", t: "Ship the CSV export", d: "Add the export button.", rec: true, goalDraft: draft },
+            { kind: "hold_runtime_debug", t: "Hold", d: "", rec: false },
+          ],
+        };
+      },
+    );
+    // SAFETY: arda holds `resolve-packet` and may edit the goal, so the
+    // confirmed edit_goal option answers with the resolve arm's own shape.
+    const result = (await postIntent("VIB-142", ids.arda, {
+      intent: "resolve-packet", option: "0",
+    })) as { ok: true; kind: string; goalDraft?: string };
+    expect(result.kind).toBe("edit_goal");
+    expect(result.goalDraft).toBe(draft);
+
+    // After a reload the loader carries the decided packet…
+    const after = await runLoader("VIB-142", ids.arda);
+    const decidedPacket = after.task.packet;
+    expect(decidedPacket?.awaiting).toBe("goal_edit");
+    expect(decidedPacket?.decided).toMatchObject({ optionIndex: 0, byUserId: ids.arda });
+    expect(after.task.displayReadiness).toBe("goal_edit_pending");
+    // …and the reload path rebuilds the same draft through the ONE composition.
+    const chosen = decidedPacket?.options[decidedPacket.decided?.optionIndex ?? -1];
+    expect(chosen ? goalDraftForOption(chosen) : null).toBe(result.goalDraft);
+  });
+
   it("rejects a non-owner contributor accepting a completion packet (R6-2)", async () => {
     // Accepting a completion is admin|maintainer OR the task's owner (R6-2).
     // selin is a contributor and NOT VIB-142's owner, so the accept path denies.

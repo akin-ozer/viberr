@@ -1,4 +1,5 @@
 import { deliveryToast } from "~/features/task-detail/delivery-toast";
+import { goalDraftForOption } from "~/shared/packet-goal-draft";
 import {
   data,
   isRouteErrorResponse,
@@ -619,18 +620,14 @@ export async function action({ request, params }: Route.ActionArgs) {
           toast,
         };
         // F17-L3: a scoping (edit_goal) decision drops the human into the goal
-        // editor — prefill it with the CHOSEN option's deliverable so they
-        // don't have to retype the scope they just picked. The option title is
-        // the headline; its description carries the deliverable + acceptance.
-        // Every other kind ships NO `goalDraft` key at all, which is what tells
-        // the editor there is nothing to prefill.
+        // editor — prefill it with the CHOSEN option's draft so they don't
+        // have to retype the scope they just picked. Ruling 138: the ONE
+        // composition (`goalDraftForOption`) is shared with the reload path,
+        // so the editor opens the same text either way. Every other kind
+        // ships NO `goalDraft` key at all, which is what tells the editor
+        // there is nothing to prefill.
         if (option.kind !== "edit_goal") return resolved;
-        return {
-          ...resolved,
-          goalDraft: option.d?.trim()
-            ? `${option.t}\n\n${option.d.trim()}`
-            : option.t,
-        };
+        return { ...resolved, goalDraft: goalDraftForOption(option) };
       }
       case "request-maintainer-decision": {
         // F20-18: a contributor-OWNER holds no option they can settle on this

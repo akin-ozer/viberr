@@ -2585,6 +2585,10 @@ describe("resolvePacket kind matrix", () => {
       dataRoot: store.dataRoot,
     })!.parsed;
     expect(stamped.packet?.awaiting).toBe("goal_edit");
+    // Ruling 138: the packet records WHICH option was chosen, by whom, when —
+    // what a reload renders as decided. Canary: drop the `decided` stamp.
+    expect(stamped.packet?.decided).toMatchObject({ optionIndex: 0, byUserId: store.users.murat.id });
+    expect(stamped.packet?.decided?.at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(stamped.timeline[0]!.text).toContain("Waiting for the edited goal");
 
     // The edit itself fulfills the decision — packet clears with no operator

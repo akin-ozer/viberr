@@ -58,6 +58,10 @@ export interface ReviewQueueRow {
   waiting: Waiting;
   /** Pending packet header only — the queue reads kind + title, nothing else. */
   packet: { kind: string; title: string } | null;
+  /** Ruling 138: an `edit_goal` decision was confirmed and the packet waits
+   *  for the edited goal — the row's subline says so instead of re-offering
+   *  the decision. */
+  goalEditPending: boolean;
   /** Newest timeline event's text (position 0) — the subline fallback. */
   latestEventText: string | null;
   pr: {
@@ -203,6 +207,7 @@ export function getReviewQueue(
       dueDate: t.dueDate,
       waiting: t.waiting,
       packet: t.packet ? { kind: t.packet.kind, title: t.packet.title } : null,
+      goalEditPending: t.packet?.awaiting === "goal_edit",
       latestEventText: latestByKey.get(t.key) ?? null,
       pr,
       validation: t.validation,

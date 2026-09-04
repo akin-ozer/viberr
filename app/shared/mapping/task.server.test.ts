@@ -182,6 +182,35 @@ describe("displayReadiness derivation (F7-UI3)", () => {
     expect(summarize(r, false).displayReadiness).toBe("blocked");
   });
 
+  it("ruling 138: a decided edit_goal packet reads 'goal edit pending' over input_required and a stored blocked, never over agent_working or a terminal state", () => {
+    // Canary: make the goal-edit branch return `readiness` unchanged and the
+    // input case reads "input_required" (the pill row is a TYPE, not a runtime,
+    // canary).
+    const decided = (type: "input" | "blocked") =>
+      JSON.stringify({
+        id: "pkt_2",
+        type,
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Scope needed",
+        body: "",
+        options: [{ kind: "edit_goal", t: "Specify the goal", d: "", rec: true }],
+        awaiting: "goal_edit",
+        decided: { optionIndex: 0, at: "2026-09-04T10:00:00.000Z", byUserId: "u-murat" },
+      });
+    expect(summarize(row({ readiness: "ready", waiting: "human", packet_json: decided("input") }), false).displayReadiness).toBe("goal_edit_pending");
+    expect(summarize(row({ readiness: "blocked", waiting: "human", packet_json: decided("blocked") }), false).displayReadiness).toBe("goal_edit_pending");
+    // An agent carrying the task still owns the slot.
+    expect(summarize(row({ readiness: "ready", waiting: "agent", packet_json: decided("input") }), false).displayReadiness).toBe("agent_working");
+    expect(summarize(row({ readiness: "blocked", waiting: "agent", packet_json: decided("blocked") }), false).displayReadiness).toBe("blocked");
+    // Never over a terminal state.
+    expect(summarize(row({ readiness: "ready", waiting: "human", packet_json: decided("input") }), true).displayReadiness).toBe("accepted");
+    // The render carries the decision for the card and the rail.
+    const s = summarize(row({ readiness: "ready", waiting: "human", packet_json: decided("input") }), false);
+    expect(s.packet?.awaiting).toBe("goal_edit");
+    expect(s.packet?.decided?.optionIndex).toBe(0);
+  });
+
   it("an input packet on the agent's turn does not raise 'input required'", () => {
     // The packet lift is for a HUMAN who owes an answer. On the agent's turn
     // the agent-working lift below owns the slot instead — what this must never

@@ -130,6 +130,12 @@ export interface PacketRender {
   body: string;
   observations: PacketObservation[];
   options: PacketOption[];
+  /** Ruling 138: an `edit_goal` decision was confirmed and the packet waits
+   *  for the edited goal to land. */
+  awaiting?: "goal_edit";
+  /** Ruling 138: which option was chosen, by whom and when — what a reload
+   *  renders as decided and rebuilds the goal draft from. */
+  decided?: TaskPacket["decided"];
 }
 
 /** What a surface renders for readiness: the canonical stored enum plus the
@@ -141,7 +147,9 @@ export type DisplayReadiness =
   | Readiness
   | "accepted"
   | "merged"
-  | "agent_working";
+  | "agent_working"
+  /** Ruling 138: a decided `edit_goal` packet owes a goal edit. */
+  | "goal_edit_pending";
 
 /** Board-card / summary shape. `readiness` is always the canonical stored enum
  * — the acceptance gate and the board attention filter read THAT; only
@@ -513,6 +521,12 @@ export function deriveDisplayReadiness(
     (readiness === "ready" || readiness === "input_required")
   ) {
     return "agent_working";
+  }
+  // Ruling 138: a decided `edit_goal` packet owes a goal edit — that wins over
+  // `input_required` and over a stored `blocked` (saving the goal lifts the
+  // blocked gate with it), but never over an agent carrying the task.
+  if (packet?.awaiting === "goal_edit" && waiting !== "agent") {
+    return "goal_edit_pending";
   }
   if (readiness === "ready" && waiting === "human" && packet?.type === "input") {
     return "input_required";

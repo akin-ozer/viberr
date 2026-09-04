@@ -911,7 +911,15 @@ export function CurrentStatePanel({
         <div className="kv-row">
           <span className="k">Waiting on</span>
           <span className="v">
-            {task.waiting === "human" ? (
+            {task.packet?.awaiting === "goal_edit" ? (
+              // Ruling 138: a decided edit_goal packet owes exactly one thing.
+              <span
+                className="by-human"
+                title="An edit-goal decision was confirmed; saving the edited goal clears the packet."
+              >
+                a goal edit
+              </span>
+            ) : task.waiting === "human" ? (
               // F17-2: name WHERE the decision lives without asserting WHICH one
               // (that is state-dependent — a packet, a stage move, or acceptance).
               // A wrong specific hint would mislead; this tooltip is always true.

@@ -751,6 +751,12 @@ export function TaskDetailPage({
             // option is above their tier).
             {...(canEscalatePacket ? { onRequestMaintainer } : {})}
             onAsk={() => setAsk((a) => a + 1)}
+            onEditGoal={(draft) => {
+              // Ruling 138: the reload path opens the editor with the SAME
+              // draft the confirm response carried.
+              setEditGoalDraft(draft);
+              setEditGoalSignal((n) => n + 1);
+            }}
           />
         )}
 

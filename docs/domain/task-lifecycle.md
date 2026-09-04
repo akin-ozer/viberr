@@ -158,7 +158,9 @@ profile's stages.
   `inconsistency_risk_detected`, hard stop → `blocked`); a `blocked` packet sets it to
   `blocked`; recovery options lift it back to `ready`. Surfaces render the derived
   display value `agent_working` instead of readiness while `waiting === "agent"`
-  (`deriveDisplayReadiness`, ruling 91), and "accepted" for terminal-stage tasks.
+  (`deriveDisplayReadiness`, ruling 91), `goal_edit_pending` while a decided `edit_goal`
+  packet waits for the edited goal (ruling 138: below `agent_working`, above
+  `input_required` and a stored `blocked`), and "accepted" for terminal-stage tasks.
 - **Waiting**: `human | agent | none`. Raising a packet or a recommendation flips it
   to `human`; dispatching an agent sets `agent`; terminal forces `none`. It is a
   display flag: `liveRuns` is the only proof a run is in flight.
@@ -276,7 +278,10 @@ anything ambiguous fails closed with the reason recorded.
 - One open **decision packet** per task (see [operator.md §6](operator.md#6-decision-packets)
   for the kinds and their effects). Resolvers: the owner, `resolve-packet` holders,
   and for `accept_completion` the acceptance tier. `edit_goal` is the only kind that
-  keeps its packet open until the goal is saved.
+  keeps its packet open until the goal is saved; the confirm stamps `decided` beside
+  `awaiting`, so the card, the hero, the queue and the rail all read the packet as decided
+  after a reload, and the editor prefill is `goalDraftForOption` (the option's `goalDraft`,
+  else its title and detail) on both the confirm and the reload path (ruling 138).
 - **Recommendations** are the supervised operator's pending cards (`transition`,
   `run_agent`, `accept_completion`, `delivery`). `applyRecommendation` passes
   `recommendationAuthorized` into the inner mutation, whose own capability gate still

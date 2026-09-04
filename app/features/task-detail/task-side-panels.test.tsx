@@ -371,3 +371,25 @@ describe("TaskDetailsPanel", () => {
     expect(editor.getByRole("button", { name: "Save" })).toBeTruthy();
   });
 });
+
+/** Ruling 138: the rail says a goal edit is owed on a decided edit_goal packet. */
+describe("ruling 138: Waiting on · a decided edit_goal packet", () => {
+  it("reads 'a goal edit' instead of 'a human'", () => {
+    // Canary: remove the `awaiting === "goal_edit"` branch.
+    const { container } = renderPanel({
+      waiting: "human",
+      packet: {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "Operator",
+        title: "Scope needed",
+        body: "",
+        observations: [],
+        options: [{ kind: "edit_goal", t: "Specify the goal", d: "", rec: true }],
+        awaiting: "goal_edit",
+        decided: { optionIndex: 0, at: "2026-09-04T10:00:00.000Z", byUserId: "u-arda" },
+      },
+    });
+    expect(kv(container, "Waiting on")).toBe("a goal edit");
+  });
+});

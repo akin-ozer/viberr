@@ -224,8 +224,13 @@ One open packet per task; every writer refuses on the pre-read and again inside 
 locked write. Header: `id`, `type` (`input | blocked`; `blocked` also floors
 readiness at `blocked`), `kind` (free text; `Agent question` is load-bearing),
 `from` (an actor-ref string), `title`, `body`, `observations`, `options`, `awaiting`
-(only `goal_edit`), `askedBy` (the agent profile whose session resumes on
-resolution, ruling 33).
+(only `goal_edit`), `decided` (`{ optionIndex, at, byUserId }`, stamped beside `awaiting`
+so a reload renders the packet as decided, ruling 138), `askedBy` (the agent profile
+whose session resumes on resolution, ruling 33). An `edit_goal` option may carry
+`goalDraft`, the proposed goal text itself (written as a goal: deliverable plus
+acceptance criteria), which the goal editor opens with; both backends' prompts say so,
+`operatorOpenPacket` caps it and refuses it by name on any other kind, and the Codex plan
+schema requires the key (null off `edit_goal`).
 
 Who opens packets: the operator's own decision (`operatorOpenPacket`, either
 backend); an agent's `ask_human` (kind `Agent question`, `custom` option only); the
@@ -266,7 +271,7 @@ Resolution effects by option kind (`resolvePacket`):
 | `block_on_policy` | The re-run kind: `readiness: ready`, `waiting: agent`, re-queued (ruling 76). Its label states what the human asserts ("The usage window has reset (…), or I switched the Claude account: re-run", "I connected a different Claude account or an API key on Profile → Agent accounts: re-run", or the stock "Re-run the operator now"); the recorded decision is the option's pre-authored `ev` or its own title, never a fixed "policy / credential updated" (ruling 130(c)). The toast says "Unblocked · the operator re-runs to re-check", and the re-run's instruction tells the operator to assume nothing about credentials or policy beyond the decision's own words. Since ruling 127 the credential half of that is a person connecting their own backend on Profile → Agent accounts, usually the task owner. |
 | `hold_runtime_debug` | `readiness: blocked`, `waiting: human`, packet cleared, not re-queued. |
 | `retry_other_backend` | Re-runs the failed agent on the named backend under operator authority; the switch sticks on the engagement's `pinnedBackend`. Offered only when the TASK OWNER has that backend connected (ruling 127). |
-| `edit_goal` | The only kind that keeps its packet open (`awaiting: goal_edit`); cleared when the edited goal is saved. |
+| `edit_goal` | The only kind that keeps its packet open (`awaiting: goal_edit`, plus `decided` recording the chosen option); cleared when the edited goal is saved. The card then reads decided (chosen option locked, no Confirm, one "Edit the goal" control), the readiness shows `goal_edit_pending`, the review queue row says a goal edit is owed, and `get_task` sees `packet.awaiting` (ruling 138). |
 | `archive_task` | The archive contract; with `deleteBranch: true` also deletes the remote branch (the product's only remote-branch deletion besides collision resolution). Requires `approve-transition`. |
 | `discard_branch` | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. Requires `approve-transition`. |
 | `resolve_remote_collision` | Deletes the stale remote branch, closes the recorded unowned PR, re-delivers this task's local work; ends with exactly one operator hand-off carrying the outcome (ruling 136). When the PR on the ref turns out to be the task's own open review PR there is no collision: a behind or absent remote gets the push, a diverged one keeps the block. Requires `approve-transition`. |

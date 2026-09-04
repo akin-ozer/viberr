@@ -59,7 +59,8 @@ export type ReadinessDisplayValue =
   | ReadinessValue
   | "accepted"
   | "merged"
-  | "agent_working";
+  | "agent_working"
+  | "goal_edit_pending";
 
 /** What a pill renders for one value: its CSS kind and its label. */
 interface PillDisplay {
@@ -75,6 +76,7 @@ const READINESS_DISPLAY = {
   accepted: { kind: "done", label: "accepted" },
   merged: { kind: "done", label: "merged" },
   agent_working: { kind: "agent", label: "agent working" },
+  goal_edit_pending: { kind: "input", label: "goal edit pending" },
 } satisfies Record<ReadinessDisplayValue, PillDisplay>;
 
 /** The same table, keyed for lookup by a value that has NOT been narrowed to

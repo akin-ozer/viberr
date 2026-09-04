@@ -325,6 +325,11 @@ observations:
   - k: Changed                    # Observed|Changed|Validation|Branch|Flag (open set)
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
+awaiting: goal_edit               # only after an edit_goal confirm (ruling 138)
+decided:                          # stamped beside `awaiting` (ruling 138)
+  optionIndex: 0
+  at: 2026-09-04T10:00:00.000Z
+  byUserId: u_arda
 options:
   - kind: accept_completion       # STABLE kind (ruling 7). The 11 kinds:
     t: Accept completion          #   accept_completion | request_edit |
