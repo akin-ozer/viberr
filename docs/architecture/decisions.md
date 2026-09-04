@@ -1411,7 +1411,11 @@ inventory is not regenerated automatically and has drifted; the verified module 
     the profile holds repo-write, supporting otherwise — a verdict-only profile dispatched
     first can no longer become a deliverer that ships nothing (UI-39's dead-end class,
     closed structurally). An explicit `delivers: true` is a delivery hand-off through the
-    existing assignSpecialist machinery. The assign/engage menus, the per-row Run buttons,
+    existing assignSpecialist machinery. **Confirmed 2026-09-04 (pass 34, Q34-14; the JC-6
+    substitution tested it):** the operator may switch the delivering agent however it
+    judges best, because a human can redirect it through the operator chat or agent
+    allocation; no gate, card or ruling number is added, and after ruling 133 a hand-off
+    is a choice about who should build, never a way around a stage. The assign/engage menus, the per-row Run buttons,
     the `assign-specialist`/`run-specialist`/`assign-reviewer`/`run-reviewer` intents and
     the legacy `specialist`/`reviewers`/`consultants` parse absorption are deleted;
     releasing a supporting engagement survives as the ledger's ✕ (`release-agent`).
@@ -1421,7 +1425,8 @@ inventory is not regenerated automatically and has drifted; the verified module 
     collapsed into `dispatch-agents`; the four slot-shaped recommendation kinds collapsed
     into `run_agent` (profileId + prompt on the card; Apply dispatches exactly what the
     manual control would). The choice itself stays an LLM decision fenced by stage
-    eligibility, grants and the selection trace — and it now weighs the durable
+    eligibility (**narrowed 2026-09-04 by ruling 133:** eligibility fences NEW engagements;
+    an engaged deliverer is re-run at any stage), grants and the selection trace — and it now weighs the durable
     **`previousStageId`** frontmatter fact (written on every transition; surfaced in the
     snapshot and turn doctrine), so "back from Review" reads as rework rather than a
     fresh build even across turns.
@@ -2370,6 +2375,41 @@ by rewriting those paragraphs:*
     `describeRevisionDrift` in `app/shared/revision-drift.ts`; the compare reader in
     `branch-sync.server.ts`; the drift block in `github-reconciler.server.ts`;
     `update-branch-operator.server.ts`.)
+
+133. **An engaged deliverer acts at any stage; stage eligibility gates NEW engagements (owner,
+    2026-09-03, pass 34 Q34-13; F34-16).** A profile's eligible stages (`stages:` / `spanAll`,
+    resolved per board by R14-1's three steps) decide which profiles may be NEWLY engaged on a task
+    at its current stage: `assignSpecialist`, `assignReviewer` and the dispatch's auto-engage keep
+    refusing an ineligible profile. Once a profile is the task's delivering engagement it may be
+    prompted or resumed on that task at EVERY stage, by the operator, by a human @mention, by the
+    Run control, by a schedule and by the built-in packets (`redirect`, `retry_other_backend`, a
+    resolved question), for rework, conflict resolution and follow-ups; the admitted reason is
+    recorded on the `task.agent.run_started` audit row as `stageEligibility`, which names the
+    exemption only when it was needed. Supporting engagements (reviewers and helpers) stay stage-
+    scoped, and the rule is the same on every door: an @mention that would resume a supporting agent
+    at a stage its profile does not declare records the comment and refuses the run with the
+    dispatcher's own sentence, and a profile that is not engaged at all (released, or never engaged)
+    is judged by the new-engagement rule even when a provider session survives. Consequences:
+    **(a)** rework routing (`reworkStages`, `transition_stage`) is a workflow choice about where the
+    board should show the work, never a workaround for a profile's stages, and the operator
+    doctrine, toolkit descriptions and seeded persona say so; **(b)** a built-in packet offers only
+    options that can execute: the branch-conflict and push-conflict packets recommend "Have the
+    delivering agent resolve the conflict" only when the task has a delivering engagement whose
+    profile is deployed with a repo-write grant, and otherwise recommend resolving by hand and say
+    why, with the offered resolver recorded in the branch-update audit row; **(c)** the Agents
+    surface states the rule beside the "N of M stages" count, and states the scoping half only for a
+    profile that is actually scoped, while the operator's `get_task` snapshot reports the deliverer
+    as eligible for the current stage and the selection trace marks the posture the dispatch will
+    actually take. The F1 run-boundary test that asserted the opposite for the deliverer is reversed
+    deliberately by this ruling; the reviewer half of F1 stands. Supersedes the "asserted on
+    assignment and dispatch" sentence in `agents-and-runtime.md` and ruling 98(b)'s "fenced by stage
+    eligibility" as it applied to re-running an engaged deliverer. Ruling 98(a) is NOT touched: who
+    may decide a delivery hand-off was put to the owner as Q34-14 and answered on 2026-09-04 — the
+    operator may switch the delivering agent however it judges best, because a human can redirect it
+    through the operator chat or agent allocation — so 98(a) stands with a dated confirmation note
+    and no separate ruling. (`runEligibilityFor` and `assertResumeEligible` in
+    `app/server/tasks/specialist-run.server.ts`; the resume gate in `commentToAgent`;
+    `stageEligibility` on `task.agent.run_started`.)
 
 134. **Rework reaches its own open pull request: a delivery pushes whatever origin does not carry,
     reuses the PR, and says what moved (owner, 2026-09-04, pass 34 F34-11).**

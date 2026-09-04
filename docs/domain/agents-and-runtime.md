@@ -370,8 +370,18 @@ Telemetry tags are collapsed by `log-noise.ts`, and the console shows the redact
 - Git identity in the run: `<profileId>@viberr.local`; `GIT_CEILING_DIRECTORIES` is the
   task dir.
 
-Stage eligibility (`stages:` on the profile, `spanAll`) is asserted on assignment and
-dispatch; an empty list means eligible everywhere.
+Stage eligibility (`stages:` on the profile, `spanAll`) gates NEW engagements
+(`assignSpecialist`, `assignReviewer`, the dispatch's auto-engage); an empty list means
+eligible everywhere. Ruling 133 (pass 34): once a profile is the task's delivering
+engagement it runs at EVERY stage, on every door (the operator's `run_agent`, the Run
+control, a human @mention's resume, a schedule, `retry_other_backend`), for rework,
+conflict resolution and follow-ups; `runEligibilityFor` is the one home, and the
+`task.agent.run_started` audit row records `stageEligibility` (`declared`,
+`engaged-deliverer`, or `undeployed`), naming the exemption only when it was needed.
+A supporting engagement stays stage-scoped, and an unengaged profile whose session
+survives is judged by the new-engagement rule, so the @mention resume door
+(`assertResumeEligible`) refuses with the dispatcher's own sentence and posts the
+comment as a partial success.
 
 
 Before a delivering dispatch, `ensureTaskBranchBestEffort` prepares the task branch; a

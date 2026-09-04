@@ -1673,6 +1673,12 @@ export async function commentToAgent(
       });
     }
     if (target.session) {
+    // Ruling 133 (pass 34): the resume door is stage-gated like every other
+    // door. Inside the A8 try, so a supporting agent gets the honest partial
+    // success (comment posted, `runNotStarted` names the refusal) while the
+    // engaged deliverer resumes anywhere.
+    const { assertResumeEligible } = await import("./specialist-run.server");
+    assertResumeEligible(ctx, input.projectSlug, input.taskKey, target.profileId);
     // 4a. Resume the agent's existing provider session, reusing the clone
     //     workdir so it keeps its repo context. P8 (pass 25): a supporting agent
     //     resumes into its OWN isolated checkout, never the delivering tree.

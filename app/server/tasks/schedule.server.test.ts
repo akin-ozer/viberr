@@ -432,6 +432,42 @@ describe("cancelScheduledAction", () => {
 });
 
 describe("fireDueSchedules", () => {
+  it("ruling 133: a scheduled run-agent for the ENGAGED deliverer fires at a stage its profile does not declare", async () => {
+    // Canary: reinstate the unconditional `assertStageEligible` in
+    // dispatchAgentRun (the occurrence fails at fire time).
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "dev", role: "developer", backends: ["claude"], model: "sonnet", stages: ["review"] },
+        },
+      ],
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        engagements: [{ profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false }],
+        schedules: [rawSchedule({ id: "sch_dev", action: "run-agent", profileId: "dev", prompt: "continue" })],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(1);
+    await waitForSchedule("VIB-1", "sch_dev", "fired");
+    // SAFETY: `kind` TEXT NOT NULL on `agent_runs`; the count is an integer.
+    const primary = store.db
+      .prepare(`SELECT count(*) AS c FROM agent_runs WHERE task_key = 'VIB-1' AND kind = 'primary'`)
+      .get() as { c: number };
+    expect(primary.c).toBe(1);
+    expect(timeline("VIB-1").some((e) => /Scheduled action failed/.test(e.text))).toBe(false);
+  });
+
   it("ruling 131(d): a due run-operator occurrence on a HELD task is retired `fired` as skipped-held with no run; a run-agent occurrence stands", async () => {
     // Canary: drop the `refusedHeld` branch (the note and the outcome vanish).
     writeTask(store.dataRoot, store.slug, {

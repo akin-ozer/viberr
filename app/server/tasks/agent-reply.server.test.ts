@@ -934,6 +934,110 @@ describe("resumeWorkdir", () => {
 
 /* ------------------------------------------------------------ commentToAgent */
 
+describe("ruling 133: the @mention resume door is stage-gated like every other door", () => {
+  /** Redeploy with `dev` (delivers) and `rev` (supporting) both scoped to review only. */
+  function scopeBothToReview(): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        { profileId: "dev", capabilities: [], extras: [], definition: { kind: "specialist", name: "dev", role: "developer", backends: ["claude"], model: "claude-sonnet", stages: ["review"] } },
+        { profileId: "rev", capabilities: [], extras: [], definition: { kind: "specialist", name: "rev", role: "reviewer", backends: ["claude"], model: "claude-sonnet", stages: ["review"] } },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+  const sessionRow = (id: string, profileId: string, kind: "primary" | "reviewer") =>
+    upsertRun(store.db, {
+      id,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: `${profileId}-thread`,
+      role: profileId === "dev" ? "developer" : "reviewer",
+      kind,
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: `${id}-session`,
+      agentName: profileId,
+      agentProfileId: profileId,
+      state: "finished",
+    });
+
+  it("an @mention of a SUPPORTING agent at an undeclared stage posts the comment and refuses the run with the dispatcher's sentence", async () => {
+    // Canary: remove the `assertResumeEligible` call from commentToAgent.
+    scopeBothToReview();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+          { profileId: "rev", backend: "claude", role: "reviewer", delivers: false, verdictCapable: true },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    sessionRow("run_rev_old", "rev", "reviewer");
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@rev please re-check" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.agent?.profileId).toBe("rev");
+    expect(result.triggered).toBeNull();
+    expect(result.runNotStarted).toMatch(/rev is not eligible for the "impl" stage/);
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.timeline.some((e) => e.type === "comment" && e.actor.kind === "human")).toBe(true);
+  });
+
+  it("an @mention of the DELIVERING agent resumes it at a stage its profile does not declare", async () => {
+    // Canary: drop the `delivers` arm from `runEligibilityFor`.
+    scopeBothToReview();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [{ profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false }],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    sessionRow("run_dev_old", "dev", "primary");
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev please continue" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("resumed");
+    expect(result.runNotStarted).toBeNull();
+  });
+
+  it("an @mention of a RELEASED profile (session survives, no engagement) at an undeclared stage is refused", async () => {
+    // Canary: return ok for an unengaged profile in `assertResumeEligible`.
+    scopeBothToReview();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [{ profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false }],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    sessionRow("run_rev_released", "rev", "reviewer");
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@rev one more look?" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBeNull();
+    expect(result.runNotStarted).toMatch(/rev is not eligible for the "impl" stage/);
+  });
+});
+
 describe("commentToAgent", () => {
   it("records a plain comment with no agent (superset of appendComment)", async () => {
     const result = await commentToAgent(

@@ -1466,12 +1466,20 @@ async function dispatchAgentRun(
   // for. Outside the try so the undeployed-profile fallback can't swallow it.
   // An undeployed profile declares no stages to check against — the withheld
   // confinement above is what bounds that run instead (P14-RT-01).
+  // Ruling 133 (pass 34): the RUN boundary admits the engaged deliverer at
+  // every stage and keeps a supporting engagement stage-scoped; the admitted
+  // reason is recorded on the audit row.
+  let stageEligibility: "declared" | "engaged-deliverer" | "undeployed" = "undeployed";
   if (resolved) {
-    assertStageEligible(
+    const eligibility = runEligibilityFor(
       resolved,
+      existing.parsed.frontmatter.engagements,
+      engagement.profileId,
       existing.parsed.frontmatter.stage,
       projectBoard(ctx, input.projectSlug),
     );
+    if (!eligibility.ok) throw AppError.validation(eligibility.refusal);
+    stageEligibility = eligibility.why;
   }
 
   // R18-1: a REVIEWER must judge the work against the SAME knowledge-base
@@ -2121,6 +2129,8 @@ async function dispatchAgentRun(
     backend,
     delivers,
     cloned: !!clone?.dir,
+    // Ruling 133: why the run was admitted at this stage.
+    stageEligibility,
   };
   recordAudit(db, {
     // ONE action id for every engaged agent (the former
@@ -3595,11 +3605,13 @@ export interface DeployedSpecialistView {
 }
 
 /**
- * True when a specialist may work a task at `stageId`, resolved against THIS
- * board (R14-1). Declared ids match literally first, then by structural role, and
- * a declaration that means nothing on this board is unrestricted — see
- * `~/shared/workflow/stage-eligibility`. Consumed by the operator picker and the
- * assign/run guards (F1).
+ * True when a profile may be NEWLY ENGAGED on a task at `stageId`, resolved
+ * against THIS board (R14-1). Declared ids match literally first, then by
+ * structural role, and a declaration that means nothing on this board is
+ * unrestricted — see `~/shared/workflow/stage-eligibility`. Consumed by the
+ * operator picker and the two new-engagement guards (`assignSpecialist`,
+ * `assignReviewer`). Ruling 133 (pass 34): this is NOT the run guard for an
+ * engaged deliverer any more — see {@link runEligibilityFor}.
  *
  * `board` is optional only so the pure-id call sites in tests stay readable;
  * every production caller passes the project's stages + workflow, because
@@ -3621,29 +3633,107 @@ export function specialistEligibleForStage(
   return stageEligible(spec, stageId, board.stages, board.workflow);
 }
 
+type EligibilityBoard = {
+  stages: readonly { id: string }[];
+  workflow: readonly { from: string; to: string }[];
+};
+
+/** The dispatcher's own refusal sentence, shared by every door (ruling 133). */
+function stageRefusalSentence(
+  spec: { name: string; stages: string[]; spanAll: boolean },
+  stageId: string,
+  board?: EligibilityBoard | null,
+): string {
+  const scopedTo = board
+    ? resolveDeclaredStages(spec.stages, board.stages, board.workflow).join(", ")
+    : spec.stages.join(", ");
+  return `${spec.name} is not eligible for the "${stageId}" stage — its profile is scoped to ${
+    scopedTo || spec.stages.join(", ") || "no stages"
+  }. Change the task's stage or the profile's eligible stages.`;
+}
+
 /**
- * Enforce agent stage eligibility (F1): reject assigning/running a specialist on
- * a task whose current stage the specialist isn't eligible for. The Agents UI
- * shows "N of M stages" per profile; this makes that promise real instead of
- * decorative. `spanAll` and no-declared-stages profiles are always eligible.
+ * Enforce stage eligibility for a NEW engagement (F1, narrowed by ruling 133):
+ * reject engaging a profile on a task whose current stage it isn't eligible
+ * for. The Agents UI shows "N of M stages" per profile; this makes that
+ * promise real where it applies: at `assignSpecialist` and `assignReviewer`.
+ * `spanAll` and no-declared-stages profiles are always eligible.
  */
 function assertStageEligible(
   spec: { name: string; stages: string[]; spanAll: boolean },
   stageId: string,
-  board?: {
-    stages: readonly { id: string }[];
-    workflow: readonly { from: string; to: string }[];
-  } | null,
+  board?: EligibilityBoard | null,
 ): void {
   if (specialistEligibleForStage(spec, stageId, board)) return;
-  const scopedTo = board
-    ? resolveDeclaredStages(spec.stages, board.stages, board.workflow).join(", ")
-    : spec.stages.join(", ");
-  throw AppError.validation(
-    `${spec.name} is not eligible for the "${stageId}" stage — its profile is scoped to ${
-      scopedTo || spec.stages.join(", ") || "no stages"
-    }. Change the task's stage or the profile's eligible stages.`,
+  throw AppError.validation(stageRefusalSentence(spec, stageId, board));
+}
+
+/** Why a run at this stage is admitted (ruling 133). `declared` is tested
+ *  FIRST so the exemption is named only when it was needed: by dispatch time
+ *  the auto-engage has already written `delivers: true`, so an exemption-first
+ *  order would stamp `engaged-deliverer` on every delivering run. */
+export type RunEligibility =
+  | { ok: true; why: "declared" | "engaged-deliverer" }
+  | { ok: false; refusal: string };
+
+/**
+ * Ruling 133 (pass 34, F34-16): the ONE home for "may this profile RUN on this
+ * task at this stage". A profile eligible for the stage runs (`declared`); the
+ * task's ENGAGED DELIVERER runs at every stage (`engaged-deliverer`): rework,
+ * conflict resolution and follow-ups belong to the agent that owns the branch,
+ * whatever stage the board shows the work at. A supporting engagement stays
+ * stage-scoped, and an unengaged profile is judged by the new-engagement rule.
+ * Live (JC-3): the deliverer was scoped to Backlog + Design, the task sat at
+ * Review, and the conflict packet's recommended option could not execute
+ * while a human @mention ran the same agent through an ungated door.
+ */
+export function runEligibilityFor(
+  spec: { name: string; stages: string[]; spanAll: boolean },
+  engagements: readonly { profileId: string; delivers: boolean }[],
+  profileId: string,
+  stageId: string,
+  board?: EligibilityBoard | null,
+): RunEligibility {
+  if (specialistEligibleForStage(spec, stageId, board)) return { ok: true, why: "declared" };
+  if (engagements.some((e) => e.profileId === profileId && e.delivers)) {
+    return { ok: true, why: "engaged-deliverer" };
+  }
+  return { ok: false, refusal: stageRefusalSentence(spec, stageId, board) };
+}
+
+/**
+ * Ruling 133: the same rule on the @mention RESUME door, which used to check
+ * continuity and principal but never the stage (`resumeRun` bypasses
+ * `dispatchAgentRun`). The engaged deliverer resumes anywhere; a supporting
+ * engagement is refused at a stage its profile does not declare; a profile
+ * that is NOT engaged at all (released, or never engaged, whose finished run
+ * rows and provider session survive) is judged by the new-engagement rule.
+ * An undeployed profile declares no stages to check against and passes
+ * through, exactly as the dispatch's undeployed catch does.
+ */
+export function assertResumeEligible(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  profileId: string,
+): void {
+  const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  if (!existing) throw AppError.notFound(`Task ${taskKey} not found.`);
+  let resolved: ResolvedSpecialist | null = null;
+  try {
+    resolved = resolveDeployedSpecialist(ctx, projectSlug, profileId);
+  } catch {
+    // Undeployed: nothing declares stages to check against (P14-RT-01).
+    return;
+  }
+  const eligibility = runEligibilityFor(
+    resolved,
+    existing.parsed.frontmatter.engagements,
+    profileId,
+    existing.parsed.frontmatter.stage,
+    projectBoard(ctx, projectSlug),
   );
+  if (!eligibility.ok) throw AppError.validation(eligibility.refusal);
 }
 
 /**

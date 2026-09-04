@@ -570,8 +570,12 @@ describe("startSpecialistRun", () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 
-  it("rejects RUNNING an already-assigned specialist at a stage it isn't eligible for (F1 run boundary)", async () => {
-    // Re-deploy `dev` scoped to the REVIEW stage only, assigned to VIB-1.
+  it("ruling 133: the ENGAGED deliverer runs at a stage its profile does not declare (reverses F1's deliverer half), and the audit row says why", async () => {
+    // Ruling 133 (pass 34, F34-16) REVERSES the F1 run-boundary case that used
+    // to stand here: rework, conflict resolution and follow-ups belong to the
+    // agent that owns the branch, whatever stage the board shows the work at.
+    // Canary: call `assertStageEligible` unconditionally in dispatchAgentRun
+    // again (the run is refused).
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
@@ -593,9 +597,6 @@ describe("startSpecialistRun", () => {
         },
       ],
     });
-    // VIB-1 is at `impl` (from beforeEach) with `dev` assigned — an ineligible
-    // stage for this profile. Assign-time is bypassed; the RUN boundary must
-    // still reject (regression for the adversarial-review F1 gap).
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "impl",
@@ -609,14 +610,59 @@ describe("startSpecialistRun", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
+    const result = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.runId).toBeTruthy();
+    const started = listAuditEvents(store.db).find((e) => e.action === "task.agent.run_started");
+    expect(started?.details).toMatchObject({ profileId: "dev", delivers: true, stageEligibility: "engaged-deliverer" });
+  });
+
+  it("ruling 133: a SUPPORTING engagement stays stage-scoped at the run boundary, and a NEW delivering engagement is still gated", async () => {
+    // Canaries: return ok for every engaged profile in `runEligibilityFor`
+    // (the supporting run starts); delete the `assertStageEligible` call in
+    // `assignSpecialist` (the new engagement lands).
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "dev", role: "developer", backends: ["claude"], model: "sonnet", stages: ["review"] },
+        },
+        {
+          profileId: "helper",
+          capabilities: [],
+          extras: [],
+          definition: { kind: "specialist", name: "helper", role: "support", backends: ["claude"], model: "sonnet", stages: ["review"] },
+        },
+      ],
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "helper", backend: "claude", role: "support", delivers: false, verdictCapable: false },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // The supporting engagement is refused with the dispatcher's own sentence.
     await expect(
-      startAgentRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toThrow(/not eligible/i);
+      startAgentRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "helper" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
+    ).rejects.toThrow(/helper is not eligible for the "impl" stage/);
+    // A NEW delivering engagement is gated at `assignSpecialist`.
+    await expect(
+      startAgentRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
+    ).rejects.toThrow(/dev is not eligible for the "impl" stage/);
+    expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter.engagements.map((e) => e.profileId)).toEqual(["helper"]);
   });
 
   it("creates a run row with the specialist backend and streams output", async () => {

@@ -120,7 +120,10 @@ off the graph (`humanGatesPreWorkAdvance`, ruling 28).
 Agent stage eligibility resolves in three steps (`stageEligible`): a literal id on
 this board; else the structural role the declared id names (`todo`, `backlog` →
 entry; `impl`, `doing`, `wip` → work; `review`, `qa`, `verify` → review; …); else a
-declaration that names nothing on this board is treated as unrestricted.
+declaration that names nothing on this board is treated as unrestricted. Eligibility
+decides where a profile may be NEWLY engaged; the task's engaged deliverer acts at any
+stage (ruling 133), so rework routing is a workflow choice, never a way around a
+profile's stages.
 
 ## 5. Transitions
 
@@ -237,7 +240,7 @@ supervisors, and the operator re-invoked with `dependencies-released`).
   the link then served them the members-only 404, which is ruling 25 read backwards. `@operator` queues an operator turn carrying the
   comment as its steer; `@<agent name>`, `@claude` or `@codex` resumes that agent's
   session (auto-engaging a deployed but unengaged agent, ruling 98) and the reply
-  posts back as a comment tagging the human. Mentions use one grammar shared by the
+  posts back as a comment tagging the human. Mentions use one grammar shared by the The resume door is stage-gated like every other door (ruling 133): the engaged deliverer resumes at any stage; a supporting or released agent at a stage its profile does not declare gets the comment posted and the run refused with the dispatcher's sentence.
   composer and the server (`app/ui/mention-spans.ts`).
 - Comment bodies are escaped so that a line that would read as file structure
   (`## `, `### `, `title:`, `to:`, `evidence:`) cannot forge a section or an event.
@@ -286,7 +289,8 @@ anything ambiguous fails closed with the reason recorded.
   before enqueuing (`pending → claimed → fired | failed`, `cancelled` by a human),
   never fires on a terminal or archived task, and resolves the **live** deployment at
   fire time (ruling 94). A fire-time refusal no retry can cure (profile undeployed,
-  stage-ineligible) is a terminal `failed` with the reason on the timeline. A
+  stage-ineligible for a NEW engagement; the engaged deliverer fires at any stage,
+  ruling 133) is a terminal `failed` with the reason on the timeline. A
   `run-operator` occurrence on a task that waits on other work (ruling 131(d)) is
   retired `fired` with a "Scheduled action skipped" note and outcome `skipped-held`
   (no run, no cost); a `run-agent` occurrence STANDS, because the ruling refuses

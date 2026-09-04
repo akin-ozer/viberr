@@ -24,6 +24,7 @@ import {
   createNotification,
   listNotifications,
 } from "~/server/projections/notifications.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 
 import { getTaskDetail } from "~/server/projections/task-query.server";
@@ -1079,6 +1080,58 @@ describe("resolvePacket kind matrix", () => {
 
   // 20s (see the routing tests): resolving this packet starts a real run through
   // the fake adapter, which under full-suite parallelism can exceed the 5s default.
+  it("ruling 133: a retry_other_backend resolution starts the retry for a deliverer scoped away from the current stage", { timeout: 20_000 }, async () => {
+    // Canary: reinstate the unconditional `assertStageEligible` in
+    // dispatchAgentRun (the resolution's retry is refused).
+    installFakeRuntime();
+    const store = prepared();
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "dev", role: "developer", backends: ["codex", "claude"], model: "gpt-5.5", stages: ["review"] },
+        },
+      ],
+    });
+    withTask(
+      store,
+      {
+        stage: "impl",
+        waiting: "human",
+        readiness: "blocked",
+        ownerUserId: store.users.arda.id,
+        engagements: [{ profileId: "dev", backend: "codex", role: "developer", delivers: true, verdictCapable: false }],
+      },
+      {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Work stalled: pick a recovery path",
+        body: "",
+        observations: [],
+        options: [
+          { kind: "retry_other_backend", t: "Retry @dev on Claude now", d: "", rec: true, backend: "claude" },
+          { kind: "redirect", t: "Redirect", d: "", rec: false },
+        ],
+      },
+    );
+    const { task } = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.packet).toBeNull();
+    expect(task.waiting).toBe("agent");
+    const started = listAuditEvents(store.db).find((e) => e.action === "task.agent.run_started");
+    expect(started?.details).toMatchObject({ profileId: "dev", backend: "claude", stageEligibility: "engaged-deliverer" });
+  });
+
   it("retry_other_backend: packet cleared, run restarts on the target backend, switch persists to the snapshot", { timeout: 20_000 }, async () => {
     const { interruptRun } = await import(
       "~/server/runtimes/run-service.server"
