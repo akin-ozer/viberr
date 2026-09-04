@@ -32,6 +32,9 @@ export interface DescribeRunFailureInput {
   role: "operator" | "specialist";
   /** The specialist's @mention handle (specialist packets name it). */
   agentHandle?: string;
+  /** The failed specialist's profile id, carried on the `retry_other_backend`
+   *  option so the retry re-runs the same profile. */
+  profileId?: string;
   dataRoot?: string;
   /** Test seam for the reset-label clock; defaults to now. */
   now?: Date;
@@ -60,6 +63,11 @@ export function formatResetLabel(resetsAt: string | null | undefined): string | 
   return `${day} · ${formatClockUTC(resetsAt)} UTC`;
 }
 
+/** A provider sentence ends exactly once, whatever the adapter wrote. */
+function terminated(text: string): string {
+  return /[.!?…]$/.test(text) ? text : `${text}.`;
+}
+
 function windowWord(window: string | null | undefined): string {
   switch (window) {
     case "five_hour":
@@ -79,6 +87,8 @@ export function describeRunFailure(
   input: DescribeRunFailureInput,
 ): RunFailureDescription {
   const backend = BACKEND_NAME[input.backend];
+  /** What an org-level restriction names: the product, not the model. */
+  const product = input.backend === "claude" ? "Claude Code" : "Codex";
   const other: RealBackend = input.backend === "codex" ? "claude" : "codex";
   const kind = input.failure?.kind ?? "unknown";
   const facts = input.failure?.facts;
@@ -110,7 +120,7 @@ export function describeRunFailure(
       const status = facts?.apiErrorStatus ?? null;
       const detail =
         code === "oauth_org_not_allowed"
-          ? `the account's organization does not allow ${backend} Code`
+          ? `the account's organization does not allow ${product}`
           : status === 403
             ? `the provider refused the account (HTTP 403${code ? `, ${code}` : ""})`
             : `the provider rejected the credential${status ? ` (HTTP ${status})` : ""}${code ? `, ${code}` : ""}`;
@@ -123,7 +133,9 @@ export function describeRunFailure(
     case "unavailable":
       // Ruling 127: the run's own line already names the person and their
       // remedy; that sentence is the reason and the remedy.
-      reason = input.failure?.text ?? `${backend} could not run ${runWord}: no usable credential.`;
+      reason = input.failure?.text
+        ? terminated(input.failure.text)
+        : `${backend} could not run ${runWord}: no usable credential.`;
       remedy = owner
         ? `${owner.name} connects ${backend} on ${profile}${ownerHasOther ? `, or the run is retried on ${BACKEND_NAME[other]}` : ""}.`
         : `Seat an owner who has ${backend} connected on ${profile}.`;
@@ -142,14 +154,14 @@ export function describeRunFailure(
       break;
     default:
       reason = input.failure?.text
-        ? `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} did not complete: ${input.failure.text}`
+        ? `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} did not complete: ${terminated(input.failure.text)}`
         : `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} did not complete.`;
       remedy = "Re-run it; if it fails the same way, read the run's console for the cause.";
   }
 
   const options = input.role === "operator"
     ? operatorOptions(kind, backend, resetLabel)
-    : specialistOptions(kind, backend, other, ownerHasOther, resetLabel, input.agentHandle);
+    : specialistOptions(kind, backend, other, ownerHasOther, resetLabel, input.agentHandle, input.profileId);
 
   return { reason, remedy, resetLabel, owner, options };
 }
@@ -185,7 +197,7 @@ function operatorOptions(
         title: `The usage window has reset${resetLabel ? ` (${resetLabel})` : ""}, or I switched the ${backend} account: re-run`,
         detail: "Closes this decision and starts a fresh operator run on the owner's current account. If it fails again you get a new decision packet.",
         recommended: true,
-        ev: "**Decision:** the usage window has reset or the account was switched; re-run the operator. No policy or credential was changed.",
+        ev: "**Decision:** the usage window has reset or the account was switched; re-run the operator. No project policy was changed.",
       },
       redirect,
       hold,
@@ -218,6 +230,7 @@ function specialistOptions(
   ownerHasOther: boolean,
   resetLabel: string | null,
   agentHandle: string | undefined,
+  profileId: string | undefined,
 ): OperatorPacketOptionInput[] {
   const handle = agentHandle ? `@${agentHandle}` : "the agent";
   const redirect: OperatorPacketOptionInput = {
@@ -229,13 +242,15 @@ function specialistOptions(
   if (backendFailure) {
     const options: OperatorPacketOptionInput[] = [];
     if (ownerHasOther) {
-      options.push({
+      const retry: OperatorPacketOptionInput = {
         kind: "retry_other_backend",
         title: `Retry ${handle} on ${BACKEND_NAME[other]} now`,
-        detail: `The owner has ${BACKEND_NAME[other]} connected; re-run the same agent there and continue.`,
+        detail: `The owner has ${BACKEND_NAME[other]} connected; re-run the same agent there and continue. The switch sticks: later prompts on this task follow it.`,
         recommended: true,
         backend: other,
-      });
+      };
+      if (profileId) retry.profileId = profileId;
+      options.push(retry);
     }
     options.push({
       kind: "request_edit",
@@ -249,7 +264,7 @@ function specialistOptions(
       recommended: !ownerHasOther,
       ev:
         kind === "quota"
-          ? "**Decision:** the usage window has reset or the account was switched; the agent continues. No policy or credential was changed."
+          ? "**Decision:** the usage window has reset or the account was switched; the agent continues. No project policy was changed."
           : `**Decision:** the ${backend} credential was changed on the owner's profile; the agent continues.`,
     });
     options.push(redirect);

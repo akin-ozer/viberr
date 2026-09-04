@@ -523,9 +523,9 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
       intent: "resolve-packet", option: "2",
     })) as { ok: true; kind: string; toast: string; navigateTo?: string };
     expect(result.kind).toBe("block_on_policy");
-    expect(result.toast).toBe(
-      "Policy / credential updated · the operator re-runs to re-check",
-    );
+    // Ruling 130(c) (pass 34): the toast states the EFFECT and restates no
+    // claim. Canary: restore the old "Policy / credential updated" literal.
+    expect(result.toast).toBe("Unblocked · the operator re-runs to re-check");
     expect(result.navigateTo).toBeUndefined();
 
     const after = await runLoader("VIB-142", ids.arda);
@@ -535,7 +535,9 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     // The re-queue may post its own events, so find the decision by type.
     const decision = after.task.timeline.find((e) => e.type === "transition");
     expect(decision).toBeDefined();
-    expect(decision!.text).toContain("policy / credential updated");
+    // The record restates the seeded option's own words (ruling 130(c)).
+    expect(decision!.text).toContain("**Decision:** Block on policy.");
+    expect(decision!.text).not.toContain("policy / credential updated");
     expect(decision!.text).toContain("unblocked");
   });
 

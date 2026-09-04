@@ -680,6 +680,10 @@ describe("claude adapter (SDK, injected fake query)", () => {
               reject(new Error("Claude Code process aborted by user")),
             );
           });
+          // Unreachable (the promise above only rejects); it makes this a
+          // generator that yields nothing rather than a function with no yield.
+          const none: never[] = [];
+          yield* none;
         })();
         return Object.assign(gen, {
           interrupt: async () => new Promise<void>(() => {}),
@@ -717,6 +721,9 @@ describe("claude adapter (SDK, injected fake query)", () => {
       const wedged: ClaudeQuery = Object.assign(
         (async function* () {
           await new Promise(() => {});
+          // Unreachable (the promise never settles); see above.
+          const none: never[] = [];
+          yield* none;
         })(),
         { interrupt: async () => new Promise<void>(() => {}) },
       );

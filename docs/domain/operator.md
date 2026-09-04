@@ -210,11 +210,20 @@ resolution, ruling 33).
 
 Who opens packets: the operator's own decision (`operatorOpenPacket`, either
 backend); an agent's `ask_human` (kind `Agent question`, `custom` option only); the
-stuck-loop escalation after a failed agent run, a no-progress react or the transition
-chain cap (`redirect`, `request_edit`, `hold_runtime_debug`, plus a recommended
-`retry_other_backend` when the failure is quota/auth/unavailable); a failed operator
-run (`escalateFailedOperatorRun`, with the provider's own redacted words); a Codex
-run that produced no parseable plan; the branch-update conflict; and the
+stuck-loop escalation after a no-progress react or the transition chain cap (the stock
+set: `redirect` recommended, `request_edit`, `hold_runtime_debug`); the same escalation
+after a failed agent run, whose reason and options come from `describeRunFailure`
+(`app/server/tasks/run-failure-remedy.server.ts`, ruling 130(b)) when the failure is
+`quota | auth | unavailable`: `retry_other_backend` first only when the task owner has
+the other backend connected, else a `request_edit` titled "The window has reset (…), or
+the account changed: send @agent back to continue", `redirect` present and never
+recommended, `hold_runtime_debug` last; a failed operator run
+(`escalateFailedOperatorRun`: "Operator run failed: pick a recovery path", body = the
+classified reason, "No coordination was performed.", the owner's own remedy, the
+provider's redacted words, a "Window reopens" observation when the reset instant is
+known; options from the same module, ruling 130(b)/(c)); a Codex run that produced no
+parseable plan (the stock blocked set, whose recommended option is "Re-run the operator
+now"); the branch-update conflict; and the
 `pr-diverged` recovery (closed PR → rework, `archive_task`, `archive_task` +
 `deleteBranch`; merged → no packet, accept instead; reopened → withdraw the moot
 packet).
@@ -225,7 +234,7 @@ Resolution effects by option kind (`resolvePacket`):
 |---|---|
 | `accept_completion` | Runs the full acceptance contract (authority, disclosure echo, live no-change probe, refusal stack, PR head check, merge). Not re-queued. |
 | `request_edit`, `redirect`, `custom` | Task back to `waiting: agent`, `readiness: ready`, packet cleared, operator re-queued; an agent question routes to the asker's resumed session first. |
-| `block_on_policy` | "I fixed the policy or credential": `readiness: ready`, `waiting: agent`, re-queued (ruling 76). Since ruling 127 the credential half of that is a person connecting their own backend on Profile → Agent accounts, usually the task owner. |
+| `block_on_policy` | The re-run kind: `readiness: ready`, `waiting: agent`, re-queued (ruling 76). Its label states what the human asserts ("The usage window has reset (…), or I switched the Claude account: re-run", "I connected a different Claude account or an API key on Profile → Agent accounts: re-run", or the stock "Re-run the operator now"); the recorded decision is the option's pre-authored `ev` or its own title, never a fixed "policy / credential updated" (ruling 130(c)). The toast says "Unblocked · the operator re-runs to re-check", and the re-run's instruction tells the operator to assume nothing about credentials or policy beyond the decision's own words. Since ruling 127 the credential half of that is a person connecting their own backend on Profile → Agent accounts, usually the task owner. |
 | `hold_runtime_debug` | `readiness: blocked`, `waiting: human`, packet cleared, not re-queued. |
 | `retry_other_backend` | Re-runs the failed agent on the named backend under operator authority; the switch sticks on the engagement's `pinnedBackend`. Offered only when the TASK OWNER has that backend connected (ruling 127). |
 | `edit_goal` | The only kind that keeps its packet open (`awaiting: goal_edit`); cleared when the edited goal is saved. |

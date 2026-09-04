@@ -114,6 +114,10 @@ import {
 } from "./run-service.server";
 import { getRun, patchRun } from "./run-store.server";
 import {
+  describeRunFailure,
+  type DescribeRunFailureInput,
+} from "~/server/tasks/run-failure-remedy.server";
+import {
   noteModelAvailabilityFromFailure,
   clearModelMark,
 } from "./model-availability.server";
@@ -1844,23 +1848,26 @@ export function authoredPacketOptions(
 
 function defaultPacketOptions(
   packetType: "input" | "blocked",
-): {
-  kind: PacketOptionKind;
-  title: string;
-  detail?: string;
-  recommended?: boolean;
-}[] {
+): OperatorPacketOptionInput[] {
   // R20-1 (F20-5): every "blocked" label says exactly what will happen. The old
   // "…and unblock" recorded a HOLD and re-accepted the same confirm forever;
   // now each option resolves the packet, and the two active ones re-run.
+  // Ruling 130(c) (pass 34, F34-12): the stock re-run option asserts only what
+  // the human says. It used to read "I've updated the policy / credential",
+  // was recommended for a run that died of a spent usage window, and its
+  // record ("policy / credential updated") led an operator to tell a
+  // specialist that a GitHub-scope block had been lifted when nothing had.
+  // A FAILED run's packet never uses this set: `escalateFailedOperatorRun`
+  // asks `describeRunFailure` for options that name the classified cause.
   return packetType === "blocked"
     ? [
         {
           kind: "block_on_policy",
-          title: "I've updated the policy / credential — unblock and re-run",
+          title: "Re-run the operator now",
           detail:
             "Closes this decision and starts a fresh operator run. If it fails again you get a new decision packet.",
           recommended: true,
+          ev: "**Decision:** re-run the operator. No policy or credential was changed.",
         },
         {
           kind: "redirect",
@@ -1870,7 +1877,7 @@ function defaultPacketOptions(
         },
         {
           kind: "hold_runtime_debug",
-          title: "Hold — pause coordination while I inspect the session",
+          title: "Hold: pause coordination while I inspect the session",
           detail:
             "Closes this decision and starts NO run. The task stays blocked and waiting on you; use Run operator when you are ready.",
         },
@@ -1884,7 +1891,7 @@ function defaultPacketOptions(
         // resolver's own words become the operator's next steer.
         {
           kind: "custom",
-          title: "Something else — say what should happen",
+          title: "Something else: say what should happen",
           detail: "Your note becomes the operator's instruction for the next turn.",
         },
       ];
@@ -2697,56 +2704,69 @@ async function escalateFailedOperatorRun(
 ): Promise<void> {
   try {
     const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
-    const reason = runFailureReason(db, runId);
-    const detail =
-      reason?.kind === "quota"
-        ? "the coordinating model is over its usage quota"
-        : reason?.kind === "auth"
-          ? "the coordinating model's credential was rejected"
-          : "the coordinating run did not complete";
+    const failure = runFailureReason(db, runId);
+    const backend: RealBackend = input.backend ?? "claude";
+    // Ruling 130(b) (pass 34, F34-12): the ONE failure-to-words mapping. A
+    // quota or credential refusal names the person whose account was refused
+    // (ruling 127's credential principal, the task owner) and their own move:
+    // wait until the reset instant, or connect a different account or an API
+    // key on Profile → Agent accounts. The old body ended "Retry on the other
+    // backend, fix the credential, or redirect the task" for EVERY kind and
+    // recommended "I've updated the policy / credential"; the recorded
+    // decision then lied about a fix nobody made.
+    const ownerUserId =
+      readTaskFile(taskFileRef(input))?.parsed.frontmatter.ownerUserId ?? null;
+    const describeInput: DescribeRunFailureInput = {
+      failure,
+      backend,
+      taskKey: input.taskKey,
+      ownerUserId,
+      role: "operator",
+    };
+    if (ctx.dataRoot) describeInput.dataRoot = ctx.dataRoot;
+    const described = describeRunFailure(db, describeInput);
     // Ruling 127: a drive refused for want of a credential principal already
     // recorded the ONE sentence that names the person and their remedy
-    // (`principalRefusalMessage`, on the run's `run·unavailable` line). Repeat
-    // the generic "fix the credential, or retry on the other backend" advice
-    // here and the packet tells a second, wronger story: the fix belongs to the
-    // task owner, on their own Profile, and the other backend is refused for
-    // exactly the same reason.
-    const refusal = reason?.kind === "unavailable" ? reason.text : "";
-    const providerText = reason?.providerText ?? "";
+    // (`principalRefusalMessage`, on the run's `run·unavailable` line); the
+    // leaf hands that sentence back as the reason, and no second remedy is
+    // written beside it.
+    const refusal = failure?.kind === "unavailable";
+    const providerText = failure?.providerText ?? "";
     logger.warn("real operator run failed — escalating", {
       taskKey: input.taskKey,
       runId,
-      kind: reason?.kind ?? "unknown",
+      kind: failure?.kind ?? "unknown",
     });
     const escalation: OperatorOpenPacketInput = {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       packetType: "blocked",
-      title: "Operator run failed — pick a recovery path",
+      // The colon form: `app/server` is outside the copy-ban gate, so this is
+      // a deliberate copy change (the title is rendered on the packet card).
+      title: "Operator run failed: pick a recovery path",
       body:
         (refusal
-          ? `The operator could not run on this task. ${refusal} No ` +
+          ? `The operator could not run on this task. ${described.reason} No ` +
             `coordination was performed.`
-          : `The operator run did not complete — ${detail}. No coordination was ` +
-            `performed. Retry on the other backend, fix the credential, or ` +
-            `redirect the task.`) +
+          : `${described.reason} No coordination was performed. ${described.remedy}`) +
         // R20-3 (F20-4): the operator's OWN escalation used to drop the
         // provider's words entirely; append the redacted sentence so a Codex
         // model/account mismatch reads its real cause, not the generic advice.
         (providerText ? `\n\nWhat the provider reported: ${providerText}` : ""),
-      options: defaultPacketOptions("blocked"),
+      options: described.options,
     };
     // Same "Provider said" observation the specialist stuck-loop packet gets —
-    // and no observations block at all when the provider said nothing.
-    if (providerText) {
-      escalation.observations = [{ k: "Provider said", v: providerText, code: true }];
-    }
+    // and no observations block at all when nothing was learned.
+    const observations: NonNullable<OperatorOpenPacketInput["observations"]> = [];
+    if (described.resetLabel) observations.push({ k: "Window reopens", v: described.resetLabel });
+    if (providerText) observations.push({ k: "Provider said", v: providerText, code: true });
+    if (observations.length) escalation.observations = observations;
     const opened = await operatorOpenPacket(db, ctx, escalation, authority);
     // R20-3: mark the model unavailable when the provider REFUSED it (no probe).
     if (providerText) {
       noteModelAvailabilityFromFailure(db, {
         runId,
-        backend: input.backend ?? "claude",
+        backend,
         model: getRun(db, runId)?.model ?? null,
         providerText,
       });
@@ -3452,7 +3472,7 @@ function operatorTurnDoctrine(
     return (
       `A human just answered your decision packet: ${decided}. The packet is now resolved. ` +
       "Act on that decision from the live snapshot and take the ONE coordination step it warrants " +
-      "(a policy/credential fix means re-check the work that was blocked; a redirect means re-prompt the delivering profile with the steer). " +
+      "Assume NOTHING about credentials or policy beyond what the decision itself says: a re-run after a spent usage window or a switched account means try the same coordination again, and a block recorded on this task (a scope, a policy, a refusal) stays in force until its own record says otherwise; a redirect means re-prompt the delivering profile with the steer. " +
       "Do NOT re-open the packet you were just answered on — if the SAME condition still blocks you, say so in ONE concise comment or open a packet that names the NEW information. " +
       triageQualityGate(snapshot)
     );

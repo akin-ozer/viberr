@@ -60,7 +60,10 @@ describe("describeRunFailure", () => {
     expect(rec.kind).toBe("block_on_policy");
     expect(rec.title).toContain("The usage window has reset");
     expect(rec.title).toContain("switched the Claude account");
-    expect(rec.ev).toContain("No policy or credential was changed");
+    // The title allows an account switch, which IS a credential change: the
+    // record denies only what the person did not assert.
+    expect(rec.ev).toContain("No project policy was changed");
+    expect(rec.ev).not.toContain("credential was changed");
     for (const o of d.options) {
       expect(o.title).not.toMatch(/updated the policy/i);
       expect(o.title).not.toMatch(/[–—]/);

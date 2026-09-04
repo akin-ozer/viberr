@@ -178,6 +178,15 @@ declaration that names nothing on this board is treated as unrestricted.
     unconnected there it renders no button and says so ("<Other> isn't connected for the
     task owner, so there is no other backend to retry on"), so the packet and the console
     never tell two stories about one task.
+  - a run the provider **refused** for the owner's account (a spent usage window, a
+    rejected credential) is worded once, by `describeRunFailure` (ruling 130(b)): the
+    `blocked` timeline event, the recovery packet and the controller's note name the
+    owner, the spent window and the instant it reopens (absolute UTC) or the
+    organization restriction, and the owner's own move: wait, or connect a different
+    account or an API key on Profile → Agent accounts. Nothing on the task says "fix the
+    credential" or "retry on the other backend" unless the owner actually has the other
+    backend connected, and the resolved decision restates the option the human chose,
+    never a "policy / credential updated" nobody performed (ruling 130(c)).
   - a **hand-off changes whose account pays** from the next run on. An in-flight run
     keeps the principal it started with (the column is per run), and a resume after a
     hand-off looks for the provider session in the NEW owner's home, finds none, and

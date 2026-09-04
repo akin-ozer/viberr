@@ -984,10 +984,16 @@ describe("resolvePacket kind matrix", () => {
     expect(task.validation).toBe("none");
     expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    // Ruling 130(c) (pass 34, F34-12): without a pre-authored `ev` the record
+    // restates the option's OWN words. It used to assert "policy / credential
+    // updated" whatever the option said, and an operator reading that record
+    // told a specialist a GitHub-scope block had been lifted (JC-6).
+    // Canary: reinstate the fixed "policy / credential updated" sentence.
     expect(detail?.timeline[0]).toMatchObject({
       type: "transition",
-      text: "**Decision:** policy / credential updated. VIB-1 is unblocked and the operator re-runs to re-check. If it is still blocked, a new decision packet is opened.",
+      text: "**Decision:** Block on policy. VIB-1 is unblocked and the operator re-runs to re-check. If it is still blocked, a new decision packet is opened.",
     });
+    expect(detail?.timeline[0]?.text).not.toContain("policy / credential updated");
     // A second confirm on the already-resolved packet is a 409 (no repeat).
     await expect(
       resolvePacket(

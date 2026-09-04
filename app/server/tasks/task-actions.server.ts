@@ -47,7 +47,15 @@ import {
   requireProjectAuthority,
   requireProjectMutable,
 } from "~/server/auth/project-authority.server";
-import type { OperatorAutonomy } from "./operator-actions.server";
+import type {
+  OperatorAutonomy,
+  OperatorOpenPacketInput,
+  OperatorPacketOptionInput,
+} from "./operator-actions.server";
+import {
+  describeRunFailure,
+  type DescribeRunFailureInput,
+} from "./run-failure-remedy.server";
 import {
   compactTimelineEvents,
   DEFAULT_COMPACTION,
@@ -125,7 +133,6 @@ import {
   patchRun,
 } from "~/server/runtimes/run-store.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
-import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import {
   refusedPrincipalUserId,
   resolveTaskRunPrincipal,
@@ -2376,6 +2383,12 @@ type StuckLoopEscalation =
    *  instead, and no notification was sent. */
   | { status: "failed" };
 
+/** A reason clause ends exactly once: a refusal sentence that already carries
+ *  its period used to be followed by another (`..`, F34-12). */
+function endSentence(text: string): string {
+  return /[.!?…]$/.test(text) ? text : `${text}.`;
+}
+
 /** Open one recovery packet when the bounded operator loop stalls. */
 async function openStuckLoopPacket(
   db: DatabaseSync,
@@ -2385,10 +2398,18 @@ async function openStuckLoopPacket(
     taskKey: string;
     agentHandle: string;
     reason: string;
-    /** Failure-specific recovery options prepended to the standard three
-     *  (e.g. retry_other_backend after a backend-unavailability failure). A
-     *  recommended extra takes the recommendation from the default redirect. */
-    extraOptions?: import("./operator-actions.server").OperatorPacketOptionInput[];
+    /** Ruling 130(b) (pass 34): the person's own move, written after the
+     *  reason ("Arda can wait until the window reopens (…), or connect a
+     *  different Claude account or an API key on Profile → Agent accounts."). */
+    remedy?: string;
+    /** Ruling 130(b): a classified backend failure supplies its own option set
+     *  from `describeRunFailure` (retry on the other backend when the owner has
+     *  it, else "send the agent back to continue"; redirect present and NOT
+     *  recommended, the agent did nothing wrong). Absent, the stock set
+     *  (redirect recommended, request_edit, hold) stands: the other two callers
+     *  escalate coordination loops, not failed runs, and their packets must
+     *  stay resolvable. The hold option is appended to either set. */
+    options?: OperatorPacketOptionInput[];
     /** R20-3 (F20-4): the provider's own redacted sentence, rendered as its own
      *  "Provider said" observation beside the Signal so the human reads the
      *  actual cause on the packet, not only in the timeline. */
@@ -2405,16 +2426,34 @@ async function openStuckLoopPacket(
       "./operator-actions.server"
     );
     const authority = resolveOperatorAuthority(ctx, input.projectSlug, {});
-    const extra = input.extraOptions ?? [];
-    const extraRecommended = extra.some((o) => o.recommended);
-    const redirect: import("./operator-actions.server").OperatorPacketOptionInput =
-      {
-        kind: "redirect",
-        title: "Redirect with sharper guidance",
-        detail: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
-      };
-    // A recommended extra (the backend retry) takes the recommendation from here.
-    if (!extraRecommended) redirect.recommended = true;
+    const hold: OperatorPacketOptionInput = {
+      kind: "hold_runtime_debug",
+      title: "Hold for runtime debugging",
+      detail: "Freeze coordination while the provider-native session is inspected.",
+    };
+    const options: OperatorPacketOptionInput[] = input.options
+      ? [...input.options, hold]
+      : [
+          {
+            kind: "redirect",
+            title: "Redirect with sharper guidance",
+            detail: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
+            recommended: true,
+          },
+          {
+            kind: "request_edit",
+            title: "Send back for another attempt",
+            detail: "Ask the same specialist to try again from its last report.",
+          },
+          hold,
+        ];
+    const observations: NonNullable<OperatorOpenPacketInput["observations"]> = [
+      { k: "Agent", v: `@${input.agentHandle}` },
+      { k: "Signal", v: input.reason },
+    ];
+    if (input.providerText) {
+      observations.push({ k: "Provider said", v: input.providerText, code: true });
+    }
     const result = await operatorOpenPacket(
       db,
       ctx,
@@ -2423,28 +2462,11 @@ async function openStuckLoopPacket(
         taskKey: input.taskKey,
         packetType: "blocked",
         title: `Work stalled: pick a recovery path`,
-        body: `${input.reason} Coordination is paused until a human chooses how to proceed.`,
-        observations: [
-          { k: "Agent", v: `@${input.agentHandle}` },
-          { k: "Signal", v: input.reason },
-          ...(input.providerText
-            ? [{ k: "Provider said", v: input.providerText, code: true }]
-            : []),
-        ],
-        options: [
-          ...extra,
-          redirect,
-          {
-            kind: "request_edit",
-            title: "Send back for another attempt",
-            detail: "Ask the same specialist to try again from its last report.",
-          },
-          {
-            kind: "hold_runtime_debug",
-            title: "Hold for runtime debugging",
-            detail: "Freeze coordination while the provider-native session is inspected.",
-          },
-        ],
+        body:
+          `${input.reason}${input.remedy ? ` ${input.remedy}` : ""} ` +
+          "Coordination is paused until a human chooses how to proceed.",
+        observations,
+        options,
       },
       authority,
     );
@@ -3680,30 +3702,65 @@ export async function applyAgentCompletionEffects(
         : failure.text
       : "";
     const providerText = failure?.providerText ?? "";
-    const reasonText =
-      failure?.kind === "quota"
-        ? `${backendLabel} is over its usage quota`
-        : failure?.kind === "auth"
-          ? `${backendLabel} rejected the credentials`
-          : failure?.kind === "unavailable"
-            // Ruling 127: the refusal sentence is `principalRefusalMessage`'s,
-            // written by the resolver and already naming the person and the
-            // remedy. Repeating a generic "no usable credential configured"
-            // here would tell a second, wronger story about the same refusal.
-            ? failText || `${backendLabel} could not run for this task's owner`
-            : failure?.kind === "max_turns"
-              ? `the ${backendLabel} run hit its turn cap and was CUT OFF mid-work, which is not a task failure (its partial report, if any, is above)`
-              // P13-D-2: a dead provider transcript is its own class. It used to
-              // fall through to the generic branch below, which reads like a
-              // runtime error and sent people to check a credential that was
-              // fine. Nothing is wrong with the setup and the other backend is
-              // not the fix — a fresh run on the SAME backend is, which is why
-              // `backendFailure` deliberately excludes this kind.
-              : failure?.kind === "session_missing"
-                ? `the agent's stored ${backendLabel} session no longer exists, so its history could not be resumed`
-                : failText
-                  ? `${backendLabel} run failed: ${failText}`
-                  : `the ${backendLabel} run ended in an error`;
+    // Ruling 127 / 130(b): the remedy for a quota or credential refusal
+    // belongs to the credential principal, the task owner; the leaf names
+    // them, their reset instant and Profile → Agent accounts. An unowned task
+    // yields no owner sentence and no retry option.
+    const ownerUserId =
+      completionFm?.ownerUserId ??
+      readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed
+        .frontmatter.ownerUserId ??
+      null;
+    const describeInput: DescribeRunFailureInput = {
+      failure,
+      backend: input.backend,
+      taskKey: input.taskKey,
+      ownerUserId,
+      role: "specialist",
+      agentHandle: input.agentHandle,
+      profileId: input.profileId,
+    };
+    if (ctx.dataRoot) describeInput.dataRoot = ctx.dataRoot;
+    const described = describeRunFailure(db, describeInput);
+    // Ruling 130(b): a classified refusal is worded ONCE, by the leaf. The
+    // other kinds keep their own sentences below; `unavailable` is ruling
+    // 127's refusal sentence, already naming the person and the remedy.
+    const classified = failure?.kind === "quota" || failure?.kind === "auth";
+    const reasonText = classified
+      ? described.reason
+      : failure?.kind === "unavailable"
+        ? failText || `${backendLabel} could not run for this task's owner`
+        : failure?.kind === "max_turns"
+          ? `the ${backendLabel} run hit its turn cap and was CUT OFF mid-work, which is not a task failure (its partial report, if any, is above)`
+          // P13-D-2: a dead provider transcript is its own class. It used to
+          // fall through to the generic branch below, which reads like a
+          // runtime error and sent people to check a credential that was
+          // fine. Nothing is wrong with the setup and the other backend is
+          // not the fix — a fresh run on the SAME backend is.
+          : failure?.kind === "session_missing"
+            ? `the agent's stored ${backendLabel} session no longer exists, so its history could not be resumed`
+            : failText
+              ? `${backendLabel} run failed: ${failText}`
+              : `the ${backendLabel} run ended in an error`;
+    const providerBlock =
+      // R20-3 (F20-4): surface the provider's own redacted words as a fenced
+      // block in the R19-13 house style, so a human sees "model is not
+      // supported when using Codex with a ChatGPT account" instead of only
+      // the generic runtime advice above.
+      providerText ? `\n\nWhat the provider reported:\n\`\`\`\n${providerText}\n\`\`\`` : "";
+    const failureText = classified
+      ? `The ${input.role} ${roleLabel} run did not complete. ${described.reason} No changes were delivered. ${described.remedy}${providerBlock}`
+      : `The ${input.role} ${roleLabel} run did not complete: ${endSentence(reasonText)}${
+          failure?.kind === "max_turns" ? "" : " No changes were delivered."
+        }${
+          failure?.kind === "max_turns"
+            ? " Re-prompt the agent to continue from its session, or raise the turn cap (VIBERR_CLAUDE_MAX_TURNS)."
+            : failure?.kind === "session_missing"
+              ? " Re-prompt the agent: it will start a fresh run and re-anchor on this task file. Provider transcripts expire, and wiping the data root removes them too."
+              // The refusal sentence already says who must do what and where;
+              // an unclassified error has no remedy Viberr can vouch for.
+              : ""
+        }${providerBlock}`;
     // Files the run saved before it died still get their producer named.
     const failureAttachments = sanitizeEventAttachmentNames(runAttachments);
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
@@ -3712,28 +3769,7 @@ export async function applyAgentCompletionEffects(
         type: "blocked",
         actor: actorRef,
         title: null,
-        text: `The ${input.role} ${roleLabel} run did not complete: ${reasonText}.${
-          failure?.kind === "max_turns" ? "" : " No changes were delivered."
-        }${
-          failure?.kind === "quota" || failure?.kind === "auth"
-            ? " Retry on the other backend, or fix the credential and re-run."
-            : failure?.kind === "unavailable"
-              // The refusal sentence already says who must do what and where.
-              ? ""
-              : failure?.kind === "max_turns"
-                ? " Re-prompt the agent to continue from its session, or raise the turn cap (VIBERR_CLAUDE_MAX_TURNS)."
-                : failure?.kind === "session_missing"
-                  ? " Re-prompt the agent: it will start a fresh run and re-anchor on this task file. Provider transcripts expire, and wiping the data root removes them too."
-                  : ""
-        }${
-          // R20-3 (F20-4): surface the provider's own redacted words as a fenced
-          // block in the R19-13 house style, so a human sees "model is not
-          // supported when using Codex with a ChatGPT account" instead of only
-          // the generic runtime advice above.
-          providerText
-            ? `\n\nWhat the provider reported:\n\`\`\`\n${providerText}\n\`\`\``
-            : ""
-        }`,
+        text: failureText,
         toAgent: false,
         evidence: null,
       };
@@ -3754,56 +3790,26 @@ export async function applyAgentCompletionEffects(
         providerText,
       });
     }
-    // Backend-level failure (quota / auth / no credential): the packet's first
-    // recovery option is a one-click retry on the OTHER backend (D4). F27-B1
-    // (owner ruling 2026-08-24): the switch STICKS — the retry run sets a
-    // per-engagement `pinnedBackend`, and every later resolution (operator prompt,
-    // @mention) follows the pin over the live profile primary (specialist-run
-    // backend resolution: override ?? pinnedBackend ?? live deployment ?? snapshot).
+    // Backend-level failure (quota / auth / no credential): the packet's
+    // options come from the leaf (D4 retry-on-the-other-backend first when the
+    // task OWNER has it connected, ruling 127; the switch STICKS per F27-B1,
+    // owner ruling 2026-08-24, via the retry run's per-engagement
+    // `pinnedBackend`; else "send the agent back to continue"; redirect
+    // present and not recommended). Any other kind keeps the stock set.
     const backendFailure =
       failure?.kind === "quota" ||
       failure?.kind === "auth" ||
       failure?.kind === "unavailable";
-    const altBackend: RealBackend = input.backend === "codex" ? "claude" : "codex";
-    const altLabel = altBackend === "claude" ? "Claude" : "Codex";
-    const failedProfileId = input.profileId;
-    // Ruling 127: "retry on the other backend" is only a recovery if the TASK
-    // OWNER has that other backend connected — the retry run would bill them.
-    // Offering it otherwise promises a one-click fix that fails identically the
-    // moment it is clicked, which is the worst kind of packet option: it looks
-    // like the way out. An unowned task has no owner to ask, so it is never
-    // offered there either, and the refusal sentence already names the real
-    // remedy (own the task / connect the backend).
-    const ownerUserId =
-      completionFm?.ownerUserId ??
-      readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed
-        .frontmatter.ownerUserId ??
-      null;
-    const ownerHasAlt =
-      ownerUserId !== null &&
-      isBackendAvailableFor(db, ownerUserId, altBackend, {
-        dataRoot: ctx.dataRoot,
-      });
-    const retryOption =
-      backendFailure && ownerHasAlt
-        ? [
-            {
-              kind: "retry_other_backend" as const,
-              title: `Retry on ${altLabel}`,
-              detail: `Re-run the ${roleLabel} on ${altLabel} with a fresh context. The switch sticks: later prompts on this task follow it.`,
-              recommended: true,
-              backend: altBackend,
-              profileId: failedProfileId,
-            },
-          ]
-        : [];
     const stuck: Parameters<typeof openStuckLoopPacket>[2] = {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       agentHandle: input.agentHandle,
-      reason: `The ${input.role} ${roleLabel} run failed: ${reasonText}.`,
+      reason: classified
+        ? described.reason
+        : `The ${input.role} ${roleLabel} run failed: ${endSentence(reasonText)}`,
     };
-    if (retryOption.length) stuck.extraOptions = retryOption;
+    if (classified) stuck.remedy = described.remedy;
+    if (backendFailure) stuck.options = described.options;
     if (providerText) stuck.providerText = providerText;
     const escalation = await openStuckLoopPacket(
       db,
@@ -3835,7 +3841,9 @@ export async function applyAgentCompletionEffects(
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       kind: "quality",
-      text: `${input.role} run failed: ${reasonText}.`,
+      text: classified
+        ? `${input.role} run failed. ${described.reason}`
+        : `${input.role} run failed: ${endSentence(reasonText)}`,
     };
     if (escalation.status === "opened") {
       failureNotice.exceptUserIds = escalation.notifiedUserIds;
@@ -6713,9 +6721,14 @@ export async function resolvePacket(
         type: "transition",
         actor: human,
         title: null,
+        // Ruling 130(c) (pass 34, F34-12): without a pre-authored `ev` the
+        // record restates the option's OWN words. It used to assert "policy /
+        // credential updated" for every option of this kind, and an operator
+        // reading that record on JC-6 told the specialist a GitHub-scope block
+        // had been lifted when nothing had.
         text:
           option.ev ??
-          `**Decision:** policy / credential updated. ${key} is unblocked and the operator ` +
+          `**Decision:** ${option.t}. ${key} is unblocked and the operator ` +
             `re-runs to re-check. If it is still blocked, a new decision packet is opened.`,
         toAgent: false,
         evidence: null,

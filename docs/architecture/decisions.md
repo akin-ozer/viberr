@@ -195,7 +195,9 @@ inventory is not regenerated automatically and has drifted; the verified module 
    and a human completes the merge later, because `merge-pull-request` is `ALWAYS_HUMAN`.
    **Extended** — the kind set is now ELEVEN: `accept_completion`, `request_edit`,
    `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`,
-   `archive_task`, `discard_branch`, `resolve_remote_collision`, `custom`. (`archive_task` arrived with R14-3 — the task
+   `archive_task`, `discard_branch`, `resolve_remote_collision`, `custom`. **Note 2026-09-04
+   (ruling 130, pass 34)** — the set is unchanged: `block_on_policy` stays the re-run kind; only
+   its labels and its recorded decision changed (they now state what the human asserted). (`archive_task` arrived with R14-3 — the task
    archive — and the count here was never updated; corrected 2026-08-05 against
    `PACKET_OPTION_KINDS` in `app/schemas/task-file.schema.ts`, which is the source of
    truth. `discard_branch` arrived 2026-08-15, pass 20 — ruling 77 / R20-2 / F20-6 — as the
@@ -993,6 +995,12 @@ inventory is not regenerated automatically and has drifted; the verified module 
     NO_REQUEUE set), and a repeat failure opens a NEW packet with a fresh decision record. A manual
     "Run operator" is refused while a packet is open (`refused: "open-packet"`) rather than paid for.
     Extends ruling 7's stable-kind dispatch and ruling 17's recovery-packet model.
+    **Extended 2026-09-04 (ruling 130(c), pass 34 F34-12)** — the stock re-run option is titled
+    "Re-run the operator now" and records "re-run the operator. No policy or credential was
+    changed."; a FAILED run's packet takes its options from `describeRunFailure` (the recommended
+    one asserts only what the human says: the window has reset or the account was switched, a
+    different account or an API key was connected); the recorded decision is the option's `ev` or
+    its own title, never a fixed "policy / credential updated"; the toast says "Unblocked".
     (`resolvePacket` in `app/server/tasks/task-actions.server.ts`; the `packet-resolved` trigger in
     `app/server/runtimes/operator-run.server.ts`)
 
@@ -2232,6 +2240,43 @@ by rewriting those paragraphs:*
     `ensureTaskBranch` in `branch-sync.server.ts`; `isMissingRefAnswer` in `github-client.server.ts`;
     the 422 arms in `pr-open.server.ts`; the pre-push gate and the rendering in
     `task-actions.server.ts`.)
+
+130. **A refused run's packet names the cause Viberr classified and the remedy the person actually
+    has (owner, 2026-09-03, pass 34 Q34-7; F34-1, F34-12).** Live: a five-hour session limit and a
+    403 `oauth_org_not_allowed` were both `run·error·unknown` ("Review the runtime configuration"),
+    the controller answered "Say it again to retry", the operator's recovery packet recommended
+    "I've updated the policy / credential - unblock and re-run", the resolved decision was recorded
+    as "policy / credential updated", and an operator acting on that record told a specialist a
+    GitHub-scope block had been lifted (JC-6), undoing the owner's Q34-10 decision. The ruling:
+    **(a)** provider refusals are classified from the STRUCTURED envelope first (the result's
+    `api_error_status`, the assistant envelope's `error` code, a `rate_limit_event` whose `status`
+    is `rejected`) and from prose second; the classified terminal line carries the machine facts
+    (kind, the reset instant, the window, the API status and code) beside its tag suffix, and every
+    reader of a failure (packet builders, the controller's note, the Agent-logs footer for every run
+    kind, the quota store) consumes that class, never a second regex over the raw stream; the API
+    error banner the provider streams as an assistant message is an error line, never the agent's
+    reply. **(b)** Under ruling 127 the remedy for `quota` and `auth` belongs to the credential
+    principal, so the packet body, the blocked timeline event and the controller's note name that
+    person and their own move: wait until the reset instant Viberr quotes, or connect a different
+    account or an API key on Profile → Agent accounts. Generic advice ("fix the credential", "retry
+    on the other backend", "review the runtime configuration") is never written for a classified
+    refusal; `retry_other_backend` stays offered only when the owner has the other backend
+    connected. **(c)** A recovery option's label states what the human asserts and what will happen;
+    its recorded decision is that label or a pre-authored `ev`; the toast and the operator's re-run
+    instruction state the EFFECT (unblocked, re-run) and restate no claim; "policy / credential
+    updated" is reserved for the stock policy-block option the operator authors itself and is never
+    the default for a failed run. One module (`run-failure-remedy.server.ts`) owns the failure-to-
+    words mapping for operator and specialist runs alike. **(d)** A quota or credential refusal is
+    recorded as evidence about the account it billed: the observation store, Insights,
+    `instance_health` and the person's own Agent-accounts card say whose account, from which run,
+    and when the window reopens, so an instance-wide "usage limit reached" is never claimed on
+    behalf of accounts that were not refused; the unauthenticated `/resources/health` body keeps its
+    contract and carries no principal, and the card states that the pill is the last refusal Viberr
+    OBSERVED, which any completed run on that backend retires. Extends rulings 76 (R20-1), 78
+    (R20-3) and 127; `PACKET_OPTION_KINDS` (ruling 7) is unchanged. (`app/server/runtimes/claude-
+    runtime.server.ts`, `wire-format.server.ts`, `backend-quota.server.ts`, `run-sink.server.ts`,
+    `app/server/tasks/run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-
+    run.server.ts`, `app/server/controller/controller-run.server.ts`.)
 
 132. **Revision drift counts authored commits only; a base refresh is reported as what it is (owner,
     2026-09-03, pass 34 Q34-12).** R17-1 measured drift as GitHub's `compare(reviewedSha...head).ahead_by`,

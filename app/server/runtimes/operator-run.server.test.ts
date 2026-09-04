@@ -66,6 +66,7 @@ import {
 } from "../../../test-support/test-db";
 import { createLocalOrigin, withLocalGithub } from "../../../test-support/git-origin";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { emptyRunFailureFacts, type RunFailureFacts } from "~/shared/run-failure";
 
 interface PendingRun {
   spec: RunSpec;
@@ -79,6 +80,28 @@ class ControlledAdapter implements RuntimeAdapter {
   start(spec: RunSpec, callbacks: RunCallbacks): RunHandle {
     this.pending = { spec, callbacks };
     return { runId: spec.runId, interrupt() {} };
+  }
+
+  /** Ruling 130(a): a run that died with a CLASSIFIED failure ends on an
+   *  `err` line carrying the adapter's typed facts; the packet builder reads
+   *  that record, never a second regex over the text. */
+  fail(store: TestStore, text: string, facts: RunFailureFacts): void {
+    const pending = this.pending;
+    if (!pending) throw new Error("No Codex operator run is pending.");
+    const tag = `run·error·${facts.kind}`;
+    insertRunLine(store.db, {
+      runId: pending.spec.runId,
+      seq: 0,
+      occurredAt: new Date().toISOString(),
+      raw: JSON.stringify({ ev: "err", tag, text }),
+      display: { t: "12:00:00", ev: "err", tag, text, failure: facts },
+    });
+    pending.callbacks.onExit({
+      outcome: "error",
+      effectiveBackend: "codex",
+      sessionId: "codex-operator-test",
+    });
+    this.pending = null;
   }
 
   finish(store: TestStore, text: string, outcome: RunExit["outcome"]): void {
@@ -1838,6 +1861,23 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     expect(withoutNote).toContain("the collision was not cleared (GitHub refused the deletion (boom).); nothing was re-delivered and the block stays.");
   });
 
+  it("ruling 130(c): the packet-resolved instruction bolds the decided title and claims no policy or credential fix", () => {
+    // Live (JC-6): the old parenthetical "(a policy/credential fix means
+    // re-check the work that was blocked)" plus a record saying "policy /
+    // credential updated" had the operator tell the specialist a GitHub-scope
+    // block was lifted when nothing had changed.
+    // Canary: restore that parenthetical.
+    const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Ship it." });
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(atWork, "packet-resolved", undefined, undefined, undefined, undefined, undefined, {
+      kind: "block_on_policy",
+      title: "Re-run the operator now",
+    });
+    expect(prompt).toContain("**Re-run the operator now**");
+    expect(prompt).toContain("Assume NOTHING about credentials or policy beyond what the decision itself says");
+    expect(prompt).toContain("stays in force until its own record says otherwise");
+    expect(prompt).not.toContain("policy/credential fix");
+  });
+
   it("F15-14: the gate is stage-scoped — a work stage never carries it", () => {
     const prompt = operatorPrompts.buildOperatorTurnPrompt(
       snap({ stage: "impl", stageName: "In Progress", goal: "Ship the parser." }),
@@ -2505,6 +2545,102 @@ describe("runOperator — authority, ordering, orphans", () => {
       expect(packet).not.toBeNull();
       expect(packet!.body).toContain("Profile → Agent accounts");
       expect(packet!.body).not.toContain("Retry on the other backend");
+    });
+  });
+
+  /**
+   * Ruling 130(b)/(c) (pass 34, F34-12 / F34-1): the operator's OWN failure
+   * packet names the cause Viberr classified and the credential principal's
+   * own remedy, and its recommended option asserts only what the human says.
+   * Live, a five-hour session limit and a 403 `oauth_org_not_allowed` both
+   * produced "Retry on the other backend, fix the credential, or redirect the
+   * task" and recommended "I've updated the policy / credential".
+   *
+   * Canaries: (1) restore `options: defaultPacketOptions("blocked")` in
+   * `escalateFailedOperatorRun` and the quota/auth cases fail on the
+   * recommended title and `ev`; (2) restore the generic body sentence and
+   * every case fails on the body.
+   */
+  describe("ruling 130: a failed operator run's packet", () => {
+    const RESET = "2026-09-07T11:50:00.000Z";
+    const RESET_LABEL = "Sep 7, 2026 · 11:50 UTC";
+    const failed = async (text: string, facts: RunFailureFacts) => {
+      deployAgents([operatorAgent()]);
+      seed("impl");
+      await drive({ trigger: "manual", backend: "claude" });
+      expect(adapter5.pending).not.toBeNull();
+      adapter5.fail(store5, text, facts);
+      await eventually(() => expect(task().packet).not.toBeNull());
+      return task().packet!;
+    };
+
+    it("quota: names the spent window, the reset instant, the owner and Profile → Agent accounts; the recommended option asserts the window/account, never 'policy / credential'", async () => {
+      const packet = await failed("Claude refused the run: usage limit reached.", {
+        ...emptyRunFailureFacts("quota"),
+        windowRejected: true,
+        window: "five_hour",
+        resetsAt: RESET,
+        apiErrorStatus: 429,
+      });
+      expect(packet.title).toBe("Operator run failed: pick a recovery path");
+      expect(packet.body).toContain(
+        `${store5.users.arda.name}'s five-hour usage window is spent and reopens at ${RESET_LABEL}`,
+      );
+      expect(packet.body).toContain("No coordination was performed.");
+      expect(packet.body).toContain("Profile → Agent accounts");
+      expect(packet.body).not.toMatch(/retry on the other backend|fix the credential|redirect the task/i);
+      expect(packet.observations.some((o) => o.k === "Window reopens" && o.v === RESET_LABEL)).toBe(true);
+      const rec = packet.options.find((o) => o.rec)!;
+      expect(rec.kind).toBe("block_on_policy");
+      expect(rec.t).toBe(`The usage window has reset (${RESET_LABEL}), or I switched the Claude account: re-run`);
+      expect(rec.ev).toContain("the usage window has reset or the account was switched");
+      expect(rec.ev).not.toContain("policy / credential updated");
+      for (const o of packet.options) expect(o.t).not.toMatch(/updated the policy|[–—]/);
+    });
+
+    it("auth: names the org restriction and the account remedy; recommends 'I connected a different account or an API key'", async () => {
+      const packet = await failed("Claude refused the run: the account was rejected.", {
+        ...emptyRunFailureFacts("auth"),
+        apiError: "oauth_org_not_allowed",
+        apiErrorStatus: 403,
+        terminalReason: "api_error",
+      });
+      expect(packet.body).toContain("the account's organization does not allow Claude Code");
+      expect(packet.body).toContain("Retrying with the same account fails the same way");
+      expect(packet.body).toContain("Profile → Agent accounts");
+      expect(packet.body).not.toMatch(/retry on the other backend|fix the credential/i);
+      const rec = packet.options.find((o) => o.rec)!;
+      expect(rec.kind).toBe("block_on_policy");
+      expect(rec.t).toBe("I connected a different Claude account or an API key on Profile → Agent accounts: re-run");
+      expect(rec.ev).toContain("No project policy was changed");
+    });
+
+    it("unknown: a plain re-run is recommended and its record claims no credential change", async () => {
+      const packet = await failed("provider exploded", emptyRunFailureFacts("unknown"));
+      expect(packet.body).toContain("The operator run did not complete: provider exploded.");
+      expect(packet.body).toContain("read the run's console for the cause");
+      expect(packet.body).not.toMatch(/fix the credential|retry on the other backend|\.\./i);
+      const rec = packet.options.find((o) => o.rec)!;
+      expect(rec.t).toBe("Re-run the operator now");
+      expect(rec.ev).toBe("**Decision:** re-run the operator. No policy or credential was changed.");
+      expect(packet.options.map((o) => o.kind)).toEqual(["block_on_policy", "redirect", "hold_runtime_debug"]);
+    });
+
+    it("the Codex no-plan packet's stock re-run option claims no credential change", async () => {
+      // Canary: restore the "I've updated the policy / credential" title in
+      // `defaultPacketOptions("blocked")`.
+      deployAgents([operatorAgent({ backends: ["codex"], model: defaultModelFor("codex") })]);
+      seed("impl");
+      await drive({ trigger: "manual", backend: "codex" });
+      expect(adapter5.pending).not.toBeNull();
+      adapter5.finish(store5, "not a plan", "finished");
+      await eventually(() => expect(task().packet).not.toBeNull());
+      const packet = task().packet!;
+      expect(packet.title).toBe("Operator turn produced no actionable plan");
+      const rec = packet.options.find((o) => o.rec)!;
+      expect(rec.t).toBe("Re-run the operator now");
+      expect(rec.ev).toBe("**Decision:** re-run the operator. No policy or credential was changed.");
+      for (const o of packet.options) expect(o.t).not.toMatch(/policy \/ credential|[–—]/);
     });
   });
 

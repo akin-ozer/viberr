@@ -277,11 +277,23 @@ record as `facts`; `projectRunsForTask` sets `failureKind` on every errored run'
 raw scan; the controller's turn note (ruling 130(b)) names a quota window's reset and
 the account switch, or an auth refusal's organization restriction, instead of "Say it
 again to retry", which stays only for an unclassified failure.
-The completion pipeline opens a stuck-loop packet, notes model availability, and clears
-waiting to human. `retry_other_backend` is offered for `quota | auth | unavailable` only
-when the **task owner** has the other backend connected (ruling 127) — otherwise the
-retry would be refused for the same reason, and the refusal sentence already names the
-real remedy.
+The completion pipeline writes the `blocked` event, notes model availability, opens the
+stuck-loop packet and clears waiting to human. For `quota` and `auth` the event, the
+packet body and the controller's note are worded by ONE module,
+`app/server/tasks/run-failure-remedy.server.ts` (`describeRunFailure`, ruling 130(b)):
+the reason names the backend, the owner, the spent window and the reset instant
+(absolute UTC) or the organization restriction; the remedy is the owner's own move on
+Profile → Agent accounts. The packet's options come from the same module for
+`quota | auth | unavailable`: `retry_other_backend` first only when the **task owner**
+has the other backend connected (ruling 127 — otherwise the retry would be refused for
+the same reason), else a `request_edit` that sends the agent back once the window has
+reset or the account changed; `redirect` is present and never recommended for a
+backend failure (the agent did nothing wrong); `hold_runtime_debug` closes the set.
+`unavailable` keeps ruling 127's refusal sentence as its reason. A failed OPERATOR
+run's packet (`escalateFailedOperatorRun`) uses the same module: its recommended
+`block_on_policy` asserts only what the human says and records exactly that in its
+`ev`, never "policy / credential updated" (ruling 130(c)). A reason clause is
+terminated exactly once (the `..` of F34-12 is gone).
 
 ### 3.6 Resume, continuity, export
 
@@ -430,8 +442,11 @@ lane: a stored `recommend` is coerced to `off` on read (ruling 81). Delivery per
    `verdictAuthorized = engagement.verdictCapable ?? live verdict grant`.
 4. Question → packet using the live ask grant; evidence rows are written; browser
    working artifacts not cited are pruned (ruling 105).
-5. Error runs: `blocked` timeline event, model-availability note, stuck-loop packet
-   with `retry_other_backend`, waiting → human.
+5. Error runs: `blocked` timeline event (worded by `describeRunFailure` for a
+   classified refusal), model-availability note, stuck-loop packet whose options come
+   from the same module (`retry_other_backend` only when the owner has the other
+   backend; else "send the agent back to continue"; `redirect` never recommended),
+   waiting → human (ruling 130(b)).
 6. Finished deliverer runs reconcile what the agent pushed itself
    (`reconcileWorkspaceDelivery`).
 7. The operator reacts (`trigger: agent-reply`) when the reply is non-empty, differs
