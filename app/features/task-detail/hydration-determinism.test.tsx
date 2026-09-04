@@ -144,6 +144,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     priority: "high",
     labels: ["runtime"],
     dueDate: "2026-07-03",
+    blockedBy: [],
     archived: false,
     validation: "healthy",
     continuity: null,

@@ -2278,6 +2278,68 @@ by rewriting those paragraphs:*
     `app/server/tasks/run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-
     run.server.ts`, `app/server/controller/controller-run.server.ts`.)
 
+131. **Task dependencies: a task names what it waits on, Viberr holds it without a packet and
+    releases it itself (owner, 2026-09-03, pass 34 Q34-11).** Pass 34 ran five controller-built goal
+    chains against one repository and three of them stalled behind the first: JC-7 and JC-9 could
+    not start until goal-1's links 2 to 4 were on the base branch, and goal-3 and goal-5 queued
+    behind the same work. Every operator read the situation correctly, and every one of them had
+    only a decision packet to say so with: JC-7's hold ended as `waiting: human` with one comment;
+    JC-9's operator ran five paid turns and then wrote "this packet is the standing token … nothing
+    will re-check main for JC-9 again"; a person had to answer each hold and would have had to re-
+    answer each one by hand when the foundation landed. Nothing in the product watched the thing
+    being waited for. **(a) The fact lives on the task.** `task.md` carries `blockedBy: []`, the
+    task keys (`JC-6`) and goal links (`goal-1 link 3`) in the same project this task waits on. It
+    is planning metadata with one difference from priority, labels and due date: while the list is
+    non-empty the derived readiness is floored at `blocked` (`deriveReadiness`, the one derivation
+    home), the board card, the list row and the task page say what it waits on and in what state,
+    and the task owes nobody anything (`waiting: none` unless a packet or a recommendation is open).
+    A goal-link entry resolves to a task key the moment the chain creates that link's task and
+    renders as both. States are resolved at read time, never cached. **(b) Three writers, one
+    gate.** Humans set the list on the task page; the controller sets it through `create_task`,
+    `update_task` and per goal link on `create_goal` / `update_goal`, under the asking person's own
+    gate; the operator records it with its `set_dependencies` tool (gated like packets, `generate-
+    packets`) instead of opening a hold packet. Every write validates against the store: a reference
+    must parse, name an existing task or goal link in this project, not be the task itself, not be
+    an archived task, and not close a cycle, counting DECLARED goal-link edges as well as created
+    tasks; a refusal names the reference and the reason. Every write is a `note` on the timeline and
+    `task.dependencies.updated` in the audit log. **(c) Chain-created tasks inherit.** A goal link
+    may declare `blockedBy`; when the chain creates that link's task the list is copied onto it and
+    validated then, so a link that waits on a sibling chain's link is born held instead of paying a
+    triage turn that has to discover the wait. **(d) The operator holds without a packet and is not
+    nudged.** While the list is non-empty: the `create`, `transition` and `scheduled` triggers are
+    refused at fire time (`refused: "blocked-by"`; no run, no cost; the refusal settles the task's
+    waiting flag, and a scheduled occurrence says on the timeline that no run happened); the
+    stranded-coordination backstop treats the list as a recorded hold and never nudges; and every
+    turn that does run (an agent report, a human's question, a resolved packet, a goal edit, a PR
+    change, a manual run) is told what the task waits on, in a doctrine that REPLACES the ordinary
+    "never end your turn with nothing done and no packet" tail, and must neither advance it,
+    dispatch delivery work, nor open a hold packet about the wait. A human-scheduled AGENT run still
+    fires: this ruling refuses operator triggers. **(e) Viberr releases it.** When every entry is
+    done (its task reached the terminal stage; its goal link is done or was skipped) the release
+    engine clears the list, writes the release note naming what was waited on, lifts a stored
+    `blocked` readiness to `ready`, clears a recorded `heldAtStage`, notifies the owner and
+    supervisors (notification kind `dependency`, its own routing toggle) and re-invokes the operator
+    with the `dependencies-released` trigger, whose doctrine says the base branch has changed since
+    the hold and that a hold packet the operator opened itself is now moot. The engine runs from the
+    same task-write hooks that advance goal chains (transition, archive and restore, acceptance) and
+    from the goal runner's minute tick, and it is convergent: an empty list has nothing to release.
+    A human clearing the list is the same release, through the same two halves. A dependency that
+    can never complete (its task archived, its link failed) does not release: it is noted once on
+    the dependent's timeline, the owner is notified, the task is left `waiting: human` because a
+    person owes the list an edit, and the entry renders as "archived" until they make it. **(f) What
+    this replaces.** The two live holds convert by setting the list: JC-7 (held as `waiting: human`)
+    gains its three entries; JC-9 gains them and its standing-token packet is resolved once, or is
+    left for the release turn to withdraw as moot. The operator doctrine no longer offers "open a
+    packet asking the human to confirm the hold" for a wait on other work; that exit stays for holds
+    a human directed. Ruling 126's price still applies to the turns that run; the turns this ruling
+    refuses cost nothing. (`app/shared/dependencies.ts`; `app/server/tasks/dependencies.server.ts`;
+    `app/server/projections/dependencies.server.ts`; `deriveReadiness` in
+    `app/server/interpretation/readiness-policy.server.ts`; the `blocked-by` refusal, the
+    `dependencies-released` trigger and the doctrine in `app/server/runtimes/operator-
+    run.server.ts`; `set_dependencies` in `app/server/tasks/operator-toolkit.server.ts` and the
+    Codex plan; the controller tools in `app/server/controller/controller-toolkit.server.ts`;
+    `task_projections.blocked_by_json`.)
+
 132. **Revision drift counts authored commits only; a base refresh is reported as what it is (owner,
     2026-09-03, pass 34 Q34-12).** R17-1 measured drift as GitHub's `compare(reviewedSha...head).ahead_by`,
     which counts every commit reachable from the PR head and not from the reviewed revision, so an

@@ -26,6 +26,7 @@ function row(patch: Partial<TaskProjectionRow> = {}): TaskProjectionRow {
     priority: "normal",
     labels_json: "[]",
     due_date: null,
+    blocked_by_json: "[]",
     archived: 0,
     validation: "healthy",
     validation_block_reason: null,
@@ -80,8 +81,27 @@ function summarize(
     workflow,
     owner: null,
     accepted,
+    blockedBy: [],
   });
 }
+
+describe("ruling 131: the summary carries the caller's resolved dependency list", () => {
+  it("passes the resolved entries through verbatim (the mapper resolves nothing itself)", () => {
+    // Canary: omit `blockedBy` from the mapper's return object.
+    const entries = [
+      { ref: "VIB-2", label: "VIB-2", state: "open" as const, taskKey: "VIB-2", goalId: null },
+    ];
+    const summary = mapTaskProjectionRow(row({ blocked_by_json: '["VIB-2"]' }), {
+      stages: STAGES,
+      workflow: WORKFLOW,
+      owner: null,
+      accepted: false,
+      blockedBy: entries,
+    });
+    expect(summary.blockedBy).toBe(entries);
+    expect(summarize(row(), false).blockedBy).toEqual([]);
+  });
+});
 
 describe("displayReadiness derivation (F7-UI3)", () => {
   it("non-terminal tasks pass raw readiness through", () => {

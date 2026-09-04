@@ -63,15 +63,42 @@ function taskState(
   return isTerminalStage(row.stage, stages) ? "done" : "open";
 }
 
-/** Resolve one project's list of canonical spellings. Unparseable spellings
- *  (a hand edit the tolerant parser let through as a string) read `missing`. */
+/** A resolver for one project with its stage list read ONCE: the board query
+ *  maps every row through the same instance, so a project of N held tasks
+ *  costs one stage read, not N. Unparseable spellings (a hand edit the
+ *  tolerant parser let through as a string) read `missing`. */
+export type DependencyResolver = (refs: readonly string[]) => DependencyRender[];
+
+export function dependencyResolver(db: DatabaseSync, slug: string): DependencyResolver {
+  let stages: { id: string }[] | null = null;
+  return (refs) => {
+    if (refs.length === 0) return [];
+    stages ??= projectStageIds(db, slug);
+    return resolveWithStages(db, slug, refs, stages);
+  };
+}
+
+/** The projection's verbatim `blocked_by_json` column as a string list. */
+export function parseBlockedByColumn(json: string): string[] {
+  return z.array(z.string()).catch([]).parse(JSON.parse(json));
+}
+
+/** Resolve one project's list of canonical spellings (one-shot form). */
 export function resolveDependencies(
   db: DatabaseSync,
   slug: string,
   refs: readonly string[],
 ): DependencyRender[] {
   if (refs.length === 0) return [];
-  const stages = projectStageIds(db, slug);
+  return resolveWithStages(db, slug, refs, projectStageIds(db, slug));
+}
+
+function resolveWithStages(
+  db: DatabaseSync,
+  slug: string,
+  refs: readonly string[],
+  stages: { id: string }[],
+): DependencyRender[] {
   const out: DependencyRender[] = [];
   for (const raw of refs) {
     const ref = parseDependencyRef(raw);
@@ -149,6 +176,6 @@ export function listHeldTasks(
     .all(slug) as { task_key: string; blocked_by_json: string }[];
   return rows.map((row) => ({
     taskKey: row.task_key,
-    blockedBy: z.array(z.string()).catch([]).parse(JSON.parse(row.blocked_by_json)),
+    blockedBy: parseBlockedByColumn(row.blocked_by_json),
   }));
 }

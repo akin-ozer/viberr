@@ -39,6 +39,7 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     priority: "normal",
     labels: [],
     dueDate: null,
+    blockedBy: [],
     archived: false,
     validation: "none",
     blockReason: null,

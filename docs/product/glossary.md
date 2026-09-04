@@ -75,7 +75,9 @@
 
 **Provenance** — the `provenance` table: what the projector and reconciler observed, and when. Not retained; not user-facing except freshness chips.
 
-**Readiness** — the stored 4-value enum `ready | input_required | inconsistency_risk_detected | blocked` (ruling 1), derived only in `readiness-policy.server.ts`. Surfaces additionally render the derived display value `agent_working` while `waiting === "agent"` (ruling 91) and "accepted" for done-stage tasks.
+**Blocked by** — a task's `blockedBy` list (ruling 131): the task keys and goal links (`goal-1 link 3`) in the same project it waits on. While non-empty the derived readiness is floored at `blocked`, the card, list row and task page say what it waits on and in what state (resolved at read time), the task is never "gone quiet", and Viberr releases it itself when every entry is done.
+
+**Readiness** — the stored 4-value enum `ready | input_required | inconsistency_risk_detected | blocked` (ruling 1), derived only in `readiness-policy.server.ts`; a non-empty `blockedBy` floors the derived value at `blocked` (ruling 131). Surfaces additionally render the derived display value `agent_working` while `waiting === "agent"` (ruling 91) and "accepted" for done-stage tasks.
 
 **Recommendation** — a pending card the supervised operator leaves on a task: kinds `transition`, `run_agent`, `accept_completion`, `delivery`. Apply executes the same mutation a human would; Dismiss records it.
 
@@ -103,6 +105,6 @@
 
 **Verdict** — a required reviewer's `approve | request_changes`, bound to a revision id. A project member's GitHub approval on the PR, bound to the delivered head, counts as an approving verdict (ruling 68).
 
-**Waiting** — `human | agent | none`: whose turn it is. Forced to `none` in the terminal stage.
+**Waiting** — `human | agent | none`: whose turn it is. Forced to `none` in the terminal stage; `none` while a task waits on other work with no packet or recommendation open (ruling 131).
 
 **Workspace** — the delivering engagement's git clone under `tasks/<KEY>/workspace/<repo>`; supporting runs get `workspace/support/<profileId>/<repo>`. Cut from a per-project mirror; reclaimed once the task is terminal.

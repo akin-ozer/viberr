@@ -16,6 +16,7 @@ import type {
   Waiting,
 } from "~/schemas/task-file.schema";
 import type { ActorRender } from "./actor.server";
+import type { DependencyRender } from "~/shared/dependencies";
 
 /** Pass-25: the stored `labels_json` is a JSON string-array (the write path
  *  normalizes it so). Parse it at this read boundary through the schema — a
@@ -55,6 +56,8 @@ export type TaskProjectionRow = {
   priority: TaskPriority;
   labels_json: string;
   due_date: string | null;
+  /** Ruling 131 (pass 34): the task file's `blockedBy` list, verbatim JSON. */
+  blocked_by_json: string;
   archived: 0 | 1;
   validation: Validation;
   validation_block_reason: string | null;
@@ -161,6 +164,11 @@ export interface TaskSummary {
   priority: TaskPriority;
   labels: string[];
   dueDate: string | null;
+  /** Ruling 131 (pass 34): what this task waits on, each entry resolved to its
+   *  state at READ time by the query layer (`dependencyResolver`, once per
+   *  query), never by this mapper and never cached. Empty when the task waits
+   *  on nothing. */
+  blockedBy: DependencyRender[];
   /** R14-3: archived tasks leave every default view but keep their record. */
   archived: boolean;
   validation: Validation;
@@ -587,6 +595,8 @@ export function mapTaskProjectionRow(
     /** Resolved owner render shape (null when unowned/unknown). */
     owner: ActorRender | null;
     accepted: boolean;
+    /** Ruling 131: the row's `blockedBy` list resolved by the caller. */
+    blockedBy: DependencyRender[];
   },
 ): TaskSummary {
   const columns = decodeProjectionColumns(row);
@@ -617,6 +627,7 @@ export function mapTaskProjectionRow(
     priority: row.priority,
     labels: parseTaskLabels(row.labels_json),
     dueDate: row.due_date,
+    blockedBy: context.blockedBy,
     archived: row.archived === 1,
     validation: row.validation,
     acceptance: row.acceptance ?? null,

@@ -20,6 +20,7 @@ import {
 // longer reaches up into features/agents for it (deployment-view imports only
 // node:fs, zod, and ~/server/files/*, with no edge back into projections).
 import { deployedSpecialistBackends } from "~/server/agents/deployment-view.server";
+import { dependencyResolver, parseBlockedByColumn } from "./dependencies.server";
 import {
   activityFactsFor,
   isQuiet,
@@ -222,9 +223,14 @@ export function listProjectTasks(
   // follows the LIVE deployment, exactly as the run does — the engage-time
   // snapshot in task.md stays only for profiles no longer deployed.
   const liveBackends = deployedSpecialistBackends(slug, opts.dataRoot);
+  // Ruling 131: ONE resolver for the whole query (the stage list is read once);
+  // every held row's entries are resolved to their live state here, never in
+  // the pure mapper and never from a cache.
+  const resolveBlockedBy = dependencyResolver(db, slug);
   return rows.map((row) => {
     const accepted = isAcceptedDisplayState({ stage: row.stage, stageIds });
     const facts = activityFactsFor(activity, row.task_key);
+    const blockedBy = resolveBlockedBy(parseBlockedByColumn(row.blocked_by_json));
     const summary = withLiveAgentBackends(
       mapTaskProjectionRow(row, {
       stages,
@@ -243,6 +249,7 @@ export function listProjectTasks(
           )
         : null,
       accepted,
+      blockedBy,
       }),
       liveBackends,
     );
@@ -252,6 +259,7 @@ export function listProjectTasks(
       archived: summary.archived,
       terminal: accepted,
       runInFlight: facts.runInFlight,
+      held: blockedBy.length > 0,
     };
     // Injected only when a caller supplied it — `isQuiet` reads the CURRENT
     // instant when the key is absent, and a `now: undefined` would not be.

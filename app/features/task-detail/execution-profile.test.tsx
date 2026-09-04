@@ -41,6 +41,7 @@ function unownedTask(): TaskSummary {
     priority: "normal",
     labels: [],
     dueDate: null,
+    blockedBy: [],
     archived: false,
     validation: "healthy",
     continuity: null,

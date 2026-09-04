@@ -45,6 +45,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     priority: "normal",
     labels: [],
     dueDate: null,
+    blockedBy: [],
     archived: false,
     validation: "healthy",
     blockReason: null,

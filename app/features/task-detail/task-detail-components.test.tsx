@@ -443,6 +443,7 @@ function taskFixture(ownerId: string, ownerName: string): TaskSummary {
     priority: "normal",
     labels: [],
     dueDate: null,
+    blockedBy: [],
     archived: false,
     validation: "none",
     continuity: null,
