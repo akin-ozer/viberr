@@ -188,6 +188,10 @@ export interface RunOperatorInput {
     | "dependencies-released"
     | "scheduled"
     | "manual";
+  /** Ruling 141: the schedule occurrence this trigger fires for, so a refusal
+   *  that meets it at the front of the lease queue can retire it on the
+   *  record. Set by the schedule runner only. */
+  scheduleId?: string;
   /** packet-resolved trigger: the option the human chose and any note, so the
    *  turn instruction can tell the operator exactly what was decided rather than
    *  making it re-derive the answer from the timeline (R20-1). */
@@ -280,6 +284,9 @@ export interface RunOperatorResult {
 
 /** The operator triggers a held task refuses (ruling 131(d)). */
 const HELD_TRIGGERS: ReadonlySet<string> = new Set(["create", "transition", "scheduled"]);
+/** Ruling 76 + ruling 141: the triggers an open decision packet refuses — a
+ *  person pressing Run operator, and the same turn they scheduled. */
+const PACKET_REFUSED_TRIGGERS: ReadonlySet<string> = new Set(["manual", "scheduled"]);
 
 /**
  * Wall-clock ms at which THIS process started. A run row created before it
@@ -598,12 +605,16 @@ function releaseOperatorLease(
     trigger: queued.trigger ?? "manual",
     queuedCarriedTriggers: leaseState().pending.get(key)?.carried.length ?? 0,
   });
-  void runOperator(db, queued).catch((error) =>
-    noteQueuedTriggerFireFailed(
-      db,
-      queued,
-      error instanceof Error ? error : new Error(String(error)),
-    ),
+  void runOperator(db, queued)
+    .then((result) =>
+      result.refused ? noteQueuedTriggerRefused(db, queued, result.refused) : undefined,
+    )
+    .catch((error) =>
+      noteQueuedTriggerFireFailed(
+        db,
+        queued,
+        error instanceof Error ? error : new Error(String(error)),
+      ),
   );
 }
 
@@ -627,12 +638,16 @@ function drainPendingAfterInFlight(db: DatabaseSync, key: string): void {
     trigger: queued.trigger ?? "manual",
     queuedCarriedTriggers: state.pending.get(key)?.carried.length ?? 0,
   });
-  void runOperator(db, queued).catch((error) =>
-    noteQueuedTriggerFireFailed(
-      db,
-      queued,
-      error instanceof Error ? error : new Error(String(error)),
-    ),
+  void runOperator(db, queued)
+    .then((result) =>
+      result.refused ? noteQueuedTriggerRefused(db, queued, result.refused) : undefined,
+    )
+    .catch((error) =>
+      noteQueuedTriggerFireFailed(
+        db,
+        queued,
+        error instanceof Error ? error : new Error(String(error)),
+      ),
   );
 }
 
@@ -652,6 +667,100 @@ function leaseRefFromKey(key: string) {
  * with nothing live. Note it on the timeline and settle the waiting flag so the
  * board stops lying and the human can run the operator manually.
  */
+/**
+ * Ruling 141 (pass 34, F34-8): a queued trigger that is REFUSED when it reaches
+ * the front of the lease queue says so on the task — the refusal used to exist
+ * only in the server log while the timeline still said "Scheduled action
+ * starting". Mirrors {@link noteQueuedTriggerFireFailed} but SETTLES NOTHING:
+ * an open packet owns `waiting: "human"`, and the terminal-stage refusal
+ * already settled inside `runOperator`. When the trigger carries a schedule
+ * occurrence (`scheduleId`) the occurrence is retired the same way the schedule
+ * runner retires a fire-time refusal (`fired`, `claimedAt: null`) and the final
+ * `task.schedule.fired` row records the outcome. A `blocked-by` refusal is
+ * noted only for a schedule occurrence: a drained transition on a held task is
+ * the ruling-131 hold itself, already on the record.
+ */
+async function noteQueuedTriggerRefused(
+  db: DatabaseSync,
+  queued: RunOperatorInput,
+  refused: NonNullable<RunOperatorResult["refused"]>,
+): Promise<void> {
+  if (refused === "blocked-by" && !queued.scheduleId) return;
+  logger.info("queued operator trigger refused at the front of the lease queue", {
+    key: `${queued.projectSlug}/${queued.taskKey}`,
+    trigger: queued.trigger ?? "manual",
+    refused,
+  });
+  const ref = {
+    projectSlug: queued.projectSlug,
+    taskKey: queued.taskKey,
+    dataRoot: queued.dataRoot,
+  };
+  const outcome =
+    refused === "open-packet"
+      ? "skipped-packet"
+      : refused === "terminal-stage"
+        ? "skipped-done"
+        : "skipped-held";
+  try {
+    const { updateTaskFile, resolveTaskFilePath } = await import(
+      "~/server/files/task-writer.server"
+    );
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const { recordAudit } = await import("~/server/audit/audit-recorder.server");
+    await updateTaskFile(ref, (parsed) => {
+      const packetTitle = parsed.packet?.title ?? null;
+      const cause =
+        refused === "open-packet"
+          ? `a decision packet is open on ${queued.taskKey}${packetTitle ? ` ("${packetTitle}")` : ""} and coordination is paused until it is resolved`
+          : refused === "terminal-stage"
+            ? `${queued.taskKey} is already Done`
+            : `${queued.taskKey} waits on other work (${parsed.frontmatter.blockedBy.join(", ")})`;
+      const text = queued.scheduleId
+        ? `**Scheduled action skipped:** the scheduled operator re-run for ${queued.taskKey} reached the front of the queue, but ${cause} — no run was started, and the occurrence spends no retry.`
+        : `A queued @operator turn was refused when it reached the front of the queue: ${cause} — no run was started. Resolve it, then run the operator again.`;
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "operator-lease" },
+        title: null,
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+      if (queued.scheduleId) {
+        const target = parsed.frontmatter.schedules.find((x) => x.id === queued.scheduleId);
+        if (target && (target.status === "claimed" || target.status === "fired")) {
+          target.status = "fired";
+          target.firedAt = target.firedAt ?? new Date().toISOString();
+          target.claimedAt = null;
+        }
+      }
+    });
+    rebuildPath(
+      db,
+      resolveTaskFilePath(ref),
+      ref.dataRoot ? { dataRoot: ref.dataRoot } : {},
+    );
+    if (queued.scheduleId) {
+      recordAudit(db, {
+        action: "task.schedule.fired",
+        actor: { userId: null, label: "system:schedule-runner" },
+        subjectKind: "task",
+        subjectId: queued.taskKey,
+        projectSlug: queued.projectSlug,
+        taskKey: queued.taskKey,
+        details: { scheduleId: queued.scheduleId, outcome, refusedAtStart: true, atDrain: true },
+      });
+    }
+  } catch (noteErr) {
+    logger.error("could not note the refused queued operator trigger", {
+      key: `${queued.projectSlug}/${queued.taskKey}`,
+      err: noteErr instanceof Error ? noteErr : new Error(String(noteErr)),
+    });
+  }
+}
+
 async function noteQueuedTriggerFireFailed(
   db: DatabaseSync,
   queued: RunOperatorInput,
@@ -1396,15 +1505,17 @@ export async function runOperator(
   // R20-1 (F20-5): a HUMAN-pressed "Run operator" while a decision packet is
   // open is a paid no-op — coordination is paused by the packet, so the run
   // completes several turns and can take no action (live: 6 turns / $0.27, only
-  // get_task). Refuse it and say why. Scoped to `manual` on purpose: machine
-  // triggers legitimately run with a packet open — `pr-diverged` recovery
-  // WITHDRAWS a moot packet (ruling 17), and `agent-reply` reacts to a run that
-  // was already in flight. The packet already owns `waiting: "human"`, so there
-  // is no settle to do here.
-  if ((input.trigger ?? "manual") === "manual") {
+  // get_task). Refuse it and say why. Ruling 141 (pass 34, F34-8): a SCHEDULED
+  // re-run is the same turn with nobody watching, so it takes the same refusal.
+  // Machine reaction triggers still run with a packet open — `pr-diverged`
+  // recovery WITHDRAWS a moot packet (ruling 17), and `agent-reply` reacts to a
+  // run that was already in flight. The packet already owns `waiting: "human"`,
+  // so there is no settle to do here.
+  if (PACKET_REFUSED_TRIGGERS.has(input.trigger ?? "manual")) {
     const openPacket = readTaskFile(taskFileRef(input))?.parsed.packet ?? null;
     if (openPacket) {
-      logger.info("manual operator run refused — a decision packet is open", {
+      logger.info("operator run refused — a decision packet is open", {
+        trigger: input.trigger ?? "manual",
         taskKey: input.taskKey,
         packet: openPacket.title,
       });

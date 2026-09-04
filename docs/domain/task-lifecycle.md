@@ -307,6 +307,12 @@ anything ambiguous fails closed with the reason recorded.
   retired `fired` with a "Scheduled action skipped" note and outcome `skipped-held`
   (no run, no cost); a `run-agent` occurrence STANDS, because the ruling refuses
   operator triggers only: a person who scheduled an agent run on a held task gets it.
+  A `run-operator` occurrence on a task with an open decision packet is retired the same
+  way, outcome `skipped-packet`, spending no retry (ruling 141: the same paid no-op ruling
+  76 refuses for a person); one that was queued behind a live drive records
+  `queued-behind-drive` at fire time and, if the drive leaves a packet open, its final
+  `skipped-packet` row (`atDrain: true`) and a "Scheduled action skipped" note when it
+  reaches the front of the lease queue.
 
 ## 10. Delivery
 

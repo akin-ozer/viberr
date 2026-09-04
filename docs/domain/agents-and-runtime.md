@@ -482,8 +482,14 @@ be deployed; audit `task.schedule.created`/`cancelled`). `startScheduleRunner` f
 boot and every 60 s: it claims in the file (lease = clone timeout + 5 min, 3 retries),
 skips moot schedules with an outcome (`skipped-done`, `skipped-archived`), starts the
 agent (`400` → failed, `409` → back to pending) or runs the operator with `trigger:
-scheduled`, and audits `task.schedule.fired`. A schedule pins no backend or autonomy
-(ruling 94).
+scheduled` and `scheduleId`, and audits `task.schedule.fired`. The outcomes a
+`run-operator` occurrence can end with: `claimed` (the claim-time row), `skipped-done`
+(terminal stage), `skipped-held` (ruling 131(d)), `skipped-packet` (ruling 141: a
+decision packet is open, the same refusal a person's Run operator gets), and
+`queued-behind-drive` (the run waits behind a live drive; a refusal at the front of the
+lease queue then writes the final `skipped-*` row with `atDrain: true` and a "Scheduled
+action skipped" note). None of the skips spends a retry. A schedule pins no backend or
+autonomy (ruling 94).
 
 ## 5. The capability catalog
 

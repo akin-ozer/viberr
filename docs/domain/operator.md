@@ -78,9 +78,12 @@ operator is deployed and writes an honest timeline note if the hand-off throws b
 a run row exists.
 
 Fire-time refusals from `runOperator`: `terminal-stage` (a scheduled re-run never
-fires on a terminal task), `open-packet` (a **human-pressed** Run operator while a
-packet is open is a paid no-op; machine triggers such as `pr-diverged` and
-`agent-reply` are not refused, ruling 76), and `blocked-by` (ruling 131(d): while the
+fires on a terminal task), `open-packet` (a **human-pressed** Run operator, or the same turn a person
+**scheduled**, while a packet is open is a paid no-op, rulings 76 and 141; machine
+reaction triggers such as `pr-diverged` and `agent-reply` are not refused; a scheduled
+occurrence is retired `fired` with a "Scheduled action skipped" note and outcome
+`skipped-packet`, and a trigger refused at the front of the lease queue says so on the
+task through `noteQueuedTriggerRefused`, which settles nothing), and `blocked-by` (ruling 131(d): while the
 task's `blockedBy` list is non-empty the `create`, `transition` and `scheduled`
 triggers are refused before any run row exists, no run and no cost; the refusal
 settles the waiting flag itself, to `none` when nothing else is pending, so a

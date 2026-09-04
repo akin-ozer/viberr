@@ -554,6 +554,15 @@ export async function fireDueSchedules(
          *  `skipped-held`. A human-scheduled AGENT run is not refused: the
          *  ruling refuses operator triggers only, so the run-agent arm stands. */
         let refusedHeld = false;
+        /** Ruling 141: a decision packet is open; the scheduled operator re-run
+         *  is the same paid no-op ruling 76 refuses for a person, so it was
+         *  refused at fire time. Retired `fired` with a note, outcome
+         *  `skipped-packet`, no retry. */
+        let refusedPacket = false;
+        /** Ruling 141: the run was queued behind a live drive; the occurrence is
+         *  retired here and its identity travels with the trigger, so a refusal
+         *  at the front of the queue writes the final row itself. */
+        let queuedBehindDrive = false;
         /** run-agent only: the dispatch refused for a reason a retry can never
          *  cure (profile undeployed, stage-ineligible, no repo-write for an
          *  explicit delivery ask). Terminal `failed` with the reason on the
@@ -635,6 +644,8 @@ export async function fireDueSchedules(
               // the task with no idea what it was asked to re-check.
               trigger: "scheduled",
               dataRoot: ctx.dataRoot,
+              // Ruling 141: the occurrence's identity travels with the trigger.
+              scheduleId: t.scheduleId,
             };
             // Only a real note rides along; an empty one would present itself to
             // the turn instruction as a stated reason.
@@ -642,6 +653,8 @@ export async function fireDueSchedules(
             const result = await runOperator(db, runInput);
             refusedTerminal = result.refused === "terminal-stage";
             refusedHeld = result.refused === "blocked-by";
+            refusedPacket = result.refused === "open-packet";
+            queuedBehindDrive = result.queued;
             ok = true;
           }
         } catch (error) {
@@ -722,6 +735,13 @@ export async function fireDueSchedules(
                       `**Scheduled action skipped:** ${t.taskKey} waits on other work (${parsed.frontmatter.blockedBy.join(", ")}) — no operator run was started; Viberr releases the task when every entry is done.`,
                     ),
                   );
+                } else if (refusedPacket) {
+                  parsed.timeline.unshift(
+                    scheduleEvent(
+                      { kind: "system", systemId: "schedule-runner" },
+                      `**Scheduled action skipped:** a decision packet is open on ${t.taskKey}${parsed.packet ? ` ("${parsed.packet.title}")` : ""} and coordination is paused until it is resolved — no operator run was started, and the occurrence spends no retry.`,
+                    ),
+                  );
                 }
                 return;
               }
@@ -743,13 +763,7 @@ export async function fireDueSchedules(
             },
           );
           reproject(db, ctx, t.projectSlug, t.taskKey);
-          if (refusedTerminal || refusedHeld) {
-            // The claim-time row for this occurrence says `outcome: "claimed"`
-            // — true when it was written, and a lie by the time the drive
-            // refused. The audit trail and the retirement note must not
-            // disagree about whether an agent turn happened (F19-20), so the
-            // occurrence's FINAL disposition is recorded too, with the same
-            // outcome the claim-time path uses when it catches this earlier.
+          if (refusedTerminal || refusedHeld || refusedPacket) {
             recordAudit(db, {
               action: "task.schedule.fired",
               actor: SYSTEM_ACTOR,
@@ -759,9 +773,26 @@ export async function fireDueSchedules(
               taskKey: t.taskKey,
               details: {
                 scheduleId: t.scheduleId,
-                outcome: refusedHeld ? "skipped-held" : "skipped-done",
+                outcome: refusedPacket
+                  ? "skipped-packet"
+                  : refusedHeld
+                    ? "skipped-held"
+                    : "skipped-done",
                 refusedAtStart: true,
               },
+            });
+          } else if (queuedBehindDrive) {
+            // Ruling 141: the run did not start here — it waits behind a live
+            // drive. The final row is written when the trigger reaches the
+            // front of the queue (a refusal there says so on the task).
+            recordAudit(db, {
+              action: "task.schedule.fired",
+              actor: SYSTEM_ACTOR,
+              subjectKind: "task",
+              subjectId: t.taskKey,
+              projectSlug: t.projectSlug,
+              taskKey: t.taskKey,
+              details: { scheduleId: t.scheduleId, outcome: "queued-behind-drive" },
             });
           }
         } catch (error) {

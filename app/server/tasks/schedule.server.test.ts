@@ -490,6 +490,50 @@ describe("fireDueSchedules", () => {
     expect(fired.map((e) => e.details?.outcome).sort()).toEqual(["claimed", "skipped-held"]);
   });
 
+  it("ruling 141: a due run-operator occurrence on a task with an OPEN packet is retired `fired` as skipped-packet, with no run and no retry", async () => {
+    // Canary: drop the `refusedPacket` arm (the note and the outcome vanish).
+    // Canary 2: route the refusal through the retry branch (`ok = false` on
+    // an open-packet refusal) — a retry is spent and the status is not `fired`.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        waiting: "human",
+        readiness: "blocked",
+        schedules: [rawSchedule({ id: "sch_pkt" })],
+      }),
+      packet: {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Branch conflicts with main",
+        body: "",
+        observations: [],
+        options: [{ kind: "redirect", t: "Have the developer resolve it", d: "", rec: true }],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(1);
+    await waitForSchedule("VIB-1", "sch_pkt", "fired");
+    expect(operatorRunCount()).toBe(0);
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    const occurrence = parsed.frontmatter.schedules.find((s) => s.id === "sch_pkt")!;
+    expect(occurrence.status).toBe("fired");
+    expect(occurrence.retries ?? 0).toBe(0);
+    expect(occurrence.claimedAt).toBeNull();
+    expect(occurrence.firedAt).not.toBeNull();
+    expect(parsed.packet?.title).toBe("Branch conflicts with main"); // untouched
+    expect(
+      timeline("VIB-1").some((e) =>
+        /Scheduled action skipped:.*a decision packet is open on VIB-1 \("Branch conflicts with main"\).*no operator run was started, and the occurrence spends no retry/.test(e.text),
+      ),
+    ).toBe(true);
+    const fired = listAuditEvents(store.db).filter((e) => e.action === "task.schedule.fired");
+    expect(fired.map((e) => e.details?.outcome).sort()).toEqual(["claimed", "skipped-packet"]);
+    expect(fired[0]!.details).toMatchObject({ outcome: "skipped-packet", refusedAtStart: true });
+  });
+
   it("fires a due pending schedule (marks fired + audits) and leaves a future one pending", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {

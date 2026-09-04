@@ -2935,6 +2935,90 @@ describe("runOperator — authority, ordering, orphans", () => {
     expect(operatorRuns()).toHaveLength(0);
   });
 
+  it("ruling 141: a SCHEDULED run is refused like a manual one while a decision packet is open", async () => {
+    // Canary: restore the manual-only guard (`=== "manual"`).
+    deployAgents([operatorAgent()]);
+    seedWithOpenPacket();
+
+    const result = await drive({ trigger: "scheduled" });
+
+    expect(result.refused).toBe("open-packet");
+    expect(result.runId).toBeNull();
+    expect(result.queued).toBe(false);
+    expect(adapter5.pending).toBeNull();
+    expect(operatorRuns()).toHaveLength(0);
+  });
+
+  it("ruling 141: a queued SCHEDULED occurrence refused at the front of the lease queue says so on the task and writes its final row", async () => {
+    // Canary: restore the bare `.catch(...)` at the drain site (drop the
+    // `.then` that chains on the result) — the refusal exists only in the log.
+    deployAgents([operatorAgent()]);
+    seed("impl");
+    await drive({ trigger: "manual" });
+    expect(adapter5.pending).not.toBeNull();
+    const queued = await drive({ trigger: "scheduled", scheduleId: "sch_1" });
+    expect(queued.queued).toBe(true);
+    // The live drive opens a packet before the queued turn gets its chance.
+    await updateTaskFile({ projectSlug: store5.slug, taskKey: "VIB-1", dataRoot: store5.dataRoot }, (parsed) => {
+      parsed.packet = {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Branch conflicts with main",
+        body: "",
+        observations: [],
+        options: [{ kind: "redirect", t: "Have the developer resolve it", d: "", rec: true }],
+      };
+      parsed.frontmatter.waiting = "human";
+    });
+    rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+    adapter5.finish(store5, JSON.stringify({ reasoning: "done", actions: [] }), "finished");
+    await eventually(() => {
+      expect(
+        task().timeline.some((e) =>
+          /Scheduled action skipped:.*reached the front of the queue, but a decision packet is open on VIB-1 \("Branch conflicts with main"\)/.test(e.text),
+        ),
+      ).toBe(true);
+    });
+    expect(operatorRuns()).toHaveLength(1); // the live drive only — no second run
+    expect(task().frontmatter.waiting).toBe("human"); // the packet owns it; the refusal settles nothing
+    const rows = listAuditEvents(store5.db).filter((e) => e.action === "task.schedule.fired");
+    expect(rows[0]!.details).toMatchObject({ scheduleId: "sch_1", outcome: "skipped-packet", refusedAtStart: true, atDrain: true });
+  });
+
+  it("ruling 141: a queued human @operator turn refused at the front of the queue gets the note, settling nothing", async () => {
+    deployAgents([operatorAgent()]);
+    seed("impl");
+    await drive({ trigger: "manual" });
+    expect(adapter5.pending).not.toBeNull();
+    const queued = await drive({ trigger: "manual" });
+    expect(queued.queued).toBe(true);
+    await updateTaskFile({ projectSlug: store5.slug, taskKey: "VIB-1", dataRoot: store5.dataRoot }, (parsed) => {
+      parsed.packet = {
+        type: "input",
+        kind: "Decision required",
+        from: "operator",
+        title: "Scope needed",
+        body: "",
+        observations: [],
+        options: [{ kind: "edit_goal", t: "Specify the goal", d: "", rec: true }],
+      };
+      parsed.frontmatter.waiting = "human";
+    });
+    rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+    adapter5.finish(store5, JSON.stringify({ reasoning: "done", actions: [] }), "finished");
+    await eventually(() => {
+      expect(
+        task().timeline.some((e) =>
+          e.text.startsWith("A queued @operator turn was refused when it reached the front of the queue: a decision packet is open on VIB-1"),
+        ),
+      ).toBe(true);
+    });
+    expect(operatorRuns()).toHaveLength(1);
+    expect(task().frontmatter.waiting).toBe("human");
+    expect(listAuditEvents(store5.db).filter((e) => e.action === "task.schedule.fired")).toHaveLength(0);
+  });
+
   it("R20-1: a MACHINE pr-diverged trigger still runs with a packet open (ruling 17 recovery)", async () => {
     // Canary for the `manual` scoping: pr-diverged WITHDRAWS a moot packet, so
     // it must NOT be refused. Remove the `=== "manual"` scoping in runOperator

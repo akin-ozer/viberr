@@ -2568,6 +2568,29 @@ by rewriting those paragraphs:*
     so, so an operator never phrases them as an instruction to the human. Extends R20-1 (a made
     decision is un-re-confirmable) and F17-L3 (the editor prefills with the chosen deliverable).
 
+141. **A scheduled operator re-run is refused while a decision packet is open, and no occurrence is
+    recorded as fired when no run happened (2026-09-04, pass 34 F34-8).** Ruling 76 refuses a
+    human-pressed "Run operator" while a packet is open because coordination is paused and the turn
+    is a paid no-op; the guard was scoped to the `manual` trigger, so the same paid no-op still ran
+    when a person scheduled it for five minutes later. It is the same turn with nobody watching, so it
+    takes the same refusal. Pass 34 also found the second half: the schedule runner writes "Scheduled
+    action starting" at claim time and stamps the occurrence `fired` for every outcome except a
+    terminal stage, so on JC-2 the task said a run had started, the trigger was queued behind the
+    drive that then opened a packet, and the refusal existed only in the server log. From now on a
+    scheduled occurrence that cannot run is retired with a timeline note naming the reason and a final
+    audit row (`outcome: "skipped-packet"`, `refusedAtStart: true`) beside the claim-time row, it
+    spends no retry, and a trigger that is refused when it reaches the front of the lease queue
+    writes the same kind of note AND retires its occurrence the same way, because the occurrence's
+    identity travels with the trigger (`RunOperatorInput.scheduleId`; the fire-time row of a run that
+    was queued behind a live drive says `outcome: "queued-behind-drive"`, and the drain-time row
+    carries `atDrain: true`). A queued human `@operator` turn refused the same way gets its own note.
+    The refusal writer settles nothing: an open packet owns `waiting: "human"`, and the
+    terminal-stage refusal already settled. Machine reaction triggers (`pr-diverged`, `agent-reply`,
+    `transition`, `packet-resolved`) still run with a packet open, exactly as ruling 17 requires.
+    Extends ruling 76. (`runOperator`'s open-packet guard, `noteQueuedTriggerRefused` and the two
+    lease-drain sites in `app/server/runtimes/operator-run.server.ts`; the finalize block in
+    `app/server/tasks/schedule.server.ts`.)
+
 142. **A run's shell carries none of Viberr's own configuration (2026-09-04, pass 34 U34-7).**
     Ruling 127 built the spawn base around what a child must not learn about OTHER people's
     credentials. Pass 34 found the other half: the base still handed every child this server's
