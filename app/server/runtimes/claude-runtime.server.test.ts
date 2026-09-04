@@ -1058,6 +1058,16 @@ describe("ruling 130(a): structured classification", () => {
     expect(rejected.terminal?.display?.text).toContain("five hour window is spent");
     expect(rejected.terminal?.display?.text).toContain("reopens at 2026-09-07 11:50 UTC");
 
+    // No prose at all: the structured facts alone classify quota (a 429
+    // status with a rejected reading), so the class never depends on the
+    // provider's wording.
+    const structuredOnly = await run([
+      { type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "five_hour", utilization: null, resetsAt: 1_788_781_800, isUsingOverage: false } },
+      { type: "result", subtype: "success", is_error: true, num_turns: 1, usage: {}, api_error_status: 429, result: "" },
+    ]);
+    expect(structuredOnly.terminal?.display?.tag).toBe("run·error·quota");
+    expect(structuredOnly.terminal?.display?.failure).toMatchObject({ kind: "quota", windowRejected: true, apiErrorStatus: 429 });
+
     const allowed = await run([
       { type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.5, resetsAt: 1_788_781_800, isUsingOverage: false } },
       { type: "result", subtype: "error_during_execution", is_error: true, num_turns: 1, usage: {}, result: "429 too many requests" },
