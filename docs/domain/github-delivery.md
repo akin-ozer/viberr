@@ -201,7 +201,7 @@ and the note itself, used to assert the reused-key origin alone.)*
 |---|---|---|
 | `resolve_remote_collision` packet option | Closes the recorded unowned PR (audit `github.pr.closed_unowned`), deletes the stale remote branch, re-delivers this task's local work, lifts `readiness` from `blocked`. | `approve-transition` |
 | `discard_branch` packet option | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. The operator may not author it when a work revision exists. | `approve-transition` |
-| `update_branch_from_base` (operator, capability `update-task-branch`) | Merges the base into the task branch in the workspace (never rebase, never force), pushes; a conflict opens a human `blocked` packet (`redirect`, `custom`, `archive_task`). | operator gate; `recommend` is refused outright |
+| `update_branch_from_base` (operator, capability `update-task-branch`) | Merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, records the refresh in `baseRefreshes` and reconciles at once (ruling 132). Reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)). A conflict opens a human `blocked` packet (`redirect`, `custom`, `archive_task`). | operator gate; `recommend` is refused outright |
 | Branch cleanup | After a successful merge when the `delete-branch-after-merge` guardrail is on (absence means on); on `archive_task` with `deleteBranch: true`; after a no-change acceptance. Refuses the default branch and a branch whose PR is open or accepted. Audit `github.branch.deleted`. | human `userId` required |
 
 ## 5. Revisions, verdicts and acceptance
@@ -255,7 +255,9 @@ and the note itself, used to assert the reused-key origin alone.)*
 (`rate_limited` is transient; another 403 opens a `repo` violation), the PR (state,
 checks summary, review state, mergeability, the head sha, revision drift when the head
 is ahead of the reviewed revision, the unpushed-revision record when it is not (ruling
-135), human approval), and writes the `pr` and `github` caches into
+135), human approval), and writes the `pr` and `github` caches into `task.md`. The
+operator's branch update runs one such pass right after its push (ruling 132), so the
+drift it caused is measured before the tool answers. The pass writes
 `task.md` (the reconciler never mints a PR link and never downgrades `merged` or
 `accepted`). Out-of-band changes become typed `note` events from the policy engine
 ("Divergence": merged but not Done → accept; closed but active → rework or archive;

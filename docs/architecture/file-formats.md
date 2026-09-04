@@ -234,8 +234,9 @@ baseRefreshes: []                 # ruling 132: every base refresh the operator'
                                   # base, commits, at }. A merge listed here is a
                                   # CLEAN merge Viberr made (that path aborts on
                                   # conflict), which is how the reconciler tells a
-                                  # base refresh from authored drift; a fast-forward
-                                  # refresh records mergeSha === baseSha
+                                  # base refresh from authored drift. The refresh merges
+                                  # with --no-ff, so mergeSha is always a two-parent
+                                  # merge commit, never the base tip itself
 branch: vib-142-attach-workspace  # task-key branch; null before creation
 archived: false                   # R14-3: abandoned work, kept for the record —
                                   # leaves the board's default view and the review

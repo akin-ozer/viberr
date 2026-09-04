@@ -184,6 +184,20 @@ Details that matter:
   new or whose head moved re-queues the operator with the `delivered` trigger (rulings
   48 and 134). The doctrine and the seeded persona say that pushing is never a
   person's job and never an agent's.
+- **Branch update.** `update_branch_from_base` merges the base into the task branch in
+  the delivering workspace (`--no-ff`, never rebase, never force) and pushes. Ruling
+  134(c): it also fetches origin's copy of the TASK branch and reports it beside the
+  base answer, derived from the workspace's own history: current, behind by N ("call
+  `deliver_for_review` to push it; do not ask a person to push"), diverged ("a person
+  resolves the branch history"), absent, or unknown with git's reason. It stays the
+  base tool and never becomes a second push door. A lagging origin lands once on the
+  timeline (the line is suppressed while the newest `github` event already says it);
+  the audit row `github.branch_update.operator` fires every call with `remote`,
+  `remoteHeadSha` and, on an update, `mergeSha`. Ruling 132: a successful update records
+  the refresh in `baseRefreshes` under the file lock, reconciles the task at once so
+  `pr.revisionDrift` is re-measured now rather than by the poll, and writes its timeline
+  line and tool message from the re-read, carrying the canonical drift sentence (or
+  "Drift could not be re-measured now"). The seeded persona says all of this.
 
 ## 6. Decision packets
 

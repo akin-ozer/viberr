@@ -58,6 +58,19 @@ function bindPat() {
   setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, SYS);
 }
 
+/** Ruling 134(c): what origin's copy of the task branch looks like. */
+type FakeRemote =
+  | { kind: "current" }
+  | { kind: "behind"; ahead: number }
+  | { kind: "diverged" }
+  | { kind: "absent" }
+  | { kind: "unknown" };
+
+const PRE_SHA = "abc1234def";
+const MERGE_SHA = "merge1234567890abcdef";
+const BASE_SHA = "base1234567890abcdef";
+const REMOTE_SHA = "remote1234567890abcdef";
+
 /** A fake git that answers every probe the update makes. */
 function fakeGit(opts: {
   branch?: string;
@@ -72,12 +85,19 @@ function fakeGit(opts: {
   conflictFiles?: string[];
   pushOk?: boolean;
   pushStderr?: string;
+  /** Origin's copy of the task branch (default: current). */
+  remote?: FakeRemote;
+  /** Ruling 132: `rev-parse HEAD` after the merge answers nothing. */
+  mergeShaUnreadable?: boolean;
 } = {}) {
   const calls: string[][] = [];
+  const branch = opts.branch ?? "vib-1";
+  const remote: FakeRemote = opts.remote ?? { kind: "current" };
+  let merged = false;
   const exec = vi.fn(async (_file: string, args: string[]) => {
     calls.push(args);
     if (args.includes("--abbrev-ref")) {
-      return { ok: true, stdout: opts.branch ?? "vib-1", stderr: "" };
+      return { ok: true, stdout: branch, stderr: "" };
     }
     if (args.includes("--is-shallow-repository")) {
       return { ok: true, stdout: opts.shallow ? "true" : "false", stderr: "" };
@@ -85,21 +105,47 @@ function fakeGit(opts: {
     if (args.includes("status") && args.includes("--porcelain")) {
       return { ok: true, stdout: opts.dirty ? " M app/main.ts\n" : "", stderr: "" };
     }
+    if (args.includes("fetch") && args.some((a) => a.includes(`refs/heads/${branch}:`))) {
+      if (remote.kind === "absent") {
+        return { ok: false, stdout: "", stderr: `fatal: couldn't find remote ref ${branch}` };
+      }
+      if (remote.kind === "unknown") {
+        return { ok: false, stdout: "", stderr: "fatal: unable to access origin: could not resolve host" };
+      }
+      return { ok: true, stdout: "", stderr: "" };
+    }
     if (args.includes("fetch")) {
       return opts.fetchOk === false
         ? { ok: false, stdout: "", stderr: "fatal: couldn't find remote ref main" }
         : { ok: true, stdout: "", stderr: "" };
     }
+    if (args.includes("--verify")) {
+      return { ok: true, stdout: remote.kind === "current" ? PRE_SHA : REMOTE_SHA, stderr: "" };
+    }
+    if (args.includes("merge-base")) {
+      return remote.kind === "behind"
+        ? { ok: true, stdout: "", stderr: "" }
+        : { ok: false, stdout: "", stderr: "", code: 1 };
+    }
     if (args.includes("--count")) {
+      const range = args[args.length - 1] ?? "";
+      if (range.endsWith("..HEAD")) {
+        return { ok: true, stdout: String(remote.kind === "behind" ? remote.ahead : 0), stderr: "" };
+      }
       return { ok: true, stdout: String(opts.behind ?? 3), stderr: "" };
     }
     if (args.includes("rev-parse") && args.includes("HEAD")) {
-      return { ok: true, stdout: "abc1234def", stderr: "" };
+      if (merged && opts.mergeShaUnreadable) return { ok: false, stdout: "", stderr: "fatal: bad revision" };
+      return { ok: true, stdout: merged ? MERGE_SHA : PRE_SHA, stderr: "" };
+    }
+    if (args.includes("rev-parse") && args.some((a) => a.startsWith("refs/remotes/origin/"))) {
+      return { ok: true, stdout: BASE_SHA, stderr: "" };
     }
     if (args.includes("merge") && args.includes("--abort")) {
       return { ok: true, stdout: "", stderr: "" };
     }
     if (args.includes("merge")) {
+      if (opts.mergeOk !== false) merged = true;
       return {
         ok: opts.mergeOk !== false,
         stdout:
@@ -143,6 +189,10 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
       branch: "vib-1",
       base: "main",
       commits: 3,
+      mergeSha: MERGE_SHA,
+      baseSha: BASE_SHA,
+      remoteBefore: { kind: "current", headSha: PRE_SHA },
+      remote: { kind: "current", headSha: MERGE_SHA },
     });
     // Fetches the base by EXPLICIT refspec — `origin/main` is what the merge
     // reads, and relying on git's opportunistic tracking update would make that
@@ -169,7 +219,13 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
     await run(git.exec);
     const flat = git.calls.map((c) => c.join(" ")).join("\n");
     expect(flat).not.toMatch(/rebase/);
-    expect(flat).not.toMatch(/--force|\+refs\/heads\/vib-1|-f\b/);
+    expect(flat).not.toMatch(/--force|-f\b/);
+    // The PUSH refspec is never forced. (The FETCH of origin's copy of the
+    // branch, ruling 134(c), force-updates the local tracking ref with a `+`,
+    // which touches nothing on the remote.)
+    for (const push of git.calls.filter((c) => c.includes("push"))) {
+      expect(push.join(" ")).not.toMatch(/\+refs\/heads\/vib-1/);
+    }
   });
 
   it("is a no-op that SAYS SO when the branch is already current", async () => {
@@ -179,6 +235,7 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
       status: "already_current",
       branch: "vib-1",
       base: "main",
+      remote: { kind: "current", headSha: PRE_SHA },
     });
     expect(git.calls.some((c) => c.includes("merge"))).toBe(false);
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
@@ -267,5 +324,84 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
     const git = fakeGit({ branch: "main" });
     expect((await run(git.exec)).status).toBe("no_branch");
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+  });
+});
+
+/**
+ * Ruling 134(c) (pass 34, F34-11): the update reports origin's copy of the
+ * TASK branch beside its base answer, derived locally from the fetched remote
+ * ref. Canary: drop the branch fetch (`readRemoteBranchState` returns
+ * `unknown`) and every state below reads `unknown`.
+ */
+describe("ruling 134(c): origin's copy of the task branch", () => {
+  it("`already_current` carries `behind` with the count when origin lags the workspace", async () => {
+    bindPat();
+    const git = fakeGit({ behind: 0, remote: { kind: "behind", ahead: 2 } });
+    const res = await run(git.exec);
+    expect(res).toEqual({
+      status: "already_current",
+      branch: "vib-1",
+      base: "main",
+      remote: { kind: "behind", headSha: REMOTE_SHA, commits: 2 },
+    });
+    // The remote ref is FETCHED (the object is needed for the ancestry test),
+    // not merely listed.
+    expect(git.calls.some((c) => c.includes("fetch") && c.some((a) => a.includes("refs/heads/vib-1:")))).toBe(true);
+    expect(git.calls.some((c) => c.includes("ls-remote"))).toBe(false);
+  });
+
+  it("the four other states: current, diverged, absent, unknown", async () => {
+    // Canary: collapse `diverged` into `behind` (treat a failed ancestry test as behind).
+    bindPat();
+    expect(await run(fakeGit({ behind: 0 }).exec)).toMatchObject({ remote: { kind: "current", headSha: PRE_SHA } });
+    expect(await run(fakeGit({ behind: 0, remote: { kind: "diverged" } }).exec)).toMatchObject({
+      remote: { kind: "diverged", headSha: REMOTE_SHA },
+    });
+    expect(await run(fakeGit({ behind: 0, remote: { kind: "absent" } }).exec)).toMatchObject({ remote: { kind: "absent" } });
+    const unknown = await run(fakeGit({ behind: 0, remote: { kind: "unknown" } }).exec);
+    expect(unknown).toMatchObject({ remote: { kind: "unknown" } });
+    expect(unknown.status === "already_current" && unknown.remote.kind === "unknown" ? unknown.remote.why : "").toContain("could not resolve host");
+  });
+
+  it("`updated` reports `current` after the push and names the pre-push lag", async () => {
+    // Canary: report the pre-push state in `remote` (copy `remoteBefore`).
+    bindPat();
+    const res = await run(fakeGit({ behind: 2, remote: { kind: "behind", ahead: 1 } }).exec);
+    expect(res).toMatchObject({
+      status: "updated",
+      commits: 2,
+      remoteBefore: { kind: "behind", headSha: REMOTE_SHA, commits: 1 },
+      remote: { kind: "current", headSha: MERGE_SHA },
+    });
+  });
+});
+
+/**
+ * Ruling 132 (pass 34, F34-14): an updated branch names its merge commit and
+ * the base tip, read BEFORE the push; a refresh that cannot be recorded is
+ * rolled back and never published. Canary: return the old four-field result.
+ */
+describe("ruling 132: the refresh is recorded before it is published", () => {
+  it("an updated branch names its merge commit and the base tip, and merges with --no-ff", async () => {
+    bindPat();
+    const git = fakeGit({ behind: 2 });
+    const res = await run(git.exec);
+    expect(res).toMatchObject({ status: "updated", mergeSha: MERGE_SHA, baseSha: BASE_SHA, base: "main" });
+    const merge = git.calls.find((c) => c.includes("merge") && !c.includes("--abort"))!;
+    expect(merge).toContain("--no-ff");
+    // The shas were read BEFORE the push.
+    const pushIndex = git.calls.findIndex((c) => c.includes("push"));
+    const shaIndex = git.calls.findIndex((c) => c.includes("rev-parse") && c.some((a) => a.startsWith("refs/remotes/origin/")));
+    expect(shaIndex).toBeGreaterThan(-1);
+    expect(shaIndex).toBeLessThan(pushIndex);
+  });
+
+  it("an unreadable merge sha resets to the pre-merge commit and pushes nothing", async () => {
+    bindPat();
+    const git = fakeGit({ behind: 2, mergeShaUnreadable: true });
+    const res = await run(git.exec);
+    expect(res).toMatchObject({ status: "update_failed", reason: expect.stringContaining("rolled back") });
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+    expect(git.calls.some((c) => c.includes("reset") && c.includes(PRE_SHA))).toBe(true);
   });
 });

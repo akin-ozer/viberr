@@ -721,8 +721,8 @@ export const dependencyRefTextSchema = z
 /** Ruling 132: one recorded base refresh (see `baseRefreshes` below). */
 export const baseRefreshSchema = z
   .object({
-    /** The merge commit `update_branch_from_base` created (full sha), or the
-     *  base tip itself when the refresh fast-forwarded. */
+    /** The merge commit `update_branch_from_base` created (full sha). The
+     *  refresh merges with `--no-ff`, so this is always a two-parent commit. */
     mergeSha: z.string().min(1),
     /** The base branch tip that was merged in (full sha). */
     baseSha: z.string().min(1),

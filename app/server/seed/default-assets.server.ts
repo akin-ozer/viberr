@@ -196,6 +196,7 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // pass-34 outgoing (ruling 134: rework reaches the open PR through
     // `deliver_for_review`; pushing is never a person's or an agent's job).
     "9462381afd6c87b991f5653610252ac2e7a4815b039709d818bbecec1db7532e",
+    "c316e4838955513f00d16b69c972bce8c9dfb3b7c355d8c71a2afa99af76d862",
     // outgoing before the rework-routing guidance (reworkStages)
     "6c67b50034ccc80b28563c8415722d5efb9b8da2f854d6339461036f1a46e71d",
     "03a4f8b7a1c2ed9e7414654e5086288e6dcc187b48f9bd16b1ef141b3eca4f34",
