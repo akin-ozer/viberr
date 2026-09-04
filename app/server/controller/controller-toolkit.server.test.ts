@@ -1415,3 +1415,72 @@ describe("update_agent_deployment carries the record it read (B5)", () => {
     ).rejects.toThrow("This profile changed while the editor was open.");
   });
 });
+
+/**
+ * C4 (pass 34, U34-5): `invite_member` told the truth and took a role. It said
+ * "new members join as contributor" while the writer pushed viewer, so live
+ * three invites landed as Viewer and were repaired with `set_member_role` —
+ * two writes and two audit rows per person.
+ */
+describe("invite_member seats the role it is given (C4)", () => {
+  async function projectMd(): Promise<string> {
+    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
+    const { readFileSync } = await import("node:fs");
+    return readFileSync(resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot }), "utf8");
+  }
+
+  it("seats the role in ONE write with one audit row and no role change", async () => {
+    // Canary: hardcode `viewer` in the writer again.
+    const before = listAuditEvents(app.db, { action: "project.member.role_changed" }).length;
+    const reply = await call(ids.projectAdmin, "invite_member", {
+      name: "Seated Contributor",
+      email: "seated-contributor@viberr.test",
+      role: "contributor",
+    });
+    expect(reply).toContain("[done]");
+    expect(reply).toContain("joins as Contributor");
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const { findUserByEmail } = await import("~/server/auth/user-store.server");
+    const seated = findUserByEmail(app.db, "seated-contributor@viberr.test")!;
+    const member = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.members.find((m) => m.userId === seated.id)!;
+    expect(member.role).toBe("contributor");
+    const invited = listAuditEvents(app.db, { action: "project.member.invited" })[0]!;
+    expect(invited.details).toMatchObject({ email: "seated-contributor@viberr.test", role: "contributor" });
+    expect(listAuditEvents(app.db, { action: "project.member.role_changed" })).toHaveLength(before);
+  });
+
+  it("no role lands as viewer, and the description no longer promises contributor", async () => {
+    const reply = await call(ids.projectAdmin, "invite_member", {
+      name: "Unstated Seat",
+      email: "unstated-seat@viberr.test",
+    });
+    expect(reply).toContain("joins as Viewer");
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const user = findUserById(app.db, ids.projectAdmin)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: user.id, email: user.email, name: user.name },
+      projectSlug: SLUG,
+    });
+    const def = toolkit.tools.find((t) => t.name === "invite_member")!;
+    expect(def.description).not.toContain("join as contributor");
+    expect(def.description).toContain("members join as viewer unless you give one");
+  });
+
+  it("an unknown role is refused by name, with project.md byte-identical", async () => {
+    // Canary: drop the `z.enum` parse in inviteMember — the call answers
+    // [done] and project.md carries an `owner` member row the tolerant parse
+    // then drops silently.
+    const before = await projectMd();
+    const reply = await call(ids.projectAdmin, "invite_member", {
+      name: "Impossible Seat",
+      email: "impossible-seat@viberr.test",
+      role: "owner",
+    });
+    expect(reply).toContain("[error] Unknown project role.");
+    expect(await projectMd()).toBe(before);
+  });
+});

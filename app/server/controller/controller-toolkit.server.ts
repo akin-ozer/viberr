@@ -1622,18 +1622,28 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "invite_member",
-      "Add a member to the project by email (an unknown email gets a new account with a one-time temporary password you must relay). Project admin. Set the role afterward with set_member_role (new members join as contributor).",
+      "Add a member to the project by email (an unknown email gets a new account with a one-time temporary password you must relay). Project admin. C4: `role` seats them in ONE write — members join as viewer unless you give one, and an unknown role is refused by name with nothing written.",
       {
         projectSlug: z.string().optional(),
         name: z.string(),
         email: z.string(),
+        role: z
+          .enum(PROJECT_ROLES)
+          .optional()
+          .describe("The seat they join in. Omitted: viewer, the narrowest."),
       },
-      runWith(async (args: { projectSlug?: string; name: string; email: string }) => {
+      runWith(async (args: { projectSlug?: string; name: string; email: string; role?: (typeof PROJECT_ROLES)[number] }) => {
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "manage this project's members");
+        const inviteInput: Parameters<typeof inviteMember>[1] = {
+          projectSlug: slug,
+          name: args.name,
+          email: args.email,
+        };
+        if (args.role) inviteInput.role = args.role;
         const result = await inviteMember(
           db,
-          { projectSlug: slug, name: args.name, email: args.email },
+          inviteInput,
           actor,
           { dataRoot },
         );

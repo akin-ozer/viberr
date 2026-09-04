@@ -109,8 +109,10 @@ the guards and the Policy page share:
 | `release-any-ownership`, `manage-members`, `manage-agents`, `edit-policy`, `force-accept-completion` | ✓ | | | |
 
 Beyond the table: a task's **owner** (contributor or above) may accept their own
-task and govern any open decision on it; membership invites join as `viewer`
-(invite is membership, no accept step); the last live project admin cannot be
+task and govern any open decision on it; membership invites join in the seat the
+inviter names and as `viewer` when they name none, in one write with one audit row
+(pass 34, C4: an unknown role is refused by name, against the same single enum
+`setMemberRole` parses; invite is membership, no accept step); the last live project admin cannot be
 demoted or removed; deleting an org account prunes its memberships from every
 `project.md` and releases its tasks. `edit-policy` also covers project settings,
 stages, the repository, archive and delete. Every boundary into the terminal stage

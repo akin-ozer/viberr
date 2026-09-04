@@ -736,6 +736,42 @@ describe("inviteMember", () => {
     expect(result.toast).not.toContain("Invite sent");
   });
 
+  it("C4: the role reaches the member row, the audit row and the toast", async () => {
+    // Canary: hardcode `viewer` again — all three go back to Viewer.
+    const store = setup();
+    const result = await inviteMember(
+      store.db,
+      { projectSlug: store.slug, name: "Deniz", email: store.users.deniz.email, role: "maintainer" },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.toast).toBe(`Added ${store.users.deniz.email}, who joins as Maintainer`);
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const member = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter.members.find((m) => m.userId === store.users.deniz.id)!;
+    expect(member.role).toBe("maintainer");
+    expect(
+      listAuditEvents(store.db, { action: "project.member.invited" })[0]!.details,
+    ).toMatchObject({ role: "maintainer" });
+  });
+
+  it("C4: an unknown role is refused by name and nothing is written", async () => {
+    const store = setup();
+    await expect(
+      inviteMember(
+        store.db,
+        { projectSlug: store.slug, name: "Deniz", email: store.users.deniz.email, role: "owner" },
+        admin(store),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow("Unknown project role.");
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    expect(
+      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter.members.some((m) => m.userId === store.users.deniz.id),
+    ).toBe(false);
+  });
+
   it("an already-registered email is added without minting a second account", async () => {
     const store = setup();
     const result = await inviteMember(
