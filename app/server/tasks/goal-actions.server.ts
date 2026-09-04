@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { parseBlockedByColumn } from "~/server/projections/dependencies.server";
 import { z } from "zod";
 import {
   allLinksSettled,
@@ -319,6 +320,42 @@ function requireGoalAuthority(
   requireAction(db, project, actor, "run-agents", what);
 }
 
+/**
+ * Pass 34 review (ruling 131 + the chain editor): who currently WAITS on a
+ * link of this goal at or after `fromIndex` — the references a removal would
+ * silently re-point, because a goal-link dependency is stored by index.
+ * Both sides are checked: this goal's own later links (`goalLinkSchema
+ * .blockedBy`) and every task in the project whose `blockedBy` names one.
+ */
+function referencesToLinksFrom(
+  db: DatabaseSync,
+  projectSlug: string,
+  fm: GoalFrontmatter,
+  fromIndex: number,
+): string[] {
+  const holders: string[] = [];
+  const affected = (entries: readonly string[]) =>
+    entries.some((raw) => {
+      const ref = parseDependencyRef(raw);
+      return ref?.kind === "goal" && ref.goal === fm.id && ref.link >= fromIndex;
+    });
+  for (const l of fm.links) {
+    if (l.index !== fromIndex && affected(l.blockedBy)) holders.push(`link ${l.index}`);
+  }
+  // SAFETY: both columns are NOT NULL on `task_projections` (`blocked_by_json`
+  // carries a '[]' default), so every row answers these two strings.
+  const rows = db
+    .prepare(
+      `SELECT task_key, blocked_by_json FROM task_projections
+        WHERE project_slug = ? AND blocked_by_json LIKE ?`,
+    )
+    .all(projectSlug, `%${fm.id}%`) as { task_key: string; blocked_by_json: string }[];
+  for (const row of rows) {
+    if (affected(parseBlockedByColumn(row.blocked_by_json))) holders.push(row.task_key);
+  }
+  return holders;
+}
+
 export async function updateGoal(
   db: DatabaseSync,
   input: UpdateGoalInput,
@@ -461,6 +498,21 @@ export async function updateGoal(
           if (link.status !== "pending" || link.taskKey) {
             throw AppError.conflict(
               "Only a pending link with no task can be removed from the chain.",
+            );
+          }
+          // Pass 34 review: a goal-link dependency is stored BY INDEX
+          // (`goal-1 link 3`), and this removal renumbers every later link. A
+          // reference that pointed at one of them would silently denote a
+          // DIFFERENT piece of work, or nothing at all — a task held forever,
+          // or released when the wrong link completes. Refuse instead, naming
+          // what refers to it; the references are re-spelled by hand and the
+          // removal retried.
+          const holders = referencesToLinksFrom(db, input.projectSlug, fm, op.index);
+          if (holders.length > 0) {
+            throw AppError.conflict(
+              `Link ${op.index} cannot be removed: removing it renumbers the links after it, and ` +
+                `${holders.join(", ")} ${holders.length === 1 ? "waits" : "wait"} on a link at or after ${op.index}. ` +
+                `Re-point or clear those waits first, then remove the link.`,
             );
           }
           fm.links = fm.links

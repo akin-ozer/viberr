@@ -985,3 +985,72 @@ describe("listGoals parses stored links instead of asserting their shape", () =>
     }
   });
 });
+
+/**
+ * Pass 34 review (ruling 131 + the chain editor): a goal-link dependency is
+ * stored BY INDEX, and `remove_pending_link` renumbers every later link — so a
+ * removal used to silently re-point or orphan every reference to them.
+ */
+describe("remove_pending_link refuses to renumber under a live reference", () => {
+  it("refuses while a TASK waits on a link at or after it, and names the task", async () => {
+    // Canary: drop the `referencesToLinksFrom` guard — the removal lands, the
+    // reference denotes different work, and nothing says so.
+    const { createGoal, updateGoal } = await import("./goal-actions.server");
+    const { createTask } = await import("./task-actions.server");
+    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const goal = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Chain a task waits on",
+        links: [
+          { title: "One", goal: "One. Done when merged." },
+          { title: "Two", goal: "Two. Done when merged." },
+          { title: "Three", goal: "Three. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const waiter = await createTask(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Waits on the third link",
+        blockedBy: [`${goal.goalId} link 3`],
+      },
+      actor,
+      ctx,
+    );
+    await expect(
+      updateGoal(app.db, { projectSlug: SLUG, goalId: goal.goalId, action: { op: "remove_pending_link", index: 2 } }, actor, ctx),
+    ).rejects.toThrow(new RegExp(`Link 2 cannot be removed.*${waiter.key}`, "s"));
+
+    // A link BEFORE every reference still removes: the guard is about the
+    // links that would move, not about the goal having any dependents.
+    const goal2 = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Chain whose first link is free",
+        links: [
+          { title: "One", goal: "One. Done when merged." },
+          { title: "Two", goal: "Two. Done when merged." },
+          { title: "Three", goal: "Three. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    await createTask(
+      app.db,
+      { projectSlug: SLUG, title: "Waits on link 1 of the other chain", blockedBy: [`${goal2.goalId} link 1`] },
+      actor,
+      ctx,
+    );
+    await expect(
+      updateGoal(app.db, { projectSlug: SLUG, goalId: goal2.goalId, action: { op: "remove_pending_link", index: 3 } }, actor, ctx),
+    ).resolves.toBeDefined();
+  });
+});

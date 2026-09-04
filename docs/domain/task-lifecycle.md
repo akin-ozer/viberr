@@ -197,7 +197,10 @@ a packet (ruling 131(d)): `create`, `transition` and `scheduled` are refused at 
 time (`refused: "blocked-by"`, the refusal settling `waiting` to `none` when nothing
 else is pending), the stranded backstop never nudges a held task, and every turn that
 does run is given the held doctrine in place of the stage rule. An emptied list clears `heldAtStage`; a
-PERSON emptying it is the release itself (ruling 131(e)): the same two halves the
+Because a goal-link wait is stored BY INDEX, removing a pending link is REFUSED while any
+task or sibling link waits on that link or a later one: the removal renumbers them, so the
+reference would silently denote different work. The refusal names every holder, and the
+waits are re-pointed by hand first. A PERSON emptying it is the release itself (ruling 131(e)): the same two halves the
 engine uses (`clearDependencies`, then `announceRelease`: the "Dependencies released"
 note naming who cleared it, a stored `blocked` lifted to `ready`, the
 `task.dependencies.released` audit row, a `dependency` notification to the owner and
