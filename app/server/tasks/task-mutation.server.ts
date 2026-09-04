@@ -391,6 +391,13 @@ export function withdrawAcceptanceOffers(
   terminalStageId: string | null,
   cause: OfferWithdrawalCause,
   actor: FileActorRef,
+  /** Cards the CALLER drops in the same write for its own reasons (the stage
+   *  move's blanket "any pending transition card is stale"). They are removed
+   *  here so the note's survivor count is the array the write actually leaves
+   *  behind — counting before the caller's own filter overstated it (pass 34
+   *  review) — but they are not NAMED: this note is about the acceptance
+   *  offers the ruling covers. */
+  alsoStale?: (r: Recommendation) => boolean,
 ): OfferWithdrawal {
   const stale = (r: Recommendation): boolean => {
     if (r.kind === "accept_completion") return true;
@@ -401,13 +408,13 @@ export function withdrawAcceptanceOffers(
       r.toStageId === terminalStageId
     );
   };
+  const keep = (r: Recommendation): boolean => !stale(r) && !(alsoStale?.(r) ?? false);
   const removed = parsed.frontmatter.recommendations.filter(stale);
   if (removed.length === 0) {
+    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(keep);
     return { removed: [], surviving: parsed.frontmatter.recommendations.length, note: null };
   }
-  parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
-    (r) => !stale(r),
-  );
+  parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(keep);
   const surviving = parsed.frontmatter.recommendations.length;
   const names = removed.map((r) => `"${r.label}"`).join(", ");
   const note: TaskFileEvent = {

@@ -874,3 +874,29 @@ describe("notifyOwnerSeatChange", () => {
     expect(answer).toEqual({ skipped: "failed" });
   });
 });
+
+/**
+ * Pass 34 review: the survivor count in the note must describe the array the
+ * write LEAVES, including the cards the caller drops in the same write.
+ */
+describe("withdrawAcceptanceOffers counts what the write really leaves", () => {
+  it("cards the caller also drops are removed and NOT counted as survivors", () => {
+    // Canary: drop the `alsoStale` parameter (count before the caller's own
+    // filter) — the note claims survivors the same write removes.
+    const parsed = file([accept, toDone, toQa, runAgent]);
+    const result = withdrawAcceptanceOffers(
+      parsed,
+      "done",
+      { kind: "stage_move", toStageId: "impl", toStageName: "Implementation" },
+      OPERATOR,
+      (r) => r.kind === "transition",
+    );
+    // Named: the acceptance offers the ruling covers.
+    expect(result.removed.map((r) => r.id)).toEqual(["r-accept", "r-done"]);
+    expect(parsed.timeline[0]!.text).toContain('"Move to Done"');
+    // The other transition card is gone too, and is not counted as standing.
+    expect(parsed.frontmatter.recommendations.map((r) => r.id)).toEqual(["r-run"]);
+    expect(result.surviving).toBe(1);
+    expect(parsed.timeline[0]!.text).toContain("1 recommendation still stands");
+  });
+});

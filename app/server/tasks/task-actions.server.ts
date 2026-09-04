@@ -576,6 +576,10 @@ export async function createTask(
     throw AppError.validation("New tasks cannot be created in the done stage.");
   }
 
+  // Pass 34 review: an invalid date must not burn a task key. Normalized here,
+  // beside the other pre-allocation checks, and used verbatim below.
+  const dueDate = normalizeCreateDueDate(input.dueDate);
+
   // Ruling 140(a): a named owner is checked BEFORE the key is allocated, by
   // the hand-off rule. The creator is the implicit first owner, so naming
   // themselves records the creator seat; an operator-authorized creation has
@@ -642,7 +646,7 @@ export async function createTask(
     operator: null,
     priority: input.priority ?? "normal",
     labels: input.labels ? normalizeTaskLabels(input.labels) : [],
-    dueDate: normalizeCreateDueDate(input.dueDate),
+    dueDate,
     // F26-16: `urgent` is the SINGLE derived mirror of `priority === "urgent"` —
     // the board highlight and "Blocked or waiting" filter read `urgent`, and it must
     // never disagree with the graded scale. Derived purely here (no separate input)
@@ -4981,19 +4985,24 @@ export async function transitionStage(
     if (input.toStageId === reviewStageIdOf(project)) {
       parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
     }
+    // A stage move makes any pending transition recommendation stale — drop it
+    // so a Done task never shows a "move to <stage>" card. It is handed to the
+    // withdrawal as the caller's own filter, so ONE write removes both sets and
+    // the note counts the survivors it really leaves (pass 34 review: counting
+    // before this filter overstated them).
+    const staleTransition = (r: Recommendation) => r.kind === "transition";
     if (moveCause) {
       moveWithdrawal.offers = withdrawAcceptanceOffers(
         parsed,
         terminalStageIdOf(project),
         moveCause,
         event.actor,
+        staleTransition,
       );
+    } else {
+      parsed.frontmatter.recommendations =
+        parsed.frontmatter.recommendations.filter((r) => !staleTransition(r));
     }
-    // A stage move makes any pending transition recommendation stale — drop it
-    // so a Done task never shows a "move to <stage>" card.
-    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
-      (r) => r.kind !== "transition",
-    );
     parsed.timeline.unshift(event);
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);

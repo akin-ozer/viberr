@@ -1768,6 +1768,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             args.capabilities ?? [],
           );
           if (refusal) throw AppError.validation(refusal);
+          // Pass 34 review: `autonomy` is written only for an operator
+          // (`updateAgentProfile` stores it under `if (isOperator)`), so a
+          // specialist call used to answer [done] for a setting nothing kept.
+          if (args.autonomy !== undefined && view.kind !== "operator") {
+            throw AppError.validation(
+              `autonomy is an operator setting; ${view.name} is a specialist. Nothing was written.`,
+            );
+          }
           const stageIds = file.parsed.frontmatter.stages.map((s) => s.id);
           const unknownStages = (args.stages ?? []).filter((id) => !stageIds.includes(id));
           if (unknownStages.length > 0) {

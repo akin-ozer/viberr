@@ -1539,3 +1539,24 @@ describe("update_agent_deployment never arms a capability it was not asked to", 
     }
   });
 });
+
+/**
+ * Pass 34 review, the same class as ruling 139's refusals: a setting the write
+ * cannot keep is refused by name instead of answering `[done]`.
+ */
+describe("update_agent_deployment refuses a setting the deployment cannot hold", () => {
+  it("autonomy on a SPECIALIST is refused, and nothing is written", async () => {
+    // Canary: drop the kind check — the call answers [done] for a value
+    // `updateAgentProfile` writes only for the operator.
+    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
+    const { readFileSync } = await import("node:fs");
+    const path = resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot });
+    const before = readFileSync(path, "utf8");
+    const reply = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      autonomy: "full",
+    });
+    expect(reply).toContain("[error] autonomy is an operator setting");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+});
