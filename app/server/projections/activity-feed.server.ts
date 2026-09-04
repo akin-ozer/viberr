@@ -10,6 +10,7 @@ import { z } from "zod";
 import {
   createActorRenderOverlay,
   type ActorRender,
+  decodeControllerInstrument,
 } from "~/shared/mapping/actor.server";
 import type { TaskEventRow } from "~/shared/mapping/task-event.server";
 import { listScopeViolations } from "./policy-violations.server";
@@ -355,7 +356,7 @@ function auditText(
   row: AuditRow,
   resolveUserName: (userId: string | null | undefined) => string | null,
 ): string {
-  const actor = row.actor_name ?? displayAuditActorLabel(row.actor_label);
+  const actor = auditActorDisplay(row);
   const d = auditDetails.parse(
     row.details_json ? JSON.parse(row.details_json) : {},
   );
@@ -577,7 +578,29 @@ export interface AuditActorOption {
  * (Implementation) set …"). Humans resolve through the users table (below);
  * this turns the other two families into the same display names the timeline
  * uses (`actor-ref.server.ts`), so one actor reads one way on both panels.
+ *
+ * It does NOT decide the human leg on its own since pass 34 (C5): a label
+ * carrying the controller instrument keeps it, through `auditActorDisplay`.
  */
+/**
+ * C5 (pass 34, U34-4): what the Activity column calls the actor of one audit
+ * row. The joined user name used to win outright, so a row written as
+ * `<email> · via controller` (ruling 99(b)'s disclosure) rendered exactly like
+ * one the same person wrote by hand — the ONE column that dropped it, since
+ * the org Audit log and `inspect_audit_log` render the raw stored label.
+ *
+ * Both legs decode the instrument, so a row whose user no longer resolves
+ * reads "<email> (via the controller)" rather than a third rendering.
+ */
+export function auditActorDisplay(row: {
+  actor_name: string | null;
+  actor_label: string;
+}): string {
+  const person = decodeControllerInstrument(row.actor_label);
+  if (person !== null) return `${row.actor_name ?? person} (via the controller)`;
+  return row.actor_name ?? displayAuditActorLabel(row.actor_label);
+}
+
 export function displayAuditActorLabel(raw: string): string {
   const ref = decodeActorRef(raw);
   switch (ref.kind) {

@@ -443,6 +443,7 @@ function taskFixture(ownerId: string, ownerName: string): TaskSummary {
     priority: "normal",
     labels: [],
     dueDate: null,
+    blockedBy: [],
     archived: false,
     validation: "none",
     continuity: null,
@@ -2071,6 +2072,62 @@ describe("UI-42/UI-44: the decision packet", () => {
     ],
   };
 
+  it("ruling 138: a DECIDED edit_goal packet renders the chosen option locked, no Confirm, and one 'Edit the goal' control that opens the shared draft", () => {
+    // Canary: ignore `p.awaiting`/`p.decided` in the card and the radiogroup +
+    // Confirm come back.
+    const onEditGoal = vi.fn();
+    const onResolve = vi.fn();
+    const decidedPacket: PacketRender = {
+      ...goalPacket,
+      awaiting: "goal_edit",
+      decided: { optionIndex: 0, at: "2026-09-04T10:00:00.000Z", byUserId: "u-arda" },
+    };
+    const { container, queryByRole, getByRole } = render(
+      <DecisionPacket
+        packet={decidedPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        onResolveCustom={() => {}}
+        onResolve={onResolve}
+        onAsk={() => {}}
+        onEditGoal={onEditGoal}
+      />,
+    );
+    expect(container.querySelector(".packet[data-decided]")).not.toBeNull();
+    expect(queryByRole("radiogroup")).toBeNull();
+    expect(queryByRole("button", { name: /^Confirm decision/ })).toBeNull();
+    const chosen = container.querySelector<HTMLButtonElement>(".opt[data-chosen]")!;
+    expect(chosen.textContent).toContain("A human refines the goal");
+    expect(chosen.textContent).toContain("chosen");
+    expect(chosen.disabled).toBe(true);
+    expect(container.querySelector("[data-decided-note]")?.textContent).toContain(
+      "Decision made · save the edited goal to clear this packet",
+    );
+    fireEvent.click(getByRole("button", { name: "Edit the goal" }));
+    expect(onEditGoal).toHaveBeenCalledWith("A human refines the goal\n\nRewrite it.");
+    expect(onResolve).not.toHaveBeenCalled();
+  });
+
+  it("ruling 138: an awaiting packet WITHOUT a recorded decision renders nothing special", () => {
+    const { queryByRole } = render(
+      <DecisionPacket
+        packet={{ ...goalPacket, awaiting: "goal_edit" }}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    expect(queryByRole("radiogroup")).not.toBeNull();
+  });
+
   it("blocks edit_goal for a resolver who cannot edit the goal", () => {
     const onResolve = vi.fn();
     const { container } = render(
@@ -2473,7 +2530,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canEditGoal
         canArchive
         canDiscardBranch
-        archiveDisclosure={{ taskKey: "VIB-1", branch: "vib-1", pendingRecommendations: 0, unownedPr: null }}
+        archiveDisclosure={{ taskKey: "VIB-1", branch: "vib-1", pendingRecommendations: 0, unownedPr: null, openPr: null }}
         onResolveCustom={() => {}} onResolve={onResolve}
         onAsk={() => {}}
       />,
@@ -2517,6 +2574,7 @@ describe("DecisionPacket — pass-20 governance", () => {
           branch: "vib-1",
           pendingRecommendations: 0,
           unownedPr: 232,
+          openPr: null,
         }}
         onResolveCustom={() => {}} onResolve={onResolve}
         onAsk={() => {}}
@@ -2677,6 +2735,7 @@ describe("DecisionPacket — pass-20 governance", () => {
             branch: "vib-1",
             pendingRecommendations: 0,
             unownedPr: 232,
+          openPr: null,
           }}
           onResolveCustom={() => {}} onResolve={() => {}}
           onAsk={() => {}}
@@ -2755,7 +2814,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canEditGoal={false}
         canArchive={false}
         canDiscardBranch={false}
-        archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0, unownedPr: null }}
+        archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0, unownedPr: null, openPr: null }}
         onResolveCustom={() => {}} onResolve={() => {}}
         onRequestMaintainer={onRequestMaintainer}
         onAsk={() => {}}
@@ -2983,6 +3042,30 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     expect(run.classList.contains("primary")).toBe(false);
     const cancel = container.querySelector<HTMLButtonElement>(".sched-cancel")!;
     expect(cancel.classList.contains("ghost")).toBe(true);
+  });
+
+  it("ruling 131: the hero links each wait entry (task page, or the Controller page for a goal link) with its state when not open", () => {
+    // Canary: drop the `Link` wrapper (no anchors) or the state suffix.
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({
+          blockedBy: [
+            { ref: "JC-3", label: "JC-3", state: "done", taskKey: "JC-3", goalId: null },
+            { ref: "goal-1 link 3", label: "goal-1 link 3", state: "open", taskKey: null, goalId: "goal-1" },
+            { ref: "JC-6", label: "JC-6", state: "failed", taskKey: "JC-6", goalId: null },
+          ],
+        })}
+        stage={undefined}
+        canEditGoal
+      />,
+    );
+    const chips = [...container.querySelectorAll<HTMLAnchorElement>("a[data-wait-state]")];
+    expect(chips.map((a) => [a.textContent, a.getAttribute("href"), a.dataset.waitState])).toEqual([
+      ["JC-3 · done", "/projects/viberr-core/tasks/JC-3", "done"],
+      ["goal-1 link 3", "/projects/viberr-core/controller", "open"],
+      ["JC-6 · archived", "/projects/viberr-core/tasks/JC-6", "failed"],
+    ]);
+    for (const a of chips) expect(a.className).toContain("neutral");
   });
 
   it("makes Save goal a primary CTA, visually distinct from Cancel", () => {

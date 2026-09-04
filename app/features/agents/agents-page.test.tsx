@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -8,10 +9,11 @@ import {
   type RenderResult,
 } from "@testing-library/react";
 import { createRoutesStub, useSearchParams } from "react-router";
-import type {
-  AgentDeploymentView,
-  AgentProfileView,
-  LibraryProfileView,
+import {
+  deploymentDot,
+  type AgentDeploymentView,
+  type AgentProfileView,
+  type LibraryProfileView,
 } from "./agent-types";
 import type { ResCatalogGroup } from "./capability-catalog";
 import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
@@ -139,6 +141,7 @@ const LIGHTWEIGHT_WORKFLOW = [
 
 function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
   return {
+    fingerprint: "fp-fixture",
     id: "developer",
     kind: "specialist",
     name: "Developer",
@@ -188,6 +191,7 @@ function mkDeployment(patch: Partial<AgentDeploymentView>): AgentDeploymentView 
     taskTitle: "Attach execution workspace to task runtime",
     status: "waiting on human",
     running: false,
+    taskWaiting: "human",
     ...patch,
   };
 }
@@ -633,6 +637,63 @@ describe("ProfileDetail", () => {
     );
   });
 
+  /**
+   * Ruling 133 (F34-16): the panel said WHERE ("2 of 5 stages") and never what
+   * the where gates. Live, a human read the count as "this agent can act at
+   * these stages", picked "Have the delivering agent resolve the conflict" on
+   * a task at Review, and watched the dispatcher refuse it — while a human
+   * @mention of the same agent at the same stage ran it. Eligibility gates
+   * NEW engagements; the delivering engagement acts on its task at any stage;
+   * a supporting one stays stage-scoped. The panel now says so, in two parts.
+   */
+  const RULE = /Eligibility decides where this profile may be newly engaged\. Once it delivers a task it may be prompted on that task at any stage\./;
+  const SCOPING = /A supporting or reviewing engagement runs only at the stages above\./;
+
+  function renderEligibility(a: AgentProfileView, board = STAGES, workflow = WORKFLOW) {
+    return render(
+      <ProfileDetail
+        a={a}
+        stages={board}
+        workflow={workflow}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    ).container.querySelector(".stage-chips")!.parentElement!.textContent!;
+  }
+
+  it("ruling 133: a restricted profile's panel states the rule AND the scoping clause", () => {
+    // Canary: delete the paragraph.
+    const text = renderEligibility(mkProfile({ stages: ["ready", "impl"] }));
+    expect(text).toContain("2 of 5 stages");
+    expect(text).toMatch(RULE);
+    expect(text).toMatch(SCOPING);
+  });
+
+  it("ruling 133: an UNRESTRICTED profile states the rule but never names a scope it does not have", () => {
+    // Canary: render the paragraph unconditionally. "The stages above" would
+    // name a scope for a profile that has none here — a new copy lie, and one
+    // that contradicts the R14-1 note beside it.
+    for (const [label, text] of [
+      ["spanAll", renderEligibility(mkProfile({ id: "operator", kind: "operator", spanAll: true }))],
+      ["stages: []", renderEligibility(mkProfile({ stages: [] }))],
+      [
+        "resolves to nothing (R14-1 rule 3)",
+        renderEligibility(
+          mkProfile({ stages: ["spec-review", "handoff"] }),
+          LIGHTWEIGHT_BOARD,
+          LIGHTWEIGHT_WORKFLOW,
+        ),
+      ],
+    ] as const) {
+      expect(text, label).toMatch(RULE);
+      expect(text, label).not.toMatch(SCOPING);
+    }
+  });
+
   it("hides manage affordances for non-admins", () => {
     const { queryByText } = render(
       <ProfileDetail
@@ -706,7 +767,7 @@ describe("ProfileDetail resource chips (P14-KM-11)", () => {
 describe("LiveRoster", () => {
   it("sorts by task key then operator→primary→reviewer and renders backends", () => {
     const rows = [
-      mkDeployment({ taskKey: "VIB-2", engagement: "reviewer", role: "Reviewer", backend: "claude", status: "anchored · on call" }),
+      mkDeployment({ taskKey: "VIB-2", engagement: "reviewer", role: "Reviewer", backend: "claude", status: "on call" }),
       mkDeployment({ taskKey: "VIB-1", engagement: "primary", status: "working" }),
       mkDeployment({ taskKey: "VIB-1", engagement: "operator", profileId: "operator", role: "Operator", backend: null, status: "coordinating" }),
     ];
@@ -887,6 +948,14 @@ describe("CapabilityMatrixModal", () => {
 });
 
 describe("CreateProfileModal", () => {
+  it("ruling 133: the Eligible stages hint says the stages gate NEW engagements", () => {
+    // Canary: restore "stages this profile may work in" — the pre-ruling rule,
+    // which a delivering engagement no longer obeys on its own task.
+    const { getByText, queryByText } = renderModal({ initial: null });
+    expect(getByText("stages where this profile may be newly engaged")).toBeTruthy();
+    expect(queryByText("stages this profile may work in")).toBeNull();
+  });
+
   it("B1: a Codex-pinned profile tags claude-only grants as advisory on Codex", () => {
     const { container, queryAllByText } = renderModal({
       initial: mkProfile({
@@ -2467,6 +2536,121 @@ describe("CreateProfileModal — a provider-refused model is disabled + explaine
 });
 
 /**
+ * Pass 34 review — the effort re-seed and the effort select must read the SAME
+ * list. The re-seed judged the stored tier against the backend-wide list while
+ * the select renders the selected model's own (narrower) list, so a stored
+ * `max` on a model that stops at `high` stood as the picker's value with no
+ * option to match, and the save would refuse it by name (ruling 139).
+ */
+describe("CreateProfileModal — a tier the selected model does not offer is re-seeded", () => {
+  const NARROWING: ModelCatalog = {
+    models: [
+      {
+        value: "haiku",
+        displayName: "Claude Haiku",
+        description: "Fast.",
+        supportsEffort: true,
+        efforts: ["low", "medium"],
+      },
+      {
+        value: "opus",
+        displayName: "Claude Opus",
+        description: "Most capable.",
+        supportsEffort: true,
+        efforts: ["low", "medium", "high", "xhigh", "max"],
+      },
+    ],
+    efforts: ["low", "medium", "high", "xhigh", "max"],
+    defaultModel: "opus",
+    defaultEffort: "high",
+  };
+
+  function mount(initial: AgentProfileView) {
+    const onSubmit = vi.fn();
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <CreateProfileModal
+            initial={initial}
+            stages={STAGES}
+            projectName="Viberr Core"
+            busy={false}
+            error={null}
+            onClose={() => {}}
+            onSubmit={onSubmit}
+          />
+        ),
+      },
+      { path: "/resources/model-catalog", loader: () => ({ data: NARROWING }) },
+    ]);
+    const view = render(<Stub initialEntries={["/"]} />);
+    const effortSelect = () =>
+      view.container.querySelector<HTMLSelectElement>("select[aria-label='Effort']")!;
+    return { ...view, onSubmit, effortSelect };
+  }
+
+  it("saves a tier the model actually offers, never the one it never showed", async () => {
+    // Canary: point seedEffort back at `catalog.efforts` — `max` is on the
+    // backend-wide list, so it survives the re-seed and is SAVED even though
+    // the picker only ever showed low/medium (the browser renders the first
+    // option for an unmatched value, so the screen looks fine and the stored
+    // value is the one ruling 139's save refuses).
+    const { onSubmit, effortSelect, getByText } = mount(
+      mkProfile({ backends: ["claude"], model: "haiku", effort: "max" }),
+    );
+    await waitFor(() => {
+      expect([...effortSelect().options].map((o) => o.value)).toEqual(["low", "medium"]);
+    });
+    // The clamp is an effect on the catalog answer: let its state update
+    // commit before submitting, or the click reads the render before it.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    fireEvent.click(getByText("Save changes"));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    // The catalog default (`high`) is not on offer either, so the first tier
+    // the model does offer is what stands and what gets saved.
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ model: "haiku", effort: "low" });
+  });
+
+  it("keeps the catalog default when the selected model does offer it", async () => {
+    const { onSubmit, effortSelect, getByText } = mount(
+      mkProfile({ backends: ["claude"], model: "opus", effort: "" }),
+    );
+    await waitFor(() => expect(effortSelect().value).toBe("high"));
+    // The clamp is an effect on the catalog answer: let its state update
+    // commit before submitting, or the click reads the render before it.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    fireEvent.click(getByText("Save changes"));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ model: "opus", effort: "high" });
+  });
+
+  it("clamps the pick when the person SWITCHES to a model with fewer tiers", async () => {
+    // Canary: delete the [model] effect — the editor keeps `max` while the
+    // picker shows low/medium and saves it.
+    const { onSubmit, effortSelect, container, getByText } = mount(
+      mkProfile({ backends: ["claude"], model: "opus", effort: "max" }),
+    );
+    await waitFor(() => expect(effortSelect().value).toBe("max"));
+    const modelSelect = container.querySelector<HTMLSelectElement>("select[aria-label='Model']")!;
+    fireEvent.change(modelSelect, { target: { value: "haiku" } });
+    await waitFor(() => {
+      expect([...effortSelect().options].map((o) => o.value)).toEqual(["low", "medium"]);
+    });
+    // The clamp is an effect on the catalog answer: let its state update
+    // commit before submitting, or the click reads the render before it.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    fireEvent.click(getByText("Save changes"));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ model: "haiku", effort: "low" });
+  });
+});
+
+/**
  * D33-2 — `docs/ui/surfaces.md` §4 states the screen-label contract as
  * universal ("every top-level surface and dialog carries data-screen-label so
  * tests and agents can address it by name"), and these two dialogs carried
@@ -2631,5 +2815,126 @@ describe("U33-5: Edit profile opens the profile the roster just selected", () =>
     );
     // …and once the URL is the authority again the pane has not drifted.
     expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Developer");
+  });
+});
+
+
+/**
+ * F34-5 — the Agents page's "working" claims were read from the task's
+ * `waiting` flag: the projection called a deliverer "working" whenever the
+ * task was agent-waiting, the stat counted that word, and the pill's pulse
+ * OR-ed the word in beside the real `running` bit. Live, the card read "5
+ * agent threads in a working state" with ONE run alive. The projection now
+ * derives the word from the run row (agent-deployments.server.test.ts); this
+ * side pins that the page reads the run, not the word, and that the waiting
+ * stat kept counting task-level waiting (correction d) with a label that says
+ * whose waiting it is.
+ */
+describe("F34-5: the Agents stats and the pulse read runs, not the waiting flag", () => {
+  /** A one-page roster the OLD arithmetic and the new one disagree on. */
+  const ROSTER: AgentDeploymentView[] = [
+    // VIB-1: operator AND deliverer both live — the operator is running
+    // (status "coordinating"), which the old `status === "working"` count
+    // never counted.
+    mkDeployment({ taskKey: "VIB-1", engagement: "operator", profileId: "operator", role: "Operator", backend: null, status: "coordinating", running: true, taskWaiting: "agent" }),
+    mkDeployment({ taskKey: "VIB-1", engagement: "primary", status: "working", running: true, taskWaiting: "agent" }),
+    // VIB-2: a queued run — admitted, no slot yet, NOT in flight.
+    mkDeployment({ taskKey: "VIB-2", engagement: "primary", status: "queued", running: false, taskWaiting: "agent" }),
+    // VIB-3 waits on a human while its reviewer runs: the reviewer says
+    // "working" and must still count as an engagement on a task waiting on a
+    // human (correction d).
+    mkDeployment({ taskKey: "VIB-3", engagement: "primary", status: "waiting on human", running: false, taskWaiting: "human" }),
+    mkDeployment({ taskKey: "VIB-3", engagement: "reviewer", role: "Reviewer", status: "working", running: true, taskWaiting: "human" }),
+    // VIB-4: an operator holding a packet.
+    mkDeployment({ taskKey: "VIB-4", engagement: "operator", profileId: "operator", role: "Operator", backend: null, status: "packet open", running: false, taskWaiting: "human" }),
+  ];
+
+  /** label → rendered number, for the four `.ag-stat` cells. */
+  function renderStats() {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/viberr-core/agents",
+        Component: () => (
+          <ToastProvider>
+            <AgentsPage
+              profiles={[mkProfile({})]}
+              library={[]}
+              deployments={ROSTER}
+              stages={STAGES}
+              workflow={WORKFLOW}
+              projectSlug="viberr-core"
+              projectName="Viberr Core"
+              myRole="admin"
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container } = render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
+    const stats = new Map<string, string>();
+    for (const stat of container.querySelectorAll(".ag-stat")) {
+      stats.set(stat.querySelector(".l")!.textContent!, stat.querySelector(".n")!.textContent!);
+    }
+    return stats;
+  }
+
+  it("the 'run in flight' stat counts d.running; the waiting stat counts the TASK's flag", () => {
+    // Canary: restore the status clauses (`status === "working"` for the first,
+    // `"waiting on human" || "packet open"` for the second) — the old sums are
+    // 2 and 2 for this roster.
+    const stats = renderStats();
+    expect(stats.get("agent threads with a run in flight")).toBe("3");
+    expect(stats.get("agent threads on tasks waiting on a human · this project")).toBe("3");
+    // Non-vacuity: the two labels this pins really are the rendered ones, so
+    // a renamed label fails here rather than passing by absence.
+    expect(stats.size).toBe(4);
+    expect(stats.get("tasks with a live operator")).toBe("2");
+  });
+
+  it("deploymentDot pulses for a live run and for nothing else", () => {
+    // Canary: restore the status clauses (`d.status === "working" ||
+    // d.status === "coordinating" || d.running`) and the first case pulses.
+    expect(deploymentDot(mkDeployment({ status: "working", running: false }))).toBe(false);
+    expect(deploymentDot(mkDeployment({ status: "coordinating", running: false }))).toBe(false);
+    expect(deploymentDot(mkDeployment({ status: "on call", running: true }))).toBe(true);
+    expect(deploymentDot(mkDeployment({ status: "queued", running: false }))).toBe(false);
+  });
+});
+
+/** Ruling 139: the editor never offers a tier it cannot save. */
+describe("CreateProfileModal effort seeding (ruling 139)", () => {
+  it("a profile whose stored effort is out of the backend's list shows the backend default and submits it", async () => {
+    // Canary: restore the preserved `<option value={effort}>` (the stale tier
+    // stays selected and is submitted).
+    const onSubmit = vi.fn();
+    const { container, findByLabelText, getByText } = renderModal({
+      initial: mkProfile({ backends: ["claude"], model: "sonnet", effort: "ultra" }),
+      onSubmit,
+    });
+    // SAFETY: the modal renders its Effort control as a <select>, which is
+    // what the label resolves to.
+    const select = (await findByLabelText("Effort")) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("high"));
+    expect([...select.options].map((o) => o.value)).not.toContain("ultra");
+    expect(container.querySelector("option[value=ultra]")).toBeNull();
+    fireEvent.click(getByText("Save changes"));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]![0].effort).toBe("high");
+  });
+});
+
+/** B5 (pass 34, U34-3): the editor submits the record it was opened on. */
+describe("CreateProfileModal fingerprint (B5)", () => {
+  it("an EDIT carries the deployment's fingerprint back to the server", () => {
+    // Canary: drop the hidden field — the server then refuses every save
+    // (the create half, which must carry none, is pinned on the route).
+    const onSubmit = vi.fn();
+    const { getByText } = renderModal({
+      initial: mkProfile({ fingerprint: "fp-opened-on" }),
+      onSubmit,
+    });
+    fireEvent.click(getByText("Save changes"));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]![0].fingerprint).toBe("fp-opened-on");
   });
 });

@@ -55,6 +55,9 @@ const pushMock = vi.fn<typeof pushWorkspaceBranch>(async () => ({
   status: "pushed",
   branch: "vib-1",
   commits: 1,
+  headSha: "a".repeat(40),
+  remoteHeadBefore: null,
+workflowFiles: [],
 }));
 
 const openTaskPrMock = vi.fn<typeof openTaskPr>(async () => ({
@@ -184,7 +187,7 @@ beforeEach(() => {
   installFakeRuntime();
   runOp.mockClear();
   pushMock.mockClear();
-  pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 1 });
+  pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
   openTaskPrMock.mockClear();
   openTaskPrMock.mockResolvedValue({
     status: "ok",
@@ -242,6 +245,8 @@ describe("F32-7 — a collision resolution's redelivery leaves a next step", () 
     );
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
     const github = fakeGithubFetch({
+      // Ruling 128: the delivery reads the base ref before pushing.
+      "GET /repos/akin-ozer/viberr/git/ref/heads/main": { body: { object: { sha: "c".repeat(40) } } },
       "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
       "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 204, body: "" },
     });
@@ -601,14 +606,136 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
       created: false,
       url: "http://x/pull/147",
     });
+    // Ruling 134(b): a reuse re-queues nothing only when the push moved
+    // nothing; a moved head is a new review subject (delivery-requeue C2).
+    pushMock.mockResolvedValueOnce({ status: "up_to_date", branch: "vib-1", headSha: "a".repeat(40) });
     expect(await deliver()).toBe("delivered");
     await flush();
     // R18-2/R19-4: the guaranteed card is the SUPERVISED safety net only. Under
     // full autonomy the operator drives, so it is never handed a card — and a
-    // reuse (created:false) re-queues nothing, so full-autonomy-reuse leaves
-    // neither a re-queue nor a card. (A's owner-ruled gate overruled B's broader
-    // "card as the safety net" here.)
+    // reuse whose push moved nothing re-queues nothing, so full-autonomy-reuse
+    // leaves neither a re-queue nor a card. (A's owner-ruled gate overruled B's
+    // broader "card as the safety net" here.)
     expect(runOp).not.toHaveBeenCalled();
     expect(recs()).toHaveLength(0);
+  });
+});
+
+/**
+ * Ruling 136(a) (pass 34, F34-10): the collision ceremony ends with EXACTLY
+ * ONE hand-off. Full autonomy: the ruling-48 `delivered` re-queue the
+ * re-delivery fired, and nothing else. Otherwise a `packet-resolved` re-queue
+ * whose payload carries the ceremony's outcome in its own field. Canaries:
+ * ignore `operatorRequeued` (two runs under full autonomy); drop the
+ * ceremony's own hand-off (no run on the refusal arm or the edgeless board).
+ */
+describe("ruling 136(a): the collision ceremony hands off exactly once", () => {
+  const PACKET: TaskPacket = {
+    type: "blocked",
+    kind: "Blocked decision",
+    from: "operator",
+    title: "Branch vib-1 collides with an unrelated remote branch",
+    body: "deliver_for_review push-conflicted.",
+    observations: [],
+    options: [
+      { kind: "resolve_remote_collision", t: "Delete the stale remote branch, then redeliver", d: "", rec: true },
+      { kind: "custom", t: "Something else", d: "", rec: false },
+    ],
+  };
+
+  async function seedCollision(routes: Record<string, { status?: number; body?: unknown }>) {
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const { createPat, setProjectCredential } = await import("~/server/secrets/pat-store.server");
+    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_collision00000000000000000000136" }, patActor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    const github = fakeGithubFetch(routes);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        waiting: "human",
+        readiness: "blocked",
+        branch: "vib-1",
+        operator: { assignedAtStageId: "ready" },
+        workRevision: {
+          id: "rev_collision136",
+          headSha: "e".repeat(40),
+          treeSha: "f".repeat(40),
+          branch: "vib-1",
+          createdAt: new Date().toISOString(),
+          sourceProfileId: "developer",
+          kind: "delivered",
+        },
+        github: { commits: [], changed: null, unownedPr: 232 },
+      }),
+      packet: PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    return github;
+  }
+
+  const clearedRoutes = () => ({
+    "GET /repos/akin-ozer/viberr/git/ref/heads/main": { body: { object: { sha: "c".repeat(40) } } },
+    "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
+    "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 204, body: "" },
+  });
+
+  async function resolve(github: { fetchImpl: typeof fetch }): Promise<void> {
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: "arda@viberr.dev" },
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl, deps: DEPS },
+    );
+  }
+
+  it("under FULL autonomy a cleared, re-delivered collision runs the operator exactly once, with the `delivered` trigger", async () => {
+    deployOperator("full");
+    const github = await seedCollision(clearedRoutes());
+    await resolve(github);
+    await waitFor(() => runOp.mock.calls.length >= 1, "the operator run");
+    await flush();
+    expect(runOp).toHaveBeenCalledTimes(1);
+    expect(runOp.mock.calls[0]![1]).toMatchObject({ trigger: "delivered" });
+  });
+
+  it("a refusal hands the operator the typed reason once, as Viberr's own record beside the human's decision", async () => {
+    deployOperator("supervised");
+    const github = await seedCollision({
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 500, body: { message: "Server Error" } },
+    });
+    await resolve(github);
+    await waitFor(() => runOp.mock.calls.length >= 1, "the operator run");
+    await flush();
+    expect(runOp).toHaveBeenCalledTimes(1);
+    expect(runOp.mock.calls[0]![1]).toMatchObject({
+      trigger: "packet-resolved",
+      resolvedOption: {
+        kind: "resolve_remote_collision",
+        serverOutcome: { kind: "resolve_remote_collision", outcome: "refused", reason: expect.stringContaining("GitHub refused the deletion") },
+      },
+    });
+    expect(runOp.mock.calls[0]![1].resolvedOption).not.toHaveProperty("note");
+  });
+
+  it("on a board with no `impl → review` edge the cleared, re-delivered task still hands off (no card, one run)", async () => {
+    deployOperator("supervised");
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      workflow: file.parsed.frontmatter.workflow.filter((w) => !(w.from === "impl" && w.to === "review")),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const github = await seedCollision(clearedRoutes());
+    await resolve(github);
+    await waitFor(() => runOp.mock.calls.length >= 1, "the operator run");
+    await flush();
+    expect(recs()).toEqual([]);
+    expect(runOp).toHaveBeenCalledTimes(1);
+    expect(runOp.mock.calls[0]![1]).toMatchObject({
+      trigger: "packet-resolved",
+      resolvedOption: { serverOutcome: { outcome: "cleared_and_delivered", prNumber: 147 } },
+    });
   });
 });

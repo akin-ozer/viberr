@@ -28,6 +28,13 @@ files, and the in-app OAuth provider rows that override the deployment env.
 
 ## 2. Validated optional variables (the schema)
 
+Every name in this section, and the two in §1, is Viberr's own configuration: the server
+reads it, and **none of it reaches a process the server spawns** (ruling 142).
+`filteredSpawnEnv` strips every name the schema declares from the base env that agent
+runs, stdio MCP servers and the hosted sign-in driver start from, so an agent working in a
+project's repository never inherits this server's `NODE_ENV`, `PORT` or data root. §3
+states the rule and what still passes.
+
 ### Process and data root
 
 | Variable | Default | Notes |
@@ -170,20 +177,38 @@ that were here moved into the schema.)*
 | `VIBERR_E2E_KEEP` | unset | `1` keeps the e2e compose stack up after `npm run e2e` (`scripts/e2e.ts`). |
 | `VIBERR_E2E_BASE_URL` | set by `scripts/e2e.ts` | The Playwright base URL; `playwright.config.ts` refuses to run without it. |
 
-The runtime also **sets** environment for the processes it spawns and never
-inherits its own environment into them: spawned MCP servers and agent runs get a
-filtered env (`filteredSpawnEnv` strips every credential-shaped key plus
-`DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`), and git is invoked
-with `GIT_ASKPASS` carrying the PAT, `GIT_CONFIG_SYSTEM`/`GIT_CONFIG_GLOBAL` pointed
-away from the host config, `GIT_ALLOW_PROTOCOL` restricted, and
-`GIT_CEILING_DIRECTORIES` set to the task directory.
+The runtime also **sets** environment for the processes it spawns and never inherits
+its own configuration into them (ruling 142). Agent runs, spawned stdio MCP servers, the
+hosted sign-in driver and the vendor sign-out all start from `filteredSpawnEnv`
+(`app/server/runtimes/runtime-registry.server.ts`), which drops **every name the env
+schema declares** (`ENV_KEYS`: everything in §1 and §2, so `NODE_ENV`, `PORT`,
+`VIBERR_DATA_ROOT`, `BETTER_AUTH_URL`, the OAuth client ids, `VIBERR_TRUST_PROXY`, the
+unlock flags and every tuning knob), every credential-shaped name (`CREDENTIAL_ENV_RE`),
+`DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`, and both vendor homes
+(ruling 127). The rule is keyed on the schema, so a knob declared tomorrow is stripped
+tomorrow. **A name the schema does not declare passes through**: `PATH`, `HOME`, locale,
+proxy settings and the image's `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` (§5) reach the
+child, which is what keeps `npx` MCP servers, `uvx` and the vendor CLIs working. That is
+safe because the gate above keeps the schema complete: the undeclared names in this
+section's table are either credential-shaped and stripped by the regex
+(`VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`) or harmless in a child (`LOG_LEVEL`,
+`VIBERR_E2E_*`). Nothing a child needs comes from a declared name:
+`VIBERR_BROWSER_EXECUTABLE` is read by the server and handed to the browser MCP as
+`--executable-path`. Git is invoked with `GIT_ASKPASS` carrying the PAT,
+`GIT_CONFIG_SYSTEM`/`GIT_CONFIG_GLOBAL` pointed away from the host config,
+`GIT_ALLOW_PROTOCOL` restricted, and `GIT_CEILING_DIRECTORIES` set to the task directory.
+*(Corrected 2026-09-04, pass 34 — U34-7 / ruling 142: this paragraph used to say the
+runtime "never inherits its own environment" while only the credential-shaped and
+private-runtime names were stripped; the container's `NODE_ENV=production` and `PORT`
+rode into every agent shell and stdio MCP child, and broke a project's own `vitest` and
+`next start` inside a run until the agent unset them by hand.)*
 
 ## 4. Configuration that is not an environment variable
 
 | Setting | Where it lives | Who edits it |
 |---|---|---|
 | Run concurrency cap (`maxConcurrentRuns`, `0` = unlimited, ceiling 64) | `instance_settings` table | Org admin, Org settings → Agent resources (`set-concurrency` intent) |
-| Backend quota observations (`backendRateLimit.<backend>`) | `instance_settings` | Written by the run sink from Claude `rate_limit_event` envelopes; read by `/insights` |
+| Backend quota observations (`backendRateLimit.<backend>`, `backendQuotaExhausted.<backend>`, `backendCredentialRefused.<backend>`) | `instance_settings` | Written by the run sink from Claude `rate_limit_event` envelopes and from classified refusals (ruling 130(d): each names the account the run billed); read by `/insights`, `instance_health` and the person's Profile card; the unauthenticated health body strips the person |
 | OAuth sign-in providers | `oauth_providers` table (sealed client secret) | Org admin, Sign-in & SSO tab; overrides the env pair per provider |
 | S3 audit export target | `s3_audit_config` table (sealed secret key) | Org admin, Audit panel |
 | Controller model, effort, grants, instructions | `agents/profiles/controller.md` + `agents/definitions/controller.md` in the data root | Org admin, Controller tab; grant sections and instructions locked unless unlocked by env (§2) |

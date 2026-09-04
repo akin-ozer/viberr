@@ -11,6 +11,8 @@
  *   friendly console model. `runs.md` §3.2 is the authoritative shape.
  */
 
+import type { RunFailureFacts, RunFailureKind } from "~/shared/run-failure";
+
 /** Lifecycle stored in agent_runs.state (orchestrator ruling 11). */
 export type RunState =
   | "queued"
@@ -94,6 +96,11 @@ export interface LogLine {
   } | null;
   /** Codex file_change changes → raw `file_change.changes`. */
   changes?: { path: string; kind: "add" | "update" | "delete" }[] | null;
+  /** Ruling 130(a) (pass 34): the adapter's classified failure record, on the
+   *  terminal `err` line only (beside its `run·error·<kind>` tag). Every
+   *  reader of a failure consumes THIS, never a second regex over the raw
+   *  stream. Absent on every other line. */
+  failure?: RunFailureFacts;
 }
 
 /**
@@ -123,6 +130,11 @@ export interface RunInputs {
   repo: string | null;
   /** A checkout actually landed in `cwd`. False → the agent ran on an empty dir. */
   cloned: boolean;
+  /** Ruling 129 (pass 34, Q34-5): what the pre-run refresh did to a REUSED
+   *  checkout, in words. Absent on a fresh clone, which needs none, and on a
+   *  run with no working tree. A refresh that could not run says so here
+   *  rather than leaving the reader to assume `origin/*` is current. */
+  workspaceRefresh?: string;
   /** This engagement DELIVERS (vs a supporting, read-only engagement). */
   delivers: boolean;
   /** Characters of persona (Claude systemPrompt / Codex developer instructions). */
@@ -290,6 +302,9 @@ export interface RunView {
   /** The run failed because its backend was unavailable / quota-limited (not a
    *  genuine task failure). The UI offers a one-click retry on `altBackend`. */
   failedBackendUnavailable?: boolean;
+  /** Ruling 130(a): the classified failure kind of an errored run, for EVERY
+   *  run kind; the Agent-logs footer selects its sentence from this. */
+  failureKind?: RunFailureKind;
   /** The OTHER backend to retry on when this one is unavailable (D4). */
   altBackend?: "claude" | "codex";
   phase: string | null;

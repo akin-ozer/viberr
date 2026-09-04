@@ -183,16 +183,28 @@ interface PriorShippedHashes {
 
 export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   [path.join("agents", "definitions", "controller.md")]: [
+    // Pass 34 A14: before the blockedBy sentences (ruling 131).
+    "e600925f824e5ec43ca962c56304e5099ae76a1ad41dff8bc94a431666756712",
     // ruling 121 outgoing: named the non-existent `list_projects`, claimed a
     // comment mention could start a run, and knew nothing of the per-turn
     // context read or `update_task`.
     "8dcb2d1bb8f3668bcc9337af2d07be196ed704b66d70b699b2ac55e39ebf258c",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Pass 34 A14: before the blockedBy sentence (ruling 131).
+    "69805ce6bb7bd0180014e164ae6d863268813bd4fb6a0f61bfa4e333b6674608",
     // ruling 121 outgoing (same rewrite).
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Pass 34 A19: before the ruling-133 rework paragraph.
+    "dd42d1a7614df74f937519f53a0e9690affa0e0eb8a89da07d38cac4fc580752",
+    // Pass 34 A13: before the set_dependencies sentence (ruling 131).
+    "9731f0a69b6a8b5824277c4d1a2d4ad18cc126c2ca827a844369f9f0ed9ef3f6",
+    // pass-34 outgoing (ruling 134: rework reaches the open PR through
+    // `deliver_for_review`; pushing is never a person's or an agent's job).
+    "9462381afd6c87b991f5653610252ac2e7a4815b039709d818bbecec1db7532e",
+    "c316e4838955513f00d16b69c972bce8c9dfb3b7c355d8c71a2afa99af76d862",
     // outgoing before the rework-routing guidance (reworkStages)
     "6c67b50034ccc80b28563c8415722d5efb9b8da2f854d6339461036f1a46e71d",
     "03a4f8b7a1c2ed9e7414654e5086288e6dcc187b48f9bd16b1ef141b3eca4f34",

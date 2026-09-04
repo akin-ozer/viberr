@@ -54,7 +54,19 @@ const CREDENTIAL_REFUSED_KEY_PREFIX = "backendCredentialRefused.";
 export const BACKENDS = ["claude", "codex"] as const;
 export type QuotaBackend = (typeof BACKENDS)[number];
 
+/** Ruling 130(d) (pass 34): WHOSE account a record is about. Under ruling 127
+ *  a run bills one person's credential, so an instance-wide row that named no
+ *  principal presented one person's refusal as everyone's. Stripped from the
+ *  unauthenticated health body (`stripQuotaPrincipals`); shown to org admins
+ *  on Insights, to the asker on `instance_health`, and to the person on their
+ *  own Profile card. */
+const principalFields = {
+  credentialUserId: z.string().nullable().default(null),
+  credentialLabel: z.string().nullable().default(null),
+};
+
 const readingSchema = z.object({
+  ...principalFields,
   /** Provider's own status word (e.g. "allowed", "allowed_warning"). */
   status: z.string(),
   /** e.g. "seven_day" | "five_hour" — the window the reading is about. */
@@ -75,15 +87,18 @@ export type BackendRateLimitReading = z.infer<typeof readingSchema>;
  * the run it came from and the provider's own sentence as its evidence.
  */
 const exhaustionSchema = z.object({
+  ...principalFields,
   /** Unix seconds when the provider said the window reopens; null when its
    *  message named no date (then only `observedAt` bounds the claim). */
   resetsAt: z.number().nullable(),
   /** How `resetsAt` was derived — `"exact"` for a machine instant the provider
-   *  emitted, `"prose"` for one reconstructed from wall-clock words whose
-   *  timezone it never named. Records written before this field existed parse
-   *  as null and are treated exactly like `"prose"`: unknown provenance gets
-   *  the conservative handling, never the precise one. */
-  resetsAtPrecision: z.enum(["exact", "prose"]).nullable().default(null),
+   *  emitted (or the SDK's own `resetsAt`), `"prose"` for one reconstructed
+   *  from wall-clock words whose timezone it never named, `"clock"` (ruling
+   *  130(d)) for a UTC wall-clock time ("resets 11:50am (UTC)") resolved to the
+   *  next occurrence at or after the observation. Records written before this
+   *  field existed parse as null and are treated exactly like `"prose"`:
+   *  unknown provenance gets the conservative handling, never the precise one. */
+  resetsAtPrecision: z.enum(["exact", "prose", "clock"]).nullable().default(null),
   /** The provider's own already-redacted sentence — the whole evidence. */
   providerText: z.string(),
   /** The failed run this was read off. */
@@ -107,6 +122,7 @@ export type BackendQuotaExhaustion = z.infer<typeof exhaustionSchema>;
  * with time.
  */
 const credentialRefusalSchema = z.object({
+  ...principalFields,
   /** The provider's own already-redacted sentence — the whole evidence. */
   providerText: z.string(),
   /** The failed run this was read off. */
@@ -151,7 +167,7 @@ export interface BackendQuotaRow {
  * pattern: it is the exact text this gate exists to reject.
  */
 const USAGE_LIMIT_RE =
-  /usage limit|usage quota|\bquota\b|weekly limit|monthly limit|subscription limit|plan limit|out of credits|credit balance/i;
+  /usage limit|usage quota|\bquota\b|session limit|weekly limit|monthly limit|subscription limit|plan limit|out of credits|credit balance/i;
 
 // The marker both adapters append the provider's own redacted sentence behind.
 // P07-C (pass 32): imported from the leaf `~/shared/provider-marker` module —
@@ -166,7 +182,7 @@ import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
  * every member of the class, transient ones included — so judging the whole
  * line would defeat `USAGE_LIMIT_RE` entirely.
  */
-function providerSentence(text: string): string {
+export function providerSentence(text: string): string {
   const idx = text.indexOf(PROVIDER_TEXT_MARKER);
   return idx >= 0 ? text.slice(idx + PROVIDER_TEXT_MARKER.length).trim() : text.trim();
 }
@@ -197,7 +213,7 @@ export interface QuotaReset {
    * panel renders a prose reset as a calendar DATE, never as a wall-clock time
    * we would be stating with unearned confidence.
    */
-  precision: "exact" | "prose";
+  precision: "exact" | "prose" | "clock";
 }
 
 const MONTHS = [
@@ -283,7 +299,7 @@ function proseInstantMs(phrase: string): number | null {
  * date on the card. Null is always an acceptable answer — the card falls back
  * to "observed <when>".
  */
-export function parseQuotaResetAt(text: string): QuotaReset | null {
+export function parseQuotaResetAt(text: string, observedAtIso?: string): QuotaReset | null {
   const epoch = /usage limit reached\|(\d{9,13})/i.exec(text);
   if (epoch) {
     const n = Number(epoch[1]);
@@ -293,11 +309,43 @@ export function parseQuotaResetAt(text: string): QuotaReset | null {
     const at = epoch[1]!.length >= 12 ? Math.round(n / 1000) : Math.round(n);
     return { at, precision: "exact" };
   }
+  // Ruling 130(d): the UTC wall-clock shape Claude's session-limit refusal
+  // uses ("resets 11:50am (UTC)"): the next occurrence at or after the
+  // observation, precision `clock` (a real UTC time, rendered to the minute,
+  // retired with the prose grace because the day is inferred).
+  const clock = /resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(UTC\)/i.exec(text);
+  if (clock) {
+    const hour12 = Number(clock[1]);
+    const minute = clock[2] ? Number(clock[2]) : 0;
+    const pm = clock[3]!.toLowerCase() === "pm";
+    if (hour12 >= 1 && hour12 <= 12 && minute >= 0 && minute < 60) {
+      const hour = (hour12 % 12) + (pm ? 12 : 0);
+      const observedMs = observedAtIso ? Date.parse(observedAtIso) : Date.now();
+      const base = Number.isFinite(observedMs) ? new Date(observedMs) : new Date();
+      let at = Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), hour, minute);
+      if (at < base.getTime()) at += 24 * 60 * 60 * 1000;
+      return { at: Math.round(at / 1000), precision: "clock" };
+    }
+  }
   const phrase = /try again(?:\s+(?:at|on))?\s+([^.\n]+)/i.exec(text);
   if (!phrase) return null;
   const ms = proseInstantMs(phrase[1]!);
   if (ms == null || !Number.isFinite(ms)) return null;
   return { at: Math.round(ms / 1000), precision: "prose" };
+}
+
+/** Ruling 130(d): the rows without their principal, for the unauthenticated
+ *  health body (which documents "never data"). */
+export function stripQuotaPrincipals(rows: BackendQuotaRow[]): BackendQuotaRow[] {
+  const strip = <T extends { credentialUserId: string | null; credentialLabel: string | null }>(
+    record: T | null,
+  ): T | null => (record ? { ...record, credentialUserId: null, credentialLabel: null } : null);
+  return rows.map((row) => ({
+    ...row,
+    reading: strip(row.reading),
+    exhausted: strip(row.exhausted),
+    credentialRefused: strip(row.credentialRefused),
+  }));
 }
 
 /** Store the latest reading for a backend. Best-effort: a failure is logged and

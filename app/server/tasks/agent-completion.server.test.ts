@@ -24,6 +24,7 @@ import {
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { logger } from "~/server/logging/logger.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { startRun } from "~/server/runtimes/run-service.server";
 import { insertRunLine, upsertRun } from "~/server/runtimes/run-store.server";
@@ -33,6 +34,7 @@ import {
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { emptyRunFailureFacts } from "~/shared/run-failure";
 import {
   applyAgentCompletionEffects,
   markWaitingAgent,
@@ -682,6 +684,48 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * packet and assert evidence rows in a vanished profile's name, one layer
    * later and out of sight.
    */
+  it("ruling 137: the envelope's question packet withdraws the standing acceptance offer on the record", async () => {
+    // Canary: drop the withdrawal at the envelope-question site in
+    // recordAgentCompletion and the accept card outlives the question.
+    writeReviewTask({
+      recommendations: [
+        { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-1 to Done", detail: "", forHeadSha: "a".repeat(40) },
+        { id: "r-run", kind: "run_agent", profileId: "dev", label: "Run dev", detail: "" },
+      ],
+    });
+    const runId = await finishedRunWith(
+      JSON.stringify({
+        summary: "Reviewed the change; one thing is unclear.",
+        question: { title: "Which API surface should this use?", body: "Two candidates." },
+      }),
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "dev",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "finished" },
+    );
+    const parsed = taskFile().parsed;
+    expect(parsed.packet?.title).toBe("Which API surface should this use?");
+    expect(parsed.frontmatter.recommendations.map((r) => r.id)).toEqual(["r-run"]);
+    const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Recommendation withdrawn");
+    expect(note?.actor).toMatchObject({ kind: "agent", profileId: "dev" });
+    expect(note?.text).toContain('a decision packet opened ("Which API surface should this use?")');
+    const rows = listAuditEvents(store.db, { action: "task.recommendation.withdrawn" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actorLabel).toContain("agent:codex/dev");
+    expect(rows[0]!.details).toMatchObject({ cause: "packet", surviving: 1 });
+  });
+
   it("R15-7: an UNRESOLVABLE profile's finished run opens no question packet and asserts no evidence", async () => {
     const runId = await finishedRunWith(
       JSON.stringify({
@@ -929,7 +973,13 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       (e) => e.type === "blocked" && /did not complete/.test(e.text),
     );
     expect(failureEvent, "a typed failure event must be posted").toBeTruthy();
-    expect(failureEvent!.text.toLowerCase()).toContain("quota");
+    // Ruling 130(b) (pass 34): the classified cause in the remedy leaf's
+    // words and the owner's OWN move; never the generic advice, never `..`.
+    const lower = failureEvent!.text.toLowerCase();
+    expect(lower).toContain("codex refused the agent run");
+    expect(lower).toContain("over its usage limit");
+    expect(lower).toContain("profile → agent accounts");
+    expect(failureEvent!.text).not.toMatch(/retry on the other backend|fix the credential|\.\./i);
     // A recovery packet reaches the human's queue (not just a timeline note):
     // it must open and mark the task blocked so it surfaces as "waiting on you".
     expect(parsed.packet, "a recovery packet must open on a failed run").toBeTruthy();
@@ -973,7 +1023,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(n.kind).toBe("packet");
       expect(n.ptype).toBe("blocked");
       expect(n.title).toContain("Work stalled");
-      expect(n.text.toLowerCase()).toContain("quota");
+      expect(n.text.toLowerCase()).toContain("over its usage limit");
     }
     // waiting must be flipped off `agent` (no phantom "agent working").
     expect(parsed.frontmatter.waiting).toBe("human");
@@ -1077,6 +1127,123 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // exactly one row, the actionable one.
     expect(ardas).toHaveLength(1);
     expect(ardas[0]!.kind).toBe("packet");
+  });
+
+  it("ruling 130(b): a specialist quota failure names the reset instant and the owner's remedy; the options come from the remedy leaf; never `..`", async () => {
+    // Canaries: restore the fixed "Retry on the other backend, or fix the
+    // credential and re-run." sentence in the error arm (the event text
+    // fails), or drop the `stuck.options` override so the stock set with
+    // `redirect` recommended returns (the option assertions fail).
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runId = "run_130b_quota";
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t-130b",
+      role: "Developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      backend: "claude",
+      model: "opus",
+      sdk: "claude",
+      state: "error",
+    });
+    insertRunLine(store.db, {
+      runId,
+      seq: 0,
+      occurredAt: "2026-09-07T10:00:00.000Z",
+      raw: JSON.stringify({ ev: "err", tag: "run·error·quota" }),
+      display: {
+        t: "10:00:00",
+        ev: "err",
+        tag: "run·error·quota",
+        text: "Claude refused the run: the five-hour usage window is spent.",
+        failure: {
+          ...emptyRunFailureFacts("quota"),
+          windowRejected: true,
+          window: "five_hour",
+          resetsAt: "2026-09-07T11:50:00.000Z",
+          apiErrorStatus: 429,
+        },
+      },
+    });
+    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "developer",
+        role: "Developer",
+        delivers: true,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "error" },
+    );
+    const parsed = taskFile().parsed;
+    const event = parsed.timeline.find(
+      (e) => e.type === "blocked" && /did not complete/.test(e.text),
+    )!;
+    const owner = store.users.arda.name;
+    expect(event.text).toContain(
+      `Claude refused the agent run: ${owner}'s five-hour usage window is spent and reopens at Sep 7, 2026 · 11:50 UTC.`,
+    );
+    expect(event.text).toContain("No changes were delivered.");
+    expect(event.text).toContain(
+      `${owner} can wait until the window reopens (Sep 7, 2026 · 11:50 UTC), or connect a different Claude account or an API key on Profile → Agent accounts.`,
+    );
+    expect(event.text).not.toMatch(/retry on the other backend|fix the credential|\.\./i);
+
+    const packet = parsed.packet!;
+    expect(packet.type).toBe("blocked");
+    expect(packet.body).toContain("five-hour usage window is spent");
+    expect(packet.body).toContain("Profile → Agent accounts");
+    expect(packet.body).toContain("Coordination is paused until a human chooses how to proceed.");
+    expect(packet.body).not.toMatch(/\.\./);
+    // arda has Codex connected (the store's beforeEach), so the other-backend
+    // retry leads and STICKS to the same profile; "send @dev back" is next;
+    // redirect is present and NOT recommended (the agent did nothing wrong);
+    // the hold option closes the set.
+    expect(packet.options.map((o) => [o.kind, o.rec])).toEqual([
+      ["retry_other_backend", true],
+      ["request_edit", false],
+      ["redirect", false],
+      ["hold_runtime_debug", false],
+    ]);
+    expect(packet.options[0]!.t).toBe("Retry @dev on Codex now");
+    expect(packet.options[0]!.profileId).toBe("developer");
+    expect(packet.options[1]!.t).toBe(
+      "The window has reset (Sep 7, 2026 · 11:50 UTC), or the Claude account changed: send @dev back to continue",
+    );
+    expect(packet.options[1]!.ev).toContain("No project policy was changed");
+    for (const o of packet.options) expect(o.t).not.toMatch(/[–—]/);
   });
 
   /**
@@ -1219,6 +1386,11 @@ describe("unavailable backend through the specialist start path", () => {
     // the reader to "configure a credential" on an instance that has none.
     expect(failureEvent.text).toContain(store.users.arda.name);
     expect(failureEvent.text).toContain("the task owner");
+    // F34-12 (pass 34): the refusal sentence already carries its period; the
+    // event and the packet body used to append another (`..`).
+    expect(failureEvent.text).not.toMatch(/\.\./);
+    expect(taskFile().parsed.packet?.body).not.toMatch(/\.\./);
+    expect(taskFile().parsed.packet?.observations.find((o) => o.k === "Signal")?.v).not.toMatch(/\.\./);
     expect(failureEvent.text).toContain("Profile → Agent accounts");
     expect(failureEvent.text).not.toContain("Configure a credential");
     expect(failureEvent.text).not.toContain("ANTHROPIC_API_KEY");

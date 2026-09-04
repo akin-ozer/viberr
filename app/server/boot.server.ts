@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { VALIDATION_VALUES } from "~/schemas/task-file.schema";
+import { NOTIFICATION_KINDS } from "~/shared/mapping/notification.server";
 import { runMigrations } from "./db/migration-runner.server";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
 import {
@@ -127,7 +128,8 @@ type BootIntegrityFields = {
   users: number;
   build: BuildInfo;
   disk: { free: string; total: string; status: DiskStatus } | null;
-  /** F21-1: absent on a healthy schema — see `projectionValidationGaps`. */
+  /** F21-1 / ruling 140: absent on a healthy schema — see
+   *  `projectionCheckGaps` (table-qualified CHECK gaps). */
   projectionSchemaDrift?: string[];
   /** Absent on a healthy schema — see `projectionMissingColumns`. */
   projectionMissingColumns?: string[];
@@ -162,27 +164,70 @@ function countRows(db: DatabaseSync, sql: string): number {
  * the one moment an operator is already reading this log.
  */
 function projectionValidationGaps(db: DatabaseSync): string[] {
+  return checkListGaps(db, "task_projections", "validation", VALIDATION_VALUES);
+}
+
+/**
+ * Ruling 140 (pass 34): the SAME drift, one table over. `notifications.kind` is
+ * a CHECK over `NOTIFICATION_KINDS`, pinned to the baseline by
+ * `notification.server.test.ts` — which, like the validation pin, reaches only
+ * FRESH roots. On an existing root every INSERT of a kind the CHECK predates
+ * throws, `createNotification`'s fail-open swallows it, and the person is never
+ * told: exactly the silent drop a new notification kind (`dependency`,
+ * `ownership`) would produce on every deployed root the day it shipped. Read
+ * the stored DDL and name what is missing, with the same remedy line.
+ */
+function notificationKindGaps(db: DatabaseSync): string[] {
+  return checkListGaps(db, "notifications", "kind", NOTIFICATION_KINDS);
+}
+
+/**
+ * The CHECK gaps the boot integrity line reports, table-qualified
+ * (`notifications.kind: ownership`), so the WARN names where the ALTER must
+ * land. Generalised from the validation-only read (F21-1) in pass 34 — a value
+ * the code declares that the live root's CHECK does not admit.
+ */
+export function projectionCheckGaps(db: DatabaseSync): string[] {
+  return [
+    ...projectionValidationGaps(db).map((value) => `task_projections.validation: ${value}`),
+    ...notificationKindGaps(db).map((value) => `notifications.kind: ${value}`),
+  ];
+}
+
+/**
+ * Values `declared` that the live `<table>.<column>` CHECK IN-list does not
+ * admit. Reads the DDL sqlite itself stored — the cheapest honest way to see a
+ * CHECK-constraint drift coming, at the one moment an operator is already
+ * reading this log.
+ */
+function checkListGaps(
+  db: DatabaseSync,
+  table: string,
+  column: string,
+  declared: readonly string[],
+): string[] {
   // SAFETY: `sql` is the only selected column; `sqlite_master.sql` is TEXT and
   // is non-null for every CREATE TABLE row (it is null only for the indexes
   // sqlite auto-creates). `.get()` yields undefined when the table is absent.
   const row = db
-    .prepare(
-      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task_projections'`,
-    )
-    .get() as { sql: string | null } | undefined;
+    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`)
+    .get(table) as { sql: string | null } | undefined;
   const ddl = row?.sql;
-  // No table at all is not drift — a database this early has no projections to
+  // No table at all is not drift — a database this early has nothing to
   // lose, and the migration runner is the thing that would have complained.
   if (!ddl) return [];
   const check = ddl.match(
-    /validation\s+TEXT\s+NOT\s+NULL\s+CHECK\s*\(\s*validation\s+IN\s*\(([^)]*)\)/i,
+    new RegExp(
+      `${column}\\s+TEXT\\s+NOT\\s+NULL\\s+CHECK\\s*\\(\\s*${column}\\s+IN\\s*\\(([^)]*)\\)`,
+      "i",
+    ),
   );
   // A column with no CHECK at all admits everything — the reverse of drift.
   if (!check) return [];
   const admitted = new Set(
     check[1]!.split(",").map((value) => value.trim().replace(/^'|'$/g, "")),
   );
-  return VALIDATION_VALUES.filter((value) => !admitted.has(value));
+  return declared.filter((value) => !admitted.has(value));
 }
 
 /**
@@ -284,7 +329,7 @@ export function logBootIntegrity(db: DatabaseSync): void {
   // Named only when some are actually gone: a healthy boot has nothing to list,
   // and an empty `missingDirs: []` reads like a finding that isn't there.
   if (missingDirs.length > 0) fields.missingDirs = missingDirs;
-  const validationGaps = projectionValidationGaps(db);
+  const validationGaps = projectionCheckGaps(db);
   if (validationGaps.length > 0) fields.projectionSchemaDrift = validationGaps;
   const missingColumns = projectionMissingColumns(db);
   if (missingColumns.length > 0) fields.projectionMissingColumns = missingColumns;
@@ -301,9 +346,11 @@ export function logBootIntegrity(db: DatabaseSync): void {
         ? "the rebuilder INSERT names these columns, so EVERY task fails to " +
           "project ('no such column') and rows go stale behind " +
           "'projection rebuild failed'"
-        : "every task whose derived validation lands on one of these fails to " +
-          "project; its row goes stale and the rebuild logs only " +
-          "'projection rebuild failed'";
+        : "every write of a value the live CHECK does not admit fails: a task " +
+          "whose derived validation lands on one of these stops projecting " +
+          "(its row goes stale behind 'projection rebuild failed'), and a " +
+          "notification of a kind the CHECK predates is dropped by the " +
+          "fail-open insert with nothing on any surface";
     drift.remedy =
       (missingColumns.length > 0 && validationGaps.length === 0
         ? "additive drift only — `ALTER TABLE <table> ADD COLUMN <column>` for " +

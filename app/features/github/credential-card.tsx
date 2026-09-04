@@ -25,7 +25,7 @@ import { useDialog } from "~/ui/use-dialog";
 
 export type CredentialCardData = Pick<
   ProjectCredentialHealth,
-  "configured" | "source" | "label" | "masked" | "scopes"
+  "configured" | "source" | "label" | "masked" | "scopes" | "advisories"
 >;
 
 export function CredentialCard({
@@ -109,6 +109,14 @@ export function CredentialCard({
           </span>
         )}
       </div>
+      {/* Ruling 144(a): advisories are facts about what this token cannot do,
+          never a missing chip and never a validation failure. */}
+      {credential.advisories.map((a) => (
+        <div className="sub" key={a.id} data-advisory={a.id}>
+          <Icon name="flag" />
+          {a.text}
+        </div>
+      ))}
       {connectionAuth === "revoked" || connectionAuth === "expired" ? (
         <div className="cred-warn">
           <Icon name="alert" />

@@ -18,6 +18,7 @@ const SNAPSHOT: OperatorTaskSnapshot = {
   priority: "normal",
   labels: [],
   dueDate: null,
+  blockedBy: [],
   stage: "impl",
   stageName: "In Progress",
   previousStage: null,

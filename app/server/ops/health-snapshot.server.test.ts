@@ -1,0 +1,36 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { createTestDbContext } from "../../../test-support/test-db";
+import { setupTestStore } from "../../../test-support/test-store";
+import { recordBackendQuotaExhaustion } from "~/server/runtimes/backend-quota.server";
+import { healthSnapshot } from "./health-snapshot.server";
+
+/**
+ * Ruling 130(d): the unauthenticated `/resources/health` body never names a
+ * person; the signed-in `instance_health` read does. Canary: return the rows
+ * unstripped by default.
+ */
+const ctx = createTestDbContext();
+afterEach(ctx.cleanup);
+
+describe("healthSnapshot and the quota principal", () => {
+  it("strips the principal by default and keeps it for a signed-in read", () => {
+    const store = setupTestStore(ctx);
+    recordBackendQuotaExhaustion(store.db, "claude", {
+      resetsAt: null,
+      resetsAtPrecision: null,
+      providerText: "session limit",
+      runId: "run_x",
+      observedAt: new Date().toISOString(),
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+    });
+    const anonymous = healthSnapshot(store.db).quota.find((q) => q.backend === "claude")!;
+    expect(anonymous.exhausted?.providerText).toBe("session limit");
+    expect(anonymous.exhausted?.credentialUserId).toBeNull();
+    expect(anonymous.exhausted?.credentialLabel).toBeNull();
+    expect(JSON.stringify(healthSnapshot(store.db))).not.toContain(store.users.arda.id);
+    const signedIn = healthSnapshot(store.db, { principal: true }).quota.find((q) => q.backend === "claude")!;
+    expect(signedIn.exhausted?.credentialUserId).toBe(store.users.arda.id);
+    expect(signedIn.exhausted?.credentialLabel).toBe("Arda");
+  });
+});

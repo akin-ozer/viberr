@@ -61,7 +61,39 @@ export type DefaultBranchEvidence =
   | { verified: false; why: string };
 
 export type PushWorkspaceResult =
-  | { status: "pushed"; branch: string; commits: number }
+  | {
+      status: "pushed";
+      branch: string;
+      commits: number;
+      /** Ruling 134: the workspace head the push published (full sha), or null
+       *  when git could not name HEAD (the push still ran). */
+      headSha: string | null;
+      /** Ruling 134: origin's head for the branch BEFORE the push (full sha),
+       *  or null when the branch did not exist on origin or could not be read. */
+      remoteHeadBefore: string | null;
+      /** Ruling 144: the files under `.github/workflows/` this push changed, as
+       *  GitHub measures them (from origin's head, or the base on a first push).
+       *  `null` when history could not answer — an unmeasured push, which is
+       *  not the same claim as a measured empty list. */
+      workflowFiles: string[] | null;
+    }
+  /**
+   * Ruling 144: a push of `.github/workflows/*` refused for the `workflow`
+   * scope. `before_push`: the bound classic token's published scopes lack it,
+   * so the push was not attempted; `github`: GitHub itself refused it (any
+   * token kind). Either way `performDelivery` opens the scope violation.
+   */
+  | {
+      status: "push_refused_scope";
+      branch: string;
+      scope: "workflow";
+      phase: "before_push" | "github";
+      files: string[];
+      reason: string;
+    }
+  /** Ruling 134: origin already carries the workspace head; no push ran.
+   *  The only honest noop for a delivery: the PR (if any) is up to date. */
+  | { status: "up_to_date"; branch: string; headSha: string }
   /** B-GH1/F15-15: the remote branch holds commits the local delivery does not
    *  (non-fast-forward) — a HISTORY divergence, never a credential problem. The
    *  branch is carried so recovery copy can name what diverged. */
@@ -107,6 +139,8 @@ export type PushWorkspaceResult =
       stderrExcerpt?: string;
     };
 
+/** Ruling 134: the pre-push read of origin's branch head. */
+const LS_REMOTE_TIMEOUT_MS = 30_000;
 /** Ceiling for the branch push itself (the one network step here). Shared with
  *  the branch-update path, which pushes the same branch the same way. */
 export const PUSH_TIMEOUT_MS = 120_000;
@@ -226,6 +260,52 @@ export const defaultExec: Exec = async (file, args, opts) => {
     return outcome;
   }
 };
+
+/**
+ * Ruling 144(c): GitHub's refusal of a workflow-file push for a token without
+ * the `workflow` scope ("refusing to allow a Personal Access Token to create
+ * or update workflow `.github/workflows/ci.yml` without `workflow` scope").
+ * Exported for its unit test.
+ */
+export function isWorkflowScopeRejection(stderr: string): boolean {
+  return /refusing to allow .*(create|update) workflow/i.test(stderr) && /workflow.? scope/i.test(stderr);
+}
+
+/**
+ * Ruling 144(b): the files under `.github/workflows/` a push changes, measured
+ * as GitHub measures the ref update: from origin's current head for the
+ * branch, and from the base branch only when the branch does not exist on
+ * origin yet. A branch whose workflow file already reached origin is never
+ * refused for a push that does not touch it. Unreadable history reads as
+ * nothing (the push itself then answers, ruling 144(c)).
+ */
+async function changedWorkflowFiles(
+  exec: Exec,
+  repoDir: string,
+  remoteHead: string | null,
+  defaultBranch: string,
+): Promise<string[] | null> {
+  const listFrom = async (range: string): Promise<string[] | null> => {
+    const res = await exec(
+      "git",
+      ["-C", repoDir, "log", "--format=", "--name-only", range, "--", ".github/workflows/"],
+      { cwd: repoDir, timeoutMs: 10_000 },
+    );
+    if (!res.ok) return null;
+    return [...new Set(res.stdout.split("\n").map((l) => l.trim()).filter(Boolean))];
+  };
+  if (remoteHead) {
+    const files = await listFrom(`${remoteHead}..HEAD`);
+    if (files) return files;
+  }
+  // Pass 34 review: `null` is "history could not answer" (a shallow clone with
+  // no `origin/<default>`, an unreadable remote head), NOT "no workflow files
+  // changed". An empty array is a MEASUREMENT; conflating the two let a
+  // degraded read silently stand in for proof — the pre-push refusal skipped
+  // and, worse, ruling 144(c)'s resolution of a standing violation claimed
+  // nothing was pushed when nothing was measured.
+  return listFrom(`origin/${defaultBranch}..HEAD`);
+}
 
 /**
  * Non-fast-forward classifier for `git push` stderr (B-GH1). git's rejection
@@ -466,10 +546,18 @@ export interface PushWorkspaceBranchInput {
 
 /**
  * Push the task's workspace branch to origin using the project PAT. Returns a
- * typed result; never throws. `pushed` means the remote now carries the local
- * commits (a `git push` with nothing new still reports `pushed`); `no_commits`
- * means the branch had no local commits ahead of the default branch; every
- * other status is a degraded reason the caller can log or surface.
+ * typed result; never throws.
+ *
+ * Ruling 134 (pass 34, F34-11): delivery is defined by the REMOTE, not by a
+ * cached PR state. Before pushing, origin's head for the branch is read
+ * (`git ls-remote --heads origin <branch>`, under the same askpass env as the
+ * push): equal to the workspace HEAD → `up_to_date`, no push; otherwise the
+ * push runs and `pushed` carries the head it published and the remote head
+ * it replaced (`remoteHeadBefore`, null when the branch was absent on origin
+ * or could not be read). An unreadable HEAD skips the compare and pushes as
+ * before, with `headSha: null`. `no_commits` means the branch had no local
+ * commits ahead of the default branch; every other status is a degraded
+ * reason the caller can log or surface.
  */
 export async function pushWorkspaceBranch(
   input: PushWorkspaceBranchInput,
@@ -671,13 +759,104 @@ export async function pushWorkspaceBranch(
     if (!token) return { status: "no_pat", reason: "no project credential" };
 
     const askpass = createGitHubAskpassEnv({ token });
+    let pushedHead = "";
+    let pushedRemoteBefore: string | null = null;
+    let pushedWorkflowFiles: string[] | null = null;
     try {
+      // Ruling 134: what does origin hold for this branch right now? Read
+      // BEFORE the push so the delivery can say what moved, and skip the push
+      // entirely when origin already carries the workspace head.
+      const headSha = await revParse(exec, repoDir, "HEAD");
+      pushedHead = headSha;
+      let remoteHeadBefore: string | null = null;
+      if (headSha) {
+        const remoteRes = await exec(
+          "git",
+          ["-C", repoDir, "ls-remote", "--heads", "origin", branch],
+          { cwd: repoDir, timeoutMs: LS_REMOTE_TIMEOUT_MS, env: askpass.env },
+        );
+        if (remoteRes.ok) {
+          const remoteSha = remoteRes.stdout.trim().split(/\s+/)[0] ?? "";
+          remoteHeadBefore = /^[0-9a-f]{40}$/i.test(remoteSha) ? remoteSha : null;
+          pushedRemoteBefore = remoteHeadBefore;
+          if (remoteHeadBefore === headSha) {
+            logger.info("workspace branch already on origin — no push needed", {
+              taskKey,
+              branch,
+            });
+            return { status: "up_to_date", branch, headSha };
+          }
+        } else {
+          // An unreadable remote never blocks the push: the push itself is the
+          // authority, and a non-fast-forward is still classified below.
+          logger.info("could not read origin's head for the branch before pushing", {
+            taskKey,
+            branch,
+            detail: redactGitOutput(remoteRes.stderr, { token }),
+          });
+        }
+      }
+      // Ruling 144(b): the workflow files this push would change, measured
+      // as GitHub measures them (origin's head for the branch; the base only
+      // on a first push). A classic token whose published list lacks
+      // `workflow` is refused HERE, with the remedy named, before GitHub is
+      // asked; a fine-grained token (no list to read) pushes and lets GitHub
+      // answer, classified below.
+      const workflowFiles = await changedWorkflowFiles(exec, repoDir, pushedRemoteBefore, defaultBranch);
+      pushedWorkflowFiles = workflowFiles;
+      if (workflowFiles === null) {
+        // Nothing to refuse on and nothing to prove with: the push goes ahead
+        // and GitHub's own answer classifies it (ruling 144(c)).
+        logger.info("could not measure the workflow files this push changes", {
+          taskKey,
+          branch,
+        });
+      }
+      const validation = credential?.validation ?? null;
+      if (
+        workflowFiles !== null &&
+        workflowFiles.length > 0 &&
+        validation?.tokenKind === "classic" &&
+        validation.headerScopes !== null &&
+        !validation.headerScopes.includes("workflow")
+      ) {
+        logger.info("workspace branch push refused before GitHub: workflow scope", {
+          taskKey,
+          branch,
+          files: workflowFiles,
+        });
+        return {
+          status: "push_refused_scope",
+          branch,
+          scope: "workflow",
+          phase: "before_push",
+          files: workflowFiles,
+          reason: `the project's classic token has no \`workflow\` scope, and this push changes ${workflowFiles.map((f) => `\`${f}\``).join(", ")}`,
+        };
+      }
       const pushRes = await exec(
         "git",
         ["-C", repoDir, "push", "origin", `HEAD:refs/heads/${branch}`],
         { cwd: repoDir, timeoutMs: PUSH_TIMEOUT_MS, env: askpass.env },
       );
       if (!pushRes.ok) {
+        // Ruling 144(c): GitHub's own refusal of a workflow-file push, on any
+        // token kind, is a scope fact and never the generic failure bucket.
+        if (isWorkflowScopeRejection(pushRes.stderr)) {
+          logger.info("workspace branch push refused by GitHub: workflow scope", {
+            taskKey,
+            branch,
+            files: workflowFiles ?? [],
+          });
+          return {
+            status: "push_refused_scope",
+            branch,
+            scope: "workflow",
+            phase: "github",
+            files: workflowFiles ?? [],
+            reason: oneLine(redactGitOutput(pushRes.stderr, { token })) || "GitHub refused the workflow-file push",
+          };
+        }
         // B-GH1/F15-15: a NON-FAST-FORWARD rejection is a history divergence
         // (the remote branch carries commits the local delivery does not — a
         // pre-existing branch under the task key, a rebase, a reused
@@ -739,7 +918,14 @@ export async function pushWorkspaceBranch(
     // The RESULT's `commits` is a number by contract, so an unreadable history
     // reports 0 there — the push happened, the count is the only thing we don't
     // know, and the log line above is where that difference is stated.
-    return { status: "pushed", branch, commits: localAhead ?? 0 };
+    return {
+      status: "pushed",
+      branch,
+      commits: localAhead ?? 0,
+      headSha: pushedHead || null,
+      remoteHeadBefore: pushedRemoteBefore,
+      workflowFiles: pushedWorkflowFiles,
+    };
   } catch (error) {
     // F19-18: "unexpected error" named nothing either. Same redacted channel.
     const detail = redactGitOutput(gitErrorText(error), { token });

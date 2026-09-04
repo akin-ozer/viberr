@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { createActorResolver } from "./actor.server";
+import { createActorResolver,
+  encodeControllerInstrument,
+  decodeControllerInstrument,
+} from "./actor.server";
 import { agentNamesByProfile, upsertRun } from "~/server/runtimes/run-store.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 
@@ -103,5 +106,21 @@ describe("agentNamesByProfile (NEW-5)", () => {
     const map = agentNamesByProfile(db, "viberr-core");
     expect(map.get("reviewer")).toBe("Reviewer");
     expect(map.has("ghost")).toBe(false);
+  });
+});
+
+/**
+ * C5 (pass 34, U34-4): the controller instrument has ONE spelling, shared by
+ * both producers and by the Activity column that decodes it.
+ */
+describe("controller instrument (C5)", () => {
+  it("round-trips a person's label, and decodes nothing from a plain one", () => {
+    // Canary: change the suffix in the encoder only — the decode stops
+    // recognising the label both controller producers write.
+    const encoded = encodeControllerInstrument("arda@viberr.dev");
+    expect(encoded).toBe("arda@viberr.dev · via controller");
+    expect(decodeControllerInstrument(encoded)).toBe("arda@viberr.dev");
+    expect(decodeControllerInstrument("arda@viberr.dev")).toBeNull();
+    expect(decodeControllerInstrument("agent:claude/dev (Implementation)")).toBeNull();
   });
 });

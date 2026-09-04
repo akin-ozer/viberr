@@ -20,9 +20,13 @@ import type { RescanSummary } from "./rebuilder.server";
  * derivation change self-applying: a stored version behind the current one
  * forces ONE full rebuild at boot, then records the version.
  *
- * History: 1 = pre-pass-32 (implicit); 2 = D32-14 actor_ref keyed by profile.
+ * History: 1 = pre-pass-32 (implicit); 2 = D32-14 actor_ref keyed by profile;
+ * 3 = ruling 131 (pass 34) put `blockedBy` on every goal LINK, and
+ * `goal_projections.links_json` is only rewritten when the goal file's content
+ * hash changes — an existing store's rows carry links with no such key, which
+ * the Controller page reads. This stamp forces the one rebuild that fills them.
  */
-export const PROJECTION_DERIVATION_VERSION = 2;
+export const PROJECTION_DERIVATION_VERSION = 3;
 
 const SETTING_KEY = "projection.derivationVersion";
 

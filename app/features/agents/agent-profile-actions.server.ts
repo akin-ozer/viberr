@@ -1,4 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
+import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { z } from "zod";
 import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.schema";
 import {
@@ -27,6 +29,8 @@ import {
   defaultModelFor,
   foreignModelBackend,
   modelDisplayName,
+  assertEffortForBackend,
+  assertModelForBackend,
 } from "~/server/runtimes/model-catalog.server";
 import { existsSync, readFileSync } from "node:fs";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
@@ -79,6 +83,9 @@ export interface ProfileSaveResult {
    *  hid that the operator can now close tasks without a human) and recorded as
    *  its own audit event, not folded into the generic profile-updated row. */
   governanceNotice?: { message: string };
+  /** Ruling 139: what the write actually stored for the run's backend, model
+   *  and effort, so a reply has a source instead of restating the request. */
+  applied?: { backend: RealBackend; model: string; modelLabel: string; effort: string };
 }
 
 export interface ProfileMutationContext {
@@ -129,6 +136,9 @@ type ProfileDeployedAuditDetails = CouplingAuditKeys & {
   name: string;
   source: "library";
   projectName: string;
+  /** Ruling 139: the model and effort the deployment was written with. */
+  model?: string;
+  effort?: string;
 };
 
 type ProfileUpdatedAuditDetails = CouplingAuditKeys & {
@@ -166,6 +176,30 @@ const modeSchema = z.enum(["direct", "recommend", "human", "off"]);
 // the FIRST available model + the default effort — so we never hardcode a
 // specific id that could drift out of the list.
 
+/**
+ * B5 (pass 34, U34-3): the identity of the deployment record the editor read,
+ * over exactly the fields a profile save may overwrite — the governed grants
+ * (order-independent), the display-only extras and the definition. NOT the
+ * whole project file: an unrelated project edit (a member, a stage, another
+ * agent) must never refuse this save.
+ *
+ * `updateAgentProfile` rebuilds the whole governed grant set from the SUBMITTED
+ * form, and the modal seeds that form once, at open time. The file mutex makes
+ * the write atomic; it does not make it aware. A modal opened before a
+ * concurrent write and saved after it therefore reverted every governed grant
+ * that write changed, reported success and audited it.
+ */
+export function deploymentFingerprint(deployment: AgentDeployment): string {
+  const canonical = JSON.stringify({
+    capabilities: [...deployment.capabilities]
+      .map((g) => ({ capabilityId: g.capabilityId, mode: g.mode }))
+      .sort((a, b) => a.capabilityId.localeCompare(b.capabilityId)),
+    extras: deployment.extras,
+    definition: deployment.definition ?? null,
+  });
+  return createHash("sha256").update(canonical, "utf8").digest("hex").slice(0, 32);
+}
+
 const profileFormSchema = z.object({
   name: z.string().trim().min(1, "Name is required."),
   role: z.string().trim().min(1, "Role is required."),
@@ -179,6 +213,9 @@ const profileFormSchema = z.object({
    * a per-backend fallback when the string is empty. */
   model: z.string().default(""),
   effort: z.string().default(""),
+  /** B5: the `deploymentFingerprint` of the record the editor read. Required
+   *  on an update (see `updateAgentProfile`); a create has no prior record. */
+  fingerprint: z.string().default(""),
   caps: z.record(z.string(), modeSchema).default({}),
   /** Operator only: default autonomy the run uses (supervised | full). */
   autonomy: z.enum(["supervised", "full"]).optional(),
@@ -399,6 +436,9 @@ export async function createAgentProfile(
 
   let profileId = "";
   const delivery: DeliveryNoticeHolder = { notices: [] };
+  // Ruling 139: a new profile has no stored tier, so an explicit effort is
+  // always a change and is judged by name.
+  if (form.effort.trim()) assertEffortForBackend(form.backend, form.effort);
   await updateProjectFile(ref, (parsed) => {
     const taken = new Set(parsed.frontmatter.agents.map((a) => a.profileId));
     // Server-generated slug id with a uniqueness check (agents spec §4.5) —
@@ -501,7 +541,15 @@ export async function createAgentProfile(
  */
 export async function deployAgentProfileFromLibrary(
   db: DatabaseSync,
-  input: { projectSlug: string; profileId: string },
+  input: {
+    projectSlug: string;
+    profileId: string;
+    /** Ruling 139: EXPLICIT overrides of the template's model and effort,
+     *  judged by name against the deployment's primary backend before the
+     *  write. A library template's OWN model is still not refused (F21-13). */
+    model?: string;
+    effort?: string;
+  },
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<ProfileSaveResult> {
@@ -551,6 +599,7 @@ export async function deployAgentProfileFromLibrary(
     })),
   );
 
+  let applied: ProfileSaveResult["applied"] | undefined;
   await updateProjectFile(
     { projectSlug: input.projectSlug, dataRoot: ctx.dataRoot },
     (project) => {
@@ -566,6 +615,13 @@ export async function deployAgentProfileFromLibrary(
       // the run would have used anyway; the difference is that project.md now
       // records it, so the agents page and the run agree.
       const templateModel = fm.model.trim();
+      // Ruling 139: an EXPLICIT override is judged by name against the backend
+      // the deployment will run on; the template's own values are taken as
+      // they are (the F21-13 rule above stays true).
+      const modelOverride = input.model?.trim() ?? "";
+      const effortOverride = input.effort?.trim() ?? "";
+      if (modelOverride) assertModelForBackend(backend, modelOverride);
+      if (effortOverride) assertEffortForBackend(backend, effortOverride);
       const definition: AgentDeploymentDefinition = {
         kind: "specialist",
         name: fm.name,
@@ -573,10 +629,11 @@ export async function deployAgentProfileFromLibrary(
         icon: fm.icon,
         backends: fm.backends.length ? fm.backends : [backend],
         model:
-          templateModel && !foreignModelBackend(backend, templateModel)
+          modelOverride ||
+          (templateModel && !foreignModelBackend(backend, templateModel)
             ? templateModel
-            : defaultModelFor(backend),
-        effort: defaultEffortFor(backend),
+            : defaultModelFor(backend)),
+        effort: effortOverride || defaultEffortFor(backend),
         scope: `Added from the global library to ${project.frontmatter.name}`,
         desc: fm.desc || parsed.description,
       };
@@ -598,6 +655,12 @@ export async function deployAgentProfileFromLibrary(
         definition,
       };
       project.frontmatter.agents.push(deployment);
+      applied = {
+        backend,
+        model: definition.model ?? "",
+        modelLabel: modelDisplayName(backend, definition.model ?? ""),
+        effort: definition.effort ?? "",
+      };
     },
   );
 
@@ -607,7 +670,12 @@ export async function deployAgentProfileFromLibrary(
     source: "library",
     projectName,
   };
+  if (applied) {
+    details.model = applied.model;
+    details.effort = applied.effort;
+  }
   const result: ProfileSaveResult = { profileId, name: fm.name };
+  if (applied) result.applied = applied;
   carryCouplingNotices(details, result, deployDelivery.notices);
   recordAudit(db, {
     action: "project.agent_profile.deployed",
@@ -647,6 +715,7 @@ export async function updateAgentProfile(
     dataRoot: ctx.dataRoot,
   };
 
+  let appliedUpdate: ProfileSaveResult["applied"] | undefined;
   await updateProjectFile(ref, (parsed) => {
     const deployment = parsed.frontmatter.agents.find(
       (a) => a.profileId === input.profileId,
@@ -654,8 +723,26 @@ export async function updateAgentProfile(
     if (!deployment) {
       throw AppError.notFound(`No agent profile ${input.profileId} in this project.`);
     }
+    // B5 (pass 34, U34-3): the ONE place the current record and the submission
+    // are both in hand. A save that was composed against a different record
+    // writes nothing: it would silently revert every governed grant the write
+    // it never saw had changed. A validation refusal, so nothing is audited.
+    const seen = deploymentFingerprint(deployment);
+    if (form.fingerprint !== seen) {
+      throw AppError.conflict(
+        "This profile changed while the editor was open. Reopen it to see the current grants, then save again.",
+      );
+    }
     const current = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
     const isOperator = current.kind === "operator";
+    // Ruling 139: a CHANGED effort is judged by name against the backend it
+    // will run on. An unchanged value is never re-judged, so a deployment
+    // that legitimately stores a preserved tier (Codex `minimal`, accepted
+    // but not offered) stays editable on every other field.
+    const submittedEffort = form.effort.trim();
+    if (submittedEffort && submittedEffort !== (current.effort ?? "")) {
+      assertEffortForBackend(form.backend, submittedEffort);
+    }
 
     // Grants come from the form for the GOVERNED capability set of this kind
     // (operator coordination caps vs specialist modal caps); everything outside
@@ -727,6 +814,12 @@ export async function updateAgentProfile(
     }
     definition.resources = form.resources;
     deployment.definition = definition;
+    appliedUpdate = {
+      backend: form.backend,
+      model: definition.model ?? "",
+      modelLabel: modelDisplayName(form.backend, definition.model ?? ""),
+      effort: definition.effort ?? "",
+    };
   });
 
   reprojectProject(db, ctx, input.projectSlug);
@@ -759,6 +852,7 @@ export async function updateAgentProfile(
     profileId: input.profileId,
     name: form.name,
   };
+  if (appliedUpdate) result.applied = appliedUpdate;
   carryCouplingNotices(details, result, delivery.notices);
   recordAudit(db, {
     action: "project.agent_profile.updated",

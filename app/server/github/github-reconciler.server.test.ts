@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -25,6 +26,8 @@ import {
   findOpenScopeViolation,
   openScopeViolation,
 } from "~/server/projections/policy-violations.server";
+import type { PrRef, WorkRevision } from "~/schemas/task-file.schema";
+import type { RevisionDrift } from "~/shared/revision-drift";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import {
@@ -344,7 +347,7 @@ describe("reconcileTask", () => {
       taskKey: "VIB-301",
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
-    expect(fm.pr?.revisionDrift).toEqual({ aheadBy: 2, headSha: "headsha318" });
+    expect(fm.pr?.revisionDrift).toEqual({ headSha: "headsha318", authored: 2, baseRefresh: null });
   });
 
   it("F21-17: the drift fact SURVIVES the PR closing — the recovery packet can still state it", async () => {
@@ -398,7 +401,7 @@ describe("reconcileTask", () => {
       actor,
       { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(openRoutes).fetchImpl },
     );
-    expect(readFm().pr?.revisionDrift).toEqual({ aheadBy: 2, headSha: "headsha318" });
+    expect(readFm().pr?.revisionDrift).toEqual({ headSha: "headsha318", authored: 2, baseRefresh: null });
 
     // Pass 2 — a human CLOSES the PR on GitHub. A settled PR deliberately buys
     // no compare call, and NO drift compare route is registered here, so the
@@ -429,7 +432,7 @@ describe("reconcileTask", () => {
     );
     const closed = readFm();
     expect(closed.pr?.state).toBe("closed");
-    expect(closed.pr?.revisionDrift).toEqual({ aheadBy: 2, headSha: "headsha318" });
+    expect(closed.pr?.revisionDrift).toEqual({ headSha: "headsha318", authored: 2, baseRefresh: null });
 
     // …and it reaches the operator on the surface where that packet is written:
     // `get_task` carries the same fact after the close, not just the task file.
@@ -442,7 +445,7 @@ describe("reconcileTask", () => {
     );
     expect(snapshot.pr).toMatchObject({
       state: "closed",
-      revisionDrift: { aheadBy: 2, headSha: "headsha318" },
+      revisionDrift: { headSha: "headsha318", authored: 2, baseRefresh: null },
     });
   });
 
@@ -1884,6 +1887,7 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
         { id: "pull_request:write", ok: true, source: "assumed" },
       ],
       missingScopes: [],
+      headerScopes: null,
       detail: "Authenticated.",
     });
     const scopeSource = () =>
@@ -2815,5 +2819,376 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
       { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(dismissed).fetchImpl },
     );
     expect(readPrHumanApproval(readPr(store))).toBeNull();
+  });
+});
+
+/**
+ * Ruling 135 (pass 34, F34-11): the reconciler records the PR head and, when
+ * the delivered revision is not reachable from it, `pr.unpushedRevision`.
+ * The PRIMARY arm is the never-pushed one: the compare's base is a LOCAL sha,
+ * GitHub answers 404, and one direct commit read confirms the object is not
+ * there at all. Canary: keep only the `ahead` arm of the drift compare and
+ * every case below loses its record.
+ */
+describe("ruling 135: the unpushed delivered revision", () => {
+  const REV = "rev0delivered";
+  function seedOwned(opts: { unpushed?: PrRef["unpushedRevision"]; kind?: "delivered" | "verified" } = {}) {
+    const store = setupTestStore(ctx);
+    const pr: PrRef = { number: 318, state: "review", title: "Attach execution workspace" };
+    if (opts.unpushed) pr.unpushedRevision = opts.unpushed;
+    const workRevision: WorkRevision = {
+      id: "rev_1",
+      headSha: REV,
+      treeSha: null,
+      branch: "vib-301-workspace",
+      createdAt: "2026-08-04T08:00:00.000Z",
+      sourceProfileId: "developer",
+    };
+    if (opts.kind) workRevision.kind = opts.kind;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr,
+        workRevision,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler135" }, actor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    const run = async (routes: FakeRoutes) => {
+      await reconcileTask(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-301" },
+        actor,
+        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+      );
+      return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    };
+    return { store, run };
+  }
+  const compareRoute = `GET ${REPO_PATH}/compare/${REV}...headsha318`;
+  const commitRoute = `GET ${REPO_PATH}/commits/${REV}`;
+
+  it("PRIMARY: a 404 compare plus a 404 commit read records `unknown` and the PR head", async () => {
+    const { run } = seedOwned();
+    const routes = happyRoutes();
+    routes[compareRoute] = { status: 404, body: { message: "Not Found" } };
+    routes[commitRoute] = { status: 404, body: { message: "No commit found for SHA: rev0delivered" } };
+    const fm = await run(routes);
+    expect(fm.pr?.headSha).toBe("headsha318");
+    expect(fm.pr?.unpushedRevision).toEqual({ revisionSha: REV, prHeadSha: "headsha318", relation: "unknown" });
+    expect(fm.pr?.revisionDrift).toBeUndefined();
+  });
+
+  it("a 404 compare whose commit read answers 200 is NOT measured: nothing is invented, nothing cached is erased", async () => {
+    const cached = { revisionSha: REV, prHeadSha: "olderhead", relation: "behind" as const };
+    const { run } = seedOwned({ unpushed: cached });
+    const routes = happyRoutes();
+    routes[compareRoute] = { status: 404, body: { message: "Not Found" } };
+    routes[commitRoute] = { body: { sha: REV } };
+    const fm = await run(routes);
+    expect(fm.pr?.headSha).toBe("headsha318");
+    expect(fm.pr?.unpushedRevision).toEqual(cached);
+  });
+
+  it("SECONDARY: a `behind` compare records `behind`; a `diverged` one records `diverged`", async () => {
+    for (const status of ["behind", "diverged"] as const) {
+      const { run } = seedOwned();
+      const routes = happyRoutes();
+      routes[compareRoute] = { body: { ahead_by: 0, behind_by: 2, status, commits: [] } };
+      const fm = await run(routes);
+      expect(fm.pr?.unpushedRevision).toEqual({ revisionSha: REV, prHeadSha: "headsha318", relation: status });
+    }
+  });
+
+  it("a head that carries the revision (identical, ahead, or the same sha) CLEARS a cached record", async () => {
+    // Canary: never clear on identical — the stale record survives.
+    const cached = { revisionSha: REV, prHeadSha: "olderhead", relation: "behind" as const };
+    const identical = seedOwned({ unpushed: cached });
+    const routes = happyRoutes();
+    routes[compareRoute] = { body: { ahead_by: 0, behind_by: 0, status: "identical", commits: [] } };
+    expect((await identical.run(routes)).pr).not.toHaveProperty("unpushedRevision");
+
+    const ahead = seedOwned({ unpushed: cached });
+    const aheadRoutes = happyRoutes();
+    aheadRoutes[compareRoute] = { body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [] } };
+    const fm = await ahead.run(aheadRoutes);
+    expect(fm.pr).not.toHaveProperty("unpushedRevision");
+    expect(fm.pr?.revisionDrift).toEqual({ headSha: "headsha318", authored: 2, baseRefresh: null });
+
+    const same = seedOwned({ unpushed: cached });
+    const sameRoutes = happyRoutes();
+    for (const route of [`GET ${REPO_PATH}/pulls`, `GET ${REPO_PATH}/pulls/318`]) {
+      const entry = sameRoutes[route]!;
+      // SAFETY: the two happy routes are static bodies (no function form).
+      const body = (entry as { body: unknown }).body;
+      // SAFETY: `JSON.parse` of a re-serialised static fixture is the fixture's own shape; `unknown` widens, never narrows.
+      const patched = JSON.parse(JSON.stringify(body).replaceAll("headsha318", REV)) as unknown;
+      sameRoutes[route] = { body: patched };
+    }
+    sameRoutes[`GET ${REPO_PATH}/commits/${REV}/check-runs`] = sameRoutes[`GET ${REPO_PATH}/commits/headsha318/check-runs`]!;
+    const sameFm = await same.run(sameRoutes);
+    expect(sameFm.pr?.headSha).toBe(REV);
+    expect(sameFm.pr).not.toHaveProperty("unpushedRevision");
+  });
+
+  it("an unreadable compare and a settled PR CARRY the cached record; a `verified` revision never gets one", async () => {
+    const cached = { revisionSha: REV, prHeadSha: "olderhead", relation: "diverged" as const };
+    const unreadable = seedOwned({ unpushed: cached });
+    const routes = happyRoutes();
+    routes[compareRoute] = { status: 500, body: { message: "boom" } };
+    expect((await unreadable.run(routes)).pr?.unpushedRevision).toEqual(cached);
+
+    const closed = seedOwned({ unpushed: cached });
+    const closedRoutes = happyRoutes();
+    closedRoutes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: { number: 318, title: "Attach execution workspace", state: "closed", merged: false, merged_at: null, head: { sha: "headsha318" }, additions: 1, deletions: 1, changed_files: 1 },
+    };
+    closedRoutes[`GET ${REPO_PATH}/branches/vib-301-workspace`] = { body: { commit: { sha: "headsha318" } } };
+    const closedFm = await closed.run(closedRoutes);
+    expect(closedFm.pr?.state).toBe("closed");
+    expect(closedFm.pr?.unpushedRevision).toEqual(cached);
+
+    const verified = seedOwned({ kind: "verified" });
+    const vRoutes = happyRoutes();
+    vRoutes[compareRoute] = { status: 404, body: { message: "Not Found" } };
+    vRoutes[commitRoute] = { status: 404, body: { message: "Not Found" } };
+    expect((await verified.run(vRoutes)).pr).not.toHaveProperty("unpushedRevision");
+  });
+});
+
+/**
+ * F34-9 (pass 34): PR adoption is recorded. Adopting a PR Viberr did not open
+ * (found on the branch with the delivered head, ruling 35) writes one `github`
+ * event naming the PR, its head and the PR it replaces, an audit row
+ * `github.pr.adopted`, and its own notification; a refresh of the same number
+ * writes nothing; replacing a LIVE cached PR wakes the operator. Canaries:
+ * delete the `recordPrAdoption` call; fire on every `ownsAPr` (the refresh
+ * writes a second line).
+ */
+describe("F34-9: PR adoption is recorded", () => {
+  const REV = "rev0delivered";
+  function adoptionRoutes(): FakeRoutes {
+    const pr = {
+      number: 318,
+      title: "Attach execution workspace",
+      state: "open",
+      draft: false,
+      merged: false,
+      merged_at: null,
+      head: { sha: REV },
+      additions: 4,
+      deletions: 1,
+      changed_files: 2,
+    };
+    return {
+      [`GET ${REPO_PATH}/compare/main...vib-301-workspace`]: {
+        body: { ahead_by: 1, behind_by: 0, status: "ahead", commits: [] },
+      },
+      [`GET ${REPO_PATH}/pulls`]: { body: [pr] },
+      [`GET ${REPO_PATH}/pulls/318`]: { body: pr },
+      [`GET ${REPO_PATH}/commits/${REV}/check-runs`]: { body: { total_count: 0, check_runs: [] } },
+    };
+  }
+  function seedDelivered(pr: PrRef | null) {
+    const store = setupTestStore(ctx);
+    const fmPatch: Parameters<typeof baseTaskFrontmatter>[1] = {
+      title: "Attach execution workspace",
+      stage: "review",
+      branch: "vib-301-workspace",
+      ownerUserId: store.users.arda.id,
+      workRevision: {
+        id: "rev_1",
+        headSha: REV,
+        treeSha: null,
+        branch: "vib-301-workspace",
+        createdAt: "2026-08-04T08:00:00.000Z",
+        sourceProfileId: "developer",
+      },
+    };
+    if (pr) fmPatch.pr = pr;
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-301", fmPatch) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler349" }, actor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    return { store, actor };
+  }
+  const adoptedLines = (store: ReturnType<typeof setupTestStore>) =>
+    readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.timeline.filter(
+      (e) => e.type === "github" && e.text.includes("Adopted **PR #"),
+    );
+
+  it("adopting a human-opened PR on the delivered head writes the event, the audit row and a notification; a refresh writes nothing", async () => {
+    const { store, actor } = seedDelivered(null);
+    const wakes: string[] = [];
+    const ctxWith = {
+      dataRoot: store.dataRoot,
+      fetchImpl: fakeGithubFetch(adoptionRoutes()).fetchImpl,
+      wakeOperator: async (_db: DatabaseSync, _ctx: { dataRoot?: string }, _slug: string, _key: string, trigger: string) => {
+        wakes.push(trigger);
+      },
+    };
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, ctxWith);
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toMatchObject({ number: 318, state: "review", headSha: REV });
+    const lines = adoptedLines(store);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.text).toContain("Adopted **PR #318** (head `rev0del`, the delivered revision) as VIB-301's review PR.");
+    expect(lines[0]!.text).toContain("Viberr did not open it");
+    expect(lines[0]!.actor).toEqual({ kind: "system", systemId: "policy-engine" });
+    const audit = listAuditEvents(store.db, { action: "github.pr.adopted" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.details).toMatchObject({ prNumber: 318, previousPrNumber: null, headSha: REV, source: "reconciler" });
+    const notes = listNotifications(store.db, store.users.arda.id).filter((n) => n.kind === "policy");
+    expect(notes.map((n) => n.title)).toContain("PR #318 adopted for VIB-301");
+    // A first adoption informs; it does not wake the operator.
+    expect(wakes).toEqual([]);
+
+    // A refresh of the SAME number, with a fact that changed (a check landed)
+    // so the pass really writes: still one adoption line, one audit row.
+    const refreshed = adoptionRoutes();
+    refreshed[`GET ${REPO_PATH}/commits/${REV}/check-runs`] = {
+      body: { total_count: 1, check_runs: [{ status: "completed", conclusion: "success" }] },
+    };
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, {
+      ...ctxWith,
+      fetchImpl: fakeGithubFetch(refreshed).fetchImpl,
+    });
+    expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter.pr?.checks?.total).toBe(1);
+    expect(adoptedLines(store)).toHaveLength(1);
+    expect(listAuditEvents(store.db, { action: "github.pr.adopted" })).toHaveLength(1);
+  });
+
+  it("replacing a LIVE cached PR names the replaced PR and wakes the operator", async () => {
+    const { store, actor } = seedDelivered({ number: 5, state: "review", title: "old" });
+    const wakes: string[] = [];
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: fakeGithubFetch(adoptionRoutes()).fetchImpl,
+      wakeOperator: async (_db: DatabaseSync, _ctx: { dataRoot?: string }, _slug: string, _key: string, trigger: string) => {
+        wakes.push(trigger);
+      },
+    });
+    const lines = adoptedLines(store);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.text).toContain("replacing PR #5 (review)");
+    expect(listAuditEvents(store.db, { action: "github.pr.adopted" })[0]!.details).toMatchObject({ previousPrNumber: 5, previousState: "review" });
+    const notes = listNotifications(store.db, store.users.arda.id).filter((n) => n.kind === "policy");
+    expect(notes.map((n) => n.title)).toContain("PR #318 adopted for VIB-301: replaces PR #5");
+    expect(wakes).toEqual(["pr-diverged"]);
+  });
+});
+
+/**
+ * Ruling 132 (pass 34, F34-14): the reconciler classifies the commits since
+ * the reviewed revision instead of counting them, so an operator's base
+ * refresh (four base commits plus its recorded merge) is reported as a base
+ * refresh and never as five unreviewed commits. Canaries: drop the
+ * `notOnBase` membership test; treat any two-parent commit as clean; remove the
+ * base-compare completeness guard.
+ */
+describe("ruling 132: drift is classified, not counted", () => {
+  const REV = "rev0delivered";
+  const HEAD = "headsha318";
+  const M = "m".repeat(40);
+  const commit = (sha: string, parents: string[] = ["p".repeat(40)]) => ({
+    sha,
+    commit: { message: `[VIB-301] ${sha.slice(0, 4)}` },
+    parents: parents.map((p) => ({ sha: p })),
+  });
+  const B = ["b1", "b2", "b3", "b4"].map((x) => x.padEnd(40, "0"));
+  const A0 = "a0".padEnd(40, "0");
+  function seedReviewed(opts: { recordMerge?: boolean; cachedDrift?: RevisionDrift } = {}) {
+    const store = setupTestStore(ctx);
+    const pr: PrRef = { number: 318, state: "review", title: "Attach execution workspace" };
+    if (opts.cachedDrift) pr.revisionDrift = opts.cachedDrift;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr,
+        workRevision: {
+          id: "rev_1", headSha: REV, treeSha: null, branch: "vib-301-workspace",
+          createdAt: "2026-08-04T08:00:00.000Z", sourceProfileId: "developer",
+        },
+        baseRefreshes: opts.recordMerge === false ? [] : [{ mergeSha: M, baseSha: B[3]!, base: "main", commits: 4, at: "2026-09-04T00:00:00.000Z" }],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler132" }, actor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    const run = async (routes: FakeRoutes) => {
+      await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, {
+        dataRoot: store.dataRoot,
+        fetchImpl: fakeGithubFetch(routes).fetchImpl,
+      });
+      return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    };
+    return { store, run };
+  }
+  /** The branch's OWN commits (base...branch): the reviewed A0 and the merge. */
+  const baseCompare = (commits: unknown[], extra: Partial<{ ahead_by: number }> = {}) => ({
+    body: { ahead_by: extra.ahead_by ?? commits.length, behind_by: 0, status: "ahead", commits },
+  });
+  const sinceRoute = `GET ${REPO_PATH}/compare/${REV}...${HEAD}`;
+  const baseRoute = `GET ${REPO_PATH}/compare/main...vib-301-workspace`;
+
+  it("a base refresh records `authored: 0` with the merge and base commits reported separately", async () => {
+    const { run } = seedReviewed();
+    const routes = happyRoutes();
+    routes[baseRoute] = baseCompare([commit(A0), commit(M, [A0, B[3]!])]);
+    routes[sinceRoute] = { body: { ahead_by: 5, behind_by: 0, status: "ahead", commits: [...B.map((b) => commit(b)), commit(M, [A0, B[3]!])] } };
+    const fm = await run(routes);
+    expect(fm.pr?.revisionDrift).toEqual({ headSha: HEAD, authored: 0, baseRefresh: { merges: 1, commits: 4 } });
+    // `github.commits` keeps its `{sha, msg}` shape (the reader's extra fields never reach the file).
+    for (const c of fm.github?.commits ?? []) expect(Object.keys(c).sort()).toEqual(["msg", "sha"]);
+  });
+
+  it("an authored commit on top of a refresh counts; a merge Viberr did not record counts as authored", async () => {
+    const { run } = seedReviewed();
+    const A2 = "a2".padEnd(40, "0");
+    const routes = happyRoutes();
+    routes[baseRoute] = baseCompare([commit(A0), commit(M, [A0, B[0]!]), commit(A2)]);
+    routes[sinceRoute] = { body: { ahead_by: 3, behind_by: 0, status: "ahead", commits: [commit(B[0]!), commit(M, [A0, B[0]!]), commit(A2)] } };
+    expect((await run(routes)).pr?.revisionDrift).toEqual({ headSha: HEAD, authored: 1, baseRefresh: { merges: 1, commits: 1 } });
+
+    const unrecorded = seedReviewed({ recordMerge: false });
+    expect((await unrecorded.run(routes)).pr?.revisionDrift).toEqual({ headSha: HEAD, authored: 2, baseRefresh: { merges: 0, commits: 1 } });
+  });
+
+  it("a fast-forward refresh records `{merges: 0, commits: N}`", async () => {
+    const { run } = seedReviewed({ recordMerge: false });
+    const routes = happyRoutes();
+    routes[baseRoute] = baseCompare([]);
+    routes[sinceRoute] = { body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [commit(B[0]!), commit(B[1]!)] } };
+    expect((await run(routes)).pr?.revisionDrift).toEqual({ headSha: HEAD, authored: 0, baseRefresh: { merges: 0, commits: 2 } });
+  });
+
+  it("an unclassifiable pass CARRIES the cached record, or records every commit as authored with nothing to carry", async () => {
+    const cached = { headSha: HEAD, authored: 0, baseRefresh: { merges: 1, commits: 4 } };
+    // The base compare answers 404 (`missing_ref`): the only status that reaches the drift block with no base compare.
+    const carried = seedReviewed({ cachedDrift: cached });
+    const routes = happyRoutes();
+    routes[baseRoute] = { status: 404, body: { message: "Not Found" } };
+    routes[sinceRoute] = { body: { ahead_by: 5, behind_by: 0, status: "ahead", commits: [...B.map((b) => commit(b)), commit(M, [A0, B[3]!])] } };
+    expect((await carried.run(routes)).pr?.revisionDrift).toEqual(cached);
+
+    const bare = seedReviewed();
+    expect((await bare.run(routes)).pr?.revisionDrift).toEqual({ headSha: HEAD, authored: 5, baseRefresh: null });
+
+    // A base compare with an undecodable entry is partial: carried, never classified.
+    const partial = seedReviewed({ cachedDrift: cached });
+    const partialRoutes = happyRoutes();
+    partialRoutes[baseRoute] = { body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [commit(A0), { commit: { message: "no sha" } }] } };
+    partialRoutes[sinceRoute] = routes[sinceRoute]!;
+    expect((await partial.run(partialRoutes)).pr?.revisionDrift).toEqual(cached);
   });
 });

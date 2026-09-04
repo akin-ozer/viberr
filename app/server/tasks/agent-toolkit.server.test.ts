@@ -19,7 +19,7 @@ import {
 } from "./agent-toolkit.server";
 import { takeStagedOutcome } from "./agent-outcome.server";
 import { z, type ZodType } from "zod";
-import type { FileActorRef } from "~/schemas/task-file.schema";
+import type { FileActorRef, Recommendation } from "~/schemas/task-file.schema";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -119,6 +119,43 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     expect(opened).toBe(true);
     const row = listAuditEvents(store.db, { action: "task.agent.packet_opened" })[0];
     expect(row.actorLabel).toBe("agent:claude/security-reviewer (Security review)");
+  });
+
+  it("ruling 137: an agent's question withdraws the standing acceptance offers on the record", async () => {
+    // Canary: remove the `withdrawAcceptanceOffers` call in
+    // openAgentQuestionPacket and the accept card outlives the question.
+    const store = setupTestStore(ctx);
+    const cards: Recommendation[] = [
+      { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-2 to Done", detail: "", forHeadSha: "a".repeat(40) },
+      { id: "r-done", kind: "transition", toStageId: "done", label: "Move to Done", detail: "" },
+      { id: "r-run", kind: "run_agent", profileId: "developer", label: "Run Developer", detail: "" },
+    ];
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review", recommendations: cards }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const opened = await openAgentQuestionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-2",
+        actorRef: AGENT_REF,
+        title: "Which config should I target?",
+      },
+    );
+    expect(opened).toBe(true);
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-2", dataRoot: store.dataRoot })!.parsed;
+    // The accept card AND the terminal transition card (an acceptance too) go;
+    // the run_agent card survives.
+    expect(parsed.frontmatter.recommendations.map((r) => r.id)).toEqual(["r-run"]);
+    const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Recommendation withdrawn");
+    expect(note?.actor).toEqual(AGENT_REF);
+    expect(note?.text).toContain('a decision packet opened ("Which config should I target?")');
+    const row = listAuditEvents(store.db, { action: "task.recommendation.withdrawn" })[0]!;
+    expect(row.actorLabel).toBe("agent:claude/security-reviewer (Security review)");
+    expect(row.details).toMatchObject({ cause: "packet", surviving: 1 });
   });
 
   it("R15-14: stamps WHICH agent asked, so the answer can be routed back to it", async () => {

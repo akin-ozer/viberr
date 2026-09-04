@@ -70,12 +70,44 @@ const MAX_CONFLICT_FILES = 20;
 const FETCH_TIMEOUT_MS = 300_000;
 const MERGE_TIMEOUT_MS = 60_000;
 
+/**
+ * Ruling 134(c) (pass 34, F34-11): origin's copy of the TASK BRANCH, related
+ * to the workspace head from the workspace's own history (the remote ref is
+ * fetched, so `merge-base --is-ancestor` has the object). `current`: origin
+ * carries the workspace head. `behind`: origin's head is an ancestor of the
+ * workspace head, `commits` behind; `deliver_for_review` pushes it. `diverged`:
+ * origin holds commits this workspace does not, so a plain push is refused.
+ * `absent`: the branch does not exist on origin yet. `unknown`: the remote ref
+ * could not be read, `why` says what git said.
+ */
+export type RemoteBranchState =
+  | { kind: "current"; headSha: string }
+  | { kind: "behind"; headSha: string; commits: number }
+  | { kind: "diverged"; headSha: string }
+  | { kind: "absent" }
+  | { kind: "unknown"; why: string };
+
 export type UpdateBranchResult =
   /** The branch now carries the base. `commits` is how many base commits it was
-   *  missing. */
-  | { status: "updated"; branch: string; base: string; commits: number }
-  /** Idempotent no-op: nothing on the base that the branch does not have. */
-  | { status: "already_current"; branch: string; base: string }
+   *  missing. Ruling 132: `mergeSha` is the merge commit the refresh created and
+   *  `baseSha` the base tip it merged (both read BEFORE the push, so a merge is
+   *  never published unrecorded). Ruling 134(c): `remoteBefore` is origin's copy
+   *  as it stood before this update and `remote` as the push left it
+   *  (`current` by construction: the push published HEAD). */
+  | {
+      status: "updated";
+      branch: string;
+      base: string;
+      commits: number;
+      mergeSha: string;
+      baseSha: string;
+      remoteBefore: RemoteBranchState;
+      remote: RemoteBranchState;
+    }
+  /** Idempotent no-op on the BASE: nothing on the base that the branch does not
+   *  have. `remote` still reports origin's copy of the branch (ruling 134(c)):
+   *  "already up to date with main" must never pronounce a lagging branch done. */
+  | { status: "already_current"; branch: string; base: string; remote: RemoteBranchState }
   /**
    * The merge could not be made automatically. The merge is ABORTED — the
    * branch (local and remote) is untouched — and the conflicting paths are
@@ -121,6 +153,64 @@ export interface UpdateBranchInput {
   workdir?: string | null;
   /** Injected runner (tests). */
   exec?: Exec;
+}
+
+/** git's answer to fetching a ref the remote does not have. */
+function isMissingRemoteRef(stderr: string): boolean {
+  return /couldn't find remote ref|no such ref was fetched|Remote branch .* not found/i.test(stderr);
+}
+
+/**
+ * Ruling 134(c): fetch origin's copy of the task branch and relate it to the
+ * workspace head LOCALLY. `ls-remote` alone cannot answer `behind` vs
+ * `diverged` (that needs the remote head OBJECT), and a head pushed from
+ * another workspace is exactly the case the answer matters for.
+ */
+async function readRemoteBranchState(
+  exec: Exec,
+  repoDir: string,
+  branch: string,
+  env: NodeJS.ProcessEnv,
+  token: string,
+): Promise<RemoteBranchState> {
+  const fetchRes = await exec(
+    "git",
+    ["-C", repoDir, "fetch", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+    { cwd: repoDir, timeoutMs: FETCH_TIMEOUT_MS, env },
+  );
+  if (!fetchRes.ok) {
+    if (isMissingRemoteRef(fetchRes.stderr)) return { kind: "absent" };
+    const why = redactGitOutput(fetchRes.stderr, { token }) || "the fetch failed";
+    return { kind: "unknown", why: fetchRes.timedOut ? "the fetch ran past its time limit" : why };
+  }
+  const remoteRes = await exec(
+    "git",
+    ["-C", repoDir, "rev-parse", "--verify", `refs/remotes/origin/${branch}`],
+    { cwd: repoDir, timeoutMs: 5_000 },
+  );
+  const headRes = await exec("git", ["-C", repoDir, "rev-parse", "HEAD"], {
+    cwd: repoDir,
+    timeoutMs: 5_000,
+  });
+  const remoteHead = remoteRes.ok ? remoteRes.stdout.trim() : "";
+  const head = headRes.ok ? headRes.stdout.trim() : "";
+  if (!remoteHead || !head) {
+    return { kind: "unknown", why: "the fetched remote ref could not be read" };
+  }
+  if (remoteHead === head) return { kind: "current", headSha: remoteHead };
+  const ancestor = await exec(
+    "git",
+    ["-C", repoDir, "merge-base", "--is-ancestor", remoteHead, head],
+    { cwd: repoDir, timeoutMs: 10_000 },
+  );
+  if (!ancestor.ok) return { kind: "diverged", headSha: remoteHead };
+  const countRes = await exec(
+    "git",
+    ["-C", repoDir, "rev-list", "--count", `${remoteHead}..HEAD`],
+    { cwd: repoDir, timeoutMs: 10_000 },
+  );
+  const commits = countRes.ok ? Number.parseInt(countRes.stdout.trim(), 10) : Number.NaN;
+  return { kind: "behind", headSha: remoteHead, commits: Number.isFinite(commits) ? commits : 1 };
 }
 
 /** git prints `CONFLICT (content): …` / `Automatic merge failed` on STDOUT. */
@@ -271,6 +361,11 @@ export async function updateWorkspaceBranchFromBase(
         );
       }
 
+      // 1b. Origin's copy of the TASK branch (ruling 134(c)). A separate fetch:
+      //    a refspec naming a ref origin does not have fails the whole fetch,
+      //    and a never-pushed branch is a normal state here, not a failure.
+      const remote = await readRemoteBranchState(exec, repoDir, branch, askpass.env, token);
+
       // 2. How far behind? Zero is a real answer, and it is a no-op that says
       //    so — never a merge commit nobody needed.
       const behindRes = await exec(
@@ -288,7 +383,7 @@ export async function updateWorkspaceBranchFromBase(
         );
       }
       if (behind === 0) {
-        return { status: "already_current", branch, base };
+        return { status: "already_current", branch, base, remote };
       }
 
       // 3. The pre-merge commit, so a push that cannot land rolls all the way
@@ -315,6 +410,11 @@ export async function updateWorkspaceBranchFromBase(
           repoDir,
           ...identity,
           "merge",
+          // Ruling 132: every refresh is a real merge commit, so the drift
+          // classifier can tell a base refresh (a two-parent commit recorded in
+          // `baseRefreshes`) from authored work. A fast-forward would leave
+          // nothing to record.
+          "--no-ff",
           "--no-edit",
           "-m",
           `[${taskKey}] merge ${base} into ${branch}`,
@@ -377,6 +477,36 @@ export async function updateWorkspaceBranchFromBase(
         );
       }
 
+      // 3b. The merge commit and the base tip, read BEFORE the push (ruling
+      //    132): a merge that cannot be recorded is not published. An unreadable
+      //    sha resets to `preSha` exactly like a failed push.
+      const mergeShaRes = await exec("git", ["-C", repoDir, "rev-parse", "HEAD"], {
+        cwd: repoDir,
+        timeoutMs: 5_000,
+      });
+      const baseShaRes = await exec(
+        "git",
+        ["-C", repoDir, "rev-parse", `refs/remotes/origin/${base}`],
+        { cwd: repoDir, timeoutMs: 5_000 },
+      );
+      const mergeSha = mergeShaRes.ok ? mergeShaRes.stdout.trim() : "";
+      const baseSha = baseShaRes.ok ? baseShaRes.stdout.trim() : "";
+      if (!mergeSha || !baseSha || mergeSha === preSha) {
+        await exec("git", ["-C", repoDir, "reset", "--hard", preSha], {
+          cwd: repoDir,
+          timeoutMs: 15_000,
+        });
+        logger.warn("branch update could not read the merge commit; rolled back", {
+          taskKey,
+          branch,
+          base,
+        });
+        return updateFailed(
+          "could not read the merge commit after merging, so the update was rolled back and nothing was pushed",
+          redactGitOutput(`${mergeShaRes.stderr}\n${baseShaRes.stderr}`, { token }),
+        );
+      }
+
       // 4. Publish. A fast-forward on the remote by construction (the merge sits
       //    on top of the branch head) — anything else means someone else wrote
       //    to the branch, which is a human decision (R18-4), never a force-push.
@@ -423,7 +553,16 @@ export async function updateWorkspaceBranchFromBase(
         base,
         commits: behind,
       });
-      return { status: "updated", branch, base, commits: behind };
+      return {
+        status: "updated",
+        branch,
+        base,
+        commits: behind,
+        mergeSha,
+        baseSha,
+        remoteBefore: remote,
+        remote: { kind: "current", headSha: mergeSha },
+      };
     } finally {
       askpass.dispose();
     }

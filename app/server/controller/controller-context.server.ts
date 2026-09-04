@@ -228,6 +228,8 @@ function taskLine(task: TaskSummary, stages: readonly { id: string; name: string
   if (task.dueDate) bits.push(`due ${task.dueDate}`);
   if (task.labels.length > 0) bits.push(`[${task.labels.join(", ")}]`);
   if (task.pr) bits.push(`PR #${task.pr.number} ${task.pr.state}`);
+  // Ruling 131: a held row says so at a glance; the task header names entries.
+  if (task.blockedBy.length > 0) bits.push(`waits on ${task.blockedBy.length}`);
   return `- ${bits.join(" · ")}`;
 }
 
@@ -276,6 +278,11 @@ function taskContext(
     `branch: ${summary.branch ?? "none"} · ${summary.pr ? `PR #${summary.pr.number} ${summary.pr.state}` : "no PR"}`,
     `open packet: ${summary.packet ? `"${summary.packet.title}"` : "none"}${summary.goalRef ? ` · goal chain ${summary.goalRef.goalId} link ${summary.goalRef.linkIndex}` : ""}`,
   ];
+  // Ruling 131: what the task waits on, each entry with its live state, so
+  // the controller never has to infer a hold from a packet that is not there.
+  if (summary.blockedBy.length > 0) {
+    header.push(`waits on: ${summary.blockedBy.map((e) => `${e.label} (${e.state})`).join(", ")}`);
+  }
   const clipped = clipTaskFile(file.content, TASK_FILE_CONTEXT_CHARS);
   const fence = fenceFor(clipped.text);
   return (

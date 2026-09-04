@@ -150,6 +150,9 @@ export interface QuietCheck {
   /** Terminal stage — accepted / merged, i.e. `isAcceptedDisplayState`. */
   terminal: boolean;
   runInFlight: boolean;
+  /** Ruling 131 (pass 34): the task waits on other work (`blockedBy` is
+   *  non-empty). Such a task is held on purpose and is never "gone quiet". */
+  held: boolean;
   /** Omitted outside tests — the real clock answers the question. */
   now?: Date;
 }
@@ -170,6 +173,8 @@ export interface QuietCheck {
  */
 export function isQuiet(input: QuietCheck): boolean {
   if (input.archived || input.terminal || input.runInFlight) return false;
+  // A task waiting on other work is holding, not stalling (ruling 131(a)).
+  if (input.held) return false;
   if (!input.lastActivityAt) return false;
   const at = Date.parse(input.lastActivityAt);
   if (!Number.isFinite(at)) return false;

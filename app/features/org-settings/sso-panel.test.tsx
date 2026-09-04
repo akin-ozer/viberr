@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { createRoutesStub } from "react-router";
 import type { AuthProviderView } from "~/server/org/org-view.server";
 import { ToastProvider } from "~/ui/toast";
@@ -23,7 +24,7 @@ const BLANK: AuthProviderView = {
   envAvailable: false,
 };
 
-function renderPanel(providers: AuthProviderView[]) {
+function panelElement(providers: AuthProviderView[]) {
   const Stub = createRoutesStub([
     {
       path: "/",
@@ -34,7 +35,11 @@ function renderPanel(providers: AuthProviderView[]) {
       ),
     },
   ]);
-  return render(<Stub initialEntries={["/"]} />);
+  return <Stub initialEntries={["/"]} />;
+}
+
+function renderPanel(providers: AuthProviderView[]) {
+  return render(panelElement(providers));
 }
 
 describe("SsoPanel", () => {
@@ -88,6 +93,31 @@ describe("SsoPanel", () => {
     expect(text).toContain("GitHub accepted the client ID and secret.");
     // A green "live" pill must not be read as "sign-in definitely works".
     expect(text).toContain("still has to be registered on the provider");
+  });
+
+  it("C6: the proof date hydrates safely — the UTC day first, the viewer's calendar date after hydration", () => {
+    const providers: AuthProviderView[] = [
+      {
+        ...BLANK,
+        configuredInApp: true,
+        clientId: "Iv1.abc",
+        source: "app",
+        active: true,
+        verifiedAt: "2026-08-10T09:00:00.000Z",
+        verifiedDetail: "GitHub accepted the client ID and secret.",
+      },
+    ];
+    // The server pass depends on the timestamp alone: the SSR host's zone is
+    // not the viewer's, and a calendar date rendered in it hydrates to
+    // different text near midnight (React #418).
+    const ssr = renderToString(panelElement(providers));
+    expect(ssr).toContain("proved ");
+    expect(ssr).toContain("2026-08-10 (UTC)");
+    expect(ssr).not.toContain("Aug 10, 2026");
+    // After hydration the effect swaps in the viewer-local calendar date.
+    const { container } = renderPanel(providers);
+    expect(container.textContent).toContain("proved Aug 10, 2026");
+    expect(container.textContent).not.toContain("(UTC)");
   });
 
   it("says when the app's OFF switch is overriding the deployment env", () => {

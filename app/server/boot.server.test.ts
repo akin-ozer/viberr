@@ -382,3 +382,48 @@ describe("projectionMissingColumns (pass-21 live-validation catch)", () => {
     }
   });
 });
+
+/**
+ * Ruling 140 (pass 34): the notifications CHECK is the same silent-drift class
+ * as the validation CHECK, one table over — a root that predates a kind
+ * rejects every INSERT of it and the fail-open swallows the throw. The boot
+ * line now names the gap, table-qualified.
+ *
+ * Canary: revert `projectionCheckGaps` to the `task_projections`-only read and
+ * the `notifications.kind: ownership` entry is never reported.
+ */
+describe("projectionCheckGaps (ruling 140)", () => {
+  it("reports a notifications CHECK that lacks a declared kind, beside the validation gaps", async () => {
+    const { projectionCheckGaps } = await import("./boot.server");
+    const ctx = createTestDbContext();
+    try {
+      const db = ctx.makeDb();
+      expect(projectionCheckGaps(db)).toEqual([]);
+      // Rebuild `notifications` with the pre-pass-34 CHECK (sqlite cannot ALTER
+      // a CHECK in place) — exactly what an existing root carries.
+      db.exec(`
+        DROP TABLE notifications;
+        CREATE TABLE notifications (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('packet', 'approval', 'mention', 'quality', 'policy', 'controller')),
+          ptype TEXT CHECK (ptype IN ('input', 'blocked')),
+          title TEXT,
+          text TEXT NOT NULL,
+          actor_json TEXT,
+          project_slug TEXT,
+          task_key TEXT,
+          occurred_at TEXT NOT NULL,
+          read_at TEXT,
+          created_at TEXT NOT NULL
+        );
+      `);
+      expect(projectionCheckGaps(db)).toEqual([
+        "notifications.kind: dependency",
+        "notifications.kind: ownership",
+      ]);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+});

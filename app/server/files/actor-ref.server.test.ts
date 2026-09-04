@@ -5,6 +5,8 @@ import {
   decodeActorRef,
   encodeActorRef,
   roleToSlug,
+  decodeControllerInstrument,
+  encodeControllerInstrument,
 } from "./actor-ref.server";
 
 /**
@@ -108,5 +110,22 @@ describe("encodeActorRef / decodeActorRef", () => {
       kind: "system",
       systemId: "policy-engine",
     });
+  });
+});
+
+/**
+ * Pass 34 (U34-4): the controller instrument on an audit `actor_label` has
+ * ONE encoder and ONE decoder, so the two producers and the Activity reader
+ * can never disagree on the suffix.
+ *
+ * Canary: change the suffix in the encoder only and the round trip fails.
+ */
+describe("controller instrument codec", () => {
+  it("round-trips, and a plain label decodes as itself", () => {
+    const encoded = encodeControllerInstrument("arda@viberr.dev");
+    expect(encoded).toBe("arda@viberr.dev · via controller");
+    expect(decodeControllerInstrument(encoded)).toEqual({ label: "arda@viberr.dev", viaController: true });
+    expect(decodeControllerInstrument("arda@viberr.dev")).toEqual({ label: "arda@viberr.dev", viaController: false });
+    expect(decodeControllerInstrument("system:policy-engine")).toEqual({ label: "system:policy-engine", viaController: false });
   });
 });

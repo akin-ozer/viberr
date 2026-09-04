@@ -68,6 +68,10 @@ export interface ProfileFormPayload {
   name: string;
   role: string;
   backend: "codex" | "claude";
+  /** B5 (pass 34, U34-3): the deployment record this editor was opened on. An
+   *  update carries it back so a save composed against a record a concurrent
+   *  write replaced is refused instead of reverting it. Absent on a create. */
+  fingerprint?: string;
   stages: string[];
   definition: string;
   /** The long persona/instructions (system-prompt material, D6); "" = keep. */
@@ -143,6 +147,29 @@ export interface ModelCatalogState {
   effortOptions: string[];
 }
 
+/** Clamp the effort pick to the tiers `model` offers: the catalog default when
+ *  that model offers it, else its first tier. A pick already on offer stands. */
+function seedEffort(
+  catalog: ModelCatalog,
+  model: string,
+  effort: string,
+  setEffort: (v: string) => void,
+): void {
+  const offered = effortsFor(catalog, model);
+  if (effort && offered.includes(effort)) return;
+  const fallback = offered.includes(catalog.defaultEffort) ? catalog.defaultEffort : offered[0];
+  setEffort(fallback ?? catalog.defaultEffort);
+}
+
+/** The effort tiers the picker offers for one model: the model's own list when
+ *  it constrains them, else the backend-wide list. The re-seed above and the
+ *  rendered select read the SAME list, so the editor never stands on a tier it
+ *  does not show. */
+function effortsFor(catalog: ModelCatalog, model: string): string[] {
+  const selected = catalog.models.find((m) => m.value === model) ?? null;
+  return selected?.efforts?.length ? selected.efforts : catalog.efforts;
+}
+
 export function useModelCatalog(
   backend: "codex" | "claude" | "",
   model: string,
@@ -195,10 +222,29 @@ export function useModelCatalog(
     const known =
       catalog.models.some((m) => m.value === model) ||
       (backend === "claude" && claudeModelRunsVerbatim(model));
-    if (!model || !known) setModel(catalog.defaultModel);
-    if (!effort) setEffort(catalog.defaultEffort);
+    const nextModel = !model || !known ? catalog.defaultModel : model;
+    if (nextModel !== model) setModel(nextModel);
+    // Ruling 139: a stored tier the backend does not list (a preserved Codex
+    // `minimal`, or a tier from the other backend) is re-seeded to the
+    // default, because the save would refuse it by name and the editor must
+    // not offer what it cannot save. Judged against the tiers the select will
+    // actually RENDER for the model that will be selected — a model may narrow
+    // the backend-wide list, and checking the wide one would leave a tier
+    // standing that the picker never shows and the save refuses.
+    seedEffort(catalog, nextModel, effort, setEffort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog]);
+
+  // A model change can NARROW the tiers on offer. The pick is clamped to what
+  // the picker now shows, so the editor never stands on a tier it does not
+  // render and the save would refuse by name. The model itself is untouched
+  // here: a cleared model while a backend switch is in flight must stay
+  // cleared until the new catalog answers (F21-13) — the effect above's job.
+  useEffect(() => {
+    if (!catalog || !model) return;
+    seedEffort(catalog, model, effort, setEffort);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model]);
 
   // Effort options come from the selected model (when it constrains them),
   // else the backend-wide list. Hidden entirely when the model has no effort.
@@ -207,10 +253,7 @@ export function useModelCatalog(
     [catalog, model],
   );
   const showEffort = !catalog || !selectedModel || selectedModel.supportsEffort;
-  const effortOptions =
-    selectedModel?.efforts && selectedModel.efforts.length
-      ? selectedModel.efforts
-      : (catalog?.efforts ?? []);
+  const effortOptions = catalog ? effortsFor(catalog, model) : [];
 
   return {
     catalog,
@@ -668,9 +711,6 @@ export function ModelEffortFields({
             disabled={!backend || catalogLoading}
             >
             {(!backend || effort === "") && <option value="">no effort yet</option>}
-            {effort && !effortOptions.includes(effort) && (
-              <option value={effort}>{effortLabel(effort)}</option>
-            )}
             {effortOptions.map((e) => (
               <option key={e} value={e}>
                 {effortLabel(e)}
@@ -697,7 +737,7 @@ function StagesField({
     <div className="field" role="group" aria-labelledby={capId}>
       <span className="flabel" id={capId}>
         Eligible stages<span className="req">*</span>
-        <span className="fhint">stages this profile may work in</span>
+        <span className="fhint">stages where this profile may be newly engaged</span>
       </span>
       <div className="pick-chips">
         {stages.map((s) => (
@@ -1404,6 +1444,8 @@ export function CreateProfileModal({
       caps,
       resources: res,
     };
+    // B5: an EDIT carries the record it was opened on; a create has none.
+    if (initial?.fingerprint) payload.fingerprint = initial.fingerprint;
     // Autonomy is an OPERATOR field: a specialist payload must not carry the
     // key at all (the action's schema leaves it optional and the writer only
     // stores it for the operator).

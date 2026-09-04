@@ -1,0 +1,21 @@
+# Prompt for the fix-phase session
+
+Paste the block below into a fresh session on this repo, after `/goal`. It assumes branch
+`pass34/findings` (pull request #277) is merged or checked out, so
+`planning/discovery-2026-09-03-pass34-jira-clone/` is on disk.
+
+`/goal` caps its condition at 4000 characters; this is 3923.
+
+```
+implement the pass 34 findings. The discovery run is done: I had viberr build a jira clone entirely through its own machinery, over real PRs on akin-ozer/jira-clone, watched from every surface. It produced 31 findings and a detailed plan, all under planning/discovery-2026-09-03-pass34-jira-clone/. Read SUMMARY.md, then FINDINGS.md (root cause and live evidence per finding), then QUESTIONS.md (my answers Q34-1..15, binding), then TODO.md which is the spec: 53 items, each with root cause at file:line, the mechanism, the callers swept, tests with the exact source edit that must make each go red, and the docs page it changes. TESTPLAN.md has 62 validation steps, unit and live, already ordered so live subjects don't destroy each other's preconditions. Every item was written from the code then refuted by an adversarial critic whose corrections are folded in, so the plan is well founded but not sacred: if the code contradicts it, the code wins and you tell me what changed and why.
+
+Work in TODO.md's "Order of work" order: shared leaves and schemas, server leaves, github delivery core, runtime and failure classification, dependencies, stage eligibility, acceptance and packets, controller and ownership, then UI, copy and docs. The headline is F34-11: rework or a conflict fix on a task with an open PR is never pushed, so a reviewer approves a revision github never saw, acceptance says "rebase and re-review", and the operator asks a human to push by hand. That is the wall the whole pipeline hit, three times. Rulings 128 to 144 are drafted at the bottom of TODO.md; record each one into docs/architecture/decisions.md with the item that carries it, not at the end.
+
+Validate as you go, never only at the end. Per part: targeted tests, and prove every canary by actually breaking the source and watching it go red before restoring (an unproven canary does not count); then rebuild the container and use the app in the browser like a person, screenshots light and dark, desktop and mobile, checking that what viberr shows matches disk, projections, audit and github. The jira-clone project is still live in the container in the states the findings describe; TESTPLAN.md says which task proves which fix. When the fixes are in, let that project keep building itself and see if the wall is gone: rework should reach its own PR with me closing nothing by hand.
+
+Traps from the last session. Never read the container's projection DB from the host, it crashed the container: read it in-container via docker exec with node:sqlite readOnly. The typecheck gate is `npm run typecheck`, never bare tsc. Resolving a packet is two clicks, the option card then "Confirm decision"; an edit_goal option opens the goal editor prefilled with the option's own text. Check .dock[data-open] before clicking the dock launcher or you close it. The copy-ban lint bans em and en dashes and "govern*" in rendered copy, and app.css has its own gate. A five-hour account limit killed twelve runs in two waves; if runs fail all at once that is probably it, and F34-1 is viberr not being able to say so.
+
+Ask me product questions when the plan leaves a real fork, with the background on why. Two are answered already: the operator may switch a task's delivering agent however it judges best, and the github workflow scope stays optional but is disclosed at attach time and refused before the push.
+
+You may not cut corners and may not defer to future work. Preprod: no migrations, no backwards compatibility, you may break things, and you are encouraged to change tests where they pin the wrong behaviour. Every fix ships a red-able test and its docs page in the same change. At the end run lint, typecheck, test, build, then e2e, then walk TESTPLAN.md end to end and show me the evidence. Open a PR on akin-ozer/viberr when it is complete and validated; another model will review it. Do the work end to end and iterate as much as you need.
+```

@@ -16,6 +16,7 @@ import type {
   Waiting,
 } from "~/schemas/task-file.schema";
 import type { ActorRender } from "./actor.server";
+import type { DependencyRender } from "~/shared/dependencies";
 
 /** Pass-25: the stored `labels_json` is a JSON string-array (the write path
  *  normalizes it so). Parse it at this read boundary through the schema — a
@@ -55,6 +56,8 @@ export type TaskProjectionRow = {
   priority: TaskPriority;
   labels_json: string;
   due_date: string | null;
+  /** Ruling 131 (pass 34): the task file's `blockedBy` list, verbatim JSON. */
+  blocked_by_json: string;
   archived: 0 | 1;
   validation: Validation;
   validation_block_reason: string | null;
@@ -127,6 +130,12 @@ export interface PacketRender {
   body: string;
   observations: PacketObservation[];
   options: PacketOption[];
+  /** Ruling 138: an `edit_goal` decision was confirmed and the packet waits
+   *  for the edited goal to land. */
+  awaiting?: "goal_edit";
+  /** Ruling 138: which option was chosen, by whom and when — what a reload
+   *  renders as decided and rebuilds the goal draft from. */
+  decided?: TaskPacket["decided"];
 }
 
 /** What a surface renders for readiness: the canonical stored enum plus the
@@ -138,7 +147,9 @@ export type DisplayReadiness =
   | Readiness
   | "accepted"
   | "merged"
-  | "agent_working";
+  | "agent_working"
+  /** Ruling 138: a decided `edit_goal` packet owes a goal edit. */
+  | "goal_edit_pending";
 
 /** Board-card / summary shape. `readiness` is always the canonical stored enum
  * — the acceptance gate and the board attention filter read THAT; only
@@ -161,6 +172,11 @@ export interface TaskSummary {
   priority: TaskPriority;
   labels: string[];
   dueDate: string | null;
+  /** Ruling 131 (pass 34): what this task waits on, each entry resolved to its
+   *  state at READ time by the query layer (`dependencyResolver`, once per
+   *  query), never by this mapper and never cached. Empty when the task waits
+   *  on nothing. */
+  blockedBy: DependencyRender[];
   /** R14-3: archived tasks leave every default view but keep their record. */
   archived: boolean;
   validation: Validation;
@@ -506,6 +522,12 @@ export function deriveDisplayReadiness(
   ) {
     return "agent_working";
   }
+  // Ruling 138: a decided `edit_goal` packet owes a goal edit — that wins over
+  // `input_required` and over a stored `blocked` (saving the goal lifts the
+  // blocked gate with it), but never over an agent carrying the task.
+  if (packet?.awaiting === "goal_edit" && waiting !== "agent") {
+    return "goal_edit_pending";
+  }
   if (readiness === "ready" && waiting === "human" && packet?.type === "input") {
     return "input_required";
   }
@@ -587,6 +609,8 @@ export function mapTaskProjectionRow(
     /** Resolved owner render shape (null when unowned/unknown). */
     owner: ActorRender | null;
     accepted: boolean;
+    /** Ruling 131: the row's `blockedBy` list resolved by the caller. */
+    blockedBy: DependencyRender[];
   },
 ): TaskSummary {
   const columns = decodeProjectionColumns(row);
@@ -617,6 +641,7 @@ export function mapTaskProjectionRow(
     priority: row.priority,
     labels: parseTaskLabels(row.labels_json),
     dueDate: row.due_date,
+    blockedBy: context.blockedBy,
     archived: row.archived === 1,
     validation: row.validation,
     acceptance: row.acceptance ?? null,

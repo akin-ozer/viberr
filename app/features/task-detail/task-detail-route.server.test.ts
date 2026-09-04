@@ -487,6 +487,51 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   });
 
+  it("ruling 138: the resolve response prefers the option's goalDraft, and a reload rebuilds the SAME draft from the decided packet", async () => {
+    // Canary: compose title + detail inline again in the route (drop
+    // `goalDraftForOption`) — the response stops matching the option's draft.
+    // Canary 2: drop the `decided` stamp in resolvePacket — the reload path
+    // has nothing to rebuild from.
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { goalDraftForOption } = await import("~/shared/packet-goal-draft");
+    const draft = "Deliver a CSV export of the board.\n\nAcceptance: the export downloads every visible column.";
+    await updateTaskFile(
+      { projectSlug: "viberr-core", taskKey: "VIB-142", dataRoot: app.dataRoot },
+      (parsed) => {
+        parsed.packet = {
+          id: "pkt_scope",
+          type: "input",
+          kind: "Decision required",
+          from: "operator",
+          title: "Scope needed",
+          body: "",
+          observations: [],
+          options: [
+            { kind: "edit_goal", t: "Ship the CSV export", d: "Add the export button.", rec: true, goalDraft: draft },
+            { kind: "hold_runtime_debug", t: "Hold", d: "", rec: false },
+          ],
+        };
+      },
+    );
+    // SAFETY: arda holds `resolve-packet` and may edit the goal, so the
+    // confirmed edit_goal option answers with the resolve arm's own shape.
+    const result = (await postIntent("VIB-142", ids.arda, {
+      intent: "resolve-packet", option: "0",
+    })) as { ok: true; kind: string; goalDraft?: string };
+    expect(result.kind).toBe("edit_goal");
+    expect(result.goalDraft).toBe(draft);
+
+    // After a reload the loader carries the decided packet…
+    const after = await runLoader("VIB-142", ids.arda);
+    const decidedPacket = after.task.packet;
+    expect(decidedPacket?.awaiting).toBe("goal_edit");
+    expect(decidedPacket?.decided).toMatchObject({ optionIndex: 0, byUserId: ids.arda });
+    expect(after.task.displayReadiness).toBe("goal_edit_pending");
+    // …and the reload path rebuilds the same draft through the ONE composition.
+    const chosen = decidedPacket?.options[decidedPacket.decided?.optionIndex ?? -1];
+    expect(chosen ? goalDraftForOption(chosen) : null).toBe(result.goalDraft);
+  });
+
   it("rejects a non-owner contributor accepting a completion packet (R6-2)", async () => {
     // Accepting a completion is admin|maintainer OR the task's owner (R6-2).
     // selin is a contributor and NOT VIB-142's owner, so the accept path denies.
@@ -523,9 +568,9 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
       intent: "resolve-packet", option: "2",
     })) as { ok: true; kind: string; toast: string; navigateTo?: string };
     expect(result.kind).toBe("block_on_policy");
-    expect(result.toast).toBe(
-      "Policy / credential updated · the operator re-runs to re-check",
-    );
+    // Ruling 130(c) (pass 34): the toast states the EFFECT and restates no
+    // claim. Canary: restore the old "Policy / credential updated" literal.
+    expect(result.toast).toBe("Unblocked · the operator re-runs to re-check");
     expect(result.navigateTo).toBeUndefined();
 
     const after = await runLoader("VIB-142", ids.arda);
@@ -535,8 +580,41 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     // The re-queue may post its own events, so find the decision by type.
     const decision = after.task.timeline.find((e) => e.type === "transition");
     expect(decision).toBeDefined();
-    expect(decision!.text).toContain("policy / credential updated");
+    // The record restates the seeded option's own words (ruling 130(c)).
+    expect(decision!.text).toContain("**Decision:** Block on policy.");
+    expect(decision!.text).not.toContain("policy / credential updated");
     expect(decision!.text).toContain("unblocked");
+  });
+
+  it("ruling 131 set-task-dependencies: sets the wait, clears it as a release, refuses a bad reference by name", async () => {
+    // Canary: drop the intent's `case` (every shape answers the unknown-intent
+    // refusal), or route it through `setTaskMetadata`.
+    // SAFETY: arda holds `edit-task-meta`, so a valid list returns the intent's
+    // ok arm with its toast.
+    const set = (await postIntent("VIB-153", ids.arda, {
+      intent: "set-task-dependencies", blockedBy: "VIB-142, VIB-142\n",
+    })) as { ok: true; toast: string };
+    expect(set.toast).toBe("Waits on VIB-142");
+    const held = await runLoader("VIB-153", ids.arda);
+    expect(held.task.blockedBy.map((e) => e.ref)).toEqual(["VIB-142"]);
+    expect(held.task.readiness).toBe("blocked");
+
+    // SAFETY: the validator refuses inside the try; the action answers through
+    // `appErrorResponse`.
+    const bad = (await postIntent("VIB-153", ids.arda, {
+      intent: "set-task-dependencies", blockedBy: "VIB-153",
+    })) as ActionRefusal;
+    expect(bad.init.status).toBe(400);
+    expect(bad.data.error).toContain("VIB-153: a task cannot wait on itself");
+
+    // SAFETY: same arm as above; an empty list is valid and clears.
+    const cleared = (await postIntent("VIB-153", ids.arda, {
+      intent: "set-task-dependencies", blockedBy: "",
+    })) as { ok: true; toast: string };
+    expect(cleared.toast).toBe("No longer waits on other work");
+    const released = await runLoader("VIB-153", ids.arda);
+    expect(released.task.blockedBy).toEqual([]);
+    expect(released.task.timeline.some((e) => e.type === "note" && /Dependencies released/.test(e.title ?? ""))).toBe(true);
   });
 
   it("request_edit: clears the packet, flips waiting to agent, writes option.ev", async () => {

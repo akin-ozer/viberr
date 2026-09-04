@@ -497,6 +497,11 @@ function GoalCard({
                 {lp.label}
               </Pill>
               <span className="ctl-link-title">{l.title}</span>
+              {l.blockedBy.length > 0 && (
+                <span className="sub" data-link-wait>
+                  waits on {l.blockedBy.join(", ")}
+                </span>
+              )}
               {l.taskKey && (
                 <Link className="mono ctl-link-task" to={`../tasks/${l.taskKey}`} relative="path">
                   {l.taskKey}

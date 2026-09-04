@@ -57,7 +57,7 @@ credential principal's own account rather than a deployment-wide one.)*
 | FR28 | Progress review without raw logs | IMPLEMENTED | live phase/step in `features/runtime/runs-panels.tsx`, evidence separation, typed events |
 | FR29 | Authenticate to GitHub, access authorized repos | IMPLEMENTED | sealed PATs (`server/secrets/*`), `server/github/github-client.server.ts`, connections; PAT-only, no GitHub App |
 | FR30 | Every task executes against its project's repo | IMPLEMENTED | `project-file.schema.ts`, `pr-open.server.ts` |
-| FR31 | Task-key branches; delivery is an operator decision; agents never push; review-without-PR announced | IMPLEMENTED as amended | `branch-sync.server.ts`, `pr-open.server.ts`, `task-actions.performDelivery`, `specialist-tool-policy.ts` |
+| FR31 | Task-key branches; delivery is an operator decision; agents never push; review-without-PR announced; an empty repository is bootstrapped (ruling 128); rework reaches the open PR (ruling 134) | IMPLEMENTED as amended | `branch-sync.server.ts`, `repo-bootstrap.server.ts`, `pr-open.server.ts`, `push-workspace.server.ts`, `task-actions.performDelivery`, `specialist-tool-policy.ts` |
 | FR32 | Branch/PR status alongside task state | IMPLEMENTED | `features/github/github-view.tsx`, `github-pills.ts`, 5-min reconcile poller |
 | FR33 | Auditable history; 90-day retention; export-before-purge; admin download | IMPLEMENTED | `server/audit/*`, `server/db/retention.server.ts`, `routes/org.settings.audit-export.ts`, S3 push; the pass also runs every 6 h (the PRD says "on every boot") |
 | FR34 | Secrets isolated from artifacts, comments, audit | IMPLEMENTED | spawn-env filter, sink and git-output redaction, `GIT_ASKPASS`, audit `details` rule |
@@ -113,6 +113,7 @@ credential principal's own account rather than a deployment-wide one.)*
 | 2026-09-02 | FR40 | ruling 121: the controller dock on every signed-in surface, conversation scopes (instance / board / task), the server-side context read (`task.md` verbatim and bounded, board snapshot, visible projects, the surface hint), `update_task`, the recorded surface on user messages |
 | 2026-09-02 | FR19/FR21, FR26, FR40 | rulings 109–116 (pass 32): Codex parity carve-out labeled "advisory on Codex"; the collision ceremony's order and its follow-up; audited `viberr_ops` reads; a Guardrails card under Policy; one capability-mode vocabulary; `accept_completion` refused at authoring off the acceptance boundary; the shared Claude MCP-log cache as a disclosed residual |
 | 2026-09-02 | FR19, FR37/FR38, NFR7, NFR9, NFR10 | ruling 127: agent backends authenticate per person, every run carries a credential principal, task creation seats the creator as owner. **Not yet in the canon PRD** (§5 item 12) |
+| 2026-09-04 | FR11, FR14, FR27, FR39, FR40, NFR9 | pass 34 (rulings 128–144): repository bootstrap (128); classified run failures and the person's own remedy (130); task dependencies with a held operator and a release engine (131); authored-only revision drift (132); rework reaches its own open PR (134); the unpushed-revision acceptance gate (135); the collision ceremony reads GitHub first (136); the `workflow` scope stays optional and is refused before the push (144) |
 
 ## 5. Drift the PRD does not record
 

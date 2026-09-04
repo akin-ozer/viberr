@@ -1,12 +1,22 @@
 import type { DatabaseSync } from "node:sqlite";
+import { createActorResolver } from "~/shared/mapping/actor.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { resolveTaskFilePath, readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
   type CreateNotificationInput,
   createNotification,
+  markTaskPacketApprovalRead,
 } from "~/server/projections/notifications.server";
+import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
+import type {
+  FileActorRef,
+  ParsedTaskFile,
+  Recommendation,
+  TaskFileEvent,
+} from "~/schemas/task-file.schema";
 import { logger } from "~/server/logging/logger.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
@@ -146,6 +156,107 @@ export interface TaskWatcherNotice {
 }
 
 /** Notify the owner and project supervisors, respecting routing preferences. */
+/** Ruling 140(b): why the owner seat changed hands, in the words the row uses. */
+export type OwnerSeatChange =
+  | { kind: "handed_off"; taskKey: string }
+  | { kind: "seated_at_creation"; taskKey: string }
+  | { kind: "taken_over"; taskKey: string }
+  | { kind: "admin_released"; taskKey: string };
+
+/** Ruling 140(b): what became of the one row this notifier tries to write —
+ *  recorded on the audit row so a silenced preference and a broken store never
+ *  read the same. */
+export type OwnerSeatNotified =
+  | { userId: string }
+  | { skipped: "silenced" }
+  | { skipped: "failed" };
+
+/** The row a seat change writes: its heading and its body. */
+interface OwnerSeatRow {
+  title: string;
+  text: string;
+}
+
+function ownerSeatText(change: OwnerSeatChange, actorName: string): OwnerSeatRow {
+  const seatMeans =
+    "The owner is this task's human reviewer and acceptance authority, and every agent run on it uses the owner's own Claude and Codex accounts.";
+  switch (change.kind) {
+    case "handed_off":
+      return {
+        title: `${actorName} handed you ${change.taskKey}`,
+        text: `You own ${change.taskKey} now. ${seatMeans}`,
+      };
+    case "seated_at_creation":
+      return {
+        title: `${actorName} created ${change.taskKey} with you as owner`,
+        text: `You own ${change.taskKey} from its first turn. ${seatMeans}`,
+      };
+    case "taken_over":
+      return {
+        title: `${actorName} took over ${change.taskKey}`,
+        text: `You no longer own ${change.taskKey}: ${actorName} holds the seat, with its review and acceptance authority, and runs on it bill their accounts now.`,
+      };
+    case "admin_released":
+      return {
+        title: `${actorName} released you from ${change.taskKey}`,
+        text: `You no longer own ${change.taskKey}. The seat is open to any contributor or above; until someone takes it, nobody holds its review and acceptance authority and no agent run on it can be billed.`,
+      };
+  }
+}
+
+/**
+ * Ruling 140(b) (pass 34, U34-11): tell the person whose owner seat changed.
+ * Under ruling 127 the seat is the credential principal and the acceptance
+ * authority, so a seat that changes hands silently is a bill and a duty
+ * someone learns about from the first failure packet.
+ *
+ * Never notifies the ACTOR about their own act (a self-take and a self-release
+ * notify nobody), and fails OPEN: a store that refuses the row is logged and
+ * reported back as `{ skipped: "failed" }` rather than failing the mutation
+ * that already landed. The caller puts the answer on its audit row.
+ */
+export function notifyOwnerSeatChange(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    recipientUserId: string;
+    actor: TaskActor;
+    actorName: string;
+    change: OwnerSeatChange;
+  },
+): OwnerSeatNotified | null {
+  if (input.recipientUserId === input.actor.userId) return null;
+  const { title, text } = ownerSeatText(input.change, input.actorName);
+  try {
+    const id = createNotification(db, {
+      userId: input.recipientUserId,
+      kind: "ownership",
+      title,
+      text,
+      // Pass 34 review: every other notifier passes `from`, and the
+      // notifications stream renders the actor from it — without one the row
+      // showed a dash and never named who changed the seat.
+      from: createActorResolver(db)({
+        kind: "human",
+        userId: input.actor.userId,
+        nameHint: input.actorName,
+      }),
+      projectSlug: input.projectSlug,
+      taskKey: input.change.taskKey,
+    });
+    // `createNotification` answers null when the reader silenced the category.
+    return id ? { userId: input.recipientUserId } : { skipped: "silenced" };
+  } catch (error) {
+    logger.error("notifyOwnerSeatChange failed", {
+      projectSlug: input.projectSlug,
+      taskKey: input.change.taskKey,
+      recipient: input.recipientUserId,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return { skipped: "failed" };
+  }
+}
+
 export function notifyTaskWatchers(
   db: DatabaseSync,
   notice: TaskWatcherNotice,
@@ -209,4 +320,159 @@ export function notifyTaskWatchers(
     if (id) notified.push(userId);
   }
   return notified;
+}
+
+// ------------------------------------------- acceptance offers (ruling 137)
+
+/** Why an acceptance offer was withdrawn — the three events that invalidate
+ *  it (pass 34, F34-15). */
+export type OfferWithdrawalCause =
+  | { kind: "revision"; headSha: string }
+  | { kind: "packet"; title: string }
+  | { kind: "stage_move"; toStageId: string; toStageName: string };
+
+export interface OfferWithdrawal {
+  removed: Recommendation[];
+  /** Cards left standing after the withdrawal (a `run_agent` card survives). */
+  surviving: number;
+  /** The timeline note that was written, when anything was removed. */
+  note: TaskFileEvent | null;
+}
+
+/**
+ * Ruling 137: the terminal stage id of a project, read from its file, for the
+ * writers that withdraw acceptance offers without a loaded project context
+ * (the packet writers, the delivery reconcile). Resolved from the workflow
+ * graph like every other role lookup. Null when the project file is
+ * unreadable: the withdrawal then removes `accept_completion` cards alone.
+ */
+export function terminalStageIdFor(ctx: TaskMutationContext, projectSlug: string): string | null {
+  const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  if (!project) return null;
+  const fm = project.parsed.frontmatter;
+  return resolveStageRoles(fm.stages, fm.workflow).terminalId;
+}
+
+/** A locked mutator's withdrawal result, carried out of the closure — a plain
+ *  `let` is narrowed to `null` past the callback that assigns it. */
+export interface OfferWithdrawalSlot {
+  offers: OfferWithdrawal | null;
+}
+
+function withdrawalCauseText(cause: OfferWithdrawalCause): string {
+  switch (cause.kind) {
+    case "revision":
+      return `a new revision \`${cause.headSha.slice(0, 7)}\` was delivered, so the offer no longer describes the work under review`;
+    case "packet":
+      return `a decision packet opened ("${cause.title}"), so the task is waiting on a human decision first`;
+    case "stage_move":
+      return `the task moved to **${cause.toStageName}**, away from the acceptance boundary`;
+  }
+}
+
+/**
+ * Ruling 137 (pass 34, F34-15): remove the acceptance offers a task carries
+ * that no longer hold, INSIDE the task file's own lock (the caller is a
+ * `updateTaskFile` mutator). `accept_completion` cards go on every cause; a
+ * `transition` card targeting the terminal stage is an acceptance too (F19-3)
+ * and goes on the packet and stage causes. `run_agent` and `delivery` cards
+ * survive all three: more work is compatible with rework.
+ *
+ * A withdrawal is never silent: one `note` titled "Recommendation withdrawn"
+ * names each card and the cause. The audit row and the bell live in
+ * {@link recordRecommendationWithdrawal}, which needs the database and runs
+ * after the lock. Lives HERE (the leaf) so the delivery reconcile, the packet
+ * writers and the stage move can all call it without closing the
+ * `specialist-run → agent-toolkit → task-actions` cycle this module exists to
+ * break.
+ */
+export function withdrawAcceptanceOffers(
+  parsed: ParsedTaskFile,
+  terminalStageId: string | null,
+  cause: OfferWithdrawalCause,
+  actor: FileActorRef,
+  /** Cards the CALLER drops in the same write for its own reasons (the stage
+   *  move's blanket "any pending transition card is stale"). They are removed
+   *  here so the note's survivor count is the array the write actually leaves
+   *  behind — counting before the caller's own filter overstated it (pass 34
+   *  review) — but they are not NAMED: this note is about the acceptance
+   *  offers the ruling covers. */
+  alsoStale?: (r: Recommendation) => boolean,
+): OfferWithdrawal {
+  const stale = (r: Recommendation): boolean => {
+    if (r.kind === "accept_completion") return true;
+    if (cause.kind === "revision") return false;
+    return (
+      r.kind === "transition" &&
+      terminalStageId !== null &&
+      r.toStageId === terminalStageId
+    );
+  };
+  const keep = (r: Recommendation): boolean => !stale(r) && !(alsoStale?.(r) ?? false);
+  const removed = parsed.frontmatter.recommendations.filter(stale);
+  if (removed.length === 0) {
+    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(keep);
+    return { removed: [], surviving: parsed.frontmatter.recommendations.length, note: null };
+  }
+  parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(keep);
+  const surviving = parsed.frontmatter.recommendations.length;
+  const names = removed.map((r) => `"${r.label}"`).join(", ");
+  const note: TaskFileEvent = {
+    occurredAt: new Date().toISOString(),
+    type: "note",
+    actor,
+    title: "Recommendation withdrawn",
+    text:
+      `Withdrew ${removed.length === 1 ? "the offer" : "the offers"} ${names}: ${withdrawalCauseText(cause)}.` +
+      (surviving > 0
+        ? ` ${surviving === 1 ? "1 recommendation still stands" : `${surviving} recommendations still stand`}.`
+        : "") +
+      " The operator re-recommends acceptance on its next turn if the offer still holds.",
+    toAgent: false,
+    evidence: null,
+  };
+  parsed.timeline.unshift(note);
+  return { removed, surviving, note };
+}
+
+/**
+ * The half of a withdrawal that needs the database: one
+ * `task.recommendation.withdrawn` audit row per withdrawal event, and the
+ * "Waiting on you" bell — `markTaskPacketApprovalRead` marks EVERY unread
+ * approval row for the task read, project-wide, and `addRecommendation` raised
+ * such a row for a surviving `run_agent` card, so it is called ONLY when no
+ * recommendation survives. Call after the locked write that ran
+ * {@link withdrawAcceptanceOffers}, and only when it removed something.
+ */
+export function recordRecommendationWithdrawal(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    withdrawal: OfferWithdrawal;
+    cause: OfferWithdrawalCause;
+    actor: AuditActor;
+  },
+): void {
+  if (input.withdrawal.removed.length === 0) return;
+  recordAudit(db, {
+    action: "task.recommendation.withdrawn",
+    actor: input.actor,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      cause: input.cause.kind,
+      removed: input.withdrawal.removed.map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        forHeadSha: r.forHeadSha ?? null,
+      })),
+      surviving: input.withdrawal.surviving,
+    },
+  });
+  if (input.withdrawal.surviving === 0) {
+    markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
+  }
 }

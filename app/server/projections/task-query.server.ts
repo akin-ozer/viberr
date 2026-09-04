@@ -25,6 +25,7 @@ import {
   resolveTaskOwner,
 } from "./board-query.server";
 import { isQuiet, readTaskActivity, type QuietCheck } from "./task-activity.server";
+import { parseBlockedByColumn, resolveDependencies } from "./dependencies.server";
 
 /**
  * Task-detail read models. Phase 5 loaders call these directly.
@@ -108,6 +109,8 @@ export function getTaskSummary(
       stage: row.stage,
       stageIds: stages.map((s) => s.id),
     }),
+    // Ruling 131: resolved at read time, never cached.
+    blockedBy: resolveDependencies(db, slug, parseBlockedByColumn(row.blocked_by_json)),
   });
   // The engaged agents' backend follows the LIVE deployment, not the
   // engage-time snapshot — the run already does (specialist-run.server.ts), so
@@ -245,6 +248,7 @@ export function getTaskDetail(
     archived: summary.archived,
     terminal: isAcceptedDisplayState({ stage: summary.stage, stageIds }),
     runInFlight: facts.runInFlight,
+    held: summary.blockedBy.length > 0,
   };
   // Test-only clock override: left ABSENT when unset, so `isQuiet` reads the
   // real clock rather than being handed an explicit `undefined`.

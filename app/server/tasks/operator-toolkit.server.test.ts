@@ -224,6 +224,31 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
   // to the full in-Viberr set (never deliver/update — effects OUTSIDE Viberr)
   // and every action the operator then proposes is refused visibly by
   // narrateRefusedActions. Pins that this asymmetry stays the enum-only one.
+  it("ruling 131(b): set_dependencies is built under generate-packets, withheld when that grant is off, and the plan enum agrees", () => {
+    // Canary: gate the Claude tool under `append-typed-events` instead (the
+    // withheld case still builds it; the parity cases above also go red).
+    const granted = withPolicy(uniform("direct"));
+    expect(build(granted).allowedTools).toContain("mcp__viberr__set_dependencies");
+    expect(operatorPlanToolsFor(granted)).toContain("set_dependencies");
+    // Every grant direct EXCEPT packets: append-typed-events stays granted, so
+    // only the packet gate can explain the tool's absence.
+    const withheld = withPolicy({ ...uniform("direct"), "generate-packets": "off" });
+    expect(build(withheld).allowedTools).not.toContain("mcp__viberr__set_dependencies");
+    expect(build(withheld).allowedTools).toContain("mcp__viberr__post_comment");
+    expect(operatorPlanToolsFor(withheld)).not.toContain("set_dependencies");
+  });
+
+  it("ruling 133 (A19): get_task, run_agent and transition_stage say the engaged deliverer runs at every stage and a hand-off is never a stage workaround", () => {
+    // Canary: restore any one of the three original sentences.
+    const defs = build(withPolicy(uniform("direct"))).tools;
+    const desc = (name: string) => defs.find((t) => t.name === name)!.description;
+    expect(desc("get_task")).toContain("it is the engaged deliverer (`engagedAsDeliverer`), which runs at EVERY stage (ruling 133)");
+    expect(desc("run_agent")).toContain("A hand-off is a choice about WHO should build, never a way around a stage");
+    expect(desc("run_agent")).toContain("never hand delivery to another profile to get around a stage");
+    expect(desc("transition_stage")).toContain("never a workaround for a profile's stages");
+    expect(desc("transition_stage")).not.toContain("does not work the review stage");
+  });
+
   it("nothing granted: Claude builds no governed tool; the Codex plan enum falls back and never advertises delivery", () => {
     const auth = withPolicy(uniform("off"));
     expect([...claudeGovernedTools(build(auth).allowedTools)]).toEqual([]);
@@ -474,5 +499,33 @@ describe("buildOperatorToolkit — mounts the caller's pre-flighted resolution (
       authority: authority(["everything-mcp"]),
     });
     expect(Object.keys(toolkit.mcpServers).sort()).toEqual(["everything-mcp", "viberr"]);
+  });
+});
+
+/** Ruling 138: the Claude tool declares `goalDraft` on packet options, with a
+ *  description that says to write it AS the goal. */
+describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruling 138)", () => {
+  it("the option schema carries goalDraft and says what it is", () => {
+    // Canary: remove the field from the option schema.
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const def = toolkit.tools.find((t) => t.name === "open_decision_packet");
+    expect(def).toBeDefined();
+    // SAFETY: the SDK types the raw input fields loosely; this tool's `options`
+    // is a zod array whose JSON Schema form carries `goalDraft` and its text.
+    const options = (def!.inputSchema as { options: z.ZodType }).options;
+    const declared = JSON.stringify(z.toJSONSchema(options));
+    expect(declared).toContain('"goalDraft"');
+    expect(declared).toContain("written AS a goal");
+    expect(declared).toContain("Refused on any other kind");
   });
 });

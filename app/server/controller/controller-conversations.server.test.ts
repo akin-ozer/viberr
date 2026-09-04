@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { LogLine } from "~/features/runtime/runtime-types";
 import {
   setupAppTest,
   type AppTestContext,
@@ -681,5 +682,63 @@ describe("conversation scope (ruling 121)", () => {
       "/projects/viberr-core/tasks/VIB-142",
       null,
     ]);
+  });
+});
+
+/**
+ * Ruling 130(b): a refused turn's note names the classified cause and the
+ * person's own remedy, never "Say it again to retry" for a quota or auth
+ * refusal (which would only reproduce it). Canaries: restore the fixed
+ * suffix on every kind; route `auth` through the generic arm.
+ */
+describe("ruling 130(b): the controller's note for a refused turn", () => {
+  async function settleErrored(runId: string, line: LogLine): Promise<string[]> {
+    const { createConversation, appendMessage, listMessages } = await import("./controller-conversations.server");
+    const { settleTurnForTests } = await import("./controller-run.server");
+    const { upsertRun, insertRunLine } = await import("~/server/runtimes/run-store.server");
+    const conversation = createConversation(app.db, { userId: ownerId, userLabel: "selin@viberr.dev", projectSlug: null });
+    appendMessage(app.db, { conversationId: conversation.id, author: "user", userId: ownerId, text: "hello" });
+    // The controller's own row convention: no project, the conversation as the task key.
+    upsertRun(app.db, {
+      id: runId, projectSlug: "", taskKey: conversation.id, threadId: "controller", role: "Controller", kind: "controller",
+      agentProfileId: "controller", backend: "claude", model: "opus", sdk: "claude", state: "error",
+    });
+    insertRunLine(app.db, { runId, seq: 0, occurredAt: new Date().toISOString(), raw: "", display: line });
+    await settleTurnForTests(
+      app.db,
+      conversation.id,
+      { conversationId: conversation.id, text: "hello", user: { id: ownerId, email: "selin@viberr.dev", name: "Selin Aksoy", orgRole: "member" }, dataRoot: app.dataRoot },
+      "error",
+      runId,
+    );
+    return listMessages(app.db, conversation.id).map((m) => m.text);
+  }
+
+  it("a quota-refused turn names the reset and the account switch, never 'Say it again to retry'", async () => {
+    const texts = await settleErrored("run_quota", {
+      t: "1", ev: "err", tag: "run·error·quota", text: "The Claude account is over its usage quota.",
+      failure: { kind: "quota", resetsAt: "2026-09-06T19:50:00.000Z", window: "five_hour", windowRejected: true, apiError: null, apiErrorStatus: 429, terminalReason: "api_error" },
+    });
+    const note = texts.find((t) => t.startsWith("I could not finish this turn"))!;
+    expect(note).toContain("five hour window is spent");
+    expect(note).toContain("reopens at 2026-09-06 19:50 UTC");
+    expect(note).toContain("Profile → Agent accounts");
+    expect(note).not.toContain("Say it again to retry");
+  });
+
+  it("an auth-refused turn names the org restriction; an `unknown` failure keeps the retry sentence", async () => {
+    const auth = await settleErrored("run_auth", {
+      t: "1", ev: "err", tag: "run·error·auth", text: "refused",
+      failure: { kind: "auth", resetsAt: null, window: null, windowRejected: false, apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error" },
+    });
+    const authNote = auth.find((t) => t.startsWith("I could not finish this turn"))!;
+    expect(authNote).toContain("oauth_org_not_allowed");
+    expect(authNote).toContain("does not allow it here");
+    expect(authNote).toContain("Profile → Agent accounts");
+    expect(authNote).not.toContain("Say it again to retry");
+
+    const unknown = await settleErrored("run_unknown", { t: "1", ev: "err", tag: "run·error·unknown", text: "The agent run did not complete." });
+    const unknownNote = unknown.find((t) => t.startsWith("I could not finish this turn"))!;
+    expect(unknownNote).toContain("Say it again to retry");
   });
 });

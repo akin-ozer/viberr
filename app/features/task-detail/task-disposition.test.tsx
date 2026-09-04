@@ -68,6 +68,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     priority: "normal",
     labels: [],
     dueDate: null,
+    blockedBy: [],
     archived: false,
     validation: "healthy",
     continuity: null,
@@ -454,7 +455,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
       workRevisionSha: "aaaaaaaaaaaabbbbbbbbbbbb",
       task: {
         pr: acceptedPr({
-          revisionDrift: { headSha: "ccccccccccccdddddddddddd", aheadBy: 2 },
+          revisionDrift: { headSha: "ccccccccccccdddddddddddd", authored: 2, baseRefresh: null },
         }),
       },
     });
@@ -470,7 +471,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(dialog.textContent).toContain("main");
     // R17-1: the head really being merged, and that it is not the reviewed one.
     expect(dialog.textContent).toContain("cccccccccccc");
-    expect(dialog.textContent).toContain("2 commits added since review");
+    expect(dialog.textContent).toContain("2 authored commits since review merge unreviewed");
     fireEvent.click(findButton(container, "Merge PR #147")!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("complete-merge");
@@ -934,6 +935,73 @@ describe("R15-2 safety net (b): the manual delivery control", () => {
     expect(submitted[0]!.intent).toBe("deliver-review");
     expect(getByText).toBeTruthy();
   });
+
+  it("ruling 134(c): offers the push control when the open PR does not carry the delivered revision, and it submits deliver-review", async () => {
+    // Canary: revert the visibility condition to "no live PR" and the button
+    // is gone while PR #9 is open.
+    const rev = "9".repeat(40);
+    const { container, submitted } = renderPage({
+      canDeliver: true,
+      task: {
+        workRevisionSha: rev,
+        pr: {
+          number: 9, state: "review", title: "x", headSha: "1".repeat(40),
+          unpushedRevision: { revisionSha: rev, prHeadSha: "1".repeat(40), relation: "behind" },
+        },
+      },
+    });
+    const btn = findButton(container, "Push 9999999 to PR #9");
+    expect(btn).toBeDefined();
+    expect(btn!.disabled).toBe(false);
+    expect(container.textContent).toContain("Unpushed");
+    expect(container.textContent).toContain("is not on PR #9");
+    fireEvent.click(btn!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("deliver-review");
+  });
+
+  it("ruling 134(c): hides the push control when the recorded record is stale", () => {
+    // Canary: drop the revision comparison in `unpushedRevisionOf`.
+    const { container } = renderPage({
+      canDeliver: true,
+      task: {
+        workRevisionSha: "7".repeat(40),
+        pr: {
+          number: 9, state: "review", title: "x", headSha: "1".repeat(40),
+          unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" },
+        },
+      },
+    });
+    expect(findButton(container, "Push 9999999 to PR #9")).toBeUndefined();
+    expect(findButton(container, "Deliver branch & open PR")).toBeUndefined();
+    expect(container.textContent).not.toContain("Unpushed");
+  });
+
+  it("ruling 134(c): a diverged relation renders the row and a DISABLED control naming the refusal", () => {
+    // Canary: render the primary (enabled) control for `diverged`.
+    const rev = "9".repeat(40);
+    const { container } = renderPage({
+      canDeliver: true,
+      task: {
+        workRevisionSha: rev,
+        pr: {
+          number: 9, state: "review", title: "x", headSha: "1".repeat(40),
+          unpushedRevision: { revisionSha: rev, prHeadSha: "1".repeat(40), relation: "diverged" },
+        },
+      },
+    });
+    const btn = findButton(container, "Push 9999999 to PR #9");
+    expect(btn).toBeDefined();
+    expect(btn!.disabled).toBe(true);
+    expect(btn!.title).toContain("refused as non-fast-forward");
+    expect(container.textContent).toContain("Unpushed");
+  });
+
+  // Ruling 134(c): the record's journey through the REAL projection (write the
+  // task file, run the workspace reconcile, rebuild, load the detail, evaluate
+  // the exact expression this panel renders from) is proven in
+  // app/server/projections/task-detail-unpushed.server.test.ts, a node-env
+  // test: the server modules it drives do not run under this file's jsdom.
 
   it("hides once a live PR stands, and entirely without delivery authority", () => {
     const withPr = renderPage({
@@ -1400,6 +1468,7 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
     branch: "vib-151",
     pendingRecommendations: 2,
     unownedPr: null,
+    openPr: null,
   };
 
   const archivePacket = (deleteBranch: boolean): PacketRender => {
@@ -2223,5 +2292,139 @@ describe("U7: the task detail's reading order matches its stacking rule", () => 
     expect(main.textContent).not.toContain("Accept completion → Done");
     // …and the timeline really is in the one that follows it.
     expect(main.querySelector(".tl-list, .timeline, .tl-wrap")).not.toBeNull();
+  });
+});
+
+/**
+ * C3 (pass 34, U34-8): the collision confirm describes the branch it is
+ * actually about, and both remote-branch ceremonies warn about the refusal
+ * `deleteTaskRemoteBranch` will hand back. Live: JC-6 at 10:33:06Z and JC-3 at
+ * 11:47:48Z were both confirmed and both refused, with the dialog promising
+ * the deletion of a stranger's branch.
+ */
+describe("C3: the collision confirm describes the right branch, and warns before the refusal", () => {
+  const collisionPacket: PacketRender = {
+    type: "blocked",
+    kind: "blocked decision",
+    from: "Operator",
+    title: "The remote vib-151 is not this task's work",
+    body: "The push was refused.",
+    observations: [],
+    options: [
+      {
+        kind: "resolve_remote_collision",
+        t: "Delete the stale remote branch, then redeliver",
+        d: "Reclaims the branch name for this task.",
+        rec: true,
+      },
+    ],
+  };
+  const dialogText = (container: HTMLElement) =>
+    container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Packet collision dialog"]',
+    )!.textContent!;
+
+  it("with NO unowned PR it describes THIS task's own remote branch, never a stranger", () => {
+    // Canary: restore the single shape — the person is told they are deleting
+    // "the unrelated one squatting on this task's branch name", which is their
+    // own pushed branch.
+    const { container } = renderPage({ task: { packet: collisionPacket, unownedPr: null } });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const text = dialogText(container);
+    expect(text).toContain("This task’s own remote branch");
+    expect(text).toContain("vib-151");
+    expect(text).toContain("No unrelated pull request is recorded on it");
+    expect(text).not.toContain("squatting");
+    expect(text).not.toContain("stale branch");
+    expect(text).toContain("cannot be undone");
+    expect(text).toContain("local delivery");
+    expect(findButton(container, "Delete branch & redeliver")).toBeTruthy();
+  });
+
+  it("with an unowned PR it still names the stranger and closes its PR", () => {
+    // Canary: make the no-collision branch unconditional.
+    const { container } = renderPage({ task: { packet: collisionPacket, unownedPr: 232 } });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const text = dialogText(container);
+    expect(text).toContain("squatting");
+    expect(text).toContain("#232");
+    expect(findButton(container, "Clear collision & redeliver")).toBeTruthy();
+  });
+
+  it("an OPEN pull request of this task's own says what the ceremony really does, read off the task", () => {
+    // Canary: hardcode `openPr: null` in the page's archiveDisclosure literal
+    // (or drop the row) — the person is told nothing about the PR the
+    // ceremony is actually about.
+    // Pass 34 review: the row used to promise a refusal, which ruling 136(b)
+    // replaced with a real delivery to that same PR.
+    const { container } = renderPage({
+      task: {
+        packet: collisionPacket,
+        unownedPr: null,
+        pr: { number: 77, state: "review", title: "VIB-151 work" },
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const text = dialogText(container);
+    expect(text).toContain("#77");
+    expect(text).toContain("this task’s OWN review pull request");
+    expect(text).toContain("pushes this task’s delivered revision");
+    expect(text).not.toContain("confirming now is refused and nothing changes");
+  });
+
+  it("a MERGED pull request is no refusal, so no warning is shown", () => {
+    const { container } = renderPage({
+      task: {
+        packet: collisionPacket,
+        unownedPr: null,
+        pr: { number: 77, state: "merged", title: "VIB-151 work" },
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    expect(dialogText(container)).not.toContain("never deletes a branch a pull request is open on");
+  });
+});
+
+/**
+ * Pass 34 review: the archive dialog's open-PR row used to promise "confirming
+ * now is refused and nothing changes" while the archive always runs — only the
+ * branch deletion is refused.
+ */
+describe("C3: the archive dialog's open-PR row tells the truth about what still happens", () => {
+  const archivePacket: PacketRender = {
+    type: "blocked",
+    kind: "blocked decision",
+    from: "Operator",
+    title: "The PR was closed without merging",
+    body: "",
+    observations: [],
+    options: [
+      {
+        kind: "archive_task",
+        t: "Archive the task and delete its branch",
+        d: "The work is abandoned.",
+        rec: true,
+        deleteBranch: true,
+      },
+    ],
+  };
+
+  it("says the task is still archived and only the branch is kept", () => {
+    // Canary: use one sentence for both ceremonies again — the archive dialog
+    // then claims nothing changes, and the task is archived anyway.
+    const { container } = renderPage({
+      task: {
+        packet: archivePacket,
+        branch: "vib-151",
+        pr: { number: 91, state: "review", title: "VIB-151 work" },
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Packet archive dialog"]',
+    )!;
+    expect(dialog.textContent).toContain("#91");
+    expect(dialog.textContent).toContain("The task is still archived");
+    expect(dialog.textContent).not.toContain("confirming now is refused and nothing changes");
   });
 });

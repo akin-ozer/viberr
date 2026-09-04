@@ -743,6 +743,13 @@ export function TaskDetailPage({
               branch: task.branch,
               pendingRecommendations: recommendations.length,
               unownedPr: task.unownedPr,
+              // C3 (pass 34, U34-8): the SAME predicate `deleteTaskRemoteBranch`
+              // refuses on, so the dialog warns before the click instead of the
+              // server refusing after it.
+              openPr:
+                task.pr && (task.pr.state === "review" || task.pr.state === "accepted")
+                  ? task.pr.number
+                  : null,
             }}
             onResolve={onResolve}
             onResolveCustom={submitResolveCustom}
@@ -751,6 +758,12 @@ export function TaskDetailPage({
             // option is above their tier).
             {...(canEscalatePacket ? { onRequestMaintainer } : {})}
             onAsk={() => setAsk((a) => a + 1)}
+            onEditGoal={(draft) => {
+              // Ruling 138: the reload path opens the editor with the SAME
+              // draft the confirm response carried.
+              setEditGoalDraft(draft);
+              setEditGoalSignal((n) => n + 1);
+            }}
           />
         )}
 

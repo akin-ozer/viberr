@@ -572,6 +572,48 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
     ).not.toBeNull();
   });
 
+  it("ruling 144(c): a re-check resolves an open `workflow` violation once the header lists it, and not before", async () => {
+    // Canary: stop adding `headerScopes` to the granted set and the second
+    // re-check leaves the violation open.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-142", { stage: "review", ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    openScopeViolation(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      scope: "workflow",
+      detail: "GitHub refused a push of .github/workflows/ci.yml.",
+    });
+    const actor = { userId: store.users.arda.id, label: "arda" };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: CLASSIC }, actor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+
+    const without = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" }, headers: { "x-oauth-scopes": "repo" } },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO, permissions: { push: true } } },
+    });
+    await revalidateProjectCredential(store.db, store.slug, actor, { dataRoot: store.dataRoot, fetchImpl: without.fetchImpl, now: () => Date.now() });
+    expect(findOpenScopeViolation(store.db, store.slug, "workflow", "VIB-142")).not.toBeNull();
+
+    const withScope = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" }, headers: { "x-oauth-scopes": "repo, workflow" } },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO, permissions: { push: true } } },
+    });
+    const result = await revalidateProjectCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: withScope.fetchImpl,
+      // Past the reuse cooldown, so the re-check really reads GitHub again.
+      now: () => Date.now() + 60 * 60 * 1000,
+    });
+    expect(result.status).toBe("revalidated");
+    if (result.status === "revalidated") {
+      expect(result.resolvedViolations.map((v) => v.scope)).toEqual(["workflow"]);
+    }
+    expect(findOpenScopeViolation(store.db, store.slug, "workflow", "VIB-142")).toBeNull();
+  });
+
   it("grant flow: revalidation resolves the seeded VIB-142 violation and writes the policy event", async () => {
     const store = setupTestStore(ctx); // slug = viberr-core
     writeTask(store.dataRoot, store.slug, {
@@ -873,5 +915,71 @@ describe("PAT revalidation cooldown (P13-D-33)", () => {
     }).map((r) => r.details?.cached);
     expect(cachedFlags).toHaveLength(2);
     expect([...cachedFlags].sort()).toEqual([false, true]);
+  });
+});
+
+/**
+ * Ruling 144 (pass 34, G34-2): a CLASSIC token's full granted list is recorded
+ * beside the required-scope verdicts, so the credential card can say a token
+ * without `workflow` cannot push `.github/workflows/*` and delivery can refuse
+ * such a push BEFORE GitHub is asked. Advisory only: `workflow` stays optional
+ * (ruling 18) and a token without it is still `valid`.
+ *
+ * Canary: drop the `headerScopes` assignment in `validatePatToken` (leave the
+ * base's `null`) and the first case fails.
+ */
+describe("ruling 144 — the classic token's header list is recorded", () => {
+  it("records the full x-oauth-scopes list on a classic token, and the token without `workflow` stays valid", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "viberr-bot" },
+        headers: { "x-oauth-scopes": "repo, read:org" },
+      },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
+    });
+    const result = await validatePatToken(CLASSIC, {
+      repo: REPO,
+      requiredScopes: ["repo", "pull_request:write"],
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.status).toBe("valid");
+    expect(result.headerScopes).toEqual(["repo", "read:org"]);
+    expect(result.missingScopes).toEqual([]);
+  });
+
+  it("an EMPTY header on a classic token records [] (a positive fact), and a fine-grained token records null", async () => {
+    const empty = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" }, headers: { "x-oauth-scopes": "" } },
+    });
+    const emptyResult = await validatePatToken(CLASSIC, {
+      repo: null,
+      requiredScopes: ["repo"],
+      fetchImpl: empty.fetchImpl,
+    });
+    expect(emptyResult.headerScopes).toEqual([]);
+
+    const fine = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: true, pull: true } },
+      },
+    });
+    const fineResult = await validatePatToken(FINE, {
+      repo: REPO,
+      requiredScopes: ["repo"],
+      fetchImpl: fine.fetchImpl,
+    });
+    expect(fineResult.tokenKind).toBe("fine_grained");
+    expect(fineResult.headerScopes).toBeNull();
+  });
+
+  it("a network failure before the header is read records null", async () => {
+    const result = await validatePatToken(CLASSIC, {
+      repo: null,
+      requiredScopes: ["repo"],
+      fetchImpl: unreachableFetch(),
+    });
+    expect(result.status).toBe("network_error");
+    expect(result.headerScopes).toBeNull();
   });
 });

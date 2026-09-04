@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { withProviderText } from "~/shared/provider-marker";
+import { emptyRunFailureFacts, type RunFailureFacts, type RunFailureKind } from "~/shared/run-failure";
+import { splitClaudeVariant } from "~/shared/model-ids";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -123,7 +125,23 @@ interface ClaudeAdapterDeps {
  */
 export function resolveClaudeModel(model?: string): string | undefined {
   if (!model) return undefined;
+  // Pass 34 (F34-7): split the bracketed context-window variant off FIRST,
+  // resolve the base through the ordinary rules (dated test included) and
+  // re-append the variant verbatim. `opus[1m]` used to hit the
+  // `includes("opus")` arm and reach the SDK as `opus`, so the person who
+  // picked a 1M-context model ran a 200k one; and `claude-opus[1m]` would
+  // otherwise match the dated branch on the digit inside the bracket and be
+  // forwarded unchanged, which is not an SDK id.
+  const { base, variant } = splitClaudeVariant(model.trim());
+  const resolved = resolveClaudeBase(base);
+  if (resolved === undefined) return undefined;
+  return variant ? `${resolved}${variant}` : resolved;
+}
+
+/** The variant-free half of {@link resolveClaudeModel}. */
+function resolveClaudeBase(model: string): string | undefined {
   const m = model.toLowerCase().trim();
+  if (!m) return undefined;
   // A versioned/dated real id (e.g. claude-sonnet-4-5) — use as-is.
   if (m.startsWith("claude-") && /\d/.test(m)) return model;
   if (m.includes("opus")) return "opus";
@@ -479,6 +497,20 @@ const claudeEnvelopeSchema = z
       .refine((text) => text.trim() !== "")
       .nullable()
       .catch(null),
+    /** Ruling 130(a): the assistant envelope's API-error code, the result's
+     *  HTTP status and terminal reason, and a rate-limit reading's status,
+     *  window and reset. Read only to classify; never persisted raw. */
+    error: z.string().nullable().catch(null),
+    api_error_status: z.number().nullable().catch(null),
+    terminal_reason: z.string().nullable().catch(null),
+    rate_limit_info: z
+      .object({
+        status: z.string().nullable().catch(null),
+        rateLimitType: z.string().nullable().catch(null),
+        resetsAt: z.number().nullable().catch(null),
+      })
+      .nullable()
+      .catch(null),
     /** `assistant` envelopes: this step's usage counters. Anything that is not
      *  a finite number counts as 0, exactly as the run row folds it. */
     message: z
@@ -492,7 +524,16 @@ const claudeEnvelopeSchema = z
       .nullable()
       .catch(null),
   })
-  .catch({ type: null, subtype: null, result: null, message: null });
+  .catch({
+    type: null,
+    subtype: null,
+    result: null,
+    error: null,
+    api_error_status: null,
+    terminal_reason: null,
+    rate_limit_info: null,
+    message: null,
+  });
 type ClaudeEnvelope = z.infer<typeof claudeEnvelopeSchema>;
 
 /** The live token counters one streamed step contributes. */
@@ -566,6 +607,56 @@ interface ClaudeFailure {
   kind: ClaudeFailureKind;
   message: string;
   providerText: string;
+  /** Ruling 130(a): the machine facts, attached to the terminal line. */
+  facts: RunFailureFacts;
+}
+
+/**
+ * Ruling 130(a): what the stream said about the failure BEFORE the prose is
+ * consulted. `rateLimit` is the last `rate_limit_event` reading; `apiError`
+ * the last assistant envelope's error code; `apiErrorStatus` and
+ * `terminalReason` the result's own fields.
+ */
+interface FailureEvidence {
+  rateLimit: { status: string | null; rateLimitType: string | null; resetsAt: number | null } | null;
+  apiError: string | null;
+  apiErrorStatus: number | null;
+  terminalReason: string | null;
+}
+
+const NO_EVIDENCE: FailureEvidence = {
+  rateLimit: null,
+  apiError: null,
+  apiErrorStatus: null,
+  terminalReason: null,
+};
+
+const QUOTA_API_ERRORS = new Set(["rate_limit", "billing_error"]);
+const AUTH_API_ERRORS = new Set(["authentication_failed", "oauth_org_not_allowed"]);
+
+/** The facts record for a classified kind: the window and reset ride ONLY on
+ *  a REJECTED reading, so a transient 429 names no instant. */
+function failureFacts(kind: RunFailureKind, evidence: FailureEvidence): RunFailureFacts {
+  const facts = emptyRunFailureFacts(kind);
+  facts.apiError = evidence.apiError;
+  facts.apiErrorStatus = evidence.apiErrorStatus;
+  facts.terminalReason = evidence.terminalReason;
+  if (evidence.rateLimit?.status === "rejected") {
+    facts.windowRejected = true;
+    facts.window = evidence.rateLimit.rateLimitType;
+    facts.resetsAt =
+      evidence.rateLimit.resetsAt != null
+        ? new Date(evidence.rateLimit.resetsAt * 1000).toISOString()
+        : null;
+  }
+  return facts;
+}
+
+/** `Sep 3, 2026 11:50 UTC`, absolute, never relative. */
+function absoluteResetLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 /** The `code` a Node spawn failure carries (`EBADF`/`ENOENT`/…). Anything that
@@ -576,7 +667,14 @@ const spawnErrorCodeSchema = z
   .transform((thrown) => thrown.code)
   .catch("");
 
-function classifyClaudeError(cause: unknown): ClaudeFailure {
+/**
+ * Ruling 130(a): classify a failure from the STRUCTURED envelope evidence
+ * first (a rejected rate-limit reading, the assistant envelope's error code,
+ * the result's HTTP status) and from prose second, in this order: spawn codes
+ * → session_missing → quota → auth → unknown. The prose regexes stay as the
+ * fallback for a thrown stream error with no envelope evidence.
+ */
+function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVIDENCE): ClaudeFailure {
   const code = spawnErrorCodeSchema.parse(cause);
   if (code === "EBADF" || code === "EMFILE" || code === "ENFILE") {
     // R20-3: these three name the real cause already (host resource exhaustion,
@@ -586,6 +684,7 @@ function classifyClaudeError(cause: unknown): ClaudeFailure {
       message:
         "The agent process could not be started (the host ran out of file handles). No work was performed.",
       providerText: "",
+      facts: failureFacts("unknown", evidence),
     };
   }
   if (code === "ENOENT") {
@@ -594,6 +693,7 @@ function classifyClaudeError(cause: unknown): ClaudeFailure {
       message:
         "The agent runtime executable was not found. Check the deployment's Claude CLI/SDK install.",
       providerText: "",
+      facts: failureFacts("unknown", evidence),
     };
   }
   const raw = cause instanceof Error ? cause.message : String(cause ?? "");
@@ -609,35 +709,60 @@ function classifyClaudeError(cause: unknown): ClaudeFailure {
       message:
         "The Claude session could not be resumed — its transcript no longer exists (provider retention). Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
       providerText: "",
+      facts: failureFacts("session_missing", evidence),
     };
   }
-  if (/usage limit|quota|rate limit|too many requests|\b429\b/i.test(raw)) {
+  const rejectedWindow = evidence.rateLimit?.status === "rejected";
+  const quotaByEvidence =
+    rejectedWindow ||
+    (evidence.apiError !== null && QUOTA_API_ERRORS.has(evidence.apiError)) ||
+    evidence.apiErrorStatus === 429;
+  if (
+    quotaByEvidence ||
+    /usage limit|quota|rate limit|too many requests|\b429\b|session limit|weekly limit|monthly limit|out of credits|credit balance/i.test(
+      raw,
+    )
+  ) {
+    const facts = failureFacts("quota", evidence);
+    const window = facts.window ? facts.window.replace(/_/g, " ") : null;
     return {
       kind: "quota",
       // Role-neutral: this classifier runs for operator AND specialist/reviewer
       // runs, so it must not say "the coordinating model" (misleads a human
       // triaging a failed delivery run toward the operator).
-      message:
-        "The Claude model is over its usage quota. Retry after the limit resets.",
+      message: facts.windowRejected
+        ? `The Claude account is over its usage quota: its ${window ?? "usage"} window is spent${facts.resetsAt ? ` and reopens at ${absoluteResetLabel(facts.resetsAt)}` : ""}. Wait for it, or connect a different Claude account or an API key on Profile → Agent accounts.`
+        : "The Claude account is over its usage quota. Retry after the limit resets, or connect a different Claude account or an API key on Profile → Agent accounts.",
       providerText,
+      facts,
     };
   }
+  const authByEvidence =
+    (evidence.apiError !== null && AUTH_API_ERRORS.has(evidence.apiError)) ||
+    evidence.apiErrorStatus === 401 ||
+    evidence.apiErrorStatus === 403;
   if (
+    authByEvidence ||
     /unauthor|forbidden|invalid.*(?:key|token|credential)|\b401\b|\b403\b|not logged in|authenticate|authentication/i.test(
       raw,
     )
   ) {
+    const facts = failureFacts("auth", evidence);
+    const orgRestricted = evidence.apiError === "oauth_org_not_allowed";
     return {
       kind: "auth",
-      message:
-        "The model credential was rejected. Review the configured Claude authentication.",
+      message: orgRestricted
+        ? `The Claude account was refused by the provider (${evidence.apiErrorStatus ?? 403} oauth_org_not_allowed): the organization this account belongs to does not allow it here. Connect a different Claude account or an API key on Profile → Agent accounts.`
+        : `The Claude credential was rejected${evidence.apiErrorStatus ? ` (${evidence.apiErrorStatus}${evidence.apiError ? ` ${evidence.apiError}` : ""})` : ""}. Connect a different Claude account or an API key on Profile → Agent accounts.`,
       providerText,
+      facts,
     };
   }
   return {
     kind: "unknown",
     message: "The agent run did not complete. Review the runtime configuration.",
     providerText,
+    facts: failureFacts("unknown", evidence),
   };
 }
 
@@ -652,6 +777,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       /** The failing RESULT envelope's own error prose, kept only long enough to
        *  classify it (P14-RT-10) — it is never persisted or logged raw. */
       let resultErrorText: string | null = null;
+      /** Ruling 130(a): the structured evidence the stream produced, kept for
+       *  the classifier. */
+      const evidence: FailureEvidence = { ...NO_EVIDENCE };
       let interrupted = false;
       let settled = false;
       let idleTimedOut = false;
@@ -742,7 +870,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       const settleError = (cause: unknown) => {
         if (settled) return;
         try {
-          const failure = classifyClaudeError(cause);
+          const failure = classifyClaudeError(cause, evidence);
           cb.onLine({
             raw: "",
             display: {
@@ -756,6 +884,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
                 !failure.message.includes(failure.providerText)
                   ? withProviderText(failure.message, failure.providerText)
                   : failure.message,
+              failure: failure.facts,
             },
             facts: {},
             occurredAt: new Date().toISOString(),
@@ -975,11 +1104,21 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             const { display, facts } = projectEnvelope("claude", message, occurredAt);
             const envelope = claudeEnvelopeSchema.parse(message);
             if (facts.sessionId) sessionId = facts.sessionId;
+            // Ruling 130(a): keep the last rate-limit reading, the last API
+            // error code and the result's status/terminal reason for the classifier.
+            if (envelope.type === "rate_limit_event" && envelope.rate_limit_info) {
+              evidence.rateLimit = envelope.rate_limit_info;
+            }
+            if (envelope.type === "assistant" && envelope.error) {
+              evidence.apiError = envelope.error;
+            }
             if (facts.isResult) {
               sawResult = true;
               resultIsError = !!facts.isError;
               resultSubtype = envelope.subtype;
               resultErrorText = envelope.result;
+              evidence.apiErrorStatus = envelope.api_error_status;
+              evidence.terminalReason = envelope.terminal_reason;
             } else {
               const u = assistantUsage(envelope);
               if (u) {
@@ -1058,6 +1197,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // thrown error is classified; the raw text never leaves this scope.
           const failure = classifyClaudeError(
             new Error(resultErrorText ?? resultSubtype ?? ""),
+            evidence,
           );
           const now = new Date().toISOString();
           cb.onLine({
@@ -1072,6 +1212,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
                 !failure.message.includes(failure.providerText)
                   ? withProviderText(failure.message, failure.providerText)
                   : failure.message,
+              failure: failure.facts,
             },
             facts: {},
             occurredAt: now,

@@ -549,42 +549,26 @@ export function fullReplyTextForRun(
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 export { PROVIDER_TEXT_MARKER };
 
-/** Classified failure classes for an errored run (F8 + R7-2 fail-fast). */
-export type RunFailureKind =
-  | "quota"
-  | "auth"
-  | "unavailable"
-  | "max_turns"
-  /** The stream produced nothing for the whole idle window — the run was HUNG,
-   *  not failed by the task. Both adapters emit it (P13-RT-11). */
-  | "idle_timeout"
-  /** P13-D-2 (FR22 / NFR17): the provider session this run tried to resume no
-   *  longer exists — Claude Code's ~30-day transcript retention, or a wiped
-   *  `$CODEX_HOME/sessions`. Its own class because it is neither a credential
-   *  problem nor a task failure: the honest recovery is a fresh run
-   *  re-anchored on task.md, which `resumeRun` performs automatically when its
-   *  pre-flight probe catches it. This class is what survives when the SDK
-   *  reports the vanished session first. */
-  | "session_missing"
-  | "unknown";
-
-/** The classes an adapter can tag on its own `err` line (`error·quota`), and
- *  the single list the tag is matched against. */
-const TAGGED_FAILURE_KINDS = [
-  "quota",
-  "auth",
-  "unavailable",
-  "max_turns",
-  "idle_timeout",
-  "session_missing",
-  "unknown",
-] as const satisfies readonly RunFailureKind[];
+/** Classified failure classes for an errored run (F8 + R7-2 fail-fast).
+ *  Ruling 130(a) (pass 34): the vocabulary lives in the client-safe leaf
+ *  `~/shared/run-failure` so the console's `LogLine.failure` can be typed
+ *  without a server import; re-exported here for the task layer's importers. */
+import {
+  TAGGED_FAILURE_KINDS,
+  type RunFailureFacts,
+  type RunFailureKind,
+} from "~/shared/run-failure";
+export type { RunFailureKind };
 
 export interface RunFailure {
   kind: RunFailureKind;
   text: string;
   /** R20-3: the provider's own redacted sentence, when the adapter sent one. */
   providerText?: string;
+  /** Ruling 130(a) (pass 34): the adapter's structured facts (reset instant,
+   *  window, API error code and status), read from the terminal line's
+   *  `failure` record. Absent when the adapter attached none. */
+  facts?: RunFailureFacts;
 }
 
 /**
@@ -627,6 +611,11 @@ export function runFailureReason(
   // "authenticate"), so re-classifying the prose would drop codex quota/auth
   // failures to `unknown`. Backends that emit no class (plain err lines) still
   // fall through to the prose regexes below.
+  // Ruling 130(a): the adapter's typed record wins outright; the tag suffix
+  // is the same fact for lines written before the record existed.
+  if (last.failure) {
+    return withProviderText({ kind: last.failure.kind, text, facts: last.failure }, providerText);
+  }
   const tag = last.tag ?? "";
   const taggedKind = TAGGED_FAILURE_KINDS.find((k) => tag.endsWith(`·${k}`));
   if (taggedKind) return withProviderText({ kind: taggedKind, text }, providerText);
@@ -638,7 +627,7 @@ export function runFailureReason(
       ? "session_missing"
       : /is unavailable|no usable credential/i.test(text)
         ? "unavailable"
-        : /usage limit|quota|rate limit|too many requests|429/i.test(text)
+        : /usage limit|quota|rate limit|too many requests|429|session limit|weekly limit|monthly limit|out of credits|credit balance/i.test(text)
           ? "quota"
           : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
             ? "auth"

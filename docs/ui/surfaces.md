@@ -33,16 +33,16 @@ POST.
 | `/projects/:slug/controller` | `project.controller.tsx` | member (CSRF checked as a result, not a throw) | the instance controller addressed inside this project; goal chain controls | `send`, `goal-op` (`pause`, `resume`, `cancel`, `skip_link`, `retry_link`) |
 | `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail, capability matrix modal | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile` |
 | `/projects/:slug/policy` | `project.policy.tsx` | member, form | role matrix (rendered from `rbac.ts`), member roles, transition boundaries, guardrails (ruling 112) | `set-role`, `set-boundary`, `set-guardrail` |
-| `/projects/:slug/github` | `project.github.tsx` | member, form | credential card, repo state, branched tasks, scope violations, update status | `set-credential`, `clear-credential`, `grant-scope`, `reconcile` |
+| `/projects/:slug/github` | `project.github.tsx` | member, form | credential card (with the workflow-scope advisory, ruling 144), repo state, branched tasks, scope violations, update status | `set-credential`, `clear-credential`, `grant-scope`, `reconcile` |
 | `/projects/:slug/activity` | `project.activity.tsx` | member | activity feed with day groups; audit column (compacted, ruling 61) | |
 | `/projects/:slug/settings` | `project.settings.tsx` | member, form (admin for writes) | project profile, stages, members, repository, branch cleanup, archive/delete | `save-project`, `add-stage`, `rename-stage`, `remove-stage`, `reorder-stages`, `invite`, `remove-member`, `set-credential`, `clear-credential`, `grant-scope`, `repair-repo`, `set-branch-cleanup`, `archive-project`, `delete-project` |
-| `/projects/:slug/tasks/:key` | `project.task.tsx` | member, form | task detail: state, execution profile, packet, recommendations, timeline, runs, GitHub trace, diagnostics | `comment`, `transition`, `update-goal`, `set-task-metadata`, `owner-take`, `owner-release`, `owner-assign`, `run-agent`, `run-operator`, `run-interrupt`, `release-agent`, `resolve-packet`, `apply-recommendation`, `dismiss-recommendation`, `deliver-review`, `accept-completion`, `force-accept`, `complete-merge`, `request-maintainer-decision`, `schedule-action`, `cancel-schedule`, `archive-task`, `restore-task` |
+| `/projects/:slug/tasks/:key` | `project.task.tsx` | member, form | task detail: state (the "Waiting on" row reads "Other work: …" for a held task), the hero's wait chips (one neutral link per `blockedBy` entry with its state, ruling 131), execution profile (the operator run control carries a hold note with Run left enabled), packet, recommendations, Details (a "Blocked by" row and its own "Edit what it waits on" form), timeline, runs, GitHub trace (with the "Unpushed" row and the "Push `<sha>` to PR #N" control when the open PR lacks the delivered revision, ruling 134(c); disabled with the refusal named for a diverged remote), diagnostics | `comment`, `transition`, `update-goal`, `set-task-metadata`, `set-task-dependencies` (ruling 131: the full `blockedBy` list, empty clears and releases), `owner-take`, `owner-release`, `owner-assign`, `run-agent`, `run-operator`, `run-interrupt`, `release-agent`, `resolve-packet`, `apply-recommendation`, `dismiss-recommendation`, `deliver-review`, `accept-completion`, `force-accept`, `complete-merge`, `request-maintainer-decision`, `schedule-action`, `cancel-schedule`, `archive-task`, `restore-task` |
 | `/projects/:slug/tasks/:key/attachments/:file` | `task-attachment.ts` | member | raw bytes, whitelist renders inline, `?download=1` forces the save dialog (ruling 105) | |
 | `/org/settings` | `org.settings.tsx` | org admin | tabs: Users & access, GitHub connections, Sign-in & SSO, Agent resources, Controller settings; audit export card; concurrency | see §3 |
 | `/org/settings/audit-export` | `org.settings.audit-export.ts` | org admin | CSV/JSON download, 100 000-row cap | |
 | `/controller` | `controller.tsx` | user (CSRF checked as a result, not a throw) | instance controller conversation (per user) | `send` |
-| `/insights` | `insights.tsx` | org admin | run analytics: counts, cost, tokens, outcomes, backend quota readings | |
-| `/profile` | `profile.tsx` | user | identity, password, **Agent accounts** (ruling 127: connect Claude and Codex for yourself), GitHub identity disconnect, theme, motion, notification and timeline prefs | `identity`, `change-password`, `github-disconnect`, `set-motion`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
+| `/insights` | `insights.tsx` | org admin | run analytics: counts, cost, tokens, outcomes, backend quota readings (a refused or exhausted row names whose account, a reading names the hour of its reset, ruling 130(d)) | |
+| `/profile` | `profile.tsx` | user | identity, password, **Agent accounts** (ruling 127: connect Claude and Codex for yourself; ruling 130(d): each connected card shows the last refusal Viberr observed on YOUR account, never another person's), GitHub identity disconnect, theme, motion, notification and timeline prefs | `identity`, `change-password`, `github-disconnect`, `set-motion`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
 | `/notifications` | `notifications.tsx` | user | newest 200, auto-read on viewing the target | |
 | `/notifications/read` | `notifications.read.tsx` | user | fetcher target | `read-all` |
 | `/prefs/theme` | `prefs.theme.tsx` | user | theme cookie + user row | |
@@ -131,7 +131,7 @@ and [../operations/configuration.md §2](../operations/configuration.md).
 Every top-level surface and dialog carries `data-screen-label` so tests and agents can
 address it by name: `Login`, `Login · set new password`, `Home · project selection`,
 `Pinned projects`, `All projects`, `Archived projects`, `Store strip`, `New project
-modal`, `Board`, `Empty state`, `Review queue`, `Controller`, `Agents`, `Policy`,
+modal`, `Board` (a held card or list row leads its state stack with a NEUTRAL "blocked by …" chip whose title lists every entry with its state, ruling 131), `Empty state`, `Review queue`, `Controller`, `Agents`, `Policy`,
 `GitHub`, `Activity`, `Settings`, `Task detail · not found`, `Accept completion dialog`,
 `Archive task dialog`, `Release ownership dialog`, `Packet archive dialog`, `Packet
 discard dialog`, `Packet collision dialog`, `Attachment lightbox`, `Command palette`,
@@ -155,7 +155,8 @@ cannot rejoin the gap silently — the typecheck refuses it.)*
 ## 5. Copy rules that tests enforce
 
 - Readiness pills come from one table (`READINESS_DISPLAY` in `app/ui/pill.tsx`);
-  "accepted", "merged" and "agent working" are display states, never stored.
+  "accepted", "merged", "agent working" and "goal edit pending" (a decided `edit_goal`
+  packet, ruling 138) are display states, never stored.
 - Backend label is "Claude", never "Claude Code", except for the product itself (CLI
   login, transcript retention) (ruling 92).
 - The retired "primary specialist" vocabulary may not appear in seeded assets, skills,
@@ -175,7 +176,40 @@ cannot rejoin the gap silently — the typecheck refuses it.)*
   covers all three. *(Added 2026-09-02, pass 32 — A00-3: the docs described the panel
   as image thumbnails plus a lightbox, which was the pre-ruling-105 surface.)*
 - Timestamps render through `app/shared/dates/format.ts` only: zero-padded `HH:MM`,
-  `{day} · {time}`, relative forms.
+  `{day} · {time}`, relative forms. **The hydration contract** (pass 34, C6): a
+  timestamp's first pass depends on the timestamp alone — the `*UTC` formatters take no
+  `now` and render the absolute UTC day + UTC clock (`Jul 3 · 23:59`), identical on the
+  server and in any viewer's browser at any clock — and an effect swaps in the
+  viewer-local form after hydration (`LocalDayDotTime`, `LocalRelative`, `useHydrated`
+  in `app/ui/local-time.tsx`; the console's line clocks sit behind the same flag).
+  Calendar dates (`formatCalendarDate`, host-zone by construction) render through
+  `LocalCalendarDate` for the same reason: `YYYY-MM-DD (UTC)` first, the local calendar
+  date after hydration. Gated by `app/features/task-detail/hydration-determinism.test.tsx`
+  (a real `renderToString` → `hydrateRoot` of the task page across the UTC/Auckland zone
+  pair and the UTC-midnight clock pair, interrupted hydration included) and
+  `e2e/06-activity-hydration.spec.ts`. *(Added 2026-09-04, pass 34 — `formatDayDotTimeUTC`
+  used to sample `now` while documenting itself as the deterministic first pass, and four
+  surfaces rendered a host-zone calendar date unguarded.)*
+- The Activity **audit** column names a controller-driven write as the person **(via the
+  controller)** (ruling 99(b), pass 34 C5): both producers write one shared instrument
+  label and the column decodes it on both legs, so a row whose user no longer resolves
+  reads the same way. The ORG audit log keeps the RAW stored label on purpose: it is the
+  forensic surface. The actor filter still lists one option per person. The
+  runtime-session FOLD is unaffected (the instrument sits before the sentence), but a
+  folded run's collapsed summary names no actor, so the instrument on folded sessions is
+  readable only when the run is expanded.
+- The agents page's `update-profile` intent carries the `deploymentFingerprint` the
+  loader shipped, and a save composed against a record a concurrent write replaced is
+  refused with "This profile changed while the editor was open." (pass 34, B5).
+- **The collision confirm renders TWO shapes** (pass 34, C3/U34-8): with an unowned PR
+  recorded it names the stranger, its pull request and the stale branch ("Clear collision
+  & redeliver"); with none it describes THIS task's own remote branch and says no pull
+  request is closed ("Delete branch & redeliver"), because that is what
+  `resolveRemoteBranchCollision` actually does then. An OPEN pull request of
+  the task's own raises a warn row in both dialogs, before the button, and each says what
+  its OWN ceremony does with it: the archive still archives and keeps the branch (only the
+  deletion is refused), while the collision resolution deletes nothing at all under ruling
+  136(b) and pushes the delivered revision to that pull request.
 - Settings headings name their scope: "Instance settings" versus "<project> · settings"
   (ruling 32).
 - **No surface gates AUTHORING on the viewer's own agent account** (ruling 127): a run
@@ -194,3 +228,26 @@ cannot rejoin the gap silently — the typecheck refuses it.)*
   and the console explains a withheld one (see
   [../domain/task-lifecycle.md](../domain/task-lifecycle.md), the owner-is-who-a-run-bills
   bullet).
+- **Every Agents Live row states what a run is doing** (F34-5): an engagement's status is
+  read from its own `agent_runs` row first — "coordinating" (operator) and "working" name a
+  running row and are the only rows that pulse, "queued" a run admitted but not yet given a
+  slot — and only an engagement with no live row reads the task's `waiting` ("packet open"
+  with a packet, "waiting on a human", "on call"). The rule is the same for every
+  engagement kind; the mock's "anchored · on call" reviewer literal is gone. The stats row
+  counts runs in flight ("agent threads with a run in flight") and task-level waiting
+  ("agent threads on tasks waiting on a human · this project" — an engagement running on a
+  human-waiting task still counts there). Pinned by
+  `app/server/projections/agent-deployments.server.test.ts`, `agents-page.test.tsx` and
+  `retired-vocabulary.test.tsx`. *(Added 2026-09-04, pass 34 — B3: the projection derived
+  "working" from `waiting === "agent"`, so a deliverer whose run had finished read "working"
+  for as long as the operator's turns kept the task agent-waiting, while the reviewer that
+  was running read idle.)*
+- **The Eligible stages panel says what "N of M stages" gates** (ruling 133 clause c): under
+  the chips it always renders "Eligibility decides where this profile may be newly engaged.
+  Once it delivers a task it may be prompted on that task at any stage." and appends "A
+  supporting or reviewing engagement runs only at the stages above." only for a profile that
+  is actually scoped on this board — not for `spanAll`, an empty declaration, or a
+  declaration that resolves to nothing here (R14-1 rule 3), where naming "the stages above"
+  would name a scope the profile does not have. The profile editor's Eligible stages hint
+  reads "stages where this profile may be newly engaged". Pinned by `agents-page.test.tsx`.
+  *(Added 2026-09-04, pass 34 — A22.)*

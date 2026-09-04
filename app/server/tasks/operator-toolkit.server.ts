@@ -18,6 +18,7 @@ import {
   operatorOpenPacket,
   operatorResolvePacket,
   operatorPostComment,
+  operatorSetDependencies,
   operatorSetGoal,
   operatorSnapshot,
   operatorTransitionStage,
@@ -259,7 +260,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "get_task",
-      "Read the current task snapshot: stage (plus `previousStage`, where the task CAME from — arriving back from a later stage means rework for the profile that built it), readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can run, the allowed next stage transitions, any open decision packet, the review `pr` (P13-D-4 — `state: \"closed\"` means a human CLOSED it on GitHub without merging, i.e. the work was rejected out-of-band: do NOT recommend or accept completion, report it and ask what to do; `pr.revisionDrift` names commits pushed to the PR head AFTER the last reviewed revision, which ship UNREVIEWED and must be stated wherever you reason about that PR), and `operatorPolicy` + autonomy. TWO SCOPES, do not mix them: `operatorPolicy` is YOUR OWN capability policy (`operatorPolicy.scope: \"operator\"`, and read its `note`), while each agent's own grants are `deployedSpecialists[].capabilities` — never quote a row of yours as evidence about an agent. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions; browser = can drive a live browser; web = holds web search/fetch egress) — never by guessing from names.",
+      "Read the current task snapshot: stage (plus `previousStage`, where the task CAME from — arriving back from a later stage means rework for the profile that built it), readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can run, the allowed next stage transitions, any open decision packet, the review `pr` (P13-D-4 — `state: \"closed\"` means a human CLOSED it on GitHub without merging, i.e. the work was rejected out-of-band: do NOT recommend or accept completion, report it and ask what to do; `pr.revisionDrift` names commits pushed to the PR head AFTER the last reviewed revision, which ship UNREVIEWED and must be stated wherever you reason about that PR), and `operatorPolicy` + autonomy. TWO SCOPES, do not mix them: `operatorPolicy` is YOUR OWN capability policy (`operatorPolicy.scope: \"operator\"`, and read its `note`), while each agent's own grants are `deployedSpecialists[].capabilities` — never quote a row of yours as evidence about an agent. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions; browser = can drive a live browser; web = holds web search/fetch egress) — never by guessing from names. `deployedSpecialists[].eligibleForCurrentStage` says whether a profile may RUN at the task's current stage: its declared stages, or it is the engaged deliverer (`engagedAsDeliverer`), which runs at EVERY stage (ruling 133); declared stages alone decide where a profile may be NEWLY engaged.",
       {},
       async () =>
         textResult(
@@ -456,6 +457,12 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   .describe(
                     "archive_task only: ALSO delete the task's remote branch (discard the rejected work entirely).",
                   ),
+                goalDraft: z
+                  .string()
+                  .optional()
+                  .describe(
+                    "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Refused on any other kind.",
+                  ),
               }),
             )
             .describe("The 2-4 resolvable options; exactly one recommended."),
@@ -475,6 +482,9 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               if (o.backend) option.backend = o.backend;
               if (o.profileId) option.profileId = o.profileId;
               if (o.deleteBranch) option.deleteBranch = true;
+              // Ruling 138: the goal draft is prose bound for the goal editor;
+              // `operatorOpenPacket` caps it and refuses it off edit_goal.
+              if (o.goalDraft) option.goalDraft = prose(o.goalDraft);
               return option;
             }),
           };
@@ -508,6 +518,32 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
       ),
       "open_decision_packet",
     );
+    // Ruling 131(b) (pass 34): the wait on other work has its own tool and is
+    // never a packet. Same grant as packets: it is the hold packet's replacement.
+    add(
+      tool(
+        "set_dependencies",
+        "Record what this task WAITS ON: the FULL list of task keys (`JC-6`) and goal links (`goal-1 link 3`) in this project; an empty list clears the wait. Use it whenever the task cannot proceed until OTHER work lands, INSTEAD of a decision packet: Viberr then holds the task (readiness `blocked`, the wait shown on the board, the coordinating triggers refused at no cost) and RELEASES it itself the moment every entry is done, re-invoking you with the base branch to re-read. Every reference is checked against the store: it must exist, must not be this task, an archived task, or close a cycle (declared goal-link waits count); a refusal names the reference and the reason and is a fact about the task, not a policy block. Never open a hold packet about a wait on other work.",
+        {
+          blockedBy: z
+            .array(z.string())
+            .describe("The FULL list of what the task waits on; [] clears it."),
+          reason: z
+            .string()
+            .optional()
+            .describe("One line: why the task waits on these (recorded with the result)."),
+        },
+        async (args) => {
+          const input: Parameters<typeof operatorSetDependencies>[2] = {
+            ...base,
+            blockedBy: args.blockedBy,
+          };
+          if (args.reason) input.reason = prose(args.reason);
+          return resultText(await operatorSetDependencies(db, ctx, input, authority));
+        },
+      ),
+      "set_dependencies",
+    );
     add(
       tool(
         "resolve_decision_packet",
@@ -538,7 +574,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "run_agent",
-        "Select a deployed agent and put it to work on the task — YOU choose which agent fits what the CURRENT stage needs, weighing where the task just came from (a task back from Review is rework for the same builder; a task newly in Review wants a verdict-capable profile). Pick by each profile's `desc` and `capabilities` from get_task, never by name. Engages the profile if needed: it becomes the delivering agent when the task has none and it holds repo-write, otherwise a supporting agent (its own read-only checkout; a verdict-capable one gates acceptance). Pass a concrete `prompt` when handing off work — it is posted as your comment and becomes the run's directive; omit it only to re-run an agent against the task as it stands. `delivers: true` explicitly hands delivery to this profile (reassigning the current deliverer). Supervised → ONE run-agent recommendation card; full autonomy → runs directly.",
+        "Select a deployed agent and put it to work on the task — YOU choose which agent fits what the CURRENT stage needs, weighing where the task just came from (a task back from Review is rework for the same builder; a task newly in Review wants a verdict-capable profile). Pick by each profile's `desc` and `capabilities` from get_task, never by name. Engages the profile if needed: it becomes the delivering agent when the task has none and it holds repo-write, otherwise a supporting agent (its own read-only checkout; a verdict-capable one gates acceptance). Pass a concrete `prompt` when handing off work — it is posted as your comment and becomes the run's directive; omit it only to re-run an agent against the task as it stands. `delivers: true` explicitly hands delivery to this profile (reassigning the current deliverer). A hand-off is a choice about WHO should build, never a way around a stage: the engaged deliverer runs at EVERY stage (ruling 133), so rework, conflict resolution and follow-ups go back to it wherever the board shows the task; never hand delivery to another profile to get around a stage. Supervised → ONE run-agent recommendation card; full autonomy → runs directly.",
         {
           profileId: z
             .string()
@@ -582,7 +618,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "deliver_for_review",
-        "DELIVER the task: push the delivering agent's committed branch and open (or reuse) the review pull request. Delivery is YOUR decision, not a stage side-effect — deliver when the work is committed and plausible for review, weighing the task's REMAINING stages (a later stage like QA need not gate delivery for this task; offer early delivery when so). When unsure whether the branch should be pushed, open a decision packet instead. The result reports the push status and PR number honestly: a `push_conflict` means the remote branch diverged (a history conflict, NOT a credential problem) and no PR was opened — open a decision packet naming the branch with a `resolve_remote_collision` option (clears the stale remote branch and its recorded squatting PR, then re-delivers; never `discard_branch`, which destroys the task's LOCAL commits) so a human resolves it. Never instruct a specialist to push or open a PR; this tool is how delivery happens.",
+        "DELIVER the task: push the delivering agent's committed branch and open (or reuse) the review pull request. Delivery is YOUR decision, not a stage side-effect — deliver when the work is committed and plausible for review, weighing the task's REMAINING stages (a later stage like QA need not gate delivery for this task; offer early delivery when so). When unsure whether the branch should be pushed, open a decision packet instead. The result reports the push status and PR number honestly: a `push_conflict` means the remote branch diverged (a history conflict, NOT a credential problem) and no PR was opened — open a decision packet naming the branch with a `resolve_remote_collision` option (clears the stale remote branch and its recorded squatting PR, then re-delivers; never `discard_branch`, which destroys the task's LOCAL commits) so a human resolves it. Never instruct a specialist to push or open a PR; this tool is how delivery happens. " + "When the task's PR is already open and `get_task` shows `pr.unpushedRevision`, call `deliver_for_review`: it pushes the delivered revision to that PR. Pushing is never a person's job and never an agent's. A result of `up_to_date` means the PR already carries the workspace head; the tool never says nothing to deliver from a cached PR state.",
         {
           reason: z
             .string()
@@ -623,7 +659,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "transition_stage",
-        "Move the task to a stage in get_task: FORWARD to any stage in `nextStages`, or BACKWARD to any stage in `reworkStages` to send failed work back. Give a short reason. `reworkStages` is populated only while validation is failing, and a move to one of them is REWORK ROUTING: you perform it directly, no human and no recommendation card, even under supervised autonomy, because the workflow graph is forward-only and a rejected task has to reach the developer somehow. That is the move to make when a reviewer requests changes and the delivering profile does not work the review stage: send the task back to its work stage, then summon the specialist. Do NOT ask a human to move it for you while `reworkStages` offers it. Do NOT move to the final Done stage here — use accept_completion. Forward moves: supervised → recommendation card; full autonomy → moves directly.",
+        "Move the task to a stage in get_task: FORWARD to any stage in `nextStages`, or BACKWARD to any stage in `reworkStages` to send failed work back. Give a short reason. `reworkStages` is populated only while validation is failing, and a move to one of them is REWORK ROUTING: you perform it directly, no human and no recommendation card, even under supervised autonomy, because the workflow graph is forward-only and a rejected task has to reach the developer somehow. That move is a WORKFLOW choice about where the board should show the work (a reviewer requested changes, so the task belongs back at its work stage), never a workaround for a profile's stages: the delivering agent runs at EVERY stage (ruling 133), so re-prompt it in place or move the task first, as the board's truth requires, then summon the specialist. Do NOT ask a human to move it for you while `reworkStages` offers it. Do NOT move to the final Done stage here — use accept_completion. Forward moves: supervised → recommendation card; full autonomy → moves directly.",
         {
           toStageId: z.string().describe("The target stage id (must be a declared next stage)."),
           reason: z.string().optional().describe("Why advance now — shown on the recommendation card."),

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PrCacheState } from "./pr-linker.server";
 import {
   decidePrAdoption,
+  prAdoptionRefusalNote,
   type PrAdoptionRefusal,
 } from "./pr-adoption.server";
 
@@ -205,6 +206,64 @@ describe("decidePrAdoption refusal-arm precedence", () => {
           revisionHeadSha: c.rev,
         }),
       ).toEqual({ adopt: false, refusal: c.refusal });
+    }
+  });
+});
+
+describe("prAdoptionRefusalNote (pass 34, U34-6): names both collision origins, asserts neither", () => {
+  const note = prAdoptionRefusalNote({
+    refusal: "head_mismatch",
+    taskKey: "JC-8",
+    branch: "jc-8",
+    prNumber: 41,
+    revisionHeadSha: REVISION,
+  });
+
+  it("keeps the byte-identical opener the reconciler, the wake, PR open and their tests key on", () => {
+    expect(
+      note.startsWith("**Branch name collision:** GitHub already has PR #41 on branch `jc-8`, but it is NOT JC-8's review PR: "),
+    ).toBe(true);
+  });
+
+  it("explains the post-allocation unowned PR AND the pre-ruling-122 reused key, and commits to neither", () => {
+    // Origin one (ruling 122(d)): an unowned OPEN PR that appeared on the
+    // branch AFTER Viberr allocated the name. JC-8 hit exactly this at
+    // 10:17:52Z and read a note blaming a reused task key it never had.
+    expect(note).toMatch(/opened on `jc-8` after Viberr allocated the name to JC-8/);
+    // Origin two: a branch recorded before ruling 122 under a reused task key.
+    expect(note).toMatch(/JC-8's branch was recorded before ruling 122 under a task key/);
+    expect(note).toMatch(/keys restart at 1/);
+    // Neither is asserted: the note says it cannot tell, and the old causal
+    // paragraph ("This happens when a task key is reused … so this only
+    // reaches a task whose branch was recorded before that") is gone.
+    // CANARY: restore that paragraph and every line below fails.
+    expect(note).toMatch(/Viberr cannot tell which from here/);
+    expect(note).not.toMatch(/This happens when/);
+    expect(note).not.toMatch(/only reaches a task/);
+    expect(note).not.toMatch(/suffixed name instead/);
+  });
+
+  it("still carries the refusal cause and the one remedy", () => {
+    expect(note).toContain(`its head is not JC-8's delivered revision (${REVISION.slice(0, 7)})`);
+    expect(note).toContain("`resolve_remote_collision`");
+    expect(note).toContain("deletes the stale remote branch `jc-8`");
+  });
+
+  it("carries no em or en dash on any refusal arm (the copy-ban dash gate does not walk app/server)", () => {
+    // copy-ban.test.ts gates app/features, app/routes, app/ui and the seed
+    // assets and leaves app/server ungated. This note is written by app/server
+    // and rendered verbatim on the task timeline, so its dash guarantee lives
+    // here, where a canary can reach it.
+    const refusals: PrAdoptionRefusal[] = ["merged", "closed", "no_revision", "head_unknown", "head_mismatch"];
+    for (const refusal of refusals) {
+      const text = prAdoptionRefusalNote({
+        refusal,
+        taskKey: "JC-8",
+        branch: "jc-8",
+        prNumber: 41,
+        revisionHeadSha: REVISION,
+      });
+      expect(text, refusal).not.toMatch(/[–—]/);
     }
   });
 });

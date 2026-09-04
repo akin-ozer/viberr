@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { describeRevisionDrift } from "~/shared/revision-drift";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -6,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import {
+  updateTaskFile, readTaskFile } from "~/server/files/task-writer.server";
 import type {
   AgentDeployment,
   AgentDeploymentDefinition,
@@ -43,6 +45,8 @@ import {
   operatorPlanToolsFor,
   resetOperatorLeasesForTests,
   runOperator,
+  authoredPacketOptions,
+  operatorPlanSchemaFor,
 } from "./operator-run.server";
 import * as operatorPrompts from "./operator-run.server";
 import { readDefaultBranchFile } from "~/server/tasks/operator-repo-read.server";
@@ -63,7 +67,9 @@ import {
   createTestDbContext,
   type TestDbContext,
 } from "../../../test-support/test-db";
+import { createLocalOrigin, withLocalGithub } from "../../../test-support/git-origin";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { emptyRunFailureFacts, type RunFailureFacts } from "~/shared/run-failure";
 
 interface PendingRun {
   spec: RunSpec;
@@ -77,6 +83,28 @@ class ControlledAdapter implements RuntimeAdapter {
   start(spec: RunSpec, callbacks: RunCallbacks): RunHandle {
     this.pending = { spec, callbacks };
     return { runId: spec.runId, interrupt() {} };
+  }
+
+  /** Ruling 130(a): a run that died with a CLASSIFIED failure ends on an
+   *  `err` line carrying the adapter's typed facts; the packet builder reads
+   *  that record, never a second regex over the text. */
+  fail(store: TestStore, text: string, facts: RunFailureFacts): void {
+    const pending = this.pending;
+    if (!pending) throw new Error("No Codex operator run is pending.");
+    const tag = `run·error·${facts.kind}`;
+    insertRunLine(store.db, {
+      runId: pending.spec.runId,
+      seq: 0,
+      occurredAt: new Date().toISOString(),
+      raw: JSON.stringify({ ev: "err", tag, text }),
+      display: { t: "12:00:00", ev: "err", tag, text, failure: facts },
+    });
+    pending.callbacks.onExit({
+      outcome: "error",
+      effectiveBackend: "codex",
+      sessionId: "codex-operator-test",
+    });
+    this.pending = null;
   }
 
   finish(store: TestStore, text: string, outcome: RunExit["outcome"]): void {
@@ -228,6 +256,40 @@ describe("Codex structured operator completion", () => {
     });
     expect(adapter.pending).not.toBeNull();
   }
+
+  it("ruling 131(b): the Codex set_dependencies step executes; a null list is a MALFORMED step narrated as state, never policy", async () => {
+    // Canary: delete the `set_dependencies` case from the executor switch
+    // (the step falls to the default arm and the wait never lands).
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const step = (blockedBy: string[] | null) => ({
+      tool: "set_dependencies",
+      profileId: null,
+      delivers: null,
+      toStageId: null,
+      packetType: null,
+      text: null,
+      reason: "the parser lands first",
+      packetOptions: null,
+      blockedBy,
+    });
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({ reasoning: "Wait for VIB-2.", actions: [step(["VIB-2"]), step(null)] }),
+      "finished",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(task().frontmatter.blockedBy).toEqual(["VIB-2"]);
+    expect(task().packet).toBeNull();
+    // The malformed sibling is narrated through the STATE arm.
+    const narration = task().timeline.find((e) => e.text.includes("The operator's plan was not carried out in full"));
+    expect(narration).toBeDefined();
+    expect(narration!.type).toBe("note");
+    expect(narration!.text).toContain("did not apply to the task's current state");
+    expect(narration!.text).toContain("`set_dependencies` — plan step omitted the list of what the task waits on");
+    expect(narration!.text).not.toContain("refused by its capability policy");
+  });
 
   it("narrates plan actions its policy refused, instead of a silent no-op (P13-RT-03)", async () => {
     // The finding's scenario: a project withholds `generate-packets` and
@@ -1011,8 +1073,10 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
       authority({ "deliver-review-pr": "off", "dispatch-agents": "off" }),
     );
     // Dynamic-dispatch rework: engage_agent + prompt_agent collapsed into ONE
-    // run_agent, so the fallback list shrank from 10 to 8.
-    expect(tools).toHaveLength(8);
+    // run_agent, so the fallback list shrank from 10 to 8; ruling 131 added
+    // `set_dependencies` (in-Viberr, no outside effect), so it is 9.
+    expect(tools).toHaveLength(9);
+    expect(tools).toContain("set_dependencies");
     expect(tools).not.toContain("deliver_for_review");
     expect(tools).toContain("flag_context_conflict");
   });
@@ -1057,6 +1121,33 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
       ),
     ).not.toContain("deliver_for_review");
   });
+
+  // Ruling 138 (pass 34, U34-10): goalDraft rides the plan and its schema requires the key.
+  it("authoredPacketOptions carries a trimmed goalDraft, and the plan schema requires the key", () => {
+    // Canary: remove the carry in `authoredPacketOptions`, or drop "goalDraft"
+    // from the option item's `required`.
+    const carried = authoredPacketOptions([
+      { kind: "edit_goal", title: "Ship the export", detail: null, recommended: true, goalDraft: " Deliver a CSV export. " },
+      { kind: "hold_runtime_debug", title: "Hold", detail: null, recommended: false, goalDraft: null },
+    ]);
+    expect(carried?.[0]?.goalDraft).toBe("Deliver a CSV export.");
+    expect(carried?.[1]?.goalDraft).toBeUndefined();
+
+    const schema = operatorPlanSchemaFor(
+      authority({
+        "append-typed-events": "direct",
+        "generate-packets": "direct",
+        "stage-transitions": "direct",
+        "dispatch-agents": "direct",
+        "completion-for-acceptance": "human",
+      }),
+    );
+    const item = schema.properties.actions.items.properties.packetOptions.items;
+    expect(item.required).toContain("goalDraft");
+    expect(item.properties.goalDraft.type).toEqual(["string", "null"]);
+    expect(item.properties.goalDraft.description).toContain("written AS a goal");
+  });
+
 });
 
 describe("pr-diverged turn instruction (both backends)", () => {
@@ -1070,6 +1161,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       priority: "normal",
       labels: [],
       dueDate: null,
+      blockedBy: [],
       stage: "review",
       stageName: "Review",
       previousStage: null,
@@ -1089,7 +1181,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       openPacket: false,
       packet: null,
       recentTimeline: [],
-      pr: { number: 318, state: "closed", title: "PR", revisionDrift: null },
+      pr: { number: 318, state: "closed", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" },
       branch: "vib-9",
       liveRuns: [],
       autonomy: "supervised",
@@ -1111,7 +1203,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
 
   it("merged out-of-band → acceptance is the next state, no packet demanded", () => {
     const prompt = buildOperatorTurnPrompt(
-      snapshot({ pr: { number: 318, state: "merged", title: "PR", revisionDrift: null } }),
+      snapshot({ pr: { number: 318, state: "merged", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" } }),
       "pr-diverged",
     );
     expect(prompt).toContain("merged OUT-OF-BAND");
@@ -1121,7 +1213,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
 
   it("PR live again → withdraw the moot packet and continue", () => {
     const prompt = buildOperatorTurnPrompt(
-      snapshot({ pr: { number: 318, state: "review", title: "PR", revisionDrift: null } }),
+      snapshot({ pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" } }),
       "pr-diverged",
     );
     expect(prompt).toContain("live again");
@@ -1159,14 +1251,37 @@ describe("pr-diverged turn instruction (both backends)", () => {
           number: 318,
           state,
           title: "PR",
-          revisionDrift: { aheadBy: 2, headSha: "cab10477beef1234" },
+          revisionDrift: { headSha: "cab10477beef1234", authored: 2, baseRefresh: null },
+          revisionDriftSentence: "2 authored commits since review merge unreviewed",
+          headSha: null,
+          unpushedRevision: null,
+          unpushedRevisionSentence: "",
         },
       });
+
+    it("ruling 132: a base refresh is named as one, and never as unreviewed work", () => {
+      // Canary: restore the blanket UNREVIEWED paragraph for any non-zero total.
+      const record = { headSha: "cab10477beef1234", authored: 0, baseRefresh: { merges: 1, commits: 4 } };
+      const prompt = buildOperatorTurnPrompt(
+        snapshot({
+          pr: {
+            number: 318, state: "closed", title: "PR",
+            revisionDrift: record,
+            revisionDriftSentence: describeRevisionDrift(record).sentence,
+            headSha: null, unpushedRevision: null, unpushedRevisionSentence: "",
+          },
+        }),
+        "pr-diverged",
+      );
+      expect(prompt).toContain(describeRevisionDrift(record).sentence);
+      expect(prompt).toContain("base refresh Viberr itself merged");
+      expect(prompt).not.toContain("UNREVIEWED");
+    });
 
     it("names the unreviewed commits and demands them as a packet observation", () => {
       // Canary: drop `drift` from the closed-PR arm and every line fails.
       const prompt = buildOperatorTurnPrompt(drifted(), "pr-diverged");
-      expect(prompt).toContain("2 commits");
+      expect(prompt).toContain("2 authored commits");
       expect(prompt).toContain("cab10477beef");
       expect(prompt).toContain("UNREVIEWED");
       expect(prompt).toContain("Unreviewed commits");
@@ -1192,15 +1307,28 @@ describe("pr-diverged turn instruction (both backends)", () => {
               number: 318,
               state: "closed",
               title: "PR",
-              revisionDrift: { aheadBy: 1, headSha: "cab10477beef1234" },
+              revisionDrift: { headSha: "cab10477beef1234", authored: 1, baseRefresh: null },
+              revisionDriftSentence: "1 authored commit since review merges unreviewed",
+              headSha: null,
+              unpushedRevision: null,
+              unpushedRevisionSentence: "",
             },
           }),
           "pr-diverged",
         ),
-      ).toContain("1 commit");
+      ).toContain("1 authored commit");
       expect(buildCodexOperatorPrompt(drifted(), "pr-diverged")).toContain("UNREVIEWED");
     });
   });
+
+  // Ruling 138: the open_packet paragraph says what becomes the goal editor's draft.
+  it("the open_packet paragraph tells the operator what becomes the draft, on a real trigger", () => {
+    // Canary: remove the sentence.
+    const prompt = operatorPrompts.buildCodexOperatorPrompt(snapshot(), "manual");
+    expect(prompt).toContain("give it `goalDraft`: the proposed goal text itself, written AS a goal");
+    expect(prompt).toContain("never phrase them as an instruction to the human");
+  });
+
 });
 
 /* ------- stranded-operator backstop (P14 follow-up, live-caught) ------- */
@@ -1218,6 +1346,7 @@ describe("stranded auto-stage resume", () => {
       stage: "triage",
       packet: null,
       recommendations: [],
+      blockedBy: [],
     };
     const { operatorLeftTaskStranded } = operatorPrompts;
     expect(operatorLeftTaskStranded(base, wf)).toBe(true);
@@ -1227,6 +1356,9 @@ describe("stranded auto-stage resume", () => {
     expect(operatorLeftTaskStranded({ ...base, archived: true }, wf)).toBe(false);
     expect(operatorLeftTaskStranded({ ...base, packet: { title: "?" } }, wf)).toBe(false);
     expect(operatorLeftTaskStranded({ ...base, recommendations: [{}] }, wf)).toBe(false);
+    // Ruling 131(d): a task waiting on other work is a RECORDED hold, never a
+    // stranding. Canary: delete the `blockedBy` early return.
+    expect(operatorLeftTaskStranded({ ...base, blockedBy: ["JC-3"] }, wf)).toBe(false);
   });
 
   it("goal-drafting is labeled SETUP in the turn instruction — the live stranding's exact misreading", () => {
@@ -1238,6 +1370,7 @@ describe("stranded auto-stage resume", () => {
         priority: "normal",
         labels: [],
         dueDate: null,
+        blockedBy: [],
         stage: "triage",
         stageName: "Triage",
         previousStage: null,
@@ -1593,6 +1726,7 @@ describe("transition trigger carries from → to and who moved it", () => {
     priority: "normal",
     labels: [],
     dueDate: null,
+    blockedBy: [],
     stage: "impl",
     stageName: "In Progress",
     previousStage: null,
@@ -1682,6 +1816,7 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     priority: "normal",
     labels: [],
     dueDate: null,
+    blockedBy: [],
     stage: "triage",
     stageName: "Triage",
     previousStage: null,
@@ -1784,6 +1919,114 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     ]) {
       expect(prompt).toContain("grantable on an agent profile");
     }
+  });
+
+  it("ruling 136(a): the human's note and the server's outcome render as different speakers", () => {
+    // Canary: embed the outcome in `resolvedOption.note` and the quoted note
+    // carries a sentence the person never wrote.
+    const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Ship it." });
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(atWork, "packet-resolved", undefined, undefined, undefined, undefined, undefined, {
+      kind: "resolve_remote_collision",
+      title: "Delete the stale remote branch, then redeliver",
+      note: "please get it onto the PR",
+      serverOutcome: { kind: "resolve_remote_collision", outcome: "own_pr_pushed", prNumber: 5 },
+    });
+    expect(prompt).toContain('the human added: "please get it onto the PR"');
+    expect(prompt).toContain("Viberr then performed that option's own steps and reports, in its own words and not the person's: there was no collision to clear (PR #5 is this task's own review PR); the delivered revision was pushed to it and the block is lifted.");
+    const quoted = /the human added: "([^"]*)"/.exec(prompt)![1]!;
+    expect(quoted).not.toContain("no collision");
+    const withoutNote = operatorPrompts.buildOperatorTurnPrompt(atWork, "packet-resolved", undefined, undefined, undefined, undefined, undefined, {
+      kind: "resolve_remote_collision",
+      title: "Delete the stale remote branch, then redeliver",
+      serverOutcome: { kind: "resolve_remote_collision", outcome: "refused", reason: "GitHub refused the deletion (boom)." },
+    });
+    expect(withoutNote).not.toContain("the human added");
+    expect(withoutNote).toContain("the collision was not cleared (GitHub refused the deletion (boom).); nothing was re-delivered and the block stays.");
+  });
+
+  it("ruling 131(d): a held prompt REPLACES the stage rule: no 'NEVER end your turn', no hold-packet exit, and it names set_dependencies", () => {
+    // Canary: append the held doctrine to the ordinary tail instead of
+    // returning it (both orders then appear in one prompt).
+    const held = snap({
+      stage: "impl",
+      stageName: "In Progress",
+      goal: "Ship it.",
+      blockedBy: [
+        { ref: "goal-1 link 2", label: "goal-1 link 2 (JC-3)", state: "open", taskKey: "JC-3", goalId: "goal-1" },
+        { ref: "JC-6", label: "JC-6", state: "failed", taskKey: "JC-6", goalId: null },
+      ],
+    });
+    for (const prompt of [
+      operatorPrompts.buildOperatorTurnPrompt(held, "manual"),
+      operatorPrompts.buildOperatorTurnPrompt(held, "agent-reply", undefined, "I finished.", undefined, undefined, undefined, undefined, true),
+      operatorPrompts.buildCodexOperatorPrompt(held, "manual"),
+    ]) {
+      expect(prompt).toContain("This task WAITS ON OTHER WORK and Viberr is holding it: goal-1 link 2 (JC-3) (open), JC-6 (archived, can never complete).");
+      expect(prompt).toContain("`set_dependencies`");
+      expect(prompt).toContain("do NOT open a decision packet about the wait");
+      expect(prompt).not.toContain("NEVER end your turn");
+      expect(prompt).not.toContain("asking the human to confirm the hold");
+      expect(prompt).not.toContain("You are at stage");
+    }
+    // A human's direct question still gets the answer branch, and the hold
+    // still binds what the answer may do.
+    const asked = operatorPrompts.buildOperatorTurnPrompt(held, "manual", "Why is this waiting?", undefined, "Arda");
+    expect(asked).toContain("addressed you directly");
+    expect(asked).toContain("This task waits on other work (goal-1 link 2 (JC-3) (open), JC-6 (archived, can never complete)) and Viberr is holding it: answer them");
+    expect(asked).not.toContain("NEVER end your turn");
+    // Every waking trigger, not only `manual`, gets the held doctrine.
+    for (const trigger of ["goal-updated", "pr-diverged", "packet-resolved", "delivered", "transition", "scheduled"] as const) {
+      const prompt = operatorPrompts.buildOperatorTurnPrompt(held, trigger);
+      expect(prompt, trigger).toContain("This task WAITS ON OTHER WORK");
+      expect(prompt, trigger).not.toContain("NEVER end your turn");
+    }
+  });
+
+  it("ruling 131(e): the dependencies-released doctrine names the entries, the base re-read and the moot packet, then continues with the stage rule", () => {
+    // Canary: return "" from `dependenciesInstruction`.
+    const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Ship it.", openPacket: true });
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(atWork, "dependencies-released", undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+      entries: ["goal-1 link 2", "goal-1 link 3"],
+      clearedBy: null,
+    });
+    expect(prompt).toContain("The work this task waited on has landed: goal-1 link 2, goal-1 link 3 is done.");
+    expect(prompt).toContain("The base branch has CHANGED since the hold");
+    expect(prompt).toContain("it is now MOOT: `resolve_decision_packet` it first");
+    expect(prompt).toContain("You are at stage \"In Progress\"");
+    const byHand = operatorPrompts.buildOperatorTurnPrompt(atWork, "dependencies-released", undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+      entries: ["JC-3"],
+      clearedBy: "arda@viberr.dev",
+    });
+    expect(byHand).toContain("arda@viberr.dev cleared the wait on JC-3");
+  });
+
+  it("ruling 133 (A19): the agent-reply doctrine re-prompts the deliverer in place on BOTH builders", () => {
+    // Canary: restore either builder's old rework sentence.
+    const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Ship it." });
+    for (const prompt of [
+      operatorPrompts.buildOperatorTurnPrompt(atWork, "manual"),
+      operatorPrompts.buildCodexOperatorPrompt(atWork, "manual"),
+    ]) {
+      expect(prompt).toContain("The engaged deliverer runs at EVERY stage (ruling 133): re-prompt it in place, never hand delivery to another profile to get around a stage");
+      expect(prompt).toContain("rework for the profile that built it (which runs at every stage, ruling 133)");
+    }
+  });
+
+  it("ruling 130(c): the packet-resolved instruction bolds the decided title and claims no policy or credential fix", () => {
+    // Live (JC-6): the old parenthetical "(a policy/credential fix means
+    // re-check the work that was blocked)" plus a record saying "policy /
+    // credential updated" had the operator tell the specialist a GitHub-scope
+    // block was lifted when nothing had changed.
+    // Canary: restore that parenthetical.
+    const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Ship it." });
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(atWork, "packet-resolved", undefined, undefined, undefined, undefined, undefined, {
+      kind: "block_on_policy",
+      title: "Re-run the operator now",
+    });
+    expect(prompt).toContain("**Re-run the operator now**");
+    expect(prompt).toContain("Assume NOTHING about credentials or policy beyond what the decision itself says");
+    expect(prompt).toContain("stays in force until its own record says otherwise");
+    expect(prompt).not.toContain("policy/credential fix");
   });
 
   it("F15-14: the gate is stage-scoped — a work stage never carries it", () => {
@@ -2457,6 +2700,183 @@ describe("runOperator — authority, ordering, orphans", () => {
   });
 
   /**
+   * Ruling 130(b)/(c) (pass 34, F34-12 / F34-1): the operator's OWN failure
+   * packet names the cause Viberr classified and the credential principal's
+   * own remedy, and its recommended option asserts only what the human says.
+   * Live, a five-hour session limit and a 403 `oauth_org_not_allowed` both
+   * produced "Retry on the other backend, fix the credential, or redirect the
+   * task" and recommended "I've updated the policy / credential".
+   *
+   * Canaries: (1) restore `options: defaultPacketOptions("blocked")` in
+   * `escalateFailedOperatorRun` and the quota/auth cases fail on the
+   * recommended title and `ev`; (2) restore the generic body sentence and
+   * every case fails on the body.
+   */
+  describe("ruling 131(d): a held task refuses the coordinating triggers at no cost", () => {
+    const seedHeld = (over: Partial<Parameters<typeof baseTaskFrontmatter>[1]> = {}): void => {
+      writeTask(store5.dataRoot, store5.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          readiness: "ready",
+          waiting: "none",
+          ownerUserId: store5.users.arda.id,
+          blockedBy: ["VIB-2"],
+          ...over,
+        }),
+        goal: "Ship the parser.",
+      });
+      writeTask(store5.dataRoot, store5.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
+      rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+    };
+
+    it("create, transition and scheduled are refused `blocked-by` with no run row; reactive triggers still drive", async () => {
+      // Canary: remove "transition" from HELD_TRIGGERS.
+      deployAgents([operatorAgent()]);
+      seedHeld();
+      for (const trigger of ["create", "transition", "scheduled"] as const) {
+        const result = await drive({ trigger });
+        expect(result.refused, trigger).toBe("blocked-by");
+        expect(result.runId).toBeNull();
+        expect(adapter5.pending).toBeNull();
+      }
+      expect(operatorRuns()).toHaveLength(0);
+      const reactive = await drive({ trigger: "manual" });
+      expect(reactive.refused).toBeUndefined();
+      expect(adapter5.pending).not.toBeNull();
+    });
+
+    it("a transition drained off the lease queue and refused settles waiting to `none`, never `agent`", async () => {
+      // Canary: delete the settle from the `blocked-by` branch (waiting
+      // stays `agent` after the drained refusal).
+      deployAgents([operatorAgent()]);
+      seedHeld({ blockedBy: [] });
+      // A drive holds the lease; a transition queues behind it; THEN the task
+      // becomes held (the operator's own `set_dependencies` mid-drive is the
+      // live shape). The drained trigger is refused, and its settle is the
+      // only thing that turns `agent` back off.
+      await drive({ trigger: "manual" });
+      expect(adapter5.pending).not.toBeNull();
+      const queued = await drive({ trigger: "transition" });
+      expect(queued.queued).toBe(true);
+      expect(task().frontmatter.waiting).toBe("agent");
+      await updateTaskFile({ projectSlug: store5.slug, taskKey: "VIB-1", dataRoot: store5.dataRoot }, (parsed) => {
+        parsed.frontmatter.blockedBy = ["VIB-2"];
+      });
+      rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+      adapter5.finish(store5, JSON.stringify({ reasoning: "held", actions: [] }), "finished");
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(1);
+        expect(task().frontmatter.waiting).toBe("none");
+      });
+      expect(task().frontmatter.blockedBy).toEqual(["VIB-2"]);
+    });
+  });
+
+  describe("ruling 130: a failed operator run's packet", () => {
+    const RESET = "2026-09-07T11:50:00.000Z";
+    const RESET_LABEL = "Sep 7, 2026 · 11:50 UTC";
+    const failed = async (text: string, facts: RunFailureFacts) => {
+      deployAgents([operatorAgent()]);
+      seed("impl");
+      await drive({ trigger: "manual", backend: "claude" });
+      expect(adapter5.pending).not.toBeNull();
+      adapter5.fail(store5, text, facts);
+      await eventually(() => expect(task().packet).not.toBeNull());
+      return task().packet!;
+    };
+
+    it("quota: names the spent window, the reset instant, the owner and Profile → Agent accounts; the recommended option asserts the window/account, never 'policy / credential'", async () => {
+      const packet = await failed("Claude refused the run: usage limit reached.", {
+        ...emptyRunFailureFacts("quota"),
+        windowRejected: true,
+        window: "five_hour",
+        resetsAt: RESET,
+        apiErrorStatus: 429,
+      });
+      expect(packet.title).toBe("Operator run failed: pick a recovery path");
+      expect(packet.body).toContain(
+        `${store5.users.arda.name}'s five-hour usage window is spent and reopens at ${RESET_LABEL}`,
+      );
+      expect(packet.body).toContain("No coordination was performed.");
+      expect(packet.body).toContain("Profile → Agent accounts");
+      expect(packet.body).not.toMatch(/retry on the other backend|fix the credential|redirect the task/i);
+      expect(packet.observations.some((o) => o.k === "Window reopens" && o.v === RESET_LABEL)).toBe(true);
+      const rec = packet.options.find((o) => o.rec)!;
+      expect(rec.kind).toBe("block_on_policy");
+      expect(rec.t).toBe(`The usage window has reset (${RESET_LABEL}), or I switched the Claude account: re-run`);
+      expect(rec.ev).toContain("the usage window has reset or the account was switched");
+      expect(rec.ev).not.toContain("policy / credential updated");
+      for (const o of packet.options) expect(o.t).not.toMatch(/updated the policy|[–—]/);
+    });
+
+    it("names the backend the run was LAUNCHED on, not a per-call override's default (pass 34 review)", async () => {
+      // Canary: `const backend = input.backend ?? "claude"` — every machine
+      // trigger (which carries no override) then names Claude on a Codex
+      // operator, in the packet body and in its options.
+      deployAgents([operatorAgent({ backends: ["codex"], model: "gpt-5.6-terra" })]);
+      seed("impl");
+      await drive({ trigger: "transition" });
+      expect(adapter5.pending).not.toBeNull();
+      adapter5.fail(store5, "Codex refused the run: usage limit reached.", {
+        ...emptyRunFailureFacts("quota"),
+        windowRejected: true,
+        window: "five_hour",
+        resetsAt: RESET,
+      });
+      await eventually(() => expect(task().packet).not.toBeNull());
+      const packet = task().packet!;
+      const rendered = [packet.body, ...packet.options.map((o) => `${o.t} ${o.d ?? ""} ${o.ev ?? ""}`)].join("\n");
+      expect(rendered).toContain("Codex");
+      expect(rendered).not.toContain("Claude");
+    });
+
+    it("auth: names the org restriction and the account remedy; recommends 'I connected a different account or an API key'", async () => {
+      const packet = await failed("Claude refused the run: the account was rejected.", {
+        ...emptyRunFailureFacts("auth"),
+        apiError: "oauth_org_not_allowed",
+        apiErrorStatus: 403,
+        terminalReason: "api_error",
+      });
+      expect(packet.body).toContain("the account's organization does not allow Claude Code");
+      expect(packet.body).toContain("Retrying with the same account fails the same way");
+      expect(packet.body).toContain("Profile → Agent accounts");
+      expect(packet.body).not.toMatch(/retry on the other backend|fix the credential/i);
+      const rec = packet.options.find((o) => o.rec)!;
+      expect(rec.kind).toBe("block_on_policy");
+      expect(rec.t).toBe("I connected a different Claude account or an API key on Profile → Agent accounts: re-run");
+      expect(rec.ev).toContain("No project policy was changed");
+    });
+
+    it("unknown: a plain re-run is recommended and its record claims no credential change", async () => {
+      const packet = await failed("provider exploded", emptyRunFailureFacts("unknown"));
+      expect(packet.body).toContain("The operator run did not complete: provider exploded.");
+      expect(packet.body).toContain("read the run's console for the cause");
+      expect(packet.body).not.toMatch(/fix the credential|retry on the other backend|\.\./i);
+      const rec = packet.options.find((o) => o.rec)!;
+      expect(rec.t).toBe("Re-run the operator now");
+      expect(rec.ev).toBe("**Decision:** re-run the operator. No policy or credential was changed.");
+      expect(packet.options.map((o) => o.kind)).toEqual(["block_on_policy", "redirect", "hold_runtime_debug"]);
+    });
+
+    it("the Codex no-plan packet's stock re-run option claims no credential change", async () => {
+      // Canary: restore the "I've updated the policy / credential" title in
+      // `defaultPacketOptions("blocked")`.
+      deployAgents([operatorAgent({ backends: ["codex"], model: defaultModelFor("codex") })]);
+      seed("impl");
+      await drive({ trigger: "manual", backend: "codex" });
+      expect(adapter5.pending).not.toBeNull();
+      adapter5.finish(store5, "not a plan", "finished");
+      await eventually(() => expect(task().packet).not.toBeNull());
+      const packet = task().packet!;
+      expect(packet.title).toBe("Operator turn produced no actionable plan");
+      const rec = packet.options.find((o) => o.rec)!;
+      expect(rec.t).toBe("Re-run the operator now");
+      expect(rec.ev).toBe("**Decision:** re-run the operator. No policy or credential was changed.");
+      for (const o of packet.options) expect(o.t).not.toMatch(/policy \/ credential|[–—]/);
+    });
+  });
+
+  /**
    * F19-20 / FR39 — "a scheduled re-run never fires on a terminal stage",
    * enforced where the run STARTS.
    *
@@ -2534,6 +2954,90 @@ describe("runOperator — authority, ordering, orphans", () => {
     expect(result.queued).toBe(false);
     expect(adapter5.pending).toBeNull();
     expect(operatorRuns()).toHaveLength(0);
+  });
+
+  it("ruling 141: a SCHEDULED run is refused like a manual one while a decision packet is open", async () => {
+    // Canary: restore the manual-only guard (`=== "manual"`).
+    deployAgents([operatorAgent()]);
+    seedWithOpenPacket();
+
+    const result = await drive({ trigger: "scheduled" });
+
+    expect(result.refused).toBe("open-packet");
+    expect(result.runId).toBeNull();
+    expect(result.queued).toBe(false);
+    expect(adapter5.pending).toBeNull();
+    expect(operatorRuns()).toHaveLength(0);
+  });
+
+  it("ruling 141: a queued SCHEDULED occurrence refused at the front of the lease queue says so on the task and writes its final row", async () => {
+    // Canary: restore the bare `.catch(...)` at the drain site (drop the
+    // `.then` that chains on the result) — the refusal exists only in the log.
+    deployAgents([operatorAgent()]);
+    seed("impl");
+    await drive({ trigger: "manual" });
+    expect(adapter5.pending).not.toBeNull();
+    const queued = await drive({ trigger: "scheduled", scheduleId: "sch_1" });
+    expect(queued.queued).toBe(true);
+    // The live drive opens a packet before the queued turn gets its chance.
+    await updateTaskFile({ projectSlug: store5.slug, taskKey: "VIB-1", dataRoot: store5.dataRoot }, (parsed) => {
+      parsed.packet = {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Branch conflicts with main",
+        body: "",
+        observations: [],
+        options: [{ kind: "redirect", t: "Have the developer resolve it", d: "", rec: true }],
+      };
+      parsed.frontmatter.waiting = "human";
+    });
+    rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+    adapter5.finish(store5, JSON.stringify({ reasoning: "done", actions: [] }), "finished");
+    await eventually(() => {
+      expect(
+        task().timeline.some((e) =>
+          /Scheduled action skipped:.*reached the front of the queue, but a decision packet is open on VIB-1 \("Branch conflicts with main"\)/.test(e.text),
+        ),
+      ).toBe(true);
+    });
+    expect(operatorRuns()).toHaveLength(1); // the live drive only — no second run
+    expect(task().frontmatter.waiting).toBe("human"); // the packet owns it; the refusal settles nothing
+    const rows = listAuditEvents(store5.db).filter((e) => e.action === "task.schedule.fired");
+    expect(rows[0]!.details).toMatchObject({ scheduleId: "sch_1", outcome: "skipped-packet", refusedAtStart: true, atDrain: true });
+  });
+
+  it("ruling 141: a queued human @operator turn refused at the front of the queue gets the note, settling nothing", async () => {
+    deployAgents([operatorAgent()]);
+    seed("impl");
+    await drive({ trigger: "manual" });
+    expect(adapter5.pending).not.toBeNull();
+    const queued = await drive({ trigger: "manual" });
+    expect(queued.queued).toBe(true);
+    await updateTaskFile({ projectSlug: store5.slug, taskKey: "VIB-1", dataRoot: store5.dataRoot }, (parsed) => {
+      parsed.packet = {
+        type: "input",
+        kind: "Decision required",
+        from: "operator",
+        title: "Scope needed",
+        body: "",
+        observations: [],
+        options: [{ kind: "edit_goal", t: "Specify the goal", d: "", rec: true }],
+      };
+      parsed.frontmatter.waiting = "human";
+    });
+    rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+    adapter5.finish(store5, JSON.stringify({ reasoning: "done", actions: [] }), "finished");
+    await eventually(() => {
+      expect(
+        task().timeline.some((e) =>
+          e.text.startsWith("A queued @operator turn was refused when it reached the front of the queue: a decision packet is open on VIB-1"),
+        ),
+      ).toBe(true);
+    });
+    expect(operatorRuns()).toHaveLength(1);
+    expect(task().frontmatter.waiting).toBe("human");
+    expect(listAuditEvents(store5.db).filter((e) => e.action === "task.schedule.fired")).toHaveLength(0);
   });
 
   it("R20-1: a MACHINE pr-diverged trigger still runs with a packet open (ruling 17 recovery)", async () => {
@@ -2933,29 +3437,20 @@ describe("R19-1 — the operator's read-only repository view", () => {
   const systemPrompt = () => adapter7.pending?.spec.systemPrompt ?? "";
 
   /**
-   * A local origin for `acme/widgets`, carrying the two things the live
-   * confabulation denied existed (a README and a `docs/` folder) plus a
-   * `.claude` catalog, which a clone Viberr creates must strip (R18-3).
+   * A local origin for `acme/widgets` (test-support/git-origin.ts), carrying
+   * the two things the live confabulation denied existed (a README and a
+   * `docs/` folder) plus a `.claude` catalog, which a clone Viberr creates must
+   * strip (R18-3).
    */
   async function makeOrigin(): Promise<void> {
-    const bare = path.join(origins, "acme", "widgets.git");
-    mkdirSync(path.dirname(bare), { recursive: true });
-    await exec("git", ["init", "-q", "--bare", "-b", "main", bare]);
-    const seed = path.join(origins, "seed");
-    mkdirSync(path.join(seed, "docs"), { recursive: true });
-    mkdirSync(path.join(seed, ".claude", "skills", "repo-own"), { recursive: true });
-    writeFileSync(path.join(seed, "README.md"), "# widgets\n");
-    writeFileSync(path.join(seed, "docs", "guide.md"), "the guide\n");
-    writeFileSync(
-      path.join(seed, ".claude", "skills", "repo-own", "SKILL.md"),
-      "# ungoverned\n",
-    );
-    await exec("git", ["init", "-q", "-b", "main", seed]);
-    await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
-    await exec("git", ["-C", seed, "config", "user.name", "T"]);
-    await exec("git", ["-C", seed, "add", "-A"]);
-    await exec("git", ["-C", seed, "commit", "-qm", "init"]);
-    await exec("git", ["-C", seed, "push", "-q", bare, "HEAD:refs/heads/main"]);
+    await createLocalOrigin(origins, {
+      repo: "acme/widgets",
+      files: {
+        "README.md": "# widgets\n",
+        "docs/guide.md": "the guide\n",
+        ".claude/skills/repo-own/SKILL.md": "# ungoverned\n",
+      },
+    });
   }
 
   /**
@@ -2963,35 +3458,8 @@ describe("R19-1 — the operator's read-only repository view", () => {
    * — an existing one for the success arm, a missing one to make the real clone
    * fail instantly and offline.
    */
-  async function withOrigin<T>(root: string, work: () => Promise<T>): Promise<T> {
-    const configPath = path.join(origins, `gitconfig-${path.basename(root)}`);
-    writeFileSync(
-      configPath,
-      `[url "${root}${path.sep}"]\n\tinsteadOf = https://github.com/\n`,
-    );
-    const saved = {
-      global: process.env.GIT_CONFIG_GLOBAL,
-      system: process.env.GIT_CONFIG_SYSTEM,
-      protocol: process.env.GIT_ALLOW_PROTOCOL,
-    };
-    process.env.GIT_CONFIG_GLOBAL = configPath;
-    process.env.GIT_CONFIG_SYSTEM = "/dev/null";
-    // Belt and braces: if the rewrite ever stopped applying, git must FAIL
-    // rather than quietly reach github.com from a unit test.
-    process.env.GIT_ALLOW_PROTOCOL = "file";
-    try {
-      return await work();
-    } finally {
-      for (const [key, value] of [
-        ["GIT_CONFIG_GLOBAL", saved.global],
-        ["GIT_CONFIG_SYSTEM", saved.system],
-        ["GIT_ALLOW_PROTOCOL", saved.protocol],
-      ] as const) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    }
-  }
+  const withOrigin = <T,>(root: string, work: () => Promise<T>): Promise<T> =>
+    withLocalGithub(root, work);
 
   beforeEach(async () => {
     ctx7 = createTestDbContext();

@@ -195,7 +195,9 @@ inventory is not regenerated automatically and has drifted; the verified module 
    and a human completes the merge later, because `merge-pull-request` is `ALWAYS_HUMAN`.
    **Extended** — the kind set is now ELEVEN: `accept_completion`, `request_edit`,
    `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`,
-   `archive_task`, `discard_branch`, `resolve_remote_collision`, `custom`. (`archive_task` arrived with R14-3 — the task
+   `archive_task`, `discard_branch`, `resolve_remote_collision`, `custom`. **Note 2026-09-04
+   (ruling 130, pass 34)** — the set is unchanged: `block_on_policy` stays the re-run kind; only
+   its labels and its recorded decision changed (they now state what the human asserted). (`archive_task` arrived with R14-3 — the task
    archive — and the count here was never updated; corrected 2026-08-05 against
    `PACKET_OPTION_KINDS` in `app/schemas/task-file.schema.ts`, which is the source of
    truth. `discard_branch` arrived 2026-08-15, pass 20 — ruling 77 / R20-2 / F20-6 — as the
@@ -272,6 +274,10 @@ inventory is not regenerated automatically and has drifted; the verified module 
     a user repository. Repository write is proven read-only from `GET /repos/{r}`
     `permissions.push`; without the probe, `pull_request:write` is reported `assumed` until
     first use. `read:org` is still honoured when a project requires it but is not a default.
+    *(Amended 2026-09-04, pass 34, ruling 144: the promise that "a refused workflow-file push
+    surfaces as a scope violation" is now implemented, with a classic-token advisory at attach
+    time and a refusal before the push when the token is known to lack `workflow`; the scope is
+    still not required.)*
 19. **Scope chips render proven verdicts only** (2026-07-25, recorded 2026-07-28). A chip
     is evidence: scope header, live probe, or open violation. `assumed`/`unchecked` render
     as an honest "unproven" line, never as a pseudo-check.
@@ -446,6 +452,10 @@ inventory is not regenerated automatically and has drifted; the verified module 
     surfacing is on this pass's implementation backlog — the gate today pins only the delivered
     SHA", is stale: the divergence surfacing shipped (F17-L12) and the gate is containment-based
     — `accept-confirm.tsx` "N commits added since review", `task-actions.server.ts`.)*
+    *(Amended 2026-09-04, pass 34, ruling 132: the drift R17-1 discloses is now the number of
+    AUTHORED commits since the reviewed revision, with a base refresh reported apart; "N commits
+    added since review" became the classified sentence `describeRevisionDrift` prints, and only
+    authored commits are called unreviewed.)*
 43. **R17-2 (2026-08-04): a verified no-diff task is a first-class "Completed — no changes"
     outcome.** A task whose branch carries no diff against the base (or has no branch at all)
     may close to Done WITHOUT a PR or merge, through a distinct "Completed — no changes
@@ -511,6 +521,10 @@ inventory is not regenerated automatically and has drifted; the verified module 
     PR fires it; the re-triggered run can never re-deliver (the deliver tool no-ops on a live PR),
     and the chain shares `OPERATOR_TRANSITION_CHAIN_CAP`. (`performDelivery` in
     `app/server/tasks/task-actions.server.ts`; the `delivered` trigger in `operator-run.server.ts`)
+    *(Amended 2026-09-04, pass 34, ruling 134(b): "only a NEWLY opened PR fires it" became "a newly
+    opened PR, or a head the push moved", and the deliver tool no longer no-ops on a live PR; a
+    reuse whose push moved nothing (`up_to_date`) still re-queues nothing, which is what keeps the
+    loop this ruling guarded against from starting.)*
 
 49. **R18-3 (2026-08-05): the SDK-native skill/command catalog is governed OUT of runs.** A
     spawned agent run loads ONLY Viberr's granted skills. The per-task workspace clone's own
@@ -981,6 +995,12 @@ inventory is not regenerated automatically and has drifted; the verified module 
     NO_REQUEUE set), and a repeat failure opens a NEW packet with a fresh decision record. A manual
     "Run operator" is refused while a packet is open (`refused: "open-packet"`) rather than paid for.
     Extends ruling 7's stable-kind dispatch and ruling 17's recovery-packet model.
+    **Extended 2026-09-04 (ruling 130(c), pass 34 F34-12)** — the stock re-run option is titled
+    "Re-run the operator now" and records "re-run the operator. No policy or credential was
+    changed."; a FAILED run's packet takes its options from `describeRunFailure` (the recommended
+    one asserts only what the human says: the window has reset or the account was switched, a
+    different account or an API key was connected); the recorded decision is the option's `ev` or
+    its own title, never a fixed "policy / credential updated"; the toast says "Unblocked".
     (`resolvePacket` in `app/server/tasks/task-actions.server.ts`; the `packet-resolved` trigger in
     `app/server/runtimes/operator-run.server.ts`)
 
@@ -1168,6 +1188,9 @@ inventory is not regenerated automatically and has drifted; the verified module 
     time a run was working — is actually driven, with a "preparing workspace" phase covering the
     clone. Closes G5 (FR28:
     current progress without opening the raw provider console) together with OBS-8/OBS-9.
+    *(Extended 2026-09-04, pass 34, ruling 129: the mirror is also what a REUSED checkout is
+    refreshed from before every delivering dispatch — the cache that made cloning cheap is what
+    made a stale checkout survive across runs.)*
     (the mirror cache is `cloneWorkspaceRepo` + `projectRepoMirrorDir` in
     `app/server/tasks/repo-mirror.server.ts`, called by the private `cloneRepo` in
     `app/server/tasks/specialist-run.server.ts`; `onPhase` in `app/server/runtimes/adapter.server.ts`
@@ -1391,7 +1414,11 @@ inventory is not regenerated automatically and has drifted; the verified module 
     the profile holds repo-write, supporting otherwise — a verdict-only profile dispatched
     first can no longer become a deliverer that ships nothing (UI-39's dead-end class,
     closed structurally). An explicit `delivers: true` is a delivery hand-off through the
-    existing assignSpecialist machinery. The assign/engage menus, the per-row Run buttons,
+    existing assignSpecialist machinery. **Confirmed 2026-09-04 (pass 34, Q34-14; the JC-6
+    substitution tested it):** the operator may switch the delivering agent however it
+    judges best, because a human can redirect it through the operator chat or agent
+    allocation; no gate, card or ruling number is added, and after ruling 133 a hand-off
+    is a choice about who should build, never a way around a stage. The assign/engage menus, the per-row Run buttons,
     the `assign-specialist`/`run-specialist`/`assign-reviewer`/`run-reviewer` intents and
     the legacy `specialist`/`reviewers`/`consultants` parse absorption are deleted;
     releasing a supporting engagement survives as the ledger's ✕ (`release-agent`).
@@ -1401,7 +1428,8 @@ inventory is not regenerated automatically and has drifted; the verified module 
     collapsed into `dispatch-agents`; the four slot-shaped recommendation kinds collapsed
     into `run_agent` (profileId + prompt on the card; Apply dispatches exactly what the
     manual control would). The choice itself stays an LLM decision fenced by stage
-    eligibility, grants and the selection trace — and it now weighs the durable
+    eligibility (**narrowed 2026-09-04 by ruling 133:** eligibility fences NEW engagements;
+    an engaged deliverer is re-run at any stage), grants and the selection trace — and it now weighs the durable
     **`previousStageId`** frontmatter fact (written on every transition; surfaced in the
     snapshot and turn doctrine), so "back from Review" reads as rework rather than a
     fresh build even across turns.
@@ -1800,6 +1828,10 @@ the quieter packet or the bare owner cell as drift.)*
     `waiting: human`, with an open PR and nothing to click). Housekeeping recorded with
     the ruling: the stale task-key branches earlier instances left on the origin were
     deleted during pass 32; **`vib-5` is kept deliberately as the collision fixture.**
+    *(Amended 2026-09-04, pass 34, ruling 136: "it never strands" is now carried by the ceremony's
+    own single hand-off rather than by the re-delivery's follow-up alone; a refusal whose PR is the
+    task's own open review PR performs the push instead of keeping the block; and the delete
+    re-confirms a cached open PR against GitHub before refusing.)*
 
 111. **Every `viberr_ops` read is audited (owner, 2026-09-02).** The three read-only
     diagnostics tools of ruling 107 (`instance_health`, `read_run_log`,
@@ -2188,6 +2220,545 @@ by rewriting those paragraphs:*
     (`app/server/runtimes/user-homes.server.ts`, `backend-credentials.server.ts`,
     `run-principal.server.ts`, `backend-login.server.ts`; the surface is Profile → Agent accounts
     with the poll route `/resources/backend-login`.)
+
+128. **Viberr bootstraps the default branch of an empty repository itself (owner, 2026-09-03, pass 34
+    Q34-2).** Live (JC-1 on `akin-ozer/jira-clone`): the pre-dispatch branch hook found no `main`
+    ref and said nothing; the delivery push then created `jc-1` as the repository's FIRST ref,
+    GitHub made it the default branch, `POST /pulls` failed 422 `base: invalid`, and every surface,
+    the tool result, the timeline, the audit row and the operator's packet reported "GitHub was
+    unreachable (network error). Fix the repository/credential settings" while GitHub answered
+    every call. Three lies (cause, remedy, state) and no way out: nothing in the product could
+    create `main`, and the one thing the exercise forbids is a person pushing by hand. The rule:
+    when the project's default branch has no ref, Viberr creates it BEFORE the task's first
+    branch. On a repository with no refs at all it authors an initial commit (`README.md` naming
+    the project) through the Contents API, which GitHub accepts on an empty repository where the
+    Git Data ref and commit endpoints answer 409, and the branch that commit lands on is the
+    default. On a repository whose only refs are task branches pushed before this ruling it
+    creates the default branch at the first commit of GitHub's current default branch and
+    restores the configured name as the repository default, the repair the owner approved live
+    (Q34-3). Both are disclosed on the task timeline and audited as `github.repo.bootstrapped`.
+    The bootstrap runs from `ensureTaskBranch` (both dispatch paths, ruling 122(c)) and again
+    from `performDelivery` before the push; a delivery whose base cannot be CREATED does not push
+    at all, so a task branch is never the first ref of a repository, while a probe that merely
+    could not be READ (a transient network or auth failure) does not block the push and does not
+    claim the base is missing. A 422 `base: invalid` on `POST /pulls` is `base_branch_missing`
+    and says so; any other unmapped 422, decode failure or unmapped HTTP status is `refused` and
+    quotes GitHub; neither is ever reported as a network failure, and a 409 "Git Repository is
+    empty" on a ref read is a missing ref, not a network failure. (`app/server/github/repo-bootstrap.server.ts`;
+    `ensureTaskBranch` in `branch-sync.server.ts`; `isMissingRefAnswer` in `github-client.server.ts`;
+    the 422 arms in `pr-open.server.ts`; the pre-push gate and the rendering in
+    `task-actions.server.ts`.)
+
+129. **A reused delivering workspace is refreshed from the project mirror on every dispatch (owner,
+    2026-09-03, pass 34 Q34-5).** Live (JC-2 to JC-5): the task workspaces were cloned once, by the
+    operators' first triage at 09:00Z, from a repository that was still empty; every later run reused
+    them as they stood, agents hold no credential so they could not fetch, and while the operator read
+    a bootstrapped `main` through the mirror and told the spec writers so, the spec writers found zero
+    commits in their checkouts and committed unrelated root commits on `jc-2` and `jc-5`. Two sources
+    of truth in one task, and `update_branch_from_base` could only answer "refusing to merge unrelated
+    histories". The rule: before a delivering run starts in an existing checkout, Viberr fetches the
+    mirror's heads into the checkout's `origin/*`; a checkout whose HEAD is unborn, or that sits clean
+    on the default branch, is fast-forwarded to `origin/<default>`; a task branch that has diverged is
+    left exactly as it is, because `update_branch_from_base` (N19-9) owns that move and a conflict
+    there is a human decision; a dirty tree and a detached HEAD are never touched; and a branch that
+    shares NO history with the default branch is named as such in the run's inputs and in the agent's
+    workspace contract rather than silently left alone. The refresh is not defeated by a cold cache:
+    the dispatch creates the mirror if it must, and falls back to a server-side credentialed fetch of
+    the remote heads if it cannot. The refresh is disclosed in the run's `run·inputs` line and in the
+    agent's workspace contract, and a mirror that could not itself be refreshed from GitHub says so
+    there. Supporting checkouts keep their fetch-only refresh (pass 32, C32-2), now the same function.
+    The operator's read-only view of the same directory is refreshed on the same terms when no
+    delivering run is live for the task, because the operator holds `Read`, `Grep` and `Glob` over it;
+    its default-branch reads remain mirror-anchored (F21-21). A cache still never blocks a task: a
+    failed refresh degrades with a warning and the run proceeds. Extends ruling 87(a), whose mirror
+    cache made the stale-checkout window possible by making the first clone cheap enough to keep.
+    (`app/server/tasks/workspace-refresh.server.ts`, called from `cloneRepo` in
+    `app/server/tasks/specialist-run.server.ts`.)
+
+130. **A refused run's packet names the cause Viberr classified and the remedy the person actually
+    has (owner, 2026-09-03, pass 34 Q34-7; F34-1, F34-12).** Live: a five-hour session limit and a
+    403 `oauth_org_not_allowed` were both `run·error·unknown` ("Review the runtime configuration"),
+    the controller answered "Say it again to retry", the operator's recovery packet recommended
+    "I've updated the policy / credential - unblock and re-run", the resolved decision was recorded
+    as "policy / credential updated", and an operator acting on that record told a specialist a
+    GitHub-scope block had been lifted (JC-6), undoing the owner's Q34-10 decision. The ruling:
+    **(a)** provider refusals are classified from the STRUCTURED envelope first (the result's
+    `api_error_status`, the assistant envelope's `error` code, a `rate_limit_event` whose `status`
+    is `rejected`) and from prose second; the classified terminal line carries the machine facts
+    (kind, the reset instant, the window, the API status and code) beside its tag suffix, and every
+    reader of a failure (packet builders, the controller's note, the Agent-logs footer for every run
+    kind, the quota store) consumes that class, never a second regex over the raw stream; the API
+    error banner the provider streams as an assistant message is an error line, never the agent's
+    reply. **(b)** Under ruling 127 the remedy for `quota` and `auth` belongs to the credential
+    principal, so the packet body, the blocked timeline event and the controller's note name that
+    person and their own move: wait until the reset instant Viberr quotes, or connect a different
+    account or an API key on Profile → Agent accounts. Generic advice ("fix the credential", "retry
+    on the other backend", "review the runtime configuration") is never written for a classified
+    refusal; `retry_other_backend` stays offered only when the owner has the other backend
+    connected. **(c)** A recovery option's label states what the human asserts and what will happen;
+    its recorded decision is that label or a pre-authored `ev`; the toast and the operator's re-run
+    instruction state the EFFECT (unblocked, re-run) and restate no claim; "policy / credential
+    updated" is reserved for the stock policy-block option the operator authors itself and is never
+    the default for a failed run. One module (`run-failure-remedy.server.ts`) owns the failure-to-
+    words mapping for operator and specialist runs alike. **(d)** A quota or credential refusal is
+    recorded as evidence about the account it billed: the observation store, Insights,
+    `instance_health` and the person's own Agent-accounts card say whose account, from which run,
+    and when the window reopens, so an instance-wide "usage limit reached" is never claimed on
+    behalf of accounts that were not refused; the unauthenticated `/resources/health` body keeps its
+    contract and carries no principal, and the card states that the pill is the last refusal Viberr
+    OBSERVED, which any completed run on that backend retires. Extends rulings 76 (R20-1), 78
+    (R20-3) and 127; `PACKET_OPTION_KINDS` (ruling 7) is unchanged. (`app/server/runtimes/claude-
+    runtime.server.ts`, `wire-format.server.ts`, `backend-quota.server.ts`, `run-sink.server.ts`,
+    `app/server/tasks/run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-
+    run.server.ts`, `app/server/controller/controller-run.server.ts`.)
+
+131. **Task dependencies: a task names what it waits on, Viberr holds it without a packet and
+    releases it itself (owner, 2026-09-03, pass 34 Q34-11).** Pass 34 ran five controller-built goal
+    chains against one repository and three of them stalled behind the first: JC-7 and JC-9 could
+    not start until goal-1's links 2 to 4 were on the base branch, and goal-3 and goal-5 queued
+    behind the same work. Every operator read the situation correctly, and every one of them had
+    only a decision packet to say so with: JC-7's hold ended as `waiting: human` with one comment;
+    JC-9's operator ran five paid turns and then wrote "this packet is the standing token … nothing
+    will re-check main for JC-9 again"; a person had to answer each hold and would have had to re-
+    answer each one by hand when the foundation landed. Nothing in the product watched the thing
+    being waited for. **(a) The fact lives on the task.** `task.md` carries `blockedBy: []`, the
+    task keys (`JC-6`) and goal links (`goal-1 link 3`) in the same project this task waits on. It
+    is planning metadata with one difference from priority, labels and due date: while the list is
+    non-empty the derived readiness is floored at `blocked` (`deriveReadiness`, the one derivation
+    home), the board card, the list row and the task page say what it waits on and in what state,
+    and the task owes nobody anything (`waiting: none` unless a packet or a recommendation is open).
+    A goal-link entry resolves to a task key the moment the chain creates that link's task and
+    renders as both. States are resolved at read time, never cached. `GOAL` is reserved as a
+    task-key prefix for the same grammar: `GOAL-1` reads as a goal reference missing its link, so
+    a project keyed that way could never be waited on and every writer of `taskPrefix` (creation,
+    project settings, the controller's `update_project_settings`) refuses it by name. **(b) Three writers, one
+    gate.** Humans set the list on the task page; the controller sets it through `create_task`,
+    `update_task` and per goal link on `create_goal` / `update_goal`, under the asking person's own
+    gate; the operator records it with its `set_dependencies` tool (gated like packets, `generate-
+    packets`) instead of opening a hold packet. Every write validates against the store: a reference
+    must parse, name an existing task or goal link in this project, not be the task itself, not be
+    an archived task, and not close a cycle, counting DECLARED goal-link edges as well as created
+    tasks; a refusal names the reference and the reason. Every write is a `note` on the timeline and
+    `task.dependencies.updated` in the audit log. **(c) Chain-created tasks inherit.** A goal link
+    may declare `blockedBy`; when the chain creates that link's task the list is copied onto it and
+    validated then, so a link that waits on a sibling chain's link is born held instead of paying a
+    triage turn that has to discover the wait. **(d) The operator holds without a packet and is not
+    nudged.** While the list is non-empty: the `create`, `transition` and `scheduled` triggers are
+    refused at fire time (`refused: "blocked-by"`; no run, no cost; the refusal settles the task's
+    waiting flag, and a scheduled occurrence says on the timeline that no run happened); the
+    stranded-coordination backstop treats the list as a recorded hold and never nudges; and every
+    turn that does run (an agent report, a human's question, a resolved packet, a goal edit, a PR
+    change, a manual run) is told what the task waits on, in a doctrine that REPLACES the ordinary
+    "never end your turn with nothing done and no packet" tail, and must neither advance it,
+    dispatch delivery work, nor open a hold packet about the wait. A human-scheduled AGENT run still
+    fires: this ruling refuses operator triggers. **(e) Viberr releases it.** When every entry is
+    done (its task reached the terminal stage; its goal link is done or was skipped) the release
+    engine clears the list, writes the release note naming what was waited on, lifts a stored
+    `blocked` readiness to `ready`, clears a recorded `heldAtStage`, notifies the owner and
+    supervisors (notification kind `dependency`, its own routing toggle) and re-invokes the operator
+    with the `dependencies-released` trigger, whose doctrine says the base branch has changed since
+    the hold and that a hold packet the operator opened itself is now moot. The engine runs from the
+    same task-write hooks that advance goal chains (transition, archive and restore, acceptance) and
+    from the goal runner's minute tick, and it is convergent: an empty list has nothing to release.
+    A human clearing the list is the same release, through the same two halves. A dependency that
+    can never complete (its task archived, its link failed) does not release: it is noted once on
+    the dependent's timeline, the owner is notified, the task is left `waiting: human` because a
+    person owes the list an edit, and the entry renders as "archived" until they make it. **(f) What
+    this replaces.** The two live holds convert by setting the list: JC-7 (held as `waiting: human`)
+    gains its three entries; JC-9 gains them and its standing-token packet is resolved once, or is
+    left for the release turn to withdraw as moot. The operator doctrine no longer offers "open a
+    packet asking the human to confirm the hold" for a wait on other work; that exit stays for holds
+    a human directed. Ruling 126's price still applies to the turns that run; the turns this ruling
+    refuses cost nothing. (`app/shared/dependencies.ts`; `app/server/tasks/dependencies.server.ts`;
+    `app/server/projections/dependencies.server.ts`; `deriveReadiness` in
+    `app/server/interpretation/readiness-policy.server.ts`; the `blocked-by` refusal, the
+    `dependencies-released` trigger and the doctrine in `app/server/runtimes/operator-
+    run.server.ts`; `set_dependencies` in `app/server/tasks/operator-toolkit.server.ts` and the
+    Codex plan; the controller tools in `app/server/controller/controller-toolkit.server.ts`;
+    `task_projections.blocked_by_json`.)
+
+132. **Revision drift counts authored commits only; a base refresh is reported as what it is (owner,
+    2026-09-03, pass 34 Q34-12).** R17-1 measured drift as GitHub's `compare(reviewedSha...head).ahead_by`,
+    which counts every commit reachable from the PR head and not from the reviewed revision, so an
+    operator's `update_branch_from_base` (four commits from `main` plus the merge commit) made the
+    accept dialog, the review-queue subline and JC-8's permanent completion record say "5 commits
+    added since review; they merge unreviewed" while the operator's own read of the same task said
+    no drift at all. Drift is now the number of AUTHORED commits since the reviewed revision: the
+    commits in `reviewedSha...head` that are not reachable from the base branch and are not clean
+    merge commits. A clean merge commit is one the product itself made through
+    `update_branch_from_base` and recorded on the task as `baseRefreshes[]` the moment the merge
+    landed (that path merges with `--no-ff` and aborts on any conflict, so every recorded merge is a
+    real, clean merge by construction); a merge commit from anywhere else, a conflict-resolving
+    merge included, is an out-of-band write to the branch and counts. A base refresh is reported
+    separately and never as unreviewed work: `pr.revisionDrift` is `{ headSha, authored,
+    baseRefresh: { merges, commits } | null }`, and ONE function, `describeRevisionDrift` in
+    `app/shared/revision-drift.ts`, turns it into the sentence every surface prints verbatim. Its
+    consumers are the reconciler (which writes the fact), the operator's `get_task` read and turn
+    doctrine, the accept and force dialogs and "Complete merge", the review-queue subline (whose row
+    carries the whole record) and the completion record. A pass that cannot classify (either compare
+    unavailable, truncated or partly undecodable; the classification assumes the PR's base is the
+    project's default branch, the only base Viberr delivers to) carries the last measurement
+    forward, or, with no measurement to carry, records every commit since the reviewed revision as
+    authored; it never writes "no drift" from silence, and a commit it cannot classify counts as
+    authored. The operator's branch update records its merge commit and the base tip it merged,
+    re-measures drift in the same call and returns the sentence, so the operator and the ceremony
+    can no longer read two different facts about one head. Extends R17-1 and the F21-17 residual;
+    acceptance still merges an ahead head, honestly. (`classifyRevisionDrift`,
+    `describeRevisionDrift` in `app/shared/revision-drift.ts`; the compare reader in
+    `branch-sync.server.ts`; the drift block in `github-reconciler.server.ts`;
+    `update-branch-operator.server.ts`.)
+
+133. **An engaged deliverer acts at any stage; stage eligibility gates NEW engagements (owner,
+    2026-09-03, pass 34 Q34-13; F34-16).** A profile's eligible stages (`stages:` / `spanAll`,
+    resolved per board by R14-1's three steps) decide which profiles may be NEWLY engaged on a task
+    at its current stage: `assignSpecialist`, `assignReviewer` and the dispatch's auto-engage keep
+    refusing an ineligible profile. Once a profile is the task's delivering engagement it may be
+    prompted or resumed on that task at EVERY stage, by the operator, by a human @mention, by the
+    Run control, by a schedule and by the built-in packets (`redirect`, `retry_other_backend`, a
+    resolved question), for rework, conflict resolution and follow-ups; the admitted reason is
+    recorded on the `task.agent.run_started` audit row as `stageEligibility`, which names the
+    exemption only when it was needed. Supporting engagements (reviewers and helpers) stay stage-
+    scoped, and the rule is the same on every door: an @mention that would resume a supporting agent
+    at a stage its profile does not declare records the comment and refuses the run with the
+    dispatcher's own sentence, and a profile that is not engaged at all (released, or never engaged)
+    is judged by the new-engagement rule even when a provider session survives. Consequences:
+    **(a)** rework routing (`reworkStages`, `transition_stage`) is a workflow choice about where the
+    board should show the work, never a workaround for a profile's stages, and the operator
+    doctrine, toolkit descriptions and seeded persona say so; **(b)** a built-in packet offers only
+    options that can execute: the branch-conflict and push-conflict packets recommend "Have the
+    delivering agent resolve the conflict" only when the task has a delivering engagement whose
+    profile is deployed with a repo-write grant, and otherwise recommend resolving by hand and say
+    why, with the offered resolver recorded in the branch-update audit row; **(c)** the Agents
+    surface states the rule beside the "N of M stages" count, and states the scoping half only for a
+    profile that is actually scoped, while the operator's `get_task` snapshot reports the deliverer
+    as eligible for the current stage and the selection trace marks the posture the dispatch will
+    actually take. The F1 run-boundary test that asserted the opposite for the deliverer is reversed
+    deliberately by this ruling; the reviewer half of F1 stands. Supersedes the "asserted on
+    assignment and dispatch" sentence in `agents-and-runtime.md` and ruling 98(b)'s "fenced by stage
+    eligibility" as it applied to re-running an engaged deliverer. Ruling 98(a) is NOT touched: who
+    may decide a delivery hand-off was put to the owner as Q34-14 and answered on 2026-09-04 — the
+    operator may switch the delivering agent however it judges best, because a human can redirect it
+    through the operator chat or agent allocation — so 98(a) stands with a dated confirmation note
+    and no separate ruling. (`runEligibilityFor` and `assertResumeEligible` in
+    `app/server/tasks/specialist-run.server.ts`; the resume gate in `commentToAgent`;
+    `stageEligibility` on `task.agent.run_started`.)
+
+134. **Rework reaches its own open pull request: a delivery pushes whatever origin does not carry,
+    reuses the PR, and says what moved (owner, 2026-09-04, pass 34 F34-11).**
+    `operatorDeliverForReview` answered "PR #N is already open for review; there is nothing to
+    deliver" for any cached non-terminal `pr.state`, before `performDelivery` ran, so every commit
+    an agent made after the first delivery (a reviewer-requested rework, a resolved base conflict,
+    the whole JC-6 scaffold) stayed in the workspace: the operator reported nothing pending, the
+    reviewer approved the local revision, the accept dialog bound to a sha GitHub had never seen,
+    `update_branch_from_base` said "already up to date", and the task page hid the Deliver control
+    because a PR existed. Three rules. **(a) Delivery is defined by the remote, not by the
+    cache.** `pushWorkspaceBranch` reads origin's head for the task branch before pushing (under
+    the same credential channel as the push), pushes when it differs, answers `up_to_date` when
+    it does not, and the delivered outcome carries the head sha and the previous remote head; the
+    operator's cached-state short-circuit is deleted, and the only honest noop is "PR #N already
+    carries `<sha>`". A head the push moved on a reused PR is recorded on the timeline ("Pushed
+    `<sha>` to **PR #N** for review (was `<old>`)", the same author rule as "Opened PR") and in
+    the delivery audit row (`headSha`, `moved`), and every human door that performs a delivery
+    (the task page's control and an applied operator recommendation) says what moved through one
+    shared toast. An unreadable `ls-remote` never blocks the push. **(b) A head the push moved is
+    a new review subject.** Ruling 48's "only a NEWLY opened PR re-queues" becomes "a newly opened
+    PR, or a head the push moved"; a reuse that pushed nothing still re-queues nothing, so the
+    loop ruling 48 guarded against cannot start. **(c) A person may always perform that push, and
+    the operator is told to.** The task page offers the control whenever the delivered revision
+    is not on the open PR ("Push `<sha>` to PR #N", ruling 135's record) and not only when no live
+    PR stands, while a DIVERGED branch gets the fact and a disabled control naming the refusal
+    the server would give rather than a button that then fails; `update_branch_from_base` reports
+    the remote copy of the branch beside its base answer (current, behind by N, diverged, absent)
+    and points at `deliver_for_review` instead of pronouncing a lagging branch "already up to
+    date"; the operator's tool description, its doctrine and the seeded persona say that pushing
+    an unpushed revision is this tool's job and never a person's or an agent's. Pushing remains
+    the server's act on the operator's or a person's decision (ruling 21 unchanged).
+    (`pushWorkspaceBranch` in `app/server/github/push-workspace.server.ts`; `performDelivery`,
+    `recordPushedHead` in `app/server/tasks/task-actions.server.ts`; `operatorDeliverForReview` in
+    `operator-actions.server.ts`; `deliveryToast` in `app/features/task-detail/delivery-toast.ts`;
+    `updateWorkspaceBranchFromBase`; the push control in `task-side-panels.tsx`.)
+
+135. **An unpushed delivered revision is its own acceptance gate, ranked above a conflicting PR, and
+    the PR head is recorded in `task.md` (owner, 2026-09-04, pass 34 F34-11).** The accept dialog on
+    JC-3 read "PR #10 conflicts with the base branch … Rebase the branch and re-review, or archive
+    the task" for a branch that was merged, resolved and merely unpushed: `mergeable: conflicting`
+    described the OLD head, the reviewer's verdict was bound to the workspace revision, and nothing
+    in the file could say that the delivered revision was not on the pull request. The reconciler
+    now records `pr.headSha` and, when the delivered revision is not reachable from that head,
+    `pr.unpushedRevision` (`behind`: a plain push fast-forwards; `diverged`: a push will be refused
+    as non-fast-forward; `unknown`: the two heads could not be related, which is what a
+    never-pushed sha actually looks like: the compare answers `missing_ref` and a direct commit
+    read answers 404). The workspace reconcile records the same fact the moment a delivering run
+    mints a new revision on a branch whose PR is open, relating the heads from the workspace's own
+    history, so the gate does not wait for the five-minute poll; a delivery that pushes clears it;
+    a verification revision never qualifies; a record for a revision that is no longer current
+    reads as nothing. `unpushedRevisionBlockedReason` is ONE helper, taking the PR ref and the
+    current revision sha so every caller can ask it from the shape it holds, consulted by every
+    writer and every surface that consults `conflictingPrBlockedReason`: the acceptance refusal
+    stack, the projection's block reason, the review queue (whose row carries the two new fields,
+    or the branch could never fire), the board ceremony, the accept-time merge sentence and the
+    forced acceptance's recorded cause, the review row subline, the operator's `get_task`. It
+    outranks the conflict sentence because it names the fact the person can act on: "deliver the
+    branch to push it", never "rebase". The live accept-time head check refuses on the same
+    evidence instead of answering "unverifiable". Ruling 42's "ahead" (`revisionDrift`) is the
+    mirror case and is unchanged. (`prRefSchema`, `unpushedRevisionOf`,
+    `unpushedRevisionBlockedReason` in `app/schemas/task-file.schema.ts`; `reconcileTaskUnlocked`
+    in `github-reconciler.server.ts`; `classifyUnpushedRevision` in
+    `workspace-delivery.server.ts`; `writePrToTask` in `pr-open.server.ts`;
+    `evaluateAcceptancePrHead` and `attemptAcceptanceMerge` in `task-actions.server.ts`.)
+
+136. **`resolve_remote_collision` never strands on either arm, and the ceremony reads GitHub before it
+    refuses (owner, 2026-09-04, pass 34 F34-10 / F34-11).** Ruling 110's "it never strands" was
+    carried by the re-delivery's own follow-up, which had two silent exits: `recordDeliveredNextStep`
+    records the "Move to <review>" card only when the board declares a `stage → review` edge (a
+    Backlog → Spec/Design → Implementation → QA → Review → Done board declares none from
+    Implementation), and ruling 48's re-queue fires only on a newly opened PR under full autonomy.
+    Live (JC-8) a fully successful ceremony, branch deleted, unowned PR closed, PR #9 opened, ended
+    `waiting: human` with no packet, no card and no run; the refusal arm (JC-6, JC-5) ended
+    `readiness: blocked · waiting: human` for a "collision" that was the task's own open review PR;
+    and (JC-3) a human who had closed the PR on GitHub seventy seconds earlier was refused because
+    `task.md` still said `review`. Three rules. **(a) The ceremony ends with exactly one hand-off.**
+    The kind stays out of the generic `packet-resolved` re-queue (that hand-off runs before the
+    ceremony and could not carry its outcome) and the ceremony fires its own at its end: the
+    ruling-48 `delivered` re-queue when the re-delivery fired it, otherwise a `packet-resolved`
+    re-queue whose payload carries the ceremony's outcome in its OWN field (`serverOutcome`),
+    rendered to the operator as Viberr's sentence and never inside the human's quoted note, so the
+    operator's next turn states what happened instead of re-deriving it and never reads a
+    server-composed fact as the person's own words. The in-ceremony reconcile of (c) runs with the
+    operator wake and the member divergence notice suppressed, so "exactly one hand-off" is
+    literally true. The server-recorded card stays where the board lets it apply, and one audit row
+    per ceremony (`github.collision.resolved`) carries the typed outcome. **(b) A refusal that finds
+    no collision does what the person asked for.** When the ref delete refuses because the PR on the
+    branch is this task's own open review PR, the packet's premise was false: a self-referencing
+    `github.unownedPr` is cleared, and for a remote the file does not record as diverged the
+    ceremony performs the delivery that pushes the work (the delivery is the authority on the
+    relation, so a diverged remote it meets refuses as `push_conflict` and the block stays); for a
+    remote recorded as diverged the block stays and the note says that the remote branch holds
+    commits this workspace does not and who resolves the history. Every other refusal keeps the
+    block and hands its typed reason to the operator. **(c) A cached open PR is re-confirmed before
+    it can refuse.** `deleteTaskRemoteBranch` runs a reconcile pass when `task.md` says the PR is
+    open, refuses only a PR GitHub still reports open (`own_pr_open`), proceeds on the refreshed
+    file when GitHub reports it closed or merged, and fails closed, "GitHub could not confirm", for
+    every degraded or unexpected reconcile status (the switch is exhaustive, so a later status can
+    never become a silent proceed); nothing is ever deleted on an unconfirmed state, and the
+    archive and empty-branch cleanup doors inherit the same live check and the same sentence.
+    Ruling 110's delete-first order, the human-only gate and the scope-violation on a refused close
+    are unchanged. (`resolvePacket`'s collision arm in `app/server/tasks/task-actions.server.ts`;
+    `resolveRemoteBranchCollision` and `deleteTaskRemoteBranch` in
+    `app/server/github/github-reconciler.server.ts`; `app/shared/packet-server-outcome.ts`; the
+    `packet-resolved` doctrine in `operator-run.server.ts`.)
+
+137. **An acceptance offer is bound to the revision it was made for, and is withdrawn, on the record,
+    when that revision or the task's decision state changes (owner-directed fix of F34-15, 2026-09-04).**
+    The operator's `accept_completion` card ("the review is clean and the work meets the goal") stood on
+    JC-3 after the deliverer committed a new revision with no verdict and after the operator opened a
+    blocked conflict packet on top of it; only a non-healthy verdict, archive or acceptance had ever
+    dropped it, and a stage move dropped transition cards alone. Every `accept_completion` card now
+    carries `forHeadSha`, the work revision it was authored against, on both the authoring and the
+    re-authoring path (`addRecommendation`'s push and its in-place update, which re-binds), the
+    `task.operator.recommended_completion` row records it, and the card renders "for revision <sha>".
+    ONE helper, `withdrawAcceptanceOffers`, living in the leaf task mutation module
+    (`app/server/tasks/task-mutation.server.ts`) so every writer can call it without closing a module
+    cycle, removes `accept_completion` cards and `transition` cards targeting the terminal stage inside
+    the task file's own lock: it runs in the write that mints a new work revision (the delivery
+    reconcile, now a locked mutator that keeps its "Reconciled branch" event), in every writer that
+    opens a decision packet (the operator's, an agent's question, the completion-envelope question),
+    and in a stage move away from the acceptance boundary as the workflow graph defines it (the review
+    stage `resolveStageRoles` names, never a positional guess; a move INTO the terminal stage is the
+    acceptance itself). A withdrawal is never silent: a `note` event titled "Recommendation withdrawn"
+    names the card and the cause, an audit row `task.recommendation.withdrawn` records it (cause,
+    removed cards with their bindings, survivors), and the card's "Waiting on you" notification is
+    marked read only when no recommendation survives. `run_agent` and `delivery` cards survive all
+    three events: more work is compatible with rework. The operator re-recommends acceptance on its
+    next turn if the offer still holds. Extends the 2026-07-18 owner decision that a divergence
+    withdraws moot cards, and `applyRecommendation`'s F19-3 rule that a terminal transition card is an
+    acceptance.
+
+138. **A decided `edit_goal` packet reads as decided everywhere, and the goal draft it opens is an
+    explicit, shared field (owner-directed fix of F34-13 and U34-10, 2026-09-04).** Confirming an
+    `edit_goal` option stamped `packet.awaiting: goal_edit` and opened the goal editor from the
+    in-memory action result only; after a reload the card rendered undecided with every option
+    selectable, a second confirm was a 409 shown as a passing toast, the readiness pill said "input
+    required", and the goal's Edit button was the undiscoverable way out. The packet now records the
+    decision itself, `decided: { optionIndex, at, byUserId }`, beside `awaiting`; both goal writers
+    keep clearing the packet when the edited goal lands. The decision-packet card renders a decided
+    packet with the chosen option locked, the words "Decision made · save the edited goal to clear
+    this packet" and one control, "Edit the goal", which opens the goal editor prefilled exactly as
+    the confirm did (a packet stamped `awaiting` with no recorded decision renders nothing special);
+    the display readiness is `goal_edit_pending` on the hero, the board card and the review queue
+    (the queue row carries `goalEditPending` and its subline says what is owed), derived in
+    `deriveDisplayReadiness` like every other display state and ranked below `agent_working` and
+    above `input_required` and a stored `blocked`, never over a terminal state; the side rail's
+    "Waiting on" says "a goal edit"; the operator's `get_task` sees `packet.awaiting`. The prefill is
+    `goalDraftForOption` in `app/shared/packet-goal-draft.ts`, the ONE composition, shared by the
+    confirm response and the reload path. An `edit_goal` option carries `goalDraft`, the proposed
+    goal text itself (capped at 4000 characters at the one chokepoint, `operatorOpenPacket`), which
+    both operator backends are told to write as a goal (deliverable plus acceptance criteria)
+    because it is what the editor opens with, which the Codex plan schema REQUIRES as a key (null
+    off `edit_goal`, so persisted plans replay), and which is refused by name on any other option
+    kind; an option without one prefills the option's title and detail verbatim, and the prompts say
+    so, so an operator never phrases them as an instruction to the human. Extends R20-1 (a made
+    decision is un-re-confirmable) and F17-L3 (the editor prefills with the chosen deliverable).
+
+139. **The controller's catalogued writes read first and refuse by name (owner, 2026-09-04, pass 34
+    F34-2 / G34-1).** Every `viberr_controller` write that takes a catalogued identifier (a capability
+    id and mode, a stage id, a resource grant key, a model id or effort tier, a project role) validates
+    it against the catalogue the runtime resolves by and refuses an unknown or impossible value BY NAME,
+    listing what is valid, before anything is written. `[done]` is never answered for a write the store
+    did not make: pass 34 watched `update_agent_deployment` answer `[done]` twelve times for capability
+    ids that do not exist while every grant stayed off, the same class F33-8 closed for resource grants
+    one tool over. The refusal covers the whole vocabulary of that call: an id outside the deployment's
+    KIND, a mode the kind does not take, a non-human mode on an always-human id, a mode other than
+    direct or off on the explicit-only verdict grant, a matrix-only capability that has no toggle at
+    all (refused as such, never as "no such id"), and a stage the project does not declare. For every
+    such catalogue there is a read the same person may call first, and the write's description names
+    it: `list_capabilities` (any signed-in person) for the capability ids and, per kind, the mode an
+    ABSENT grant actually resolves to (`absentGrantMode`, the roster's own rule), not the catalogue's
+    create-seed default; `get_project` for a deployment's resolved grants, model, effort and operator
+    autonomy, derived by the Agents page's own roster so the controller reads what the roster renders;
+    `list_skills`, `list_mcp_servers`, `list_knowledge_bases` for grant keys (F33-8). Effort is
+    settable wherever model is: `deploy_agent` takes `model` and `effort`, `update_agent_deployment`
+    takes `effort`, and both check the tier against the backend's list at save time rather than
+    clamping at run time, because a silent clamp is the same lie as a silent drop; the profile editor
+    shares the check for a CHANGED value only, so a deployment that legitimately stores a preserved
+    tier stays editable, and the editor stops offering a stale tier it cannot save. The refusal lives
+    in the controller tools and the shared validators, not in `grantsFor`: the project editor
+    legitimately preserves advisory and retired ids that a strict catalogue check would refuse.
+    (`controller-toolkit.server.ts`, `capability-catalog.ts` `capabilityPatchRefusal`,
+    `agents-query.server.ts` `absentGrantMode`, `agent-profile-actions.server.ts`,
+    `model-catalog.server.ts` `assertEffortForBackend`.)
+
+140. **The owner seat is named at creation, seated before the first run, and every seat change is
+    told to the person whose seat it is (owner, 2026-09-04, pass 34 G34-3 / U34-11).** Ruling 127 made
+    the owner the credential principal and the acceptance authority; a seat that changes hands without
+    telling the person is a bill and a duty they learn about from the first failure packet, which is
+    how Omar learned he owned JC-15. **(a)** `createTask` takes an optional `ownerUserId`: a member who
+    can own tasks (the hand-off rule of `setOwner`, contributor or above, one shared check
+    `requireOwnable`), seated in the same `task.md` write that creates the task and before the
+    operator's `create` trigger, so the first triage run already bills the named owner and is refused
+    honestly when they have no credential, instead of running once on the creator's account. The
+    controller's `create_task` takes `owner` (an email, or `me`; the release word `none` is refused by
+    name at creation) and `dueDate` beside priority and labels; `priority: urgent` IS the urgent flag,
+    because `urgent` is derived from priority and never a second input (F26-16). The `task.created`
+    row records `seat: creator | named | none`. **(b)** A notification kind `ownership`, with its own
+    routing category, reaches the new owner on a hand-off or a creation that names them. The row names
+    who did it and what the seat means under ruling 127, opens the task page, and never enters
+    "Waiting on you" (that panel is fed by pending decisions, not by notification kind); the audit row
+    records whether the person was told and, when they were not, WHY (`notified: {userId}` /
+    `{skipped: "silenced"}` / `{skipped: "failed"}`), so a silenced preference and a broken store never
+    read the same. Nobody is told about their own take or release, and a member removal releases seats
+    silently because the person is leaving. Because kinds are a CHECK constraint on `notifications`,
+    the boot integrity check now compares that constraint against the kinds the code declares
+    (`projectionCheckGaps`), so a data root that predates a new kind is reported rather than silently
+    dropping every row of it. The PREVIOUS owner is told on a takeover and the released owner on an
+    admin release, through the same notifier: losing the seat takes away the credential principal
+    role, the review duty and the acceptance authority, so it is not a smaller fact than gaining it.
+    (`task-actions.server.ts` `createTask` / `setOwner` / `releaseOwner`, `task-mutation.server.ts`
+    `notifyOwnerSeatChange`, `notification.server.ts`, `notification-prefs.ts`, `notification-meta.ts`,
+    `0001_baseline.sql`, `boot.server.ts`, `controller-toolkit.server.ts` `create_task`.)
+
+141. **A scheduled operator re-run is refused while a decision packet is open, and no occurrence is
+    recorded as fired when no run happened (2026-09-04, pass 34 F34-8).** Ruling 76 refuses a
+    human-pressed "Run operator" while a packet is open because coordination is paused and the turn
+    is a paid no-op; the guard was scoped to the `manual` trigger, so the same paid no-op still ran
+    when a person scheduled it for five minutes later. It is the same turn with nobody watching, so it
+    takes the same refusal. Pass 34 also found the second half: the schedule runner writes "Scheduled
+    action starting" at claim time and stamps the occurrence `fired` for every outcome except a
+    terminal stage, so on JC-2 the task said a run had started, the trigger was queued behind the
+    drive that then opened a packet, and the refusal existed only in the server log. From now on a
+    scheduled occurrence that cannot run is retired with a timeline note naming the reason and a final
+    audit row (`outcome: "skipped-packet"`, `refusedAtStart: true`) beside the claim-time row, it
+    spends no retry, and a trigger that is refused when it reaches the front of the lease queue
+    writes the same kind of note AND retires its occurrence the same way, because the occurrence's
+    identity travels with the trigger (`RunOperatorInput.scheduleId`; the fire-time row of a run that
+    was queued behind a live drive says `outcome: "queued-behind-drive"`, and the drain-time row
+    carries `atDrain: true`). A queued human `@operator` turn refused the same way gets its own note.
+    The refusal writer settles nothing: an open packet owns `waiting: "human"`, and the
+    terminal-stage refusal already settled. Machine reaction triggers (`pr-diverged`, `agent-reply`,
+    `transition`, `packet-resolved`) still run with a packet open, exactly as ruling 17 requires.
+    Extends ruling 76. (`runOperator`'s open-packet guard, `noteQueuedTriggerRefused` and the two
+    lease-drain sites in `app/server/runtimes/operator-run.server.ts`; the finalize block in
+    `app/server/tasks/schedule.server.ts`.)
+
+142. **A run's shell carries none of Viberr's own configuration (2026-09-04, pass 34 U34-7).**
+    Ruling 127 built the spawn base around what a child must not learn about OTHER people's
+    credentials. Pass 34 found the other half: the base still handed every child this server's
+    own runtime settings. The JC-6 Developer run saw `NODE_ENV=production` and `PORT=5173`,
+    which broke `vitest` and `next start` inside a repository whose tooling reads exactly those
+    names, and the agent had to unset them by hand. An agent works in the project's repository,
+    not in Viberr's process, and a registered stdio MCP server is somebody else's program, so
+    `filteredSpawnEnv` now also strips **every name the env schema declares** (`ENV_KEYS`:
+    `NODE_ENV`, `PORT`, `VIBERR_DATA_ROOT`, `BETTER_AUTH_URL`, the OAuth client ids,
+    `VIBERR_TRUST_PROXY`, the unlock flags and every other `VIBERR_*` knob), keyed on the schema
+    rather than a hand-written list so a knob declared tomorrow is stripped tomorrow. The rule is
+    the mechanism, not a list: a declared name is stripped whatever its value (an empty string
+    included); a name the schema does NOT declare still passes, which is safe precisely because
+    the "no undeclared env reads" gate (`env.server.test.ts`) keeps the schema complete, and the
+    few undeclared reads it allows are either credential-shaped and stripped by the regex
+    (`VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`) or harmless in a child (`LOG_LEVEL`,
+    `VIBERR_E2E_*`, the test markers). Ordinary host settings (PATH, HOME, locale, proxies) and
+    the image's deliberate agent-facing `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` survive.
+    Nothing a child needs comes from a declared name: `VIBERR_BROWSER_EXECUTABLE` is read by the
+    server and handed to the browser MCP as `--executable-path`, and the agent toolkit and the
+    controller's `viberr_ops` mount are in-process SDK servers. The same base serves every
+    spawned stdio MCP child (`mcpSpawnEnv`), the hosted sign-in driver and the vendor logout, so
+    all of them lose the server's configuration in the same change. The
+    `docs/operations/configuration.md` sentence claiming the runtime "never inherits its own
+    environment" becomes true instead of aspirational, with a dated correction. The three
+    existing exclusions (`CREDENTIAL_ENV_RE`, the private-runtime names, both vendor homes) are
+    unchanged. Extends ruling 127. (`APP_CONFIG_ENV` / `filteredSpawnEnv` in
+    `app/server/runtimes/runtime-registry.server.ts`; `ENV_KEYS` in
+    `app/server/config/env.server.ts`.)
+
+143. **An allocated branch is not a delivery (2026-09-04, pass 34 U34-9).** Ruling 122
+    moved branch naming to allocation time, at first dispatch, before an agent has
+    written anything. The Insights traceability metric had been counting "has a branch"
+    as delivery footprint since before that ruling, so its denominator quietly grew to
+    include every task that ever engaged a deliverer: live in pass 34 the card read
+    "7 of 8 delivered tasks carry branch + PR" while one of the eight, JC-7, had
+    delivered nothing at all. The PRD's outcome is about executed tasks. The denominator
+    is therefore tasks carrying a delivered work revision or a recorded pull request; a
+    delivered revision with no pull request stays in it on purpose, because an unpushed
+    delivery is exactly an untraceable one. The numerator stays branch AND pull request,
+    which is what makes an untraceable delivery visible. A task whose only footprint is
+    the allocated branch is out of both, and the test pins that fixture explicitly
+    (`VIB-4` in `insights-query.server.test.ts`: branch only, must not count). The card's
+    own subline, "N of M delivered tasks carry branch + PR", does not change: with this
+    denominator it is finally true. This is a consequence of ruling 122 recorded where
+    a number a person reads changed. (`getInsightsSummary` and the
+    `OversightSummary.traceability` comment in
+    `app/server/insights/insights-query.server.ts`; the prose definition in
+    `docs/domain/auth-and-rbac.md` §6.)
+
+
+144. **The `workflow` scope stays optional, is disclosed on classic tokens, and a workflow-file push
+    is refused before it reaches GitHub when the token is known to lack it (2026-09-04, pass 34
+    G34-2, under Q34-10's direction to close the gap in the fix phase; confirmed by the owner as
+    Q34-15 on 2026-09-04; amends ruling 18).** Ruling 18 dropped `workflow` from the required set
+    and promised that "a refused workflow-file push surfaces as a scope violation when it
+    matters". Live (JC-6): GitHub rejected the push of `.github/workflows/ci.yml` with "refusing
+    to allow a Personal Access Token to create or update workflow … without `workflow` scope",
+    and the rejection reached the person only as the operator's packet 25 minutes later; no scope
+    violation, no chip, nothing at attach time, because git push rejections never went through
+    the violation path at all. Three parts. **(a)** The validator records a classic token's full
+    `x-oauth-scopes` list; the project credential card and the connection row say, as an
+    advisory that never fails validation, that a classic token without `workflow` cannot push
+    `.github/workflows/*`. Fine-grained tokens expose nothing to read, so they get no advisory.
+    **(b)** Before pushing, delivery lists the workflow files the branch changes AS GITHUB
+    MEASURES THEM (the ref update from the remote branch head, falling back to the base branch
+    only for a first push) and refuses with a named remedy before GitHub is asked when the bound
+    credential is a classic token without `workflow`; a branch whose workflow file already
+    reached the remote is never refused for a push that does not touch it. **(c)** A push GitHub
+    refuses for that reason, on any token kind, opens a `workflow` scope violation on the task
+    (the `policy` event, the inbox notification, the credential-card flag, the rail count),
+    resolved by a re-check whose header now lists `workflow` (header scopes are evidence for
+    every scope they name), or by the next successful push of workflow files; the remedy names
+    the Grant / Re-check control by name, and the operator is told the remedy is a human's.
+    `workflow` is still not required: a project that never ships CI never sees any of this.
+    (`credentialAdvisories` in `pat-store.server.ts`; `headerScopes` and the re-check sweep in
+    `pat-validator.server.ts`; `changedWorkflowFiles`, `isWorkflowScopeRejection` and the
+    `push_refused_scope` result in `push-workspace.server.ts`; the `scope_violation` outcome in
+    `task-actions.server.ts`; `credential-card.tsx`; `connections.server.ts`.)
 
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates

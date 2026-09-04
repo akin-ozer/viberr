@@ -15,6 +15,8 @@ import {
 } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { resolvePacket } from "~/server/tasks/task-actions.server";
+import type { TaskPacket } from "~/schemas/task-file.schema";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
@@ -65,6 +67,7 @@ beforeEach(() => {
   invoked.length = 0;
 });
 
+type FakeRoutes = Parameters<typeof fakeGithubFetch>[0];
 const REPO_PATH = "/repos/akin-ozer/viberr";
 const BRANCH = "vib-301-workspace";
 
@@ -334,16 +337,18 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
     const { store, actor } = setup({
       pr: { number: 318, state: "review", title: "Attach execution workspace" },
     });
-    const fake = fakeGithubFetch({});
+    // Ruling 136(c): the refusal is CONFIRMED against GitHub, which reports
+    // the PR still open; nothing is written.
+    const fake = fakeGithubFetch(livePrRoutes("open"));
     const result = await deleteTaskRemoteBranch(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-301" },
       actor,
       { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
     );
-    expect(result).toMatchObject({ status: "refused" });
+    expect(result).toMatchObject({ status: "refused", reason: "own_pr_open", prNumber: 318 });
     expect(refusalMessage(result)).toMatch(/PR #318 is still open/);
-    expect(fake.calls).toHaveLength(0); // refused BEFORE any GitHub write
+    expect(fake.calls.filter((c) => c.method !== "GET")).toHaveLength(0); // refused BEFORE any GitHub write
   });
 
   it("never deletes the project's default branch", async () => {
@@ -414,5 +419,173 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
     );
     expect(result).toEqual({ status: "deleted", branch });
     expect(fake.callsTo(`DELETE ${encodedPath}`)).toHaveLength(1);
+  });
+});
+
+/** Ruling 136(c): the reads the in-ceremony re-confirm makes, for a PR GitHub
+ *  reports `open` or `closed`. */
+function livePrRoutes(state: "open" | "closed"): FakeRoutes {
+  const pr = {
+    number: 318,
+    title: "Attach execution workspace",
+    state,
+    draft: false,
+    merged: false,
+    merged_at: null,
+    head: { sha: "headsha318" },
+    additions: 1,
+    deletions: 0,
+    changed_files: 1,
+  };
+  return {
+    [`GET ${REPO_PATH}/compare/main...${BRANCH}`]: {
+      body: { ahead_by: 1, behind_by: 0, status: "ahead", commits: [] },
+    },
+    [`GET ${REPO_PATH}/pulls`]: { body: [pr] },
+    [`GET ${REPO_PATH}/pulls/318`]: { body: pr },
+    [`GET ${REPO_PATH}/commits/headsha318/check-runs`]: { body: { total_count: 0, check_runs: [] } },
+    [`GET ${REPO_PATH}/branches/${BRANCH}`]: { body: { commit: { sha: "headsha318" } } },
+    [`DELETE ${REPO_PATH}/git/refs/heads/${BRANCH}`]: { status: 204 },
+  };
+}
+
+/**
+ * Ruling 136(c) (pass 34, F34-10/F34-11): every remote-branch delete
+ * re-confirms a cached open PR against GitHub before it can refuse, fails
+ * closed on an unconfirmed state, and runs that pass with the divergence
+ * notification and the operator wake suppressed. Canaries: decide from the
+ * cache (the closed-on-GitHub case refuses); delete regardless (the
+ * still-open case deletes); proceed when the reconcile fails (the
+ * unreachable case deletes); pass `ctx` through unchanged (the wake fires).
+ */
+describe("ruling 136(c): the delete re-confirms a cached open PR", () => {
+  it("a cached open PR that GitHub reports CLOSED is re-confirmed and the ref deleted", async () => {
+    const { store, actor } = setup({
+      pr: { number: 318, state: "review", title: "Attach execution workspace" },
+    });
+    const fake = fakeGithubFetch(livePrRoutes("closed"));
+    const result = await deleteTaskRemoteBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
+    );
+    expect(result).toEqual({ status: "deleted", branch: BRANCH });
+    expect(fake.callsTo(`DELETE ${REPO_PATH}/git/refs/heads/${BRANCH}`)).toHaveLength(1);
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr?.state).toBe("closed");
+  });
+
+  it("GitHub unreachable refuses as `unconfirmed` with no DELETE", async () => {
+    const { store, actor } = setup({
+      pr: { number: 318, state: "review", title: "Attach execution workspace" },
+    });
+    const routes = livePrRoutes("closed");
+    routes[`GET ${REPO_PATH}/compare/main...${BRANCH}`] = { status: 500, body: { message: "boom" } };
+    const fake = fakeGithubFetch(routes);
+    const result = await deleteTaskRemoteBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
+    );
+    expect(result).toMatchObject({ status: "refused", reason: "unconfirmed", prNumber: 318 });
+    expect(refusalMessage(result)).toMatch(/could not confirm whether PR #318 is still open/);
+    expect(fake.callsTo(`DELETE ${REPO_PATH}/git/refs/heads/${BRANCH}`)).toHaveLength(0);
+  });
+
+  it("the in-ceremony reconcile fires no member notification and no operator wake, but the record still lands", async () => {
+    const { store, actor } = setup({
+      pr: { number: 318, state: "review", title: "Attach execution workspace" },
+    });
+    const wakes: string[] = [];
+    const spy: OperatorWake = async (_db, _ctx, _slug, taskKey) => {
+      wakes.push(taskKey);
+    };
+    const fake = fakeGithubFetch(livePrRoutes("closed"));
+    await deleteTaskRemoteBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl, wakeOperator: spy },
+    );
+    expect(wakes).toEqual([]);
+    for (const user of Object.values(store.users)) {
+      expect(
+        listNotifications(store.db, user.id).filter((n) => n.kind === "policy"),
+        user.email,
+      ).toEqual([]);
+    }
+    // The timeline note about the closure is a true record and stays.
+    const events = eventTextRows.parse(
+      store.db.prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`).all(),
+    );
+    expect(events.some((e) => /closed on GitHub/i.test(e.text))).toBe(true);
+    expect(events.some((e) => e.text === `Deleted branch \`${BRANCH}\` from GitHub.`)).toBe(true);
+  });
+});
+
+/**
+ * Ruling 136(c): the archive door (`archive_task` + `deleteBranch`) inherits
+ * the live re-confirm and its sentence. Canary: drop the transport hook from
+ * the archive door's delete context and the delete's reconcile reaches the
+ * real network instead of the fake, so the closed-on-GitHub case never deletes.
+ */
+describe("ruling 136(c): the archive door inherits the re-confirm", () => {
+  const ARCHIVE_PACKET: TaskPacket = {
+    type: "blocked",
+    kind: "Blocked decision",
+    from: "operator",
+    title: "PR #318 closed on GitHub: VIB-301 needs a decision",
+    body: "b",
+    observations: [],
+    options: [
+      { kind: "archive_task", t: "Archive the task and delete its branch", d: "", rec: true, deleteBranch: true },
+    ],
+  };
+  function seedArchive() {
+    const { store, actor } = setup({
+      pr: { number: 318, state: "review", title: "Attach execution workspace" },
+    });
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: { ...file.parsed.frontmatter, readiness: "blocked", waiting: "human" },
+      goal: file.parsed.goal,
+      packet: ARCHIVE_PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    return { store, actor };
+  }
+  const texts = (store: ReturnType<typeof setup>["store"]) =>
+    readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.timeline.map((e) => e.text);
+
+  it("archive + deleteBranch on a cached-open PR that GitHub reports CLOSED deletes the ref", async () => {
+    const { store, actor } = seedArchive();
+    const fake = fakeGithubFetch(livePrRoutes("closed"));
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301", optionIndex: 0 },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
+    );
+    expect(fake.callsTo(`DELETE ${REPO_PATH}/git/refs/heads/${BRANCH}`)).toHaveLength(1);
+    expect(texts(store).some((t) => t === `Deleted branch \`${BRANCH}\` from GitHub.`)).toBe(true);
+    expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter.archived).toBe(true);
+  });
+
+  it("an unreachable GitHub refuses the archive's delete with the confirm sentence, and archives anyway", async () => {
+    const { store, actor } = seedArchive();
+    const routes = livePrRoutes("closed");
+    routes[`GET ${REPO_PATH}/compare/main...${BRANCH}`] = { status: 500, body: { message: "boom" } };
+    const fake = fakeGithubFetch(routes);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301", optionIndex: 0 },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
+    );
+    expect(fake.callsTo(`DELETE ${REPO_PATH}/git/refs/heads/${BRANCH}`)).toHaveLength(0);
+    expect(texts(store).some((t) => t.includes("was **not** deleted") && t.includes("could not confirm whether PR #318 is still open"))).toBe(true);
+    expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter.archived).toBe(true);
   });
 });

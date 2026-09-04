@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { listNotifications } from "~/server/projections/notifications.server";
+import type { DatabaseSync } from "node:sqlite";
+import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
+import { describeRevisionDrift } from "~/shared/revision-drift";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -21,6 +25,7 @@ import type {
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { insertUser } from "~/server/auth/user-store.server";
+import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import {
@@ -43,6 +48,7 @@ import {
   releaseTasksOwnedBy,
   setOwner,
   clearWaitingToHuman,
+  manualDeliverForReview,
   performDelivery,
   revisionDriftNote,
   specialistReplyDirective,
@@ -270,6 +276,38 @@ async function recordReviewerReply(
 }
 
 describe("createTask", () => {
+  it("ruling 131: createTask with blockedBy is born held; a bad reference refuses before a key is allocated", async () => {
+    // Canary: move the `validateDependencyRefs` call below `allocateTaskKey`
+    // and the refused create burns VIB-100 (the good one lands on VIB-101).
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await expect(
+      createTask(
+        store.db,
+        { projectSlug: store.slug, title: "Waits on nothing real", blockedBy: ["VIB-999"] },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("VIB-999 is not a task in this project") });
+    const held = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Waits on VIB-1", blockedBy: ["VIB-1"] },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(held.key).toBe("VIB-100");
+    expect(held.task.waiting).toBe("none");
+    expect(held.task.readiness).toBe("blocked");
+    expect(held.task.blockedBy.map((e) => [e.ref, e.state])).toEqual([["VIB-1", "open"]]);
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-100", dataRoot: store.dataRoot })!.parsed;
+    // The stored value stays at birth; the floor is derived, never stored.
+    expect(parsed.frontmatter.readiness).toBe("input_required");
+    expect(parsed.frontmatter.blockedBy).toEqual(["VIB-1"]);
+    expect(parsed.timeline[0]).toMatchObject({ type: "note", title: "Waits on other work" });
+    expect(parsed.timeline[0]!.text).toContain("Created waiting on VIB-1");
+  });
+
   it("writes task.md with the mock create defaults and projects it", async () => {
     const store = prepared();
     const result = await createTask(
@@ -2600,21 +2638,33 @@ describe("F19-23: the revision-drift note agrees with its own number", () => {
         number: 150,
         state: "review",
         title: "[VIB-4] work",
-        revisionDrift: { aheadBy, headSha: HEAD },
+        revisionDrift: { headSha: HEAD, authored: aheadBy, baseRefresh: null },
       },
     });
 
   it("uses the singular for exactly one commit", () => {
-    expect(revisionDriftNote(withDrift(1))).toContain("1 commit was added");
+    expect(revisionDriftNote(withDrift(1))).toContain("1 authored commit was added");
     expect(revisionDriftNote(withDrift(1))).not.toContain("commit were");
   });
 
   it("keeps the plural for more than one", () => {
-    expect(revisionDriftNote(withDrift(3))).toContain("3 commits were added");
+    expect(revisionDriftNote(withDrift(3))).toContain("3 authored commits were added");
   });
 
   it("says nothing at all when the merged head IS the reviewed one", () => {
     expect(revisionDriftNote(baseTaskFrontmatter("VIB-4"))).toBe("");
+  });
+
+  it("ruling 132: the permanent completion record names a base refresh as one, never as unreviewed commits", () => {
+    // Canary: restore the old body ("N commits were added to the PR head after
+    // the review") over the summed count.
+    const record = { headSha: HEAD, authored: 0, baseRefresh: { merges: 1, commits: 4 } };
+    const note = revisionDriftNote(
+      baseTaskFrontmatter("VIB-4", { pr: { number: 150, state: "review", title: "[VIB-4] work", revisionDrift: record } }),
+    );
+    expect(note).toContain(describeRevisionDrift(record).sentence);
+    expect(note).not.toMatch(/unreviewed/i);
+    expect(note).not.toContain("5 commits were added");
   });
 });
 
@@ -3607,5 +3657,602 @@ describe("recordAgentCompletion attachments (P21 — the producing message names
         dataRoot: store.dataRoot,
       })!.diagnostics,
     ).toEqual([]);
+  });
+});
+
+/**
+ * Ruling 128 (pass 34, F34-4): the base branch is created BEFORE the first
+ * push, and the pre-push gate splits by EVIDENCE — only a positive "no default
+ * ref and Viberr could not create it" refuses the push; a probe that merely
+ * could not be READ pushes anyway and never claims the base is missing.
+ */
+describe("ruling 128: performDelivery bootstraps the base before the first push", () => {
+  // Ruling 144(c): a refused workflow-file push opens a `workflow` scope
+  // violation on the task with its remedy, opens no PR, and the next
+  // successful push of workflow files resolves it. Canaries: route
+  // `push_refused_scope` into the `push_failed` arm; drop the resolve.
+  it("ruling 144: a refused workflow push opens the violation with the remedy, and no PR", async () => {
+    pushMock.mockClear();
+    const store = prepared();
+    seedDeliverable(store);
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { body: { object: { sha: ROOT } } },
+      [`POST ${REPO_PATH}/pulls`]: { status: 201, body: { number: 1, html_url: "https://x/pull/1", title: "t", state: "open" } },
+    });
+    pushMock.mockResolvedValueOnce({
+      status: "push_refused_scope",
+      branch: "vib-1",
+      scope: "workflow",
+      phase: "before_push",
+      files: [".github/workflows/ci.yml"],
+      reason: "the project's classic token has no `workflow` scope, and this push changes `.github/workflows/ci.yml`",
+    });
+    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    expect(outcome).toMatchObject({ status: "scope_violation", scope: "workflow" });
+    expect(outcome.status === "scope_violation" ? outcome.message : "").toContain("Re-check on the project's GitHub view");
+    expect(github.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
+    const open = listScopeViolations(store.db, store.slug, { status: "open" });
+    expect(open.map((v) => [v.scope, v.taskKey])).toEqual([["workflow", "VIB-1"]]);
+    const timeline = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline;
+    expect(timeline.some((e) => e.text.includes("Delivery push refused: workflow scope") || e.text.includes("`.github/workflows/ci.yml`"))).toBe(true);
+
+    // A push whose workflow files could NOT be measured proves nothing: the
+    // violation stands. Canary: read `null` as an empty list in the resolve
+    // arm — an unmeasured push then clears a violation it never disproved.
+    pushMock.mockResolvedValueOnce({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "c".repeat(40),
+      remoteHeadBefore: null,
+      workflowFiles: null,
+    });
+    await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    expect(
+      listScopeViolations(store.db, store.slug, { status: "open" }).map((v) => v.scope),
+    ).toEqual(["workflow"]);
+
+    // The next successful push of workflow files is the proof that resolves it.
+    pushMock.mockResolvedValueOnce({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "a".repeat(40),
+      remoteHeadBefore: null,
+      workflowFiles: [".github/workflows/ci.yml"],
+    });
+    const again = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    expect(again.status).toBe("delivered");
+    expect(listScopeViolations(store.db, store.slug, { status: "open" })).toEqual([]);
+  });
+
+  const REPO_PATH = "/repos/akin-ozer/viberr";
+  const ROOT = "d2e0fb0".padEnd(40, "0");
+
+  function seedDeliverable(store: TestStore): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_bootstrap0000000000001" },
+      actor(store.users.arda),
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor(store.users.arda));
+  }
+
+  it("bootstraps `main` before the first push and records it (the bootstrap line is timeline[1], under the PR event)", async () => {
+    // Canary: gate the bootstrap on the absence of the `pushWorkspaceBranch`
+    // dep (skip it when a dep is injected) and the PUT never runs here.
+    pushMock.mockClear();
+    const store = prepared();
+    seedDeliverable(store);
+    let bootstrapped = false;
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: () =>
+        bootstrapped
+          ? { body: { object: { sha: ROOT } } }
+          : { status: 409, body: { message: "Git Repository is empty." } },
+      [`GET ${REPO_PATH}/branches`]: { body: [] },
+      [`PUT ${REPO_PATH}/contents/README.md`]: () => {
+        bootstrapped = true;
+        return { status: 201, body: { commit: { sha: ROOT } } };
+      },
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 1, html_url: "https://x/pull/1", title: "[VIB-1] t", state: "open", head: { sha: "a".repeat(40) } },
+      },
+    });
+    pushMock.mockResolvedValueOnce({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "a".repeat(40),
+      remoteHeadBefore: null,
+   workflowFiles: [],
+    });
+    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    expect(outcome.status).toBe("delivered");
+    expect(github.callsTo(`PUT ${REPO_PATH}/contents/README.md`)).toHaveLength(1);
+    // The bootstrap ran BEFORE the push.
+    const putIndex = github.calls.findIndex((c) => c.method === "PUT");
+    expect(putIndex).toBeGreaterThan(-1);
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    const timeline = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline;
+    expect(timeline[0]!.text).toContain("Opened **PR #1**");
+    expect(timeline[1]!.text).toContain("Bootstrapped the repository");
+    expect(timeline[1]!.text).toContain("`d2e0fb0`");
+  });
+
+  it("refuses to push when the base cannot be CREATED, and pushes anyway when the probe merely could not be READ", async () => {
+    // Canary: route `network_unavailable` into the refusing arm and the second
+    // half fails (no push, and a sentence claiming the base is missing).
+    pushMock.mockClear();
+    const store = prepared();
+    seedDeliverable(store);
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { status: 409, body: { message: "Git Repository is empty." } },
+      [`GET ${REPO_PATH}/branches`]: { body: [] },
+      [`PUT ${REPO_PATH}/contents/README.md`]: { status: 500, body: { message: "boom" } },
+    });
+    const refused = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    expect(refused.status).toBe("failed");
+    expect(refused.status === "failed" ? refused.message : "").toContain("has no `main` branch and Viberr could not create it");
+    expect(refused.status === "failed" ? refused.message : "").toContain("Nothing was pushed");
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!.text).toContain("could not create it");
+
+    // The probe could not be READ: the push proceeds, and no surface claims
+    // the base is missing.
+    const offline = prepared();
+    seedDeliverable(offline);
+    pushMock.mockClear();
+    pushMock.mockResolvedValueOnce({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
+    const { unreachableFetch } = await import("../../../test-support/fake-github");
+    const outcome = await performDelivery(
+      offline.db,
+      { dataRoot: offline.dataRoot, deps: { pushWorkspaceBranch: pushMock }, fetchImpl: unreachableFetch() },
+      offline.slug,
+      "VIB-1",
+      actor(offline.users.arda),
+    );
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    expect(outcome.status).toBe("failed");
+    const text = getTaskDetail(offline.db, offline.slug, "VIB-1")!.timeline[0]!.text;
+    expect(text).not.toContain("has no `main`");
+    expect(text).toContain("unreachable");
+  });
+});
+
+/**
+ * Ruling 134(a): a push that moved the head of a REUSED PR is recorded on the
+ * timeline with the same author rule the "Opened PR" event uses — a human
+ * delivery renders as that human. Canary: drop the `recordPushedHead` call.
+ */
+describe("ruling 134: the pushed-head event on a reused PR", () => {
+  it("writes `Pushed <sha> to PR #N (was <old>)` attributed to the human who delivered, and records the head on the PR", async () => {
+    const REPO_PATH = "/repos/akin-ozer/viberr";
+    pushMock.mockClear();
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1",
+        ownerUserId: store.users.arda.id,
+        pr: {
+          number: 4,
+          state: "review",
+          title: "[VIB-1] t",
+          headSha: "6004958".padEnd(40, "0"),
+          unpushedRevision: { revisionSha: "385047c".padEnd(40, "0"), prHeadSha: "6004958".padEnd(40, "0"), relation: "unknown" },
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_pushed00000000000001" }, actor(store.users.arda));
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor(store.users.arda));
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { body: { object: { sha: "c".repeat(40) } } },
+      [`GET ${REPO_PATH}/pulls/4`]: {
+        body: { number: 4, html_url: "https://x/pull/4", title: "[VIB-1] t", state: "open", merged: false, head: { sha: "385047c".padEnd(40, "0") } },
+      },
+    });
+    pushMock.mockResolvedValueOnce({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "385047c".padEnd(40, "0"),
+      remoteHeadBefore: "6004958".padEnd(40, "0"),
+    workflowFiles: [],
+    });
+    const outcome = await manualDeliverForReview(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      deliveryCtx(store),
+    );
+    expect(outcome).toMatchObject({ status: "delivered", created: false, moved: true, headSha: "385047c".padEnd(40, "0") });
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const event = file.parsed.timeline.find((e) => e.text.startsWith("Pushed `385047c`"))!;
+    expect(event.text).toBe("Pushed `385047c` to **PR #4** for review (was `6004958`).");
+    expect(event.actor).toMatchObject({ kind: "human", userId: store.users.arda.id });
+    expect(file.parsed.frontmatter.pr?.headSha).toBe("385047c".padEnd(40, "0"));
+    // The push satisfied the recorded unpushed revision.
+    expect(file.parsed.frontmatter.pr).not.toHaveProperty("unpushedRevision");
+    const audit = listAuditEvents(store.db).find((e) => e.action === "github.delivery.manual");
+    expect(audit?.details).toMatchObject({ status: "delivered", moved: true, headSha: "385047c".padEnd(40, "0") });
+  });
+});
+
+/**
+ * Ruling 137 (pass 34, F34-15): a move AWAY from the acceptance boundary
+ * withdraws the standing acceptance offers on the record. The transition
+ * filter already dropped the cards; the point is the note and the audit row.
+ */
+describe("ruling 137: a move off the acceptance boundary withdraws the offers", () => {
+  it("review → impl withdraws the accept card and the terminal transition card, on the record; the run_agent card survives", async () => {
+    // Canary: drop the `transitionStage` withdrawal site — the cards still
+    // vanish (the transition filter), but silently: no note, no row.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        branch: "vib-1-work",
+        workRevision: workRev("rev_1"),
+        validation: "changed",
+        recommendations: [
+          { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-1 to Done", detail: "", forHeadSha: "a".repeat(40) },
+          { id: "r-done", kind: "transition", toStageId: "done", label: "Move to Done", detail: "" },
+          { id: "r-run", kind: "run_agent", profileId: "dev", label: "Run dev", detail: "" },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    expect(parsed.frontmatter.stage).toBe("impl");
+    expect(parsed.frontmatter.recommendations.map((r) => r.id)).toEqual(["r-run"]);
+    const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Recommendation withdrawn");
+    expect(note?.text).toContain('"Accept completion and move VIB-1 to Done"');
+    expect(note?.text).toContain('"Move to Done"');
+    expect(note?.text).toMatch(/moved to \*\*[^*]+\*\*, away from the acceptance boundary/);
+    expect(note?.text).toContain("1 recommendation still stands");
+    const rows = listAuditEvents(store.db, { action: "task.recommendation.withdrawn" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({ cause: "stage_move", surviving: 1, removed: [{ id: "r-accept" }, { id: "r-done" }] });
+    expect(rows[0]!.actorLabel).toBe(store.users.arda.email);
+  });
+});
+
+/**
+ * Ruling 140(a) (pass 34, G34-3): a named owner is seated in the SAME write
+ * that creates the task, before the operator's `create` trigger, so the first
+ * run bills the named owner; the hand-off rule is the ONE shared check.
+ */
+describe("ruling 140(a): a named owner at creation", () => {
+  it("the operator's create trigger reads the NAMED owner from the file, exactly once", async () => {
+    // Asserting right after `await createTask` proves nothing: the hand-off is
+    // fired with `void` and awaits a dynamic import first. The injected
+    // `runOperator` captures what the file said WHEN THE RUN STARTED.
+    // Canary: write the creator into the frontmatter and apply the named owner
+    // after `autoInvokeOperator` — the run reads arda, not murat.
+    const store = prepared();
+    // `autoInvokeOperator` returns early when no operator is deployed, so the
+    // hand-off this case is about needs one on the project.
+    const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...projectFile.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [{ capabilityId: "dispatch-agents", mode: "direct" as const }],
+          extras: [],
+          definition: {
+            kind: "operator" as const,
+            name: "Operator",
+            role: "Coordination",
+            icon: "shield",
+            backends: ["claude" as const],
+            model: "sonnet",
+            autonomy: "supervised" as const,
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const seen: { ownerUserId: string | null; trigger: string | undefined }[] = [];
+    let settle: (() => void) | null = null;
+    const observed = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const runOperator = vi.fn((_db: DatabaseSync, input: RunOperatorInput) => {
+      const file = readTaskFile({
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        dataRoot: store.dataRoot,
+      });
+      seen.push({
+        ownerUserId: file?.parsed.frontmatter.ownerUserId ?? null,
+        trigger: input.trigger,
+      });
+      settle?.();
+      return Promise.resolve({
+        runId: "run_seat",
+        queued: false,
+        backend: "claude" as const,
+        autonomy: "supervised" as const,
+      });
+    });
+    const created = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Seated at birth", ownerUserId: store.users.murat.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { runOperator } },
+    );
+    expect(created.task.owner).toMatchObject({ kind: "human", userId: store.users.murat.id });
+    await Promise.race([
+      observed,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("the create trigger never fired")), 5_000),
+      ),
+    ]);
+    expect(seen).toEqual([{ ownerUserId: store.users.murat.id, trigger: "create" }]);
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: created.key,
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    const assign = parsed.timeline.find((e) => e.type === "assign")!;
+    expect(assign.text).toContain(`Seated ${store.users.murat.name} as owner at creation.`);
+    expect(assign.actor).toMatchObject({ kind: "human", userId: store.users.arda.id });
+    expect(
+      listAuditEvents(store.db, { action: "task.created" })[0]!.details,
+    ).toMatchObject({ ownerUserId: store.users.murat.id, seat: "named" });
+  });
+
+  it("naming yourself records the creator seat with the creator text", async () => {
+    const store = prepared();
+    const created = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Mine to own", ownerUserId: store.users.arda.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: created.key,
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.frontmatter.ownerUserId).toBe(store.users.arda.id);
+    expect(parsed.timeline.find((e) => e.type === "assign")?.text).toContain(
+      "Took task ownership by creating the task.",
+    );
+    expect(
+      listAuditEvents(store.db, { action: "task.created" })[0]!.details,
+    ).toMatchObject({ seat: "creator" });
+  });
+
+  it("the hand-off refusals apply, before a key is allocated", async () => {
+    // Canary: drop `requireOwnable` from createTask.
+    const store = prepared();
+    const before = listAuditEvents(store.db).length;
+    await expect(
+      createTask(
+        store.db,
+        { projectSlug: store.slug, title: "To a viewer", ownerUserId: store.users.deniz.id },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(
+      "Ownership can only be handed to a project member who can own tasks (contributor or above).",
+    );
+    await expect(
+      createTask(
+        store.db,
+        { projectSlug: store.slug, title: "To a non member", ownerUserId: "u_nobody" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(
+      "Ownership can only be handed to a project member who can own tasks (contributor or above).",
+    );
+    await expect(
+      createTask(
+        store.db,
+        { projectSlug: store.slug, title: "By the operator", ownerUserId: store.users.murat.id },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, operatorAuthorized: true },
+      ),
+    ).rejects.toThrow(
+      "A named owner is seated by a person; an operator-created task starts unowned.",
+    );
+    expect(listAuditEvents(store.db).length).toBe(before);
+  });
+});
+
+/**
+ * Ruling 140(b) (pass 34, U34-11): the person whose owner seat changed is
+ * told. Under ruling 127 the seat is the credential principal and the
+ * acceptance authority, so Omar learned he owned JC-15 from the failure packet
+ * his missing credential produced.
+ */
+describe("ruling 140(b): a seat change notifies the person whose seat it is", () => {
+  /** Pass 34 review: BOTH sides of a hand-off are told, independently — an
+   *  admin moving the seat between two other people used to tell the new owner
+   *  and leave the displaced one to find out from a failure packet. */
+
+  const ownershipRows = (store: TestStore, userId: string) =>
+    listNotifications(store.db, userId).filter((n) => n.kind === "ownership");
+
+  it("a hand-off tells the new owner; a takeover tells the DISPLACED owner; the actor is never told", async () => {
+    // Canary: delete the notifier call in the hand-off branch of setOwner.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.murat.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const handed = ownershipRows(store, store.users.murat.id);
+    expect(handed).toHaveLength(1);
+    expect(handed[0]!.title).toContain(`${store.users.arda.name} handed you VIB-1`);
+    expect(handed[0]!.text).toContain("reviewer and acceptance authority");
+    expect(handed[0]!.taskKey).toBe("VIB-1");
+    expect(ownershipRows(store, store.users.arda.id)).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.ownership.handed_off" })[0]!.details,
+    ).toMatchObject({ notified: { userId: store.users.murat.id } });
+
+    // Arda (admin) takes the occupied seat back: MURAT is the one who loses it.
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.arda.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const displaced = ownershipRows(store, store.users.murat.id);
+    expect(displaced).toHaveLength(2);
+    expect(displaced[0]!.title).toContain(`${store.users.arda.name} took over VIB-1`);
+    expect(ownershipRows(store, store.users.arda.id)).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.ownership.taken" })[0]!.details,
+    ).toMatchObject({ notifiedDisplaced: { userId: store.users.murat.id } });
+  });
+
+  it("an admin release tells the released owner; a self-take and a self-release tell nobody", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { ownerUserId: null }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // Self-take of an OPEN seat: nobody is told.
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-2", targetUserId: store.users.murat.id },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(ownershipRows(store, store.users.murat.id)).toHaveLength(0);
+
+    // Admin release: the released owner is told.
+    await releaseOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-2" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const released = ownershipRows(store, store.users.murat.id);
+    expect(released).toHaveLength(1);
+    expect(released[0]!.title).toContain(`${store.users.arda.name} released you from VIB-2`);
+    expect(
+      listAuditEvents(store.db, { action: "task.ownership.admin_released" })[0]!.details,
+    ).toMatchObject({ notified: { userId: store.users.murat.id } });
+
+    // Self-release: nobody is told, and the row records no notification.
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-2", targetUserId: store.users.murat.id },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    await releaseOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-2" },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(ownershipRows(store, store.users.murat.id)).toHaveLength(1);
+    const selfRelease = listAuditEvents(store.db, { action: "task.ownership.released" })[0]!;
+    expect(selfRelease.details).not.toHaveProperty("notified");
+  });
+
+  it("a silenced category drops the row and the audit says so", async () => {
+    // Canary: pass `bypassPrefs` in the notifier — the row lands and the audit
+    // claims the person was told.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { setNotifRoutingPref } = await import("~/features/profile/profile-actions.server");
+    setNotifRoutingPref(store.db, store.users.murat.id, "ownership", false);
+
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-3", targetUserId: store.users.murat.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(ownershipRows(store, store.users.murat.id)).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.ownership.handed_off" })[0]!.details,
+    ).toMatchObject({ notified: { skipped: "silenced" } });
+  });
+
+  it("a THIRD-PARTY hand-off tells both sides: the new owner and the displaced one", async () => {
+    // Canary: pick one recipient by `isTake` again — the displaced owner is
+    // told nothing and the audit row names the wrong person.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-4", { ownerUserId: store.users.murat.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // Arda (admin) moves the seat from Murat to Selin: neither is the actor.
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-4", targetUserId: store.users.selin.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const gained = ownershipRows(store, store.users.selin.id);
+    const lost = ownershipRows(store, store.users.murat.id);
+    expect(gained).toHaveLength(1);
+    expect(gained[0]!.title).toContain(`${store.users.arda.name} handed you VIB-4`);
+    expect(lost).toHaveLength(1);
+    expect(lost[0]!.title).toContain(`${store.users.arda.name} took over VIB-4`);
+    expect(ownershipRows(store, store.users.arda.id)).toHaveLength(0);
+    const row = listAuditEvents(store.db, { action: "task.ownership.handed_off" })[0]!;
+    expect(row.details).toMatchObject({
+      notified: { userId: store.users.selin.id },
+      notifiedDisplaced: { userId: store.users.murat.id },
+    });
+    // The row names WHO did it, so the stream is not a dash (pass 34 review).
+    expect(gained[0]!.from).toMatchObject({ kind: "human", name: store.users.arda.name });
+  });
+
+  it("a creation that names someone else tells them", async () => {
+    const store = prepared();
+    const created = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Yours from birth", ownerUserId: store.users.murat.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const rows = ownershipRows(store, store.users.murat.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.title).toContain(`created ${created.key} with you as owner`);
+    expect(
+      listAuditEvents(store.db, { action: "task.created" })[0]!.details,
+    ).toMatchObject({ notified: { userId: store.users.murat.id } });
   });
 });

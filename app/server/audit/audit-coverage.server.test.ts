@@ -153,6 +153,70 @@ describe("governed actions record audit rows (table-driven)", () => {
           ),
       },
       {
+        // Ruling 131: the dependency writer and the human release.
+        name: "setTaskDependencies",
+        action: "task.dependencies.updated",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { setTaskDependencies } = await import("~/server/tasks/dependencies.server");
+          await setTaskDependencies(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-2"] },
+            actorArda(),
+            fileCtx,
+          );
+        },
+      },
+      {
+        name: "setTaskDependencies (a person empties the list)",
+        action: "task.dependencies.released",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { setTaskDependencies } = await import("~/server/tasks/dependencies.server");
+          await setTaskDependencies(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-2"] },
+            actorArda(),
+            fileCtx,
+          );
+          await setTaskDependencies(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: [] },
+            actorArda(),
+            fileCtx,
+          );
+        },
+      },
+      {
+        // Ruling 137: a withdrawal writes its own row. The accept card is
+        // seeded on a task with NO open packet, and the packet the question
+        // opens is cleared afterwards so later rows in this sequential store
+        // are unaffected.
+        name: "withdrawAcceptanceOffers (an agent question opens)",
+        action: "task.recommendation.withdrawn",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { openAgentQuestionPacket } = await import("~/server/tasks/agent-toolkit.server");
+          const { updateTaskFile } = await import("~/server/files/task-writer.server");
+          const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+          await updateTaskFile(ref, (parsed) => {
+            parsed.packet = null;
+            parsed.frontmatter.recommendations = [
+              { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "" },
+            ];
+          });
+          await openAgentQuestionPacket(store.db, fileCtx, {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            actorRef: { kind: "agent", backend: "claude", profileId: "reviewer", roleHint: "Reviewer" },
+            title: "Which base branch should this target?",
+          });
+          await updateTaskFile(ref, (parsed) => {
+            parsed.packet = null;
+          });
+        },
+      },
+      {
         name: "appendComment",
         action: "task.comment",
         taskKey: "VIB-1",
@@ -344,6 +408,72 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
+        // Ruling 128 (pass 34): an empty repository is bootstrapped, and the
+        // repository-level write is audited like a credential assignment.
+        name: "ensureDefaultBranch (bootstraps an empty repository)",
+        action: "github.repo.bootstrapped",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+          const { createPat, setProjectCredential } = await import(
+            "~/server/secrets/pat-store.server"
+          );
+          const { getProjectGithubContext } = await import("~/server/github/github-context.server");
+          const { ensureDefaultBranch } = await import("~/server/github/repo-bootstrap.server");
+          const patActor = { userId: store.users.arda.id, label: store.users.arda.email };
+          const pat = createPat(
+            store.db,
+            { userId: store.users.arda.id, label: "bot", token: "ghp_coverage000000000000000000000002" },
+            patActor,
+          );
+          setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+          let bootstrapped = false;
+          const gh = fakeGithubFetch({
+            "GET /repos/akin-ozer/viberr/git/ref/heads/main": () =>
+              bootstrapped
+                ? { body: { object: { sha: "d".repeat(40) } } }
+                : { status: 409, body: { message: "Git Repository is empty." } },
+            "GET /repos/akin-ozer/viberr/branches": { body: [] },
+            "PUT /repos/akin-ozer/viberr/contents/README.md": () => {
+              bootstrapped = true;
+              return { status: 201, body: { commit: { sha: "d".repeat(40) } } };
+            },
+          });
+          const context = getProjectGithubContext(store.db, store.slug, { fetchImpl: gh.fetchImpl });
+          if (context.status !== "ok") throw new Error(context.status);
+          await ensureDefaultBranch(
+            store.db,
+            context,
+            { projectSlug: store.slug, taskKey: "VIB-1" },
+            patActor,
+            { dataRoot: store.dataRoot },
+          );
+        },
+      },
+      {
+        // Pass 34 (F34-9): a PR adoption is recorded by every door.
+        name: "recordPrAdoption (a human-opened PR replaces the task's closed one)",
+        action: "github.pr.adopted",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { recordPrAdoption } = await import("~/server/github/pr-adoption-record.server");
+          await recordPrAdoption(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+            {
+              repo: "akin-ozer/viberr",
+              branch: "vib-1",
+              prNumber: 6,
+              previousPrNumber: 5,
+              previousState: "closed",
+              headSha: "e".repeat(40),
+              source: "reconciler",
+            },
+            { userId: null, label: "system:policy-engine" },
+          );
+        },
+      },
+      {
         // C05-H (pass 32): the collision remedy's PR close was locked only in
         // task-governance; the designated coverage file names it too.
         name: "resolveRemoteBranchCollision (closes the unowned PR)",
@@ -381,6 +511,70 @@ describe("governed actions record audit rows (table-driven)", () => {
             { projectSlug: store.slug, taskKey: "VIB-1" },
             actorArda(),
             { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+          );
+        },
+      },
+      {
+        // Ruling 136: one row per collision ceremony with its typed outcome.
+        // No credential here, so the ceremony refuses (`no_context`) and is
+        // still audited; the fuller arms are locked in task-governance and
+        // delivery-actionable, which supply `fetchImpl` and the delivery deps.
+        name: "resolvePacket (resolve_remote_collision ceremony)",
+        action: "github.collision.resolved",
+        taskKey: "VIB-77",
+        run: async () => {
+          writeTask(store.dataRoot, store.slug, {
+            frontmatter: baseTaskFrontmatter("VIB-77", {
+              stage: "review",
+              waiting: "human",
+              readiness: "blocked",
+              branch: "vib-1-work",
+              github: { commits: [], changed: null, unownedPr: 232 },
+            }),
+            packet: {
+              type: "blocked",
+              kind: "Blocked decision",
+              from: "operator",
+              title: "Branch vib-1-work collides with an unrelated remote branch",
+              body: "b",
+              observations: [],
+              options: [
+                { kind: "resolve_remote_collision", t: "Delete the stale remote branch, then redeliver", d: "", rec: true },
+              ],
+            },
+          });
+          rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+          await resolvePacket(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-77", optionIndex: 0 },
+            actorArda(),
+            { dataRoot: store.dataRoot },
+          );
+        },
+      },
+      {
+        // F34-3: a pre-dispatch branch preparation failure is audited.
+        name: "ensureTaskBranchBestEffort (network failure before dispatch)",
+        action: "github.branch.prepare_failed",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { unreachableFetch } = await import("../../../test-support/fake-github");
+          const { createPat, setProjectCredential } = await import(
+            "~/server/secrets/pat-store.server"
+          );
+          const { ensureTaskBranchBestEffort } = await import("~/server/github/branch-sync.server");
+          const patActor = { userId: store.users.arda.id, label: store.users.arda.email };
+          const pat = createPat(
+            store.db,
+            { userId: store.users.arda.id, label: "bot", token: "ghp_coverage000000000000000000000003" },
+            patActor,
+          );
+          setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+          await ensureTaskBranchBestEffort(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1" },
+            actorArda(),
+            { dataRoot: store.dataRoot, fetchImpl: unreachableFetch() },
           );
         },
       },

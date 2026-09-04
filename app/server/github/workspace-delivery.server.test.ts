@@ -9,6 +9,8 @@ import {
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { createNotification } from "~/server/projections/notifications.server";
+import type { Recommendation } from "~/schemas/task-file.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
@@ -47,8 +49,23 @@ function fakeExec(config: {
   shallow?: boolean;
   /** Whether `git fetch --deepen …` succeeds (default: true). */
   deepenOk?: boolean;
+  /** Ruling 135: what the workspace knows about the PR head `gh` reported.
+   *  Default: nothing (`merge-base` fails, `cat-file` fails → `unknown`). */
+  ancestry?: { prHeadIsAncestor?: boolean; revisionIsAncestor?: boolean; prHeadKnown?: boolean };
 }): CommandExec {
   return async (file, args) => {
+    if (file === "git" && args.includes("merge-base")) {
+      const older = args[args.indexOf("--is-ancestor") + 1];
+      const yes = older === HEAD_SHA
+        ? config.ancestry?.revisionIsAncestor === true
+        : config.ancestry?.prHeadIsAncestor === true;
+      return yes ? { ok: true, stdout: "" } : { ok: false, stdout: "", stderr: "", code: 1 };
+    }
+    if (file === "git" && args.includes("cat-file")) {
+      return config.ancestry?.prHeadKnown
+        ? { ok: true, stdout: "" }
+        : { ok: false, stdout: "", stderr: "missing object", code: 1 };
+    }
     if (file === "git" && args.includes("--is-shallow-repository")) {
       return { ok: true, stdout: config.shallow ? "true\n" : "false\n" };
     }
@@ -150,6 +167,81 @@ describe("reconcileWorkspaceDelivery", () => {
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain(
       "github.workspace.branch_reconciled",
     );
+  });
+
+  it("ruling 137: a new delivered revision withdraws the accept card, records why, keeps the Reconciled branch event, and leaves a surviving run_agent card's bell UNREAD", async () => {
+    // Canary: restore the blind branch patch (drop the withdrawal from the
+    // locked write) and the accept card survives the revision it no longer
+    // describes.
+    const accept: Recommendation = {
+      id: "r-accept",
+      kind: "accept_completion",
+      toStageId: "done",
+      label: "Accept completion and move ATL-3 to Done",
+      detail: "The review is clean.",
+      forHeadSha: "01d".padEnd(40, "0"),
+    };
+    const runAgent: Recommendation = {
+      id: "r-run",
+      kind: "run_agent",
+      profileId: "developer",
+      label: "Run Developer",
+      detail: "",
+    };
+    const store = setupTask("ATL-3", { stage: "review", recommendations: [accept, runAgent] });
+    createNotification(store.db, {
+      userId: store.users.murat.id,
+      kind: "approval",
+      text: "Run Developer",
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      bypassPrefs: true,
+    });
+    const workdir = makeWorkspaceRepo();
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      profileId: "developer",
+      workdir,
+      dataRoot: store.dataRoot,
+      backend: "codex",
+      role: "Developer",
+      exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
+    });
+    expect(res.status).toBe("reconciled");
+
+    const parsed = readFm(store);
+    expect(parsed.frontmatter.workRevision?.headSha).toBe(HEAD_SHA);
+    expect(parsed.frontmatter.recommendations.map((r) => r.id)).toEqual(["r-run"]);
+    // The branch-linked event the reconcile always wrote is still there…
+    expect(parsed.timeline.find((e) => e.type === "github")?.text).toContain(
+      `Reconciled branch \`${BRANCH}\``,
+    );
+    // …and the withdrawal is on the record, in the deliverer's name.
+    const note = parsed.timeline.find(
+      (e) => e.type === "note" && e.title === "Recommendation withdrawn",
+    );
+    expect(note?.actor).toMatchObject({ kind: "agent", profileId: "developer" });
+    expect(note?.text).toContain('"Accept completion and move ATL-3 to Done"');
+    expect(note?.text).toContain(`a new revision \`${HEAD_SHA.slice(0, 7)}\` was delivered`);
+    expect(note?.text).toContain("still stand");
+    const rows = listAuditEvents(store.db, { action: "task.recommendation.withdrawn" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({
+      cause: "revision",
+      surviving: 1,
+      removed: [{ id: "r-accept", kind: "accept_completion", forHeadSha: "01d".padEnd(40, "0") }],
+    });
+    // The surviving card's "Waiting on you" bell is NOT marked read.
+    // SAFETY: a `count(*) AS c` aggregate answers exactly one row with the integer `c`.
+    const unread = store.db
+      .prepare(
+        `SELECT count(*) AS c FROM notifications WHERE task_key = 'ATL-3' AND kind = 'approval' AND read_at IS NULL`,
+      )
+      .get() as { c: number };
+    expect(unread.c).toBe(1);
   });
 
   it("locates the repo via the conventional <taskDir>/workspace/<name> path when no workdir is given", async () => {
@@ -675,5 +767,107 @@ describe("reconcileWorkspaceDelivery", () => {
     });
 
     expect(res.status).toBe("no_repo");
+  });
+});
+
+/**
+ * Ruling 135 (pass 34, F34-11): the moment a delivering run mints a revision on
+ * a branch whose PR is open, the workspace reconcile relates origin's copy (the
+ * PR head `gh` reported) to that revision from the workspace's own history and
+ * records `pr.unpushedRevision`, so the acceptance gate does not wait for the
+ * five-minute poll. Canary: make `classifyUnpushedRevision` return null and
+ * the three relations below are never written.
+ */
+describe("ruling 135: the workspace reconcile records the unpushed revision", () => {
+  const PR_HEAD = "0".repeat(40);
+  async function reconcile(store: ReturnType<typeof setupTask>, exec: CommandExec) {
+    return reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      profileId: "developer",
+      workdir: makeWorkspaceRepo(),
+      dataRoot: store.dataRoot,
+      exec,
+    });
+  }
+  const owned = () =>
+    setupTask("ATL-3", { branch: BRANCH, pr: { number: 9, state: "review", title: "[ATL-3] Add feature" } });
+
+  it("`behind` when the PR head is an ancestor of the workspace revision, with the timeline line and the audit row", async () => {
+    const store = owned();
+    const res = await reconcile(store, fakeExec({
+      branch: BRANCH, commits: COMMITS,
+      pr: { number: 9, state: "OPEN", title: "[ATL-3] Add feature", headRefOid: PR_HEAD },
+      ancestry: { prHeadIsAncestor: true },
+    }));
+    expect(res.prLinked, "a head change is not a link").toBe(false);
+    const parsed = readFm(store);
+    expect(parsed.frontmatter.pr).toMatchObject({
+      number: 9, state: "review", headSha: PR_HEAD,
+      unpushedRevision: { revisionSha: HEAD_SHA, prHeadSha: PR_HEAD, relation: "behind" },
+    });
+    const line = parsed.timeline.find((e) => e.text.includes("is not on **PR #9**"));
+    expect(line?.text).toContain("Delivering the branch pushes it");
+    expect(line?.text).not.toMatch(/rebase/i);
+    const audit = listAuditEvents(store.db, { action: "github.workspace.pr_linked" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.details).toMatchObject({ headSha: PR_HEAD, unpushedRevision: "behind" });
+  });
+
+  it("`diverged` when both heads are known and neither contains the other; `unknown` when the PR head is not here", async () => {
+    const diverged = owned();
+    await reconcile(diverged, fakeExec({
+      branch: BRANCH, commits: COMMITS,
+      pr: { number: 9, state: "OPEN", title: "t", headRefOid: PR_HEAD },
+      ancestry: { prHeadKnown: true },
+    }));
+    expect(readFm(diverged).frontmatter.pr?.unpushedRevision).toEqual({ revisionSha: HEAD_SHA, prHeadSha: PR_HEAD, relation: "diverged" });
+    expect(readFm(diverged).timeline[0]!.text).toContain("holds commits this workspace does not");
+
+    const unknown = owned();
+    await reconcile(unknown, fakeExec({
+      branch: BRANCH, commits: COMMITS,
+      pr: { number: 9, state: "OPEN", title: "t", headRefOid: PR_HEAD },
+    }));
+    expect(readFm(unknown).frontmatter.pr?.unpushedRevision).toEqual({ revisionSha: HEAD_SHA, prHeadSha: PR_HEAD, relation: "unknown" });
+  });
+
+  it("a head that already CONTAINS the revision (origin ahead) records nothing; a head equal to it CLEARS a cached record", async () => {
+    const ahead = owned();
+    await reconcile(ahead, fakeExec({
+      branch: BRANCH, commits: COMMITS,
+      pr: { number: 9, state: "OPEN", title: "t", headRefOid: PR_HEAD },
+      ancestry: { revisionIsAncestor: true, prHeadKnown: true },
+    }));
+    expect(readFm(ahead).frontmatter.pr).toMatchObject({ number: 9, headSha: PR_HEAD });
+    expect(readFm(ahead).frontmatter.pr).not.toHaveProperty("unpushedRevision");
+    expect(readFm(ahead).timeline.filter((e) => e.text.includes("PR #9"))).toHaveLength(0);
+
+    const cleared = setupTask("ATL-3", {
+      branch: BRANCH,
+      pr: {
+        number: 9, state: "review", title: "t", headSha: PR_HEAD,
+        checks: { total: 1, passing: 1, failing: 0, pending: 0 },
+        unpushedRevision: { revisionSha: HEAD_SHA, prHeadSha: PR_HEAD, relation: "behind" },
+      },
+    });
+    // gh now reports the workspace HEAD as the PR head (the default headRefOid).
+    await reconcile(cleared, fakeExec({ branch: BRANCH, commits: COMMITS, pr: { number: 9, state: "OPEN", title: "t" } }));
+    const fm = readFm(cleared).frontmatter;
+    expect(fm.pr).toMatchObject({ number: 9, headSha: HEAD_SHA, checks: { total: 1, passing: 1, failing: 0, pending: 0 } });
+    expect(fm.pr).not.toHaveProperty("unpushedRevision");
+    expect(readFm(cleared).timeline[0]!.text).toContain("carries the workspace revision");
+  });
+
+  it("a settled PR gets no record", async () => {
+    const store = owned();
+    await reconcile(store, fakeExec({
+      branch: BRANCH, commits: COMMITS,
+      pr: { number: 9, state: "MERGED", title: "t", headRefOid: PR_HEAD },
+      ancestry: { prHeadIsAncestor: true },
+    }));
+    expect(readFm(store).frontmatter.pr?.state).toBe("merged");
+    expect(readFm(store).frontmatter.pr).not.toHaveProperty("unpushedRevision");
   });
 });

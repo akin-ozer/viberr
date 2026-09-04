@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describeRevisionDrift } from "~/shared/revision-drift";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { insertUser } from "~/server/auth/user-store.server";
 import {
@@ -11,9 +12,11 @@ import {
 import {
   deliveringEngagement,
   supportingEngagements,
+  type Recommendation,
+  type WorkRevision,
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
@@ -54,6 +57,7 @@ import {
   operatorBackendFor,
   resolveOperatorAuthority,
   type OperatorAutonomy,
+  GOAL_DRAFT_MAX_CHARS,
 } from "./operator-actions.server";
 
 /**
@@ -413,6 +417,47 @@ describe("operatorSetGoal — draft the goal at the triage gate", () => {
   });
 });
 
+describe("operatorSetDependencies (ruling 131(b))", () => {
+  it("done on a new list, noop on an unchanged one, noop with the VALIDATOR's own sentence on a bad reference, denied only when generate-packets is withheld", async () => {
+    // Canary: return `denied` for the validator's error (the LV-03 misblame
+    // rule: a state refusal must never accuse the project's policy).
+    deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-9", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const { operatorSetDependencies } = await import("./operator-actions.server");
+    const call = (blockedBy: string[], auth = authority("supervised")) =>
+      operatorSetDependencies(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", blockedBy, reason: "needs the parser first" }, auth);
+
+    const done = await call(["VIB-9"]);
+    expect(done.outcome).toBe("done");
+    expect(done.message).toContain("VIB-1 waits on VIB-9");
+    expect(done.message).toContain("Reason: needs the parser first");
+    expect(task().frontmatter.blockedBy).toEqual(["VIB-9"]);
+    expect(task().frontmatter.waiting).toBe("none");
+    expect(task().packet).toBeNull();
+    expect(task().timeline[0]).toMatchObject({ type: "note", title: "Dependencies updated", actor: { kind: "operator" } });
+    const audit = listAuditEvents(store.db, { action: "task.dependencies.updated" });
+    expect(audit[0]?.details).toMatchObject({ added: ["VIB-9"], removed: [] });
+
+    const same = await call(["vib-9"]);
+    expect(same.outcome).toBe("noop");
+    expect(same.message).toContain("already waits on VIB-9");
+
+    const bad = await call(["VIB-1"]);
+    expect(bad.outcome).toBe("noop");
+    expect(bad.message).toBe("VIB-1: a task cannot wait on itself.");
+    const missing = await call(["VIB-404"]);
+    expect(missing.outcome).toBe("noop");
+    expect(missing.message).toBe("VIB-404 is not a task in this project.");
+
+    deployRoster([{ capabilityId: "generate-packets", mode: "off" }, { capabilityId: "append-typed-events", mode: "direct" }]);
+    const denied = await call([], authority("supervised"));
+    expect(denied.outcome).toBe("denied");
+    expect(task().frontmatter.blockedBy).toEqual(["VIB-9"]);
+  });
+});
+
 describe("operatorDispatchAgent", () => {
   it("direct mode AUTO-ENGAGES the profile (capability-derived posture) and starts its run", async () => {
     // The pre-assignment ceremony is gone: a bare dispatch of an unengaged
@@ -495,7 +540,7 @@ describe("operatorDispatchAgent", () => {
     chosen: string;
     delivers: boolean;
     reason: string | null;
-    candidates: { profileId: string; chosen: boolean; eligibleForStage: boolean }[];
+    candidates: { profileId: string; chosen: boolean; eligibleForStage: boolean; alreadyEngaged: boolean; deliveringAtSelection: boolean }[];
   };
 
   it("F10-35: records a routing trace — candidates considered, chosen, reason", async () => {
@@ -534,6 +579,90 @@ describe("operatorDispatchAgent", () => {
     expect(
       d.candidates.find((c) => c.profileId === "developer")?.eligibleForStage,
     ).toBe(true);
+    // Ruling 133 (A19): the trace records the posture the dispatch will TAKE.
+    // This is a FIRST dispatch (auto-engage): not yet engaged, delivering at
+    // selection. Canary: derive `deliveringAtSelection` from the pre-dispatch
+    // file for the chosen profile (it reads false here).
+    const dev = d.candidates.find((c) => c.profileId === "developer")!;
+    expect(dev.alreadyEngaged).toBe(false);
+    expect(dev.deliveringAtSelection).toBe(true);
+    expect(d.candidates.find((c) => c.profileId === "reviewer")!.deliveringAtSelection).toBe(false);
+    await interruptRunningRuns("VIB-1");
+  });
+
+  it("ruling 133 (A19): the snapshot and the trace judge eligibility as 'may RUN here': the engaged deliverer is eligible at a stage it does not declare, with engagedAsDeliverer beside it", async () => {
+    // Canary: map `eligibleForCurrentStage` back to `specialistEligibleForStage`.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        { profileId: "operator", capabilities: DEFAULT_POLICY, extras: [], definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet", autonomy: "full" } },
+        { profileId: "developer", capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }], extras: [], definition: { kind: "specialist", name: "Dev", role: "Implementation", backends: ["claude"], model: "sonnet", stages: ["impl"] } },
+        { profileId: "helper", capabilities: [], extras: [], definition: { kind: "specialist", name: "Helper", role: "Support", backends: ["claude"], model: "sonnet", stages: ["impl"] } },
+      ],
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        engagements: [
+          { profileId: "developer", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+          { profileId: "helper", backend: "claude", role: "Support", delivers: false, verdictCapable: false },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+    const dev = snap.deployedSpecialists.find((s) => s.id === "developer")!;
+    const helper = snap.deployedSpecialists.find((s) => s.id === "helper")!;
+    expect(dev).toMatchObject({ eligibleForCurrentStage: true, engagedAsDeliverer: true });
+    expect(helper).toMatchObject({ eligibleForCurrentStage: false, engagedAsDeliverer: false });
+    // The trace agrees: a re-prompt of the deliverer at Review is eligible,
+    // and it is already delivering.
+    await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", prompt: "Address the review." },
+      authority("full"),
+    );
+    const trace = listAuditEvents(store.db, { action: "task.operator.agent_selected" })[0]!;
+    // SAFETY: `task.operator.agent_selected` has ONE writer (recordAgentSelectionTrace); its details are this shape.
+    const d = trace.details as AgentSelectionTrace;
+    expect(d.candidates.find((c) => c.profileId === "developer")).toMatchObject({ eligibleForStage: true, alreadyEngaged: true, deliveringAtSelection: true });
+    expect(d.candidates.find((c) => c.profileId === "helper")).toMatchObject({ eligibleForStage: false, alreadyEngaged: true, deliveringAtSelection: false });
+    await interruptRunningRuns("VIB-1");
+  });
+
+  it("Q34-14 (owner, 2026-09-04): an explicit hand-off to another deployed deliverer still runs directly under direct autonomy after ruling 133", async () => {
+    // The regression guard for the owner's answer: it fails the moment
+    // somebody re-gates the hand-off with a refusal or a card.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", delivers: true },
+      authority("full"),
+    );
+    await interruptRunningRuns("VIB-1");
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: [
+        ...file.parsed.frontmatter.agents,
+        { profileId: "developer2", capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }], extras: [], definition: { kind: "specialist", name: "Dev Two", role: "Implementation", backends: ["claude"], model: "sonnet" } },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const r = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer2", delivers: true, prompt: "Take over the build." },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().frontmatter.engagements.find((e) => e.delivers)?.profileId).toBe("developer2");
+    expect(task().frontmatter.recommendations).toEqual([]);
     await interruptRunningRuns("VIB-1");
   });
 
@@ -2390,6 +2519,31 @@ describe("applyRecommendation / dismissRecommendation", () => {
     );
   }
 
+  it("ruling 131(d): the snapshot carries blockedBy with resolved states", async () => {
+    // Canary: omit `blockedBy` from `operatorSnapshot`'s return object.
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(snapshot().blockedBy).toEqual([]);
+    const { setTaskDependencies } = await import("./dependencies.server");
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-77", { stage: "done", waiting: "none" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-77", "goal-9 link 1"] },
+      { userId: "operator", label: "operator" },
+      { dataRoot: store.dataRoot, operatorAuthorized: true },
+    ).catch(() => {});
+    await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-77"] },
+      { userId: "operator", label: "operator" },
+      { dataRoot: store.dataRoot, operatorAuthorized: true },
+    );
+    expect(snapshot().blockedBy).toEqual([
+      { ref: "VIB-77", label: "VIB-77", state: "done", taskKey: "VIB-77", goalId: null },
+    ]);
+  });
+
   it("dismissing a recommendation writes a typed timeline event NAMING what was declined", async () => {
     const recId = await seedRecommendation();
     const label = task().frontmatter.recommendations[0]!.label;
@@ -3275,7 +3429,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
           number: 318,
           state: "closed",
           title: "PR",
-          revisionDrift: { aheadBy: 2, headSha: "cab10477beef1234" },
+          revisionDrift: { headSha: "cab10477beef1234", authored: 2, baseRefresh: null },
         },
       },
       goal: file.parsed.goal,
@@ -3283,9 +3437,27 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     expect(snapshot().pr?.revisionDrift).toEqual({
-      aheadBy: 2,
       headSha: "cab10477beef1234",
+      authored: 2,
+      baseRefresh: null,
     });
+  });
+
+  it("ruling 132: get_task carries the WHOLE drift record and the canonical sentence, so its read and the ceremony agree", () => {
+    // Canary: emit the old `{aheadBy, headSha}` object (or an empty sentence).
+    deployScopedRoster();
+    seedTask("review");
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    const file = readTaskFile(ref)!;
+    const record = { headSha: "cab10477beef1234", authored: 0, baseRefresh: { merges: 1, commits: 4 } };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: { ...file.parsed.frontmatter, pr: { number: 318, state: "review", title: "PR", revisionDrift: record } },
+      goal: file.parsed.goal,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const pr = snapshot().pr!;
+    expect(pr.revisionDrift).toEqual(record);
+    expect(pr.revisionDriftSentence).toBe(describeRevisionDrift(record).sentence);
   });
 });
 
@@ -3573,5 +3745,269 @@ describe("get_task exposes the rework license the operator was never told about"
         dataRoot: store.dataRoot,
       })!.parsed.frontmatter.stage,
     ).toBe(target.id);
+  });
+});
+
+/**
+ * Ruling 135: `get_task` carries the PR head, the CURRENT unpushed record and
+ * the acceptance gate's own sentence, so the operator's read and the ceremony
+ * never disagree and the persona's "call `deliver_for_review` when `get_task`
+ * shows `pr.unpushedRevision`" has something to read. Canary: emit `null` for
+ * the record regardless of the file.
+ */
+describe("ruling 135: the operator snapshot and the unpushed revision", () => {
+  it("carries the record, the head and the sentence; a stale record reads as nothing", () => {
+    seedTask("review");
+    const record = { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" as const };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...task().frontmatter,
+        pr: { number: 7, state: "review" as const, title: "[VIB-1] Operator drive", headSha: "1".repeat(40), unpushedRevision: record },
+        workRevision: { id: "rev_1", headSha: "9".repeat(40), treeSha: null, branch: "vib-1-work", createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "dev" },
+      },
+      goal: "g",
+      timeline: [],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const snapshot = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("supervised"));
+    expect(snapshot.pr).toMatchObject({
+      number: 7,
+      headSha: "1".repeat(40),
+      unpushedRevision: record,
+      unpushedRevisionSentence: expect.stringContaining("Deliver the branch to push it"),
+    });
+
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...task().frontmatter,
+        workRevision: { id: "rev_2", headSha: "7".repeat(40), treeSha: null, branch: "vib-1-work", createdAt: "2026-09-04T01:00:00.000Z", sourceProfileId: "dev" },
+      },
+      goal: "g",
+      timeline: [],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const stale = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("supervised"));
+    expect(stale.pr?.unpushedRevision).toBeNull();
+    expect(stale.pr?.unpushedRevisionSentence).toBe("");
+  });
+});
+
+/**
+ * Ruling 137 (pass 34, F34-15): an acceptance offer is bound to the revision
+ * it was made for and withdrawn, on the record, when a packet opens or the
+ * revision is replaced.
+ */
+describe("ruling 137: acceptance offers are bound to a revision and withdrawn on the record", () => {
+  function revision(headSha: string): WorkRevision {
+    return {
+      id: `rev_${headSha.slice(0, 4)}`,
+      headSha,
+      treeSha: headSha.split("").reverse().join(""),
+      branch: "vib-1-work",
+      createdAt: "2026-09-04T10:00:00.000Z",
+      sourceProfileId: "developer",
+      kind: "delivered",
+    };
+  }
+  /** A delivered revision the engaged reviewer approved, with its review PR:
+   *  the state an acceptance offer is made in. */
+  async function deliverReviewed(headSha: string): Promise<void> {
+    const rev = revision(headSha);
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.engagements = [
+        { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: true },
+      ];
+      parsed.frontmatter.workRevision = rev;
+      parsed.frontmatter.verdicts = [
+        { profileId: "reviewer", revisionId: rev.id, headSha, result: "approve", reason: "clean", at: "2026-09-04T10:05:00.000Z" },
+      ];
+      parsed.frontmatter.validation = "healthy";
+      parsed.frontmatter.branch = "vib-1-work";
+      parsed.frontmatter.pr = { number: 7, state: "review", title: "VIB-1 work" };
+    });
+  }
+
+  it("opening a packet withdraws the standing acceptance offer and the terminal transition card, and says so", async () => {
+    // Canary: delete the `withdrawAcceptanceOffers` call in operatorOpenPacket
+    // and both cards outlive the packet.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "generate-packets"),
+      { capabilityId: "generate-packets", mode: "direct" },
+    ]);
+    seedTask("review");
+    const cards: Recommendation[] = [
+      { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-1 to Done", detail: "", forHeadSha: "a".repeat(40) },
+      { id: "r-done", kind: "transition", toStageId: "done", label: "Move to Done", detail: "" },
+      { id: "r-run", kind: "run_agent", profileId: "developer", label: "Run Developer", detail: "" },
+    ];
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.recommendations = cards;
+    });
+    const r = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Branch conflicts with main",
+        options: [{ kind: "redirect", title: "Have the developer resolve the conflict" }],
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().packet?.title).toBe("Branch conflicts with main");
+    expect(task().frontmatter.recommendations.map((x) => x.id)).toEqual(["r-run"]);
+    const note = task().timeline.find((e) => e.type === "note" && e.title === "Recommendation withdrawn");
+    expect(note?.actor).toEqual({ kind: "operator" });
+    expect(note?.text).toContain('"Accept completion and move VIB-1 to Done"');
+    expect(note?.text).toContain('"Move to Done"');
+    expect(note?.text).toContain('a decision packet opened ("Branch conflicts with main")');
+    const rows = listAuditEvents(store.db, { action: "task.recommendation.withdrawn" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({ cause: "packet", surviving: 1 });
+  });
+
+  it("recommend accept on revision A, deliver revision B, recommend again: the stored card binds to B", async () => {
+    // Canary: leave the in-place update arm of addRecommendation alone (no
+    // forHeadSha re-bind) and the card keeps A.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    await deliverReviewed("a".repeat(40));
+    const first = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(first.outcome).toBe("recommended");
+    const cardA = task().frontmatter.recommendations.find((x) => x.kind === "accept_completion")!;
+    expect(cardA.forHeadSha).toBe("a".repeat(40));
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.recommended_completion" })[0]!.details,
+    ).toMatchObject({ forHeadSha: "a".repeat(40) });
+
+    // Revision B lands (the reconcile's own withdrawal is covered in
+    // workspace-delivery.server.test.ts); the operator recommends again.
+    await deliverReviewed("b".repeat(40));
+    const second = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(second.outcome).toBe("recommended");
+    const cards = task().frontmatter.recommendations.filter((x) => x.kind === "accept_completion");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.id).toBe(cardA.id); // the same card, re-bound in place
+    expect(cards[0]!.forHeadSha).toBe("b".repeat(40));
+  });
+});
+
+/**
+ * Ruling 138 (pass 34, U34-10): an `edit_goal` option carries `goalDraft`, the
+ * proposed goal text itself; it is refused on any other kind.
+ */
+describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
+  const packetsRoster = () =>
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "generate-packets"),
+      { capabilityId: "generate-packets", mode: "direct" },
+    ]);
+
+  it("stores goalDraft on an edit_goal option verbatim", async () => {
+    // Canary: drop the goalDraft mapping in operatorOpenPacket.
+    packetsRoster();
+    seedTask("impl");
+    const draft = "Deliver a CSV export of the board.\n\nAcceptance: every visible column downloads.";
+    const r = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Scope needed",
+        options: [
+          { kind: "edit_goal", title: "Ship the CSV export", detail: "Add the export.", recommended: true, goalDraft: ` ${draft} ` },
+          { kind: "hold_runtime_debug", title: "Hold" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().packet?.options[0]?.goalDraft).toBe(draft);
+    expect(task().packet?.options[1]?.goalDraft).toBeUndefined();
+  });
+
+  it("caps an over-long goalDraft at GOAL_DRAFT_MAX_CHARS instead of refusing it", async () => {
+    packetsRoster();
+    seedTask("impl");
+    await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Scope needed",
+        options: [{ kind: "edit_goal", title: "Ship it", recommended: true, goalDraft: "x".repeat(GOAL_DRAFT_MAX_CHARS + 500) }],
+      },
+      authority("full"),
+    );
+    expect(task().packet?.options[0]?.goalDraft).toHaveLength(GOAL_DRAFT_MAX_CHARS);
+  });
+
+  it("the operator's snapshot reports the decided packet's awaiting stamp, so it does not re-ask", async () => {
+    // Canary: drop `awaiting` from the snapshot's packet.
+    packetsRoster();
+    seedTask("impl");
+    await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Scope needed",
+        options: [{ kind: "edit_goal", title: "Specify the goal", recommended: true, goalDraft: "Deliver the export." }],
+      },
+      authority("full"),
+    );
+    const { resolvePacket } = await import("./task-actions.server");
+    const before = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+    expect(before.packet?.awaiting).toBeNull();
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    const after = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+    expect(after.packet?.awaiting).toBe("goal_edit");
+  });
+
+  it("refuses goalDraft on any other option kind, by name, and writes nothing", async () => {
+    // Canary: remove the stray-draft refusal.
+    packetsRoster();
+    seedTask("impl");
+    const r = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Pick a path",
+        options: [
+          { kind: "redirect", title: "Have the developer redo it", recommended: true, goalDraft: "not a goal" },
+          { kind: "edit_goal", title: "Refine the goal" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain('goalDraft only fits an edit_goal option — "Have the developer redo it" is redirect');
+    expect(task().packet).toBeNull();
   });
 });

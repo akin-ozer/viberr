@@ -1,3 +1,5 @@
+import type { Waiting } from "~/schemas/task-file.schema";
+
 /**
  * Client-safe render shapes for the Agents surface (shared with Policy).
  * Server assembly lives in agents-query.server.ts /
@@ -5,15 +7,19 @@
  */
 
 /** Deployment status vocabulary — display strings are the contract
- * (contracts §2.4): derived server-side from real engagement + waiting
- * state, rendered verbatim. */
+ * (contracts §2.4), rendered verbatim. Derived server-side from the
+ * engagement's own `agent_runs` row first (F34-5): "coordinating" and
+ * "working" name a RUNNING row, "queued" a run admitted but not yet given a
+ * slot, and the other three are the idle wording read from the task's
+ * `waiting` flag. The mock's "anchored · on call" reviewer literal is gone:
+ * a supporting engagement reads by the same rule as a delivering one. */
 export type DeploymentStatus =
   | "coordinating"
   | "packet open"
   | "working"
+  | "queued"
   | "waiting on human"
-  | "on call"
-  | "anchored · on call";
+  | "on call";
 
 export type Engagement = "operator" | "primary" | "reviewer";
 
@@ -29,8 +35,15 @@ export interface AgentDeploymentView {
   taskKey: string;
   taskTitle: string;
   status: DeploymentStatus;
-  /** True when an agent_runs row for this engagement is state='running'. */
+  /** True when an agent_runs row for this engagement is state='running' —
+   *  the only proof a run is in flight, and what `status` "working" /
+   *  "coordinating" now mean (F34-5). */
   running: boolean;
+  /** The TASK's `waiting` flag, carried so the page's "waiting on a human"
+   *  stat keeps counting task-level waiting after `status` stopped being
+   *  derived from it: an engagement whose run is in flight on a human-waiting
+   *  task says "working" and would otherwise silently leave that count. */
+  taskWaiting: Waiting;
 }
 
 /** Effective agent profile as the roster renders it: org template merged
@@ -89,6 +102,11 @@ export interface AgentProfileView {
   resources: { skills: string[]; mcps: string[]; kb: string[] };
   /** "template" = org base deployed here · "project" = created in-project. */
   source: "template" | "project";
+  /** B5 (pass 34, U34-3): the identity of the deployment record this view was
+   *  built from. The editor submits it back, and a save composed against a
+   *  different record is refused rather than reverting what it never saw.
+   *  Empty for a LIBRARY template, which has no deployment record yet. */
+  fingerprint: string;
 }
 
 /**
@@ -174,9 +192,12 @@ export function deploymentStatusKind(
   return "neutral";
 }
 
-/** Pulsing pill dot: actively-working statuses, plus any engagement with a
- * live run (the agent_runs join — honest enrichment, noted in the phase
- * report). */
-export function deploymentDot(d: Pick<AgentDeploymentView, "status" | "running">): boolean {
-  return d.status === "working" || d.status === "coordinating" || d.running;
+/** Pulsing pill dot: exactly the engagements with a live run. This used to OR
+ * the "working"/"coordinating" statuses in, back when the projection derived
+ * them from the task's `waiting` flag — so a delivering engagement whose run
+ * had finished pulsed for as long as the task stayed agent-waiting (F34-5).
+ * The statuses are now derived from the run rows themselves, and the row is
+ * the one fact worth pulsing for. */
+export function deploymentDot(d: Pick<AgentDeploymentView, "running">): boolean {
+  return d.running;
 }

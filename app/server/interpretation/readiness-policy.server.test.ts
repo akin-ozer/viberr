@@ -70,3 +70,37 @@ describe("isAcceptedDisplayState", () => {
     expect(isAcceptedDisplayState({ stage: "impl", stageIds: [] })).toBe(false);
   });
 });
+
+/**
+ * Ruling 131 (pass 34): a non-empty `blockedBy` list floors readiness at
+ * `blocked`, the one derivation home, and never improves a stored value.
+ *
+ * Canary: floor at `input_required` instead of `blocked` and the first two
+ * cases fail.
+ */
+describe("deriveReadiness — the dependency floor (ruling 131)", () => {
+  it("floors a ready or input_required task at blocked while it waits on other work", () => {
+    expect(deriveReadiness({ storedReadiness: "ready", diagnostics: [], dependenciesListed: true })).toEqual({
+      readiness: "blocked",
+      downgraded: true,
+      diagnosticsFloor: null,
+      dependencyFloor: "blocked",
+    });
+    expect(
+      deriveReadiness({ storedReadiness: "input_required", diagnostics: [warning], dependenciesListed: true }),
+    ).toMatchObject({ readiness: "blocked", downgraded: true, diagnosticsFloor: "input_required", dependencyFloor: "blocked" });
+  });
+
+  it("an empty or absent list imposes no floor; a stored blocked stays blocked either way", () => {
+    expect(deriveReadiness({ storedReadiness: "ready", diagnostics: [], dependenciesListed: false })).toMatchObject({
+      readiness: "ready",
+      downgraded: false,
+      dependencyFloor: null,
+    });
+    expect(deriveReadiness({ storedReadiness: "ready", diagnostics: [] }).dependencyFloor).toBeNull();
+    expect(deriveReadiness({ storedReadiness: "blocked", diagnostics: [], dependenciesListed: true })).toMatchObject({
+      readiness: "blocked",
+      downgraded: false,
+    });
+  });
+});

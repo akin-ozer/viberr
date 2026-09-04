@@ -1,4 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
+import { deploymentFingerprint } from "./agent-profile-actions.server";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   AgentDeployment,
@@ -28,6 +29,7 @@ import {
   coerceSpecialistCapabilityMode,
   GRANT_REQUIRED_CAPABILITY_IDS,
   UNIFIED_CAP_CATALOG,
+  type CapabilityKind,
 } from "~/shared/capabilities";
 import { humanGatesPreWorkAdvance } from "~/shared/workflow/stage-roles";
 import { specialistGrantModes } from "~/server/tasks/specialist-tool-policy";
@@ -275,6 +277,43 @@ function identityOverride(
  * (`humanGatesPreWorkAdvance`); callers that only read `kind`/`backend`/model
  * pass "direct" and never touch `capabilities`.
  */
+/** The ids whose ABSENT mode is the project's delivery policy, materialised by
+ *  the roster from the workflow (ruling 28 / R15-9), never by this rule. */
+export const POLICY_DEPENDENT_CAPABILITY_IDS: readonly string[] = [
+  "deliver-review-pr",
+  "update-task-branch",
+];
+
+/**
+ * The mode a grant resolves to when it is ABSENT from project.md, per kind —
+ * the ONE home of the rule (ruling 139: `list_capabilities` publishes it as
+ * `whenUngranted`, and the roster materialises absent grants with it):
+ *  · always-human ids are `human`;
+ *  · operator: `gate()` resolves an absent grant through `absentPolarityGate`
+ *    (F31-C2) — `off` for most coordination capabilities, with the per-capability
+ *    exceptions this mirrors: `dispatch-agents` mirrors `dispatchGate`'s
+ *    absent-means-catalog-default polarity (dispatch-rework hunt, 2026-08-29:
+ *    pre-rework deployments store only the retired assign/summon ids and the
+ *    runtime keeps dispatching, so the surface must not render "off" over a
+ *    live authority, F15-20's drift class), and web egress keeps its own
+ *    catalog default; the two policy-dependent grants are materialised by the
+ *    roster at the delivery-gate mode and never reach this rule;
+ *  · specialist: the grant-required family is `off`, everything else its
+ *    catalog default.
+ */
+export function absentGrantMode(
+  kind: CapabilityKind,
+  c: (typeof UNIFIED_CAP_CATALOG)[number],
+): CapabilityMode {
+  if (ALWAYS_HUMAN_CAPABILITY_IDS.includes(c.id)) return "human";
+  if (kind === "operator") {
+    return c.id === "use-web-search-fetch" || c.id === "dispatch-agents"
+      ? c.defaultMode
+      : "off";
+  }
+  return GRANT_REQUIRED_CAPABILITY_IDS.has(c.id) ? "off" : c.defaultMode;
+}
+
 export function effectiveProfileView(
   deployment: AgentDeployment,
   dataRoot: string | undefined,
@@ -361,7 +400,6 @@ export function effectiveProfileView(
   // governance-dependent `absentDeliverMode`, so `present` skips it. One writer —
   // matrix, detail and policy now agree with the editor and the runtime.
   const grantKind = isSpecialist ? "agent" : "operator";
-  const alwaysHuman = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
   const present = new Set(effectiveGrants.map((c) => c.capabilityId));
   // The mode the RUNTIME applies to an ABSENT grant, per profile kind — this must
   // match the gate the runtime consults, or the display (and the editor seed that
@@ -376,20 +414,8 @@ export function effectiveProfileView(
   //    above at the delivery-gate mode, so they never reach this fallback.
   //    Materializing any other coordination cap at its catalog `direct`/
   //    `recommend` would show — and let a save arm — authority the gate denies.
-  const absentMode = (c: (typeof UNIFIED_CAP_CATALOG)[number]): CapabilityMode => {
-    if (alwaysHuman.has(c.id)) return "human";
-    if (grantKind === "operator") {
-      // `dispatch-agents` mirrors `dispatchGate`'s absent-means-catalog-default
-      // polarity (dispatch-rework hunt, 2026-08-29): pre-rework deployments
-      // store only the retired assign/summon ids, and the runtime keeps
-      // dispatching — the surface must not render "off" over a live authority
-      // (F15-20's drift class). Web egress keeps its own catalog default.
-      return c.id === "use-web-search-fetch" || c.id === "dispatch-agents"
-        ? c.defaultMode
-        : "off";
-    }
-    return GRANT_REQUIRED_CAPABILITY_IDS.has(c.id) ? "off" : c.defaultMode;
-  };
+  const absentMode = (c: (typeof UNIFIED_CAP_CATALOG)[number]): CapabilityMode =>
+    absentGrantMode(grantKind, c);
   const absentMaterialized = UNIFIED_CAP_CATALOG.filter(
     (c) => c.kinds.includes(grantKind) && c.group !== null && !present.has(c.id),
   ).map((c) => ({ capabilityId: c.id, mode: absentMode(c) }));
@@ -482,6 +508,8 @@ export function effectiveProfileView(
       kb: def?.resources?.kb ?? template?.resources.kb ?? [],
     },
     source: template ? "template" : "project",
+    // B5: the record this view was built from, for the editor to submit back.
+    fingerprint: deploymentFingerprint(deployment),
   };
   // The key is set ONLY when a real run earned the mark: an absent
   // `modelUnavailable` claims nothing about availability (ruling 19), so it must

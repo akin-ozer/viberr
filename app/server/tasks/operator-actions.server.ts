@@ -1,3 +1,18 @@
+import {
+  describeRevisionDrift,
+  type RevisionDrift,
+} from "~/shared/revision-drift";
+import { resolveDependencies } from "~/server/projections/dependencies.server";
+import { setTaskDependencies } from "./dependencies.server";
+import type { TaskActor } from "./task-mutation.server";
+import {
+  recordRecommendationWithdrawal,
+  terminalStageIdFor,
+  withdrawAcceptanceOffers,
+  type OfferWithdrawalSlot,
+  type OfferWithdrawalCause,
+} from "./task-mutation.server";
+import type { DependencyRender } from "~/shared/dependencies";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type {
@@ -20,8 +35,10 @@ import {
   type RecommendationKind,
   type TaskFileEvent,
   type TaskPacket,
+  unpushedRevisionOf,
+  type UnpushedRevision,
 } from "~/schemas/task-file.schema";
-import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
+import { PACKET_OPTION_KINDS, unpushedRevisionBlockedReason } from "~/schemas/task-file.schema";
 import {
   compactTimelineEvents,
   DEFAULT_COMPACTION,
@@ -91,7 +108,7 @@ import {
 import {
   listDeployedSpecialists,
   projectBoard,
-  specialistEligibleForStage,
+  runEligibilityFor,
   startAgentRun,
   type DeployedSpecialistView,
 } from "./specialist-run.server";
@@ -776,19 +793,23 @@ function recordCommentDrop(
  * comment. Sets waiting=human. Idempotent per (kind, target). This is what a
  * SUPERVISED operator does instead of performing a governed action itself.
  */
+interface RecommendationInput {
+  kind: RecommendationKind;
+  profileId?: string;
+  prompt?: string;
+  delivers?: boolean;
+  toStageId?: string;
+  label: string;
+  /** accept_completion — ruling 137: the work revision the offer binds to. */
+  forHeadSha?: string;
+}
+
 async function addRecommendation(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
-  rec: {
-    kind: RecommendationKind;
-    profileId?: string;
-    prompt?: string;
-    delivers?: boolean;
-    toStageId?: string;
-    label: string;
-  },
+  rec: RecommendationInput,
   reasoning: string,
 ): Promise<void> {
   const recommendation: Recommendation = {
@@ -803,6 +824,7 @@ async function addRecommendation(
   if (rec.prompt) recommendation.prompt = rec.prompt;
   if (rec.delivers !== undefined) recommendation.delivers = rec.delivers;
   if (rec.toStageId) recommendation.toStageId = rec.toStageId;
+  if (rec.forHeadSha) recommendation.forHeadSha = rec.forHeadSha;
   // Same disclosure the narration path carries (S5-G3): the reasoning is
   // operator prose and can tag a human, so an ambiguous handle must not vanish.
   const commentText = withAmbiguityDisclosure(
@@ -823,7 +845,8 @@ async function addRecommendation(
     } else if (
       existing.prompt !== recommendation.prompt ||
       existing.delivers !== recommendation.delivers ||
-      existing.label !== recommendation.label
+      existing.label !== recommendation.label ||
+      existing.forHeadSha !== recommendation.forHeadSha
     ) {
       // Hunt 2026-08-29: the per-target dedupe predates `prompt`/`delivers`
       // on run_agent cards, so a NEWER directive for the same agent was
@@ -840,6 +863,13 @@ async function addRecommendation(
         existing.delivers = recommendation.delivers;
       } else {
         delete existing.delivers;
+      }
+      // Ruling 137: a re-recommended acceptance re-binds to the revision it
+      // was authored against, or the card keeps a stale binding.
+      if (recommendation.forHeadSha !== undefined) {
+        existing.forHeadSha = recommendation.forHeadSha;
+      } else {
+        delete existing.forHeadSha;
       }
       wasNew = true;
     }
@@ -894,6 +924,9 @@ async function addRecommendation(
 }
 
 /** One option the operator offers on a decision/blocking packet. */
+/** Ruling 138: the longest `goalDraft` an option may carry into task.md. */
+export const GOAL_DRAFT_MAX_CHARS = 4000;
+
 export interface OperatorPacketOptionInput {
   kind: PacketOptionKind;
   title: string;
@@ -907,6 +940,9 @@ export interface OperatorPacketOptionInput {
   profileId?: string;
   /** archive_task — also delete the task's remote branch (discard the work). */
   deleteBranch?: boolean;
+  /** edit_goal only — ruling 138: the proposed goal text itself, what the goal
+   *  editor opens with when the human confirms. Refused on any other kind. */
+  goalDraft?: string;
 }
 
 export interface OperatorOpenPacketInput {
@@ -1094,6 +1130,21 @@ export async function operatorOpenPacket(
     };
   }
 
+  // Ruling 138: `goalDraft` is the goal editor's prefill, which only an
+  // `edit_goal` option opens — on any other kind it is a claim nothing reads,
+  // so the authoring is refused by name (the ruling-115 precedent above).
+  const strayDraft = rawOptions.find(
+    (o) => o.kind !== "edit_goal" && (o.goalDraft ?? "").trim() !== "",
+  );
+  if (strayDraft) {
+    return {
+      outcome: "noop",
+      message:
+        `goalDraft only fits an edit_goal option — "${strayDraft.title}" is ${strayDraft.kind}. ` +
+        "Put the proposed goal text on the edit_goal option, or drop it.",
+    };
+  }
+
   // Exactly one recommended option (the parser expects this): honour the first
   // one the operator marked, else default to the first option.
   let recSeen = false;
@@ -1126,6 +1177,10 @@ export async function operatorOpenPacket(
     if (backend) option.backend = backend;
     if (profileId) option.profileId = profileId;
     if (o.deleteBranch) option.deleteBranch = true;
+    // Ruling 138: the draft is model-authored prose bound for task.md — capped
+    // here, the one chokepoint both operator backends reach.
+    const goalDraft = o.goalDraft?.trim();
+    if (goalDraft) option.goalDraft = goalDraft.slice(0, GOAL_DRAFT_MAX_CHARS);
     return option;
   });
   if (!recSeen && options[0]) options[0].rec = true;
@@ -1146,12 +1201,21 @@ export async function operatorOpenPacket(
   };
 
   let opened = false;
+  // Ruling 137: a packet pauses coordination, so the standing acceptance
+  // offers (and the terminal transition cards, acceptances too) are withdrawn
+  // on the record inside the same locked write.
+  const packetCause: OfferWithdrawalCause = { kind: "packet", title };
+  const terminalStageId = terminalStageIdFor(ctx, input.projectSlug);
+  const packetWithdrawal: OfferWithdrawalSlot = { offers: null };
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     // Re-check inside the locked write — the read above raced other writers
     // (the same guard `openAgentQuestionPacket` makes).
     if (parsed.packet) return;
     parsed.packet = packet;
     opened = true;
+    packetWithdrawal.offers = withdrawAcceptanceOffers(parsed, terminalStageId, packetCause, {
+      kind: "operator",
+    });
     parsed.frontmatter.waiting = "human";
     if (input.packetType === "blocked") {
       // Blocked-ness lives on `readiness` alone (F7-VAL1). It used to ALSO set
@@ -1183,6 +1247,15 @@ export async function operatorOpenPacket(
     };
   }
   reproject(db, ctx, input.projectSlug, input.taskKey);
+  if (packetWithdrawal.offers) {
+    recordRecommendationWithdrawal(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      withdrawal: packetWithdrawal.offers,
+      cause: packetCause,
+      actor: OPERATOR_AUDIT_ACTOR,
+    });
+  }
   recordAudit(db, {
     action: "task.operator.packet_opened",
     actor: OPERATOR_AUDIT_ACTOR,
@@ -1362,6 +1435,9 @@ export interface OperatorTaskSnapshot {
   priority: string;
   labels: string[];
   dueDate: string | null;
+  /** Ruling 131(d): what the task waits on, each entry with its live state.
+   *  Non-empty means the task is HELD: the doctrine replaces the stage rule. */
+  blockedBy: DependencyRender[];
   stage: string;
   stageName: string;
   /** Dynamic-dispatch rework (2026-08-29): where the task CAME from — the
@@ -1413,9 +1489,13 @@ export interface OperatorTaskSnapshot {
   /** The implementation ("work") stage id (edge into review). */
   workStageId: string | null;
   deployedSpecialists: (DeployedSpecialistView & {
-    /** Whether this specialist may work the task's CURRENT stage (F1) — the
-     *  operator should only assign/prompt an eligible one. */
+    /** Whether this profile may RUN the task at its CURRENT stage: its
+     *  declared eligibility, or (ruling 133) it is the task's engaged
+     *  deliverer, which runs at every stage. Declared eligibility alone is
+     *  where a profile may be NEWLY engaged. */
     eligibleForCurrentStage: boolean;
+    /** Ruling 133: this profile is the task's delivering engagement. */
+    engagedAsDeliverer: boolean;
     /** F21-16: the specialist's OWN capabilities, resolved live from its
      *  deployment grants — the right place to look when a human asks whether an
      *  agent's grant took effect. `DeployedSpecialistView.capabilities` already
@@ -1432,6 +1512,9 @@ export interface OperatorTaskSnapshot {
     title: string;
     body: string;
     options: string[];
+    /** Ruling 138: `goal_edit` once an edit_goal option was confirmed — the
+     *  packet is decided and waits for the edited goal, so do not re-ask. */
+    awaiting: "goal_edit" | null;
   } | null;
   recentTimeline: { type: string; actor: string; text: string }[];
   /** [1] The coordinator's OWN proposals — what it already asked for, and what a
@@ -1481,13 +1564,27 @@ export interface OperatorTaskSnapshot {
    *  The operator was structurally blind to it, so its PR-closed recovery packet
    *  could say "the review before closure was clean (Approve)" while an
    *  unreviewed out-of-band commit the reconciler had already seen went
-   *  unmentioned. Null when the head equals the reviewed revision. */
+   *  unmentioned. Null when the head equals the reviewed revision.
+   *
+   *  Ruling 132 (pass 34, F34-14): the WHOLE record, plus the canonical
+   *  sentence (`describeRevisionDrift`) the accept dialog prints, so the
+   *  operator's read and the ceremony can never say two different things. */
   pr:
     | {
         number: number;
         state: PrState;
         title: string;
-        revisionDrift: { aheadBy: number; headSha: string } | null;
+        revisionDrift: RevisionDrift | null;
+        /** `describeRevisionDrift(revisionDrift).sentence`, empty for none. */
+        revisionDriftSentence: string;
+        /** Ruling 135 (pass 34, F34-11): the PR head as last read, the CURRENT
+         *  unpushed record (null when the delivered revision is on the PR or
+         *  the fact was never measured), and the sentence the acceptance gate
+         *  refuses with ("" when none). An unpushed revision reaches its PR
+         *  through `deliver_for_review`; it is never a person's push. */
+        headSha: string | null;
+        unpushedRevision: UnpushedRevision | null;
+        unpushedRevisionSentence: string;
       }
     | null;
   /** The task's delivery branch (null before any delivery). Lets recovery
@@ -1764,6 +1861,7 @@ export function operatorSnapshot(
     priority: fm.priority,
     labels: fm.labels,
     dueDate: fm.dueDate,
+    blockedBy: resolveDependencies(db, projectSlug, fm.blockedBy),
     stage: fm.stage,
     stageName: stageName(fm.stage),
     previousStage: fm.previousStageId
@@ -1808,10 +1906,17 @@ export function operatorSnapshot(
     workStageId: roles.workId,
     deployedSpecialists: listDeployedSpecialists(projectSlug, ctx).map((s) => ({
       ...s,
-      eligibleForCurrentStage: specialistEligibleForStage(
+      // Ruling 133: may this profile RUN here (declared, or the engaged
+      // deliverer), not only "may it be newly engaged here".
+      eligibleForCurrentStage: runEligibilityFor(
         s,
+        file.parsed.frontmatter.engagements,
+        s.id,
         file.parsed.frontmatter.stage,
         { stages, workflow },
+      ).ok,
+      engagedAsDeliverer: file.parsed.frontmatter.engagements.some(
+        (e) => e.profileId === s.id && e.delivers,
       ),
       // F21-16: the specialist's own egress row, so the operator has somewhere
       // TRUE to look when it is asked whether an agent's web grant took effect.
@@ -1827,6 +1932,7 @@ export function operatorSnapshot(
           title: file.parsed.packet.title,
           body: file.parsed.packet.body,
           options: file.parsed.packet.options.map((o) => o.t),
+          awaiting: file.parsed.packet.awaiting ?? null,
         }
       : null,
     recentTimeline: file.parsed.timeline.slice(0, 6).map((e) => ({
@@ -1862,15 +1968,17 @@ export function operatorSnapshot(
           number: fm.pr.number,
           state: fm.pr.state,
           title: fm.pr.title,
-          // F21-17: the unreviewed-drift fact, verbatim from the same field the
-          // acceptance ceremony reads.
+          // F21-17 / ruling 132: the drift record verbatim from the same field
+          // the acceptance ceremony reads, and the same sentence it prints.
           revisionDrift:
-            fm.pr.revisionDrift && fm.pr.revisionDrift.aheadBy > 0
-              ? {
-                  aheadBy: fm.pr.revisionDrift.aheadBy,
-                  headSha: fm.pr.revisionDrift.headSha,
-                }
+            describeRevisionDrift(fm.pr.revisionDrift).kind !== "none"
+              ? (fm.pr.revisionDrift ?? null)
               : null,
+          revisionDriftSentence: describeRevisionDrift(fm.pr.revisionDrift).sentence,
+          headSha: fm.pr.headSha ?? null,
+          unpushedRevision: unpushedRevisionOf(fm.pr, fm.workRevision?.headSha ?? null),
+          unpushedRevisionSentence:
+            unpushedRevisionBlockedReason(fm.pr, fm.workRevision?.headSha ?? null, taskKey) ?? "",
         }
       : null,
     // The task branch, so recovery copy can NAME what an `archive_task`
@@ -2025,6 +2133,64 @@ export async function operatorFlagContextConflict(
     outcome: "done",
     message: `Recorded: \`${repoSource}\` wins; a human will settle it.`,
   };
+}
+
+/** The in-process actor the operator's writes are attributed to when a task
+ *  writer wants one; RBAC is skipped under `operatorAuthorized`. */
+const OPERATOR_WRITE_ACTOR: TaskActor = { userId: "operator", label: "operator" };
+
+/**
+ * Ruling 131(b) (pass 34): the operator records what a task WAITS ON with a
+ * tool of its own instead of a hold packet (JC-9's "standing token"). Gated
+ * like packets (`generate-packets`: the wait is the packet's replacement, so
+ * it reuses the packet's own grant rather than minting a catalog id for one
+ * tool). A validator refusal is a `noop` carrying the validator's own
+ * sentence: the task's state ruled it out, not the project's policy (the
+ * LV-03 misblame rule); an unchanged list is a `noop`; success is `done`.
+ */
+export async function operatorSetDependencies(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; blockedBy: readonly string[]; reason?: string },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  if (gate(authority, "generate-packets") === "deny") {
+    return {
+      outcome: "denied",
+      message: "The operator cannot record what a task waits on in this project (the generate-packets grant is withheld).",
+    };
+  }
+  try {
+    const result = await setTaskDependencies(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, blockedBy: input.blockedBy },
+      OPERATOR_WRITE_ACTOR,
+      { ...ctx, operatorAuthorized: true },
+    );
+    const list = result.blockedBy.join(", ");
+    if (!result.changed) {
+      return {
+        outcome: "noop",
+        message: list
+          ? `Unchanged: ${input.taskKey} already waits on ${list}.`
+          : `Unchanged: ${input.taskKey} waits on nothing.`,
+      };
+    }
+    const why = input.reason?.trim() ? ` Reason: ${input.reason.trim()}` : "";
+    return {
+      outcome: "done",
+      message: list
+        ? `Recorded: ${input.taskKey} waits on ${list}. Viberr holds it and releases it when every entry is done.${why}`
+        : `Recorded: ${input.taskKey} no longer waits on other work.${why}`,
+    };
+  } catch (error) {
+    // The validator's refusal names the reference and the reason: a fact about
+    // the store, never a policy block.
+    if (error instanceof AppError && error.status === 400) {
+      return { outcome: "noop", message: error.userMessage };
+    }
+    throw error;
+  }
 }
 
 /** Fill only an unspecified goal; established scope remains human-controlled. */
@@ -2219,16 +2385,25 @@ function recordAgentSelectionTrace(
   try {
     const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
     const stage = file?.parsed.frontmatter.stage;
-    const engaged = new Set(
-      (file?.parsed.frontmatter.engagements ?? []).map((e) => e.profileId),
-    );
+    const engagements = file?.parsed.frontmatter.engagements ?? [];
+    const engaged = new Set(engagements.map((e) => e.profileId));
+    const board = projectBoard(ctx, input.projectSlug);
     const candidates = listDeployedSpecialists(input.projectSlug, ctx).map(
       (s) => ({
         profileId: s.id,
+        // Ruling 133: may it RUN here (declared, or the engaged deliverer).
         eligibleForStage: stage
-          ? specialistEligibleForStage(s, stage, projectBoard(ctx, input.projectSlug))
+          ? runEligibilityFor(s, engagements, s.id, stage, board).ok
           : false,
         alreadyEngaged: engaged.has(s.id),
+        // The posture the dispatch will TAKE: for the chosen profile the
+        // resolved delivers intent (auto-engage included, so a first
+        // dispatch reads `true` while `alreadyEngaged` is false); for every
+        // other candidate its current engagement's posture.
+        deliveringAtSelection:
+          s.id === input.profileId
+            ? input.delivers
+            : engagements.some((e) => e.profileId === s.id && e.delivers),
         chosen: s.id === input.profileId,
       }),
     );
@@ -2447,6 +2622,10 @@ type DeliveryAuditDetails = {
   status: string;
   /** Present only when a review PR actually exists. */
   prNumber?: number;
+  /** Ruling 134: the head the delivery left on the PR, and whether the push
+   *  (or the PR open) MOVED anything — `delivered` only. */
+  headSha?: string | null;
+  moved?: boolean;
 };
 
 /** The move an operator transition asks `transitionStage` to perform. */
@@ -2484,29 +2663,46 @@ export async function operatorDeliverForReview(
   if (!existing) {
     return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
   }
-  const pr = existing.parsed.frontmatter.pr;
-  if (pr && pr.state !== "closed" && pr.state !== "merged") {
-    // Idempotent: a live PR already stands for review. performDelivery would
-    // reuse it, but a fresh push of an unchanged workspace is wasted motion —
-    // report the live PR instead.
-    return {
-      outcome: "noop",
-      message: `PR #${pr.number} is already open for review; there is nothing to deliver.`,
-    };
-  }
+  // Ruling 134 (pass 34, F34-11): NO cached-state short-circuit. The old
+  // "PR #N is already open for review; there is nothing to deliver" answered
+  // before `performDelivery` ran, so every commit an agent made after the first
+  // delivery (a reviewer-requested rework, a resolved base conflict, the whole
+  // JC-6 scaffold) stayed in the workspace. Delivery is defined by the REMOTE:
+  // `pushWorkspaceBranch` reads origin's head and answers `up_to_date` when
+  // there is nothing to push, and THAT is the only honest noop.
+  const fm = existing.parsed.frontmatter;
+  const livePr = fm.pr && fm.pr.state !== "closed" && fm.pr.state !== "merged" ? fm.pr : null;
   if (g === "recommend") {
+    // The recommend arm reads the RECORDED fact, never the cache: with an open
+    // PR and no unpushed revision on the record there is nothing to propose.
+    const unpushed = unpushedRevisionOf(fm.pr, fm.workRevision?.headSha ?? null);
+    if (livePr && !unpushed) {
+      return {
+        outcome: "noop",
+        message: `PR #${livePr.number} already carries the delivered revision${fm.workRevision ? ` \`${fm.workRevision.headSha.slice(0, 7)}\`` : ""}; there is nothing to deliver.`,
+      };
+    }
     await addRecommendation(
       db,
       ctx,
       input.projectSlug,
       input.taskKey,
-      { kind: "delivery", label: "Deliver the branch & open the review PR" },
+      {
+        kind: "delivery",
+        label: livePr && unpushed
+          ? `Push \`${unpushed.revisionSha.slice(0, 7)}\` to PR #${livePr.number}`
+          : "Deliver the branch & open the review PR",
+      },
       input.reason ??
-        "The work is committed and ready for review; delivering pushes the task branch and opens the review PR.",
+        (livePr && unpushed
+          ? `The delivered revision \`${unpushed.revisionSha.slice(0, 7)}\` is not on PR #${livePr.number}; delivering pushes it to that PR.`
+          : "The work is committed and ready for review; delivering pushes the task branch and opens the review PR."),
     );
     return {
       outcome: "recommended",
-      message: "Recommended delivering the branch & opening the review PR.",
+      message: livePr && unpushed
+        ? `Recommended pushing \`${unpushed.revisionSha.slice(0, 7)}\` to PR #${livePr.number}.`
+        : "Recommended delivering the branch & opening the review PR.",
     };
   }
   // F17-1: delivery THROUGH the operator's own tool is operator-authorized by
@@ -2524,7 +2720,11 @@ export async function operatorDeliverForReview(
   // The PR number exists only on a DELIVERED outcome; a `prNumber` key on a
   // failed delivery would name a pull request that was never opened.
   const details: DeliveryAuditDetails = { status: outcome.status };
-  if (outcome.status === "delivered") details.prNumber = outcome.prNumber;
+  if (outcome.status === "delivered") {
+    details.prNumber = outcome.prNumber;
+    details.headSha = outcome.headSha;
+    details.moved = outcome.moved;
+  }
   recordAudit(db, {
     action: "github.delivery.operator",
     actor: OPERATOR_AUDIT_ACTOR,
@@ -2535,15 +2735,20 @@ export async function operatorDeliverForReview(
     details,
   });
   switch (outcome.status) {
-    case "delivered":
-      return {
-        outcome: "done",
-        message:
-          `Delivered: push ${outcome.pushStatus === "pushed" ? "succeeded" : `skipped (${outcome.pushStatus})`}, ` +
-          (outcome.created
-            ? `opened review PR #${outcome.prNumber}.`
-            : `reusing open review PR #${outcome.prNumber}.`),
-      };
+    case "delivered": {
+      // Ruling 134(a): the message names what MOVED. A reuse whose push moved
+      // the head says so with the sha; a reuse that pushed nothing is the one
+      // honest noop, and it reads as one.
+      const sha = outcome.headSha ? ` \`${outcome.headSha.slice(0, 7)}\`` : "";
+      const message = outcome.created
+        ? `Delivered: pushed${sha} and opened review PR #${outcome.prNumber}.`
+        : outcome.moved
+          ? `Delivered: pushed${sha} to the open review PR #${outcome.prNumber} (its head moved; the reviewers judge the new revision).`
+          : outcome.pushStatus === "up_to_date"
+            ? `Nothing to push: PR #${outcome.prNumber} already carries${sha || " the workspace head"}.`
+            : `Delivered: push skipped (${outcome.pushStatus}), reusing open review PR #${outcome.prNumber}.`;
+      return { outcome: "done", message };
+    }
     case "push_conflict":
       return {
         outcome: "noop",
@@ -2556,6 +2761,16 @@ export async function operatorDeliverForReview(
           `\`archive_task\` option to abandon the task. Do NOT author ` +
           `\`discard_branch\` here: it destroys this task's LOCAL commits and is ` +
           `refused while delivered work stands on the branch.`,
+      };
+    case "scope_violation":
+      // Ruling 144: the remedy is a human's (grant the scope on GitHub, then
+      // Re-check); the violation is already on the task and in the inbox.
+      return {
+        outcome: "noop",
+        message:
+          `Delivery was refused for a missing \`${outcome.scope}\` scope: ${outcome.message} ` +
+          `A scope violation is open on the task; do not retry until the credential card shows the scope. ` +
+          `Do not ask an agent to push.`,
       };
     case "grant_withheld":
     case "push_failed":
@@ -2836,18 +3051,23 @@ export async function operatorAcceptCompletion(
     // wording keys on the DURABLE claim (unchanged by F28-L1, which only reorders
     // the acceptance GATE so a verified-empty completion is not refused).
     const isNoChange = noChangeApplies(file.parsed.frontmatter);
+    // Ruling 137: the offer binds to the revision it describes, so a later
+    // delivery can withdraw it by name and the card can say which one.
+    const offer: RecommendationInput = {
+      kind: "accept_completion",
+      toStageId: doneStageId,
+      label: isNoChange
+        ? `Complete ${input.taskKey} with no changes and move it to ${doneName}`
+        : `Accept completion and move ${input.taskKey} to ${doneName}`,
+    };
+    const offeredHeadSha = file.parsed.frontmatter.workRevision?.headSha ?? null;
+    if (offeredHeadSha) offer.forHeadSha = offeredHeadSha;
     await addRecommendation(
       db,
       ctx,
       input.projectSlug,
       input.taskKey,
-      {
-        kind: "accept_completion",
-        toStageId: doneStageId,
-        label: isNoChange
-          ? `Complete ${input.taskKey} with no changes and move it to ${doneName}`
-          : `Accept completion and move ${input.taskKey} to ${doneName}`,
-      },
+      offer,
       isNoChange
         ? `The review is clean and there is nothing to deliver: no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
         : `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable; otherwise it records the PR as accepted (merge pending).`,
@@ -2859,7 +3079,7 @@ export async function operatorAcceptCompletion(
       subjectId: input.taskKey,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
-      details: { toStage: doneStageId },
+      details: { toStage: doneStageId, forHeadSha: offeredHeadSha },
     });
     return {
       outcome: "recommended",

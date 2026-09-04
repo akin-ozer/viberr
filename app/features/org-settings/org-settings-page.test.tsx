@@ -3,9 +3,11 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { renderToString } from "react-dom/server";
 import { createRoutesStub } from "react-router";
 import { z } from "zod";
 import type { ConnectionRecord } from "~/server/org/connections.server";
+import { formatCalendarDate } from "~/shared/dates/format";
 import type { GagentView } from "~/server/org/gagents.server";
 import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
@@ -54,7 +56,7 @@ let lastForm: Record<string, string> | null = null;
  *  intent these tests capture, so they are skipped rather than stringified. */
 const textField = z.string();
 
-function renderPanel(ui: ReactNode) {
+function panelElement(ui: ReactNode) {
   lastForm = null;
   const Stub = createRoutesStub([
     {
@@ -71,7 +73,11 @@ function renderPanel(ui: ReactNode) {
       },
     },
   ]);
-  return render(<Stub initialEntries={["/org/settings"]} />);
+  return <Stub initialEntries={["/org/settings"]} />;
+}
+
+function renderPanel(ui: ReactNode) {
+  return render(panelElement(ui));
 }
 
 const CONNECTIONS: ConnectionRecord[] = [
@@ -79,7 +85,7 @@ const CONNECTIONS: ConnectionRecord[] = [
     id: "akin-ozer", owner: "akin-ozer", method: "PAT", patId: "pat_1",
     masked: "····0000", def: true, repos: null, expiresAt: null, daysLeft: null,
     validationState: "unvalidated", scopes: [], lastValidatedAt: null,
-    createdAt: "2026-07-01T09:00:00.000Z", boundProjects: 0,
+    createdAt: "2026-07-01T09:00:00.000Z", boundProjects: 0, advisories: [],
   },
   {
     id: "hepapi", owner: "hepapi", method: "PAT", patId: "pat_2",
@@ -90,7 +96,7 @@ const CONNECTIONS: ConnectionRecord[] = [
       { id: "workflow", ok: true, source: "header" },
       { id: "pull_request:write", ok: true, source: "header" },
     ], lastValidatedAt: "2026-07-01T09:00:00.000Z",
-    createdAt: "2026-07-01T09:05:00.000Z", boundProjects: 2,
+    createdAt: "2026-07-01T09:05:00.000Z", boundProjects: 2, advisories: [],
   },
 ];
 
@@ -105,6 +111,28 @@ describe("ConnectionsPanel", () => {
     expect(getByText("default")).toBeTruthy();
     expect(getByText("expires in 15 days")).toBeTruthy();
     expect(queryByText("validation failed")).toBeNull();
+  });
+
+  it("C6: a PAT expiry hydrates safely — the UTC day first, the viewer's calendar date after hydration", () => {
+    // The server pass depends on the timestamp alone: the SSR host's zone is
+    // not the viewer's, and a calendar date rendered in it hydrates to
+    // different text near midnight (React #418). Midnight UTC is exactly the
+    // instant a host west of Greenwich puts on the previous day.
+    const ssr = renderToString(
+      panelElement(<ConnectionsPanel connections={CONNECTIONS} />),
+    );
+    expect(ssr).toContain("expires ");
+    expect(ssr).toContain("2026-07-20 (UTC)");
+    expect(ssr).not.toMatch(/Jul (19|20), 2026/);
+    expect(ssr).toContain("no expiry date");
+    // After hydration the effect swaps in the viewer-local calendar date.
+    const { container } = renderPanel(
+      <ConnectionsPanel connections={CONNECTIONS} />,
+    );
+    expect(container.textContent).toContain(
+      `expires ${formatCalendarDate("2026-07-20T00:00:00.000Z")}`,
+    );
+    expect(container.textContent).not.toContain("(UTC)");
   });
 
   it("refuses to remove the default with the mock toast; confirms others", async () => {
@@ -137,7 +165,7 @@ describe("ConnectionsPanel", () => {
 
   it("A4: with no bound projects, the confirm keeps the harmless copy (no false sync-loss claim)", async () => {
     const unbound: ConnectionRecord[] = [
-      { ...CONNECTIONS[1]!, id: "solo", owner: "solo", def: false, boundProjects: 0 },
+      { ...CONNECTIONS[1]!, id: "solo", owner: "solo", def: false, boundProjects: 0, advisories: [] },
     ];
     const { getByLabelText, getByText, queryByText } = renderPanel(
       <ConnectionsPanel connections={unbound} />,

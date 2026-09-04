@@ -21,6 +21,7 @@ import { resolveSpecialistDisallowedTools } from "../tasks/specialist-tool-polic
 import { agentGitIdentity } from "../tasks/specialist-run.server";
 import { CAP_CATALOG, capabilityEnforcement } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
+import { ENV_KEYS, resetEnvCacheForTests } from "~/server/config/env.server";
 
 /**
  * A Claude SDK query as the adapter consumes it: an async generator of SDK
@@ -45,6 +46,10 @@ describe("runtime-registry", () => {
       else process.env[key] = value;
       delete RESTORE[key];
     }
+    // The ruling-142 cases below set DECLARED knobs (NODE_ENV, PORT, the data
+    // root) and `start()` reads the validated env, which caches per process:
+    // drop the cache so a later test never sees the values this one set.
+    resetEnvCacheForTests();
   });
 
   /**
@@ -196,6 +201,132 @@ describe("runtime-registry", () => {
       // principal's, and arrives on spec.env.
       expect(env?.CLAUDE_CONFIG_DIR).toBeUndefined();
       expect(env?.CODEX_HOME).toBeUndefined();
+    }
+  });
+
+  it("ruling 142: filteredSpawnEnv strips every name the env schema declares, and keeps the undeclared rest", () => {
+    // U34-7 (pass 34): the JC-6 Developer's shell inherited the container's
+    // NODE_ENV=production and PORT, and the project's own `vitest` and
+    // `next start` broke on them until the agent unset them by hand. An
+    // agent works in the PROJECT's repository, not in Viberr's process, so
+    // the app's own configuration — every name the env schema declares —
+    // stays out of the child. The rule is keyed on the schema, not a list,
+    // so a knob declared tomorrow is stripped tomorrow.
+    for (const key of ENV_KEYS) setEnv(key, process.env[key] || `declared-${key}`);
+    setEnv("NODE_ENV", "production");
+    setEnv("PORT", "5173");
+    setEnv("VIBERR_DATA_ROOT", "/data");
+    // Undeclared names are not Viberr's configuration and pass through: the
+    // child needs PATH/HOME, the image's UV caches are agent-facing on
+    // purpose, and the test marker is the suite's own.
+    setEnv("PATH", process.env.PATH || "/usr/bin:/bin");
+    setEnv("HOME", process.env.HOME || "/home/viberr");
+    setEnv("UV_CACHE_DIR", "/data/runtimes/uv-cache");
+    setEnv("VIBERR_CLAUDE_TEST_MARKER", "present");
+
+    const env = filteredSpawnEnv();
+
+    expect(env.PATH).toBeTruthy();
+    expect(env.HOME).toBeTruthy();
+    expect(env.UV_CACHE_DIR).toBe("/data/runtimes/uv-cache");
+    expect(env.VIBERR_CLAUDE_TEST_MARKER).toBe("present");
+    // The two the finding saw, by name…
+    expect(env.NODE_ENV).toBeUndefined();
+    expect(env.PORT).toBeUndefined();
+    expect(env.VIBERR_DATA_ROOT).toBeUndefined();
+    // …and the whole declared list, whatever it holds today.
+    expect(ENV_KEYS.filter((key) => key in env)).toEqual([]);
+    // The list is the real schema, not an empty fixture: the names an
+    // operator would recognise are all on it.
+    expect(ENV_KEYS).toEqual(
+      expect.arrayContaining([
+        "NODE_ENV",
+        "PORT",
+        "VIBERR_DATA_ROOT",
+        "BETTER_AUTH_URL",
+        "GITHUB_OAUTH_CLIENT_ID",
+        "VIBERR_TRUST_PROXY",
+        "VIBERR_UNLOCK_CONTROLLER_SKILLS",
+        "VIBERR_BROWSER_EXECUTABLE",
+      ]),
+    );
+  });
+
+  it("ruling 142: createAdapters builds BOTH adapters on a base that carries none of the app's own configuration", async () => {
+    // The same invariant where it bites: what each SDK is actually handed.
+    // `VIBERR_BROWSER_EXECUTABLE` is the one declared knob a child's tool
+    // depends on, and it reaches the browser MCP as argv from the parent, so
+    // stripping it here loses nothing.
+    setEnv("NODE_ENV", "production");
+    setEnv("PORT", "5173");
+    setEnv("VIBERR_DATA_ROOT", "/data");
+    setEnv("VIBERR_BROWSER_EXECUTABLE", "/usr/bin/chromium");
+    setEnv("VIBERR_CLAUDE_TEST_MARKER", "present");
+
+    let claudeEnv: Record<string, string> | undefined;
+    let codexEnv: Record<string, string> | undefined;
+    const adapters = createAdapters({
+      claudeQueryFn: (params) => {
+        claudeEnv = params.options?.env;
+        return fakeClaudeQuery({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          num_turns: 1,
+          usage: {},
+        });
+      },
+      codexFactory: (options) => {
+        codexEnv = options?.env;
+        const thread: ReturnType<CodexClient["startThread"]> = {
+          id: "thread-app-config",
+          async runStreamed() {
+            const events = (async function* (): AsyncGenerator<ThreadEvent> {
+              yield {
+                type: "turn.completed",
+                usage: {
+                  input_tokens: 1,
+                  cached_input_tokens: 0,
+                  cache_write_input_tokens: 0,
+                  output_tokens: 1,
+                  reasoning_output_tokens: 0,
+                },
+              };
+            })();
+            return { events };
+          },
+        };
+        return { startThread: () => thread, resumeThread: () => thread };
+      },
+    });
+
+    const spec: RunSpec = {
+      runId: "run_app_config",
+      projectSlug: "viberr-core",
+      taskKey: "VIB-1",
+      threadId: "primary",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      prompt: "hello",
+      workdir: "/tmp",
+      autonomous: true,
+    };
+    const sink = { onLine: () => {}, onExit: () => {} };
+    adapters.claude.start(spec, sink);
+    adapters.codex.start({ ...spec, backend: "codex" }, sink);
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+
+    for (const env of [claudeEnv, codexEnv]) {
+      expect(env).toBeTruthy();
+      expect(env?.PATH).toBeTruthy();
+      expect(env?.VIBERR_CLAUDE_TEST_MARKER).toBe("present");
+      expect(env?.NODE_ENV).toBeUndefined();
+      expect(env?.PORT).toBeUndefined();
+      expect(env?.VIBERR_DATA_ROOT).toBeUndefined();
+      expect(env?.VIBERR_BROWSER_EXECUTABLE).toBeUndefined();
+      expect(ENV_KEYS.filter((key) => key in (env ?? {}))).toEqual([]);
     }
   });
 

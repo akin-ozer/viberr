@@ -67,8 +67,9 @@ resources, persona, whether the operator is deployed, and `humanGatedBeforeWork`
 | `goal-updated` | re-scope | `updateTaskGoal` |
 | `agent-reply` | react | the agent completion pipeline |
 | `pr-diverged` | recover | the GitHub reconciler on an out-of-band PR change |
-| `delivered` | proceed | a full-autonomy delivery that opened a new PR (ruling 48) |
-| `packet-resolved` | proceed | `resolvePacket`, when no asking agent absorbed the answer |
+| `delivered` | proceed | a full-autonomy delivery that opened a new PR, or whose push moved the head of the task's open PR (rulings 48 and 134) |
+| `packet-resolved` | proceed | `resolvePacket`, when no asking agent absorbed the answer. The payload carries the option (kind, title), the person's own note, and, for a ceremony that performs work of its own (`resolve_remote_collision`), Viberr's record of what it did in a separate `serverOutcome` field rendered as Viberr's sentence, never inside the quoted note (ruling 136(a)) |
+| `dependencies-released` | proceed after a hold | the release engine (ruling 131(e)): the payload names what was waited on and who cleared it; the doctrine says the base branch has changed since the hold and that a hold packet the operator opened itself is now moot |
 | `scheduled` | re-check | the schedule runner |
 | `manual` | coordinate | the Run-operator control, an `@operator` comment, boot recovery, the controller's `run_agent_on_task` |
 
@@ -77,9 +78,19 @@ operator is deployed and writes an honest timeline note if the hand-off throws b
 a run row exists.
 
 Fire-time refusals from `runOperator`: `terminal-stage` (a scheduled re-run never
-fires on a terminal task) and `open-packet` (a **human-pressed** Run operator while a
-packet is open is a paid no-op; machine triggers such as `pr-diverged` and
-`agent-reply` are not refused, ruling 76).
+fires on a terminal task), `open-packet` (a **human-pressed** Run operator, or the same turn a person
+**scheduled**, while a packet is open is a paid no-op, rulings 76 and 141; machine
+reaction triggers such as `pr-diverged` and `agent-reply` are not refused; a scheduled
+occurrence is retired `fired` with a "Scheduled action skipped" note and outcome
+`skipped-packet`, and a trigger refused at the front of the lease queue says so on the
+task through `noteQueuedTriggerRefused`, which settles nothing), and `blocked-by` (ruling 131(d): while the
+task's `blockedBy` list is non-empty the `create`, `transition` and `scheduled`
+triggers are refused before any run row exists, no run and no cost; the refusal
+settles the waiting flag itself, to `none` when nothing else is pending, so a
+transition drained off the lease queue never strands `waiting: agent`; a scheduled
+occurrence is retired `fired` with a "Scheduled action skipped" note and outcome
+`skipped-held`; a human-scheduled AGENT run is not refused). The stranded-coordination
+backstop treats a non-empty list as a recorded hold and never nudges.
 
 **Single-flight per task.** One drive at a time; queued triggers coalesce per kind:
 machine triggers keep only the latest, while reason-carrying triggers (a human
@@ -103,13 +114,25 @@ appends the capability-gap remedy clause (ruling 85: a packet must name the gran
 capability and where a human grants it, not only workarounds), and the backend prompt
 builders wrap it. The default arm states that `liveRuns` is the only proof a run is in
 flight: `waiting` is a display flag and a directive comment is not a running agent.
+While the snapshot's `blockedBy` is non-empty (ruling 131(d)) the held doctrine
+REPLACES the stage-rule tail rather than following it, so the prompt never carries
+two contradictory orders: it names every entry with its live state and the one tool
+that changes the wait (`set_dependencies`), forbids advancing the stage, dispatching
+delivery work and opening a packet about the wait, and says that ending the turn with
+one concise comment is correct. The "confirm the hold" packet exit stays only for
+holds a human directed.
 
 `get_task` returns the `OperatorTaskSnapshot`: stage and `previousStage` (so "back
 from Review" reads as rework), `validation` (derived), `reworkStages` (non-empty only
-while validation is `failing`), PR facts including revision drift, `noChanges`,
+while validation is `failing`), PR facts including the head sha, revision drift and
+the current unpushed-revision record with the acceptance gate's own sentence (ruling
+135: an unpushed revision reaches its PR through `deliver_for_review`), `noChanges`,
 `liveRuns`, pending and recently declined recommendations (so a supervised operator
-does not re-propose a just-dismissed move), and its own `operatorPolicy` labelled with
-scope so it cannot mistake its own web grant for a specialist's.
+does not re-propose a just-dismissed move), `blockedBy` (ruling 131: each entry with
+its resolved state), `deployedSpecialists[].eligibleForCurrentStage` meaning "may RUN
+here" (declared stages, or the engaged deliverer, ruling 133) beside
+`engagedAsDeliverer`, and its own `operatorPolicy` labelled with scope so it cannot
+mistake its own web grant for a specialist's.
 
 Before triage the operator gets a **full read-only clone** of the project repository
 (ruling 55), the same per-task checkout a specialist run reuses; on the shared
@@ -136,6 +159,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `flag_context_conflict` | `operatorFlagContextConflict` (repo convention vs KB, ruling 56) | `append-typed-events` |
 | `open_decision_packet` | `operatorOpenPacket` (appends the delegated-ask disclosure, ruling 84) | `generate-packets` |
 | `resolve_decision_packet` | `operatorResolvePacket` (refuses any packet not `from: operator` or carrying `askedBy`) | `generate-packets` |
+| `set_dependencies` | `operatorSetDependencies` → `setTaskDependencies` (ruling 131(b): the FULL `blockedBy` list, `[]` clears; a validator refusal is a `noop` carrying the validator's own sentence, an unchanged list a `noop`; the Codex plan verb is `set_dependencies` with `blockedBy`) | `generate-packets` (the wait is the hold packet's replacement) |
 | `run_agent` | `operatorDispatchAgent` | `dispatch-agents` |
 | `deliver_for_review` | `operatorDeliverForReview` → `performDelivery` | `deliver-review-pr` |
 | `update_branch_from_base` | `operatorUpdateBranchFromBase` (merge, never rebase; conflict → packet) | `update-task-branch` |
@@ -171,10 +195,34 @@ Details that matter:
   The operator **cannot merge**: it records `pr.state: accepted` (merge pending) and a
   human completes the merge (`complete-merge` intent). A racing human acceptance wins
   the lock and the operator's audit row is skipped.
-- **Delivery.** `deliver_for_review` runs `performDelivery`; a supervised delivery
-  always leaves an actionable next step (a "Move to Review" recommendation) when the
-  operator recorded none (ruling 58); a full-autonomy delivery re-queues the operator
-  with the `delivered` trigger (ruling 48).
+- **Delivery.** `deliver_for_review` runs `performDelivery`, with NO cached-state
+  short-circuit (ruling 134): rework on a task whose PR is already open is pushed to
+  that PR and the tool result names what moved ("pushed `<sha>` to the open review PR
+  #N"); the only noop is the push itself answering `up_to_date` ("Nothing to push: PR
+  #N already carries `<sha>`"). Under `recommend` the card reads the RECORDED
+  `pr.unpushedRevision` fact and proposes "Push `<sha>` to PR #N". A supervised
+  delivery always leaves an actionable next step (a "Move to Review" recommendation)
+  when the operator recorded none (ruling 58); a full-autonomy delivery whose PR is
+  new or whose head moved re-queues the operator with the `delivered` trigger (rulings
+  48 and 134). The doctrine and the seeded persona say that pushing is never a
+  person's job and never an agent's.
+- **Branch update.** `update_branch_from_base` merges the base into the task branch in
+  the delivering workspace (`--no-ff`, never rebase, never force) and pushes. Ruling
+  134(c): it also fetches origin's copy of the TASK branch and reports it beside the
+  base answer, derived from the workspace's own history: current, behind by N ("call
+  `deliver_for_review` to push it; do not ask a person to push"), diverged ("a person
+  resolves the branch history"), absent, or unknown with git's reason. It stays the
+  base tool and never becomes a second push door. A lagging origin lands once on the
+  timeline (the line is suppressed while the newest `github` event already says it);
+  the audit row `github.branch_update.operator` fires on every call and always carries
+  the `status`; the rest is whatever the outcome actually held — `remote` and
+  `remoteHeadSha` when origin's copy was read (an update or an already-current answer,
+  not a conflict), `commits` and `mergeSha` on an update, the conflicting `files` on a
+  conflict, and the offered `resolver` on either conflict shape (ruling 133(b)). Ruling 132: a successful update records
+  the refresh in `baseRefreshes` under the file lock, reconciles the task at once so
+  `pr.revisionDrift` is re-measured now rather than by the poll, and writes its timeline
+  line and tool message from the re-read, carrying the canonical drift sentence (or
+  "Drift could not be re-measured now"). The seeded persona says all of this.
 
 ## 6. Decision packets
 
@@ -182,19 +230,43 @@ One open packet per task; every writer refuses on the pre-read and again inside 
 locked write. Header: `id`, `type` (`input | blocked`; `blocked` also floors
 readiness at `blocked`), `kind` (free text; `Agent question` is load-bearing),
 `from` (an actor-ref string), `title`, `body`, `observations`, `options`, `awaiting`
-(only `goal_edit`), `askedBy` (the agent profile whose session resumes on
-resolution, ruling 33).
+(only `goal_edit`), `decided` (`{ optionIndex, at, byUserId }`, stamped beside `awaiting`
+so a reload renders the packet as decided, ruling 138), `askedBy` (the agent profile
+whose session resumes on resolution, ruling 33). An `edit_goal` option may carry
+`goalDraft`, the proposed goal text itself (written as a goal: deliverable plus
+acceptance criteria), which the goal editor opens with; both backends' prompts say so,
+`operatorOpenPacket` caps it and refuses it by name on any other kind, and the Codex plan
+schema requires the key (null off `edit_goal`).
 
 Who opens packets: the operator's own decision (`operatorOpenPacket`, either
 backend); an agent's `ask_human` (kind `Agent question`, `custom` option only); the
-stuck-loop escalation after a failed agent run, a no-progress react or the transition
-chain cap (`redirect`, `request_edit`, `hold_runtime_debug`, plus a recommended
-`retry_other_backend` when the failure is quota/auth/unavailable); a failed operator
-run (`escalateFailedOperatorRun`, with the provider's own redacted words); a Codex
-run that produced no parseable plan; the branch-update conflict; and the
+stuck-loop escalation after a no-progress react or the transition chain cap (the stock
+set: `redirect` recommended, `request_edit`, `hold_runtime_debug`); the same escalation
+after a failed agent run, whose reason and options come from `describeRunFailure`
+(`app/server/tasks/run-failure-remedy.server.ts`, ruling 130(b)) when the failure is
+`quota | auth | unavailable`: `retry_other_backend` first only when the task owner has
+the other backend connected, else a `request_edit` titled "The window has reset (…), or
+the account changed: send @agent back to continue", `redirect` present and never
+recommended, `hold_runtime_debug` last; a failed operator run
+(`escalateFailedOperatorRun`: "Operator run failed: pick a recovery path", body = the
+classified reason, "No coordination was performed.", the owner's own remedy, the
+provider's redacted words, a "Window reopens" observation when the reset instant is
+known; options from the same module, ruling 130(b)/(c)); a Codex run that produced no
+parseable plan (the stock blocked set, whose recommended option is "Re-run the operator
+now"); the branch-update conflict and push conflict (ruling 133(b): the redirect to the
+deliverer is offered only when that deliverer is deployed with repo-write, else resolving
+by hand is recommended and the body says why); and the
 `pr-diverged` recovery (closed PR → rework, `archive_task`, `archive_task` +
 `deleteBranch`; merged → no packet, accept instead; reopened → withdraw the moot
 packet).
+
+Every packet writer (the operator's `operatorOpenPacket`, an agent's `ask_human`, the Codex
+completion envelope's question) withdraws the task's standing acceptance offers inside the
+same locked write (ruling 137): the `accept_completion` card and any `transition` card
+targeting the terminal stage go, a "Recommendation withdrawn" note names them and the packet,
+a `task.recommendation.withdrawn` row records it, and the "Waiting on you" bell is marked read
+only when no card survives. The operator re-recommends acceptance on its next turn if the
+offer still holds.
 
 Resolution effects by option kind (`resolvePacket`):
 
@@ -202,13 +274,13 @@ Resolution effects by option kind (`resolvePacket`):
 |---|---|
 | `accept_completion` | Runs the full acceptance contract (authority, disclosure echo, live no-change probe, refusal stack, PR head check, merge). Not re-queued. |
 | `request_edit`, `redirect`, `custom` | Task back to `waiting: agent`, `readiness: ready`, packet cleared, operator re-queued; an agent question routes to the asker's resumed session first. |
-| `block_on_policy` | "I fixed the policy or credential": `readiness: ready`, `waiting: agent`, re-queued (ruling 76). Since ruling 127 the credential half of that is a person connecting their own backend on Profile → Agent accounts, usually the task owner. |
+| `block_on_policy` | The re-run kind: `readiness: ready`, `waiting: agent`, re-queued (ruling 76). Its label states what the human asserts ("The usage window has reset (…), or I switched the Claude account: re-run", "I connected a different Claude account or an API key on Profile → Agent accounts: re-run", or the stock "Re-run the operator now"); the recorded decision is the option's pre-authored `ev` or its own title, never a fixed "policy / credential updated" (ruling 130(c)). The toast says "Unblocked · the operator re-runs to re-check", and the re-run's instruction tells the operator to assume nothing about credentials or policy beyond the decision's own words. Since ruling 127 the credential half of that is a person connecting their own backend on Profile → Agent accounts, usually the task owner. |
 | `hold_runtime_debug` | `readiness: blocked`, `waiting: human`, packet cleared, not re-queued. |
 | `retry_other_backend` | Re-runs the failed agent on the named backend under operator authority; the switch sticks on the engagement's `pinnedBackend`. Offered only when the TASK OWNER has that backend connected (ruling 127). |
-| `edit_goal` | The only kind that keeps its packet open (`awaiting: goal_edit`); cleared when the edited goal is saved. |
+| `edit_goal` | The only kind that keeps its packet open (`awaiting: goal_edit`, plus `decided` recording the chosen option); cleared when the edited goal is saved. The card then reads decided (chosen option locked, no Confirm, one "Edit the goal" control), the readiness shows `goal_edit_pending`, the review queue row says a goal edit is owed, and `get_task` sees `packet.awaiting` (ruling 138). |
 | `archive_task` | The archive contract; with `deleteBranch: true` also deletes the remote branch (the product's only remote-branch deletion besides collision resolution). Requires `approve-transition`. |
 | `discard_branch` | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. Requires `approve-transition`. |
-| `resolve_remote_collision` | Closes the recorded unowned PR, deletes the stale remote branch, re-delivers this task's local work. Requires `approve-transition`. |
+| `resolve_remote_collision` | Deletes the stale remote branch, closes the recorded unowned PR, re-delivers this task's local work; ends with exactly one operator hand-off carrying the outcome (ruling 136). When the PR on the ref turns out to be the task's own open review PR there is no collision: a behind or absent remote gets the push, a diverged one keeps the block. Requires `approve-transition`. |
 
 Who may resolve: `accept_completion` is guarded by `requireAcceptCompletion` (admin,
 maintainer, or the live task owner); every other kind by the owner exception or

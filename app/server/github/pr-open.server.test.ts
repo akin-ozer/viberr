@@ -562,6 +562,56 @@ describe("openTaskPr", () => {
     expect(fm.pr).toBeNull();
   });
 
+  it("ruling 128: a 422 with `field: base, code: invalid` is `base_branch_missing`, never `network_unavailable`", async () => {
+    // Canary: remove `field`/`code` from `ghValidationBodySchema` and this
+    // reads `refused` (the residual), not the typed base outcome.
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 422,
+        // Exactly what GitHub sent on JC-1: a structured row with NO message.
+        body: {
+          message: "Validation Failed",
+          errors: [{ resource: "PullRequest", field: "base", code: "invalid" }],
+        },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res).toMatchObject({ status: "base_branch_missing", base: "main" });
+    expect(res.status === "base_branch_missing" ? res.message : "").toContain("`main` does not exist");
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toBeNull();
+  });
+
+  it("ruling 128: an unmapped 422 is `refused` and carries GitHub's own words", async () => {
+    // Canary: return `network_unavailable` from the residual again.
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 422,
+        body: {
+          message: "Validation Failed",
+          errors: [{ resource: "PullRequest", code: "custom", message: "A pull request title is required" }],
+        },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("refused");
+    expect(res.status === "refused" ? res.message : "").toContain("A pull request title is required");
+  });
+
   it("F21-9: an UNREADABLE head probe never falls through to create", async () => {
     // The probe answered 200 with a payload the reader refused, so whether a PR
     // already occupies `head` is UNKNOWN. Before this, an unreadable answer was
@@ -689,8 +739,15 @@ describe("openTaskPr", () => {
     // Reused, not created — a second POST would 422 all over again.
     expect(res.created).toBe(false);
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(1);
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
-    expect(fm.pr).toMatchObject({ number: 92, state: "review" });
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed;
+    expect(parsed.frontmatter.pr).toMatchObject({ number: 92, state: "review" });
+    // F34-9: the delivery door records the adoption on its own, and no "opened".
+    // Canary: drop the `recordPrAdoption` call from `prAlreadyOnHead`.
+    const adopted = parsed.timeline.filter((e) => e.type === "github" && e.text.includes("Adopted **PR #92**"));
+    expect(adopted).toHaveLength(1);
+    expect(adopted[0]!.actor).toEqual({ kind: "system", systemId: "delivery" });
+    expect(listAuditEvents(store.db, { action: "github.pr.adopted" })[0]!.details).toMatchObject({ prNumber: 92, source: "delivery" });
+    expect(listAuditEvents(store.db, { action: "github.pr.opened" })).toHaveLength(0);
   });
 
   it("an UNRELATED 422 is neither an empty branch nor a collision", async () => {
@@ -714,8 +771,10 @@ describe("openTaskPr", () => {
       { ...ACTOR, userId: store.users.arda.id },
       { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
     );
-    expect(res.status).toBe("network_unavailable");
-    if (res.status !== "network_unavailable") throw new Error("expected network_unavailable");
+    // Ruling 128: GitHub ANSWERED, so an unmapped 422 is `refused` (quoting
+    // GitHub), never `network_unavailable`.
+    expect(res.status).toBe("refused");
+    if (res.status !== "refused") throw new Error("expected refused");
     expect(res.message).toContain("base is invalid");
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toBeNull();
@@ -1032,5 +1091,63 @@ describe("openTaskPr", () => {
       { dataRoot: store.dataRoot },
     );
     expect(["no_pat_configured", "no_repo_configured"]).toContain(res.status);
+  });
+});
+
+/**
+ * Ruling 135: the delivery door writes the PR head it read. A reuse of the
+ * SAME PR carries the head forward and clears a satisfied record; a DIFFERENT
+ * PR never inherits the old head. Canary: carry `existingPr.headSha`
+ * unconditionally (spread `existingPr` even when the number differs).
+ */
+describe("ruling 135: writePrToTask and the PR head", () => {
+  it("reusing the SAME PR writes the live head and clears a satisfied unpushed record", async () => {
+    const store = setupWithBranch();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-201", {
+        title: "Attach execution workspace to task runtime",
+        stage: "review",
+        branch: BRANCH,
+        workRevision: { id: "rev_1", headSha: "9".repeat(40), treeSha: null, branch: BRANCH, createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
+        pr: {
+          number: 42, state: "review", title: "old title", headSha: "1".repeat(40),
+          unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" },
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/42`]: {
+        body: { number: 42, html_url: "https://github.com/akin-ozer/viberr/pull/42", title: "new title", state: "open", merged: false, head: { sha: "9".repeat(40) } },
+      },
+    });
+    const res = await openTaskPr(store.db, { projectSlug: store.slug, taskKey: "VIB-201" }, { ...ACTOR, userId: store.users.arda.id }, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl });
+    expect(res).toMatchObject({ status: "ok", prNumber: 42, created: false });
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toEqual({ number: 42, state: "review", title: "new title", headSha: "9".repeat(40) });
+  });
+
+  it("a DIFFERENT PR does not inherit the old head", async () => {
+    const store = setupWithBranch();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-201", {
+        title: "Attach execution workspace to task runtime",
+        stage: "review",
+        branch: BRANCH,
+        pr: { number: 7, state: "closed", title: "[VIB-201] abandoned", headSha: "1".repeat(40) },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 43, html_url: "https://github.com/akin-ozer/viberr/pull/43", title: "[VIB-201] t", state: "open" },
+      },
+    });
+    const res = await openTaskPr(store.db, { projectSlug: store.slug, taskKey: "VIB-201" }, { ...ACTOR, userId: store.users.arda.id }, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl });
+    expect(res).toMatchObject({ status: "ok", prNumber: 43, created: true });
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toEqual({ number: 43, state: "review", title: "[VIB-201] t" });
   });
 });

@@ -14,12 +14,16 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { fakeGithubFetch } from "../../../test-support/fake-github";
+import { describeRevisionDrift } from "~/shared/revision-drift";
 import {
   createPat,
   setProjectCredential,
 } from "~/server/secrets/pat-store.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { writeProject } from "../../../test-support/test-store";
 import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
 import {
   operatorUpdateBranchFromBase,
@@ -83,16 +87,53 @@ function authority(patch: Partial<OperatorAuthority> = {}): OperatorAuthority {
 }
 
 /** A fake git whose merge either succeeds or conflicts. */
-function fakeGit(opts: { conflict?: boolean; behind?: number } = {}) {
+const PRE_SHA = "abc1234";
+const MERGE_SHA = "merge00000000000000000000000000000000000";
+const BASE_SHA = "base000000000000000000000000000000000000";
+const REMOTE_SHA = "remote0000000000000000000000000000000000";
+
+function fakeGit(
+  opts: {
+    conflict?: boolean;
+    behind?: number;
+    /** Ruling 134(c): origin's copy of the branch (default current). */
+    remote?: "current" | "behind" | "diverged" | "absent";
+    ahead?: number;
+    /** Ruling 133(b): the push is refused non-fast-forward (a `push_conflict`). */
+    pushRefused?: boolean;
+  } = {},
+) {
   const calls: string[][] = [];
+  const remote = opts.remote ?? "current";
+  let merged = false;
   const exec = vi.fn(async (_file: string, args: string[]) => {
     calls.push(args);
     if (args.includes("--abbrev-ref")) return { ok: true, stdout: "vib-1", stderr: "" };
     if (args.includes("--is-shallow-repository")) return { ok: true, stdout: "false", stderr: "" };
     if (args.includes("--porcelain")) return { ok: true, stdout: "", stderr: "" };
-    if (args.includes("--count")) return { ok: true, stdout: String(opts.behind ?? 2), stderr: "" };
+    if (args.includes("fetch") && args.some((a) => a.includes("refs/heads/vib-1:"))) {
+      return remote === "absent"
+        ? { ok: false, stdout: "", stderr: "fatal: couldn't find remote ref vib-1" }
+        : { ok: true, stdout: "", stderr: "" };
+    }
+    if (args.includes("--verify")) {
+      return { ok: true, stdout: remote === "current" ? PRE_SHA : REMOTE_SHA, stderr: "" };
+    }
+    if (args.includes("merge-base")) {
+      return remote === "behind"
+        ? { ok: true, stdout: "", stderr: "" }
+        : { ok: false, stdout: "", stderr: "", code: 1 };
+    }
+    if (args.includes("--count")) {
+      const range = args[args.length - 1] ?? "";
+      if (range.endsWith("..HEAD")) return { ok: true, stdout: String(opts.ahead ?? 2), stderr: "" };
+      return { ok: true, stdout: String(opts.behind ?? 2), stderr: "" };
+    }
     if (args.includes("rev-parse") && args.includes("HEAD")) {
-      return { ok: true, stdout: "abc1234", stderr: "" };
+      return { ok: true, stdout: merged ? MERGE_SHA : PRE_SHA, stderr: "" };
+    }
+    if (args.includes("rev-parse") && args.some((a) => a.startsWith("refs/remotes/origin/"))) {
+      return { ok: true, stdout: BASE_SHA, stderr: "" };
     }
     if (args.includes("--diff-filter=U")) {
       return { ok: true, stdout: "app/main.ts\n", stderr: "" };
@@ -107,18 +148,57 @@ function fakeGit(opts: { conflict?: boolean; behind?: number } = {}) {
         stderr: "",
       };
     }
+    if (args.includes("merge")) merged = true;
+    if (args.includes("push") && opts.pushRefused) {
+      return {
+        ok: false,
+        stdout: "",
+        stderr: " ! [rejected]        HEAD -> vib-1 (non-fast-forward)\nerror: failed to push some refs to 'origin'",
+      };
+    }
     return { ok: true, stdout: "", stderr: "" };
   });
   return { exec, calls };
 }
 
+/** Ruling 133(b): deploy `dev` (with or without repo-write) and engage it as
+ *  VIB-1's deliverer, so the conflict packet has a resolver to consider. */
+function deployDeliverer(repoWrite: boolean, engaged = true): void {
+  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+  writeProject(store.dataRoot, {
+    ...file.parsed.frontmatter,
+    agents: [
+      {
+        profileId: "dev",
+        capabilities: repoWrite ? [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }] : [],
+        extras: [],
+        definition: { kind: "specialist", name: "Dev", role: "developer", backends: ["claude"], model: "sonnet" },
+      },
+    ],
+  });
+  writeTask(store.dataRoot, store.slug, {
+    frontmatter: baseTaskFrontmatter("VIB-1", {
+      stage: "review",
+      branch: "vib-1",
+      engagements: engaged
+        ? [{ profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false }]
+        : [],
+    }),
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+}
+
+/** Every call carries a canned transport: the post-update reconcile (ruling
+ *  132) must never reach GitHub from a test. Unrouted answers 404, which the
+ *  reconcile degrades from honestly. */
 const act = (
   exec: ReturnType<typeof fakeGit>["exec"],
   auth: OperatorAuthority = authority(),
+  fetchImpl: typeof fetch = fakeGithubFetch({}).fetchImpl,
 ) =>
   operatorUpdateBranchFromBase(
     store.db,
-    { dataRoot: store.dataRoot },
+    { dataRoot: store.dataRoot, fetchImpl },
     { projectSlug: store.slug, taskKey: "VIB-1", exec },
     auth,
   );
@@ -144,6 +224,10 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
   });
 
   it("a CONFLICT opens a BLOCKING decision packet naming the files — and never retries", async () => {
+    // Ruling 133(b): the redirect is recommended because the task HAS a
+    // deployed, repo-write deliverer. Canary: pass `{kind: "none"}`
+    // unconditionally into `conflictOptions`.
+    deployDeliverer(true);
     const git = fakeGit({ conflict: true });
     const res = await act(git.exec);
     // Not `denied`: nothing about the policy refused this (the LV-03 misblame
@@ -166,6 +250,9 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     // owns the branch, and its workspace now has the base fetched.
     const recommended = packet.options.find((o) => o.rec)!;
     expect(recommended.kind).toBe("redirect");
+    expect(recommended.t).toBe("Have Dev resolve the conflict");
+    expect(packet.observations.find((o) => o.k === "Delivering agent")?.v).toBe("Dev");
+    expect(listAuditEvents(store.db).find((e) => e.action === "github.branch_update.operator")?.details).toMatchObject({ status: "conflict", resolver: "deliverer" });
     // Every option is a human decision — none of them force the branch.
     expect(packet.options.map((o) => o.kind).sort()).toEqual([
       "archive_task",
@@ -183,6 +270,59 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(file.parsed.frontmatter.waiting).toBe("human");
     // The branch itself was left alone.
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+  });
+
+  it("ruling 133(b): with NO delivering agent the packet offers only what can execute and says why", async () => {
+    // Canary: always build the three options.
+    const git = fakeGit({ conflict: true });
+    await act(git.exec);
+    const packet = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.packet!;
+    expect(packet.options.map((o) => [o.kind, o.rec])).toEqual([
+      ["custom", true],
+      ["archive_task", false],
+    ]);
+    expect(packet.options[0]!.t).toBe("Resolve `vib-1` yourself");
+    expect(packet.body).toContain("No delivering agent can resolve it in product: this task has no delivering agent. Resolving by hand is the recommended option.");
+    expect(packet.observations.find((o) => o.k === "Delivering agent")?.v).toBe("none");
+    expect(listAuditEvents(store.db).find((e) => e.action === "github.branch_update.operator")?.details).toMatchObject({ status: "conflict", resolver: "none" });
+  });
+
+  it("ruling 133(b): a deliverer whose repo-write grant was withdrawn is not offered as the resolver", async () => {
+    // Canary: treat any deployed deliverer as a resolver.
+    deployDeliverer(false);
+    const git = fakeGit({ conflict: true });
+    await act(git.exec);
+    const packet = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.packet!;
+    expect(packet.options.find((o) => o.rec)!.kind).toBe("custom");
+    expect(packet.options.some((o) => o.kind === "redirect")).toBe(false);
+    expect(packet.body).toContain("its delivering agent (Dev) holds no repo-write grant any more");
+  });
+
+  it("ruling 133(b): a PUSH conflict takes the same rule, with its own wording", async () => {
+    // Canary: route push_conflict through the merge wording (the deliverer
+    // case's option detail speaks of merging the base).
+    deployDeliverer(true);
+    const withDev = fakeGit({ pushRefused: true });
+    const res = await act(withDev.exec);
+    expect(res.outcome).toBe("noop");
+    const packet = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.packet!;
+    expect(packet.title).toBe("`vib-1` diverged from its remote");
+    const rec = packet.options.find((o) => o.rec)!;
+    expect(rec.kind).toBe("redirect");
+    expect(rec.t).toBe("Have Dev reconcile the branch with origin");
+    expect(rec.d).not.toContain("merges and resolves the conflicting files");
+    expect(rec.d).toContain("nothing is forced");
+    expect(listAuditEvents(store.db).find((e) => e.action === "github.branch_update.operator")?.details).toMatchObject({ status: "push_conflict", resolver: "deliverer" });
+  });
+
+  it("ruling 133(b): a PUSH conflict with no delivering agent recommends resolving by hand, with the push wording", async () => {
+    const noDev = fakeGit({ pushRefused: true });
+    await act(noDev.exec);
+    const packet = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.packet!;
+    expect(packet.title).toBe("`vib-1` diverged from its remote");
+    expect(packet.options.map((o) => [o.kind, o.rec])).toEqual([["custom", true], ["archive_task", false]]);
+    expect(packet.options[0]!.d).toContain("Reconcile the branch with origin's copy by hand");
+    expect(packet.body).toContain("this task has no delivering agent");
   });
 
   it("says so honestly when the branch is already current", async () => {
@@ -263,6 +403,12 @@ describe("the operator persona teaches the branch update", () => {
     expect(seed).toMatch(/never ask an agent to rebase, merge, or force-push/i);
   });
 
+  it("ruling 134(c): says the tool reports origin's copy and that the push is `deliver_for_review`'s job", () => {
+    // Canary: revert the seed sentence.
+    expect(seed).toMatch(/It also reports whether origin carries the workspace head/);
+    expect(seed).toMatch(/When it says the remote copy is behind, call `deliver_for_review` to push it; do not ask a person to push\./);
+  });
+
   it("makes a conflict a human decision the operator does not retry", () => {
     expect(seed).toMatch(/A CONFLICT is not yours to settle/i);
     expect(seed).toMatch(/never propose forcing the branch/i);
@@ -271,5 +417,97 @@ describe("the operator persona teaches the branch update", () => {
   it("keeps the live store's copy in step when one is present (both copies or neither)", () => {
     if (live === null) return;
     expect(live).toBe(seed);
+  });
+});
+
+/**
+ * Ruling 134(c): `update_branch_from_base` reports origin's copy of the task
+ * branch and points at `deliver_for_review` when origin lags; the record is as
+ * idempotent as the tool (one timeline line across two identical calls, an
+ * audit row per call). Canary: revert the `already_current` arm (no remote
+ * sentence); append the line unconditionally.
+ */
+describe("ruling 134(c): the remote report", () => {
+  const REPO_PATH = "/repos/akin-ozer/viberr";
+  it("names a lagging origin, points at deliver_for_review, and writes ONE timeline line across two calls", async () => {
+    const first = await act(fakeGit({ behind: 0, remote: "behind", ahead: 2 }).exec);
+    expect(first.outcome).toBe("noop");
+    expect(first.message).toContain("already up to date with `main`");
+    expect(first.message).toContain("Origin's copy of `vib-1` (`remote0`) is 2 commits behind the workspace head");
+    expect(first.message).toContain("call `deliver_for_review` to push it");
+    expect(first.message).not.toMatch(/nothing to do/i);
+    const second = await act(fakeGit({ behind: 0, remote: "behind", ahead: 2 }).exec);
+    expect(second.message).toBe(first.message);
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const lines = file.parsed.timeline.filter((e) => e.type === "github" && e.text === first.message);
+    expect(lines).toHaveLength(1);
+    expect(file.parsed.packet).toBeNull();
+    const audit = listAuditEvents(store.db, { action: "github.branch_update.operator" });
+    expect(audit).toHaveLength(2);
+    expect(audit[0]!.details).toMatchObject({ status: "already_current", remote: "behind", remoteHeadSha: REMOTE_SHA });
+  });
+
+  it("a current origin stays a quiet no-op; diverged and absent say who acts", async () => {
+    const current = await act(fakeGit({ behind: 0 }).exec);
+    expect(current.message).toContain("Origin carries the workspace head");
+    expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.timeline).toHaveLength(0);
+    const diverged = await act(fakeGit({ behind: 0, remote: "diverged" }).exec);
+    expect(diverged.message).toContain("holds commits this workspace does not");
+    expect(diverged.message).toContain("A person resolves the branch history");
+    expect(diverged.message).not.toContain("deliver_for_review");
+    const absent = await act(fakeGit({ behind: 0, remote: "absent" }).exec);
+    expect(absent.message).toContain("does not exist on origin yet: call `deliver_for_review`");
+  });
+
+  /**
+   * Ruling 132: a successful update records the refresh row, reconciles so
+   * drift is re-measured NOW, and says so from the re-read. Canaries: remove
+   * the `reconcileTask` call (no drift is measured); remove the `baseRefreshes`
+   * push (the row is missing).
+   */
+  it("ruling 132: a successful update records the row, re-measures drift and says so", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1",
+        workRevision: { id: "rev_1", headSha: PRE_SHA, treeSha: null, branch: "vib-1", createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
+        pr: { number: 5, state: "review", title: "[VIB-1] t" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/compare/main...vib-1`]: { body: { ahead_by: 1, behind_by: 0, status: "ahead", commits: [] } },
+      [`GET ${REPO_PATH}/pulls`]: { body: [{ number: 5, title: "[VIB-1] t", state: "open", draft: false, merged_at: null, head: { sha: MERGE_SHA } }] },
+      [`GET ${REPO_PATH}/pulls/5`]: { body: { number: 5, title: "[VIB-1] t", state: "open", merged: false, merged_at: null, head: { sha: MERGE_SHA }, additions: 1, deletions: 0, changed_files: 1 } },
+      [`GET ${REPO_PATH}/commits/${MERGE_SHA}/check-runs`]: { body: { total_count: 0, check_runs: [] } },
+      [`GET ${REPO_PATH}/compare/${PRE_SHA}...${MERGE_SHA}`]: { body: { ahead_by: 3, behind_by: 0, status: "ahead", commits: [] } },
+    });
+    const res = await act(fakeGit({ behind: 2 }).exec, authority(), gh.fetchImpl);
+    expect(res.outcome).toBe("done");
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    expect(fm.frontmatter.baseRefreshes).toEqual([
+      { mergeSha: MERGE_SHA, baseSha: BASE_SHA, base: "main", commits: 2, at: expect.any(String) },
+    ]);
+    expect(fm.frontmatter.pr?.revisionDrift).toBeTruthy();
+    const sentence = describeRevisionDrift(fm.frontmatter.pr?.revisionDrift).sentence;
+    expect(sentence).not.toBe("");
+    expect(res.message).toContain(`Drift re-measured: ${sentence}.`);
+    expect(res.message).toContain("merge commit `merge00`");
+    const event = fm.timeline.find((e) => e.type === "github" && e.text.includes("Brought `vib-1` up to date"))!;
+    expect(event.text).toBe(res.message);
+    expect(listAuditEvents(store.db, { action: "github.branch_update.operator" })[0]!.details).toMatchObject({ mergeSha: MERGE_SHA, remote: "current" });
+  });
+
+  it("ruling 132: when the reconcile cannot run, the row still lands and the message says the drift was not re-measured", async () => {
+    // Canary: swallow the reconcile result silently (no "could not be re-measured").
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/compare/main...vib-1`]: { status: 500, body: { message: "boom" } },
+    });
+    const res = await act(fakeGit({ behind: 1 }).exec, authority(), gh.fetchImpl);
+    expect(res.outcome).toBe("done");
+    expect(res.message).toContain("could not be re-measured now");
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.baseRefreshes).toHaveLength(1);
+    expect(fm.baseRefreshes[0]).toMatchObject({ mergeSha: MERGE_SHA, baseSha: BASE_SHA, commits: 1 });
   });
 });

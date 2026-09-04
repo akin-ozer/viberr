@@ -1,4 +1,20 @@
 import type { DatabaseSync } from "node:sqlite";
+import {
+  assertEffortForBackend,
+  assertModelForBackend,
+  defaultEffortFor,
+  defaultModelFor,
+} from "~/server/runtimes/model-catalog.server";
+import {
+  ALWAYS_HUMAN_CAPABILITY_IDS,
+  UNIFIED_CAP_CATALOG,
+  capabilityById,
+  type CapabilityKind,
+} from "~/shared/capabilities";
+import { capabilityPatchRefusal,
+  OPERATOR_CAP_MODES,
+  SPECIALIST_CAP_MODES,
+} from "~/features/agents/capability-catalog";
 import { z } from "zod";
 import {
   createSdkMcpServer,
@@ -51,10 +67,14 @@ import {
   deployAgentProfileFromLibrary,
   updateAgentProfile,
   type SubmittedProfileForm,
+  deploymentFingerprint,
 } from "~/features/agents/agent-profile-actions.server";
 import {
   effectiveProfileView,
   VIEW_WITHOUT_POLICY,
+  assembleAgentRoster,
+  absentGrantMode,
+  POLICY_DEPENDENT_CAPABILITY_IDS,
 } from "~/features/agents/agents-query.server";
 import {
   addStage,
@@ -95,6 +115,7 @@ import {
   userName,
   type CreateTaskInput,
 } from "~/server/tasks/task-actions.server";
+import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { PRIORITY_VALUES } from "~/schemas/task-file.schema";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import type { StartAgentRunInput } from "~/server/tasks/specialist-run.server";
@@ -246,6 +267,45 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       }),
     ),
     "whoami",
+  );
+
+  add(
+    tool(
+      "list_capabilities",
+      "The capability catalogue the deployments are written against (ruling 139): for each kind (the operator, a specialist) the settable ids with their label, the modes that kind takes, and `whenUngranted`, the mode a deployment RESOLVES to when project.md carries no grant for the id (not the create-seed default). `deliver-review-pr` and `update-task-branch` depend on the project's workflow policy: read get_project for a deployment's resolved mode. Any signed-in person; instance scope.",
+      {},
+      run(() => {
+        const policyDependent = new Set(POLICY_DEPENDENT_CAPABILITY_IDS);
+        const kindRows = (kind: CapabilityKind) =>
+          UNIFIED_CAP_CATALOG.filter((c) => c.kinds.includes(kind) && c.group !== null).map(
+            (c) => ({
+              id: c.id,
+              label: c.label,
+              whenUngranted:
+                kind === "operator" && policyDependent.has(c.id)
+                  ? "project policy (see get_project)"
+                  : absentGrantMode(kind, c),
+              alwaysHuman: ALWAYS_HUMAN_CAPABILITY_IDS.includes(c.id),
+            }),
+          );
+        return json({
+          note:
+            "whenUngranted is the mode a deployment resolves to when the grant is ABSENT from project.md. update_agent_deployment refuses an id outside the kind's list, a mode the kind does not take, a non-human mode on an always-human id, and report-validation-verdict at any mode but direct or off.",
+          kinds: {
+            operator: {
+              modes: OPERATOR_CAP_MODES.map((m) => m.id),
+              capabilities: kindRows("operator"),
+            },
+            agent: {
+              modes: SPECIALIST_CAP_MODES.map((m) => m.id),
+              capabilities: kindRows("agent"),
+            },
+          },
+          alwaysHuman: [...ALWAYS_HUMAN_CAPABILITY_IDS],
+        });
+      }),
+    ),
+    "list_capabilities",
   );
 
   add(
@@ -838,7 +898,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents, goals summary. Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every catalogued capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment), goals summary. Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -869,15 +929,32 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             name: users.get(m.userId)?.name ?? m.userId,
             email: users.get(m.userId)?.email ?? null,
           })),
-          agents: fm.agents.map((a) => {
-            const view = effectiveProfileView(a, dataRoot, VIEW_WITHOUT_POLICY);
-            return {
-              profileId: a.profileId,
-              name: view.name,
-              kind: view.kind,
-              backends: view.backends,
-              stages: view.stages,
+          // Ruling 139: the deployments come from the Agents page's own roster
+          // (the projection, which every agent writer reprojects before it
+          // returns), so the controller reads exactly what the roster renders:
+          // an absent `deliver-review-pr` at the project's delivery-gate mode,
+          // the grant-required family at `off`, the model marks applied.
+          agents: assembleAgentRoster(db, slug, { dataRoot }).map((row) => {
+            const entry = {
+              profileId: row.id,
+              name: row.name,
+              kind: row.kind,
+              backends: row.backends,
+              stages: row.stages,
+              model: row.model,
+              modelLabel: row.modelLabel,
+              effort: row.effort,
+              capabilities: row.capabilities.map((c) => ({
+                capabilityId: c.capabilityId,
+                mode: c.mode,
+                // A retired id that is no longer in the catalogue keeps its
+                // id as its label; nothing here assumes the lookup succeeds.
+                label: capabilityById(c.capabilityId)?.label ?? c.capabilityId,
+              })),
             };
+            return row.kind === "operator"
+              ? { ...entry, autonomy: row.autonomy ?? "supervised" }
+              : entry;
           }),
           goals: listGoals(db, slug).map((g) => ({
             id: g.id,
@@ -895,7 +972,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_tasks",
-      "A project's tasks: key, title, stage, readiness, waiting, owner, priority, goal-chain chip. Membership gated. Includes Done; archived only when asked.",
+      "A project's tasks: key, title, stage, readiness, waiting, owner, priority, goal-chain chip, and what each waits on (`waitsOn`, ruling 131). Membership gated. Includes Done; archived only when asked.",
       {
         projectSlug: z.string().optional(),
         stageId: z.string().optional().describe("Filter to one stage."),
@@ -922,6 +999,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             priority: t.priority,
             archived: t.archived,
             goal: t.goalRef ? { goalId: t.goalRef.goalId, link: t.goalRef.linkIndex } : null,
+            // Ruling 131: what the task waits on, each entry with its live state.
+            waitsOn: t.blockedBy.map((e) => `${e.label} (${e.state})`),
           })),
         );
       }),
@@ -962,13 +1041,22 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "create_task",
-      "Create a task at the project's entry stage (every task passes the triage gate). Contributor or above.",
+      "Create a task at the project's entry stage (every task passes the triage gate). Contributor or above. `priority: urgent` IS the urgent flag (urgent is derived from priority, never a second input). Ruling 140: `owner` seats a member as owner in the same write that creates the task, BEFORE the first operator run, so that run bills the named owner; omit it to seat yourself. Use set_task_owner afterwards to release a seat; `none` is refused here.",
       {
         projectSlug: z.string().optional(),
         title: z.string(),
         goal: z.string().optional().describe("The task text: deliverable plus the done signal."),
-        priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
+        priority: z.enum(["low", "normal", "high", "urgent"]).optional().describe("urgent IS the urgent flag."),
         labels: z.array(z.string()).optional(),
+        owner: z
+          .string()
+          .optional()
+          .describe('A member email, or "me" (the default). Seated before the first operator run; "none" is refused at creation.'),
+        dueDate: z.string().optional().describe("YYYY-MM-DD, or empty for none."),
+        blockedBy: z
+          .array(z.string())
+          .optional()
+          .describe("Ruling 131: what the new task waits on (task keys like JC-6, goal links like 'goal-1 link 3', in this project). The task is born held and released by Viberr when every entry is done."),
       },
       runWith(
         async (args: {
@@ -977,6 +1065,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           goal?: string;
           priority?: "low" | "normal" | "high" | "urgent";
           labels?: string[];
+          owner?: string;
+          dueDate?: string;
+          blockedBy?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
           // Visibility BEFORE the action gate. `createTask` refuses a
@@ -992,8 +1083,31 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (args.goal) taskInput.goal = prose(args.goal);
           if (args.priority) taskInput.priority = args.priority;
           if (args.labels) taskInput.labels = args.labels;
+          if (args.dueDate !== undefined) taskInput.dueDate = args.dueDate.trim() || null;
+          if (args.blockedBy?.length) taskInput.blockedBy = args.blockedBy;
+          // Ruling 140(a): the owner is resolved BEFORE the write and seated in
+          // it, so the operator's `create` trigger already reads the right
+          // principal. The release word the sibling `set_task_owner` accepts is
+          // refused by name here rather than falling through to a misleading
+          // "No Viberr user with the email none."
+          const who = (args.owner ?? "me").trim().toLowerCase();
+          if (who === "none") {
+            throw AppError.validation(
+              "A new task is created with an owner; use `set_task_owner` to release the seat afterwards.",
+            );
+          }
+          if (who !== "me") {
+            const target = listUsers(db).find((u) => u.email.toLowerCase() === who)?.id;
+            if (!target) throw AppError.notFound(`No Viberr user with the email ${args.owner}.`);
+            taskInput.ownerUserId = target;
+          }
           const created = await createTask(db, taskInput, actor, { dataRoot });
-          return `[done] ${created.key} created in ${created.stageName}: ${created.task.title}.`;
+          const wait = created.task.blockedBy.length
+            ? ` Waits on ${created.task.blockedBy.map((e) => e.label).join(", ")}; held until every entry is done.`
+            : "";
+          const seated =
+            who !== "me" ? ` Owner: ${args.owner}, seated before the first operator run.` : "";
+          return `[done] ${created.key} created in ${created.stageName}: ${created.task.title}.${seated}${wait}`;
         },
       ),
     ),
@@ -1131,7 +1245,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_task",
-      "Edit a task's goal text and/or its metadata (priority, labels, due date) — the same two writers the task page uses, behind the same gates: the goal needs maintainer or above, metadata needs the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Never edits the title, stage, owner or engaged agents.",
+      "Edit a task's goal text, its metadata (priority, labels, due date) and/or what it waits on (blockedBy, ruling 131: the full list; [] clears it and RELEASES the task) — the same two writers the task page uses, behind the same gates: the goal needs maintainer or above, metadata needs the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Never edits the title, stage, owner or engaged agents.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -1139,6 +1253,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         priority: z.enum(PRIORITY_VALUES).optional(),
         labels: z.array(z.string()).optional().describe("The full label set; [] clears it."),
         dueDate: z.string().optional().describe("ISO date (YYYY-MM-DD), or \"\" to clear."),
+        blockedBy: z
+          .array(z.string())
+          .optional()
+          .describe("The FULL list of what the task waits on (task keys like JC-6, goal links like 'goal-1 link 3'); [] clears it and releases the task."),
       },
       runWith(
         async (args: {
@@ -1148,15 +1266,17 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           priority?: (typeof PRIORITY_VALUES)[number];
           labels?: string[];
           dueDate?: string;
+          blockedBy?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
           const key = keyOf(args.taskKey, slug);
           requireVisible(slug, "edit this task");
           const hasMeta =
             args.priority !== undefined || args.labels !== undefined || args.dueDate !== undefined;
-          if (args.goal === undefined && !hasMeta) {
+          const hasWait = args.blockedBy !== undefined;
+          if (args.goal === undefined && !hasMeta && !hasWait) {
             throw AppError.validation(
-              "Pass a goal and/or at least one metadata field (priority, labels, dueDate).",
+              "Pass a goal and/or at least one metadata field (priority, labels, dueDate, blockedBy).",
             );
           }
           // Two writers, two gates. Each part reports on its own so a goal that
@@ -1221,6 +1341,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               if (!(error instanceof AppError)) throw error;
               firstError ??= error;
               refused.push(`${fields.join(", ")}: ${error.userMessage}`);
+            }
+          }
+          // Ruling 131: the wait has its own writer and its own report line; a
+          // refusal names the reference and the reason in the validator's words.
+          if (hasWait) {
+            try {
+              const wait = await setTaskDependencies(
+                db,
+                { projectSlug: slug, taskKey: key, blockedBy: args.blockedBy ?? [] },
+                actor,
+                { dataRoot },
+              );
+              if (!wait.changed) unchanged.push("blocked by");
+              else if (wait.blockedBy.length === 0) applied.push("blocked by (cleared: the task is released)");
+              else applied.push(`blocked by (${wait.blockedBy.join(", ")})`);
+            } catch (error) {
+              if (!(error instanceof AppError)) throw error;
+              firstError ??= error;
+              refused.push(`blocked by: ${error.userMessage}`);
             }
           }
           if (applied.length === 0 && firstError) throw firstError;
@@ -1483,18 +1622,28 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "invite_member",
-      "Add a member to the project by email (an unknown email gets a new account with a one-time temporary password you must relay). Project admin. Set the role afterward with set_member_role (new members join as contributor).",
+      "Add a member to the project by email (an unknown email gets a new account with a one-time temporary password you must relay). Project admin. C4: `role` seats them in ONE write — members join as viewer unless you give one, and an unknown role is refused by name with nothing written.",
       {
         projectSlug: z.string().optional(),
         name: z.string(),
         email: z.string(),
+        role: z
+          .enum(PROJECT_ROLES)
+          .optional()
+          .describe("The seat they join in. Omitted: viewer, the narrowest."),
       },
-      runWith(async (args: { projectSlug?: string; name: string; email: string }) => {
+      runWith(async (args: { projectSlug?: string; name: string; email: string; role?: (typeof PROJECT_ROLES)[number] }) => {
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "manage this project's members");
+        const inviteInput: Parameters<typeof inviteMember>[1] = {
+          projectSlug: slug,
+          name: args.name,
+          email: args.email,
+        };
+        if (args.role) inviteInput.role = args.role;
         const result = await inviteMember(
           db,
-          { projectSlug: slug, name: args.name, email: args.email },
+          inviteInput,
           actor,
           { dataRoot },
         );
@@ -1542,21 +1691,27 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "deploy_agent",
-      "Deploy a global agent template into the project (from list_global_agents; delivery starts withheld until an admin opens it up). Project admin. No removal exists here.",
+      "Deploy a global agent template into the project (from list_global_agents; delivery starts withheld until an admin opens it up). Project admin. No removal exists here. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's model and the backend's default effort. The reply states what was stored.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
+        model: z.string().optional().describe("Model id for the template's backend (see the profile's backend in list_global_agents)."),
+        effort: z.string().optional().describe("Effort tier the backend offers: Claude low|medium|high|xhigh|max, Codex low|medium|high|xhigh."),
       },
-      runWith(async (args: { projectSlug?: string; profileId: string }) => {
+      runWith(async (args: { projectSlug?: string; profileId: string; model?: string; effort?: string }) => {
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "manage this project's agents");
-        const result = await deployAgentProfileFromLibrary(
-          db,
-          { projectSlug: slug, profileId: args.profileId },
-          actor,
-          { dataRoot },
-        );
-        return `[done] ${result.name} deployed on ${slug}. Delivery starts withheld; open it up with update_agent_deployment when the profile should write the repo.`;
+        const deployInput: Parameters<typeof deployAgentProfileFromLibrary>[1] = {
+          projectSlug: slug,
+          profileId: args.profileId,
+        };
+        if (args.model) deployInput.model = args.model;
+        if (args.effort) deployInput.effort = args.effort;
+        const result = await deployAgentProfileFromLibrary(db, deployInput, actor, { dataRoot });
+        const stored = result.applied
+          ? ` Runs on ${result.applied.backend === "codex" ? "Codex" : "Claude"} with model ${result.applied.model} at effort ${result.applied.effort}.`
+          : "";
+        return `[done] ${result.name} deployed on ${slug}.${stored} Delivery starts withheld; open it up with update_agent_deployment when the profile should write the repo.`;
       }),
     ),
     "deploy_agent",
@@ -1565,7 +1720,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_agent_deployment",
-      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, eligible stages, or operator autonomy. Project admin. Merge semantics: only the fields you pass change.",
+      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, eligible stages, or operator autonomy. Project admin. Merge semantics: only the fields you pass change. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, and every stage id must be one of the project's stages.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -1574,6 +1729,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .optional(),
         backend: z.enum(["claude", "codex"]).optional(),
         model: z.string().optional(),
+        effort: z
+          .string()
+          .optional()
+          .describe(
+            "Effort tier the deployment's backend offers (Claude low|medium|high|xhigh|max, Codex low|medium|high|xhigh); refused by name otherwise. A backend switch with no effort resets to that backend's default.",
+          ),
         stages: z.array(z.string()).optional(),
         autonomy: z.enum(["supervised", "full"]).optional().describe("Operator only."),
       },
@@ -1584,6 +1745,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           capabilities?: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[];
           backend?: "claude" | "codex";
           model?: string;
+          effort?: string;
           stages?: string[];
           autonomy?: "supervised" | "full";
         }) => {
@@ -1597,18 +1759,69 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             throw AppError.notFound(`No agent ${args.profileId} is deployed on ${slug}.`);
           }
           const view = effectiveProfileView(deployment, dataRoot, VIEW_WITHOUT_POLICY);
+          // Ruling 139 (pass 34, F34-2): read first, refuse by name, write
+          // nothing. The capability check is KIND-aware (the operator and a
+          // specialist take different ids and modes), which is why it lives
+          // here and not in the kind-blind form parser.
+          const refusal = capabilityPatchRefusal(
+            view.kind === "operator" ? "operator" : "agent",
+            args.capabilities ?? [],
+          );
+          if (refusal) throw AppError.validation(refusal);
+          // Pass 34 review: `autonomy` is written only for an operator
+          // (`updateAgentProfile` stores it under `if (isOperator)`), so a
+          // specialist call used to answer [done] for a setting nothing kept.
+          if (args.autonomy !== undefined && view.kind !== "operator") {
+            throw AppError.validation(
+              `autonomy is an operator setting; ${view.name} is a specialist. Nothing was written.`,
+            );
+          }
+          const stageIds = file.parsed.frontmatter.stages.map((s) => s.id);
+          const unknownStages = (args.stages ?? []).filter((id) => !stageIds.includes(id));
+          if (unknownStages.length > 0) {
+            throw AppError.validation(
+              `${unknownStages.map((id) => `"${id}"`).join(", ")} ${unknownStages.length === 1 ? "is not a stage" : "are not stages"} of ${slug}. Nothing was written. The project's stage ids are: ${stageIds.join(", ")}.`,
+            );
+          }
+          // Seed from the RESOLVED grants — the same view `get_project`
+          // reports and the same one the agents-page modal seeds from
+          // (`seedCaps`). Seeding from the RAW stored record instead let
+          // `grantsFor` materialise every ABSENT id at its CATALOG default, so
+          // an unrelated patch armed capabilities the deployment had withheld:
+          // live in this pass's review, `comment-on-task: off` on the seeded
+          // Reviewer stored `execute-code-or-write-repo`, `create-task-branch`
+          // and `open-review-pr` as `direct`. Ruling 139 pairs the read with
+          // the write; the write must not contradict the read.
+          const resolved =
+            assembleAgentRoster(db, slug, { dataRoot }).find((r) => r.id === args.profileId) ?? null;
           const caps: Record<string, string> = {};
-          for (const grant of deployment.capabilities) caps[grant.capabilityId] = grant.mode;
+          for (const grant of resolved?.capabilities ?? deployment.capabilities) {
+            caps[grant.capabilityId] = grant.mode;
+          }
           for (const patch of args.capabilities ?? []) caps[patch.capabilityId] = patch.mode;
+          // Ruling 139: effort is settable wherever model is, judged by name
+          // against the backend the deployment will run on, BEFORE the write.
+          // A backend switch with no effort resets to that backend's default
+          // and the reply says so; an unchanged backend keeps the stored tier.
+          const currentBackend = view.backends[0] === "codex" ? "codex" : "claude";
+          const backend = args.backend ?? currentBackend;
+          const switched = backend !== currentBackend;
+          if (args.effort !== undefined) assertEffortForBackend(backend, args.effort);
+          if (args.model !== undefined) assertModelForBackend(backend, args.model);
+          const effort = args.effort ?? (switched ? defaultEffortFor(backend) : view.effort);
           const baseForm = {
             name: view.name,
             role: view.role,
-            backend: args.backend ?? (view.backends[0] === "codex" ? "codex" : "claude"),
+            // B5 (pass 34, U34-3): the record THIS tool just read. Its own
+            // read-modify-write inside one turn is never refused by itself; a
+            // hand-save landing between the read and the write is.
+            fingerprint: deploymentFingerprint(deployment),
+            backend,
             stages: args.stages ?? view.stages,
             definition: "",
             persona: "",
-            model: args.model ?? view.model,
-            effort: view.effort,
+            model: args.model ?? (switched ? defaultModelFor(backend) : view.model),
+            effort,
             caps,
             resources: view.resources,
           };
@@ -1631,7 +1844,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const governance = result.governanceNotice
             ? ` ${result.governanceNotice.message}`
             : "";
-          return `[done] ${result.name} updated on ${slug}.${governance}${notices}`;
+          const reset =
+            switched && args.effort === undefined && result.applied
+              ? ` Backend switched to ${backend === "codex" ? "Codex" : "Claude"}: effort reset to its default (${result.applied.effort})${args.model === undefined ? ` and model to ${result.applied.model}` : ""}.`
+              : "";
+          const stored =
+            args.effort !== undefined && result.applied ? ` Effort is now ${result.applied.effort}.` : "";
+          return `[done] ${result.name} updated on ${slug}.${reset}${stored}${governance}${notices}`;
         },
       ),
     ),
@@ -1657,6 +1876,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             z.object({
               title: z.string(),
               goal: z.string().describe("Self-standing task text: deliverable plus the done signal."),
+              blockedBy: z
+                .array(z.string())
+                .optional()
+                .describe("Ruling 131(c): what this link's task waits on (task keys, or other goals' links like 'goal-1 link 3'); the task is born held when the chain creates it."),
             }),
           )
           .min(1)
@@ -1668,7 +1891,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           title: string;
           description?: string;
           onFailure?: "pause" | "continue";
-          links: { title: string; goal: string }[];
+          links: { title: string; goal: string; blockedBy?: string[] }[];
         }) => {
           const slug = slugOf(args.projectSlug);
           // Same reason as `create_task`: the action gate below would refuse a
@@ -1677,7 +1900,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const goalInput: CreateGoalInput = {
             projectSlug: slug,
             title: args.title,
-            links: args.links.map((l) => ({ title: l.title, goal: prose(l.goal) })),
+            links: args.links.map((l) => {
+              const link: CreateGoalInput["links"][number] = { title: l.title, goal: prose(l.goal) };
+              if (l.blockedBy?.length) link.blockedBy = l.blockedBy;
+              return link;
+            }),
           };
           if (args.description) goalInput.description = prose(args.description);
           if (args.onFailure) goalInput.onFailure = args.onFailure;
@@ -1709,6 +1936,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               title: l.title,
               status: l.status,
               taskKey: l.taskKey,
+              blockedBy: l.blockedBy,
             })),
           })),
         );
@@ -1754,6 +1982,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         title: z.string().optional(),
         goal: z.string().optional(),
         reason: z.string().optional(),
+        blockedBy: z
+          .array(z.string())
+          .optional()
+          .describe("edit_link / add_link: what the link's task waits on (the full list; [] clears; omit on edit_link to leave it)."),
       },
       runWith(
         async (args: {
@@ -1772,6 +2004,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           title?: string;
           goal?: string;
           reason?: string;
+          blockedBy?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "redirect this project's goals");
@@ -1807,13 +2040,22 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               };
               if (args.title) edit.title = args.title;
               if (args.goal) edit.goal = prose(args.goal);
+              // Ruling 131(c): absent leaves the link's wait; [] clears it.
+              if (args.blockedBy !== undefined) edit.blockedBy = args.blockedBy;
               action = edit;
               break;
             }
-            case "add_link":
+            case "add_link": {
               if (!args.title) throw AppError.validation("add_link needs a title.");
-              action = { op: "add_link", title: args.title, goal: prose(args.goal ?? "") };
+              const added: Extract<UpdateGoalOp, { op: "add_link" }> = {
+                op: "add_link",
+                title: args.title,
+                goal: prose(args.goal ?? ""),
+              };
+              if (args.blockedBy !== undefined) added.blockedBy = args.blockedBy;
+              action = added;
               break;
+            }
             case "remove_pending_link":
               action = { op: "remove_pending_link", index: args.index! };
               break;

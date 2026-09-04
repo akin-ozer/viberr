@@ -40,6 +40,12 @@ export function ntfMeta(n: {
   // Ruling 99: controller replies + goal-chain progress — the comment palette
   // (it is conversational), with the cpu glyph naming the sender.
   if (n.kind === "controller") return { icon: "cpu", cls: "act-comment" };
+  // Ruling 131: a released wait is forward motion — the transition palette
+  // with the lock glyph the board's wait chip wears.
+  if (n.kind === "dependency") return { icon: "lock", cls: "act-transition" };
+  // Ruling 140: a seat change is about a person — the user glyph on the
+  // transition palette (nothing was violated, nothing is blocked).
+  if (n.kind === "ownership") return { icon: "user", cls: "act-transition" };
   return { icon: "alert", cls: "act-policy" }; // "policy" + unknown fallback
 }
 

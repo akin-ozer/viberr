@@ -894,6 +894,29 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
     );
   });
 
+  it("ruling 135: an UNPUSHED delivered revision projects its own block reason ABOVE the conflict", () => {
+    // Canary: drop `unpushedRevisionBlockedReason` from `acceptanceBlockReason`
+    // and the column names a rebase for a branch that only needs a push.
+    const store = setupTestStore(ctx);
+    const task = seed(store, {
+      verdicts: [APPROVAL],
+      pr: {
+        number: 900, state: "review", title: "Work", mergeable: "conflicting", headSha: "1".repeat(40),
+        unpushedRevision: { revisionSha: REV.headSha, prHeadSha: "1".repeat(40), relation: "behind" },
+      },
+    });
+    expect(task.validation).toBe("healthy");
+    expect(task.blockReason).toBe(
+      `VIB-9's delivered revision \`${REV.headSha.slice(0, 7)}\` is not on PR #900 (its head is \`1111111\`). Deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`,
+    );
+    // A record for a revision that is no longer current is stale and silent.
+    const stale = seed(store, {
+      verdicts: [APPROVAL],
+      pr: { number: 900, state: "review", title: "Work", unpushedRevision: { revisionSha: "0".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" } },
+    });
+    expect(stale.blockReason).toBeNull();
+  });
+
   it("an OPEN BLOCKED PACKET blocks acceptance in the projected column", () => {
     const store = setupTestStore(ctx);
     const task = seed(
@@ -1109,5 +1132,49 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
     });
     expect(healed.action).toBe("projected");
     expect(eventCount()).toBe(3);
+  });
+});
+
+/**
+ * Ruling 131 (pass 34): the projection carries `blockedBy` verbatim and the
+ * DERIVED readiness floors at `blocked` while the list is non-empty; the
+ * stored value is untouched (the floor never improves anything).
+ *
+ * Canary: pass `dependenciesListed: false` into `deriveReadiness` and the
+ * derived `blocked` assertion fails while the column still fills.
+ */
+describe("task dependencies projection (ruling 131)", () => {
+  it("stores blocked_by_json verbatim and floors the derived readiness at blocked, leaving the stored value alone", () => {
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-7", {
+          readiness: "ready",
+          blockedBy: ["goal-1 link 2", "goal-1 link 3", "goal-1 link 4"],
+        }),
+      });
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-8", { readiness: "ready" }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+      // SAFETY: the three selected columns are TEXT NOT NULL on `task_projections`.
+      const rows = store.db
+        .prepare(
+          `SELECT task_key, readiness, stored_readiness, blocked_by_json FROM task_projections WHERE task_key IN ('VIB-7', 'VIB-8') ORDER BY task_key`,
+        )
+        .all() as { task_key: string; readiness: string; stored_readiness: string; blocked_by_json: string }[];
+      expect(rows).toEqual([
+        {
+          task_key: "VIB-7",
+          readiness: "blocked",
+          stored_readiness: "ready",
+          blocked_by_json: JSON.stringify(["goal-1 link 2", "goal-1 link 3", "goal-1 link 4"]),
+        },
+        { task_key: "VIB-8", readiness: "ready", stored_readiness: "ready", blocked_by_json: "[]" },
+      ]);
+    } finally {
+      ctx.cleanup();
+    }
   });
 });

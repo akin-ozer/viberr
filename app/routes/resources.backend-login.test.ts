@@ -71,6 +71,25 @@ async function poll(
   return { status: response.status, body: await response.json() };
 }
 
+/**
+ * Poll until the spawned sign-in has actually printed its device URL, or give
+ * up and answer with whatever the route last said (so a real regression fails
+ * the assertion rather than this loop).
+ *
+ * `startBackendLogin` publishes the session synchronously but the URL only
+ * exists once the child has written it to stdout, so a poll fired in the same
+ * tick legitimately sees a session with no URL yet. Asserting straight after
+ * the spawn made this a race that lost on a busy machine.
+ */
+async function pollUntilSignInUrl(cookie: string): Promise<BackendLoginPollData> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    const { body } = await poll("?backend=codex", cookie);
+    if (body.login?.url || Date.now() > deadline) return body;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 /** Start a real (hung) sign-in for one person, so the route has a live session
  *  to answer with. `hang` keeps the child alive until the reset kills it. */
 async function startHungSignIn(userId: string, label: string): Promise<void> {
@@ -124,10 +143,10 @@ describe("GET /resources/backend-login", () => {
   it("reports the caller's own live sign-in, and never another person's", async () => {
     await startHungSignIn(ardaId, "arda@viberr.dev");
     const arda = await app.cookieFor(ardaId);
-    const seen = await poll("?backend=codex", arda.cookie);
-    expect(seen.body.login?.backend).toBe("codex");
-    expect(seen.body.login?.method).toBe("device");
-    expect(seen.body.login?.url).toBe(FAKE_CODEX_URL);
+    const seen = await pollUntilSignInUrl(arda.cookie);
+    expect(seen.login?.backend).toBe("codex");
+    expect(seen.login?.method).toBe("device");
+    expect(seen.login?.url).toBe(FAKE_CODEX_URL);
     // A session is one person's. The route takes no user parameter, so this is
     // the only way it could ever have leaked one.
     const murat = await app.cookieFor(muratId);

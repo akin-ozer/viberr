@@ -1,6 +1,10 @@
+import type { RevisionDrift } from "~/shared/revision-drift";
 import type { DatabaseSync } from "node:sqlite";
 import {
   conflictingPrBlockedReason,
+  unpushedRevisionBlockedReason,
+  unpushedRevisionOf,
+  type UnpushedRevision,
   type PrMergeable,
   type PrState,
   type TaskPriority,
@@ -54,6 +58,10 @@ export interface ReviewQueueRow {
   waiting: Waiting;
   /** Pending packet header only — the queue reads kind + title, nothing else. */
   packet: { kind: string; title: string } | null;
+  /** Ruling 138: an `edit_goal` decision was confirmed and the packet waits
+   *  for the edited goal — the row's subline says so instead of re-offering
+   *  the decision. */
+  goalEditPending: boolean;
   /** Newest timeline event's text (position 0) — the subline fallback. */
   latestEventText: string | null;
   pr: {
@@ -75,10 +83,15 @@ export interface ReviewQueueRow {
      *  cannot be merged at all. Same convention as `prRefSchema`: an ABSENT key
      *  means never read, which is NOT "merges cleanly". */
     mergeable?: PrMergeable;
-    /** R17-1 (F17-L12): the PR head is ahead of the reviewed revision by
-     *  `aheadBy` commits — the queue subline warns that accepting merges them
-     *  unreviewed. Absent when the head equals the reviewed revision. */
-    revisionDrift?: { aheadBy: number };
+    /** R17-1 (F17-L12) as amended by ruling 132 (pass 34): the WHOLE drift
+     *  record (authored count + base refresh), so the subline can print the
+     *  canonical sentence. Absent when the head equals the reviewed revision. */
+    revisionDrift?: RevisionDrift;
+    /** Ruling 135: the PR head as last read, and the CURRENT unpushed record
+     *  (already filtered through `unpushedRevisionOf` against the row's own
+     *  revision, so the subline can trust it). Absent = on the PR, or unread. */
+    headSha?: string;
+    unpushedRevision?: UnpushedRevision;
   } | null;
   validation: Validation;
   /** F10-11/F10-15: null = the current revision is acceptance-ready (all
@@ -174,9 +187,14 @@ export function getReviewQueue(
       // Omitted rather than nulled when GitHub was never asked — the key's
       // absence is the "never read" signal the file format itself uses.
       if (t.pr.mergeable) pr.mergeable = t.pr.mergeable;
-      if (t.pr.revisionDrift) {
-        pr.revisionDrift = { aheadBy: t.pr.revisionDrift.aheadBy };
-      }
+      // Ruling 132: the whole record rides through — projecting only a count
+      // here is what dropped `baseRefresh` before the row was built.
+      if (t.pr.revisionDrift) pr.revisionDrift = t.pr.revisionDrift;
+      // Ruling 135: both fields ride through, or `prStateSub`'s branch is
+      // structurally unreachable (the same defect `mergeable` had, P14-LV-07).
+      if (t.pr.headSha) pr.headSha = t.pr.headSha;
+      const unpushed = unpushedRevisionOf(t.pr, t.workRevisionSha ?? null);
+      if (unpushed) pr.unpushedRevision = unpushed;
     }
     return {
       key: t.key,
@@ -189,6 +207,7 @@ export function getReviewQueue(
       dueDate: t.dueDate,
       waiting: t.waiting,
       packet: t.packet ? { kind: t.packet.kind, title: t.packet.title } : null,
+      goalEditPending: t.packet?.awaiting === "goal_edit",
       latestEventText: latestByKey.get(t.key) ?? null,
       pr,
       validation: t.validation,
@@ -256,6 +275,8 @@ export function getReviewQueue(
       // (task-actions.server.ts): an operator-raised blocked decision is still
       // open, and accepting would bury it.
       (t.readiness === "blocked" && t.packet?.type === "blocked") ||
+        // Ruling 135: the delivered revision is not on the PR.
+        unpushedRevisionBlockedReason(t.pr, t.workRevisionSha ?? null, t.key) !== null ||
         // P14-LV-07, via the SAME helper the server gate calls — a PR GitHub
         // cannot merge cannot be accepted.
         conflictingPrBlockedReason(t, t.key) !== null,

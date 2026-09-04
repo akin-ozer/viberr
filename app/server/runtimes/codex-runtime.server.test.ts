@@ -1528,3 +1528,22 @@ describe("codex adapter run phases (R21-4a / FR28)", () => {
     expect(steps[0]).toBe("turn 1");
   });
 });
+
+/** Ruling 130(a): the Codex adapter attaches the same typed record to its
+ *  terminal line (every fact but the kind unknown). Canary: omit `failure`. */
+describe("ruling 130(a): failure record parity", () => {
+  it("the terminal err line carries `failure` with the classified kind", async () => {
+    const { factory } = fakeCodex([
+      { type: "turn.started" },
+      { type: "turn.failed", error: { message: "You've hit your usage limit. Try again later." } },
+    ]);
+    const adapter = createCodexAdapter({ codexFactory: factory });
+    const lines: EmittedLine[] = [];
+    adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
+    await drain();
+    const terminal = lines.find((l) => (l.display?.tag ?? "").endsWith("·quota"));
+    expect(terminal?.display?.failure).toEqual({
+      kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null,
+    });
+  });
+});

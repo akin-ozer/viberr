@@ -24,6 +24,7 @@ import {
   createNotification,
   listNotifications,
 } from "~/server/projections/notifications.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 
 import { getTaskDetail } from "~/server/projections/task-query.server";
@@ -984,10 +985,16 @@ describe("resolvePacket kind matrix", () => {
     expect(task.validation).toBe("none");
     expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    // Ruling 130(c) (pass 34, F34-12): without a pre-authored `ev` the record
+    // restates the option's OWN words. It used to assert "policy / credential
+    // updated" whatever the option said, and an operator reading that record
+    // told a specialist a GitHub-scope block had been lifted (JC-6).
+    // Canary: reinstate the fixed "policy / credential updated" sentence.
     expect(detail?.timeline[0]).toMatchObject({
       type: "transition",
-      text: "**Decision:** policy / credential updated. VIB-1 is unblocked and the operator re-runs to re-check. If it is still blocked, a new decision packet is opened.",
+      text: "**Decision:** Block on policy. VIB-1 is unblocked and the operator re-runs to re-check. If it is still blocked, a new decision packet is opened.",
     });
+    expect(detail?.timeline[0]?.text).not.toContain("policy / credential updated");
     // A second confirm on the already-resolved packet is a 409 (no repeat).
     await expect(
       resolvePacket(
@@ -1073,6 +1080,58 @@ describe("resolvePacket kind matrix", () => {
 
   // 20s (see the routing tests): resolving this packet starts a real run through
   // the fake adapter, which under full-suite parallelism can exceed the 5s default.
+  it("ruling 133: a retry_other_backend resolution starts the retry for a deliverer scoped away from the current stage", { timeout: 20_000 }, async () => {
+    // Canary: reinstate the unconditional `assertStageEligible` in
+    // dispatchAgentRun (the resolution's retry is refused).
+    installFakeRuntime();
+    const store = prepared();
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "dev", role: "developer", backends: ["codex", "claude"], model: "gpt-5.5", stages: ["review"] },
+        },
+      ],
+    });
+    withTask(
+      store,
+      {
+        stage: "impl",
+        waiting: "human",
+        readiness: "blocked",
+        ownerUserId: store.users.arda.id,
+        engagements: [{ profileId: "dev", backend: "codex", role: "developer", delivers: true, verdictCapable: false }],
+      },
+      {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Work stalled: pick a recovery path",
+        body: "",
+        observations: [],
+        options: [
+          { kind: "retry_other_backend", t: "Retry @dev on Claude now", d: "", rec: true, backend: "claude" },
+          { kind: "redirect", t: "Redirect", d: "", rec: false },
+        ],
+      },
+    );
+    const { task } = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.packet).toBeNull();
+    expect(task.waiting).toBe("agent");
+    const started = listAuditEvents(store.db).find((e) => e.action === "task.agent.run_started");
+    expect(started?.details).toMatchObject({ profileId: "dev", backend: "claude", stageEligibility: "engaged-deliverer" });
+  });
+
   it("retry_other_backend: packet cleared, run restarts on the target backend, switch persists to the snapshot", { timeout: 20_000 }, async () => {
     const { interruptRun } = await import(
       "~/server/runtimes/run-service.server"
@@ -1573,6 +1632,34 @@ describe("resolvePacket kind matrix", () => {
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
   }
 
+  /** Ruling 136(c): the reads the in-ceremony re-confirm makes when the
+   *  task's own PR stands on the branch, as GitHub reports it. */
+  function ownPrRoutes(number: number, state: "open" | "closed", headSha = "1".repeat(40)) {
+    const pr = {
+      number,
+      html_url: `https://github.com/akin-ozer/viberr/pull/${number}`,
+      title: "VIB-1: own review PR",
+      state,
+      draft: false,
+      merged: false,
+      merged_at: null,
+      head: { sha: headSha },
+      additions: 1,
+      deletions: 0,
+      changed_files: 1,
+    };
+    return {
+      "GET /repos/akin-ozer/viberr/compare/main...vib-1-work": {
+        body: { ahead_by: 1, behind_by: 0, status: "ahead", commits: [] },
+      },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [pr] },
+      [`GET /repos/akin-ozer/viberr/pulls/${number}`]: { body: pr },
+      [`GET /repos/akin-ozer/viberr/commits/${headSha}/check-runs`]: { body: { total_count: 0, check_runs: [] } },
+      "GET /repos/akin-ozer/viberr/branches/vib-1-work": { body: { commit: { sha: headSha } } },
+      "GET /repos/akin-ozer/viberr/git/ref/heads/main": { body: { object: { sha: "c".repeat(40) } } },
+    };
+  }
+
   const COLLISION_REVISION: WorkRevision = {
     id: "rev_collision4",
     headSha: "1".repeat(40),
@@ -1583,18 +1670,17 @@ describe("resolvePacket kind matrix", () => {
     kind: "delivered",
   };
 
-  it("resolve_remote_collision: a refused branch delete closes NOTHING — GitHub is left exactly as it was (C05-B)", async () => {
+  it("resolve_remote_collision: the task's OWN open PR on the ref is no collision — nothing is closed or deleted, and the ceremony does what was asked (C05-B, ruling 136(b))", async () => {
     const store = prepared();
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
+    // GitHub confirms PR #5 open on the branch (ruling 136(c)); the DELETE
+    // and PATCH routes exist so a regression that reaches them is caught.
     const github = fakeGithubFetch({
+      ...ownPrRoutes(5, "open"),
       "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
       "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
     });
-    // The task's OWN review PR is still open on the branch, so the ref delete
-    // refuses (deleting it would silently close that PR). Before C05-B the
-    // unrelated PR #232 was already closed by the time the refusal was written,
-    // and the refusal text said nothing about it.
     withTask(
       store,
       {
@@ -1627,19 +1713,229 @@ describe("resolvePacket kind matrix", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
-    // The collision record stands: nothing was cleared.
-    expect(fm.github?.unownedPr).toBe(232);
     const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    // The premise was false and the note says so; with no workspace in this
+    // fixture the delivery that would push the work cannot complete, so the
+    // block stays and the note says that too.
     expect(
       texts.some(
         (t) =>
-          t.includes("The branch collision was **not** cleared") &&
-          t.includes("PR #5 is still open") &&
-          t.includes("Nothing was re-delivered"),
+          t.includes("No collision to clear: PR #5 on `vib-1-work` is VIB-1's own review PR") &&
+          t.includes("did not complete") &&
+          t.includes("The block stays"),
       ),
     ).toBe(true);
+    expect(texts.some((t) => t.includes("was **not** cleared"))).toBe(false);
+    expect(fm.readiness).toBe("blocked");
     expect(texts.some((t) => t.includes("Closed unrelated PR"))).toBe(false);
     expect(listAuditEvents(store.db, { action: "github.pr.closed_unowned" })).toHaveLength(0);
+    expect(listAuditEvents(store.db, { action: "github.collision.resolved" })[0]!.details).toMatchObject({
+      outcome: "own_pr_delivery_failed",
+      prNumber: 5,
+      delivered: false,
+      blockLifted: false,
+    });
+  });
+
+  it("ruling 136(b): own PR open and origin merely BEHIND: the block lifts and the delivery actually runs", async () => {
+    // Canary: keep `readiness: blocked` on every refusal.
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    await collisionCredential(store);
+    const pushed = "1".repeat(40);
+    const github = fakeGithubFetch({
+      ...ownPrRoutes(5, "open", "0".repeat(40)),
+      // The re-confirm (ruling 136(c)) re-measures the record: origin's head
+      // is an ancestor of the delivered revision.
+      [`GET /repos/akin-ozer/viberr/compare/${pushed}...${"0".repeat(40)}`]: {
+        body: { ahead_by: 0, behind_by: 1, status: "behind", commits: [] },
+      },
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
+    });
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        readiness: "blocked",
+        branch: "vib-1-work",
+        workRevision: COLLISION_REVISION,
+        pr: {
+          number: 5, state: "review", title: "VIB-1: own review PR", headSha: "0".repeat(40),
+          unpushedRevision: { revisionSha: pushed, prHeadSha: "0".repeat(40), relation: "behind" },
+        },
+        // The live JC-6/JC-5 shape: the recorded "collision" IS the task's own PR.
+        github: { commits: [], changed: null, unownedPr: 5 },
+      },
+      COLLISION_PACKET,
+    );
+    const pushes: string[] = [];
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      {
+        dataRoot: store.dataRoot,
+        fetchImpl: github.fetchImpl,
+        deps: {
+          pushWorkspaceBranch: async () => {
+            pushes.push("push");
+            return { status: "pushed", branch: "vib-1-work", commits: 1, headSha: pushed, remoteHeadBefore: "0".repeat(40), workflowFiles: [] };
+          },
+        },
+      },
+    );
+    expect(pushes).toEqual(["push"]);
+    expect(github.callsTo("DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work")).toHaveLength(0);
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.readiness).toBe("ready");
+    expect(fm.github?.unownedPr ?? null, "a self-referencing collision record is cleared").toBeNull();
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.includes("No collision to clear: PR #5") && t.includes("was pushed to it, and the block is lifted"))).toBe(true);
+    expect(texts.some((t) => t.includes("Pushed `1111111` to **PR #5**"))).toBe(true);
+    expect(listAuditEvents(store.db, { action: "github.collision.resolved" })[0]!.details).toMatchObject({
+      outcome: "own_pr_pushed",
+      prNumber: 5,
+      delivered: true,
+      blockLifted: true,
+    });
+  });
+
+  it("ruling 136(b): own PR open and origin DIVERGED: the block stays and the note names the history", async () => {
+    // Canary: lift on every `own_pr_open`.
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    await collisionCredential(store);
+    const github = fakeGithubFetch({
+      ...ownPrRoutes(5, "open", "0".repeat(40)),
+      // The re-confirm re-measures the record and GitHub confirms `diverged`.
+      [`GET /repos/akin-ozer/viberr/compare/${"1".repeat(40)}...${"0".repeat(40)}`]: {
+        body: { ahead_by: 1, behind_by: 1, status: "diverged", commits: [] },
+      },
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
+    });
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        readiness: "blocked",
+        branch: "vib-1-work",
+        workRevision: COLLISION_REVISION,
+        pr: {
+          number: 5, state: "review", title: "VIB-1: own review PR", headSha: "0".repeat(40),
+          unpushedRevision: { revisionSha: "1".repeat(40), prHeadSha: "0".repeat(40), relation: "diverged" },
+        },
+        github: { commits: [], changed: null, unownedPr: 5 },
+      },
+      COLLISION_PACKET,
+    );
+    const pushes: string[] = [];
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      {
+        dataRoot: store.dataRoot,
+        fetchImpl: github.fetchImpl,
+        deps: {
+          pushWorkspaceBranch: async () => {
+            pushes.push("push");
+            return { status: "pushed", branch: "vib-1-work", commits: 1, headSha: "1".repeat(40), remoteHeadBefore: null, workflowFiles: [] };
+          },
+        },
+      },
+    );
+    expect(pushes).toEqual([]);
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.readiness).toBe("blocked");
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.includes("No collision to clear: PR #5") && t.includes("holds commits this workspace does not") && t.includes("A person resolves the branch history"))).toBe(true);
+    expect(listAuditEvents(store.db, { action: "github.collision.resolved" })[0]!.details).toMatchObject({ outcome: "own_pr_diverged", blockLifted: false });
+  });
+
+  it("ruling 136: GitHub refused the delete: the block stays and the operator is handed the typed reason", async () => {
+    // Canary: lift on every refusal.
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    await collisionCredential(store);
+    const github = fakeGithubFetch({
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 500, body: { message: "Server Error" } },
+    });
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        readiness: "blocked",
+        branch: "vib-1-work",
+        workRevision: COLLISION_REVISION,
+        github: { commits: [], changed: null, unownedPr: 232 },
+      },
+      COLLISION_PACKET,
+    );
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+    );
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.readiness).toBe("blocked");
+    expect(fm.github?.unownedPr).toBe(232);
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(texts.filter((t) => t.includes("The branch collision was **not** cleared") && t.includes("GitHub refused the deletion"))).toHaveLength(1);
+    expect(listAuditEvents(store.db, { action: "github.collision.resolved" })[0]!.details).toMatchObject({
+      outcome: "refused",
+      reason: expect.stringContaining("GitHub refused the deletion"),
+      delivered: false,
+      blockLifted: false,
+    });
+  });
+
+  it("ruling 136(c), the JC-3 shape: a cached open PR that GitHub reports CLOSED is re-confirmed, the ref deleted, the unowned PR closed", async () => {
+    // Canary: decide from the cache and the DELETE never goes out.
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    await collisionCredential(store);
+    const github = fakeGithubFetch({
+      ...ownPrRoutes(5, "closed"),
+      "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
+    });
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        readiness: "blocked",
+        branch: "vib-1-work",
+        workRevision: COLLISION_REVISION,
+        pr: { number: 5, state: "review", title: "VIB-1: own review PR" },
+        github: { commits: [], changed: null, unownedPr: 232 },
+      },
+      COLLISION_PACKET,
+    );
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+    );
+    expect(github.callsTo("DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work")).toHaveLength(1);
+    expect(github.callsTo("PATCH /repos/akin-ozer/viberr/pulls/232")).toHaveLength(1);
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.includes("Deleted branch `vib-1-work`"))).toBe(true);
+    // No workspace in this fixture: the re-delivery degrades honestly.
+    expect(texts.some((t) => t.includes("the re-delivery did not complete"))).toBe(true);
+    expect(listAuditEvents(store.db, { action: "github.collision.resolved" })[0]!.details).toMatchObject({ outcome: "cleared_delivery_failed" });
+    // Nobody was told "PR #5 closed: VIB-1 needs a decision" by the re-confirm.
+    const { listNotifications } = await import("~/server/projections/notifications.server");
+    for (const user of Object.values(store.users)) {
+      expect(
+        listNotifications(store.db, user.id).filter((n) => /closed on GitHub|needs a decision/.test(n.title ?? "")),
+      ).toEqual([]);
+    }
   });
 
   it("resolve_remote_collision: a 403 on the PR close opens the pull_request:write scope violation instead of vanishing (C05-D)", async () => {
@@ -1729,7 +2025,7 @@ describe("resolvePacket kind matrix", () => {
       { userId: null, label: "system" },
       { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
     );
-    expect(result).toEqual({ status: "refused", message: "No acting user." });
+    expect(result).toEqual({ status: "refused", reason: "no_actor", message: "No acting user." });
     expect(github.calls).toHaveLength(0);
     const fm = readTaskFile({
       projectSlug: store.slug,
@@ -1753,9 +2049,10 @@ describe("resolvePacket kind matrix", () => {
     const store = prepared();
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
-    const github = fakeGithubFetch({});
-    // The task's own review PR stands on the ref, so the delete refuses — the
-    // safe outcome the C05-B ordering exists to produce.
+    const github = fakeGithubFetch(ownPrRoutes(270, "open"));
+    // The task's own review PR stands on the ref (confirmed live, ruling
+    // 136(c)), so the delete refuses — the safe outcome the C05-B ordering
+    // exists to produce.
     withTask(
       store,
       {
@@ -1786,10 +2083,13 @@ describe("resolvePacket kind matrix", () => {
     expect(
       texts.some((t) => t.includes("The stale remote branch is removed")),
     ).toBe(false);
-    // …and the outcome is on the timeline exactly once, from the note.
+    // …and the outcome is on the timeline exactly once, from the note (ruling
+    // 136(b): the task's own PR on the ref is no collision, and with no
+    // workspace here the delivery that would push the work cannot complete).
     expect(
-      texts.filter((t) => t.includes("The branch collision was **not** cleared")),
+      texts.filter((t) => t.includes("No collision to clear: PR #270")),
     ).toHaveLength(1);
+    expect(texts.some((t) => t.includes("was **not** cleared"))).toBe(false);
   });
 
   it("F33-2: the discard decision event claims no outcome either, and `ev` still overrides", async () => {
@@ -1869,7 +2169,7 @@ describe("resolvePacket kind matrix", () => {
     const store = prepared();
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
-    const github = fakeGithubFetch({});
+    const github = fakeGithubFetch(ownPrRoutes(270, "open"));
     withTask(
       store,
       {
@@ -1897,9 +2197,11 @@ describe("resolvePacket kind matrix", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
-    // The remedy really did refuse — nothing reached GitHub, the record stands.
-    expect(github.calls).toHaveLength(0);
-    expect(fm.github?.unownedPr).toBe(232);
+    // The remedy really did refuse — no WRITE reached GitHub (the ruling 136(c)
+    // re-confirm reads). The live read finds the task's own PR on the branch,
+    // so the stale collision record is cleared by the reconcile itself.
+    expect(github.calls.filter((c) => c.method !== "GET")).toHaveLength(0);
+    expect(fm.github?.unownedPr ?? null).toBeNull();
     // …and the task is not stranded: one card, over the PR that IS open.
     expect(fm.recommendations).toHaveLength(1);
     expect(fm.recommendations[0]).toMatchObject({
@@ -2283,6 +2585,10 @@ describe("resolvePacket kind matrix", () => {
       dataRoot: store.dataRoot,
     })!.parsed;
     expect(stamped.packet?.awaiting).toBe("goal_edit");
+    // Ruling 138: the packet records WHICH option was chosen, by whom, when —
+    // what a reload renders as decided. Canary: drop the `decided` stamp.
+    expect(stamped.packet?.decided).toMatchObject({ optionIndex: 0, byUserId: store.users.murat.id });
+    expect(stamped.packet?.decided?.at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(stamped.timeline[0]!.text).toContain("Waiting for the edited goal");
 
     // The edit itself fulfills the decision — packet clears with no operator

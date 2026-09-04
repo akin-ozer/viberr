@@ -20,6 +20,7 @@ import {
   filteredSpawnEnv,
 } from "./runtime-registry.server";
 import { runCredentialFor } from "./backend-credentials.server";
+import { ENV_KEYS, resetEnvCacheForTests } from "~/server/config/env.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
@@ -76,6 +77,48 @@ async function withAmbientHomes<T>(body: () => T | Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * What the shipped container's process carries (ruling 142): the image bakes
+ * `NODE_ENV=production`, `PORT`, `VIBERR_DATA_ROOT` and the browser binary in,
+ * `.env` adds the public origin, an OAuth client id, a proxy count and the
+ * unlock flags — and `UV_CACHE_DIR`, which is NOT Viberr's configuration and
+ * is meant for the child.
+ */
+const AMBIENT_APP_CONFIG = {
+  NODE_ENV: "production",
+  PORT: "5173",
+  VIBERR_DATA_ROOT: "/data",
+  VIBERR_BROWSER_EXECUTABLE: "/usr/bin/chromium",
+  BETTER_AUTH_URL: "https://viberr.example.com",
+  GITHUB_OAUTH_CLIENT_ID: "iv1.example-client-id",
+  VIBERR_TRUST_PROXY: "1",
+  VIBERR_UNLOCK_CONTROLLER_SKILLS: "enabled",
+  UV_CACHE_DIR: "/data/runtimes/uv-cache",
+} as const;
+
+/**
+ * Run `body` with the container's own configuration set on the SERVER's
+ * process, then put the environment back exactly as it was. The values are
+ * all schema-valid, and the validated-env cache is dropped afterwards so a
+ * later `getEnv()` in this file cannot be pinned to them.
+ */
+async function withAmbientAppConfig<T>(body: () => T | Promise<T>): Promise<T> {
+  const previous: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(AMBIENT_APP_CONFIG)) {
+    previous[key] = process.env[key];
+    process.env[key] = value;
+  }
+  try {
+    return await body();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    resetEnvCacheForTests();
+  }
+}
+
 /** A Claude SDK query as the adapter consumes it. */
 function fakeClaudeQuery(...messages: unknown[]): ClaudeQuery {
   const gen = (async function* (): AsyncGenerator<unknown, void> {
@@ -113,6 +156,31 @@ describe("test-harness hermeticity", () => {
       const env = filteredSpawnEnv();
       expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
       expect(env.CODEX_HOME).toBeUndefined();
+    });
+  });
+
+  it("the base spawn env carries none of the app's own configuration", async () => {
+    // Ruling 142 (pass 34, U34-7): ruling 127 built this base around what a
+    // child must not learn about OTHER people's credentials; the other half
+    // is what it must not learn about THIS server. `NODE_ENV=production` and
+    // `PORT=5173` rode into a Developer run's shell and broke the project's
+    // own `vitest` and `next start`. Every name the env schema declares is
+    // stripped; a name it does not declare is not Viberr's configuration
+    // and passes, which is what keeps PATH/HOME and the image's agent-facing
+    // UV caches working.
+    await withAmbientAppConfig(() => {
+      const env = filteredSpawnEnv();
+      expect(env.NODE_ENV).toBeUndefined();
+      expect(env.PORT).toBeUndefined();
+      expect(env.VIBERR_DATA_ROOT).toBeUndefined();
+      expect(env.VIBERR_BROWSER_EXECUTABLE).toBeUndefined();
+      expect(env.BETTER_AUTH_URL).toBeUndefined();
+      expect(env.GITHUB_OAUTH_CLIENT_ID).toBeUndefined();
+      expect(env.VIBERR_TRUST_PROXY).toBeUndefined();
+      expect(env.VIBERR_UNLOCK_CONTROLLER_SKILLS).toBeUndefined();
+      expect(ENV_KEYS.filter((key) => key in env)).toEqual([]);
+      expect(env.PATH).toBeTruthy();
+      expect(env.UV_CACHE_DIR).toBe(AMBIENT_APP_CONFIG.UV_CACHE_DIR);
     });
   });
 

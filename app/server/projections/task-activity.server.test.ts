@@ -119,6 +119,7 @@ describe("isQuiet — the threshold follows who is on the hook", () => {
     archived: false,
     terminal: false,
     runInFlight: false,
+    held: false,
     now: NOW,
   };
 
@@ -174,6 +175,14 @@ describe("isQuiet — the threshold follows who is on the hook", () => {
     ).toBe(false);
     // A task with an empty timeline never started — a backlog is not a stall.
     expect(isQuiet({ ...base, waiting: "agent", lastActivityAt: null })).toBe(false);
+  });
+
+  it("ruling 131: a task waiting on other work is held, never quiet", () => {
+    // Canary: delete the `held` early return in `isQuiet`.
+    const longAgo = ago(30 * 24 * 60 * 60_000);
+    expect(isQuiet({ ...base, waiting: "none", lastActivityAt: longAgo, held: true })).toBe(false);
+    expect(isQuiet({ ...base, waiting: "agent", lastActivityAt: longAgo, held: true })).toBe(false);
+    expect(isQuiet({ ...base, waiting: "none", lastActivityAt: longAgo, held: false })).toBe(true);
   });
 });
 
@@ -260,6 +269,32 @@ describe("listProjectTasks annotates the whole board", () => {
     insertRun(store.db, store.slug, "VIB-300", "queued");
     expect(quietByKey(store).get("VIB-300")!.quiet).toBe(false);
   });
+
+  it("ruling 131: a held task carries its resolved list and is never quiet, however long it waits", () => {
+    // Canary: drop `held` from the board query's QuietCheck (VIB-301 reads
+    // quiet), or resolve nothing (`blockedBy` reads empty).
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "done", waiting: "none" }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        stage: "impl",
+        waiting: "none",
+        blockedBy: ["VIB-1", "VIB-999"],
+      }),
+      timeline: [event(ago(30 * 24 * 60 * 60_000))],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const held = quietByKey(store).get("VIB-301")!;
+    expect(held.quiet).toBe(false);
+    expect(held.readiness).toBe("blocked");
+    expect(held.blockedBy.map((e) => [e.ref, e.state])).toEqual([
+      ["VIB-1", "done"],
+      ["VIB-999", "missing"],
+    ]);
+    expect(quietByKey(store).get("VIB-1")!.blockedBy).toEqual([]);
+  });
 });
 
 describe("getTaskDetail carries the same two fields", () => {
@@ -277,5 +312,24 @@ describe("getTaskDetail carries the same two fields", () => {
     const detail = getTaskDetail(store.db, store.slug, "VIB-400", { now: NOW })!;
     expect(detail.lastActivityAt).toBe(ago(3 * 60 * 60_000));
     expect(detail.quiet).toBe(true);
+  });
+
+  it("ruling 131: the task page carries the resolved list and a held task is not quiet", () => {
+    // Canary: drop `held` from the detail query's QuietCheck.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-401", {
+        stage: "impl",
+        waiting: "none",
+        blockedBy: ["goal-1 link 2"],
+      }),
+      timeline: [event(ago(3 * 60 * 60_000))],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const detail = getTaskDetail(store.db, store.slug, "VIB-401", { now: NOW })!;
+    expect(detail.quiet).toBe(false);
+    expect(detail.blockedBy).toEqual([
+      { ref: "goal-1 link 2", label: "goal-1 link 2", state: "missing", taskKey: null, goalId: "goal-1" },
+    ]);
   });
 });

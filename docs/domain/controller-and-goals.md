@@ -229,7 +229,7 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
 - Every handler maps a 401/403 to `[denied] <sentence>` and anything else to
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 
-The 38 tools (ruling 121: `projectSlug` defaults to the bound project and, on a
+The 39 tools (ruling 121: `projectSlug` defaults to the bound project and, on a
 task-anchored conversation, every task tool's `taskKey` defaults to the anchored task —
 **only within the anchor's own project**: a call that names a different `projectSlug`
 must name its task, or it is refused. `whoami` reports both bindings):
@@ -240,8 +240,8 @@ must name its task, or it is refused. `whoami` reports both bindings):
 | Instance writes | `create_user` (relays the one-time temp password), `update_user`, `set_user_org_role`, `save_knowledge_base`, `save_skill`, `save_mcp_server` (takes no credential; reserved names refused), `test_mcp_server`, `save_global_agent` (specialists only; **grants are store keys and an omitted list is left alone** — see below) | org admin |
 | Project creation | `create_project` (any shape: stages, boundaries, members, description) | any signed-in user; the asker is seeded project admin (FR5) |
 | Board reads | `get_project`, `list_tasks`, `get_task` (events 12, max 50), `get_github_state`, `list_goals`, `get_goal` | `requireVisible` |
-| Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier), `update_task` (ruling 121: the goal under `update-goal`, priority / labels / due date under `edit-task-meta` as a full replace — the task page's two writers and gates, each part reported on its own, and an axis already holding the asked-for value answers `[noop]` rather than claiming a write nobody made), `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `terminal-stage` / queued honestly, else `startAgentRun`), `update_project_settings`, `update_stages`, `set_transition_boundary` (`edit-policy`), `invite_member`, `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
-| Goals | `create_goal` (`create-task`, 1..20 links), `update_goal` (creator or `run-agents`) | `requireVisible` then the goal gate (§7) |
+| Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier; ruling 140(b): the person whose seat changed is notified, and the audit row says whether they were told), `update_task` (ruling 121: the goal under `update-goal`, priority / labels / due date under `edit-task-meta` as a full replace — the task page's two writers and gates, each part reported on its own, and an axis already holding the asked-for value answers `[noop]` rather than claiming a write nobody made; ruling 131: `blockedBy` is the FULL list of what the task waits on through `setTaskDependencies`, reported on its own arm, a refusal in the validator's words, `[]` clearing it and releasing the task), `create_task` also takes `blockedBy` (validated before a key is allocated; the task is born held) and, ruling 140(a), `owner` (a member email or `me`; seated in the creating write before the first operator run, checked by the hand-off rule; the release word is refused by name) and `dueDate`, with `priority: urgent` as the urgent flag itself, `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `terminal-stage` / queued honestly, else `startAgentRun`), `update_project_settings`, `update_stages`, `set_transition_boundary` (`edit-policy`), `invite_member` (C4: takes the `role` the member joins in, seated in ONE write with one audit row; omitted is viewer, and an unknown role is refused by name with nothing written), `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
+| Goals | `create_goal` (`create-task`, 1..20 links, each with an optional `blockedBy`), `update_goal` (creator or `run-agents`; `edit_link` without `blockedBy` leaves the link's list, `[]` clears it; `add_link` takes one) | `requireVisible` then the goal gate (§7) |
 
 Invariants pinned by tests: there is **no** tool for merge, acceptance,
 force-accept, packet resolution or a move into the terminal stage (ruling 88's
@@ -274,6 +274,57 @@ tool descriptions.
   erased every grant — and `list_global_agents` returned no grants at all, so the model
   could not see what it was about to erase. That tool now returns `skills`, `mcps` and
   `kbs`.
+
+### 4.2 Catalogued writes read first and refuse by name (pass 34, ruling 139)
+
+Every controller write that takes a catalogued identifier validates it against the
+catalogue the runtime resolves by and refuses an unknown or impossible value BY NAME,
+listing what is valid, before anything is written; `[done]` is never answered for a
+write the store did not make. `update_agent_deployment` refuses, through
+`capabilityPatchRefusal` (`app/features/agents/capability-catalog.ts`): an id outside
+the deployment's KIND (an operator id on a specialist and the reverse are named as
+such), an id nothing in the catalogue answers to, a matrix-only advisory id (refused as
+"no toggle", never as "no such id"), `recommend` on a specialist, a non-`human` mode on
+an always-human id, `report-validation-verdict` at any mode but `direct` or `off`; and,
+in the same call, a stage id the project does not declare (listed with the project's
+stage ids). The check lives in the tool, not in `grantsFor`: the project editor
+legitimately preserves advisory and retired ids a strict catalogue check would refuse.
+
+For every such catalogue there is a read the same person may call first, and the write's
+description names it. `get_project` returns each deployment's RESOLVED grants (every
+governed id at the mode the runtime applies, with its label), model, effort and, for the
+operator, autonomy, derived by the Agents page's own `assembleAgentRoster` from the
+projection (every agent writer reprojects before it returns), so the controller reads what
+the roster renders: an absent `deliver-review-pr` at the project's delivery-gate mode, the
+grant-required family at `off`. `list_capabilities` (instance scope, any signed-in person,
+like `whoami`) serves the ids per kind with their labels, the modes each kind takes, the
+always-human three, and `whenUngranted`: the mode a deployment resolves to when project.md
+carries NO grant for the id, which is `absentGrantMode` in `agents-query.server.ts`, the one
+home the roster also materialises absent grants with, never the catalogue's create-seed
+default (`create-task-branch` seeds `direct` and resolves `off` when absent). The two
+policy-dependent operator grants (`deliver-review-pr`, `update-task-branch`) are named as
+such and read from `get_project`.
+
+Every controller write is audited under the ASKING PERSON with the controller named as
+the instrument (ruling 99(b)); pass 34's C5 made the Activity audit column render that
+disclosure ("<name> (via the controller)") instead of dropping it for the joined user
+name.
+
+`update_agent_deployment` also carries the `deploymentFingerprint` of the record it just
+read (B5), so its own read-modify-write inside one turn is never refused by itself while a
+hand-save landing between that read and the write is, with the same by-name refusal shape:
+re-read, then write again.
+
+Effort is settable wherever model is (ruling 139): `deploy_agent` takes `model` and
+`effort` overrides and `update_agent_deployment` takes `effort`; both check the value
+against the backend's tier list (`assertEffortForBackend`, `assertModelForBackend` in
+`model-catalog.server.ts`) BEFORE the write and refuse by name, listing the tiers, so the
+controller can never store a tier the runtime would silently clamp. A backend switch with
+no effort resets to that backend's default and the reply says so; the deployed-audit row
+records the model and effort written. The profile editor shares the check for a CHANGED
+value only, so a deployment that legitimately stores a preserved tier (Codex `minimal`)
+stays editable, and the editor re-seeds a stored tier the backend does not list instead of
+offering it.
 
 ## 5. The `viberr_ops` diagnostics server (ruling 107)
 
@@ -373,8 +424,12 @@ link 1 `active`, writes the file, re-projects and audits `goal.created`.
 this goal now". It runs from three task write paths (stage transition, archive or
 restore, acceptance), after `resume | skip_link | add_link`, and from
 `startGoalRunner` (a boot catch-up, then every 60 seconds over goals in
-`active | attention`). Each pass reads every linked task's state from its canonical
-file and applies:
+`active | attention`). The same three hooks and the same tick (`goalRunnerTick`)
+also run the dependency release engine (ruling 131(e), `releaseDependents` /
+`releaseDueDependents`): every held task in the project whose `blockedBy` entries
+are all done is released, so a link finishing releases whatever waited on it within
+the same write, and a hand edit the hooks never saw releases within a minute. Each
+pass reads every linked task's state from its canonical file and applies:
 
 - a failed link (its task archived or missing) with `onFailure: pause` parks the
   chain in `attention` and notifies the creator; with `continue` it marks the link
@@ -385,14 +440,21 @@ file and applies:
   `create-task` is re-proven (`creatorMayCreateTasks`, silent deny); lost authority
   parks the chain in `attention`. The task is created under the actor
   `{ userId: createdBy, label: "<label> · goal chain" }` inside a per-link lock that
-  re-checks the chain status before and after `createTask`.
+  re-checks the chain status before and after `createTask`. Ruling 131(c): the link's
+  declared `blockedBy` is copied into `createTask` and validated there, so the task is
+  born held (`waiting: none`, readiness floored at `blocked`) and the link history says
+  what it waits on; a wait that can no longer be satisfied (its task archived since the
+  declaration) refuses the create and parks the chain in `attention` with the
+  validator's sentence.
 
 ### 7.4 Redirecting
 
 `updateGoal` is gated by `requireGoalAuthority`: the creator (project mutable and any
 membership) **or** a member holding `run-agents`. Operations (terminal chains refuse
 all of them): `pause`, `resume`, `cancel`, `skip_link`, `retry_link` (failed links
-only; a fresh task under the present caller), `edit_link` (pending or failed),
+only; a fresh task under the present caller), `edit_link` (pending or failed; ruling
+131(c): `blockedBy` absent leaves the link's declared wait, `[]` clears it, any list is
+validated at declaration time, this chain's own links included),
 `add_link` (≤ 20), `remove_pending_link` (re-indexes). Audit `goal.updated {op}`.
 The project route's `goal-op` intent and the Goals panel expose only the first five;
 `edit_link`, `add_link` and `remove_pending_link` are controller-tool-only today.

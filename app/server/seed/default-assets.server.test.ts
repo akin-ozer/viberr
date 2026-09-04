@@ -138,6 +138,30 @@ describe("shipped-asset refresh (B-OP1)", () => {
       "utf8",
     );
 
+  it("pass 34 A19/A21: the operator doctrine says a hand-off is about who builds, never about stages, and its outgoing hash is recorded", async () => {
+    // Canaries: revert the rework paragraph; remove the outgoing hash.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "dd42d1a7614df74f937519f53a0e9690affa0e0eb8a89da07d38cac4fc580752", {})).toBe(true);
+    expect(shipped()).toContain("the deliverer owes the rework and it runs at EVERY stage");
+    expect(shipped()).toContain("Never hand delivery to another profile to get around a stage.");
+    expect(shipped()).not.toContain("does not work the CURRENT stage");
+  });
+
+  it("pass 34 A13: the operator doctrine shipped before `set_dependencies` is a recorded prior hash, so a live store upgrades in place", async () => {
+    // Canary: remove the outgoing hash from PRIOR_SHIPPED_HASHES.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "9731f0a69b6a8b5824277c4d1a2d4ad18cc126c2ca827a844369f9f0ed9ef3f6", {})).toBe(true);
+    expect(shipped()).toContain("`set_dependencies`");
+  });
+
+  it("pass 34 A14: the controller definition and guide shipped before `blockedBy` are recorded prior hashes, so both upgrade in place", async () => {
+    // Canary: omit the skill's hash.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    const path = await import("node:path");
+    expect(shippedCopyIsUnedited(path.join("agents", "definitions", "controller.md"), "e600925f824e5ec43ca962c56304e5099ae76a1ad41dff8bc94a431666756712", {})).toBe(true);
+    expect(shippedCopyIsUnedited(path.join("skills", "controller-guide", "SKILL.md"), "69805ce6bb7bd0180014e164ae6d863268813bd4fb6a0f61bfa4e333b6674608", {})).toBe(true);
+  });
+
   it("refreshes an UNEDITED copy of an older shipped version", async () => {
     const { seedDefaultAgentAssets } = await import("./default-assets.server");
     const dataRoot = freshStore();
@@ -341,5 +365,30 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
     expect(definition).toContain("context block the server gathered when the turn started");
     expect(definition).toContain("A comment never starts a run by itself");
     expect(skill).toContain("## The context you are handed");
+  });
+});
+
+/**
+ * Ruling 134 (pass 34, F34-11): the shipped operator doctrine says that
+ * rework on an open PR is delivered with `deliver_for_review`, and that
+ * pushing is never a person's or an agent's job. The outgoing sha256 is
+ * listed so an unedited store copy upgrades at boot.
+ *
+ * Canary: revert the persona sentence (or drop the outgoing hash) and the
+ * matching assertion fails.
+ */
+describe("the operator doctrine upgrade in place (ruling 134)", () => {
+  const assetsDir = path.join(import.meta.dirname, "assets");
+  it("carries the rework-delivery sentence and lists its outgoing version", async () => {
+    const { PRIOR_SHIPPED_HASHES, assetHash } = await import("./default-assets.server");
+    const definition = readFileSync(path.join(assetsDir, "operator.definition.md"), "utf8");
+    expect(definition).toContain("shows `pr.unpushedRevision`, call `deliver_for_review`");
+    expect(definition).toContain("Pushing is never a person's job and never an agent's.");
+    expect(definition).not.toMatch(/[–—]/);
+    const rel = path.join("agents", "definitions", "operator.md");
+    expect(PRIOR_SHIPPED_HASHES[rel]).toContain(
+      "9462381afd6c87b991f5653610252ac2e7a4815b039709d818bbecec1db7532e",
+    );
+    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(assetHash(definition));
   });
 });

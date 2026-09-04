@@ -1,4 +1,8 @@
-import type { PrState, TaskPriority } from "~/schemas/task-file.schema";
+import {
+  describeRevisionDrift,
+  type RevisionDrift,
+} from "~/shared/revision-drift";
+import type { PrState, TaskPriority, UnpushedRevision } from "~/schemas/task-file.schema";
 import type { ValidationValue } from "~/ui/pill";
 import { plainText } from "~/features/notifications/notification-meta";
 
@@ -13,6 +17,8 @@ export interface ReviewRowView {
   dueDate: string | null;
   waiting: "human" | "agent" | "none";
   packet: { kind: string; title: string } | null;
+  /** Ruling 138: the packet is decided and waits for the edited goal. */
+  goalEditPending: boolean;
   latestEventText: string | null;
   pr: {
     number: number;
@@ -24,9 +30,13 @@ export interface ReviewRowView {
     state: PrState;
     /** P14-LV-07: GitHub's live mergeability for an open PR; absent = never read. */
     mergeable?: "clean" | "conflicting" | "unknown" | null;
-    /** R17-1 (F17-L12): the PR head is ahead of the reviewed revision by
-     *  `aheadBy` commits; the subline warns they would merge unreviewed. */
-    revisionDrift?: { aheadBy: number } | null;
+    /** R17-1 as amended by ruling 132 (pass 34): the whole drift record, so the
+     *  subline prints `describeRevisionDrift`'s sentence verbatim — authored
+     *  commits merge unreviewed; a base refresh is named as a base refresh. */
+    revisionDrift?: RevisionDrift | null;
+    /** Ruling 135: the CURRENT unpushed record, filtered by the row builder. */
+    headSha?: string;
+    unpushedRevision?: UnpushedRevision;
   } | null;
   validation: ValidationValue;
   /** F10-11: why the current revision is NOT acceptance-ready (null when it is).
@@ -61,6 +71,15 @@ function prStateSub(pr: NonNullable<ReviewRowView["pr"]>): string {
   if (pr.state === "closed") {
     return `PR #${pr.number} was closed on GitHub without merging. Rework and reopen it, or archive the task.`;
   }
+  // Ruling 135 (pass 34, F34-11): the delivered revision is not on the PR.
+  // Ranked ABOVE the conflict: `mergeable` describes the head GitHub has, and
+  // the fact a person can act on is that the reviewed revision never reached it.
+  if (pr.unpushedRevision) {
+    const rev = pr.unpushedRevision.revisionSha.slice(0, 7);
+    return pr.unpushedRevision.relation === "diverged"
+      ? `PR #${pr.number} does not carry the delivered revision ${rev}, and its head holds commits the workspace does not. Resolve the history, then deliver the branch to push it.`
+      : `PR #${pr.number} does not carry the delivered revision ${rev}. Deliver the branch to push it.`;
+  }
   if (pr.mergeable === "conflicting") {
     return `PR #${pr.number} conflicts with the base branch. GitHub can't merge it until the branch is rebased.`;
   }
@@ -73,11 +92,12 @@ function prStateSub(pr: NonNullable<ReviewRowView["pr"]>): string {
   if (pr.state === "accepted") {
     return `PR #${pr.number} is accepted. The merge is still pending; a human completes it on the task.`;
   }
-  // R17-1 (F17-L12): commits landed on the PR head after the review — accepting
-  // still merges them, but they ship unreviewed, so the boundary says so.
-  if (pr.revisionDrift && pr.revisionDrift.aheadBy > 0) {
-    const n = pr.revisionDrift.aheadBy;
-    return `PR #${pr.number} is open. ${n} commit${n === 1 ? "" : "s"} added since review would merge unreviewed.`;
+  // R17-1 (F17-L12) as amended by ruling 132 (pass 34, F34-14): the head moved
+  // after the review — the ONE canonical sentence says what moved, and only
+  // authored commits are called unreviewed.
+  const drift = describeRevisionDrift(pr.revisionDrift);
+  if (drift.kind !== "none") {
+    return `PR #${pr.number} is open. ${drift.sentence}.`;
   }
   return `PR #${pr.number} is open for review on GitHub.`;
 }
@@ -102,6 +122,11 @@ export function reviewRowSub(t: ReviewRowView): string {
   // F10-11: a not-yet-acceptable task states WHY (failing / awaiting a reviewer /
   // no delivered revision) instead of a generic "needs a human decision".
   if (t.blockReason) return t.blockReason;
+  // Ruling 138: a decided edit_goal packet is not a decision still owed — the
+  // row says what is owed instead of re-offering the packet.
+  if (t.goalEditPending) {
+    return "Goal edit pending: save the edited goal to clear the decision packet.";
+  }
   if (t.packet) return t.packet.kind + ": " + t.packet.title;
   // P14-LV-05: live PR state outranks the newest timeline note.
   if (t.pr) return prStateSub(t.pr);

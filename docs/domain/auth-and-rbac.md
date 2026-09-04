@@ -104,13 +104,15 @@ the guards and the Policy page share:
 | Action | admin | maintainer | contributor | viewer |
 |---|---|---|---|---|
 | `view`, `comment` | ✓ | ✓ | ✓ | ✓ |
-| `create-task`, `own-task`, `edit-task-meta` | ✓ | ✓ | ✓ | |
+| `create-task`, `own-task`, `edit-task-meta` (priority, labels, due date and, ruling 131, what a task waits on) | ✓ | ✓ | ✓ | |
 | `approve-transition`, `resolve-packet`, `accept-completion`, `update-goal`, `run-agents`, `reorder-board`, `reconcile-github`, `grant-github-scope`, `rescan-project` | ✓ | ✓ | | |
 | `release-any-ownership`, `manage-members`, `manage-agents`, `edit-policy`, `force-accept-completion` | ✓ | | | |
 
 Beyond the table: a task's **owner** (contributor or above) may accept their own
-task and govern any open decision on it; membership invites join as `viewer`
-(invite is membership, no accept step); the last live project admin cannot be
+task and govern any open decision on it; membership invites join in the seat the
+inviter names and as `viewer` when they name none, in one write with one audit row
+(pass 34, C4: an unknown role is refused by name, against the same single enum
+`setMemberRole` parses; invite is membership, no accept step); the last live project admin cannot be
 demoted or removed; deleting an org account prunes its memberships from every
 `project.md` and releases its tasks. `edit-policy` also covers project settings,
 stages, the repository, archive and delete. Every boundary into the terminal stage
@@ -229,6 +231,14 @@ skips that pass's purge. Two actions boot recovery uses as idempotency keys
 (`task.agent.replied`, `runtime.operator.plan_executed`) are exempt. The pass runs at
 boot and every 6 hours.
 
+**Reading a controller-driven write** (pass 34, C5). A write the controller makes for a
+person is audited under that person with the controller named as the instrument
+(`encodeControllerInstrument` in `app/shared/mapping/actor.server.ts`, ruling 99(b)). The
+Activity audit column renders it as "<name> (via the controller)" through
+`auditActorDisplay`, on both the joined-name and the userless leg. The org Audit log and
+`inspect_audit_log` keep the RAW stored label deliberately: they are the forensic
+surfaces, and the raw label is what `recordAudit` was handed.
+
 ## 6. Insights (`/insights`, org admin only)
 
 One aggregate query over `agent_runs` (`getInsightsSummary`): totals (runs, cost,
@@ -238,11 +248,26 @@ duration, a 30-day daily chart, oversight metrics (owner clarity, branch and PR
 traceability, packet resolution times from audit rows, time to review, long
 timelines) and the latest backend quota readings. Read-only; nothing here writes.
 
+Branch and PR traceability counts, over the tasks that have **delivered** (a delivered
+work revision or a recorded pull request), how many carry both the task branch and a
+recorded PR. An allocated branch alone is not a delivery: ruling 122 names the branch at
+first dispatch, before an agent has written anything, so a task that only ever engaged a
+deliverer stays out of the denominator (ruling 143). A delivered revision with no PR
+stays in it on purpose; an unpushed delivery is exactly the untraceable one the number
+exists to show. *(Corrected 2026-09-04, pass 34 — U34-9: the denominator used to admit
+any task with a branch, and the card read "7 of 8 delivered tasks carry branch + PR"
+while one of the eight had delivered nothing.)*
+
+Ruling 130(d) (pass 34): the backend quota panel names whose account a refusal or an
+exhaustion was recorded on (`credentialLabel`). That is org-admin information: it names a
+person's provider account state, so it reaches this page, the signed-in `instance_health`
+read and the person's own Profile card, and never the unauthenticated health body.
+
 ## 7. Profile and preferences (`/profile`)
 
-Identity (name, title; audit `profile.updated`), notification routing (six in-app
-opt-out toggles: packets, approvals, mentions, policy, quality, controller; enforced
-inside `createNotification`), appearance (theme `light | dark | system` persisted to
+Identity (name, title; audit `profile.updated`), notification routing (eight in-app
+opt-out toggles: packets, approvals, mentions, policy, quality, controller,
+dependencies (ruling 131) and ownership; enforced inside `createNotification`), appearance (theme `light | dark | system` persisted to
 `users.theme` and the `viberr_theme` cookie; reduce motion; default timeline filter),
 a read-only "Your access" table rendered from the same RBAC rows, **Agent accounts**
 (below), GitHub identity (disconnect flips `idp` back to `local`, refused without a
@@ -282,6 +307,15 @@ Two routes in, both the vendor's own:
   workspace access token has no free probe and is stored `verified_at = null` with the
   card saying so. `backend-disconnect` runs the vendor's own logout, removes the
   credential file and drops the row (transcripts stay).
+
+**The last refusal Viberr observed** (ruling 130(d), pass 34 F34-1). A connected card
+also reads the quota store (`latestBackendRateLimits`) and shows, ONLY when the record's
+`credentialUserId` is the viewer, a `risk` pill "refused by the provider · <when>" with
+the provider's own sentence in a "Last refusal" row, or a neutral "usage window spent ·
+reopens <when>" pill with a "Usage window" row. The copy says what the pill is: the last
+refusal Viberr observed on this account, which any completed run on that backend
+retires, so the absence of a pill is not proof the account works. Another person's
+refusal, or a record written before principals were stored, never appears on this card.
 
 Viberr never implements the vendors' OAuth, never reads, copies or stores a Claude.ai or
 ChatGPT **session** token, and offers no setup-token field: Anthropic's Claude Code

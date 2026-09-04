@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { unreachableFetch } from "../../../test-support/fake-github";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { ENV_KEYS } from "~/server/config/env.server";
 import { kbDirPath, skillDirPath } from "~/server/files/file-store-root.server";
 import {
   deleteKnowledgeBase,
@@ -1581,6 +1582,49 @@ describe("mcpSpawnEnv (third-party command isolation)", () => {
     } finally {
       if (saved === undefined) delete process.env.VIBERR_SECRET_ENCRYPTION_KEY;
       else process.env.VIBERR_SECRET_ENCRYPTION_KEY = saved;
+    }
+  });
+
+  it("ruling 142: withholds Viberr's own configuration, which a third-party command has no business reading", async () => {
+    // U34-7 (pass 34): the container's NODE_ENV=production and PORT rode
+    // into every stdio MCP child through this same base (and into every
+    // agent shell, where they broke the project's own tooling). A registered
+    // command is somebody else's program; this server's declared
+    // configuration is not its environment. None of these names is
+    // credential-shaped, so the regex above let every one of them through.
+    const { mcpSpawnEnv } = await import("./resources.server");
+    const APP_CONFIG = {
+      NODE_ENV: "production",
+      PORT: "5173",
+      VIBERR_DATA_ROOT: "/data",
+      BETTER_AUTH_URL: "https://viberr.example.com",
+      GITHUB_OAUTH_CLIENT_ID: "iv1.example-client-id",
+      VIBERR_UNLOCK_CONTROLLER_MCPS: "enabled",
+    };
+    const saved: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(APP_CONFIG)) {
+      saved[k] = process.env[k];
+      process.env[k] = v;
+    }
+    const savedPath = process.env.PATH;
+    process.env.PATH ??= "/usr/bin";
+    try {
+      const env = mcpSpawnEnv("mcp-token-value");
+      for (const key of Object.keys(APP_CONFIG)) {
+        expect(env[key], `${key} must not reach a third-party command`).toBeUndefined();
+      }
+      // The whole declared list, whatever it holds today.
+      expect(ENV_KEYS.filter((key) => key in env)).toEqual([]);
+      // The child still gets its one secret and an ordinary environment.
+      expect(env.MCP_CREDENTIAL).toBe("mcp-token-value");
+      expect(env.PATH).toBeTruthy();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      if (savedPath === undefined) delete process.env.PATH;
+      else process.env.PATH = savedPath;
     }
   });
 });

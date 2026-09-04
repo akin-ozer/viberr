@@ -1,4 +1,5 @@
 import path from "node:path";
+import { encodeControllerInstrument } from "~/shared/mapping/actor.server";
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
@@ -10,6 +11,7 @@ import { logger } from "~/server/logging/logger.server";
 import {
   fullReplyTextForRun,
   runFailureReason,
+  type RunFailure,
 } from "~/server/tasks/agent-reply.server";
 import {
   resolveSpecialistMcpServersDetailed,
@@ -390,7 +392,7 @@ async function startTurnRun(
 
   const actor = {
     userId: input.user.id,
-    label: `${input.user.email} · via controller`,
+    label: encodeControllerInstrument(input.user.email),
   };
 
   let runId: string;
@@ -473,8 +475,54 @@ export function settleTurnForTests(
   db: DatabaseSync,
   conversationId: string,
   input: ControllerTurnInput,
+  state: "finished" | "error" | "interrupted" = "finished",
+  runId = "run_test",
 ): Promise<void> {
-  return settleTurn(db, conversationId, "run_test", "finished", input);
+  return settleTurn(db, conversationId, runId, state, input);
+}
+
+/**
+ * Ruling 130(b): the note for a turn that ended in error. A classified quota
+ * or auth refusal names the person's own move (wait for the window, or switch
+ * the account on Profile → Agent accounts) instead of "Say it again to retry",
+ * which would only reproduce the refusal; every other kind keeps that sentence.
+ */
+function failedTurnNote(failure: RunFailure | null): string {
+  const facts = failure?.facts ?? null;
+  if (failure?.kind === "quota") {
+    const window = facts?.window ? facts.window.replace(/_/g, " ") : "usage";
+    const reset = facts?.resetsAt ? ` It reopens at ${absoluteUtcLabel(facts.resetsAt)}.` : "";
+    return (
+      `I could not finish this turn: your Claude account's ${window} window is spent.${reset} ` +
+      "Wait for it, or connect a different Claude account or an API key on Profile → Agent accounts, then send your message again." +
+      (failure.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "")
+    );
+  }
+  if (failure?.kind === "auth") {
+    const code = facts?.apiError ?? (facts?.apiErrorStatus ? String(facts.apiErrorStatus) : null);
+    const cause =
+      facts?.apiError === "oauth_org_not_allowed"
+        ? "the organization this account belongs to does not allow it here"
+        : "the provider rejected the credential";
+    return (
+      `I could not finish this turn: your Claude account was refused by the provider${code ? ` (${code})` : ""}: ${cause}. ` +
+      "Connect a different Claude account or an API key on Profile → Agent accounts, then send your message again." +
+      (failure.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "")
+    );
+  }
+  const detail = "the run did not complete";
+  return (
+    `I could not finish this turn: ${detail}.` +
+    (failure?.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "") +
+    " Say it again to retry."
+  );
+}
+
+/** `2026-09-03 11:50 UTC`: absolute, never relative. */
+function absoluteUtcLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 /** Record the reply, release the lease, fire the next queued message. */
@@ -496,21 +544,11 @@ async function settleTurn(
       if (state === "interrupted") {
         reply = "This turn was stopped before I could answer.";
       } else {
-        const failure = runFailureReason(db, runId);
-        const detail =
-          failure?.kind === "quota"
-            ? "the model is over its usage quota"
-            : failure?.kind === "auth"
-              ? "the model credential was rejected"
-              : "the run did not complete";
-        reply =
-          `I could not finish this turn: ${detail}.` +
-          // P07-C: the same marker words as every run-failure line (one
-          // source), inlined into a chat sentence rather than a log line.
-          (failure?.providerText
-            ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}`
-            : "") +
-          " Say it again to retry.";
+        // Ruling 130(b): the note names the classified cause and the
+        // person's own remedy; the generic retry sentence is kept only for a
+        // failure with no classified class (P07-C: the provider's words ride
+        // the same marker every run-failure line uses).
+        reply = failedTurnNote(state === "error" ? runFailureReason(db, runId) : null);
       }
     }
     appendMessage(db, {

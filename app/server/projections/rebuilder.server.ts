@@ -8,6 +8,7 @@ import {
   acceptanceBlockedReason,
   closedPrBlockedReason,
   conflictingPrBlockedReason,
+  unpushedRevisionBlockedReason,
   deliveringEngagement,
   deriveValidation,
   supportingEngagements,
@@ -368,6 +369,8 @@ function acceptanceBlockReason(
     (ctx.blockedPacket
       ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
       : null) ??
+    // Ruling 135: the delivered revision is not on the PR, above the conflict.
+    unpushedRevisionBlockedReason(fm.pr, fm.workRevision?.headSha ?? null, fm.key) ??
     // P14-LV-07: a PR GitHub cannot merge cannot be accepted.
     conflictingPrBlockedReason(fm, fm.key)
   );
@@ -492,6 +495,10 @@ export function rebuildTaskFile(
   const derivation = deriveReadiness({
     storedReadiness,
     diagnostics: allDiagnostics,
+    // Ruling 131: a task waiting on other work is floored at `blocked`; the
+    // list's states are resolved at read time (dependencies.server.ts), so
+    // the floor reads only that a list exists.
+    dependenciesListed: fm.blockedBy.length > 0,
   });
 
   const memberIds = project ? getMemberIds(db, slug) : undefined;
@@ -526,20 +533,21 @@ export function rebuildTaskFile(
   db.prepare(
     `INSERT INTO task_projections
        (project_slug, task_key, title, stage, readiness, stored_readiness,
-        waiting, urgent, priority, labels_json, due_date, archived, validation, validation_block_reason, acceptance, continuity, owner_user_id, specialist_json,
+        waiting, urgent, priority, labels_json, due_date, blocked_by_json, archived, validation, validation_block_reason, acceptance, continuity, owner_user_id, specialist_json,
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
         work_revision_sha, goal, packet_json, recommendation_count,
         schedules_json, event_count, comment_count,
         goal_id, goal_link_index,
         diagnostic_count, created_at, updated_at, board_rank, source_path,
         content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
        waiting = excluded.waiting, urgent = excluded.urgent,
        priority = excluded.priority, labels_json = excluded.labels_json,
        due_date = excluded.due_date,
+       blocked_by_json = excluded.blocked_by_json,
        archived = excluded.archived,
        validation = excluded.validation,
        validation_block_reason = excluded.validation_block_reason,
@@ -577,6 +585,8 @@ export function rebuildTaskFile(
     fm.priority,
     JSON.stringify(fm.labels),
     fm.dueDate,
+    // Ruling 131: the raw list, verbatim (canonical spellings).
+    JSON.stringify(fm.blockedBy),
     fm.archived ? 1 : 0,
     derivedValidation,
     acceptanceBlockReason(fm, {

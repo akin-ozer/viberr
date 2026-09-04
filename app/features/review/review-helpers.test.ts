@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { describeRevisionDrift } from "~/shared/revision-drift";
 import { reviewRowSub, type ReviewRowView } from "./review-helpers";
 
 const base: ReviewRowView = {
@@ -9,6 +10,7 @@ const base: ReviewRowView = {
   dueDate: null,
   waiting: "agent",
   packet: null,
+  goalEditPending: false,
   latestEventText: null,
   pr: null,
   validation: "none",
@@ -50,6 +52,7 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
     const sub = reviewRowSub({
       ...base,
       pr: { number: 103, state: "review" },
+      goalEditPending: false,
       latestEventText:
         "**Divergence:** PR #103 was closed on GitHub without merging, but VM-4 is still active.",
     });
@@ -61,6 +64,31 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
     const sub = reviewRowSub({ ...base, pr: { number: 103, state: "closed" } });
     expect(sub).toContain("closed on GitHub without merging");
     expect(sub).toContain("archive the task");
+  });
+
+  it("ruling 135: an unpushed delivered revision outranks the conflict subline and names the push", () => {
+    // Canary: move the `unpushedRevision` branch below the `mergeable` one.
+    const behind = reviewRowSub({
+      ...base,
+      pr: { number: 103, state: "review", mergeable: "conflicting", headSha: "1".repeat(40), unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" } },
+    });
+    expect(behind).toContain("does not carry the delivered revision 9999999");
+    expect(behind).toContain("Deliver the branch to push it");
+    expect(behind).not.toContain("conflicts with the base branch");
+    const diverged = reviewRowSub({
+      ...base,
+      pr: { number: 103, state: "review", unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "diverged" } },
+    });
+    expect(diverged).toContain("holds commits the workspace does not");
+    expect(diverged).toContain("Resolve the history");
+  });
+
+  it("ruling 132: a base refresh prints the canonical sentence verbatim, never 'unreviewed'", () => {
+    // Canary: restore the summed-count arm (`aheadBy`-style) over the record.
+    const record = { headSha: "b".repeat(40), authored: 0, baseRefresh: { merges: 1, commits: 4 } };
+    const sub = reviewRowSub({ ...base, pr: { number: 130, state: "review", revisionDrift: record } });
+    expect(sub).toContain(`PR #130 is open. ${describeRevisionDrift(record).sentence}.`);
+    expect(sub).not.toContain("unreviewed");
   });
 
   it("surfaces a conflicting PR — the state that used to be invisible (LV-07)", () => {
@@ -75,10 +103,10 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
   it("R17-1: an open PR whose head drifted ahead of the review warns it merges unreviewed", () => {
     const sub = reviewRowSub({
       ...base,
-      pr: { number: 130, state: "review", revisionDrift: { aheadBy: 2 } },
+      pr: { number: 130, state: "review", revisionDrift: { headSha: "a".repeat(40), authored: 2, baseRefresh: null } },
     });
-    expect(sub).toContain("2 commits added since review");
-    expect(sub).toContain("unreviewed");
+    // Ruling 132: the canonical sentence, verbatim.
+    expect(sub).toContain("2 authored commits since review merge unreviewed");
   });
 
   it("R17-1: a conflicting PR still takes precedence over the drift note", () => {
@@ -90,7 +118,7 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
           number: 130,
           state: "review",
           mergeable: "conflicting",
-          revisionDrift: { aheadBy: 1 },
+          revisionDrift: { headSha: "b".repeat(40), authored: 1, baseRefresh: null },
         },
       }),
     ).toContain("conflicts with the base branch");
@@ -101,6 +129,7 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
       reviewRowSub({
         ...base,
         pr: { number: 311, state: "merged" },
+        goalEditPending: false,
         latestEventText: "**Transition request:** move on",
       }),
     ).toContain("is merged on GitHub");
@@ -179,5 +208,30 @@ describe("reviewRowSub terminal GitHub facts (R16-3)", () => {
         packet: { kind: "Blocked decision", title: "Pick a recovery path" },
       }),
     ).toContain("closed on GitHub without merging");
+  });
+});
+
+describe("ruling 138: reviewRowSub on a decided edit_goal packet", () => {
+  it("says a goal edit is owed instead of re-offering the packet", () => {
+    // Canary: drop the `goalEditPending` branch.
+    const base = {
+      key: "VIB-9",
+      title: "t",
+      priority: "normal" as const,
+      labels: [],
+      dueDate: null,
+      waiting: "human" as const,
+      packet: { kind: "Blocked decision", title: "Scope needed" },
+      goalEditPending: true,
+      latestEventText: null,
+      pr: null,
+      validation: "none" as const,
+      blockReason: null,
+      lastActivityAt: null,
+      quiet: false,
+      continuity: null,
+    };
+    expect(reviewRowSub(base)).toBe("Goal edit pending: save the edited goal to clear the decision packet.");
+    expect(reviewRowSub({ ...base, goalEditPending: false })).toBe("Blocked decision: Scope needed");
   });
 });

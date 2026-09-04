@@ -580,11 +580,16 @@ export function AgentLogsPanel({
   // owner's missing connection rather than leaving the absent control
   // unexplained. `retryBackends === undefined` is "not asked", and claims
   // nothing about the owner.
+  // Pass 34 review: the "isn't connected" clause is about a retry this panel
+  // can offer, and only an AGENT run has one — an operator or controller run
+  // has no other backend to move to, so appending it there stated a
+  // credential fact that was often false and always irrelevant.
+  const retryOffered = cur!.kind === "primary" || cur!.kind === "reviewer";
   const retryClause = canRetryBackend
     ? `. Retry on ${altLabel}`
     : retryPossible
       ? ". A maintainer can retry it on the other backend"
-      : altBackend !== null && retryBackends !== undefined
+      : retryOffered && altBackend !== null && retryBackends !== undefined
         ? `. ${altLabel} isn't connected for the task owner, so there is no other backend to retry on`
         : "";
   const footer =
@@ -602,7 +607,13 @@ export function AgentLogsPanel({
               (cur!.finished ? finishedClock(cur!.finished, hydrated) : "−") +
               "; thread can be re-engaged"
             : cur!.state === "error"
-              ? backendUnavailable
+              ? // Ruling 130(a): the SENTENCE follows the classified failure
+                // for every run kind; the retry clause follows the OFFER.
+                cur!.failureKind === "quota"
+                ? `${cur!.backend === "codex" ? "Codex" : "Claude"} refused this run: the account's usage window is spent (the error line names the reset and the account remedy)${retryClause}`
+                : cur!.failureKind === "auth"
+                  ? `${cur!.backend === "codex" ? "Codex" : "Claude"} refused this run: the account was rejected by the provider (an organization restriction or a rejected credential; the error line names the remedy)${retryClause}`
+                  : backendUnavailable
                 ? // Ruling 127: the same `run·unavailable` classification now
                   // also covers "the account this run bills has not connected
                   // the backend", so the footer states the CLASS and lets the

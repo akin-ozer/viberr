@@ -3,6 +3,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import { readFileSync } from "node:fs";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
@@ -777,6 +778,95 @@ describe("task anchoring (ruling 121)", () => {
     expect(mixed).toContain("Already set, nothing written: priority.");
   });
 
+  it("ruling 131: create_task and update_task set the wait; [noop] on an unchanged list; refusal by name; [] clears and releases; a viewer is refused", async () => {
+    // Canary: drop `blockedBy` from the empty-call guard (the wait-only
+    // update answers "[error] Pass a goal…").
+    const { getTaskSummary } = await import("~/server/projections/task-query.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const created = await call(ids.contributor, "create_task", {
+      title: "Waits on the credential attach",
+      blockedBy: ["VIB-142"],
+    });
+    expect(created).toMatch(/^\[done\] VIB-\d+ created in Triage: Waits on the credential attach\. Waits on VIB-142; held until every entry is done\.$/);
+    const key = /VIB-\d+/.exec(created)![0];
+    let summary = getTaskSummary(app.db, SLUG, key)!;
+    expect(summary.blockedBy.map((e) => e.ref)).toEqual(["VIB-142"]);
+    expect(summary.waiting).toBe("none");
+    expect(summary.readiness).toBe("blocked");
+
+    // A bad reference refuses by name and burns no key: the next create lands on the next number.
+    expect(await call(ids.contributor, "create_task", { title: "Bad wait", blockedBy: ["VIB-9999"] })).toContain(
+      "[error] VIB-9999 is not a task in this project.",
+    );
+
+    expect(await callAnchored(ids.contributor, "update_task", { blockedBy: ["vib-142"] }, key)).toContain(
+      `[noop] ${key}: blocked by already had that value; nothing was written.`,
+    );
+    expect(await callAnchored(ids.contributor, "update_task", { blockedBy: ["VIB-142", "VIB-148"], priority: "high" }, key)).toContain(
+      `[done] ${key} updated: priority, blocked by (VIB-142, VIB-148).`,
+    );
+    const selfWait = await callAnchored(ids.contributor, "update_task", { blockedBy: [key] }, key);
+    expect(selfWait).toContain(`[error] ${key}: a task cannot wait on itself.`);
+    expect(await callAnchored(ids.viewer, "update_task", { blockedBy: [] }, key)).toMatch(/^\[denied\]/);
+    // A person emptying the list is the release itself.
+    expect(await callAnchored(ids.contributor, "update_task", { blockedBy: [] }, key)).toContain(
+      `[done] ${key} updated: blocked by (cleared: the task is released).`,
+    );
+    summary = getTaskSummary(app.db, SLUG, key)!;
+    expect(summary.blockedBy).toEqual([]);
+    const file = readTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot })!.parsed;
+    expect(file.timeline.some((e) => e.title === "Dependencies released")).toBe(true);
+    // The reads expose the wait.
+    // SAFETY: `list_tasks` answers `json(rows.map(...))` with exactly these
+    // two fields on every row (the tool's own mapping above).
+    const listed = JSON.parse(await call(ids.contributor, "list_tasks", {})) as { key: string; waitsOn: string[] }[];
+    expect(listed.find((t) => t.key === key)!.waitsOn).toEqual([]);
+    await callAnchored(ids.contributor, "update_task", { blockedBy: ["VIB-142"] }, key);
+    // SAFETY: same mapping as above.
+    const listedAgain = JSON.parse(await call(ids.contributor, "list_tasks", {})) as { key: string; waitsOn: string[] }[];
+    expect(listedAgain.find((t) => t.key === key)!.waitsOn).toEqual(["VIB-142 (open)"]);
+  });
+
+  it("ruling 131(c): create_goal links declare a wait, update_goal edit_link leaves it when absent and clears it with [], and list_goals/get_goal expose it", async () => {
+    // Canary: drop `blockedBy` from the `edit_link` op mapping (the [] clear
+    // is silently ignored).
+    const created = await call(ids.maintainer, "create_goal", {
+      title: "Chain with a declared wait",
+      links: [
+        { title: "First", goal: "Do the first thing. Done when merged." },
+        { title: "Second", goal: "Do the second thing. Done when merged.", blockedBy: ["VIB-142"] },
+      ],
+    });
+    expect(created).toMatch(/^\[done\] Goal goal-\d+ created with 2 links; link 1 is VIB-\d+\.$/);
+    const goalId = /goal-\d+/.exec(created)![0];
+    // SAFETY: `get_goal` answers `json(goalView)`, whose `links` are the
+    // schema-parsed GoalLink[] (index and blockedBy always present).
+    const goal = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { index: number; blockedBy: string[] }[] };
+    expect(goal.links.map((l) => l.blockedBy)).toEqual([[], ["VIB-142"]]);
+    // A title-only edit leaves the wait alone.
+    await call(ids.maintainer, "update_goal", { goalId, op: "edit_link", index: 2, title: "Second, renamed" });
+    // SAFETY: same shape as above.
+    let after = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { blockedBy: string[] }[] };
+    expect(after.links[1]!.blockedBy).toEqual(["VIB-142"]);
+    // A declared cycle is refused at declaration time.
+    expect(await call(ids.maintainer, "update_goal", { goalId, op: "edit_link", index: 2, blockedBy: [`${goalId} link 2`] })).toContain(
+      `[error] ${goalId} link 2: a link cannot wait on itself.`,
+    );
+    // [] clears.
+    expect(await call(ids.maintainer, "update_goal", { goalId, op: "edit_link", index: 2, blockedBy: [] })).toContain("waits on nothing");
+    // SAFETY: same shape as above.
+    after = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { blockedBy: string[] }[] };
+    expect(after.links[1]!.blockedBy).toEqual([]);
+    // SAFETY: `list_goals` maps every link to `{index, title, status, taskKey, blockedBy}`.
+    const listed = JSON.parse(await call(ids.maintainer, "list_goals", {})) as { id: string; links: { blockedBy: string[] }[] }[];
+    expect(listed.find((g) => g.id === goalId)!.links.map((l) => l.blockedBy)).toEqual([[], []]);
+    // add_link with a wait.
+    expect(await call(ids.maintainer, "update_goal", { goalId, op: "add_link", title: "Third", goal: "Third thing.", blockedBy: ["VIB-148"] })).toContain("[done] Link 3 added.");
+    // SAFETY: same shape as above.
+    after = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { blockedBy: string[] }[] };
+    expect(after.links[2]!.blockedBy).toEqual(["VIB-148"]);
+  });
+
   it("update_task is a write tool, so the always-human and no-delete invariants still hold", async () => {
     const { buildControllerToolkit } = await import("./controller-toolkit.server");
     const toolkit = buildControllerToolkit({
@@ -944,5 +1034,529 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
       mcps: [],
       kbs: ["grant-probe-handbook"],
     });
+  });
+});
+
+/**
+ * Ruling 139 (pass 34, F34-2): `update_agent_deployment` reads first and
+ * refuses a catalogued value it cannot store BY NAME, with nothing written —
+ * it used to answer `[done]` twelve times for capability ids that do not exist.
+ */
+describe("update_agent_deployment refuses catalogued values by name (ruling 139)", () => {
+  async function projectMd(): Promise<string> {
+    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
+    return readFileSync(resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot }), "utf8");
+  }
+  async function refused(args: Record<string, JsonValue>): Promise<string> {
+    const before = await projectMd();
+    const audits = listAuditEvents(app.db).length;
+    const reply = await call(ids.projectAdmin, "update_agent_deployment", args);
+    expect(reply.startsWith("[error] ")).toBe(true);
+    expect(reply).toContain("Nothing was written");
+    expect(await projectMd()).toBe(before);
+    expect(listAuditEvents(app.db)).toHaveLength(audits);
+    return reply;
+  }
+
+  it("an unknown id is refused by name with the valid ids, and nothing is written", async () => {
+    // Canary: make `capabilityPatchRefusal` return null.
+    const reply = await refused({
+      profileId: "developer",
+      capabilities: [{ capabilityId: "write-code", mode: "direct" }],
+    });
+    expect(reply).toContain('No capability answers to "write-code"');
+    expect(reply).toContain("execute-code-or-write-repo");
+    expect(reply).toContain("list_capabilities");
+  });
+
+  it("a specialist recommend, a non-human mode on an always-human id, and an operator id on a specialist are refused", async () => {
+    // Canary: validate against the union of both kinds.
+    expect(
+      await refused({ profileId: "developer", capabilities: [{ capabilityId: "comment-on-task", mode: "recommend" }] }),
+    ).toContain("cannot be set to recommend on a specialist");
+    expect(
+      await refused({ profileId: "developer", capabilities: [{ capabilityId: "merge-pull-request", mode: "direct" }] }),
+    ).toContain("reserved for humans");
+    expect(
+      await refused({ profileId: "developer", capabilities: [{ capabilityId: "dispatch-agents", mode: "direct" }] }),
+    ).toContain('"dispatch-agents" is an operator capability and cannot be set on a specialist');
+  });
+
+  it("the operator arm resolves the operator from project.md and refuses a specialist id on it", async () => {
+    // The KIND lives on the resolved profile, not the stored deployment row,
+    // so the operator is found the way the roster finds it.
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const { effectiveProfileView, VIEW_WITHOUT_POLICY } = await import("~/features/agents/agents-query.server");
+    const deployments = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.agents;
+    const operator = deployments.find(
+      (a) => effectiveProfileView(a, app.dataRoot, VIEW_WITHOUT_POLICY).kind === "operator",
+    );
+    expect(operator).toBeDefined();
+    const reply = await refused({
+      profileId: operator!.profileId,
+      capabilities: [{ capabilityId: "use-browser", mode: "direct" }],
+    });
+    expect(reply).toContain('"use-browser" is a specialist capability and cannot be set on the operator');
+  });
+
+  it("`report-validation-verdict` at human is refused", async () => {
+    // Canary: delete branch (e) — project.md stores `off` and the call answers `[done]`.
+    expect(
+      await refused({ profileId: "developer", capabilities: [{ capabilityId: "report-validation-verdict", mode: "human" }] }),
+    ).toContain("takes only direct or off");
+  });
+
+  it("an advisory id is refused as matrix-only, never as 'no such id'", async () => {
+    // Canary: fold it into branch (a).
+    const reply = await refused({ profileId: "developer", capabilities: [{ capabilityId: "read-repo-diff", mode: "off" }] });
+    expect(reply).toContain('"read-repo-diff" is a matrix-only capability with no toggle');
+    expect(reply).not.toContain("No capability answers to");
+  });
+
+  it("an unknown stage id is refused with the project's stage ids", async () => {
+    // Canary: drop the stage check (the write lands and the agent is eligible nowhere).
+    const reply = await refused({ profileId: "developer", stages: ["implementation"] });
+    expect(reply).toContain('"implementation" is not a stage of viberr-core');
+    expect(reply).toMatch(/stage ids are: .*impl/);
+  });
+
+  it("a legal patch still writes (the refusal is by name, not blanket)", async () => {
+    const reply = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      capabilities: [{ capabilityId: "comment-on-task", mode: "off" }],
+    });
+    expect(reply).toContain("[done]");
+  });
+});
+
+/**
+ * Ruling 139 (pass 34, F34-2, the read half): `get_project` reports each
+ * deployment's RESOLVED grants at the mode the roster renders, and
+ * `list_capabilities` publishes the catalogue with the absent-grant rule.
+ */
+describe("get_project and list_capabilities read the catalogue (ruling 139)", () => {
+  interface ProjectRead {
+    agents: {
+      profileId: string;
+      kind: string;
+      model: string;
+      effort: string;
+      autonomy?: string;
+      capabilities: { capabilityId: string; mode: string; label: string }[];
+    }[];
+  }
+  interface CatalogueRead {
+    kinds: Record<
+      "operator" | "agent",
+      { modes: string[]; capabilities: { id: string; whenUngranted: string; alwaysHuman: boolean }[] }
+    >;
+    alwaysHuman: string[];
+  }
+  const modeOf = (row: ProjectRead["agents"][number], id: string) =>
+    row.capabilities.find((c) => c.capabilityId === id)?.mode;
+
+  it("get_project reports resolved grants, model, effort and autonomy at the mode the roster renders", async () => {
+    // Canary: revert the agents map to the five-field literal.
+    // Canary 2 (policy): read `effectiveProfileView(a, dataRoot, VIEW_WITHOUT_POLICY)`
+    // instead of the roster — the operator's ABSENT deliver-review-pr reads `direct`.
+    const { updateProjectFile, readProjectFile } = await import("~/server/files/project-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    // A fixture that can move: strip the operator's stored deliver-review-pr
+    // grant and human-gate the pre-work boundary, so the absent mode resolves
+    // to `recommend` (ruling 28).
+    await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+      for (const a of p.frontmatter.agents) {
+        a.capabilities = a.capabilities.filter((g) => g.capabilityId !== "deliver-review-pr");
+      }
+    });
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    // `humanGatesPreWorkAdvance` holds only when EVERY pre-terminal boundary
+    // is human-gated, so gate each one the project declares.
+    const fm = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter;
+    const terminalId = fm.stages[fm.stages.length - 1]!.id;
+    for (const edge of fm.workflow.filter((b) => b.to !== terminalId)) {
+      const gated = await call(ids.projectAdmin, "set_transition_boundary", { from: edge.from, to: edge.to, boundary: "approval" });
+      expect(gated).toContain("[done]");
+    }
+
+    // SAFETY: the tool answers the JSON it built; the fields asserted below are its own.
+    const read = JSON.parse(await call(ids.viewer, "get_project")) as ProjectRead;
+    const operator = read.agents.find((a) => a.kind === "operator")!;
+    expect(["supervised", "full"]).toContain(operator.autonomy);
+    expect(modeOf(operator, "deliver-review-pr")).toBe("recommend");
+    const developer = read.agents.find((a) => a.profileId === "developer")!;
+    expect(developer.model.length).toBeGreaterThan(0);
+    expect(developer).toHaveProperty("effort");
+    expect(developer.autonomy).toBeUndefined();
+    // Anchored to project.md, not to the function the tool calls: the
+    // developer's create-task-branch mode equals what the FILE stores, `off`
+    // when the grant is absent (the grant-required family).
+    const stored =
+      readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+        .parsed.frontmatter.agents.find((a) => a.profileId === "developer")!
+        .capabilities.find((g) => g.capabilityId === "create-task-branch")?.mode ?? "off";
+    expect(modeOf(developer, "create-task-branch")).toBe(stored);
+    expect(developer.capabilities.every((c) => c.label.length > 0)).toBe(true);
+  });
+
+  it("list_capabilities lists every governed id per kind with whenUngranted, for any signed-in person", async () => {
+    // Canary: return the union of kinds (`c.kinds.includes(kind)` → true).
+    // SAFETY: the tool answers the JSON it built; the fields asserted below are its own.
+    const read = JSON.parse(await call(ids.nonMember, "list_capabilities", {}, null)) as CatalogueRead;
+    const operatorIds = read.kinds.operator.capabilities.map((c) => c.id);
+    const agentIds = read.kinds.agent.capabilities.map((c) => c.id);
+    expect(operatorIds).toContain("dispatch-agents");
+    expect(operatorIds).not.toContain("use-browser");
+    expect(agentIds).toContain("use-browser");
+    expect(agentIds).not.toContain("dispatch-agents");
+    expect(agentIds).not.toContain("read-repo-diff"); // matrix-only: no toggle
+    expect(read.kinds.operator.modes).toEqual(["direct", "recommend", "human", "off"]);
+    expect(read.kinds.agent.modes).toEqual(["direct", "human", "off"]);
+    const when = (kind: "operator" | "agent", id: string) =>
+      read.kinds[kind].capabilities.find((c) => c.id === id)?.whenUngranted;
+    // The ABSENT-grant mode, not the create-seed default.
+    expect(when("agent", "create-task-branch")).toBe("off");
+    expect(when("agent", "comment-on-task")).toBe("direct");
+    expect(when("operator", "dispatch-agents")).toBe("direct");
+    expect(when("operator", "generate-packets")).toBe("off");
+    expect(when("operator", "deliver-review-pr")).toBe("project policy (see get_project)");
+    expect(when("agent", "merge-pull-request")).toBe("human");
+    expect(read.alwaysHuman).toEqual(["merge-pull-request", "transition-to-done", "change-project-policy"]);
+  });
+
+  it("a write then a read in one session reports the new grant", async () => {
+    // Canary: drop the reproject in updateAgentProfile — the roster reads the
+    // projection and would report the OLD mode.
+    const set = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      capabilities: [{ capabilityId: "comment-on-task", mode: "off" }],
+    });
+    expect(set).toContain("[done]");
+    // SAFETY: the tool answers the JSON it built; the fields asserted below are its own.
+    let read = JSON.parse(await call(ids.projectAdmin, "get_project")) as ProjectRead;
+    expect(modeOf(read.agents.find((a) => a.profileId === "developer")!, "comment-on-task")).toBe("off");
+    await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      capabilities: [{ capabilityId: "comment-on-task", mode: "direct" }],
+    });
+    // SAFETY: as above.
+    read = JSON.parse(await call(ids.projectAdmin, "get_project")) as ProjectRead;
+    expect(modeOf(read.agents.find((a) => a.profileId === "developer")!, "comment-on-task")).toBe("direct");
+  });
+});
+
+/**
+ * Ruling 139 (pass 34, G34-1): effort is settable wherever model is, judged
+ * by name against the backend at save time, never clamped at run time.
+ */
+describe("effort and model at deploy are settable and refused by name (ruling 139)", () => {
+  interface ProjectRead {
+    agents: { profileId: string; backends: string[]; model: string; effort: string }[];
+  }
+  async function developer(): Promise<ProjectRead["agents"][number]> {
+    // SAFETY: the tool answers the JSON it built; the fields asserted are its own.
+    const read = JSON.parse(await call(ids.projectAdmin, "get_project")) as ProjectRead;
+    return read.agents.find((a) => a.profileId === "developer")!;
+  }
+
+  it("update_agent_deployment sets effort, refuses a tier the backend does not offer by name, and resets on a backend switch", async () => {
+    // Canary: remove `effort` from the schema, or drop the assert on the write surface.
+    // Backend-agnostic: earlier cases in this sequential store may have
+    // switched the developer, so every tier is chosen for the CURRENT backend.
+    const before = await developer();
+    const current = before.backends[0] === "codex" ? "codex" : "claude";
+    const other = current === "claude" ? "codex" : "claude";
+    const label = { claude: "Claude", codex: "Codex" } as const;
+    const tiers = { claude: "low, medium, high, xhigh, max", codex: "low, medium, high, xhigh" } as const;
+    const top = current === "claude" ? "max" : "xhigh";
+    const set = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", effort: top });
+    expect(set).toContain("[done]");
+    expect(set).toContain(`Effort is now ${top}`);
+    expect((await developer()).effort).toBe(top);
+
+    const refused = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", effort: "ultra" });
+    expect(refused).toContain(`[error] "ultra" is not an effort tier ${label[current]} offers. ${label[current]} takes: ${tiers[current]}.`);
+    expect((await developer()).effort).toBe(top); // nothing written
+
+    // A tier the OTHER backend does not list, sent with the switch: refused, nothing written.
+    const foreignTier = other === "codex" ? "max" : "minimal";
+    const wrongBackend = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", backend: other, effort: foreignTier });
+    expect(wrongBackend).toContain(`[error] "${foreignTier}" is not an effort tier ${label[other]} offers`);
+    expect((await developer()).backends).toEqual(before.backends);
+
+    const otherDefault = other === "codex" ? "medium" : "high";
+    const switched = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", backend: other });
+    expect(switched).toContain(`Backend switched to ${label[other]}: effort reset to its default (${otherDefault})`);
+    const after = await developer();
+    expect(after.backends).toEqual([other]);
+    expect(after.effort).toBe(otherDefault);
+    // Restore the fixture for the other cases.
+    await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", backend: current, model: before.model, effort: before.effort || top });
+  });
+
+  it("deploy_agent pins model and effort, audits them, and refuses an unknown tier before the write", async () => {
+    // Canary: keep `defaultEffortFor(backend)` at the deploy write (the override is ignored).
+    const minted = await call(ids.orgAdmin, "save_global_agent", {
+      name: "Effort Probe",
+      backend: "claude",
+      summary: "Probes the deploy overrides.",
+      stages: ["impl"],
+    });
+    expect(minted).toContain("[done]");
+    const refused = await call(ids.projectAdmin, "deploy_agent", { profileId: "effort-probe", effort: "ultra" });
+    expect(refused).toContain('[error] "ultra" is not an effort tier Claude offers');
+    const deployed = await call(ids.projectAdmin, "deploy_agent", { profileId: "effort-probe", model: "opus", effort: "max" });
+    expect(deployed).toContain("[done] Effort Probe deployed");
+    expect(deployed).toContain("Runs on Claude with model opus at effort max.");
+    // SAFETY: the tool answers the JSON it built; the fields asserted are its own.
+    const read = JSON.parse(await call(ids.projectAdmin, "get_project")) as ProjectRead;
+    const probe = read.agents.find((a) => a.profileId === "effort-probe")!;
+    expect(probe.model).toBe("opus");
+    expect(probe.effort).toBe("max");
+    const row = listAuditEvents(app.db, { action: "project.agent_profile.deployed" })[0]!;
+    expect(row.details).toMatchObject({ name: "Effort Probe", model: "opus", effort: "max" });
+  });
+});
+
+/**
+ * Ruling 140(a) (pass 34, G34-3): `create_task` takes `owner` and `dueDate`;
+ * a named owner is seated before the first operator run; the release word is
+ * refused by name at creation.
+ */
+describe("create_task seats a named owner and takes dueDate (ruling 140)", () => {
+  it("seats the named owner in the creating write, records dueDate, derives urgent from priority", async () => {
+    // Canary: drop the owner pass-through (the seat becomes the caller); drop
+    // the dueDate pass-through.
+    const reply = await call(ids.contributor, "create_task", {
+      title: "Seated for the maintainer",
+      goal: "Prove the seat. Done when Murat owns it from birth.",
+      owner: "murat@viberr.dev",
+      dueDate: "2026-09-30",
+      priority: "urgent",
+    });
+    expect(reply).toContain("[done]");
+    expect(reply).toContain("Owner: murat@viberr.dev, seated before the first operator run.");
+    const key = /VIB-\d+/.exec(reply)![0];
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const fm = readTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.ownerUserId).toBe(ids.maintainer);
+    expect(fm.dueDate).toBe("2026-09-30");
+    expect(fm.priority).toBe("urgent");
+    expect(fm.urgent).toBe(true);
+    expect(
+      listAuditEvents(app.db, { action: "task.created" })[0]!.details,
+    ).toMatchObject({ ownerUserId: ids.maintainer, seat: "named" });
+  });
+
+  it("the release word is refused by name; an unknown email is named; a viewer cannot be seated", async () => {
+    const none = await call(ids.contributor, "create_task", { title: "Nobody owns this", owner: "none" });
+    expect(none).toContain(
+      "[error] A new task is created with an owner; use `set_task_owner` to release the seat afterwards.",
+    );
+    const ghost = await call(ids.contributor, "create_task", { title: "Ghost owns this", owner: "ghost@viberr.dev" });
+    expect(ghost).toContain("[error] No Viberr user with the email ghost@viberr.dev.");
+    const viewer = await call(ids.contributor, "create_task", { title: "Viewer owns this", owner: "viewer@viberr.test" });
+    expect(viewer).toContain(
+      "Ownership can only be handed to a project member who can own tasks (contributor or above).",
+    );
+  });
+});
+
+/**
+ * B5 (pass 34, U34-3): the controller's own read-modify-write inside one turn
+ * is never refused by its own fingerprint; a hand-save landing between its
+ * read and its write IS.
+ */
+describe("update_agent_deployment carries the record it read (B5)", () => {
+  it("its own read-modify-write applies, and a save landing in between is refused", async () => {
+    // Canary: have the tool send a constant fingerprint — its own writes then
+    // fail, and a stale one succeeds.
+    const own = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      capabilities: [{ capabilityId: "comment-on-task", mode: "direct" }],
+    });
+    expect(own).toContain("[done]");
+
+    // A hand-save lands between a read and a write the tool performs. The tool
+    // reads the record at call time, so simulate the race by writing the file
+    // out from under an already-composed form.
+    const { updateAgentProfile, deploymentFingerprint } = await import(
+      "~/features/agents/agent-profile-actions.server"
+    );
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const deployment = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.agents.find((a) => a.profileId === "developer")!;
+    const staleForm = {
+      name: "Developer",
+      role: "Implementation",
+      backend: "claude" as const,
+      stages: ["impl"],
+      definition: "",
+      model: "sonnet",
+      effort: "high",
+      fingerprint: deploymentFingerprint(deployment),
+      caps: { "comment-on-task": "off" },
+      resources: { skills: [], mcps: [], kb: [] },
+    };
+    // The concurrent write.
+    await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      capabilities: [{ capabilityId: "ask-human", mode: "off" }],
+    });
+    const actor = { userId: ids.projectAdmin, label: "elif@viberr.dev" };
+    await expect(
+      updateAgentProfile(
+        app.db,
+        { projectSlug: SLUG, profileId: "developer", form: staleForm },
+        actor,
+        { dataRoot: app.dataRoot },
+      ),
+    ).rejects.toThrow("This profile changed while the editor was open.");
+  });
+});
+
+/**
+ * C4 (pass 34, U34-5): `invite_member` told the truth and took a role. It said
+ * "new members join as contributor" while the writer pushed viewer, so live
+ * three invites landed as Viewer and were repaired with `set_member_role` —
+ * two writes and two audit rows per person.
+ */
+describe("invite_member seats the role it is given (C4)", () => {
+  async function projectMd(): Promise<string> {
+    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
+    const { readFileSync } = await import("node:fs");
+    return readFileSync(resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot }), "utf8");
+  }
+
+  it("seats the role in ONE write with one audit row and no role change", async () => {
+    // Canary: hardcode `viewer` in the writer again.
+    const before = listAuditEvents(app.db, { action: "project.member.role_changed" }).length;
+    const reply = await call(ids.projectAdmin, "invite_member", {
+      name: "Seated Contributor",
+      email: "seated-contributor@viberr.test",
+      role: "contributor",
+    });
+    expect(reply).toContain("[done]");
+    expect(reply).toContain("joins as Contributor");
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const { findUserByEmail } = await import("~/server/auth/user-store.server");
+    const seated = findUserByEmail(app.db, "seated-contributor@viberr.test")!;
+    const member = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.members.find((m) => m.userId === seated.id)!;
+    expect(member.role).toBe("contributor");
+    const invited = listAuditEvents(app.db, { action: "project.member.invited" })[0]!;
+    expect(invited.details).toMatchObject({ email: "seated-contributor@viberr.test", role: "contributor" });
+    expect(listAuditEvents(app.db, { action: "project.member.role_changed" })).toHaveLength(before);
+  });
+
+  it("no role lands as viewer, and the description no longer promises contributor", async () => {
+    const reply = await call(ids.projectAdmin, "invite_member", {
+      name: "Unstated Seat",
+      email: "unstated-seat@viberr.test",
+    });
+    expect(reply).toContain("joins as Viewer");
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const user = findUserById(app.db, ids.projectAdmin)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: user.id, email: user.email, name: user.name },
+      projectSlug: SLUG,
+    });
+    const def = toolkit.tools.find((t) => t.name === "invite_member")!;
+    expect(def.description).not.toContain("join as contributor");
+    expect(def.description).toContain("members join as viewer unless you give one");
+  });
+
+  it("an unknown role is refused by name, with project.md byte-identical", async () => {
+    // Canary: drop the `z.enum` parse in inviteMember — the call answers
+    // [done] and project.md carries an `owner` member row the tolerant parse
+    // then drops silently.
+    const before = await projectMd();
+    const reply = await call(ids.projectAdmin, "invite_member", {
+      name: "Impossible Seat",
+      email: "impossible-seat@viberr.test",
+      role: "owner",
+    });
+    expect(reply).toContain("[error] Unknown project role.");
+    expect(await projectMd()).toBe(before);
+  });
+});
+
+/**
+ * C5 (pass 34, U34-4): a write the controller made for a person reads, on the
+ * Activity audit column, as that person via the controller — the disclosure
+ * ruling 99(b) requires, which this column used to drop.
+ */
+describe("a controller write discloses its instrument on Activity (C5)", () => {
+  it("renders the person, named, with the instrument", async () => {
+    // Canary: revert the audit column to `row.actor_name ?? …`.
+    const reply = await call(ids.projectAdmin, "update_project_settings", {
+      description: "Set through the controller for the instrument case.",
+    });
+    expect(reply).toContain("[done]");
+    const { listAuditLog } = await import("~/server/projections/activity-feed.server");
+    const rows = listAuditLog(app.db, SLUG, { limit: 20 });
+    const instrumented = rows.filter((r) => r.text.includes("(via the controller)"));
+    expect(instrumented.length).toBeGreaterThan(0);
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const elif = findUserById(app.db, ids.projectAdmin)!;
+    expect(instrumented[0]!.text).toContain(`${elif.name} (via the controller)`);
+  });
+});
+
+/**
+ * Pass 34 review (ruling 139, the read/write pairing): `update_agent_deployment`
+ * used to seed its form from the RAW stored grants, so `grantsFor` materialised
+ * every ABSENT id at its CATALOG default — an unrelated patch armed capabilities
+ * the deployment had withheld. Live in the review: `comment-on-task: off` on the
+ * seeded Reviewer stored `execute-code-or-write-repo`, `create-task-branch` and
+ * `open-review-pr` as `direct`.
+ */
+describe("update_agent_deployment never arms a capability it was not asked to", () => {
+  it("an unrelated patch leaves every withheld write grant withheld", async () => {
+    // Canary: seed `caps` from `deployment.capabilities` again.
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const stored = () =>
+      readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+        .parsed.frontmatter.agents.find((a) => a.profileId === "reviewer")!.capabilities;
+    const modeOf = (id: string) => stored().find((g) => g.capabilityId === id)?.mode ?? "absent";
+    // The seeded Reviewer stores none of the three write grants.
+    for (const id of ["execute-code-or-write-repo", "create-task-branch", "open-review-pr"]) {
+      expect(modeOf(id)).toBe("absent");
+    }
+    const reply = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "reviewer",
+      capabilities: [{ capabilityId: "comment-on-task", mode: "off" }],
+    });
+    expect(reply).toContain("[done]");
+    expect(modeOf("comment-on-task")).toBe("off");
+    // The point: none of the three became actionable.
+    for (const id of ["execute-code-or-write-repo", "create-task-branch", "open-review-pr"]) {
+      expect(modeOf(id), `${id} must not be armed by an unrelated patch`).toBe("off");
+    }
+  });
+});
+
+/**
+ * Pass 34 review, the same class as ruling 139's refusals: a setting the write
+ * cannot keep is refused by name instead of answering `[done]`.
+ */
+describe("update_agent_deployment refuses a setting the deployment cannot hold", () => {
+  it("autonomy on a SPECIALIST is refused, and nothing is written", async () => {
+    // Canary: drop the kind check — the call answers [done] for a value
+    // `updateAgentProfile` writes only for the operator.
+    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
+    const { readFileSync } = await import("node:fs");
+    const path = resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot });
+    const before = readFileSync(path, "utf8");
+    const reply = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      autonomy: "full",
+    });
+    expect(reply).toContain("[error] autonomy is an operator setting");
+    expect(readFileSync(path, "utf8")).toBe(before);
   });
 });

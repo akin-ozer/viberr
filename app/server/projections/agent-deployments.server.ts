@@ -15,15 +15,27 @@ import { deployedSpecialistBackends } from "~/server/agents/deployment-view.serv
  * mock's `role.toLowerCase()` string coincidence) joined with agent_runs so
  * an engagement with a live run is honestly marked `running`.
  *
- * Status vocabulary is the mock's, derived from real waiting state
- * (contracts §2.4):
- *   operator   waiting=human → "packet open" WITH a packet, else "waiting on
- *              human" · else "coordinating"
- *   primary    waiting=agent → "working" · waiting=human → "waiting on
- *              human" · else "on call"
- *   reviewer always "anchored · on call"
+ * Status vocabulary is the mock's (contracts §2.4), but since F34-5 it is
+ * derived from the engagement's OWN run row first and from the task's
+ * `waiting` flag only when no run is in flight — `waiting === "agent"` is a
+ * display flag about the task, not proof that THIS engagement is executing
+ * (ruling 91's family: `liveRuns` is the only proof a run is in flight). Live,
+ * the roster called a Developer "working" for twenty minutes after its run had
+ * finished because the operator's own turns kept the task agent-waiting, and
+ * called a reviewer "anchored · on call" while it was the one running.
  *
- * Done-stage tasks (the project's LAST stage) contribute nothing.
+ *   agent_runs state=running  → operator "coordinating" · anyone else "working"
+ *   agent_runs state=queued   → "queued" (admitted, no slot yet —
+ *                               run-service writes it when no reservation was
+ *                               granted)
+ *   no run, waiting=human     → operator "packet open" WITH a packet, else
+ *                               "waiting on human" · anyone else "waiting on
+ *                               human"
+ *   no run, otherwise         → "on call"
+ *
+ * The rule is the same for every engagement kind; the reviewer literal the
+ * mock hard-coded is gone. Done-stage tasks (the project's LAST stage)
+ * contribute nothing.
  */
 
 type DeploymentTaskRow = {
@@ -39,43 +51,55 @@ type DeploymentTaskRow = {
   has_packet: number;
 };
 
-type RunningRunRow = {
+type LiveRunRow = {
   task_key: string;
   kind: "operator" | "primary" | "reviewer";
   thread_id: string;
+  state: "running" | "queued";
 };
 
+type LiveRunState = LiveRunRow["state"];
+
 /**
- * UXV19-7: this derived the label from `waiting` ALONE — every operator on a
- * human-waiting task was reported "packet open".
+ * ONE status rule for every engagement kind (F34-5). The run row wins: a
+ * running row is the only fact that says this engagement is executing, and a
+ * queued row is a real state (run-service.server.ts writes it when admission
+ * granted no reservation), not an idle one. Only with no live row does the
+ * task's `waiting` flag speak, and then it names the TASK's state — parked on
+ * a human, or nothing to do right now ("on call").
  *
- * Human-waiting is not the same as packet-present, and two server modules say
- * so in as many words: review-queue.server.ts ("a review-stage task waiting on
- * a human can have no packet/recommendation … yet still need a human to accept
- * it") and decisions.server.ts (B-FD5, "acceptance-ready review-stage tasks —
- * the class that carries no decision OBJECT"). The roster was the only surface
- * naming an ARTIFACT where every other names the STATE — board "waiting on a
- * human", queue "needs a human decision", task page "Waiting on: Human
- * decision" — and it is the only one of the four that can be false: clicking
- * that row lands on a task page whose Decision packet section does not render,
- * while the Decisions surfaces simultaneously list nothing for it. Any
+ * UXV19-7 still holds inside the idle branch: a human-waiting operator is
+ * "packet open" only WITH a packet. Human-waiting is not the same as
+ * packet-present, and two server modules say so in as many words:
+ * review-queue.server.ts ("a review-stage task waiting on a human can have no
+ * packet/recommendation … yet still need a human to accept it") and
+ * decisions.server.ts (B-FD5, "acceptance-ready review-stage tasks — the class
+ * that carries no decision OBJECT"). The roster was the only surface naming an
+ * ARTIFACT where every other names the STATE — board "waiting on a human",
+ * queue "needs a human decision", task page "Waiting on: Human decision" — and
+ * it was the only one of the four that could be false: clicking that row
+ * landed on a task page whose Decision packet section does not render, while
+ * the Decisions surfaces simultaneously listed nothing for it. Any
  * non-terminal stage whose operator turn ends without opening a packet hits
  * this, not just Review.
  *
- * The state-named fallback is the vocabulary the rest of the app already uses
- * (and `primaryStatus`'s own human-waiting label), so the page-level "agent
- * threads waiting on a human" stat — which counts BOTH — stays exactly as
- * honest as it was.
+ * Before F34-5 an idle operator on a non-human-waiting task read
+ * "coordinating" and an idle deliverer on an agent-waiting task read
+ * "working" — both from the flag alone. Those two words now mean a running
+ * row and nothing else; the idle wording for that case is "on call".
  */
-function operatorStatus(waiting: Waiting, hasPacket: boolean): DeploymentStatus {
-  if (waiting !== "human") return "coordinating";
-  return hasPacket ? "packet open" : "waiting on human";
-}
-
-function primaryStatus(waiting: Waiting): DeploymentStatus {
-  if (waiting === "agent") return "working";
-  if (waiting === "human") return "waiting on human";
-  return "on call";
+function engagementStatus(
+  engagement: Engagement,
+  live: LiveRunState | null,
+  waiting: Waiting,
+  hasPacket: boolean,
+): DeploymentStatus {
+  if (live === "running") {
+    return engagement === "operator" ? "coordinating" : "working";
+  }
+  if (live === "queued") return "queued";
+  if (waiting !== "human") return "on call";
+  return engagement === "operator" && hasPacket ? "packet open" : "waiting on human";
 }
 
 /** Reviewer thread ids index into reviewers[] — "r0", "r1", … for app-started
@@ -83,6 +107,15 @@ function primaryStatus(waiting: Waiting): DeploymentStatus {
 function reviewerIndex(threadId: string): number {
   const match = /^[rc](\d+)/.exec(threadId);
   return match ? Number(match[1]) : 0;
+}
+
+/** The join key between a task's engagement and its run rows: operator and
+ *  primary are singletons per task; a reviewer is addressed by its index into
+ *  `reviewers[]`, which the run's thread id carries. */
+function engagementKey(taskKey: string, engagement: Engagement, index: number): string {
+  return engagement === "reviewer"
+    ? `${taskKey}·reviewer·${index}`
+    : `${taskKey}·${engagement}`;
 }
 
 export function listAgentDeployments(
@@ -128,31 +161,38 @@ export function listAgentDeployments(
     )
     .all(projectSlug) as DeploymentTaskRow[];
 
-  // SAFETY: the SELECT names three `agent_runs` columns 0001_baseline declares
-  // NOT NULL, and its CHECK restricts `kind` to exactly the three values
-  // RunningRunRow lists.
-  const runningRows = db
+  // SAFETY: the SELECT names four `agent_runs` columns 0001_baseline declares
+  // NOT NULL; the WHERE restricts `state` to the two values LiveRunRow lists,
+  // and `kind` to the three it lists because the fourth CHECK value,
+  // 'controller', is written only with `project_slug = ''` (the instance
+  // machinery's non-project scope), which a real project slug never equals.
+  const liveRows = db
     .prepare(
-      `SELECT task_key, kind, thread_id
+      `SELECT task_key, kind, thread_id, state
          FROM agent_runs
-        WHERE project_slug = ? AND state = 'running'`,
+        WHERE project_slug = ? AND state IN ('running', 'queued')`,
     )
-    .all(projectSlug) as RunningRunRow[];
-  const running = new Map<string, Set<string>>();
-  for (const row of runningRows) {
-    const key =
-      row.kind === "reviewer"
-        ? `${row.task_key}·reviewer·${reviewerIndex(row.thread_id)}`
-        : `${row.task_key}·${row.kind}`;
-    if (!running.has(key)) running.set(key, new Set());
-    running.get(key)!.add(row.thread_id);
-  }
-  const isRunning = (taskKey: string, engagement: Engagement, index = 0) =>
-    running.has(
-      engagement === "reviewer"
-        ? `${taskKey}·reviewer·${index}`
-        : `${taskKey}·${engagement}`,
+    .all(projectSlug) as LiveRunRow[];
+  // Two maps, engagement key → live state. Where both could name the same
+  // engagement, "running" outranks "queued": it is the stronger claim.
+  const running = new Set<string>();
+  const queued = new Set<string>();
+  for (const row of liveRows) {
+    const key = engagementKey(
+      row.task_key,
+      row.kind,
+      row.kind === "reviewer" ? reviewerIndex(row.thread_id) : 0,
     );
+    (row.state === "running" ? running : queued).add(key);
+  }
+  const liveState = (
+    taskKey: string,
+    engagement: Engagement,
+    index = 0,
+  ): LiveRunState | null => {
+    const key = engagementKey(taskKey, engagement, index);
+    return running.has(key) ? "running" : queued.has(key) ? "queued" : null;
+  };
 
   const instances: AgentDeploymentView[] = [];
   for (const task of tasks) {
@@ -167,6 +207,7 @@ export function listAgentDeployments(
       ? (JSON.parse(task.operator_json) as OperatorRef)
       : null;
     if (operator) {
+      const live = liveState(task.task_key, "operator");
       instances.push({
         profileId: "operator",
         role: "Operator",
@@ -174,8 +215,9 @@ export function listAgentDeployments(
         engagement: "operator",
         taskKey: task.task_key,
         taskTitle: task.title,
-        status: operatorStatus(task.waiting, task.has_packet === 1),
-        running: isRunning(task.task_key, "operator"),
+        status: engagementStatus("operator", live, task.waiting, task.has_packet === 1),
+        running: live === "running",
+        taskWaiting: task.waiting,
       });
     }
 
@@ -184,6 +226,7 @@ export function listAgentDeployments(
       ? (JSON.parse(task.specialist_json) as AgentRef)
       : null;
     if (specialist) {
+      const live = liveState(task.task_key, "primary");
       instances.push({
         profileId: specialist.profileId,
         role: specialist.role,
@@ -191,8 +234,9 @@ export function listAgentDeployments(
         engagement: "primary",
         taskKey: task.task_key,
         taskTitle: task.title,
-        status: primaryStatus(task.waiting),
-        running: isRunning(task.task_key, "primary"),
+        status: engagementStatus("primary", live, task.waiting, task.has_packet === 1),
+        running: live === "running",
+        taskWaiting: task.waiting,
       });
     }
 
@@ -201,6 +245,7 @@ export function listAgentDeployments(
     // to '[]' in the schema.
     const reviewers = JSON.parse(task.reviewers_json) as AgentRef[];
     reviewers.forEach((reviewer, index) => {
+      const live = liveState(task.task_key, "reviewer", index);
       instances.push({
         profileId: reviewer.profileId,
         role: reviewer.role,
@@ -208,8 +253,11 @@ export function listAgentDeployments(
         engagement: "reviewer",
         taskKey: task.task_key,
         taskTitle: task.title,
-        status: "anchored · on call",
-        running: isRunning(task.task_key, "reviewer", index),
+        // F34-5: the same rule as the two rows above — a supporting engagement
+        // with a live run says so, one without reads the task's state.
+        status: engagementStatus("reviewer", live, task.waiting, task.has_packet === 1),
+        running: live === "running",
+        taskWaiting: task.waiting,
       });
     });
   }

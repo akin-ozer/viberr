@@ -205,16 +205,18 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
     ).toBe(false);
   });
 
-  it("the working-state stat counts agent threads, not specialists", () => {
+  it("the run-in-flight stat counts agent threads, not specialists", () => {
     const html = renderToString(
-      <AgentStats profiles={3} operators={1} working={2} waiting={1} />,
+      <AgentStats profiles={3} operators={1} running={2} waiting={1} />,
     );
     // Non-vacuity: all four counters rendered, so a missing label would fail
-    // rather than pass by absence.
+    // rather than pass by absence. The third and fourth labels are F34-5's:
+    // the count is runs in flight (not "a working state" read off the task's
+    // waiting flag) and the waiting is the task's.
     expect(html).toContain("profiles approved · incl. operator");
     expect(html).toContain("tasks with a live operator");
-    expect(html).toContain("agent threads in a working state");
-    expect(html).toContain("agent threads waiting on a human · this project");
+    expect(html).toContain("agent threads with a run in flight");
+    expect(html).toContain("agent threads on tasks waiting on a human · this project");
     expect(
       BARE_SPECIALIST.test(html),
       `the Agents stat row still renders "specialist" — the objects it counts ` +
@@ -300,6 +302,7 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
   });
 
   const roleless = (patch: Partial<AgentProfileView>): AgentProfileView => ({
+    fingerprint: "fp-fixture",
     id: "docs-writer",
     kind: "specialist",
     name: "Org Docs Writer",

@@ -132,6 +132,35 @@ describe("createConnection", () => {
     expect(JSON.stringify(conn)).not.toContain("ghp_valid_token_42af");
   });
 
+  it("ruling 144(a): the workflow-scope advisory rides the connection record from the token's header", async () => {
+    // Canary: return `[]` for `advisories` in the record builder.
+    const db = makeDbWithUser();
+    const withWorkflow = await createConnection(
+      db,
+      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: validTransport().fetchImpl },
+    );
+    expect(withWorkflow.status).toBe("saved");
+    expect(listConnections(db)[0]!.advisories).toEqual([]);
+
+    const bare = makeDbWithUser();
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "other-owner" }, headers: { "x-oauth-scopes": "repo" } },
+      "GET /users/other-owner": { body: { public_repos: 1 } },
+    });
+    const without = await createConnection(
+      bare,
+      { owner: "other-owner", token: "ghp_valid_token_beef", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: gh.fetchImpl },
+    );
+    expect(without.status).toBe("saved");
+    const [conn] = listConnections(bare);
+    expect(conn!.advisories).toHaveLength(1);
+    expect(conn!.advisories[0]).toMatchObject({ id: "workflow_scope", source: "header" });
+  });
+
   it("refuses duplicates without a network round-trip", async () => {
     const db = makeDbWithUser();
     const gh = validTransport();

@@ -39,6 +39,7 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     priority: "normal",
     labels: [],
     dueDate: null,
+    blockedBy: [],
     archived: false,
     validation: "none",
     blockReason: null,
@@ -1128,12 +1129,12 @@ describe("F19-27: the board accept confirm discloses what it merges", () => {
         number: 124,
         state: "review",
         title: "Attach a credential",
-        revisionDrift: { aheadBy: 2, headSha: "a4c790ce63efbeef" },
+        revisionDrift: { headSha: "a4c790ce63efbeef", authored: 2, baseRefresh: null },
       },
     });
     expect(text).toContain("a4c790ce63ef");
-    expect(text).toContain("2 commits added since review");
-    expect(text).toContain("they merge unreviewed");
+    // Ruling 132: the ONE canonical sentence, verbatim.
+    expect(text).toContain("2 authored commits since review merge unreviewed");
   });
 
   // F19-23: the noun was already switched here; the VERB was not, so a single
@@ -1145,12 +1146,11 @@ describe("F19-27: the board accept confirm discloses what it merges", () => {
         number: 124,
         state: "review",
         title: "t",
-        revisionDrift: { aheadBy: 1, headSha: "a4c790ce63efbeef" },
+        revisionDrift: { headSha: "a4c790ce63efbeef", authored: 1, baseRefresh: null },
       },
     });
-    expect(text).toContain("1 commit added since review");
-    expect(text).toContain("it merges unreviewed");
-    expect(text).not.toContain("they merge unreviewed");
+    expect(text).toContain("1 authored commit since review merges unreviewed");
+    expect(text).not.toContain("commits since review merge unreviewed");
   });
 
   it("shows the verdict it is about to accept over", () => {
@@ -1235,6 +1235,21 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
     });
     expect(text).toContain("conflicts with the base branch");
     expect(text).toContain("Rebase the branch and re-review");
+  });
+
+  it("ruling 135: names an unpushed delivered revision ABOVE the conflict, through the server's own predicate", () => {
+    // Canary: drop `unpushedRevisionBlockedReason` from `acceptanceCeremonyRefusal`.
+    const text = openConfirm({
+      blockReason: null,
+      workRevisionSha: "9".repeat(40),
+      pr: {
+        number: 124, state: "review", title: "Attach a credential", mergeable: "conflicting", headSha: "1".repeat(40),
+        unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" },
+      },
+    });
+    expect(text).toContain("delivered revision `9999999` is not on PR #124");
+    expect(text).toContain("Deliver the branch to push it");
+    expect(text).not.toContain("Rebase the branch");
   });
 
   it("stays silent on a PR that merges cleanly", () => {
@@ -2010,14 +2025,14 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
         number: 124,
         state: "review",
         title: "t",
-        revisionDrift: { aheadBy: 2, headSha: "a4c790ce63efbeef" },
+        revisionDrift: { headSha: "a4c790ce63efbeef", authored: 2, baseRefresh: null },
       },
     })
       .container.querySelector("dialog")!
       .textContent!.replace(/\s+/g, " ");
     expect(text).toContain("PR #124 · in review");
     expect(text).toContain("a4c790ce63ef");
-    expect(text).toContain("2 commits added since review");
+    expect(text).toContain("2 authored commits since review merge unreviewed");
     expect(text).toContain("awaiting verdict"); // the ValidationPill verdict row
   });
 });
@@ -2097,6 +2112,55 @@ describe("D9: the board announces moves to a screen reader", () => {
         "Accepted VIB-1, moved to Done",
       ),
     );
+  });
+});
+
+describe("ruling 131: the wait chip on the card and the list row", () => {
+  const held = () =>
+    task({
+      key: "JC-9",
+      readiness: "blocked",
+      displayReadiness: "blocked",
+      waiting: "none",
+      blockedBy: [
+        { ref: "goal-1 link 2", label: "goal-1 link 2 (JC-3)", state: "done", taskKey: "JC-3", goalId: "goal-1" },
+        { ref: "goal-1 link 3", label: "goal-1 link 3", state: "open", taskKey: null, goalId: "goal-1" },
+        { ref: "JC-6", label: "JC-6", state: "failed", taskKey: "JC-6", goalId: null },
+      ],
+    });
+  const waitChipOf = (root: Element) =>
+    [...root.querySelectorAll(".pill.neutral.sm")].find((p) => (p.textContent ?? "").startsWith("blocked by "));
+
+  it("draws the NEUTRAL chip first, naming two entries and folding its own overflow, with every state in the title", () => {
+    // Canary: remove the `statePills.push` for the wait (no chip), or push it
+    // last (the fold below swallows it on a stormy card).
+    for (const view of [undefined, "list" as const]) {
+      const { container } = renderBoard([held()], view ? { view } : {});
+      const chip = waitChipOf(container)!;
+      expect(chip, `wait chip in ${view ?? "card"} view`).toBeTruthy();
+      expect(chip.textContent).toBe("blocked by goal-1 link 2 (JC-3), goal-1 link 3 +1");
+      expect(chip.className).not.toMatch(/\b(blocked|risk)\b/);
+      expect(chip.getAttribute("title")).toBe(
+        "goal-1 link 2 (JC-3) · done · goal-1 link 3 · open · JC-6 · failed",
+      );
+    }
+  });
+
+  it("leads the state stack: on a stormy card the wait chip is shown and the fold counts the rest", () => {
+    const stormy = task({
+      ...held(),
+      pr: { number: 124, state: "closed", title: "Attach a credential" },
+      prChecks: { total: 5, passing: 3, failing: 2, pending: 0, state: "failing" },
+      prReview: "changes_requested",
+      validation: "failing",
+    });
+    const { container } = renderBoard([stormy]);
+    const card = container.querySelector(".card")!;
+    expect(waitChipOf(card)).toBeTruthy();
+    const fold = [...card.querySelectorAll(".pill.neutral.sm")].find((p) => /^\+\d+$/.test(p.textContent ?? ""))!;
+    // wait + pr shown; checks, review, validation folded.
+    expect(fold.textContent).toBe("+3");
+    expect(fold.getAttribute("title")).not.toContain("blocked by");
   });
 });
 

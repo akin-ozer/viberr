@@ -1,3 +1,4 @@
+import { credentialAdvisories, type CredentialAdvisory } from "~/server/secrets/pat-store.server";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { withTransaction } from "~/server/db/transaction.server";
@@ -97,6 +98,8 @@ export interface ConnectionRecord {
    * `source` was already persisted and ignored; it now reaches the UI.
    */
   scopes: ConnectionScopeEvidence[];
+  /** Ruling 144(a): the same advisories the project credential card shows. */
+  advisories: CredentialAdvisory[];
   lastValidatedAt: string | null;
   createdAt: string;
   /**
@@ -158,6 +161,7 @@ function mapRow(row: ConnectionRow, now = new Date()): ConnectionRecord {
       if (sc.note) scope.note = sc.note;
       return scope;
     }),
+    advisories: credentialAdvisories(parsePatValidation(row.validation_json), []),
     lastValidatedAt: row.last_validated_at,
     createdAt: row.created_at,
     boundProjects: row.bound_projects,

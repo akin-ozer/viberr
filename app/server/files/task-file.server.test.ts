@@ -31,10 +31,12 @@ const FULL: ParsedTaskFile = {
     priority: "urgent",
     labels: [],
     dueDate: null,
+    blockedBy: [],
     archived: false,
     validation: "changed",
     workRevision: null,
     verdicts: [],
+    baseRefreshes: [],
     branch: "vib-142-attach-workspace",
     // P13-D-5: `repo` was here — the task-level override is deleted, so it is no
     // longer a known frontmatter field (a leftover line round-trips as unknown).

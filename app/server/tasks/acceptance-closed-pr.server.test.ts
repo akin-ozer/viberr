@@ -234,7 +234,7 @@ describe("path 3 — operatorAcceptCompletion", () => {
           number: 318,
           state: "review",
           title: "[VIB-1] Attach execution workspace",
-          revisionDrift: { aheadBy: 2, headSha: "aheadhead0000" },
+          revisionDrift: { headSha: "aheadhead0000", authored: 2, baseRefresh: null },
         },
       }),
       goal: "Prove the divergence note lands on the completion record.",
@@ -251,7 +251,8 @@ describe("path 3 — operatorAcceptCompletion", () => {
     expect(result.message).toMatch(/accepted|Done/i);
     expect(task().frontmatter.stage).toBe("done");
     const completion = task().timeline.find((e) => e.type === "completion");
-    expect(completion?.text).toContain("2 commits were added to the PR head");
+    // Ruling 132: the record says AUTHORED, in the shared vocabulary.
+    expect(completion?.text).toContain("2 authored commits were added to the PR head");
     // The note shows the first 12 chars of the drifted head sha.
     expect(completion?.text).toContain("aheadhead000");
   });
@@ -375,6 +376,10 @@ describe("path 3 — operatorAcceptCompletion", () => {
       // F21-17: null here because this fixture's head IS the reviewed revision;
       // when it is not, the fact travels into the recovery packet.
       revisionDrift: null,
+      revisionDriftSentence: "",
+      headSha: null,
+      unpushedRevision: null,
+      unpushedRevisionSentence: "",
     });
   });
 

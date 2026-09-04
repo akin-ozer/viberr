@@ -40,6 +40,11 @@ import {
   reprojectTask,
   taskRef,
   type TaskMutationContext,
+  recordRecommendationWithdrawal,
+  terminalStageIdFor,
+  withdrawAcceptanceOffers,
+  type OfferWithdrawalSlot,
+  type OfferWithdrawalCause,
 } from "./task-mutation.server";
 
 /**
@@ -210,12 +215,23 @@ export async function openAgentQuestionPacket(
   const packet = buildAgentQuestionPacket(input.actorRef, question);
 
   let opened = false;
+  // Ruling 137: an agent's question pauses coordination like any packet, so
+  // the standing acceptance offers are withdrawn on the record in the same write.
+  const questionCause: OfferWithdrawalCause = { kind: "packet", title: packet.title };
+  const terminalStageId = terminalStageIdFor(ctx, input.projectSlug);
+  const questionWithdrawal: OfferWithdrawalSlot = { offers: null };
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     // Re-check inside the locked write — the read above raced other writers.
     if (parsed.packet) return;
     parsed.packet = packet;
     // A question is a human hand-off: the board should say so.
     parsed.frontmatter.waiting = "human";
+    questionWithdrawal.offers = withdrawAcceptanceOffers(
+      parsed,
+      terminalStageId,
+      questionCause,
+      input.actorRef,
+    );
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),
       type: "blocked",
@@ -229,6 +245,15 @@ export async function openAgentQuestionPacket(
   });
   if (!opened) return false;
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  if (questionWithdrawal.offers) {
+    recordRecommendationWithdrawal(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      withdrawal: questionWithdrawal.offers,
+      cause: questionCause,
+      actor: { userId: null, label: encodeActorRef(input.actorRef) },
+    });
+  }
   recordAudit(db, {
     action: "task.agent.packet_opened",
     // P11-23: the agent opened this question packet — attribute it to the agent.

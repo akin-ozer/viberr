@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
@@ -121,10 +122,45 @@ async function runLoader(userId?: string): Promise<LoaderData> {
   } as never);
 }
 
+/**
+ * B5 (pass 34, U34-3): the fingerprint the agents LOADER ships for a
+ * deployment — what the editor submits back, so a save composed against a
+ * record a concurrent write replaced is refused instead of reverting it. Read
+ * the same way the loader reads it, so no case pins a value the page could not
+ * produce.
+ */
+/** The one field this harness reads out of an editor payload; `.loose()` keeps
+ *  every other key so re-serializing preserves the case's own form. */
+const editorPayloadSchema = z.object({ fingerprint: z.string().optional() }).loose();
+
+async function currentFingerprint(profileId: string): Promise<string> {
+  const { readProjectFile } = await import("~/server/files/project-writer.server");
+  const { deploymentFingerprint } = await import(
+    "~/features/agents/agent-profile-actions.server"
+  );
+  const deployment = readProjectFile({ projectSlug: "viberr-core", dataRoot: app.dataRoot })!
+    .parsed.frontmatter.agents.find((a) => a.profileId === profileId)!;
+  return deploymentFingerprint(deployment);
+}
+
 async function postAction(userId: string, fields: Record<string, string>) {
   const { action } = await import("~/routes/project.agents");
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
+  // The real editor always carries the record it was opened on (B5). A case
+  // that means to send a STALE one sets `fingerprint` in its own payload.
+  if (fields.intent === "update-profile" && fields.profileId && fields.payload) {
+    const parsed = editorPayloadSchema.parse(JSON.parse(fields.payload));
+    if (parsed.fingerprint === undefined) {
+      fields = {
+        ...fields,
+        payload: JSON.stringify({
+          ...parsed,
+          fingerprint: await currentFingerprint(fields.profileId),
+        }),
+      };
+    }
+  }
   const body = new URLSearchParams({ ...fields, _csrf: csrf });
   const request = app.request("/projects/viberr-core/agents", {
     method: "POST",
@@ -295,25 +331,31 @@ describe("loader", () => {
   it("derives live deployments — VIB-151 crew incl. its running runs (inserted above, not seeded)", async () => {
     const data = await runLoader(ids.arda);
     const vib151 = data.deployments.filter((d) => d.taskKey === "VIB-151");
+    // F34-5: the status is read from each engagement's own run row. The
+    // primary and the r0 reviewer have running rows (beforeAll) and say so; the
+    // operator has none, so it is "on call" even though the task is
+    // agent-waiting.
     expect(vib151.map((d) => [d.profileId, d.engagement, d.status])).toEqual([
-      ["operator", "operator", "coordinating"],
+      ["operator", "operator", "on call"],
       ["developer", "primary", "working"],
-      ["reviewer", "reviewer", "anchored · on call"],
+      ["reviewer", "reviewer", "working"],
     ]);
     // The running claude primary + codex r0 reviewer inserted in beforeAll.
     expect(vib151.find((d) => d.engagement === "primary")!.running).toBe(true);
     expect(vib151.find((d) => d.engagement === "reviewer")!.running).toBe(true);
+    expect(vib151.find((d) => d.engagement === "operator")!.running).toBe(false);
 
     // Done tasks contribute nothing; triage tasks have no operator.
     expect(data.deployments.some((d) => d.taskKey === "VIB-139")).toBe(false);
     expect(data.deployments.some((d) => d.taskKey === "VIB-166")).toBe(false);
 
-    // VIB-142 (review · waiting human): packet open / waiting on human.
+    // VIB-142 (review · waiting human, no runs): packet open / waiting on
+    // human for every engagement kind — the reviewer reads by the same rule.
     const vib142 = data.deployments.filter((d) => d.taskKey === "VIB-142");
     expect(vib142.map((d) => d.status)).toEqual([
       "packet open",
       "waiting on human",
-      "anchored · on call",
+      "waiting on human",
     ]);
   });
 
@@ -1556,5 +1598,147 @@ describe("F21-13 — a model foreign to the chosen backend is refused", () => {
       intent: "delete-profile",
       profileId: result.profileId!,
     });
+  });
+});
+
+/**
+ * Ruling 139 (pass 34, G34-1): the profile editor refuses a CHANGED effort
+ * tier the backend does not offer, by name; an UNCHANGED stale tier a
+ * deployment legitimately stores (Codex `minimal`, accepted but not offered)
+ * still saves an unrelated field.
+ */
+describe("effort tiers on the editor path (ruling 139)", () => {
+  it("refuses a CHANGED out-of-list tier and names the valid ones", async () => {
+    // Canary: make `assertEffortForBackend` a no-op — "ultra" lands in project.md.
+    const result = await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "developer",
+      payload: JSON.stringify({
+        name: "Developer",
+        role: "Implementation",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "",
+        model: "sonnet",
+        effort: "ultra",
+        caps: {},
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    });
+    expect(refusalStatus(result)).toBe(400);
+    expect(refusalError(result)).toContain('"ultra" is not an effort tier Claude offers. Claude takes: low, medium, high, xhigh, max.');
+    expect(readFileSync(path.join(app.dataRoot, "projects/viberr-core/project.md"), "utf8")).not.toContain("effort: ultra");
+  });
+
+  it("an UNCHANGED stale tier still saves an unrelated field", async () => {
+    // Canary: refuse unconditionally in the writer — the preserved `minimal`
+    // makes the form unsaveable.
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    await updateProjectFile({ projectSlug: "viberr-core", dataRoot: app.dataRoot }, (p) => {
+      const dep = p.frontmatter.agents.find((a) => a.profileId === "developer")!;
+      dep.definition = { ...dep.definition!, backends: ["codex"], model: "gpt-5.5", effort: "minimal" };
+    });
+    const result = saved(await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "developer",
+      payload: JSON.stringify({
+        name: "Developer (renamed)",
+        role: "Implementation",
+        backend: "codex",
+        stages: ["impl"],
+        definition: "",
+        model: "gpt-5.5",
+        effort: "minimal",
+        caps: {},
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    }));
+    expect(result.ok).toBe(true);
+    const file = readFileSync(path.join(app.dataRoot, "projects/viberr-core/project.md"), "utf8");
+    expect(file).toContain("Developer (renamed)");
+    expect(file).toContain("effort: minimal");
+  });
+});
+
+/**
+ * B5 (pass 34, U34-3): a profile save cannot silently revert a write it never
+ * saw. `updateAgentProfile` rebuilds the whole governed grant set from the
+ * SUBMITTED form, and the modal seeds that form once, at open time — so a
+ * modal opened before a concurrent write and saved after it reverted every
+ * grant that write changed, reported success and audited it.
+ */
+describe("B5: a stale editor cannot revert a concurrent write", () => {
+  const editorPayload = (fingerprint: string, caps: Record<string, string>) =>
+    JSON.stringify({
+      name: "Developer",
+      role: "Implementation",
+      backend: "claude",
+      stages: ["impl"],
+      definition: "",
+      model: "sonnet",
+      effort: "high",
+      fingerprint,
+      caps,
+      resources: { skills: [], mcps: [], kb: [] },
+    });
+
+  it("a save carrying a STALE fingerprint is refused, and the concurrent write survives", async () => {
+    // Canary: skip the comparison and write anyway — the case then finds the
+    // concurrent grant reverted, which is exactly what shipped.
+    const opened = await currentFingerprint("developer");
+
+    // A second actor lands a write between the editor's read and its save.
+    const concurrent = saved(await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "developer",
+      payload: editorPayload(opened, { "use-browser": "direct" }),
+    }));
+    expect(concurrent.ok).toBe(true);
+    const afterConcurrent = readFileSync(
+      path.join(app.dataRoot, "projects/viberr-core/project.md"),
+      "utf8",
+    );
+    expect(afterConcurrent).toContain("use-browser");
+
+    // The stale editor saves the form it opened BEFORE that write.
+    const stale = await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "developer",
+      payload: editorPayload(opened, { "use-browser": "off" }),
+    });
+    expect(refusalStatus(stale)).toBe(409);
+    expect(refusalError(stale)).toBe(
+      "This profile changed while the editor was open. Reopen it to see the current grants, then save again.",
+    );
+    // Byte for byte: the refused save wrote nothing at all.
+    expect(
+      readFileSync(path.join(app.dataRoot, "projects/viberr-core/project.md"), "utf8"),
+    ).toBe(afterConcurrent);
+  });
+
+  it("a save carrying the CURRENT fingerprint applies, and a create needs none", async () => {
+    // Canary: require the field on `create-profile` too.
+    const fresh = saved(await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "developer",
+      payload: editorPayload(await currentFingerprint("developer"), { "use-browser": "off" }),
+    }));
+    expect(fresh.ok).toBe(true);
+
+    const created = saved(await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        name: "No Fingerprint Needed",
+        role: "Probe",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "A create has no prior record.",
+        model: "sonnet",
+        effort: "high",
+        caps: {},
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    }));
+    expect(created.ok).toBe(true);
   });
 });

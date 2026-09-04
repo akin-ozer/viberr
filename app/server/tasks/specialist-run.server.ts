@@ -1,4 +1,9 @@
 import { execFile } from "node:child_process";
+import {
+  describeWorkspaceRefresh,
+  refreshWorkspaceFromMirror,
+  type WorkspaceRefreshInput,
+} from "./workspace-refresh.server";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -104,10 +109,6 @@ import {
   webSearchWithheldFromDenylist,
 } from "~/server/runtimes/run-service.server";
 import { describeCodexSandbox } from "~/server/runtimes/codex-runtime.server";
-import {
-  refreshProjectMirror,
-  type ProjectMirrorRequest,
-} from "./repo-mirror.server";
 import { publishRunLogAppended } from "~/server/runtimes/run-events.server";
 import { createLineRedactor } from "~/server/runtimes/run-sink.server";
 import {
@@ -503,6 +504,9 @@ export function resolvedResourceInputs(input: {
   cwd: string | null;
   repo: string | null;
   cloned: boolean;
+  /** Ruling 129: what the pre-run refresh did to a reused checkout; undefined
+   *  on a fresh clone and on a run with no working tree. */
+  workspaceRefresh: string | undefined;
   delivers: boolean;
   personaChars: number;
   skills: string[];
@@ -518,7 +522,7 @@ export function resolvedResourceInputs(input: {
   /** See `RunInputs.sandbox` — computed by {@link runSandboxDisclosure}. */
   sandbox: RunInputs["sandbox"];
 }): ResolvedResourceInputs {
-  return {
+  const resolved: ResolvedResourceInputs = {
     cwd: input.cwd,
     repo: input.repo,
     cloned: input.cloned,
@@ -548,6 +552,8 @@ export function resolvedResourceInputs(input: {
     },
     sandbox: input.sandbox,
   };
+  if (input.workspaceRefresh) resolved.workspaceRefresh = input.workspaceRefresh;
+  return resolved;
 }
 
 /**
@@ -588,6 +594,7 @@ function runInputsSummary(inputs: RunInputs): string {
     `${inputs.knowledge.length} knowledge base${inputs.knowledge.length === 1 ? "" : "s"}`,
     `${inputs.mcp.mounted.length} MCP server${inputs.mcp.mounted.length === 1 ? "" : "s"}`,
   ];
+  if (inputs.workspaceRefresh) bits.push(`workspace ${inputs.workspaceRefresh}`);
   const missing =
     inputs.unresolvedResources.length +
     inputs.mcp.unresolved.length +
@@ -1466,12 +1473,20 @@ async function dispatchAgentRun(
   // for. Outside the try so the undeployed-profile fallback can't swallow it.
   // An undeployed profile declares no stages to check against — the withheld
   // confinement above is what bounds that run instead (P14-RT-01).
+  // Ruling 133 (pass 34): the RUN boundary admits the engaged deliverer at
+  // every stage and keeps a supporting engagement stage-scoped; the admitted
+  // reason is recorded on the audit row.
+  let stageEligibility: "declared" | "engaged-deliverer" | "undeployed" = "undeployed";
   if (resolved) {
-    assertStageEligible(
+    const eligibility = runEligibilityFor(
       resolved,
+      existing.parsed.frontmatter.engagements,
+      engagement.profileId,
       existing.parsed.frontmatter.stage,
       projectBoard(ctx, input.projectSlug),
     );
+    if (!eligibility.ok) throw AppError.validation(eligibility.refusal);
+    stageEligibility = eligibility.why;
   }
 
   // R18-1: a REVIEWER must judge the work against the SAME knowledge-base
@@ -1798,6 +1813,7 @@ async function dispatchAgentRun(
     delivery,
     delivers,
   };
+  if (clone?.refreshed) promptInput.workspaceRefresh = clone.refreshed;
   if (anchor) promptInput.anchor = anchor;
   if (collab.evidence && realBackend) {
     promptInput.attachmentsDropRel = storeRelativePath(
@@ -2031,6 +2047,8 @@ async function dispatchAgentRun(
         cwd: runWorkdir,
         repo,
         cloned: !!clone?.dir,
+        // Ruling 129: what the pre-run refresh did, disclosed on the run.
+        workspaceRefresh: clone?.refreshed,
         delivers,
         personaChars: persona.length,
         skills,
@@ -2121,6 +2139,8 @@ async function dispatchAgentRun(
     backend,
     delivers,
     cloned: !!clone?.dir,
+    // Ruling 133: why the run was admitted at this stage.
+    stageEligibility,
   };
   recordAudit(db, {
     // ONE action id for every engaged agent (the former
@@ -2530,6 +2550,8 @@ export interface AnalyzePromptInput {
   /** The task-key branch the delivery must land on. */
   branch: string;
   cloned: boolean;
+  /** Ruling 129: what the pre-run refresh did to a REUSED checkout, in words. */
+  workspaceRefresh?: string;
   /** Why there is no checkout, when `cloned` is false and the server tried.
    *  Without this the agent can only infer a cause from an empty directory,
    *  and it inferred the most expensive wrong one: a missing credential. */
@@ -2600,7 +2622,12 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
           `off-limits.\n`
         : ``) +
       (input.cloned
-        ? `- The repository \`${input.repo}\` is already checked out in the current directory.\n`
+        ? `- The repository \`${input.repo}\` is already checked out in the current directory.` +
+          // Ruling 129: a REUSED checkout says what its refresh did, so an
+          // agent never reasons from a stale `origin/*` (or from a branch
+          // that shares no history with the base) without being told.
+          (input.workspaceRefresh ? ` Before this run Viberr ${input.workspaceRefresh}.` : ``) +
+          `\n`
         : input.cloneFailure
           ? // The server TRIED and failed. Telling the agent to clone here is a
             // trap: agents are never given the project's token (deliberately),
@@ -3108,6 +3135,7 @@ export async function resolveResumeConfinement(
       runInputs: resolvedResourceInputs({
         cwd: cloneDir,
         repo: projectRepo(ctx, input.projectSlug),
+        workspaceRefresh: undefined,
         cloned: !!cloneDir && existsSync(cloneDir),
         delivers: input.delivers === true,
         personaChars: persona.length,
@@ -3155,6 +3183,7 @@ export async function resolveResumeConfinement(
       runInputs: resolvedResourceInputs({
         cwd: taskCloneDir(ctx, input.projectSlug, input.taskKey, support),
         repo: projectRepo(ctx, input.projectSlug),
+        workspaceRefresh: undefined,
         cloned: false,
         delivers: input.delivers === true,
         personaChars: 0,
@@ -3260,6 +3289,10 @@ interface CloneOutcome {
   /** The checkout directory, or null when the run has no working tree. */
   dir: string | null;
   failure?: CloneFailure;
+  /** Ruling 129 (pass 34, Q34-5): what the pre-run refresh did to a REUSED
+   *  checkout, in the words `describeWorkspaceRefresh` gives it. Absent on a
+   *  fresh clone (nothing to refresh: it was just built from the mirror). */
+  refreshed?: string;
 }
 
 // `stripUngovernedRepoCatalog` (R18-3 / F18-8) moved to
@@ -3268,51 +3301,14 @@ interface CloneOutcome {
 // rule (Viberr owns the workspace catalog), and keeping them together is what
 // lets the mount guarantee "only Viberr content is discoverable" on its own.
 
-/**
- * C32-2 (pass 32): a `--local` clone's `origin/*` are the DELIVERING checkout's
- * local branches as they stood at ITS clone time — and that checkout's own
- * `origin/main` is never fetched again after it is cut. So a reviewer's
- * `git diff origin/main...HEAD` compared against a base that could be several
- * merges behind the PR's real base (live: VIB-2's reviewer saw VIB-1's README
- * as part of the change and found the right base only by reasoning). Refresh
- * the support checkout's remote-tracking refs from the project MIRROR — the
- * one store that is fetched against GitHub (when the network allows) with the
- * project's credential, which never enters the checkout: the fetch here is a
- * local path. Best-effort: no mirror (or a failed fetch) leaves the refs as
- * cloned, and says so.
- */
-async function refreshSupportBase(
-  db: DatabaseSync,
-  input: { projectSlug: string; repo: string; dataRoot?: string },
-  dir: string,
-): Promise<void> {
-  const cred = getProjectCredential(db, input.projectSlug);
-  const token = cred ? getPatToken(db, cred.id) : null;
-  const request: ProjectMirrorRequest = {
-    projectSlug: input.projectSlug,
-    repo: input.repo,
-    token,
-    create: false,
-  };
-  if (input.dataRoot) request.dataRoot = input.dataRoot;
-  const mirror = await refreshProjectMirror(request);
-  if (!mirror) return;
-  try {
-    await execFileAsync(
-      "git",
-      ["-C", dir, "fetch", "--quiet", mirror.dir, "+refs/heads/*:refs/remotes/origin/*"],
-      { timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
-    );
-  } catch (error) {
-    logger.warn(
-      "support checkout could not refresh its base refs from the project mirror — reviewing against the delivering checkout's clone-time base",
-      {
-        projectSlug: input.projectSlug,
-        repo: input.repo,
-        err: error instanceof Error ? error : new Error(String(error)),
-      },
-    );
-  }
+
+/** Ruling 129: the branch a reused checkout is refreshed against — the
+ *  project's own default, read from project.md like every other caller. */
+function defaultBranchForRefresh(input: { projectSlug: string; dataRoot?: string }): string {
+  const ref = input.dataRoot
+    ? { projectSlug: input.projectSlug, dataRoot: input.dataRoot }
+    : { projectSlug: input.projectSlug };
+  return readProjectFile(ref)?.parsed.frontmatter.defaultBranch || "main";
 }
 
 async function cloneRepo(
@@ -3383,7 +3379,17 @@ async function cloneRepo(
             githubRemoteSanitizationArgs(input.repo, dir),
             { timeout: 10_000 },
           );
-          await refreshSupportBase(db, input, dir);
+          // Ruling 129: the supporting checkout keeps its fetch-only refresh,
+          // now through the SAME function the delivering one uses.
+          const supportRefresh: WorkspaceRefreshInput = {
+            projectSlug: input.projectSlug,
+            repo: input.repo,
+            dir,
+            defaultBranch: defaultBranchForRefresh(input),
+            fastForward: false,
+          };
+          if (input.dataRoot) supportRefresh.dataRoot = input.dataRoot;
+          await refreshWorkspaceFromMirror(db, supportRefresh);
           await setIdentity(dir);
           await stripUngovernedRepoCatalog(dir);
           return { dir };
@@ -3411,7 +3417,35 @@ async function cloneRepo(
       // for it (and only those, via the per-process MOUNT_MARK) rather than
       // pulling them out from under it.
       await stripUngovernedRepoCatalog(dir);
-      return { dir };
+      // Ruling 129 (pass 34, Q34-5): THIS is the stale-checkout window. A
+      // workspace cloned once, from a repository that was still empty, was
+      // reused as it stood by every later run — agents hold no credential, so
+      // they could not fetch — and the spec writers committed unrelated root
+      // commits while the operator read a bootstrapped `main` through the
+      // mirror. Refresh `origin/*` from the mirror before the run starts, and
+      // fast-forward only a checkout that is unborn or clean on the default
+      // branch. A failure degrades with a warning: a cache never blocks a task.
+      // A supporting checkout keeps its fetch-only refresh (pass 32, C32-2),
+      // now through this same function.
+      const refreshInput: WorkspaceRefreshInput = {
+        projectSlug: input.projectSlug,
+        repo: input.repo,
+        dir,
+        defaultBranch: defaultBranchForRefresh(input),
+        fastForward: !input.support,
+      };
+      if (input.dataRoot) refreshInput.dataRoot = input.dataRoot;
+      const refresh = await refreshWorkspaceFromMirror(db, refreshInput);
+      const described = describeWorkspaceRefresh(refresh, defaultBranchForRefresh(input));
+      if (refresh.status === "fetch_failed" || refresh.status === "no_mirror") {
+        logger.warn("workspace refresh degraded — the run proceeds on the checkout as it stands", {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          repo: input.repo,
+          detail: described,
+        });
+      }
+      return described ? { dir, refreshed: described } : { dir };
     }
     mkdirSync(path.dirname(dir), { recursive: true });
 
@@ -3595,11 +3629,13 @@ export interface DeployedSpecialistView {
 }
 
 /**
- * True when a specialist may work a task at `stageId`, resolved against THIS
- * board (R14-1). Declared ids match literally first, then by structural role, and
- * a declaration that means nothing on this board is unrestricted — see
- * `~/shared/workflow/stage-eligibility`. Consumed by the operator picker and the
- * assign/run guards (F1).
+ * True when a profile may be NEWLY ENGAGED on a task at `stageId`, resolved
+ * against THIS board (R14-1). Declared ids match literally first, then by
+ * structural role, and a declaration that means nothing on this board is
+ * unrestricted — see `~/shared/workflow/stage-eligibility`. Consumed by the
+ * operator picker and the two new-engagement guards (`assignSpecialist`,
+ * `assignReviewer`). Ruling 133 (pass 34): this is NOT the run guard for an
+ * engaged deliverer any more — see {@link runEligibilityFor}.
  *
  * `board` is optional only so the pure-id call sites in tests stay readable;
  * every production caller passes the project's stages + workflow, because
@@ -3621,29 +3657,107 @@ export function specialistEligibleForStage(
   return stageEligible(spec, stageId, board.stages, board.workflow);
 }
 
+type EligibilityBoard = {
+  stages: readonly { id: string }[];
+  workflow: readonly { from: string; to: string }[];
+};
+
+/** The dispatcher's own refusal sentence, shared by every door (ruling 133). */
+function stageRefusalSentence(
+  spec: { name: string; stages: string[]; spanAll: boolean },
+  stageId: string,
+  board?: EligibilityBoard | null,
+): string {
+  const scopedTo = board
+    ? resolveDeclaredStages(spec.stages, board.stages, board.workflow).join(", ")
+    : spec.stages.join(", ");
+  return `${spec.name} is not eligible for the "${stageId}" stage — its profile is scoped to ${
+    scopedTo || spec.stages.join(", ") || "no stages"
+  }. Change the task's stage or the profile's eligible stages.`;
+}
+
 /**
- * Enforce agent stage eligibility (F1): reject assigning/running a specialist on
- * a task whose current stage the specialist isn't eligible for. The Agents UI
- * shows "N of M stages" per profile; this makes that promise real instead of
- * decorative. `spanAll` and no-declared-stages profiles are always eligible.
+ * Enforce stage eligibility for a NEW engagement (F1, narrowed by ruling 133):
+ * reject engaging a profile on a task whose current stage it isn't eligible
+ * for. The Agents UI shows "N of M stages" per profile; this makes that
+ * promise real where it applies: at `assignSpecialist` and `assignReviewer`.
+ * `spanAll` and no-declared-stages profiles are always eligible.
  */
 function assertStageEligible(
   spec: { name: string; stages: string[]; spanAll: boolean },
   stageId: string,
-  board?: {
-    stages: readonly { id: string }[];
-    workflow: readonly { from: string; to: string }[];
-  } | null,
+  board?: EligibilityBoard | null,
 ): void {
   if (specialistEligibleForStage(spec, stageId, board)) return;
-  const scopedTo = board
-    ? resolveDeclaredStages(spec.stages, board.stages, board.workflow).join(", ")
-    : spec.stages.join(", ");
-  throw AppError.validation(
-    `${spec.name} is not eligible for the "${stageId}" stage — its profile is scoped to ${
-      scopedTo || spec.stages.join(", ") || "no stages"
-    }. Change the task's stage or the profile's eligible stages.`,
+  throw AppError.validation(stageRefusalSentence(spec, stageId, board));
+}
+
+/** Why a run at this stage is admitted (ruling 133). `declared` is tested
+ *  FIRST so the exemption is named only when it was needed: by dispatch time
+ *  the auto-engage has already written `delivers: true`, so an exemption-first
+ *  order would stamp `engaged-deliverer` on every delivering run. */
+export type RunEligibility =
+  | { ok: true; why: "declared" | "engaged-deliverer" }
+  | { ok: false; refusal: string };
+
+/**
+ * Ruling 133 (pass 34, F34-16): the ONE home for "may this profile RUN on this
+ * task at this stage". A profile eligible for the stage runs (`declared`); the
+ * task's ENGAGED DELIVERER runs at every stage (`engaged-deliverer`): rework,
+ * conflict resolution and follow-ups belong to the agent that owns the branch,
+ * whatever stage the board shows the work at. A supporting engagement stays
+ * stage-scoped, and an unengaged profile is judged by the new-engagement rule.
+ * Live (JC-3): the deliverer was scoped to Backlog + Design, the task sat at
+ * Review, and the conflict packet's recommended option could not execute
+ * while a human @mention ran the same agent through an ungated door.
+ */
+export function runEligibilityFor(
+  spec: { name: string; stages: string[]; spanAll: boolean },
+  engagements: readonly { profileId: string; delivers: boolean }[],
+  profileId: string,
+  stageId: string,
+  board?: EligibilityBoard | null,
+): RunEligibility {
+  if (specialistEligibleForStage(spec, stageId, board)) return { ok: true, why: "declared" };
+  if (engagements.some((e) => e.profileId === profileId && e.delivers)) {
+    return { ok: true, why: "engaged-deliverer" };
+  }
+  return { ok: false, refusal: stageRefusalSentence(spec, stageId, board) };
+}
+
+/**
+ * Ruling 133: the same rule on the @mention RESUME door, which used to check
+ * continuity and principal but never the stage (`resumeRun` bypasses
+ * `dispatchAgentRun`). The engaged deliverer resumes anywhere; a supporting
+ * engagement is refused at a stage its profile does not declare; a profile
+ * that is NOT engaged at all (released, or never engaged, whose finished run
+ * rows and provider session survive) is judged by the new-engagement rule.
+ * An undeployed profile declares no stages to check against and passes
+ * through, exactly as the dispatch's undeployed catch does.
+ */
+export function assertResumeEligible(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  profileId: string,
+): void {
+  const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  if (!existing) throw AppError.notFound(`Task ${taskKey} not found.`);
+  let resolved: ResolvedSpecialist | null = null;
+  try {
+    resolved = resolveDeployedSpecialist(ctx, projectSlug, profileId);
+  } catch {
+    // Undeployed: nothing declares stages to check against (P14-RT-01).
+    return;
+  }
+  const eligibility = runEligibilityFor(
+    resolved,
+    existing.parsed.frontmatter.engagements,
+    profileId,
+    existing.parsed.frontmatter.stage,
+    projectBoard(ctx, projectSlug),
   );
+  if (!eligibility.ok) throw AppError.validation(eligibility.refusal);
 }
 
 /**

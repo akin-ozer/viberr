@@ -1590,6 +1590,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .op-rec-kind svg { width: 12px; height: 12px; }
 .op-rec-title { font-family: var(--font-display); font-weight: 600; font-size: .92rem; color: var(--fg); }
 .op-rec-detail { margin-top: .25rem; font-size: .86rem; color: var(--muted); line-height: 1.45; }
+.op-rec-revision { font-size: .86rem; color: var(--muted); }
 /* Hunt 2026-08-29: the run_agent card's DIRECTIVE — the instruction Apply
    hands the dispatched run. Quoted and set off from the reasoning above it. */
 .op-rec-prompt { margin-top: .25rem; font-size: .86rem; color: var(--fg); line-height: 1.45; font-style: italic; }

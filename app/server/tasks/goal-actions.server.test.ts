@@ -1,6 +1,10 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { z } from "zod";
+import { goalLinkSchema } from "~/schemas/goal-file.schema";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { DatabaseSync } from "node:sqlite";
+import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import {
   setupAppTest,
   type AppTestContext,
@@ -49,6 +53,92 @@ async function closeTaskToDone(taskKey: string) {
   const { rebuildTaskFile } = await import("~/server/projections/rebuilder.server");
   rebuildTaskFile(app.db, SLUG, taskKey, { dataRoot: app.dataRoot });
 }
+
+describe("ruling 131(c): chain-created tasks inherit the link's declared wait", () => {
+  it("goal-2's link 1 declares a wait on goal-1 link 2: the created task carries it, waiting is none, the history says so, the create trigger is handed over (and refused, A12); a wait that can no longer be satisfied parks the chain", async () => {
+    // Canaries: drop `blockedBy` from `startLinkTaskLocked`'s createTask
+    // input (link 2's task is born free); swallow the validation error in
+    // `startLinkTask`'s catch (the chain never parks).
+    const { createGoal, getGoalView } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { setTaskArchived } = await import("./task-actions.server");
+    const runOperator = vi.fn((_db: DatabaseSync, _input: RunOperatorInput) =>
+      Promise.resolve({ runId: "run_x", queued: false, backend: "claude" as const, autonomy: "supervised" as const }),
+    );
+    const ctx = { dataRoot: app.dataRoot, deps: { runOperator } };
+    // The demo seed deploys no operator; `autoInvokeOperator` returns early
+    // without one, so deploy one for the hand-over to have a seam to reach.
+    const { readProjectFile, updateProjectFile } = await import("~/server/files/project-writer.server");
+    const pf = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!;
+    if (!pf.parsed.frontmatter.agents.some((a) => a.profileId === "operator")) {
+      await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (proj) => {
+        proj.frontmatter.agents.push({
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: { kind: "operator", name: "Operator", role: "Task coordinator", backends: ["claude"], model: "sonnet", autonomy: "supervised" },
+        });
+      });
+      const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    }
+    const goal1 = await createGoal(
+      app.db,
+      { projectSlug: SLUG, title: "Foundation", links: [{ title: "Base A", goal: "A. Done when merged." }, { title: "Base B", goal: "B. Done when merged." }] },
+      actorOf(contributorId, "selin@viberr.dev"),
+      ctx,
+    );
+    const goal2 = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Dependent",
+        links: [
+          { title: "Needs base B", goal: "C. Done when merged.", blockedBy: [`${goal1.goalId} link 2`] },
+          { title: "Needs base A", goal: "D. Done when merged.", blockedBy: [`${goal1.goalId} link 1`] },
+        ],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      ctx,
+    );
+    const first = readTaskFile({ projectSlug: SLUG, taskKey: goal2.activeTaskKey!, dataRoot: app.dataRoot })!.parsed;
+    expect(first.frontmatter.blockedBy).toEqual([`${goal1.goalId} link 2`]);
+    expect(first.frontmatter.waiting).toBe("none");
+    expect(first.timeline.some((e) => e.title === "Waits on other work")).toBe(true);
+    // The hand-over is fire-and-forget behind a dynamic import: poll for it.
+    const deadline = Date.now() + 4000;
+    while (!runOperator.mock.calls.some((c) => c[1].taskKey === goal2.activeTaskKey && c[1].trigger === "create")) {
+      if (Date.now() > deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const handed = runOperator.mock.calls.find((c) => c[1].taskKey === goal2.activeTaskKey && c[1].trigger === "create");
+    expect(handed, "the create trigger reached the seam (its refusal is A12's real-runOperator test)").toBeDefined();
+    // A declared wait on a later link of the SAME chain is refused at declaration.
+    await expect(
+      createGoal(
+        app.db,
+        { projectSlug: SLUG, title: "Backwards", links: [{ title: "L1", goal: "x", blockedBy: ["goal-999 link 1"] }] },
+        actorOf(contributorId, "selin@viberr.dev"),
+        ctx,
+      ),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("goal-999 is not a goal in this project") });
+
+    // Link 2 of goal-2 waits on goal-1 link 1 = goal1's first task. Archive
+    // that task, then complete goal-2 link 1 by hand: the chain tries to start
+    // link 2, the wait can never be satisfied, and the chain parks.
+    await setTaskArchived(app.db, { projectSlug: SLUG, taskKey: goal1.activeTaskKey!, archived: true }, actorOf(orgAdminId, "arda@viberr.dev"), ctx);
+    await closeTaskToDone(goal2.activeTaskKey!);
+    const { reconcileGoal } = await import("./goal-actions.server");
+    await reconcileGoal(app.db, SLUG, goal2.goalId, ctx);
+    const parked = getGoalView(SLUG, goal2.goalId, ctx)!;
+    expect(parked.status).toBe("attention");
+    expect(parked.history.some((h) => /Chain paused \(attention\): creating the next link's task failed \(.*is archived/.test(h.text))).toBe(true);
+    expect(parked.links[1]!.taskKey).toBeNull();
+  });
+});
 
 describe("chained goals", () => {
   let goalId = "";
@@ -843,5 +933,124 @@ describe("chained goals — retry re-parks when its task cannot be created", () 
         },
       );
     }
+  });
+});
+
+/**
+ * Pass 34 review (ruling 131's projection half): `goal_projections.links_json`
+ * is only rewritten when the goal file's content hash changes, so an existing
+ * store's rows carry links written before `blockedBy` existed — and the
+ * Controller page reads `l.blockedBy.length` off exactly those rows.
+ */
+describe("listGoals parses stored links instead of asserting their shape", () => {
+  it("a row written before ruling 131 reads blockedBy as an empty list, not undefined", async () => {
+    // Canary: restore `links = decoded as GoalLink[]` — `blockedBy` comes back
+    // undefined and the Controller page's `l.blockedBy.length` throws.
+    const { createGoal, listGoals } = await import("./goal-actions.server");
+    const goal = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Chain with a pre-131 projection row",
+        links: [
+          { title: "First", goal: "First. Done when merged." },
+          { title: "Second", goal: "Second. Done when merged." },
+        ],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    // SAFETY: the projection row exists (the goal was just created) and
+    // `links_json` is NOT NULL with a '[]' default, so this SELECT answers one
+    // row with that one string column.
+    const row = app.db
+      .prepare(`SELECT links_json FROM goal_projections WHERE goal_id = ?`)
+      .get(goal.goalId) as { links_json: string };
+    // The pre-ruling row shape: the same links with the key that did not exist
+    // yet removed. Parsed with the schema that tolerates its absence, so this
+    // fixture cannot drift from what the reader accepts.
+    const legacy = z
+      .array(goalLinkSchema)
+      .parse(JSON.parse(row.links_json))
+      .map(({ blockedBy: _dropped, ...rest }) => rest);
+    app.db
+      .prepare(`UPDATE goal_projections SET links_json = ? WHERE goal_id = ?`)
+      .run(JSON.stringify(legacy), goal.goalId);
+
+    const read = listGoals(app.db, SLUG).find((g) => g.id === goal.goalId)!;
+    expect(read.links.length).toBeGreaterThan(0);
+    for (const link of read.links) {
+      expect(link.blockedBy).toEqual([]);
+      expect(link.blockedBy.length).toBe(0);
+    }
+  });
+});
+
+/**
+ * Pass 34 review (ruling 131 + the chain editor): a goal-link dependency is
+ * stored BY INDEX, and `remove_pending_link` renumbers every later link — so a
+ * removal used to silently re-point or orphan every reference to them.
+ */
+describe("remove_pending_link refuses to renumber under a live reference", () => {
+  it("refuses while a TASK waits on a link at or after it, and names the task", async () => {
+    // Canary: drop the `referencesToLinksFrom` guard — the removal lands, the
+    // reference denotes different work, and nothing says so.
+    const { createGoal, updateGoal } = await import("./goal-actions.server");
+    const { createTask } = await import("./task-actions.server");
+    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const goal = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Chain a task waits on",
+        links: [
+          { title: "One", goal: "One. Done when merged." },
+          { title: "Two", goal: "Two. Done when merged." },
+          { title: "Three", goal: "Three. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const waiter = await createTask(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Waits on the third link",
+        blockedBy: [`${goal.goalId} link 3`],
+      },
+      actor,
+      ctx,
+    );
+    await expect(
+      updateGoal(app.db, { projectSlug: SLUG, goalId: goal.goalId, action: { op: "remove_pending_link", index: 2 } }, actor, ctx),
+    ).rejects.toThrow(new RegExp(`Link 2 cannot be removed.*${waiter.key}`, "s"));
+
+    // A link BEFORE every reference still removes: the guard is about the
+    // links that would move, not about the goal having any dependents.
+    const goal2 = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Chain whose first link is free",
+        links: [
+          { title: "One", goal: "One. Done when merged." },
+          { title: "Two", goal: "Two. Done when merged." },
+          { title: "Three", goal: "Three. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    await createTask(
+      app.db,
+      { projectSlug: SLUG, title: "Waits on link 1 of the other chain", blockedBy: [`${goal2.goalId} link 1`] },
+      actor,
+      ctx,
+    );
+    await expect(
+      updateGoal(app.db, { projectSlug: SLUG, goalId: goal2.goalId, action: { op: "remove_pending_link", index: 3 } }, actor, ctx),
+    ).resolves.toBeDefined();
   });
 });

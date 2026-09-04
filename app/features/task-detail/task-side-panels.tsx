@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { unpushedRevisionOf } from "~/schemas/task-file.schema";
 import { Link, useFetcher } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import {
@@ -34,6 +35,13 @@ import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 function viewerRole(myRole: string | null): ProjectRole | null {
   return PROJECT_ROLES.find((role) => role === myRole) ?? null;
 }
+
+/** Ruling 134(c): the push control's label, with its own busy text and tooltip. */
+export const PUSH_LABEL = (rev: string, prNumber: number): string =>
+  `Push ${rev} to PR #${prNumber}`;
+/** The refusal the server would give a plain push of a diverged branch. */
+export const DIVERGED_PUSH_REFUSAL =
+  "Origin's copy of this branch holds commits the workspace does not, so a plain push would be refused as non-fast-forward. Resolve the branch history first; the operator can open a decision packet for it.";
 
 export function GithubTrace({
   task,
@@ -104,6 +112,19 @@ export function GithubTrace({
   delivering?: boolean;
   merging?: boolean;
 }) {
+  // Ruling 134(c) / 135: the recorded unpushed revision, current only.
+  const unpushed = unpushedRevisionOf(task.pr, task.workRevisionSha ?? null);
+  const prTerminal =
+    !task.pr || task.pr.state === "closed" || task.pr.state === "merged";
+  const pushOffer =
+    task.pr && !prTerminal && unpushed
+      ? {
+          prNumber: task.pr.number,
+          rev: unpushed.revisionSha.slice(0, 7),
+          head: unpushed.prHeadSha ? unpushed.prHeadSha.slice(0, 7) : null,
+          relation: unpushed.relation,
+        }
+      : null;
   // Admin escape hatch (DG-2): acceptance is wedged either by the acceptance gate
   // itself (`acceptance.blockedReason` — the live, full-order refusal) OR by an open
   // blocked decision packet a crashed run left behind. Surfaced for admins
@@ -339,24 +360,53 @@ export function GithubTrace({
             ))}
           </div>
         )}
+        {/* Ruling 135: the delivered revision is not on the open PR. Named
+            beside the branch so the push control below reads from a fact. */}
+        {pushOffer && (
+          <div className="kv-row">
+            <span className="k">Unpushed</span>
+            <span className="v">
+              <span className="mono">{pushOffer.rev}</span> is not on PR{" "}
+              <span className="mono">#{pushOffer.prNumber}</span>
+              {pushOffer.head ? (
+                <>
+                  {" "}(its head is <span className="mono">{pushOffer.head}</span>)
+                </>
+              ) : null}
+            </span>
+          </div>
+        )}
         {/* R15-2 safety net (b): with delivery now an operator decision, a
             human with authority can always ship the branch by hand — shown when
-            no live PR stands (none yet, or the last one closed/merged). */}
-        {onDeliver &&
-          (!task.pr ||
-            task.pr.state === "closed" ||
-            task.pr.state === "merged") && (
-            <button
-              type="button"
-              className="btn primary sm panel-act"
-              disabled={delivering}
-              onClick={onDeliver}
-              title="Push the delivering agent's branch and open the review PR (audited)"
-            >
-              <Icon name="branch" />
-              {delivering ? "Delivering…" : "Deliver branch & open PR"}
-            </button>
-          )}
+            no live PR stands (none yet, or the last one closed/merged) and,
+            since ruling 134(c), whenever the open PR does not carry the
+            delivered revision: the same door pushes the revision to that PR.
+            A DIVERGED remote gets the fact and a disabled control naming the
+            refusal the server would give, never a button that then fails. */}
+        {onDeliver && (prTerminal || pushOffer) && (
+          <button
+            type="button"
+            className="btn primary sm panel-act"
+            disabled={delivering || pushOffer?.relation === "diverged"}
+            onClick={onDeliver}
+            title={
+              pushOffer?.relation === "diverged"
+                ? DIVERGED_PUSH_REFUSAL
+                : pushOffer
+                  ? "Push the delivered revision to the open review PR (audited)"
+                  : "Push the delivering agent's branch and open the review PR (audited)"
+            }
+          >
+            <Icon name="branch" />
+            {pushOffer
+              ? delivering
+                ? "Pushing…"
+                : PUSH_LABEL(pushOffer.rev, pushOffer.prNumber)
+              : delivering
+                ? "Delivering…"
+                : "Deliver branch & open PR"}
+          </button>
+        )}
         {/* F19-24: this is a Done writer — it finishes the acceptance by
             performing the irreversible merge, and it is the mandatory human half
             of EVERY full-autonomy operator acceptance (R16-6). It used to merge
@@ -414,6 +464,25 @@ export function TaskDetailsPanel({
   const fetcher = useFetcher<ActionResult>();
   useActionFeedback(fetcher);
   const [open, setOpen] = useState(false);
+  // Ruling 131 (pass 34): the wait has its OWN form, fetcher, toast and
+  // refusal. Riding the metadata form would let its close-on-success swallow
+  // a dependency refusal, and a bad reference is exactly what must stay on
+  // screen.
+  const depFetcher = useFetcher<ActionResult>();
+  useActionFeedback(depFetcher);
+  const [depOpen, setDepOpen] = useState(false);
+  const [depText, setDepText] = useState(task.blockedBy.map((e) => e.ref).join(", "));
+  const depHandled = useRef<unknown>(null);
+  useEffect(() => {
+    if (depFetcher.state !== "idle" || !depFetcher.data?.ok) return;
+    if (depHandled.current === depFetcher.data) return;
+    depHandled.current = depFetcher.data;
+    setDepOpen(false);
+  }, [depFetcher.state, depFetcher.data]);
+  const startDepEdit = () => {
+    setDepText(task.blockedBy.map((e) => e.ref).join(", "));
+    setDepOpen(true);
+  };
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
   const [labels, setLabels] = useState<string[]>(task.labels);
   const [due, setDue] = useState(task.dueDate ?? "");
@@ -524,7 +593,63 @@ export function TaskDetailsPanel({
                 )}
               </span>
             </div>
+            <div className="kv-row">
+              <span className="k">Blocked by</span>
+              <span className="v meta-chips" data-blocked-by={task.blockedBy.length}>
+                {task.blockedBy.length > 0 ? (
+                  task.blockedBy.map((e) => (
+                    <span
+                      key={e.ref}
+                      className="pill neutral sm"
+                      data-wait-state={e.state}
+                      title={`${e.label} · ${e.state}`}
+                    >
+                      {e.label}
+                      {e.state !== "open" ? ` · ${e.state === "failed" ? "archived" : e.state}` : ""}
+                    </span>
+                  ))
+                ) : (
+                  <span className="sub">Nothing</span>
+                )}
+              </span>
+            </div>
           </div>
+          {depOpen && (
+            <depFetcher.Form method="post" className="meta-edit-panel" data-dependency-form>
+              <input type="hidden" name="intent" value="set-task-dependencies" />
+              <input type="hidden" name="_csrf" value={csrf} />
+              <label className="meta-field">
+                <span className="meta-label">Blocked by</span>
+                <input
+                  className="mono"
+                  type="text"
+                  name="blockedBy"
+                  value={depText}
+                  placeholder="VIB-12, goal-1 link 3"
+                  aria-label="What this task waits on"
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(e) => setDepText(e.target.value)}
+                />
+                <span className="sub xs dim">
+                  Task keys and goal links in this project, comma-separated. Empty
+                  clears the wait and releases the task.
+                </span>
+              </label>
+              <div className="meta-edit-actions">
+                <button
+                  type="submit"
+                  className="btn primary sm"
+                  disabled={depFetcher.state !== "idle"}
+                >
+                  Save
+                </button>
+                <button type="button" className="btn sm" onClick={() => setDepOpen(false)}>
+                  Cancel
+                </button>
+              </div>
+            </depFetcher.Form>
+          )}
           {/* F26-13: an archived task's planning metadata is frozen (the server
               refuses the write too) — restore it first. */}
           {canEdit &&
@@ -533,10 +658,18 @@ export function TaskDetailsPanel({
                 Archived. Restore this task to edit its details.
               </p>
             ) : (
-              <button type="button" className="meta-edit-btn" onClick={startEdit}>
-                <Icon name="sliders" />
-                Edit details
-              </button>
+              <>
+                <button type="button" className="meta-edit-btn" onClick={startEdit}>
+                  <Icon name="sliders" />
+                  Edit details
+                </button>
+                {!depOpen && (
+                  <button type="button" className="meta-edit-btn" onClick={startDepEdit}>
+                    <Icon name="lock" />
+                    Edit what it waits on
+                  </button>
+                )}
+              </>
             ))}
         </>
       )}
@@ -778,7 +911,15 @@ export function CurrentStatePanel({
         <div className="kv-row">
           <span className="k">Waiting on</span>
           <span className="v">
-            {task.waiting === "human" ? (
+            {task.packet?.awaiting === "goal_edit" ? (
+              // Ruling 138: a decided edit_goal packet owes exactly one thing.
+              <span
+                className="by-human"
+                title="An edit-goal decision was confirmed; saving the edited goal clears the packet."
+              >
+                a goal edit
+              </span>
+            ) : task.waiting === "human" ? (
               // F17-2: name WHERE the decision lives without asserting WHICH one
               // (that is state-dependent — a packet, a stage move, or acceptance).
               // A wrong specific hint would mislead; this tooltip is always true.
@@ -797,6 +938,15 @@ export function CurrentStatePanel({
               </span>
             ) : task.waiting === "agent" ? (
               <span className="by-agent">Agent work</span>
+            ) : task.blockedBy.length > 0 ? (
+              // Ruling 131(a): a held task owes nobody anything; what it waits
+              // on is other work, named with each entry's live state.
+              <span
+                className="sub"
+                title={task.blockedBy.map((e) => `${e.label} · ${e.state}`).join(" · ")}
+              >
+                Other work: {task.blockedBy.map((e) => e.label).join(", ")}
+              </span>
             ) : (
               "Nothing"
             )}

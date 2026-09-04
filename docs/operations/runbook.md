@@ -1,8 +1,10 @@
 # Runbook — operating Viberr
 
 Quick reference for the common operational tasks and failure modes. All commands run
-from the repo root (or `docker compose exec app …` inside the container, for the
-read-only ones; the writing CLIs refuse against a running app, see below).
+from the repo root. On the Docker deployment the read-only ones run INSIDE the container
+(`docker compose exec -T app …`), never from the host against the live root; the reason
+is under [Readers, and where they must run](#readers-and-where-they-must-run). The
+writing CLIs refuse against a running app, see below.
 Rewritten 2026-09-01 against `main` @ `68b5480` and re-verified 2026-09-02 against
 `pass32/implementation` @ `478bed0`; the earlier text's stale claims are
 listed in [`../validation/2026-09-01-doc-validation.md`](../validation/2026-09-01-doc-validation.md).
@@ -124,16 +126,79 @@ a readiness downgrade (tolerant parsing):
 - A row that silently stops updating almost always means a schema or CHECK problem:
   `rebuildPath` swallows the throw into a provenance `error` row and the log line
   `projection rebuild failed`. Read the boot integrity WARN.
-- A run that ended with `continuity error` in the runs panel is any error run; open the
-  log console for the provider's own words (`The provider reported: …`) and the failure
-  kind on the terminal tag (`quota`, `auth`, `idle_timeout`, `max_turns`,
-  `session_missing`, `unavailable`).
+- A run that ended in error: the Agent-logs footer names the classified cause for every
+  run kind (ruling 130(a)): "refused this run: the account's usage window is spent" or
+  "the account was rejected by the provider"; `continuity error` is now only an
+  unclassified failure. The terminal line in the log console carries the kind on its
+  tag (`quota`, `auth`, `idle_timeout`, `max_turns`, `session_missing`, `unavailable`),
+  the typed facts (the window, the absolute reset, the API status and code) and the
+  provider's own words (`The provider reported: …`). A 403 `oauth_org_not_allowed` means
+  the connected Claude account's organization does not allow it: the remedy is on that
+  person's Profile → Agent accounts, never a retry.
+
+## A task waits on other work (ruling 131)
+
+A task whose `blockedBy` list is non-empty is HELD, not stuck: its readiness is floored
+at `blocked`, the card leads with a neutral "blocked by …" chip, the task page names
+each entry with its live state, and `waiting` is `none` unless a packet or a
+recommendation is open. Nothing is owed by anyone while it waits.
+
+- **Who set it:** the task page's "Edit what it waits on" form, the controller's
+  `update_task` / `create_task` / a goal link, or the operator's `set_dependencies`
+  tool. Every write is a "Dependencies updated" note and a `task.dependencies.updated`
+  audit row; a bad reference is refused by name (unknown, archived, self, a cycle).
+- **Why the operator is quiet:** `create`, `transition` and `scheduled` triggers are
+  refused at fire time (`refused: "blocked-by"`, no run, no cost) and the stranded
+  backstop never nudges a held task. A run that does start (an @mention, a resolved
+  packet, a manual run) is told the wait and told not to advance, dispatch delivery or
+  open a packet about it. A scheduled `run-operator` occurrence retires as
+  `skipped-held` with a note; a scheduled `run-agent` still fires.
+- **How it releases:** when every entry is done (its task at the terminal stage; its
+  goal link done or skipped) the release engine, which runs from the same task-write
+  hooks that advance goal chains and from the goal runner's minute tick, clears the
+  list, writes "Dependencies released", lifts a stored `blocked` to `ready`, clears
+  `heldAtStage`, notifies the owner and supervisors (kind `dependency`, its own
+  toggle) and re-invokes the operator with `dependencies-released`. A person emptying
+  the list is the same release.
+- **It never releases** when an entry is archived: the dependent gets one "Waiting on
+  archived work" note, its watchers one notification, and it is left `waiting: human`
+  until someone edits the list; the entry renders as "archived".
+- **Converting an old hold** (the live JC-7 / JC-9 shapes): set the list on the task
+  page first (setting a wait never touches a packet), then resolve any standing packet
+  with its recommended option; that one reactive turn reads the wait and stops. The
+  projection column `blocked_by_json` is additive: an existing data root takes
+  `ALTER TABLE task_projections ADD COLUMN blocked_by_json TEXT NOT NULL DEFAULT '[]'`
+  through the boot integrity path, never a re-baseline (the file also carries users,
+  sessions and sealed PATs), and never a host-side write against the running
+  container.
 
 ## GitHub / PAT issues
 
 - Per-project credential health and scope violations show on the GitHub view and the
   task. Diagnostics distinguish `insufficient_scope`, `expired`, `revoked`,
   `repo_not_found`, `org_approval_missing`, `network_error`.
+- **An empty repository needs nothing from you** (ruling 128, pass 34). Viberr creates
+  the default branch itself before a task's first branch (an initial commit through the
+  Contents API, or the configured default at the first commit of a task branch GitHub
+  made the default), disclosed on the task timeline and audited as
+  `github.repo.bootstrapped`. "Delivery could not run … Viberr could not create it"
+  names the one case that needs a person: the credential cannot write the repository
+  (a `repo` scope violation opens) or GitHub refused the create; fix that, then deliver
+  again. A delivery never pushes a task branch as the repository's first ref.
+- **A branch collision packet whose PR is the task's own** (ruling 136, pass 34): the
+  `resolve_remote_collision` option performs the push the person asked for when origin's
+  copy is behind or absent, keeps the block only for a diverged remote, and every branch
+  delete re-confirms a cached open PR against GitHub before refusing. "GitHub could not
+  confirm whether PR #N is still open" means the check itself failed: nothing was deleted;
+  resolve the packet again when GitHub answers.
+- **"Delivery push refused: workflow scope"** (ruling 144, pass 34): the task changes a file
+  under `.github/workflows/` and the project's token cannot push it (a classic token without
+  the `workflow` scope, refused before the push; or GitHub's own refusal on any token). A
+  `workflow` scope violation is open on the task and the credential card carries the
+  advisory. Grant `workflow` to the token on GitHub, then use **Re-check** (Grant scope) on
+  the project's GitHub view: the header now listing `workflow` resolves the violation, as
+  does the next successful push of workflow files. Then deliver again. Nothing here asks a
+  person to push.
 - Accept-completion merges the review PR; a missing `pull_request:write` scope surfaces
   as an open scope violation with a Grant-scope action (re-validate the PAT, 60 s
   cooldown) rather than a silent failure. Write permission is proven read-only from the
@@ -193,12 +258,28 @@ a readiness downgrade (tolerant parsing):
   ```bash
   curl -s localhost:${PORT:-3000}/resources/health | jq .backends
   # {"claude":{"connectedUsers":3},"codex":{"connectedUsers":1}}
-
-  sqlite3 "$VIBERR_DATA_ROOT/state/projection.sqlite" \
-    "SELECT u.email, c.backend, c.kind, c.method, c.verified_at, c.created_at
-       FROM user_backend_credentials c JOIN users u ON u.id = c.user_id
-      ORDER BY u.email, c.backend;"
   ```
+
+  The per-person rows are in the database, and on the Docker deployment a live database
+  is read INSIDE the container and read-only, never from the host (why: [Readers, and
+  where they must run](#readers-and-where-they-must-run)). `node:sqlite` is the driver
+  the app itself uses, so nothing has to be installed:
+
+  ```bash
+  docker compose exec -T app node -e '
+    const { DatabaseSync } = require("node:sqlite");
+    const db = new DatabaseSync(process.env.VIBERR_DATA_ROOT + "/state/projection.sqlite", { readOnly: true });
+    console.table(db.prepare(`
+      SELECT u.email, c.backend, c.kind, c.method, c.verified_at, c.created_at
+        FROM user_backend_credentials c JOIN users u ON u.id = c.user_id
+       ORDER BY u.email, c.backend`).all());
+    db.close();
+  '
+  ```
+
+  On bare metal (one host, one app process, a local `VIBERR_DATA_ROOT`) the same query
+  may run from the host, still read-only:
+  `sqlite3 "file:$VIBERR_DATA_ROOT/state/projection.sqlite?mode=ro" "SELECT …"`.
 
   One row per `(user, backend)`; connecting a new method REPLACES the previous row.
   `kind = 'login'` carries no secret at all (the vendor binary holds it), `api_key` /
@@ -215,7 +296,10 @@ a readiness downgrade (tolerant parsing):
 - Raw run logs are append-only under `$VIBERR_DATA_ROOT/runtimes/<backend>/<runId>.jsonl`;
   the log panel projects them. Provider session transcripts live in the principal's own
   home. Interrupt is admin/maintainer-gated and audited.
-- Quota and rate-limit state per backend is on `/insights` (org admin); a quota-refused
+- Quota and rate-limit state per backend is on `/insights` (org admin), and it says WHOSE
+  account the refusal was (ruling 130(d)): a spent window or a rejected credential is one
+  person's, not the instance's; the same person sees it on their Profile → Agent accounts
+  card, and `/resources/health` names nobody. A quota-refused
   run opens a packet with a `retry_other_backend` option, offered only when the task owner
   has the other backend connected, and the switch sticks on the engagement
   (`pinnedBackend`). The Agent-logs "Retry on <other>" button passes the same test, so a
@@ -323,13 +407,50 @@ exits with a synchronous `FATAL` line if the file is deleted or replaced. Same h
 pid is reclaimed automatically; a different hostname is never probed and always refused
 (compose pins `hostname: viberr`). `VIBERR_FORCE_DATA_ROOT_LOCK=1` forces a takeover.
 
-| CLI | Lock |
-|---|---|
-| `npm run seed`, `seed:demo`, `rescan`, `restore` (whole root), `keys -- reseal` | **takes the writer lock**; against a running app prints `refused to run: it would be a SECOND writer on this data root` and exits 1 |
-| `npm run backup`, `store:check`, `keys -- status`, `restore --file` | reader; no lock |
+| CLI | Lock | Where it runs on the Docker deployment |
+|---|---|---|
+| `npm run seed`, `seed:demo`, `rescan`, `restore` (whole root), `keys -- reseal` | **takes the writer lock**; against a running app prints `refused to run: it would be a SECOND writer on this data root` and exits 1 | from the host, before the container starts or after `docker compose down`; the lock refuses anything else |
+| `npm run backup`, `keys -- status` | reader; no lock | INSIDE the container while it runs (`docker compose exec -T app …`); from the host only once it is down. Both open the database, and a host-side reader of a live root is the hazard below |
+| `npm run store:check`, `restore --file` | no lock, no database | either side: they read and write the markdown tree only |
 
 So `docker compose exec app npm run seed` is refused. Seed before the container starts, or
 stop it first. Do **not** wipe `state/` while the app runs.
+
+### Readers, and where they must run
+
+The writer lock stops a second WRITER. Nothing stops a second READER, and on the shipped
+Docker deployment a reader on the wrong side of the container boundary is the hazard:
+`./docker-data` is a bind mount, so a process on the HOST that opens
+`state/projection.sqlite` (`sqlite3`, a host-side `npm run backup`, a desktop SQLite
+browser) maps the WAL index (`-shm`) of a file the GUEST process is writing, across
+VirtioFS. A stale shared mapping in the guest is what a SIGBUS looks like. The rules:
+
+- **Every read of a live database runs inside the container, and always read-only.**
+  The form is `docker compose exec -T app node -e '…'` opening the file with
+  `new DatabaseSync(path, { readOnly: true })`, the option `openDatabaseReadOnly` in
+  `app/server/db/sqlite.server.ts` uses for the read-only CLIs; the worked example is
+  under [Agent runtimes](#agent-runtimes). The same goes for `npm run keys -- status`
+  (`docker compose exec -T app npm run keys -- status`) and for `npm run backup`, which
+  open the database themselves; the backup is the two-step form under
+  [Backup / restore](#backup--restore), because its artefact may not land under `/data`
+  and anywhere else in the container is gone with it.
+- **`npm run store:check` needs no database** (it parses the markdown tree) and may run
+  from either side; so may `restore --file`, which writes one markdown file and touches
+  no SQLite.
+- **On bare metal** (one host, one app process, a local `VIBERR_DATA_ROOT`) a host reader
+  shares the kernel with the writer and is fine, and must still open read-only:
+  `sqlite3 "file:$VIBERR_DATA_ROOT/state/projection.sqlite?mode=ro"`.
+- **Once the container is down** the root is just files, and the host may read it.
+
+*(Added 2026-09-04, pass 34 — D34-1. This page told an operator to run `sqlite3` against
+`$VIBERR_DATA_ROOT/state/projection.sqlite` from the host, and the table above said
+nothing about which side of the boundary a reader runs on. Done exactly that way during
+the pass, host-side `sqlite3 -readonly` polling over VirtioFS every few seconds from
+09:01Z preceded the container's SIGBUS at 09:12:46Z, exit 135; compose restarted it and
+boot recovery finalized the two live runs as `interruptedBy: restart`. `-readonly` was no
+protection: the shared mapping is the problem, not the write. The read block, the table
+and `deployment.md`'s backup recipes now say where a reader runs, and
+`app/shared/docs/runbook-db-read.test.ts` keeps them saying it.)*
 
 ## Self-heal and disk
 
@@ -348,7 +469,19 @@ stop it first. Do **not** wipe `state/` while the app runs.
 `npm run backup [-- --out <dir>]` writes a consistent point-in-time artefact (`VACUUM
 INTO` from a read-only connection plus the store tree — `projects/`, `agents/`, `kb/`,
 `skills/` and `audit-exports/` — and a manifest) **without** taking the lock, so it works
-on a live instance. `runtimes/` is excluded unless you pass `--include-runtimes`, and
+on a live instance. On the Docker deployment "on a live instance" means INSIDE the
+container ([Readers, and where they must run](#readers-and-where-they-must-run)), with an
+explicit `--out`: the default `./backups` is `/app/backups` in the container and vanishes
+with it, and `createBackup` refuses a destination under the data root it is backing up, so
+`/data/…` is not an option either. Write it to a container-local directory and copy it out
+in the same breath:
+
+```bash
+docker compose exec -T app npm run backup -- --out /tmp/viberr-backups
+docker compose cp app:/tmp/viberr-backups/. ./backups/    # now the artefact is on the host
+```
+
+`runtimes/` is excluded unless you pass `--include-runtimes`, and
 since ruling 127 that directory holds every person's live vendor sign-in
 (`runtimes/users/<userId>/…`), so an artefact taken with it is a secret. `npm run restore -- --from <artefact>` takes the
 lock, needs `--force` on an occupied root and moves displaced data to

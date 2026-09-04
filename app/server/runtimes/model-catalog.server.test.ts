@@ -7,8 +7,11 @@ import type {
   ClaudeQueryOptions,
 } from "./claude-runtime.server";
 import {
+  assertEffortForBackend,
+  assertModelForBackend,
   claudeProbeOptions,
   curatedCatalog,
+  effortsFor,
   defaultEffortFor,
   defaultModelFor,
   foreignModelBackend,
@@ -377,6 +380,42 @@ describe("isKnownModel agrees with what the picker offered (P13-RT-07)", () => {
     expect(resolveRunModel("claude", "claude-sonnet")).toBe("sonnet");
   });
 
+  it("pass 34 (F34-7): a family alias with a context-window variant is known on a COLD process", () => {
+    // The live catalog offers `opus[1m]` ("Opus (1M context)"); a profile
+    // stores it; ten minutes later the cache is gone. The validator used to
+    // substitute the catalog default and the editor rewrote the stored value.
+    // Canary: remove the `CLAUDE_ALIAS_VARIANT_RE` clause from isKnownModel.
+    resetModelCatalogCache();
+    expect(isKnownModel("claude", "opus[1m]")).toBe(true);
+    expect(resolveRunModel("claude", "opus[1m]")).toBe("opus[1m]");
+    expect(isKnownModel("claude", "sonnet[1m]")).toBe(true);
+    expect(isKnownModel("claude", "opus[]")).toBe(false);
+    expect(isKnownModel("codex", "opus[1m]")).toBe(false);
+  });
+
+  it("pass 34 (F34-7): the variant's display name is the LIVE row's when cached, else the family name plus the variant", async () => {
+    // Canary: delete the variant branch in modelDisplayName (the cold case
+    // echoes the id) or the live lookup (the warm case does).
+    resetModelCatalogCache();
+    expect(modelDisplayName("claude", "opus[1m]")).toBe("Claude Opus [1m]");
+    expect(modelDisplayName("claude", "opus-next")).toBe("opus-next");
+    await getModelCatalog("claude", {
+      credential: VIEWER_CREDENTIAL,
+      claudeQueryFn: makeFakeQuery([
+        {
+          value: "opus[1m]",
+          displayName: "Opus (1M context)",
+          description: "",
+          supportsEffort: true,
+          supportedEffortLevels: ["low", "high"],
+        },
+      ]),
+    });
+    expect(modelDisplayName("claude", "opus[1m]")).toBe("Opus (1M context)");
+    // Codex has no live endpoint and no variants.
+    expect(modelDisplayName("codex", "gpt-5.5[1m]")).toBe("gpt-5.5[1m]");
+  });
+
   it("accepts a non-dated value the live catalog actually listed", async () => {
     const catalog = await getModelCatalog("claude", {
       credential: VIEWER_CREDENTIAL,
@@ -500,5 +539,51 @@ describe("foreignModelBackend (F21-13)", () => {
     expect(foreignModelBackend("codex", "gpt-9-imaginary")).toBeNull();
     expect(foreignModelBackend("claude", "")).toBeNull();
     expect(foreignModelBackend("claude", null)).toBeNull();
+  });
+});
+
+/**
+ * Ruling 139 (pass 34, G34-1): the save-time effort/model assertions the
+ * controller's typed write surfaces and the profile editor share.
+ *
+ * Canary: route `assertEffortForBackend` through `resolveRunEffort` (clamp
+ * instead of refuse) and the refusal cases answer nothing.
+ */
+describe("assertEffortForBackend / assertModelForBackend (ruling 139)", () => {
+  it("accepts every tier the backend offers and refuses the rest by name, listing the tiers", () => {
+    for (const backend of ["claude", "codex"] as const) {
+      for (const tier of effortsFor(backend)) {
+        expect(() => assertEffortForBackend(backend, tier)).not.toThrow();
+      }
+    }
+    expect(() => assertEffortForBackend("codex", "max")).toThrow(
+      /"max" is not an effort tier Codex offers\. Codex takes: low, medium, high, xhigh\./,
+    );
+    expect(() => assertEffortForBackend("claude", "ultra")).toThrow(/Claude takes: low, medium, high, xhigh, max/);
+    expect(() => assertEffortForBackend("claude", "")).toThrow(/"\(empty\)" is not an effort tier/);
+    // Codex `minimal` is accepted at run time but NOT offered: the write
+    // surfaces refuse it; the editor only refuses it when CHANGED (A34).
+    expect(() => assertEffortForBackend("codex", "minimal")).toThrow();
+  });
+
+  it("refuses a model the OTHER backend recognises, with the F21-13 sentence, and passes an open Claude id", () => {
+    expect(() => assertModelForBackend("claude", "gpt-5.6-terra")).toThrow(
+      /GPT-5\.6 Terra is a Codex model\. Claude cannot run it\. Pick a model from the Claude list\./,
+    );
+    expect(() => assertModelForBackend("codex", "opus")).toThrow(/is a Claude model\. Codex cannot run it/);
+    expect(() => assertModelForBackend("claude", "claude-sonnet-4-5")).not.toThrow();
+    expect(() => assertModelForBackend("claude", "opus[1m]")).not.toThrow();
+    expect(() => assertModelForBackend("codex", "gpt-5.6-terra")).not.toThrow();
+  });
+
+  it("pass 34 review: an id CODEX does not list is refused by name, never silently substituted", () => {
+    // Canary: drop the closed-catalogue branch — the controller stores
+    // `gpt-5.7-nova`, `resolveRunModel` substitutes the default at start, and
+    // every surface reports a model that never ran.
+    expect(() => assertModelForBackend("codex", "gpt-5.7-nova")).toThrow(
+      /"gpt-5\.7-nova" is not a model Codex offers\. Codex takes: /,
+    );
+    // Claude stays OPEN (dated ids and account-listed models run verbatim).
+    expect(() => assertModelForBackend("claude", "claude-fable-5-1")).not.toThrow();
   });
 });

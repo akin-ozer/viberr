@@ -199,7 +199,10 @@ engagements:                      # ONE uniform list of engaged agents (G1),
     verdictCapable: true          # reviewer.
 operator:                         # null in triage (ruling 16: store stage id;
   assignedAtStageId: triage       # UI renders "stage <1-based index>")
-recommendations: []               # pending operator recommendation cards
+recommendations: []               # pending operator recommendation cards; an
+                                  # accept_completion card carries `forHeadSha`, the
+                                  # work revision it binds to, and is withdrawn on the
+                                  # record when that changes (ruling 137)
 schedules: []                     # pending/fired scheduled runs (O-3, ruling 98:
                                   # run-operator | run-agent; the agent arm pins
                                   # profileId + prompt, nothing else)
@@ -224,6 +227,15 @@ verdicts:                         # per-engagement, each bound to a revision
     result: approve               # approve | request_changes
     reason: Scope matches the goal.
     at: 2026-07-04T06:52:00.000Z
+baseRefreshes: []                 # ruling 132: every base refresh the operator's
+                                  # update_branch_from_base landed on the branch,
+                                  # recorded as it is pushed: { mergeSha, baseSha,
+                                  # base, commits, at }. A merge listed here is a
+                                  # CLEAN merge Viberr made (that path aborts on
+                                  # conflict), which is how the reconciler tells a
+                                  # base refresh from authored drift. The refresh merges
+                                  # with --no-ff, so mergeSha is always a two-parent
+                                  # merge commit, never the base tip itself
 branch: vib-142-attach-workspace  # task-key branch; null before creation
 archived: false                   # R14-3: abandoned work, kept for the record —
                                   # leaves the board's default view and the review
@@ -234,6 +246,24 @@ pr:                               # GitHub projection mirrored into the file
   number: 318                     # (Phase 7 reconciler owns sync)
   state: review
   title: Attach execution workspace
+  headSha: 60049586…              # ruling 135: the PR head as GitHub last reported
+                                  # it (optional key; carried across a reuse of the
+                                  # SAME number, never inherited by a different PR)
+  revisionDrift:                  # ruling 132: AUTHORED commits since the reviewed
+    headSha: 60049586…            # revision, with a base refresh reported apart —
+    authored: 0                   # never as unreviewed work; describeRevisionDrift
+    baseRefresh:                  # (app/shared/revision-drift.ts) is the ONE
+      merges: 1                   # sentence every surface prints; null baseRefresh
+      commits: 4                  # when the head carries none; merges: 0 = a
+                                  # fast-forward refresh
+  unpushedRevision:               # ruling 135: the DELIVERED revision is not on
+    revisionSha: 385047c…         # the PR — behind (a plain push fast-forwards),
+    prHeadSha: 60049586…          # diverged (a push is refused non-fast-forward)
+    relation: unknown             # or unknown (GitHub does not have the sha at
+                                  # all: never pushed). Written by the reconciler
+                                  # and by the workspace reconcile the moment a run
+                                  # mints a new revision on an open PR; cleared by
+                                  # a delivery that pushes; never for `verified`
 github:                           # more GitHub cache: commits + change stats
   commits: [{ sha: a91f7c2, msg: "[VIB-142] …" }]
   changed: { files: 9, add: 412, del: 87 }
@@ -241,6 +271,17 @@ priority: normal                  # R26-1: normal | high | urgent-ish metadata t
                                   # reads (advisory); never in the specialist prompt
 labels: []                        # R26-2: free-text labels, searchable on the board and ⌘K
 dueDate: null                     # R26-1: ISO date or null — advisory metadata
+blockedBy:                        # ruling 131: what this task WAITS ON, in exactly
+  - JC-6                          # two spellings (app/shared/dependencies.ts): a
+  - goal-1 link 3                 # task key, or `<goal-id> link <n>`. Non-empty
+                                  # floors the derived readiness at `blocked`,
+                                  # settles `waiting: none`, refuses the operator's
+                                  # create/transition/scheduled triggers, and is
+                                  # cleared by the release engine when every entry
+                                  # is done. States are resolved at read time,
+                                  # never stored. Parsed per row. `GOAL` is a
+                                  # reserved taskPrefix: `GOAL-1` would read as
+                                  # a goal reference missing its link
 acceptance: forced                # optional; N20-14 — set when an admin force-accepted
 goalRef: null                     # ruling 99: { goalId, linkIndex } for a chained-goal task
 createdAt: 2026-07-03T06:00:00.000Z
@@ -270,7 +311,8 @@ acceptance is gated **solely** on `kind === "accept_completion"`, plus the admin
 re-check in `resolvePacket`. The schema is `.loose()`, so an `accept:` key copied out of this
 doc would round-trip as an unknown field and be read by nothing — a silent no-op that looked
 load-bearing. Beyond the four keys shown, the fields the schema actually defines on an option
-are `ev`, `backend`, `profileId` and `deleteBranch`.)*
+are `ev`, `backend`, `profileId`, `deleteBranch` and, since pass 34 (ruling 138), `goalDraft` on
+an `edit_goal` option.)*
 
 ```yaml
 type: input                       # input | blocked (card tint)
@@ -298,6 +340,19 @@ options:
     d: …
     rec: false
     ev: "**Decision:** request one edit. …"   # pre-authored timeline copy
+  - kind: edit_goal
+    t: Align the goal to the merged spec
+    d: Why the goal should change.
+    rec: false
+    goalDraft: |                  # ruling 138: the proposed goal text itself,
+      Deliverable: …              # written AS a goal; what the editor opens with.
+      Acceptance: …               # Absent → the editor prefills t + d verbatim.
+                                  # Refused on any other kind.
+awaiting: goal_edit               # set when an edit_goal option was confirmed;
+decided:                          # ruling 138: WHICH option, so a reload renders
+  optionIndex: 2                  # the packet as decided (chosen option locked,
+  at: 2026-07-04T07:00:00.000Z    # one "Edit the goal" control) and rebuilds the
+  byUserId: u_abc123              # same draft; both clear with the packet
 ```
 
 ## Timeline
@@ -352,7 +407,8 @@ Notes:
   searchable on the board and in ⌘K; `acceptance: forced` when an admin force-accepted;
   `goalRef: { goalId, linkIndex }` back-reference to a chained goal; `engagements[].pinnedBackend`
   (set by a `retry_other_backend` resolution so the switch sticks, F27-B1); `pr.checks`,
-  `pr.review`, `pr.mergeable`, `pr.revisionDrift` (reconciler cache); each `schedules[]`
+  `pr.review`, `pr.mergeable`, `pr.headSha`, `pr.revisionDrift`, `pr.unpushedRevision`
+  (reconciler cache, shown above); each `schedules[]`
   row carries `action` (`run-operator | run-agent`), `dueAt`, `profileId`, `prompt`,
   `status` (`SCHEDULE_STATUS_VALUES`), `claimedAt`, `firedAt`.
 - Unknown top-level frontmatter keys are preserved verbatim on write (the legacy
@@ -431,6 +487,10 @@ links:
     taskKey: VIB-12               # null until the chain reaches this link
     status: done                  # pending | active | done | failed | skipped
     note: null                    # failure reason / redirect note
+    blockedBy: []                 # ruling 131(c): what this link's task waits on
+                                  # (task keys / `goal-2 link 1`); copied onto the
+                                  # task the chain creates for the link, validated
+                                  # then, so the task is born held
 createdAt: 2026-08-30T10:00:00.000Z
 updatedAt: 2026-08-30T12:00:00.000Z
 ---

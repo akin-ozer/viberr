@@ -432,6 +432,108 @@ describe("cancelScheduledAction", () => {
 });
 
 describe("fireDueSchedules", () => {
+  it("ruling 133: a scheduled run-agent for the ENGAGED deliverer fires at a stage its profile does not declare", async () => {
+    // Canary: reinstate the unconditional `assertStageEligible` in
+    // dispatchAgentRun (the occurrence fails at fire time).
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "dev", role: "developer", backends: ["claude"], model: "sonnet", stages: ["review"] },
+        },
+      ],
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        engagements: [{ profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false }],
+        schedules: [rawSchedule({ id: "sch_dev", action: "run-agent", profileId: "dev", prompt: "continue" })],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(1);
+    await waitForSchedule("VIB-1", "sch_dev", "fired");
+    // SAFETY: `kind` TEXT NOT NULL on `agent_runs`; the count is an integer.
+    const primary = store.db
+      .prepare(`SELECT count(*) AS c FROM agent_runs WHERE task_key = 'VIB-1' AND kind = 'primary'`)
+      .get() as { c: number };
+    expect(primary.c).toBe(1);
+    expect(timeline("VIB-1").some((e) => /Scheduled action failed/.test(e.text))).toBe(false);
+  });
+
+  it("ruling 131(d): a due run-operator occurrence on a HELD task is retired `fired` as skipped-held with no run; a run-agent occurrence stands", async () => {
+    // Canary: drop the `refusedHeld` branch (the note and the outcome vanish).
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        waiting: "none",
+        blockedBy: ["VIB-2"],
+        schedules: [rawSchedule({ id: "sch_held" })],
+      }),
+    });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(1);
+    await waitForSchedule("VIB-1", "sch_held", "fired");
+    expect(operatorRunCount()).toBe(0);
+    expect(timeline("VIB-1").some((e) => /Scheduled action skipped:.*waits on other work \(VIB-2\)/.test(e.text))).toBe(true);
+    const fired = listAuditEvents(store.db).filter((e) => e.action === "task.schedule.fired");
+    expect(fired.map((e) => e.details?.outcome).sort()).toEqual(["claimed", "skipped-held"]);
+  });
+
+  it("ruling 141: a due run-operator occurrence on a task with an OPEN packet is retired `fired` as skipped-packet, with no run and no retry", async () => {
+    // Canary: drop the `refusedPacket` arm (the note and the outcome vanish).
+    // Canary 2: route the refusal through the retry branch (`ok = false` on
+    // an open-packet refusal) — a retry is spent and the status is not `fired`.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        waiting: "human",
+        readiness: "blocked",
+        schedules: [rawSchedule({ id: "sch_pkt" })],
+      }),
+      packet: {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Branch conflicts with main",
+        body: "",
+        observations: [],
+        options: [{ kind: "redirect", t: "Have the developer resolve it", d: "", rec: true }],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(1);
+    await waitForSchedule("VIB-1", "sch_pkt", "fired");
+    expect(operatorRunCount()).toBe(0);
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    const occurrence = parsed.frontmatter.schedules.find((s) => s.id === "sch_pkt")!;
+    expect(occurrence.status).toBe("fired");
+    expect(occurrence.retries ?? 0).toBe(0);
+    expect(occurrence.claimedAt).toBeNull();
+    expect(occurrence.firedAt).not.toBeNull();
+    expect(parsed.packet?.title).toBe("Branch conflicts with main"); // untouched
+    expect(
+      timeline("VIB-1").some((e) =>
+        /Scheduled action skipped:.*a decision packet is open on VIB-1 \("Branch conflicts with main"\).*no operator run was started, and the occurrence spends no retry/.test(e.text),
+      ),
+    ).toBe(true);
+    const fired = listAuditEvents(store.db).filter((e) => e.action === "task.schedule.fired");
+    expect(fired.map((e) => e.details?.outcome).sort()).toEqual(["claimed", "skipped-packet"]);
+    expect(fired[0]!.details).toMatchObject({ outcome: "skipped-packet", refusedAtStart: true });
+  });
+
   it("fires a due pending schedule (marks fired + audits) and leaves a future one pending", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {

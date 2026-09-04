@@ -201,3 +201,87 @@ export interface ResourceSelection {
 // profile starts with an EMPTY selection and the creator grants from that live
 // catalog. The old mock `RES_CATALOG`/`RES_DEFAULTS` (pre-checked ids like
 // `repo-write` / "Coding standards" that resolved to no real resource) are gone.
+
+// ------------------------------------------ patch refusal (ruling 139)
+
+/** One capability patch as the controller's `update_agent_deployment` takes
+ *  it: an id and the mode to set. */
+export interface CapabilityPatch {
+  capabilityId: string;
+  mode: CapMode;
+}
+
+/** The ids the catalogue offers `kind` a toggle for. */
+function toggleableIdsFor(kind: CapabilityKind): ReadonlySet<string> {
+  return kind === "operator" ? OPERATOR_CAP_IDS : MODAL_CAP_IDS;
+}
+
+const ALWAYS_HUMAN_IDS: ReadonlySet<string> = new Set(
+  UNIFIED_CAP_CATALOG.filter((e) => e.defaultMode === "human" && !e.promotable).map(
+    (e) => e.id,
+  ),
+);
+
+/** The matrix-only advisory ids (`group: null`): stored, displayed, never
+ *  toggled. */
+const ADVISORY_IDS: ReadonlySet<string> = new Set(
+  UNIFIED_CAP_CATALOG.filter((e) => e.group === null).map((e) => e.id),
+);
+
+const KIND_WORD = {
+  operator: "the operator",
+  agent: "a specialist",
+} as const satisfies Record<CapabilityKind, string>;
+
+/**
+ * Ruling 139 (pass 34, F34-2): the refusal sentence for a set of capability
+ * patches aimed at a deployment of `kind`, or null when every patch is legal.
+ * Built ONLY from the catalogue sets already in this module, so it can never
+ * drift from what the editor offers and what `grantsFor` persists:
+ *
+ *   (a) an id outside the kind's governed set is named, with the valid ids and
+ *       a pointer at `list_capabilities`; an id the catalogue holds for this
+ *       kind with NO toggle (matrix-only, advisory) is refused AS SUCH, never as
+ *       "no such id", which would be false;
+ *   (b) `recommend` on a specialist (an operator-only mode; the runtime treats
+ *       it as `direct` and `grantsFor` would store `off`);
+ *   (c) a non-`human` mode on an always-human id;
+ *   (e) `report-validation-verdict` at a mode other than `direct` or `off`
+ *       (`grantsFor` forces exactly those two, so `human` would store `off`
+ *       while the tool answered done).
+ *
+ * The check lives on the WRITE SURFACES that take a typed argument (the
+ * controller tools), not in `grantsFor`: the project editor legitimately
+ * preserves advisory and retired ids a strict check would refuse. Client-safe
+ * copy (this module ships in the browser bundle): no dashes.
+ */
+export function capabilityPatchRefusal(
+  kind: CapabilityKind,
+  patches: readonly CapabilityPatch[],
+): string | null {
+  const toggleable = toggleableIdsFor(kind);
+  const valid = [...toggleable].join(", ");
+  for (const patch of patches) {
+    const id = patch.capabilityId;
+    if (!toggleable.has(id)) {
+      if (ADVISORY_IDS.has(id)) {
+        return `"${id}" is a matrix-only capability with no toggle: it describes persona guidance and cannot be granted or withheld. Nothing was written. The ids ${KIND_WORD[kind]} takes are: ${valid} (see list_capabilities).`;
+      }
+      const otherKind: CapabilityKind = kind === "operator" ? "agent" : "operator";
+      const belongsToOther = toggleableIdsFor(otherKind).has(id);
+      return belongsToOther
+        ? `"${id}" is ${KIND_WORD[otherKind] === "the operator" ? "an operator" : "a specialist"} capability and cannot be set on ${KIND_WORD[kind]}. Nothing was written. The ids ${KIND_WORD[kind]} takes are: ${valid} (see list_capabilities).`
+        : `No capability answers to "${id}". Nothing was written. The ids ${KIND_WORD[kind]} takes are: ${valid} (see list_capabilities).`;
+    }
+    if (kind === "agent" && patch.mode === "recommend") {
+      return `"${id}" cannot be set to recommend on a specialist: recommend is an operator-only mode (a specialist runs a grant directly or not at all). Use direct, human or off. Nothing was written.`;
+    }
+    if (ALWAYS_HUMAN_IDS.has(id) && patch.mode !== "human") {
+      return `"${id}" is reserved for humans and can only be human. Nothing was written.`;
+    }
+    if (id === "report-validation-verdict" && patch.mode !== "direct" && patch.mode !== "off") {
+      return `"report-validation-verdict" takes only direct or off: verdict authority is explicit and is never widened or reserved. Nothing was written.`;
+    }
+  }
+  return null;
+}

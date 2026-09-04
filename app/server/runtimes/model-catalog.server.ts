@@ -1,6 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
+import { AppError } from "~/server/errors/app-error.server";
 import { logger } from "~/server/logging/logger.server";
-import { DATED_CLAUDE_ID_RE } from "~/shared/model-ids";
+import {
+  CLAUDE_ALIAS_VARIANT_RE,
+  DATED_CLAUDE_ID_RE,
+  splitClaudeVariant,
+} from "~/shared/model-ids";
 import type { RunCredential } from "./backend-credentials.server";
 import { unavailableModels } from "./model-availability.server";
 import {
@@ -194,6 +199,65 @@ export function defaultEffortFor(backend: RealBackend): string {
   return (backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED).defaultEffort;
 }
 
+/** Display names for the refusal sentences below. */
+const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const satisfies Record<RealBackend, string>;
+
+/** The effort tiers a backend OFFERS (the curated list; Codex's accepted but
+ *  unoffered `minimal` is deliberately absent, see `CODEX_EFFORTS`). */
+export function effortsFor(backend: RealBackend): readonly string[] {
+  return (backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED).efforts;
+}
+
+/**
+ * Ruling 139 (pass 34, G34-1): refuse an effort tier the backend does not
+ * list, BY NAME, at save time. `resolveRunEffort` clamps an unknown tier at
+ * run time, which is the same silent substitution F21-13 closed for models:
+ * the controller answered `[done]` for an `effort: "max"` it had stripped, and
+ * a Codex deployment saved with `max` would have run `xhigh`. Lives on the
+ * write surfaces that take a typed argument (`deploy_agent`,
+ * `update_agent_deployment`) and, for a CHANGED value only, in the profile
+ * editor: an unconditional refusal there would make a deployment storing a
+ * legitimately preserved tier (Codex `minimal`) unsaveable.
+ */
+export function assertEffortForBackend(backend: RealBackend, effort: string): void {
+  const e = effort.trim();
+  const tiers = effortsFor(backend);
+  if (tiers.includes(e)) return;
+  throw AppError.validation(
+    `"${e || "(empty)"}" is not an effort tier ${BACKEND_LABEL[backend]} offers. ` +
+      `${BACKEND_LABEL[backend]} takes: ${tiers.join(", ")}.`,
+  );
+}
+
+/**
+ * Ruling 139: the F21-13 check, extracted so the controller's typed write
+ * surfaces and the profile editor refuse a foreign model with ONE sentence.
+ * Only a model the OTHER backend recognises is refused: the Claude catalogue is
+ * open (a dated id or a live-only id passes), so "unknown here" alone is not
+ * evidence of a mistake.
+ */
+export function assertModelForBackend(backend: RealBackend, model: string): void {
+  const foreign = foreignModelBackend(backend, model);
+  // Pass 34 review: Codex's list is CLOSED (`CODEX_MODELS`), and
+  // `resolveRunModel` silently substitutes anything else at start — the same
+  // silent substitution ruling 139 refuses for effort. An id Codex does not
+  // list is refused here, by name, rather than stored and reported as what
+  // runs. The foreign-model sentence (F21-13) wins when it applies: it names
+  // the backend that DOES run the id, which is the more useful answer.
+  const id = model.trim();
+  if (!foreign && backend === "codex" && id && !isKnownModel("codex", id)) {
+    throw AppError.validation(
+      `"${id}" is not a model Codex offers. Codex takes: ${CODEX_MODELS.map((m) => m.value).join(", ")}.`,
+    );
+  }
+  if (!foreign) return;
+  throw AppError.validation(
+    `${modelDisplayName(foreign, model)} is a ${BACKEND_LABEL[foreign]} model. ` +
+      `${BACKEND_LABEL[backend]} cannot run it. Pick a model from the ` +
+      `${BACKEND_LABEL[backend]} list.`,
+  );
+}
+
 // The dated-id rule lives in ~/shared/model-ids (ruling 106 review, D1): the
 // client model pickers must ask the SAME "would a run execute this verbatim?"
 // question, or an unlisted-but-valid stored id gets silently rewritten to the
@@ -224,6 +288,11 @@ export function isKnownModel(backend: RealBackend, model: string): boolean {
   if (cat.models.some((m) => m.value === model)) return true;
   if (backend === "codex") return false;
   if (DATED_CLAUDE_ID_RE.test(model)) return true;
+  // Pass 34 (F34-7): a family alias with a context-window variant (`opus[1m]`)
+  // is what the live catalog offers and what a profile stores; it is known
+  // BEFORE the live cache is consulted, so a cold process never substitutes
+  // the catalog default for a value the picker itself offered.
+  if (CLAUDE_ALIAS_VARIANT_RE.test(model)) return true;
   return liveCatalogModelValues("claude").has(model);
 }
 
@@ -315,11 +384,27 @@ export function resolveRunEffort(
   return cat.defaultEffort;
 }
 
-/** The friendly display name for a model id (from the curated catalog), or the
- *  id itself when it is not a curated model (e.g. a live-only or legacy value). */
+/**
+ * The friendly display name for a model id: the curated name; else the LIVE
+ * catalog row's name whenever the cache holds the id ("Opus (1M context)" for
+ * `opus[1m]`, pass 34 F34-7); else, for a family alias carrying a
+ * context-window variant, the curated family name plus the variant ("Claude
+ * Opus [1m]"), which is only the cold-process fallback; else the id itself
+ * (a live-only or legacy value; the UI pairs that with a substitution flag).
+ */
 export function modelDisplayName(backend: RealBackend, model: string): string {
   const cat = backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED;
-  return cat.models.find((m) => m.value === model)?.displayName ?? model;
+  const curated = cat.models.find((m) => m.value === model)?.displayName;
+  if (curated) return curated;
+  if (backend === "codex") return model;
+  const live = liveCatalogDisplayName("claude", model);
+  if (live) return live;
+  if (CLAUDE_ALIAS_VARIANT_RE.test(model)) {
+    const { base, variant } = splitClaudeVariant(model);
+    const family = cat.models.find((m) => m.value === base)?.displayName;
+    if (family && variant) return `${family} ${variant}`;
+  }
+  return model;
 }
 
 // ------------------------------------------------------------ live (claude)
@@ -426,6 +511,13 @@ export function resetModelCatalogCache(): void {
 function liveCatalogModelValues(backend: RealBackend): Set<string> {
   const entry = getCache().get(backend);
   return new Set(entry?.catalog.models.map((m) => m.value) ?? []);
+}
+
+/** The LIVE catalog's display name for an id it last offered, else null; the
+ *  same TTL-blind read as {@link liveCatalogModelValues}. */
+function liveCatalogDisplayName(backend: RealBackend, model: string): string | null {
+  const entry = getCache().get(backend);
+  return entry?.catalog.models.find((m) => m.value === model)?.displayName ?? null;
 }
 
 /** Map a `supportedModels()` row to a catalog model. */

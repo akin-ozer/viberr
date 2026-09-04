@@ -13,7 +13,7 @@
 
 **Agent account** — one person's connection to one backend, on Profile → Agent accounts (ruling 127). One row per `(user, backend)` in `user_backend_credentials`, replaced when they connect a different way. Three `kind`s: `login` (a hosted sign-in run by the unmodified vendor binary; the credential file lives in that person's runtime home under `runtimes/users/<userId>/`, and Viberr holds no secret at all), `api_key` and `access_token` (a pasted value, sealed, shown only as its last 4 characters). `method` records which vendor flow signed in: `claudeai | console | device`.
 
-**Agent profile / template** — an org-level markdown file `agents/profiles/<id>.md` describing an agent: `kind` (`operator | specialist | controller`), backends, model, effort, eligible stages, resources (skills, MCPs, KBs), persona body. Templates are **deployed** into projects.
+**Agent profile / template** — an org-level markdown file `agents/profiles/<id>.md` describing an agent: `kind` (`operator | specialist | controller`), backends, model, effort, eligible stages (`stages` / `spanAll`: where the profile may be **newly engaged** on a task, resolved per board by R14-1's three steps; ruling 133), resources (skills, MCPs, KBs), persona body. Templates are **deployed** into projects.
 
 **Always-human capabilities** — `merge-pull-request`, `transition-to-done`, `change-project-policy`. A server invariant (`ALWAYS_HUMAN_CAPABILITY_IDS`); no stored grant can hand them to an agent.
 
@@ -37,9 +37,11 @@
 
 **Data root** — `VIBERR_DATA_ROOT`. Holds canonical files, SQLite, run logs, KBs, skills and the per-person agent homes under `runtimes/users/` (ruling 127). One app process per data root, enforced by `state/writer.lock`.
 
-**Decision packet** — the one open structured question on a task (`## Packet` in `task.md`): `type` `input | blocked`, observations, and options whose `kind` is one of `PACKET_OPTION_KINDS` (`accept_completion`, `request_edit`, `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`, `archive_task`, `discard_branch`, `resolve_remote_collision`, `custom`). Resolution dispatches on the kind, never the title (ruling 7).
+**Decision packet** — the one open structured question on a task (`## Packet` in `task.md`): `type` `input | blocked`, observations, and options whose `kind` is one of `PACKET_OPTION_KINDS` (`accept_completion`, `request_edit`, `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`, `archive_task`, `discard_branch`, `resolve_remote_collision`, `custom`). Resolution dispatches on the kind, never the title (ruling 7). A failed run's recovery packet names the cause Viberr classified and the credential principal's own remedy, and a recovery option's label states what the human asserts; its recorded decision is that label or its pre-authored `ev` (ruling 130).
 
-**Delivery** — pushing the task branch and opening the review PR. An operator decision (capability `deliver-review-pr`, ruling 21) executed by the server; specialists never push. Humans can trigger it directly (`deliver-review` intent).
+**Delivery** — pushing the task branch and opening the review PR. An operator decision (capability `deliver-review-pr`, ruling 21) executed by the server; specialists never push and nobody pushes by hand. Humans can trigger it directly (`deliver-review` intent). Delivery is defined by the remote (ruling 134): the push reads origin's head first, answers `up_to_date` when it already carries the workspace head, and otherwise pushes and says what moved; rework on a task whose PR is already open is delivered the same way and moves that PR's head.
+
+**Repository bootstrap** — ruling 128: when the project's default branch has no ref (an empty repository, or one whose only refs are task branches), Viberr creates it before a task's first branch, by an initial commit or at the first commit of GitHub's current default, disclosed on the timeline and audited as `github.repo.bootstrapped`.
 
 **Deployment** — a `project.md` `agents[]` entry `{profileId, capabilities, extras, definition?}` that puts a template on a project with a project-effective capability policy.
 
@@ -47,7 +49,7 @@
 
 **Dispatch** — running a deployed agent on a task (`run_agent` for the operator, `run-agent` intent for humans). Running an unengaged profile **engages** it; delivering iff the task has no deliverer and the profile holds repo-write, supporting otherwise (ruling 98).
 
-**Engagement** — an entry in `task.md` `engagements[]`: `{profileId, backend, role, delivers, verdictCapable, pinnedBackend?}`. At most one has `delivers: true` (the **delivering engagement**, owner of workspace, branch and PR). Others are **supporting engagements**; a supporting engagement with `verdictCapable: true` is a **required reviewer**.
+**Engagement** — an entry in `task.md` `engagements[]`: `{profileId, backend, role, delivers, verdictCapable, pinnedBackend?}`. At most one has `delivers: true` (the **delivering engagement**, owner of workspace, branch and PR). Others are **supporting engagements**; a supporting engagement with `verdictCapable: true` is a **required reviewer**. Stage eligibility gates NEW engagements only (ruling 133): once a profile is the task's delivering engagement it may be prompted or resumed on that task at every stage, while a supporting engagement runs only at the stages its profile declares.
 
 **Goal (chained goal)** — one outcome decomposed into an ordered chain of tasks, canonical at `projects/<slug>/goals/<id>.md` (`status` `active | paused | attention | completed | cancelled`, `onFailure` `pause | continue`, links with `pending | active | done | failed | skipped`). Tasks are created lazily as links complete; each task carries `goalRef`.
 
@@ -63,7 +65,7 @@
 
 **Org role** — `users.role`: `admin | member`. Governs instance surfaces (org settings, insights, audit export). Distinct from project roles.
 
-**Owner** — the one human on a task (`ownerUserId`), seated at creation as the creator (ruling 127). Contributor or above may take or release; the owner governs any open decision on their own task, including accepting completion (FR37, rulings 22), and every agent run on the task bills the owner's own agent accounts, so an unowned task cannot run agents at all.
+**Owner** — the one human on a task (`ownerUserId`), seated at creation as the creator (ruling 127) or as the member named at creation, before the first operator run (ruling 140(a)). Contributor or above may take or release; the owner governs any open decision on their own task, including accepting completion (FR37, rulings 22), and every agent run on the task bills the owner's own agent accounts, so an unowned task cannot run agents at all.
 
 **PR state** — the `task.md` `pr.state` cache: `review` (open or draft), `merged`, `closed` (closed unmerged), `accepted` (a full-autonomy operator accepted; merge pending for a human). Sync pill precedence: merged > behind > synced.
 
@@ -73,11 +75,15 @@
 
 **Provenance** — the `provenance` table: what the projector and reconciler observed, and when. Not retained; not user-facing except freshness chips.
 
-**Readiness** — the stored 4-value enum `ready | input_required | inconsistency_risk_detected | blocked` (ruling 1), derived only in `readiness-policy.server.ts`. Surfaces additionally render the derived display value `agent_working` while `waiting === "agent"` (ruling 91) and "accepted" for done-stage tasks.
+**Blocked by** — a task's `blockedBy` list (ruling 131): the task keys and goal links (`goal-1 link 3`) in the same project it waits on. While non-empty the derived readiness is floored at `blocked`, the card, list row and task page say what it waits on and in what state (resolved at read time), the task is never "gone quiet", and Viberr releases it itself when every entry is done. No project may take `GOAL` as its task prefix: `GOAL-1` reads as a goal reference missing its link, so its tasks could never be waited on.
 
-**Recommendation** — a pending card the supervised operator leaves on a task: kinds `transition`, `run_agent`, `accept_completion`, `delivery`. Apply executes the same mutation a human would; Dismiss records it.
+**Readiness** — the stored 4-value enum `ready | input_required | inconsistency_risk_detected | blocked` (ruling 1), derived only in `readiness-policy.server.ts`; a non-empty `blockedBy` floors the derived value at `blocked` (ruling 131). Surfaces additionally render the derived display value `agent_working` while `waiting === "agent"` (ruling 91) and "accepted" for done-stage tasks.
+
+**Recommendation** — a pending card the supervised operator leaves on a task: kinds `transition`, `run_agent`, `accept_completion`, `delivery`. Apply executes the same mutation a human would; Dismiss records it. An `accept_completion` card binds to the work revision it was made for (`forHeadSha`) and is withdrawn, on the record, when that revision is replaced, a packet opens, or the task leaves the acceptance boundary (ruling 137).
 
 **Revision (work revision)** — the immutable identity of the work under review: `{id, headSha, treeSha, branch, createdAt, sourceProfileId, kind: delivered | verified}`. A new head with a different tree mints a new revision, which stales every prior verdict.
+
+**Revision drift** — how far the PR head has moved past the reviewed revision, recorded by the reconciler as `pr.revisionDrift {headSha, authored, baseRefresh}` (ruling 132). `authored` counts commits since the review that are the branch's own and not a merge Viberr recorded in `baseRefreshes`; `baseRefresh` counts the base commits and clean merges an `update_branch_from_base` brought in. `describeRevisionDrift` prints the one sentence every surface shows; only authored commits are "unreviewed". A base refresh is reported as a base refresh.
 
 **Ruling** — a numbered owner decision recorded in [decisions.md](../architecture/decisions.md). Code comments cite them as "ruling N"; superseded rulings are kept and marked, never deleted.
 
@@ -99,6 +105,8 @@
 
 **Verdict** — a required reviewer's `approve | request_changes`, bound to a revision id. A project member's GitHub approval on the PR, bound to the delivered head, counts as an approving verdict (ruling 68).
 
-**Waiting** — `human | agent | none`: whose turn it is. Forced to `none` in the terminal stage.
+**Decided packet** — an `edit_goal` packet whose option was confirmed: `awaiting: goal_edit` plus `decided { optionIndex, at, byUserId }`. It reads as decided on every surface (display readiness `goal_edit_pending`), and its only way out is saving the edited goal, prefilled by `goalDraftForOption` from the option's `goalDraft` (ruling 138).
+
+**Waiting** — `human | agent | none`: whose turn it is. Forced to `none` in the terminal stage; `none` while a task waits on other work with no packet or recommendation open (ruling 131).
 
 **Workspace** — the delivering engagement's git clone under `tasks/<KEY>/workspace/<repo>`; supporting runs get `workspace/support/<profileId>/<repo>`. Cut from a per-project mirror; reclaimed once the task is terminal.

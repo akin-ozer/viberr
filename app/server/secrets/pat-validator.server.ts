@@ -175,6 +175,9 @@ interface PatValidationBase {
   repo: string | null;
   scopes: ScopeCheck[];
   missingScopes: string[];
+  /** Ruling 144: the classic token's granted list (null until the header is
+   *  read, and for fine-grained tokens). */
+  headerScopes: string[] | null;
 }
 
 /**
@@ -200,6 +203,7 @@ export async function validatePatToken(
     repo,
     scopes: [],
     missingScopes: [],
+    headerScopes: null,
   };
 
   // 1. Identity — /user.
@@ -256,7 +260,20 @@ export async function validatePatToken(
   const scopesHeader = user.scopesHeader;
   const tokenKind = tokenKindOf(token, scopesHeader);
   const expiresAt = user.tokenExpiration ?? options.knownExpiresAt ?? null;
-  const withIdentity = { ...base, login, tokenKind, expiresAt };
+  // Ruling 144 (pass 34): a CLASSIC token's full granted list, verbatim from
+  // the header (an empty header is the positive fact "no scopes"). Null for a
+  // fine-grained token, which sends no header. Advisory: `scopes` below stays
+  // the verdict on the REQUIRED set; this is what the credential card reads to
+  // say that a token without `workflow` cannot push `.github/workflows/*`, and
+  // what delivery consults before such a push.
+  const headerScopes =
+    scopesHeader !== null && tokenKind === "classic"
+      ? scopesHeader.split(",").flatMap((s) => {
+          const scope = s.trim();
+          return scope ? [scope] : [];
+        })
+      : null;
+  const withIdentity = { ...base, login, tokenKind, expiresAt, headerScopes };
 
   // 2. Repo access — /repos/{owner}/{repo}. The response also carries the
   //    `permissions` block GitHub computes for THIS token, which is the
@@ -683,6 +700,13 @@ export async function revalidateProjectCredential(
       s.ok && (s.source === "header" || s.source === "probe") ? [s.id] : [],
     ),
   );
+  // Ruling 144(c): a classic token's published list is header evidence for
+  // EVERY scope it names, not only the required ones, so an open `workflow`
+  // violation resolves on a re-check whose header now lists it.
+  for (const scope of validation.headerScopes ?? []) {
+    grantedScopes.add(scope);
+    provenScopes.add(scope);
+  }
   const resolvedViolations: ScopeViolationRecord[] = [];
   for (const violation of listScopeViolations(db, projectSlug, {
     status: "open",

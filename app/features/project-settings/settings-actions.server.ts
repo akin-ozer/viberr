@@ -1,4 +1,9 @@
 import { existsSync, rmSync } from "node:fs";
+import { PROJECT_ROLES, ROLE_LABEL } from "~/shared/rbac";
+import {
+  isReservedTaskPrefix,
+  RESERVED_TASK_PREFIX_REFUSAL,
+} from "~/shared/dependencies";
 import { deleteProjectNotifications } from "~/server/projections/notifications.server";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -203,6 +208,7 @@ export async function updateProjectIdentity(
   if (!/^[A-Z]{1,4}$/.test(prefix)) {
     throw AppError.validation("Task prefix must be 1 to 4 letters.");
   }
+  if (isReservedTaskPrefix(prefix)) throw AppError.validation(RESERVED_TASK_PREFIX_REFUSAL);
   const description = input.description.trim();
 
   const changedFields: string[] = [];
@@ -786,7 +792,7 @@ export interface InviteMemberResult {
  */
 export async function inviteMember(
   db: DatabaseSync,
-  input: { projectSlug: string; name: string; email: string },
+  input: { projectSlug: string; name: string; email: string; role?: string },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<InviteMemberResult> {
@@ -799,6 +805,15 @@ export async function inviteMember(
   if (!name || !EMAIL_RE.test(email)) {
     throw AppError.validation("Enter a name and a valid email");
   }
+  // C4 (pass 34, U34-5): the seat the invite takes. Parsed HERE, against the
+  // same single enum `setMemberRole` uses, because a caller that bypasses a
+  // tool schema (the controller tests call the handler directly) would
+  // otherwise push an arbitrary string into project.md, where the tolerant
+  // per-row parse drops the member SILENTLY. Absent stays `viewer`: the
+  // narrowest seat is what an unstated invite has always meant.
+  const roleParse = z.enum(PROJECT_ROLES).safeParse(input.role ?? "viewer");
+  if (!roleParse.success) throw AppError.validation("Unknown project role.");
+  const role = roleParse.data;
 
   const auditActor = { userId: actor.userId, label: actor.label };
   let user = findUserByEmail(db, email);
@@ -822,8 +837,10 @@ export async function inviteMember(
     // An invite IS the membership (X15): viberr uses a whitelist auth model with
     // no separate accept-invite step, so the member gets access immediately and
     // we no longer stamp a decorative `status: invited` that never gated
-    // anything. The member joins as a viewer, editable in Policy afterwards.
-    parsed.frontmatter.members.push({ userId, role: "viewer" as const });
+    // anything. C4: the seat is the one the caller asked for (viewer unless
+    // stated), editable in Policy afterwards — it used to be viewer whatever
+    // was asked, which cost a second write and a second audit row per person.
+    parsed.frontmatter.members.push({ userId, role });
   });
 
   reprojectProject(db, ctx, input.projectSlug);
@@ -833,14 +850,14 @@ export async function inviteMember(
     subjectKind: "user",
     subjectId: userId,
     projectSlug: input.projectSlug,
-    details: { email, role: "viewer" },
+    details: { email, role },
   });
   // N20-6: no mailer exists (ruling 13) — do NOT claim an invite was sent. Name
   // what actually happened, and for a freshly minted account point at where the
   // sign-in credential is completed.
   const toast = tempPassword
-    ? `Added ${email}, who joins as Viewer. Set their sign-in password in Users & access.`
-    : `Added ${email}, who joins as Viewer`;
+    ? `Added ${email}, who joins as ${ROLE_LABEL[role]}. Set their sign-in password in Users & access.`
+    : `Added ${email}, who joins as ${ROLE_LABEL[role]}`;
   const result: InviteMemberResult = { toast, userId };
   if (tempPassword) result.tempPassword = tempPassword;
   return result;

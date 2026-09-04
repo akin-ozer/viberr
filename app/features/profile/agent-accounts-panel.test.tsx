@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { createRoutesStub, useFetcher } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { AgentAccountsPanel } from "./agent-accounts-panel";
@@ -75,7 +76,7 @@ function runningLogin(
   };
 }
 
-function renderPanel(
+function panelElement(
   backends: ProfileBackend[],
   poll: BackendLoginPollData | null = null,
 ) {
@@ -105,7 +106,14 @@ function renderPanel(
       loader: () => poll,
     },
   ]);
-  return render(<Stub initialEntries={["/profile"]} />);
+  return <Stub initialEntries={["/profile"]} />;
+}
+
+function renderPanel(
+  backends: ProfileBackend[],
+  poll: BackendLoginPollData | null = null,
+) {
+  return render(panelElement(backends, poll));
 }
 
 describe("AgentAccountsPanel", () => {
@@ -279,6 +287,106 @@ describe("AgentAccountsPanel", () => {
     });
   });
 
+  it("ruling 130(d): a connected card shows the last refusal Viberr observed on the account, or a spent window as a neutral pill", () => {
+    // Canary: remove the `lastRefusal` render branch and both pills vanish.
+    const connected = (name: "claude" | "codex") => ({
+      ...HEALTH_NONE,
+      backend: name,
+      userId: "u_arda",
+      available: true,
+      kind: "login" as const,
+      method: name === "claude" ? ("claudeai" as const) : ("device" as const),
+      verification: "file" as const,
+      verifiedAt: "2026-09-01T10:00:00.000Z",
+      connectedAt: "2026-09-01T10:00:00.000Z",
+      detail: null,
+    });
+    const { container } = renderPanel([
+      backend("claude", {
+        health: connected("claude"),
+        lastRefusal: {
+          kind: "credential",
+          providerText: "The account's organization does not allow Claude Code (oauth_org_not_allowed).",
+          observedAt: "2026-09-07T10:00:00.000Z",
+          runId: "run_refused",
+          resetsAt: null,
+          resetsAtPrecision: null,
+        },
+      }),
+      backend("codex", {
+        health: connected("codex"),
+        lastRefusal: {
+          kind: "quota",
+          providerText: "You've hit your usage limit.",
+          observedAt: "2026-09-07T10:05:00.000Z",
+          runId: "run_spent",
+          resetsAt: "2026-09-07T11:50:00.000Z",
+          resetsAtPrecision: "exact",
+        },
+      }),
+    ]);
+    const pills = Array.from(container.querySelectorAll(".pill")).map((p) => p.textContent ?? "");
+    expect(pills.some((t) => t.startsWith("refused by the provider · "))).toBe(true);
+    expect(pills.some((t) => t.startsWith("usage window spent · reopens "))).toBe(true);
+    // The credential refusal is a risk pill; the spent window is neutral.
+    const refused = Array.from(container.querySelectorAll(".pill")).find((p) => /refused by the provider/.test(p.textContent ?? ""))!;
+    expect(refused.className).toMatch(/risk/);
+    const spent = Array.from(container.querySelectorAll(".pill")).find((p) => /usage window spent/.test(p.textContent ?? ""))!;
+    expect(spent.className).not.toMatch(/risk/);
+    // The note carries the provider's own words and says what the pill is.
+    const note = container.querySelector('[data-refusal="credential"]')!;
+    expect(note.textContent).toContain("The account's organization does not allow Claude Code (oauth_org_not_allowed).");
+    expect(note.textContent).toContain("last refusal Viberr observed on this account");
+    expect(note.textContent).toContain("not proof the account works");
+    expect(note.textContent).toContain("any completed Claude run retires it");
+    const window_ = container.querySelector('[data-refusal="quota"]')!;
+    expect(window_.textContent).toContain("Spent as of");
+    expect(window_.textContent).toContain("reopens");
+    expect(window_.textContent).toContain("Any completed Codex run retires this notice");
+  });
+
+  it("ruling 130(d): no refusal, no pill and no note", () => {
+    const { container } = renderPanel([
+      backend("claude", { lastRefusal: null }),
+      backend("codex"),
+    ]);
+    expect(container.querySelector("[data-refusal]")).toBeNull();
+    expect(container.textContent).not.toMatch(/refused by the provider|usage window spent/);
+  });
+
+  it("C6: the connected-on and verified dates hydrate safely — the UTC day first, the viewer's calendar date after hydration", () => {
+    const backends = [
+      backend("claude", {
+        health: {
+          ...HEALTH_NONE,
+          backend: "claude",
+          userId: "u_arda",
+          available: true,
+          kind: "login",
+          method: "claudeai",
+          verification: "file",
+          verifiedAt: "2026-09-01T10:00:00.000Z",
+          connectedAt: "2026-09-01T10:00:00.000Z",
+          detail: null,
+        },
+      }),
+    ];
+    // The server pass depends on the timestamp alone: the SSR host's zone is
+    // not the viewer's, and a calendar date rendered in it hydrates to
+    // different text near midnight (React #418).
+    const ssr = renderToString(panelElement(backends));
+    expect(ssr).toContain(" on ");
+    expect(ssr).toContain("verified ");
+    expect(ssr.split("2026-09-01 (UTC)")).toHaveLength(3);
+    expect(ssr).not.toContain("Sep 1, 2026");
+    // After hydration the effect swaps in the viewer-local calendar date, on
+    // the sentence AND on the pill.
+    const { container } = renderPanel(backends);
+    expect(container.textContent).toContain("on Sep 1, 2026.");
+    expect(container.textContent).toContain("verified Sep 1, 2026");
+    expect(container.textContent).not.toContain("(UTC)");
+  });
+
   it("a login whose credential file vanished warns with the server's own sentence", () => {
     const { container, getByText } = renderPanel([
       backend("claude", {
@@ -439,5 +547,60 @@ describe("AgentAccountsPanel", () => {
       await vi.advanceTimersByTimeAsync(50);
     });
     expect(queryByText("Claude connected")).toBeTruthy();
+  });
+});
+
+/**
+ * Pass 34 review: a reset the provider gave in WORDS is a UTC calendar day,
+ * not a minute — the card rendered it as a to-the-minute local time, which can
+ * name the wrong day and claims precision the record never had.
+ */
+describe("the usage-window reset renders at the precision it has", () => {
+  const connectedHealth = (name: "claude" | "codex") => ({
+    ...HEALTH_NONE,
+    backend: name,
+    userId: "u_arda",
+    available: true,
+    kind: "login" as const,
+    method: name === "claude" ? ("claudeai" as const) : ("device" as const),
+    verification: "file" as const,
+    verifiedAt: "2026-09-01T10:00:00.000Z",
+    connectedAt: "2026-09-01T10:00:00.000Z",
+    detail: null,
+  });
+
+  it("a prose-derived reset shows the UTC day; an exact one keeps its clock", () => {
+    // Canary: drop `resetsAtPrecision` from the card (render every reset with
+    // `LocalDayDotTime`) — the prose case regains a minute it never had.
+    const prose = renderPanel([
+      backend("claude", {
+        health: connectedHealth("claude"),
+          lastRefusal: {
+            kind: "quota",
+            providerText: "Usage limit reached.",
+            observedAt: "2026-09-04T10:00:00.000Z",
+            runId: "run_a",
+            resetsAt: "2026-09-07T00:00:00.000Z",
+          resetsAtPrecision: "prose",
+        },
+      }),
+    ]);
+    expect(prose.container.textContent).toContain("2026-09-07 (UTC)");
+    prose.unmount();
+
+    const exact = renderPanel([
+      backend("claude", {
+        health: connectedHealth("claude"),
+          lastRefusal: {
+            kind: "quota",
+            providerText: "Usage limit reached.",
+            observedAt: "2026-09-04T10:00:00.000Z",
+            runId: "run_b",
+            resetsAt: "2026-09-07T11:50:00.000Z",
+          resetsAtPrecision: "exact",
+        },
+      }),
+    ]);
+    expect(exact.container.textContent).not.toContain("2026-09-07 (UTC)");
   });
 });

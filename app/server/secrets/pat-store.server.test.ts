@@ -27,6 +27,7 @@ import {
   getPatToken,
   getProjectCredential,
   getProjectCredentialHealth,
+  credentialAdvisories,
   markWriteScopeProven,
   recordPatValidation,
   setProjectCredential,
@@ -106,6 +107,7 @@ describe("pat-store", () => {
       repo: "akin-ozer/viberr",
       scopes: [{ id: "repo", ok: true, source: "probe" }],
       missingScopes: [],
+      headerScopes: null,
       detail: "Authenticated as viberr-bot.",
     });
     const reloaded = getPatMetadata(store.db, pat.id);
@@ -135,6 +137,7 @@ describe("pat-store", () => {
         { id: "pull_request:write", ok: true, source: "assumed" },
       ],
       missingScopes: [],
+      headerScopes: null,
       detail: "Authenticated as viberr-bot.",
     });
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
@@ -174,6 +177,7 @@ describe("pat-store", () => {
           { id: "pull_request:write", ok: true, source: "assumed" },
         ],
         missingScopes: [],
+        headerScopes: null,
         detail: "Authenticated.",
       });
       return pat;
@@ -279,6 +283,7 @@ describe("pat-store", () => {
         { id: "pull_request:write", ok: true, source: "header" },
       ],
       missingScopes: ["repo"],
+      headerScopes: null,
       detail: "Missing scope: repo.",
     });
 
@@ -298,5 +303,48 @@ describe("pat-store", () => {
     expect(health.scopes.find((s) => s.id === "pull_request:write")).toMatchObject(
       { ok: false, source: "violation", flaggedTaskKey: "VIB-142" },
     );
+  });
+});
+
+/**
+ * Ruling 144(a): the workflow-scope advisory, from a classic token's published
+ * list or from an open violation; never for a fine-grained token, never a
+ * verdict. Canary: derive it from `validation.scopes` (return [] when the
+ * header lacks the scope).
+ */
+describe("credentialAdvisories (ruling 144)", () => {
+  const validation = (tokenKind: "classic" | "fine_grained", headerScopes: string[] | null) => ({
+    status: "valid" as const,
+    checkedAt: "2026-09-04T00:00:00.000Z",
+    login: "bot",
+    tokenKind,
+    expiresAt: null,
+    repo: null,
+    scopes: [],
+    missingScopes: [],
+    headerScopes,
+    detail: "",
+  });
+  it("a classic token without `workflow` gets the header advisory; with it, none; fine-grained, none", () => {
+    const [advisory] = credentialAdvisories(validation("classic", ["repo"]), []);
+    expect(advisory).toMatchObject({ id: "workflow_scope", scope: "workflow", source: "header" });
+    expect(advisory!.text).toContain("cannot push changes under .github/workflows/");
+    expect(credentialAdvisories(validation("classic", ["repo", "workflow"]), [])).toEqual([]);
+    expect(credentialAdvisories(validation("fine_grained", null), [])).toEqual([]);
+    expect(credentialAdvisories(null, [])).toEqual([]);
+  });
+  it("an open `workflow` violation names the task and outranks the header", () => {
+    const [advisory] = credentialAdvisories(validation("classic", ["repo", "workflow"]), [{ scope: "workflow", taskKey: "JC-6" }]);
+    expect(advisory).toMatchObject({ source: "violation" });
+    expect(advisory!.text).toContain("(JC-6)");
+    expect(advisory!.text).toContain("Re-check");
+  });
+  it("rides the project credential health", () => {
+    const store = setupTestStore(ctx);
+    const actor = { userId: store.users.arda.id, label: "arda" };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_advisory0001" }, actor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    recordPatValidation(store.db, pat.id, validation("classic", ["repo"]));
+    expect(getProjectCredentialHealth(store.db, store.slug).advisories).toHaveLength(1);
   });
 });

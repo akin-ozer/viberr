@@ -14,16 +14,41 @@
  *                | "Mar 30" (home cards / store strip)
  *
  * Pure, client-safe (no .server suffix); pass `now` in tests.
+ *
+ * The `*UTC` siblings are the hydration FIRST PASS (app/ui/local-time.tsx):
+ * they depend on the timestamp alone — no `now`, no host zone — so a server
+ * render and a client hydration agree byte-for-byte whatever the two clocks
+ * and zones are; an effect then swaps in the local form above. That is why
+ * they take no `now` parameter at all: a "Today" that samples the clock is a
+ * mismatch waiting for a request that straddles UTC midnight (pass 34, C6).
  */
 
 const shortDay = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
 });
+/**
+ * Host-zone BY CONSTRUCTION (no `timeZone`): on the client the host is the
+ * viewer, and the viewer's own calendar day is the point of a calendar date.
+ * Do not pin this to UTC to make it hydrate — that would silently re-word every
+ * rendered date instead; surfaces render it through `LocalCalendarDate`
+ * (app/ui/local-time.tsx), whose first pass is the UTC day key.
+ */
 const calendarDate = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
   year: "numeric",
+});
+
+/** {@link calendarDate} pinned to UTC — for a label whose CLOCK is UTC, so the
+ *  day and the time cannot come from two different zones (pass 34 review: a
+ *  quota packet read "Sep 3, 2026 · 23:50 UTC" on a host twelve hours ahead,
+ *  where the UTC day was the 4th). */
+const calendarDateUTC = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
 });
 
 function toDate(iso: string): Date {
@@ -95,6 +120,13 @@ export function utcDayKey(iso: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** "Jul 3, 2027" in UTC — pair it with a UTC clock, never with a local one. */
+export function formatCalendarDateUTC(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = toDate(iso);
+  return Number.isNaN(d.getTime()) ? null : calendarDateUTC.format(d);
+}
+
 /** "Jul 3, 2027"; null for missing or invalid values. */
 export function formatCalendarDate(iso: string | null): string | null {
   if (!iso) return null;
@@ -124,14 +156,6 @@ const shortDayUtc = new Intl.DateTimeFormat("en-US", {
   timeZone: "UTC",
 });
 
-function sameUtcDay(a: Date, b: Date): boolean {
-  return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate()
-  );
-}
-
 /**
  * `formatDayBucket`'s hydration first pass: the absolute UTC calendar day
  * ("Mar 30") for EVERY row — deliberately never Today/Yesterday. Those depend
@@ -146,18 +170,19 @@ export function formatDayBucketUTC(iso: string): string {
 }
 
 /**
- * `formatDayDotTime` rendered in UTC regardless of the host timezone — the
- * deterministic first pass that SSR and hydration agree on byte-for-byte;
- * an effect then swaps in the viewer-local form (app/ui/local-time.tsx).
+ * `formatDayDotTime`'s hydration first pass: the absolute UTC day and the UTC
+ * clock for EVERY timestamp ("Jul 3 · 23:59") — deliberately never the bare
+ * "09:41" of today or "Yesterday · …", which depend on when "now" is sampled.
+ * This used to take a `now` and branch on it, while documenting itself as
+ * "the deterministic first pass": a server at 23:59:59Z and a viewer at
+ * 00:00:01Z then disagreed on every timestamp at once (pass 34, C6). There is
+ * no `now` parameter on purpose, so no caller can reintroduce the dependency;
+ * the effect in `LocalDayDotTime` swaps in the viewer-local form.
  */
-export function formatDayDotTimeUTC(iso: string, now: Date = new Date()): string {
-  const d = toDate(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const t = clock(d.getUTCHours(), d.getUTCMinutes());
-  if (sameUtcDay(d, now)) return t;
-  const yesterday = new Date(now.getTime() - 86_400_000);
-  if (sameUtcDay(d, yesterday)) return `Yesterday · ${t}`;
-  return `${shortDayUtc.format(d)} · ${t}`;
+export function formatDayDotTimeUTC(iso: string): string {
+  const day = formatDayBucketUTC(iso);
+  if (!day) return "";
+  return `${day} · ${formatClockUTC(iso)}`;
 }
 
 /** `formatClock` in UTC — the timezone-deterministic hydration first pass. */

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { AuthProviderView } from "~/server/org/org-view.server";
 import { oauthCallbackUrl } from "~/shared/auth/auth-paths";
-import { formatCalendarDate } from "~/shared/dates/format";
+import { LocalCalendarDate } from "~/ui/local-time";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
@@ -245,7 +245,9 @@ export function SsoPanel({
                   {proved && (
                     <>
                       {" · proved "}
-                      {formatCalendarDate(p.verifiedAt) || "recently"}
+                      {/* First paint is the UTC day; the viewer's calendar
+                          date lands after hydration (pass 34, C6). */}
+                      <LocalCalendarDate iso={p.verifiedAt} fallback="recently" />
                     </>
                   )}
                 </span>

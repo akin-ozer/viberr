@@ -89,7 +89,10 @@ untrusted files, so a malformed file reports zero errors there.
   file's `diagnostics`, records provenance, writes the content hash **last**, emits
   `project.updated`, and forces every task of the project to re-project when the
   project row changed.
-- `rebuildTaskFile` computes the derived `readiness`, `validation`
+- `rebuildTaskFile` computes the derived `readiness` (`deriveReadiness`: the
+  diagnostics floor and, ruling 131, the dependency floor: a non-empty `blockedBy`
+  floors it at `blocked` while `stored_readiness` keeps the file's value), stores
+  `blocked_by_json` verbatim, `validation`
   (`deriveValidation`, never the stored cache), `validation_block_reason` (closed PR →
   required reviewers → verdict gate → open blocked packet → conflicting PR),
   `continuity` (`degraded` when a `continuity` event exists), `waiting` forced to
@@ -100,6 +103,13 @@ untrusted files, so a malformed file reports zero errors there.
   emits `task.updated`.
 - `rebuildGoalFile` reconciles link statuses against live task rows and emits
   `goal.updated`.
+- `dependencies.server.ts` (ruling 131) is the READ model beside the rebuilder:
+  `resolveDependencies` / `dependencyResolver` map each stored entry to
+  `open | done | failed | missing` from the live projections (a task at the
+  terminal stage is `done`, an archived one `failed`; a goal link takes its task's
+  state once created, else its own status, `skipped` counting as done). The board
+  query resolves every row through ONE resolver; the task query resolves on read;
+  nothing caches a resolved state. `listHeldTasks` feeds the release engine.
 - `rebuildPath` routes a path to the right rebuilder with a content-hash
   short-circuit unless forced; it swallows every throw into a provenance `error` row
   and the log line `projection rebuild failed`, so a row that silently stops updating

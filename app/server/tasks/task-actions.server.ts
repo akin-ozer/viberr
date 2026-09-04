@@ -1,11 +1,20 @@
+import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
+import { findUserById } from "~/server/auth/user-store.server";
+import type {
+  CollisionServerOutcome,
+  ResolvedPacketOption,
+} from "~/shared/packet-server-outcome";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { isMissingRefAnswer } from "~/server/github/github-client.server";
 import {
   acceptanceBlockedReason,
   archivedTaskBlockedReason,
   archivedTaskMoveBlockedReason,
   closedPrBlockedReason,
   conflictingPrBlockedReason,
+  unpushedRevisionBlockedReason,
+  unpushedRevisionOf,
   deliveringEngagement,
   deriveValidation,
   normalizeEvidenceRows,
@@ -39,7 +48,21 @@ import {
   requireProjectAuthority,
   requireProjectMutable,
 } from "~/server/auth/project-authority.server";
-import type { OperatorAutonomy } from "./operator-actions.server";
+import type {
+  OperatorAutonomy,
+  OperatorOpenPacketInput,
+  OperatorPacketOptionInput,
+} from "./operator-actions.server";
+import {
+  describeRunFailure,
+  type DescribeRunFailureInput,
+} from "./run-failure-remedy.server";
+import {
+  maybeReleaseDependents,
+  noteDeadDependency,
+  validateDependencyRefs,
+} from "./dependencies.server";
+import type { DependencyReleasePayload } from "~/shared/dependencies";
 import {
   compactTimelineEvents,
   DEFAULT_COMPACTION,
@@ -95,6 +118,11 @@ import {
   type TaskWatcherNotice,
   type TaskMutationContext,
   type ProjectContext,
+  recordRecommendationWithdrawal,
+  withdrawAcceptanceOffers,
+  type OfferWithdrawalSlot,
+  type OfferWithdrawalCause,
+  notifyOwnerSeatChange,
 } from "./task-mutation.server";
 import {
   createTaskFile,
@@ -117,7 +145,6 @@ import {
   patchRun,
 } from "~/server/runtimes/run-store.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
-import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import {
   refusedPrincipalUserId,
   resolveTaskRunPrincipal,
@@ -473,6 +500,15 @@ export interface CreateTaskInput {
   dueDate?: string | null;
   /** Ruling 99: set only by goal-actions when this task is a chain link. */
   goalRef?: { goalId: string; linkIndex: number } | null;
+  /** Ruling 131: what the new task waits on, validated BEFORE a key is
+   *  allocated so a refusal burns no key; the task is born held
+   *  (`waiting: "none"`, readiness floored at `blocked` by derivation). */
+  blockedBy?: readonly string[];
+  /** Ruling 140(a): the member to seat as owner at creation, checked by the
+   *  same rule as a hand-off (`requireOwnable`) and written in the SAME
+   *  task.md write, before the operator's `create` trigger. Absent: the
+   *  creator is seated (ruling 127). */
+  ownerUserId?: string | null;
 }
 
 /**
@@ -481,11 +517,26 @@ export interface CreateTaskInput {
  * mock create defaults, reprojects, audits.
  * RBAC: any project member except viewers (board spec §5.1).
  */
+/**
+ * Ruling 140(a): the ONE rule for who may hold the owner seat, shared by a
+ * hand-off through `setOwner` and a named owner at creation, so the pinned
+ * sentence never forks. The ACTOR-side guard of `setOwner` (who may hand off)
+ * does not apply at creation: the creator is the implicit first owner.
+ */
+function requireOwnable(project: ProjectContext, targetUserId: string): void {
+  const targetRole = project.memberRoles.get(targetUserId);
+  if (!targetRole || !roleCan(targetRole, "own-task")) {
+    throw AppError.forbidden(
+      "Ownership can only be handed to a project member who can own tasks (contributor or above).",
+    );
+  }
+}
+
 export async function createTask(
   db: DatabaseSync,
   input: CreateTaskInput,
   actor: TaskActor,
-  ctx: TaskMutationContext = {},
+  ctx: TaskActionContext = {},
 ): Promise<{ key: string; task: TaskSummary; stageName: string }> {
   const project = loadProjectContext(ctx, input.projectSlug);
   requireAction(db, project, actor, "create-task", "create tasks");
@@ -525,6 +576,38 @@ export async function createTask(
     throw AppError.validation("New tasks cannot be created in the done stage.");
   }
 
+  // Pass 34 review: an invalid date must not burn a task key. Normalized here,
+  // beside the other pre-allocation checks, and used verbatim below.
+  const dueDate = normalizeCreateDueDate(input.dueDate);
+
+  // Ruling 140(a): a named owner is checked BEFORE the key is allocated, by
+  // the hand-off rule. The creator is the implicit first owner, so naming
+  // themselves records the creator seat; an operator-authorized creation has
+  // no person to seat and keeps its null seat.
+  const namedOwnerId = input.ownerUserId?.trim() || null;
+  if (namedOwnerId && !creator) {
+    throw AppError.validation(
+      "A named owner is seated by a person; an operator-created task starts unowned.",
+    );
+  }
+  const seat: "creator" | "named" | "none" =
+    namedOwnerId && creator && namedOwnerId !== creator.userId
+      ? "named"
+      : creator
+        ? "creator"
+        : "none";
+  if (seat === "named" && namedOwnerId) requireOwnable(project, namedOwnerId);
+  const namedOwner = seat === "named" && namedOwnerId ? findUserById(db, namedOwnerId) : null;
+  if (seat === "named" && !namedOwner) {
+    throw AppError.notFound("No Viberr user with that id.");
+  }
+
+  // Ruling 131: validate the wait BEFORE the key is allocated — a refused
+  // reference must not burn a counter value.
+  const blockedBy = input.blockedBy?.length
+    ? validateDependencyRefs(db, { projectSlug: input.projectSlug, self: null, entries: input.blockedBy })
+    : [];
+
   const projectRef = {
     projectSlug: input.projectSlug,
     dataRoot: ctx.dataRoot,
@@ -541,7 +624,8 @@ export async function createTask(
     previousStageId: null,
     heldAtStage: null,
     readiness: "input_required",
-    waiting: "human",
+    // Ruling 131(a): a task born waiting on other work owes nobody anything.
+    waiting: blockedBy.length > 0 ? "none" : "human",
     // Ruling 127: creation SEATS the creator as owner. Every agent run on a
     // task bills the OWNER's own Claude/Codex accounts, so a task with no owner
     // cannot run agents at all — and the pre-127 default (`null`) meant every
@@ -549,7 +633,11 @@ export async function createTask(
     // an "Assign me" ceremony standing between a person and their own work. An
     // OPERATOR-created task keeps a null seat: the operator is not a person and
     // has no account to bill; a human has to take that one.
-    ownerUserId: creator?.userId ?? null,
+    // Ruling 140(a): a named owner is seated in this same write, before the
+    // operator's `create` trigger reads the file, so the first triage run
+    // bills the named owner and is refused honestly when they have no
+    // credential, instead of running once on the creator's account.
+    ownerUserId: seat === "named" ? namedOwnerId : (creator?.userId ?? null),
     engagements: [],
     recommendations: [],
     schedules: [],
@@ -558,16 +646,18 @@ export async function createTask(
     operator: null,
     priority: input.priority ?? "normal",
     labels: input.labels ? normalizeTaskLabels(input.labels) : [],
-    dueDate: normalizeCreateDueDate(input.dueDate),
+    dueDate,
     // F26-16: `urgent` is the SINGLE derived mirror of `priority === "urgent"` —
     // the board highlight and "Blocked or waiting" filter read `urgent`, and it must
     // never disagree with the graded scale. Derived purely here (no separate input)
     // so the two cannot desync; the edit path (`setTaskMetadata`) does the same.
     urgent: input.priority === "urgent",
+    blockedBy,
     archived: false,
     validation: "none",
     workRevision: null,
     verdicts: [],
+    baseRefreshes: [],
     branch: null,
     pr: null,
     github: null,
@@ -583,7 +673,15 @@ export async function createTask(
   };
   // The same `assign` event a take through `setOwner` writes, so the timeline
   // reads the same however the seat was filled (ruling 127).
-  if (creator) {
+  if (creator && seat === "named" && namedOwner) {
+    createInput.timeline = [
+      ownerAssignEvent(
+        db,
+        creator,
+        `Seated ${namedOwner.name} as owner at creation. Agent runs on this task use the owner's own Claude and Codex accounts, and the owner is its human reviewer and acceptance authority.`,
+      ),
+    ];
+  } else if (creator) {
     createInput.timeline = [
       ownerAssignEvent(
         db,
@@ -591,6 +689,18 @@ export async function createTask(
         "Took task ownership by creating the task. Agent runs on this task use the owner's own Claude and Codex accounts, and the owner is its human reviewer and acceptance authority.",
       ),
     ];
+  }
+  if (blockedBy.length > 0) {
+    const waitNote: TaskFileEvent = {
+      occurredAt: now,
+      type: "note",
+      actor: creator ? humanActorRef(db, creator) : { kind: "operator" },
+      title: "Waits on other work",
+      text: `Created waiting on ${blockedBy.join(", ")}. Held until every entry is done; Viberr releases it then.`,
+      toAgent: false,
+      evidence: null,
+    };
+    createInput.timeline = [waitNote, ...(createInput.timeline ?? [])];
   }
   await createTaskFile(taskRef(ctx, input.projectSlug, key), createInput);
 
@@ -600,6 +710,24 @@ export async function createTask(
   });
   reprojectTask(db, ctx, input.projectSlug, key);
 
+  // Ruling 140(b): a creation that seats someone ELSE tells them, in the same
+  // shape a hand-off uses; the audit row then says whether they were told.
+  const createdDetails: NonNullable<AuditEventInput["details"]> = {
+    title,
+    stage: stageId,
+    ownerUserId: frontmatter.ownerUserId,
+    seat,
+  };
+  if (seat === "named" && namedOwnerId && creator) {
+    const seatNotified = notifyOwnerSeatChange(db, {
+      projectSlug: input.projectSlug,
+      recipientUserId: namedOwnerId,
+      actor: creator,
+      actorName: userName(db, creator.userId),
+      change: { kind: "seated_at_creation", taskKey: key },
+    });
+    if (seatNotified) createdDetails.notified = seatNotified;
+  }
   recordAudit(db, {
     action: "task.created",
     actor: { userId: actor.userId, label: actor.label },
@@ -607,7 +735,7 @@ export async function createTask(
     subjectId: key,
     projectSlug: input.projectSlug,
     taskKey: key,
-    details: { title, stage: stageId, ownerUserId: frontmatter.ownerUserId },
+    details: createdDetails,
   });
 
   // A dedicated operator coordinates every active task (ADR-002): auto-invoke
@@ -919,6 +1047,24 @@ async function answerAskingAgent(
   }
 }
 
+/** What a trigger carries into the run beside its name: ONE trailing options
+ *  object (ruling 131 folded the growing positional tail). */
+export interface AutoInvokeOptions {
+  /** Transition-chain depth to thread into the run (transition + delivered triggers —
+   *  see OPERATOR_TRANSITION_CHAIN_CAP). Omitted → the run starts a fresh chain. */
+  transitionDepth?: number;
+  /** Owner ruling 2026-07-26 — the transition trigger carries WHAT moved and
+   *  WHO moved it, so the operator picks the task up knowing from → to. A
+   *  human-authored move whose intent isn't visible on the timeline is
+   *  something the operator ASKS about instead of guessing. */
+  transition?: { fromName: string; toName: string; byHuman: string | null };
+  /** R20-1 (F20-5): packet-resolved trigger — the option the human chose (kind,
+   *  title, optional note), so the turn instruction states the decision. */
+  resolvedOption?: ResolvedPacketOption;
+  /** Ruling 131(e): dependencies-released trigger — what was waited on. */
+  dependencyRelease?: DependencyReleasePayload;
+}
+
 /** Best-effort operator handoff; dynamically imported to avoid a module cycle.
  *  Exported for the GitHub reconciler (P14 follow-up): an out-of-band PR state
  *  change (`pr-diverged`) is a coordination event like any other, so the
@@ -935,19 +1081,11 @@ export async function autoInvokeOperator(
     | "goal-updated"
     | "pr-diverged"
     | "delivered"
-    | "packet-resolved",
-  /** Transition-chain depth to thread into the run (transition + delivered triggers —
-   *  see OPERATOR_TRANSITION_CHAIN_CAP). Omitted → the run starts a fresh chain. */
-  transitionDepth?: number,
-  /** Owner ruling 2026-07-26 — the transition trigger carries WHAT moved and
-   *  WHO moved it, so the operator picks the task up knowing from → to. A
-   *  human-authored move whose intent isn't visible on the timeline is
-   *  something the operator ASKS about instead of guessing. */
-  transition?: { fromName: string; toName: string; byHuman: string | null },
-  /** R20-1 (F20-5): packet-resolved trigger — the option the human chose (kind,
-   *  title, optional note), so the turn instruction states the decision. */
-  resolvedOption?: { kind: string; title: string; note?: string },
+    | "packet-resolved"
+    | "dependencies-released",
+  options: AutoInvokeOptions = {},
 ): Promise<void> {
+  const { transitionDepth, transition, resolvedOption, dependencyRelease } = options;
   try {
     const { resolveOperatorAuthority } = await import("./operator-actions.server");
     const authority = resolveOperatorAuthority(ctx, projectSlug);
@@ -968,6 +1106,7 @@ export async function autoInvokeOperator(
       runInput.transitionByHuman = transition.byHuman;
     }
     if (resolvedOption) runInput.resolvedOption = resolvedOption;
+    if (dependencyRelease) runInput.dependencyRelease = dependencyRelease;
     await runOperator(db, runInput);
   } catch (error) {
     logger.error("auto operator invocation failed", {
@@ -1182,7 +1321,7 @@ export interface CommentToAgentResult extends AppendCommentResult {
    * operator branch reported `triggered: "started"` on a refused run, so the route
    * toasted "@Operator is picking it up" while nothing ran (the reply never came).
    */
-  operatorRefused: "open-packet" | "terminal-stage" | null;
+  operatorRefused: "open-packet" | "terminal-stage" | "blocked-by" | null;
   /**
    * A8 (pass 23): the comment is recorded BEFORE any run starts, so a SPECIALIST
    * run-start failure (single-flight conflict, a backend the task owner has not
@@ -1616,6 +1755,12 @@ export async function commentToAgent(
       });
     }
     if (target.session) {
+    // Ruling 133 (pass 34): the resume door is stage-gated like every other
+    // door. Inside the A8 try, so a supporting agent gets the honest partial
+    // success (comment posted, `runNotStarted` names the refusal) while the
+    // engaged deliverer resumes anywhere.
+    const { assertResumeEligible } = await import("./specialist-run.server");
+    assertResumeEligible(ctx, input.projectSlug, input.taskKey, target.profileId);
     // 4a. Resume the agent's existing provider session, reusing the clone
     //     workdir so it keeps its repo context. P8 (pass 25): a supporting agent
     //     resumes into its OWN isolated checkout, never the delivering tree.
@@ -2366,6 +2511,12 @@ type StuckLoopEscalation =
    *  instead, and no notification was sent. */
   | { status: "failed" };
 
+/** A reason clause ends exactly once: a refusal sentence that already carries
+ *  its period used to be followed by another (`..`, F34-12). */
+function endSentence(text: string): string {
+  return /[.!?…]$/.test(text) ? text : `${text}.`;
+}
+
 /** Open one recovery packet when the bounded operator loop stalls. */
 async function openStuckLoopPacket(
   db: DatabaseSync,
@@ -2375,10 +2526,18 @@ async function openStuckLoopPacket(
     taskKey: string;
     agentHandle: string;
     reason: string;
-    /** Failure-specific recovery options prepended to the standard three
-     *  (e.g. retry_other_backend after a backend-unavailability failure). A
-     *  recommended extra takes the recommendation from the default redirect. */
-    extraOptions?: import("./operator-actions.server").OperatorPacketOptionInput[];
+    /** Ruling 130(b) (pass 34): the person's own move, written after the
+     *  reason ("Arda can wait until the window reopens (…), or connect a
+     *  different Claude account or an API key on Profile → Agent accounts."). */
+    remedy?: string;
+    /** Ruling 130(b): a classified backend failure supplies its own option set
+     *  from `describeRunFailure` (retry on the other backend when the owner has
+     *  it, else "send the agent back to continue"; redirect present and NOT
+     *  recommended, the agent did nothing wrong). Absent, the stock set
+     *  (redirect recommended, request_edit, hold) stands: the other two callers
+     *  escalate coordination loops, not failed runs, and their packets must
+     *  stay resolvable. The hold option is appended to either set. */
+    options?: OperatorPacketOptionInput[];
     /** R20-3 (F20-4): the provider's own redacted sentence, rendered as its own
      *  "Provider said" observation beside the Signal so the human reads the
      *  actual cause on the packet, not only in the timeline. */
@@ -2395,16 +2554,34 @@ async function openStuckLoopPacket(
       "./operator-actions.server"
     );
     const authority = resolveOperatorAuthority(ctx, input.projectSlug, {});
-    const extra = input.extraOptions ?? [];
-    const extraRecommended = extra.some((o) => o.recommended);
-    const redirect: import("./operator-actions.server").OperatorPacketOptionInput =
-      {
-        kind: "redirect",
-        title: "Redirect with sharper guidance",
-        detail: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
-      };
-    // A recommended extra (the backend retry) takes the recommendation from here.
-    if (!extraRecommended) redirect.recommended = true;
+    const hold: OperatorPacketOptionInput = {
+      kind: "hold_runtime_debug",
+      title: "Hold for runtime debugging",
+      detail: "Freeze coordination while the provider-native session is inspected.",
+    };
+    const options: OperatorPacketOptionInput[] = input.options
+      ? [...input.options, hold]
+      : [
+          {
+            kind: "redirect",
+            title: "Redirect with sharper guidance",
+            detail: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
+            recommended: true,
+          },
+          {
+            kind: "request_edit",
+            title: "Send back for another attempt",
+            detail: "Ask the same specialist to try again from its last report.",
+          },
+          hold,
+        ];
+    const observations: NonNullable<OperatorOpenPacketInput["observations"]> = [
+      { k: "Agent", v: `@${input.agentHandle}` },
+      { k: "Signal", v: input.reason },
+    ];
+    if (input.providerText) {
+      observations.push({ k: "Provider said", v: input.providerText, code: true });
+    }
     const result = await operatorOpenPacket(
       db,
       ctx,
@@ -2413,28 +2590,11 @@ async function openStuckLoopPacket(
         taskKey: input.taskKey,
         packetType: "blocked",
         title: `Work stalled: pick a recovery path`,
-        body: `${input.reason} Coordination is paused until a human chooses how to proceed.`,
-        observations: [
-          { k: "Agent", v: `@${input.agentHandle}` },
-          { k: "Signal", v: input.reason },
-          ...(input.providerText
-            ? [{ k: "Provider said", v: input.providerText, code: true }]
-            : []),
-        ],
-        options: [
-          ...extra,
-          redirect,
-          {
-            kind: "request_edit",
-            title: "Send back for another attempt",
-            detail: "Ask the same specialist to try again from its last report.",
-          },
-          {
-            kind: "hold_runtime_debug",
-            title: "Hold for runtime debugging",
-            detail: "Freeze coordination while the provider-native session is inspected.",
-          },
-        ],
+        body:
+          `${input.reason}${input.remedy ? ` ${input.remedy}` : ""} ` +
+          "Coordination is paused until a human chooses how to proceed.",
+        observations,
+        options,
       },
       authority,
     );
@@ -2838,6 +2998,15 @@ export async function recordAgentCompletion(
   const roleDisplay =
     actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
   let questionOpened = false;
+  // Ruling 137: the envelope's question packet withdraws the standing
+  // acceptance offers on the record, inside the same locked write.
+  const questionCause: OfferWithdrawalCause | null = question
+    ? { kind: "packet", title: question.title.trim() }
+    : null;
+  const questionTerminalStageId = question
+    ? terminalStageIdOf(loadProjectContext(ctx, projectSlug))
+    : null;
+  const questionWithdrawal: OfferWithdrawalSlot = { offers: null };
   /** Set when the envelope's question could not open a packet (one already is)
    *  — recorded as a timeline note instead of being dropped (P13-RT-06). */
   let questionDeferred: string | null = null;
@@ -3037,6 +3206,14 @@ export async function recordAgentCompletion(
       if (question && !parsed.packet) {
         parsed.packet = buildAgentQuestionPacket(actorRef, question);
         parsed.frontmatter.waiting = "human";
+        if (questionCause) {
+          questionWithdrawal.offers = withdrawAcceptanceOffers(
+            parsed,
+            questionTerminalStageId,
+            questionCause,
+            actorRef,
+          );
+        }
         parsed.timeline.unshift({
           occurredAt: new Date().toISOString(),
           type: "blocked",
@@ -3105,6 +3282,15 @@ export async function recordAgentCompletion(
       );
     }
     if (questionOpened) {
+      if (questionCause && questionWithdrawal.offers) {
+        recordRecommendationWithdrawal(db, {
+          projectSlug,
+          taskKey,
+          withdrawal: questionWithdrawal.offers,
+          cause: questionCause,
+          actor: { userId: null, label: encodeActorRef(actorRef) },
+        });
+      }
       recordAudit(db, {
         action: "task.agent.packet_opened",
         // P13-RT-06: the AGENT asked, not the operator. The Claude transport
@@ -3670,30 +3856,65 @@ export async function applyAgentCompletionEffects(
         : failure.text
       : "";
     const providerText = failure?.providerText ?? "";
-    const reasonText =
-      failure?.kind === "quota"
-        ? `${backendLabel} is over its usage quota`
-        : failure?.kind === "auth"
-          ? `${backendLabel} rejected the credentials`
-          : failure?.kind === "unavailable"
-            // Ruling 127: the refusal sentence is `principalRefusalMessage`'s,
-            // written by the resolver and already naming the person and the
-            // remedy. Repeating a generic "no usable credential configured"
-            // here would tell a second, wronger story about the same refusal.
-            ? failText || `${backendLabel} could not run for this task's owner`
-            : failure?.kind === "max_turns"
-              ? `the ${backendLabel} run hit its turn cap and was CUT OFF mid-work, which is not a task failure (its partial report, if any, is above)`
-              // P13-D-2: a dead provider transcript is its own class. It used to
-              // fall through to the generic branch below, which reads like a
-              // runtime error and sent people to check a credential that was
-              // fine. Nothing is wrong with the setup and the other backend is
-              // not the fix — a fresh run on the SAME backend is, which is why
-              // `backendFailure` deliberately excludes this kind.
-              : failure?.kind === "session_missing"
-                ? `the agent's stored ${backendLabel} session no longer exists, so its history could not be resumed`
-                : failText
-                  ? `${backendLabel} run failed: ${failText}`
-                  : `the ${backendLabel} run ended in an error`;
+    // Ruling 127 / 130(b): the remedy for a quota or credential refusal
+    // belongs to the credential principal, the task owner; the leaf names
+    // them, their reset instant and Profile → Agent accounts. An unowned task
+    // yields no owner sentence and no retry option.
+    const ownerUserId =
+      completionFm?.ownerUserId ??
+      readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed
+        .frontmatter.ownerUserId ??
+      null;
+    const describeInput: DescribeRunFailureInput = {
+      failure,
+      backend: input.backend,
+      taskKey: input.taskKey,
+      ownerUserId,
+      role: "specialist",
+      agentHandle: input.agentHandle,
+      profileId: input.profileId,
+    };
+    if (ctx.dataRoot) describeInput.dataRoot = ctx.dataRoot;
+    const described = describeRunFailure(db, describeInput);
+    // Ruling 130(b): a classified refusal is worded ONCE, by the leaf. The
+    // other kinds keep their own sentences below; `unavailable` is ruling
+    // 127's refusal sentence, already naming the person and the remedy.
+    const classified = failure?.kind === "quota" || failure?.kind === "auth";
+    const reasonText = classified
+      ? described.reason
+      : failure?.kind === "unavailable"
+        ? failText || `${backendLabel} could not run for this task's owner`
+        : failure?.kind === "max_turns"
+          ? `the ${backendLabel} run hit its turn cap and was CUT OFF mid-work, which is not a task failure (its partial report, if any, is above)`
+          // P13-D-2: a dead provider transcript is its own class. It used to
+          // fall through to the generic branch below, which reads like a
+          // runtime error and sent people to check a credential that was
+          // fine. Nothing is wrong with the setup and the other backend is
+          // not the fix — a fresh run on the SAME backend is.
+          : failure?.kind === "session_missing"
+            ? `the agent's stored ${backendLabel} session no longer exists, so its history could not be resumed`
+            : failText
+              ? `${backendLabel} run failed: ${failText}`
+              : `the ${backendLabel} run ended in an error`;
+    const providerBlock =
+      // R20-3 (F20-4): surface the provider's own redacted words as a fenced
+      // block in the R19-13 house style, so a human sees "model is not
+      // supported when using Codex with a ChatGPT account" instead of only
+      // the generic runtime advice above.
+      providerText ? `\n\nWhat the provider reported:\n\`\`\`\n${providerText}\n\`\`\`` : "";
+    const failureText = classified
+      ? `The ${input.role} ${roleLabel} run did not complete. ${described.reason} No changes were delivered. ${described.remedy}${providerBlock}`
+      : `The ${input.role} ${roleLabel} run did not complete: ${endSentence(reasonText)}${
+          failure?.kind === "max_turns" ? "" : " No changes were delivered."
+        }${
+          failure?.kind === "max_turns"
+            ? " Re-prompt the agent to continue from its session, or raise the turn cap (VIBERR_CLAUDE_MAX_TURNS)."
+            : failure?.kind === "session_missing"
+              ? " Re-prompt the agent: it will start a fresh run and re-anchor on this task file. Provider transcripts expire, and wiping the data root removes them too."
+              // The refusal sentence already says who must do what and where;
+              // an unclassified error has no remedy Viberr can vouch for.
+              : ""
+        }${providerBlock}`;
     // Files the run saved before it died still get their producer named.
     const failureAttachments = sanitizeEventAttachmentNames(runAttachments);
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
@@ -3702,28 +3923,7 @@ export async function applyAgentCompletionEffects(
         type: "blocked",
         actor: actorRef,
         title: null,
-        text: `The ${input.role} ${roleLabel} run did not complete: ${reasonText}.${
-          failure?.kind === "max_turns" ? "" : " No changes were delivered."
-        }${
-          failure?.kind === "quota" || failure?.kind === "auth"
-            ? " Retry on the other backend, or fix the credential and re-run."
-            : failure?.kind === "unavailable"
-              // The refusal sentence already says who must do what and where.
-              ? ""
-              : failure?.kind === "max_turns"
-                ? " Re-prompt the agent to continue from its session, or raise the turn cap (VIBERR_CLAUDE_MAX_TURNS)."
-                : failure?.kind === "session_missing"
-                  ? " Re-prompt the agent: it will start a fresh run and re-anchor on this task file. Provider transcripts expire, and wiping the data root removes them too."
-                  : ""
-        }${
-          // R20-3 (F20-4): surface the provider's own redacted words as a fenced
-          // block in the R19-13 house style, so a human sees "model is not
-          // supported when using Codex with a ChatGPT account" instead of only
-          // the generic runtime advice above.
-          providerText
-            ? `\n\nWhat the provider reported:\n\`\`\`\n${providerText}\n\`\`\``
-            : ""
-        }`,
+        text: failureText,
         toAgent: false,
         evidence: null,
       };
@@ -3744,56 +3944,26 @@ export async function applyAgentCompletionEffects(
         providerText,
       });
     }
-    // Backend-level failure (quota / auth / no credential): the packet's first
-    // recovery option is a one-click retry on the OTHER backend (D4). F27-B1
-    // (owner ruling 2026-08-24): the switch STICKS — the retry run sets a
-    // per-engagement `pinnedBackend`, and every later resolution (operator prompt,
-    // @mention) follows the pin over the live profile primary (specialist-run
-    // backend resolution: override ?? pinnedBackend ?? live deployment ?? snapshot).
+    // Backend-level failure (quota / auth / no credential): the packet's
+    // options come from the leaf (D4 retry-on-the-other-backend first when the
+    // task OWNER has it connected, ruling 127; the switch STICKS per F27-B1,
+    // owner ruling 2026-08-24, via the retry run's per-engagement
+    // `pinnedBackend`; else "send the agent back to continue"; redirect
+    // present and not recommended). Any other kind keeps the stock set.
     const backendFailure =
       failure?.kind === "quota" ||
       failure?.kind === "auth" ||
       failure?.kind === "unavailable";
-    const altBackend: RealBackend = input.backend === "codex" ? "claude" : "codex";
-    const altLabel = altBackend === "claude" ? "Claude" : "Codex";
-    const failedProfileId = input.profileId;
-    // Ruling 127: "retry on the other backend" is only a recovery if the TASK
-    // OWNER has that other backend connected — the retry run would bill them.
-    // Offering it otherwise promises a one-click fix that fails identically the
-    // moment it is clicked, which is the worst kind of packet option: it looks
-    // like the way out. An unowned task has no owner to ask, so it is never
-    // offered there either, and the refusal sentence already names the real
-    // remedy (own the task / connect the backend).
-    const ownerUserId =
-      completionFm?.ownerUserId ??
-      readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed
-        .frontmatter.ownerUserId ??
-      null;
-    const ownerHasAlt =
-      ownerUserId !== null &&
-      isBackendAvailableFor(db, ownerUserId, altBackend, {
-        dataRoot: ctx.dataRoot,
-      });
-    const retryOption =
-      backendFailure && ownerHasAlt
-        ? [
-            {
-              kind: "retry_other_backend" as const,
-              title: `Retry on ${altLabel}`,
-              detail: `Re-run the ${roleLabel} on ${altLabel} with a fresh context. The switch sticks: later prompts on this task follow it.`,
-              recommended: true,
-              backend: altBackend,
-              profileId: failedProfileId,
-            },
-          ]
-        : [];
     const stuck: Parameters<typeof openStuckLoopPacket>[2] = {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       agentHandle: input.agentHandle,
-      reason: `The ${input.role} ${roleLabel} run failed: ${reasonText}.`,
+      reason: classified
+        ? described.reason
+        : `The ${input.role} ${roleLabel} run failed: ${endSentence(reasonText)}`,
     };
-    if (retryOption.length) stuck.extraOptions = retryOption;
+    if (classified) stuck.remedy = described.remedy;
+    if (backendFailure) stuck.options = described.options;
     if (providerText) stuck.providerText = providerText;
     const escalation = await openStuckLoopPacket(
       db,
@@ -3825,7 +3995,9 @@ export async function applyAgentCompletionEffects(
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       kind: "quality",
-      text: `${input.role} run failed: ${reasonText}.`,
+      text: classified
+        ? `${input.role} run failed. ${described.reason}`
+        : `${input.role} run failed: ${endSentence(reasonText)}`,
     };
     if (escalation.status === "opened") {
       failureNotice.exceptUserIds = escalation.notifiedUserIds;
@@ -4030,10 +4202,12 @@ export async function clearWaitingToHuman(
     const fm = existing.parsed.frontmatter;
     const { getProject } = await import("~/server/projections/board-query.server");
     const stages = getProject(db, projectSlug)?.stages ?? [];
+    // Ruling 131(d): a task waiting on other work with nothing else pending
+    // owes nobody anything either; "waiting on a human" would put a held task
+    // on every human-decision surface with nothing to decide.
+    const nothingPending = !existing.parsed.packet && fm.recommendations.length === 0;
     const settled =
-      isTerminalStage(fm.stage, stages) &&
-      !existing.parsed.packet &&
-      fm.recommendations.length === 0
+      nothingPending && (isTerminalStage(fm.stage, stages) || fm.blockedBy.length > 0)
         ? "none"
         : "human";
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
@@ -4275,12 +4449,7 @@ export async function setOwner(
     if (currentOwnerId !== actor.userId && !roleCan(actorRole, "release-any-ownership")) {
       throw AppError.forbidden("Only the current owner or a project admin can hand off ownership.");
     }
-    const targetRole = project.memberRoles.get(input.targetUserId);
-    if (!targetRole || !roleCan(targetRole, "own-task")) {
-      throw AppError.forbidden(
-        "Ownership can only be handed to a project member who can own tasks (contributor or above).",
-      );
-    }
+    requireOwnable(project, input.targetUserId);
   }
 
   if (currentOwnerId === input.targetUserId) {
@@ -4306,6 +4475,42 @@ export async function setOwner(
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
+  // Ruling 140(b): tell the person whose seat changed — the new owner on a
+  // hand-off, the DISPLACED owner on a takeover. Losing the seat takes away
+  // the credential principal role, the review duty and the acceptance
+  // authority, so it is not a smaller fact than gaining it. Nobody is told
+  // about their own act. The notifier runs BEFORE the audit row so the row can
+  // say whether the person was told, and why not when they were not.
+  // Both sides, independently. Choosing ONE recipient by `isTake` left a
+  // third-party hand-off (an admin moving the seat between two other people,
+  // which the gate above admits) telling the new owner and nobody else: the
+  // displaced owner lost the credential principal role, the review duty and
+  // the acceptance authority in silence, and the audit row named the wrong
+  // person as the one told (pass 34 review).
+  const actorName = userName(db, actor.userId);
+  const notified = notifyOwnerSeatChange(db, {
+    projectSlug: input.projectSlug,
+    recipientUserId: input.targetUserId,
+    actor,
+    actorName,
+    change: { kind: "handed_off", taskKey: input.taskKey },
+  });
+  const displaced =
+    currentOwnerId && currentOwnerId !== input.targetUserId
+      ? notifyOwnerSeatChange(db, {
+          projectSlug: input.projectSlug,
+          recipientUserId: currentOwnerId,
+          actor,
+          actorName,
+          change: { kind: "taken_over", taskKey: input.taskKey },
+        })
+      : null;
+  const ownershipDetails: NonNullable<AuditEventInput["details"]> = {
+    previousOwnerUserId: currentOwnerId,
+    newOwnerUserId: input.targetUserId,
+  };
+  if (notified) ownershipDetails.notified = notified;
+  if (displaced) ownershipDetails.notifiedDisplaced = displaced;
   recordAudit(db, {
     action: isTake ? "task.ownership.taken" : "task.ownership.handed_off",
     actor: { userId: actor.userId, label: actor.label },
@@ -4313,10 +4518,7 @@ export async function setOwner(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: {
-      previousOwnerUserId: currentOwnerId,
-      newOwnerUserId: input.targetUserId,
-    },
+    details: ownershipDetails,
   });
 
   // Ownership is a human bookkeeping action (claiming the review/acceptance
@@ -4390,6 +4592,22 @@ export async function releaseOwner(
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
+  // Ruling 140(b): an ADMIN release takes the seat away from someone; they are
+  // told, in the same shape a hand-off uses. A self-release notifies nobody.
+  const releaseNotified = isSelf
+    ? null
+    : notifyOwnerSeatChange(db, {
+        projectSlug: input.projectSlug,
+        recipientUserId: currentOwnerId,
+        actor,
+        actorName: userName(db, actor.userId),
+        change: { kind: "admin_released", taskKey: input.taskKey },
+      });
+  const releaseDetails: NonNullable<AuditEventInput["details"]> = {
+    previousOwnerUserId: currentOwnerId,
+    forced: !isSelf,
+  };
+  if (releaseNotified) releaseDetails.notified = releaseNotified;
   recordAudit(db, {
     action: isSelf ? "task.ownership.released" : "task.ownership.admin_released",
     actor: { userId: actor.userId, label: actor.label },
@@ -4397,7 +4615,7 @@ export async function releaseOwner(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: { previousOwnerUserId: currentOwnerId, forced: !isSelf },
+    details: releaseDetails,
   });
 
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
@@ -4692,6 +4910,22 @@ export async function transitionStage(
   // file lock, so a retry … can never leave two cards"). `moved` carries the
   // in-lock verdict back out so the event, the audit row, the notification
   // read and the operator re-trigger all follow the ONE write that happened.
+  // Ruling 137: a move AWAY from the acceptance boundary (the review stage the
+  // workflow graph names, the same source `isAtAcceptanceBoundary` reads)
+  // withdraws the standing acceptance offers on the record. A move INTO the
+  // terminal stage is the acceptance itself and consumes every card.
+  const boundaryStageId = reviewStageIdOf(project);
+  const moveCause: OfferWithdrawalCause | null =
+    boundaryStageId !== null &&
+    fromStageId === boundaryStageId &&
+    input.toStageId !== terminalStageIdOf(project)
+      ? {
+          kind: "stage_move",
+          toStageId: input.toStageId,
+          toStageName: stageName(project, input.toStageId),
+        }
+      : null;
+  const moveWithdrawal: OfferWithdrawalSlot = { offers: null };
   let moved = false;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     const current = parsed.frontmatter.stage;
@@ -4752,10 +4986,23 @@ export async function transitionStage(
       parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
     }
     // A stage move makes any pending transition recommendation stale — drop it
-    // so a Done task never shows a "move to <stage>" card.
-    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
-      (r) => r.kind !== "transition",
-    );
+    // so a Done task never shows a "move to <stage>" card. It is handed to the
+    // withdrawal as the caller's own filter, so ONE write removes both sets and
+    // the note counts the survivors it really leaves (pass 34 review: counting
+    // before this filter overstated them).
+    const staleTransition = (r: Recommendation) => r.kind === "transition";
+    if (moveCause) {
+      moveWithdrawal.offers = withdrawAcceptanceOffers(
+        parsed,
+        terminalStageIdOf(project),
+        moveCause,
+        event.actor,
+        staleTransition,
+      );
+    } else {
+      parsed.frontmatter.recommendations =
+        parsed.frontmatter.recommendations.filter((r) => !staleTransition(r));
+    }
     parsed.timeline.unshift(event);
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
@@ -4783,6 +5030,17 @@ export async function transitionStage(
     taskKey: input.taskKey,
     details: transitionDetails,
   });
+  if (moveCause && moveWithdrawal.offers) {
+    recordRecommendationWithdrawal(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      withdrawal: moveWithdrawal.offers,
+      cause: moveCause,
+      actor: ctx.operatorAuthorized
+        ? OPERATOR_AUDIT_ACTOR
+        : { userId: actor.userId, label: actor.label },
+    });
+  }
 
   // Approving a requested transition resolves its approval notifications.
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
@@ -4829,15 +5087,17 @@ export async function transitionStage(
         input.projectSlug,
         input.taskKey,
         "transition",
-        chainDepth,
         {
-          fromName: stageName(project, fromStageId),
-          toName: stageName(project, input.toStageId),
-          // Operator-authored moves need no explanation; a HUMAN's move tells
-          // the operator who to honor — or to ask — by name (NEW-4 tags).
-          byHuman: ctx.operatorAuthorized
-            ? null
-            : (humanActorRef(db, actor).nameHint ?? actor.label),
+          transitionDepth: chainDepth,
+          transition: {
+            fromName: stageName(project, fromStageId),
+            toName: stageName(project, input.toStageId),
+            // Operator-authored moves need no explanation; a HUMAN's move tells
+            // the operator who to honor — or to ask — by name (NEW-4 tags).
+            byHuman: ctx.operatorAuthorized
+              ? null
+              : (humanActorRef(db, actor).nameHint ?? actor.label),
+          },
         },
       );
     }
@@ -4850,6 +5110,9 @@ export async function transitionStage(
     const { maybeReconcileGoalForTask } = await import("./goal-actions.server");
     maybeReconcileGoalForTask(db, ctx, input.projectSlug, input.taskKey);
   })().catch(() => {});
+  // Ruling 131(e): a move into (or out of) the terminal stage can satisfy a
+  // dependent's wait. Same fire-and-forget posture; the engine converges.
+  maybeReleaseDependents(db, ctx, input.projectSlug);
 
   // R15-2 (owner ruling 2026-07-28): delivery (push + review PR) is an OPERATOR
   // decision, never a stage side-effect — the transitionStage auto-delivery hook
@@ -5007,9 +5270,19 @@ export type DeliveryOutcome =
       url: string;
       /** True when this delivery CREATED the PR; false when one was reused. */
       created: boolean;
-      /** The raw push status ("pushed", or a benign non-push such as
-       *  "no_commits" when an agent already delivered with its own creds). */
+      /** The raw push status ("pushed", "up_to_date", or a benign non-push
+       *  such as "no_commits" when an agent already delivered with its own
+       *  creds). */
       pushStatus: string;
+      /** Ruling 134: the workspace head the delivery left on the PR (full
+       *  sha), or null when git could not name it. */
+      headSha: string | null;
+      /** Ruling 134: the PR was opened, or the push moved its head. A reuse
+       *  that pushed nothing is `false`, and re-queues nothing (ruling 48). */
+      moved: boolean;
+      /** Ruling 134(b): a `delivered` operator run was queued for this outcome
+       *  (full autonomy, moved head). */
+      operatorRequeued: boolean;
     }
   /** F15-15/B-GH1: the remote branch diverged (non-fast-forward). No PR was
    *  opened — it would review the stale remote content, not the delivery. */
@@ -5017,6 +5290,9 @@ export type DeliveryOutcome =
   | { status: "grant_withheld"; message: string }
   /** The push failed outright; no PR was opened over a possibly-stale remote. */
   | { status: "push_failed"; message: string }
+  /** Ruling 144: a workflow-file push refused for the `workflow` scope; the
+   *  violation is open on the task and the remedy is a human's. */
+  | { status: "scope_violation"; scope: string; message: string }
   | { status: "nothing_to_review"; message: string }
   | { status: "failed"; message: string };
 
@@ -5042,6 +5318,25 @@ export async function performDelivery(
   try {
     const canCommitPush = await resolveDeliveryPushGrant(ctx, projectSlug, taskKey);
 
+    // 0. Ruling 128 (F34-4): the base branch must exist BEFORE the push, or a
+    //    task branch becomes an empty repository's first ref. The gate splits by
+    //    EVIDENCE: only a positive "there is no default ref and Viberr could not
+    //    create it" (`bootstrap_failed`, `scope_violation`) refuses the push; a
+    //    probe that merely could not be READ (network, auth) pushes anyway and
+    //    the PR-side wording is what the person sees.
+    const bootstrap = await ensureDefaultBranchBeforePush(db, ctx, projectSlug, taskKey, actor);
+    if (bootstrap.status === "bootstrap_failed" || bootstrap.status === "scope_violation") {
+      const message =
+        bootstrap.status === "bootstrap_failed"
+          ? `${taskKey}'s repository has no \`${bootstrap.defaultBranch}\` branch and Viberr could not create it (${bootstrap.reason}). ` +
+            `Nothing was pushed: a task branch must never become the repository's first ref. ` +
+            `Create \`${bootstrap.defaultBranch}\` on GitHub (or fix what GitHub named), then deliver again.`
+          : `${taskKey}'s repository has no default branch and creating it was refused: the project credential lacks the \`repo\` scope (a scope violation is open on the task). ` +
+            `Nothing was pushed. Grant the scope or create the branch on GitHub, then deliver again.`;
+      await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Delivery could not run", message);
+      return { status: "failed", message };
+    }
+
     // 1. Push the workspace commits to the remote task branch.
     const pushWorkspaceBranch =
       ctx.deps?.pushWorkspaceBranch ??
@@ -5053,7 +5348,9 @@ export async function performDelivery(
       canCommitPush,
       ...dataCtx,
     });
-    if (push.status !== "pushed") {
+    // Ruling 134: `up_to_date` is an ordinary delivery (origin already carries
+    // the head); only a real non-push is worth a log line.
+    if (push.status !== "pushed" && push.status !== "up_to_date") {
       logger.info("workspace push before review PR did not push", {
         taskKey,
         status: push.status,
@@ -5101,6 +5398,40 @@ export async function performDelivery(
     // P11-11 hardened by F15-15: a FAILED push leaves the remote missing (or
     // misrepresenting) the newest work — refuse to open a PR whose head would
     // not match the delivered commit, instead of opening one "best effort".
+    if (push.status === "push_refused_scope") {
+      // Ruling 144(c): the refusal is a scope violation on the task, with the
+      // policy event, the inbox notification, the credential-card flag and the
+      // rail count every other violation gets; the remedy names the control.
+      const files = push.files.map((f) => `\`${f}\``).join(", ") || "files under `.github/workflows/`";
+      const { flagScopeViolation, policyViolationText } = await import(
+        "~/server/github/scope-flag.server"
+      );
+      const flagInput: Parameters<typeof flagScopeViolation>[1] = {
+        projectSlug,
+        taskKey,
+        scope: push.scope,
+        detail: policyViolationText(push.scope, `pushing ${files} on \`${push.branch}\``),
+      };
+      if (actor.userId) flagInput.actor = { userId: actor.userId, label: actor.label };
+      await flagScopeViolation(db, flagInput, { dataRoot: ctx.dataRoot });
+      const remedy =
+        `Nothing was pushed and no review PR was opened. Grant the \`${push.scope}\` scope to the ` +
+        `project's token on GitHub, then use Re-check on the project's GitHub view, and deliver again.`;
+      const message =
+        push.phase === "before_push"
+          ? `${taskKey}'s branch changes ${files}, and the project's classic token has no \`${push.scope}\` scope: GitHub would refuse the push. ${remedy}`
+          : `GitHub refused to push ${files} on \`${push.branch}\`: the token lacks the \`${push.scope}\` scope (${push.reason}). ${remedy}`;
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Delivery push refused: workflow scope",
+        message,
+      );
+      return { status: "scope_violation", scope: push.scope, message };
+    }
+
     if (push.status === "push_failed" || push.status === "no_pat") {
       const message =
         `${taskKey}'s execution branch could not be pushed (${push.status === "no_pat" ? "no project credential" : push.reason}). ` +
@@ -5128,13 +5459,38 @@ export async function performDelivery(
       return { status: "push_failed", message };
     }
 
+    // Ruling 144(c): a successful push of workflow files is the proof that
+    // resolves an open `workflow` violation on this project. A push whose
+    // workflow files could NOT be measured (`null`, a degraded history read)
+    // proves nothing and leaves the violation standing — an empty list is a
+    // measurement, an absent one is not.
+    if (push.status === "pushed" && (push.workflowFiles?.length ?? 0) > 0) {
+      const { listScopeViolations } = await import(
+        "~/server/projections/policy-violations.server"
+      );
+      const { resolveScopeViolationWithEvent } = await import(
+        "~/server/github/scope-flag.server"
+      );
+      for (const violation of listScopeViolations(db, projectSlug, { status: "open" })) {
+        if (violation.scope !== "workflow") continue;
+        await resolveScopeViolationWithEvent(
+          db,
+          violation.id,
+          { userId: actor.userId, label: actor.label },
+          { dataRoot: ctx.dataRoot },
+        );
+      }
+    }
+
     // A3: every REMAINING non-`pushed` outcome is a state no PR may be opened
     // over, and each one has its own cause. They used to fall straight through
     // to `openTaskPr` — the same hazard the three refusals above exist to stop
     // (a review PR whose head is not the delivery), reached through four
     // quieter doors. `no_commits` in particular was also what a FAILED
     // `git rev-list` looked like before push-workspace learned to say "unknown".
-    if (push.status !== "pushed") {
+    // Ruling 134: `up_to_date` (origin already carries the head) flows through
+    // the reconcile and `openTaskPr` exactly like `pushed`.
+    if (push.status !== "pushed" && push.status !== "up_to_date") {
       // F19-21 (pass 19) — R17-2's "Completed — no changes required" outcome was
       // UNREACHABLE for the task shape ruling 43 named. `noChanges` had exactly
       // two writers, both requiring a delivery that got far enough to see an
@@ -5381,20 +5737,36 @@ export async function performDelivery(
       // human manual delivery gets neither — the human who just clicked Deliver is
       // present and needs no card. That keeps R18-2's full-autonomy behaviour
       // byte-for-byte unchanged and covers every other operator delivery.
+      // Ruling 134: did anything MOVE? A newly opened PR, or a push that moved
+      // the head of a reused PR. A reuse that pushed nothing (`up_to_date`)
+      // moved nothing and re-queues nothing, so ruling 48's loop cannot start.
+      const moved = result.created || push.status === "pushed";
+      const headSha = push.status === "pushed" || push.status === "up_to_date" ? push.headSha : null;
+      if (!result.created && push.status === "pushed") {
+        await recordPushedHead(db, ctx, projectSlug, taskKey, {
+          prNumber: result.prNumber,
+          headSha: push.headSha,
+          remoteHeadBefore: push.remoteHeadBefore,
+          actor,
+        });
+      }
+      let operatorRequeued = false;
       const { resolveOperatorAuthority } = await import("./operator-actions.server");
       const autonomy =
         ctx.operatorRun?.autonomy ??
         resolveOperatorAuthority(ctx, projectSlug).autonomy;
       if (autonomy === "full") {
-        // Only a NEWLY opened PR re-queues: a reuse changed nothing (R18-2).
-        if (result.created) {
+        // Ruling 48 as amended by ruling 134(b): a newly opened PR, OR a head
+        // the push moved, is a new review subject and re-queues the operator.
+        if (moved) {
+          operatorRequeued = true;
           void autoInvokeOperator(
             db,
             ctx,
             projectSlug,
             taskKey,
             "delivered",
-            nextTransitionChainDepth(ctx),
+            { transitionDepth: nextTransitionChainDepth(ctx) },
           );
         }
       } else if (ctx.operatorAuthorized === true) {
@@ -5412,6 +5784,9 @@ export async function performDelivery(
         url: result.url,
         created: result.created,
         pushStatus: push.status,
+        headSha,
+        moved,
+        operatorRequeued,
       };
     }
     logger.info("review PR not opened", { taskKey, reason: result.status });
@@ -5457,6 +5832,23 @@ export async function performDelivery(
         },
       );
       return { status: "nothing_to_review", message };
+    }
+    // Ruling 128 (F34-4): GitHub ANSWERED. A missing base branch and any other
+    // refusal are named as what they are, never as "unreachable" and never with
+    // "fix the credential settings" (nothing is wrong with them).
+    if (result.status === "base_branch_missing") {
+      const message =
+        `No pull request could be opened for ${taskKey}: ${result.message} ` +
+        `The task branch was pushed, so a delivery from this workspace cannot re-cut it: delete the task branch locally and let the deliverer re-cut it from the bootstrapped \`${result.base}\`, or resolve the unrelated history by hand; then deliver again.`;
+      await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Review PR could not be opened", message);
+      return { status: "failed", message };
+    }
+    if (result.status === "refused") {
+      const message =
+        `No pull request could be opened for ${taskKey}: GitHub refused it (${result.message}). ` +
+        `Fix what GitHub named, then deliver again.`;
+      await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Review PR could not be opened", message);
+      return { status: "failed", message };
     }
     // DG-5: a GitHub/credential FAILURE (auth, network, missing PAT/repo) is
     // surfaced so a human knows the review PR is missing and why.
@@ -5545,7 +5937,12 @@ export async function manualDeliverForReview(
     taskKey: input.taskKey,
     details:
       outcome.status === "delivered"
-        ? { status: outcome.status, prNumber: outcome.prNumber }
+        ? {
+            status: outcome.status,
+            prNumber: outcome.prNumber,
+            headSha: outcome.headSha,
+            moved: outcome.moved,
+          }
         : { status: outcome.status },
   });
   return outcome;
@@ -5557,6 +5954,88 @@ export async function manualDeliverForReview(
  * something a human must see, not just a log line. Best-effort — a failure to
  * surface only logs.
  */
+/**
+ * Ruling 128: make sure the project's default branch exists before the push.
+ * Reads the GitHub context the same way the PR open does; a project with no
+ * repository or credential is `skipped` (the push path reports those itself).
+ */
+async function ensureDefaultBranchBeforePush(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  actor: TaskActor,
+): Promise<
+  | Awaited<ReturnType<typeof import("~/server/github/repo-bootstrap.server").ensureDefaultBranch>>
+  | { status: "skipped" }
+> {
+  const { getProjectGithubContext } = await import("~/server/github/github-context.server");
+  const ghOptions: GithubContextOptions = {};
+  if (ctx.fetchImpl) ghOptions.fetchImpl = ctx.fetchImpl;
+  const gh = getProjectGithubContext(db, projectSlug, ghOptions);
+  if (gh.status !== "ok") return { status: "skipped" };
+  const { ensureDefaultBranch } = await import("~/server/github/repo-bootstrap.server");
+  return ensureDefaultBranch(
+    db,
+    gh,
+    { projectSlug, taskKey },
+    { userId: actor.userId, label: actor.label },
+    { dataRoot: ctx.dataRoot },
+  );
+}
+
+/**
+ * Ruling 134(a): a push that MOVED the head of a reused PR is recorded on the
+ * timeline ("Pushed `<sha7>` to **PR #N** for review (was `<old7>`)"), with the
+ * same author rule the "Opened PR" event uses (operator → the Operator; a
+ * human → that human), and `pr.headSha` is brought up to the pushed head so
+ * a recorded unpushed revision it satisfies is cleared in the same write.
+ * Nothing is written when git could not name the pushed head.
+ */
+async function recordPushedHead(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  input: {
+    prNumber: number;
+    headSha: string | null;
+    remoteHeadBefore: string | null;
+    actor: TaskActor;
+  },
+): Promise<void> {
+  if (!input.headSha) return;
+  const humanUserId =
+    !ctx.operatorAuthorized && input.actor.userId ? input.actor.userId : null;
+  const nameHint = humanUserId ? userName(db, humanUserId) : null;
+  const actor: FileActorRef = ctx.operatorAuthorized
+    ? { kind: "operator" }
+    : humanUserId
+      ? { kind: "human", userId: humanUserId, nameHint }
+      : { kind: "system", systemId: "delivery" };
+  const headSha = input.headSha;
+  await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "github",
+      actor,
+      title: null,
+      text:
+        `Pushed \`${headSha.slice(0, 7)}\` to **PR #${input.prNumber}** for review` +
+        (input.remoteHeadBefore ? ` (was \`${input.remoteHeadBefore.slice(0, 7)}\`)` : "") +
+        ".",
+      toAgent: false,
+      evidence: null,
+    });
+    const pr = parsed.frontmatter.pr;
+    if (pr && pr.number === input.prNumber) {
+      pr.headSha = headSha;
+      if (pr.unpushedRevision?.revisionSha === headSha) delete pr.unpushedRevision;
+    }
+  });
+  reprojectTask(db, ctx, projectSlug, taskKey);
+}
+
 async function surfaceDeliveryEvent(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -5806,7 +6285,21 @@ async function attemptAcceptanceMerge(
       case "no_pr":
       case "task_not_found":
         return { kind: "no_pr" };
-      case "not_mergeable":
+      case "not_mergeable": {
+        // Ruling 135: `mergeable: conflicting` describes the head GitHub has.
+        // When the delivered revision never reached it, the push is the
+        // remedy and the sentence says so instead of "rebase".
+        const fmNow = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed.frontmatter ?? null;
+        const unpushedReason = fmNow
+          ? unpushedRevisionBlockedReason(fmNow.pr, fmNow.workRevision?.headSha ?? null, taskKey)
+          : null;
+        if (unpushedReason) {
+          return {
+            kind: "unmergeable",
+            reason: unpushedReason,
+            cause: "the delivered revision is not on the PR; deliver the branch to push it, then merge",
+          };
+        }
         return {
           kind: "unmergeable",
           reason:
@@ -5818,6 +6311,7 @@ async function attemptAcceptanceMerge(
               ? "the PR conflicts with the base branch; rebase it, then merge"
               : `GitHub refuses the merge: ${result.message}`,
         };
+      }
       case "head_changed":
         return {
           kind: "unmergeable",
@@ -6094,6 +6588,20 @@ export async function setTaskArchived(
         : { stage: existing.parsed.frontmatter.stage },
   });
 
+  // Ruling 131(e): a dependent waiting on THIS task can never be released by
+  // it now. Noted once on each dependent (and its watchers told) BEFORE the
+  // archive returns, so the person who archived sees the consequence at once.
+  if (input.archived) {
+    try {
+      await noteDeadDependency(db, ctx, input.projectSlug, input.taskKey);
+    } catch (error) {
+      logger.warn("dead-dependency notice failed", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+
   // Ruling 99: archiving a goal-chain link fails it (the chain pauses or
   // rides past, per the goal's own policy); a restore lets the reconciler
   // re-derive the truth. Fire-and-forget; the engine converges.
@@ -6101,6 +6609,8 @@ export async function setTaskArchived(
     const { maybeReconcileGoalForTask } = await import("./goal-actions.server");
     maybeReconcileGoalForTask(db, ctx, input.projectSlug, input.taskKey);
   })().catch(() => {});
+  // Ruling 131(e): a restore can satisfy a dependent's wait again.
+  maybeReleaseDependents(db, ctx, input.projectSlug);
 
   return {
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
@@ -6475,9 +6985,14 @@ export async function resolvePacket(
         type: "transition",
         actor: human,
         title: null,
+        // Ruling 130(c) (pass 34, F34-12): without a pre-authored `ev` the
+        // record restates the option's OWN words. It used to assert "policy /
+        // credential updated" for every option of this kind, and an operator
+        // reading that record on JC-6 told the specialist a GitHub-scope block
+        // had been lifted when nothing had.
         text:
           option.ev ??
-          `**Decision:** policy / credential updated. ${key} is unblocked and the operator ` +
+          `**Decision:** ${option.t}. ${key} is unblocked and the operator ` +
             `re-runs to re-check. If it is still blocked, a new decision packet is opened.`,
         toAgent: false,
         evidence: null,
@@ -6725,6 +7240,13 @@ export async function resolvePacket(
     // clears it when the edited goal lands.
     if (option.kind === "edit_goal" && parsed.packet) {
       parsed.packet.awaiting = "goal_edit";
+      // Ruling 138: the packet records WHICH option was chosen, so a reload
+      // renders it decided and rebuilds the same goal draft.
+      parsed.packet.decided = {
+        optionIndex: input.optionIndex,
+        at: new Date().toISOString(),
+        byUserId: actor.userId,
+      };
     }
     // P11-71: carry the human's free-text into the recorded decision so an
     // option that asked for input isn't resolved with an unstated reading — the
@@ -6819,9 +7341,7 @@ export async function resolvePacket(
         input.projectSlug,
         input.taskKey,
         "packet-resolved",
-        undefined,
-        undefined,
-        resolvedOption,
+        { resolvedOption },
       );
     }
   }
@@ -6853,11 +7373,15 @@ export async function resolvePacket(
       const { deleteTaskRemoteBranch } = await import(
         "~/server/github/github-reconciler.server"
       );
+      // Ruling 136(c): this door now pays the live re-confirm of a cached open
+      // PR, so the transport hook is threaded like every other GitHub call.
+      const archiveDeleteCtx: GithubActionContext = { dataRoot: ctx.dataRoot };
+      if (ctx.fetchImpl) archiveDeleteCtx.fetchImpl = ctx.fetchImpl;
       const outcome = await deleteTaskRemoteBranch(
         db,
         { projectSlug: input.projectSlug, taskKey: input.taskKey },
         { userId: actor.userId, label: actor.label },
-        { dataRoot: ctx.dataRoot },
+        archiveDeleteCtx,
       );
       const outcomeText =
         outcome.status === "deleted"
@@ -7039,15 +7563,20 @@ export async function resolvePacket(
     }
   }
 
-  // resolve_remote_collision (F31-6): the decision IS the three-step remedy —
-  // close the recorded unowned PR, delete the stale remote branch, re-deliver
-  // this task's local work. Each step is best-effort AFTER the resolution
-  // write (the decision stands even when GitHub misbehaves), and every
-  // non-success lands on the timeline in plain words.
-  // P07-F (pass 32): no `&& actor.userId` guard — a resolver without a user id
-  // used to resolve+clear the packet and then do NOTHING (no close, no delete,
-  // no note). `resolveRemoteBranchCollision` refuses that actor itself
-  // ("No acting user.") and the refusal lands on the timeline below.
+  // resolve_remote_collision (F31-6, ruling 136): the decision IS the remedy —
+  // delete the stale remote branch, close the recorded unowned PR, re-deliver
+  // this task's local work — and the ceremony ends with EXACTLY ONE hand-off.
+  // Each step is best-effort AFTER the resolution write (the decision stands
+  // even when GitHub misbehaves) and every non-success lands on the timeline
+  // in plain words. The kind stays out of the generic `packet-resolved`
+  // re-queue above (that hand-off runs before the ceremony and could not carry
+  // its outcome): the ceremony fires its own at its end, the ruling-48
+  // `delivered` re-queue when the re-delivery fired it, otherwise a
+  // `packet-resolved` re-queue whose payload carries the outcome in its OWN
+  // field, never inside the human's quoted note.
+  // P07-F (pass 32): no `&& actor.userId` guard — `resolveRemoteBranchCollision`
+  // refuses a user-less actor itself ("No acting user.") and the refusal lands
+  // on the timeline below.
   if (option.kind === "resolve_remote_collision") {
     const { resolveRemoteBranchCollision } = await import(
       "~/server/github/github-reconciler.server"
@@ -7056,70 +7585,112 @@ export async function resolvePacket(
       dataRoot: ctx.dataRoot,
     };
     if (ctx.fetchImpl) collisionCtx.fetchImpl = ctx.fetchImpl;
+    const collisionRef = { projectSlug: input.projectSlug, taskKey: input.taskKey };
     const collision = await resolveRemoteBranchCollision(
       db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      collisionRef,
       { userId: actor.userId, label: actor.label },
       collisionCtx,
     );
+    const branchName = existing.parsed.frontmatter.branch ?? "";
     let noteText: string | null = null;
     let delivered = false;
+    let deliveredPr: number | null = null;
+    let liftBlock = false;
+    let operatorRequeued = false;
+    let serverOutcome: CollisionServerOutcome;
+    const outcomeOf = (
+      outcome: CollisionServerOutcome["outcome"],
+      facts: { prNumber?: number | null; reason?: string },
+    ): CollisionServerOutcome => {
+      const built: CollisionServerOutcome = { kind: "resolve_remote_collision", outcome };
+      if (facts.prNumber !== undefined && facts.prNumber !== null) built.prNumber = facts.prNumber;
+      if (facts.reason) built.reason = facts.reason;
+      return built;
+    };
+    // The delivery door the task page uses (maintainer+/owner gate; the
+    // approve-transition check above implies it for every resolver).
+    const deliverNow = () => manualDeliverForReview(db, collisionRef, actor, ctx);
     if (collision.status === "cleared") {
-      // The name is free again — re-deliver through the same audited door the
-      // task page's "Deliver branch & open PR" uses (maintainer+/owner gate;
-      // the approve-transition check above implies it for every resolver).
-      const delivery = await manualDeliverForReview(
-        db,
-        { projectSlug: input.projectSlug, taskKey: input.taskKey },
-        actor,
-        ctx,
-      );
-      if (delivery.status !== "delivered") {
-        noteText = `The stale remote branch was cleared, but the re-delivery did not complete: ${delivery.message} Deliver again from the task page when it is resolved.`;
-      } else {
+      // The name is free again — re-deliver through the audited human door.
+      const delivery = await deliverNow();
+      if (delivery.status === "delivered") {
         delivered = true;
-        // F32-7 (pass 32): the follow-up after THIS delivery is owned by
-        // nobody unless it is claimed here. `manualDeliverForReview` is the
-        // human's door, and `performDelivery` deliberately records no next
-        // step for a human who just clicked Deliver (R18-2/R19-4) — but the
-        // person here confirmed a packet ceremony, not a delivery, and this
-        // kind sits in NO_REQUEUE on the promise that "the re-delivery's own
-        // machinery owns the follow-up". Live (VIB-1): the task sat at In
-        // Progress, `waiting: human`, an open PR and nothing to click. Under
-        // FULL autonomy `performDelivery` already re-queues the operator for
-        // any newly opened PR (R18-2 — that arm never looked at who
-        // delivered), so only the SUPERVISED half is missing: record the
-        // server-attributed "Move to <review>" card here, exactly the one an
-        // operator-authorized delivery would have recorded.
-        const { resolveOperatorAuthority } = await import(
-          "./operator-actions.server"
-        );
-        const autonomy = resolveOperatorAuthority(ctx, input.projectSlug).autonomy;
-        if (autonomy !== "full") {
-          await recordDeliveredNextStep(
-            db,
-            ctx,
-            input.projectSlug,
-            input.taskKey,
-            delivery.prNumber,
-          );
+        deliveredPr = delivery.prNumber;
+        liftBlock = true;
+        operatorRequeued = delivery.operatorRequeued;
+        serverOutcome = outcomeOf("cleared_and_delivered", { prNumber: delivery.prNumber });
+      } else {
+        noteText = `The stale remote branch was cleared, but the re-delivery did not complete: ${delivery.message} Deliver again from the task page when it is resolved.`;
+        serverOutcome = outcomeOf("cleared_delivery_failed", { reason: delivery.message });
+      }
+    } else if (collision.reason === "own_pr_open") {
+      // Ruling 136(b): the packet's premise was false — the PR on the branch is
+      // this task's OWN review PR, so there is no collision to clear, and what
+      // the person asked for is the work reaching that PR. For a remote that
+      // is merely behind or absent, perform the delivery that pushes it (the
+      // delivery is the authority on the relation: a diverged remote it meets
+      // refuses as `push_conflict`, and the block stays). For a remote the file
+      // already records as DIVERGED, keep the block and say who resolves the
+      // history. A self-referencing collision record is cleared either way.
+      const fmNow =
+        readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter ?? null;
+      const ownPr = collision.prNumber ?? fmNow?.pr?.number ?? null;
+      const premise = `No collision to clear: PR #${ownPr} on \`${branchName}\` is ${input.taskKey}'s own review PR.`;
+      if (fmNow?.github?.unownedPr != null && fmNow.github.unownedPr === ownPr) {
+        await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+          if (parsed.frontmatter.github) parsed.frontmatter.github.unownedPr = null;
+        });
+      }
+      const record = fmNow
+        ? unpushedRevisionOf(fmNow.pr, fmNow.workRevision?.headSha ?? null)
+        : null;
+      if (record?.relation === "diverged") {
+        const head = record.prHeadSha ? `\`${record.prHeadSha.slice(0, 7)}\`` : "its head";
+        noteText = `${premise} Its remote copy (${head}) holds commits this workspace does not, so the delivered revision \`${record.revisionSha.slice(0, 7)}\` cannot be pushed as it stands. A person resolves the branch history, or archives the task; the block stays until then.`;
+        serverOutcome = outcomeOf("own_pr_diverged", {
+          prNumber: ownPr,
+          reason: "the remote branch holds commits this workspace does not",
+        });
+      } else {
+        const delivery = await deliverNow();
+        if (delivery.status === "delivered") {
+          delivered = true;
+          deliveredPr = delivery.prNumber;
+          liftBlock = true;
+          operatorRequeued = delivery.operatorRequeued;
+          const sha = delivery.headSha ? ` \`${delivery.headSha.slice(0, 7)}\`` : "";
+          const current = delivery.pushStatus === "up_to_date";
+          noteText = current
+            ? `${premise} It already carries the delivered revision${sha}; nothing needed pushing, and the block is lifted.`
+            : `${premise} The delivered revision${sha} was pushed to it, and the block is lifted.`;
+          serverOutcome = outcomeOf(current ? "own_pr_current" : "own_pr_pushed", {
+            prNumber: delivery.prNumber,
+          });
+        } else {
+          noteText = `${premise} The delivery that would push the delivered revision to it did not complete: ${delivery.message} The block stays.`;
+          serverOutcome = outcomeOf("own_pr_delivery_failed", {
+            prNumber: ownPr,
+            reason: delivery.message,
+          });
         }
       }
     } else {
       noteText = `The branch collision was **not** cleared: ${collision.message} Nothing was re-delivered.`;
+      serverOutcome = outcomeOf("refused", { reason: collision.message });
     }
-    if (noteText !== null || delivered) {
+    if (noteText !== null || liftBlock) {
       await updateTaskFile(
         taskRef(ctx, input.projectSlug, input.taskKey),
         (parsed) => {
           // The push-conflict packet held `readiness: blocked` down with it, and
           // nothing in the delivery path writes readiness (the F29-7 withdrawal
           // can't either — the resolution write already cleared the packet). A
-          // successful re-delivery falsifies the block, so lift it here; on the
-          // refused/failed arms the block is still real and stays. `waiting`
-          // stays "human": the resolver is present, and acceptance is
+          // delivery that reached the PR falsifies the block, so lift it here;
+          // on the refused/failed arms the block is still real and stays.
+          // `waiting` stays "human": the resolver is present, and acceptance is
           // verdict-gated regardless.
-          if (delivered && parsed.frontmatter.readiness === "blocked") {
+          if (liftBlock && parsed.frontmatter.readiness === "blocked") {
             parsed.frontmatter.readiness = "ready";
           }
           if (noteText !== null) {
@@ -7137,40 +7708,66 @@ export async function resolvePacket(
       );
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     }
-    // F33-4 (pass 33): ruling 110 ends "And it never strands", and F32-7 hung
-    // that guarantee on the RE-DELIVERY — so the arm where no re-delivery runs
-    // inherited none of it. A refusal is the safe outcome the delete-first
-    // ordering exists to produce, and live (VIB-1) it left the task at `impl`,
-    // `waiting: human`, no packet, no recommendation, and PR #270 open on the
-    // branch: the exact strand ruling 110 quotes. The refusal is also the arm
-    // where a review PR is most likely to already stand — `deleteTaskRemoteBranch`
-    // refuses precisely because the task's OWN open PR sits on the ref — so the
-    // follow-up is the same "Move to <review>" card the success arm records, over
-    // the PR the task already carries. `recordDeliveredNextStep` is the ONE writer
-    // of that card and re-checks everything under the lock (already-actionable,
-    // stage at/past review, no workflow edge, archived), so this cannot double up
-    // with the success arm above nor invent a move the board would refuse. No PR
-    // means no honest card: the refusal note names the remedy instead.
-    if (!delivered) {
+    // One audit row per ceremony, with its typed outcome.
+    recordAudit(db, {
+      action: "github.collision.resolved",
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: {
+        outcome: serverOutcome.outcome,
+        reason: serverOutcome.reason ?? null,
+        prNumber: serverOutcome.prNumber ?? null,
+        delivered,
+        blockLifted: liftBlock,
+      },
+    });
+    if (delivered && deliveredPr !== null) {
+      // F32-7 (pass 32): `manualDeliverForReview` is the human's door, and
+      // `performDelivery` records no next step for a human who just clicked
+      // Deliver (R18-2/R19-4) — but the person here confirmed a packet
+      // ceremony, not a delivery. Under FULL autonomy the delivery re-queues
+      // the operator itself (ruling 134(b)); the SUPERVISED half gets the
+      // server-attributed "Move to <review>" card, where the board lets it
+      // apply (`recordDeliveredNextStep` re-checks everything under the lock).
+      const { resolveOperatorAuthority } = await import("./operator-actions.server");
+      if (resolveOperatorAuthority(ctx, input.projectSlug).autonomy !== "full") {
+        await recordDeliveredNextStep(db, ctx, input.projectSlug, input.taskKey, deliveredPr);
+      }
+    } else {
+      // F33-4 (pass 33): the refusing arm runs no re-delivery, so the same
+      // "Move to <review>" card is recorded over the PR the task already
+      // carries, when one is open. No PR means no honest card: the refusal
+      // note names the remedy instead.
       const openPr =
-        readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed
-          .frontmatter.pr ?? null;
-      // "review" and "accepted" are the two OPEN states (a human-set "accepted"
-      // is merge-pending, still open on GitHub — the reconciler reads them the
-      // same way). A merged or closed PR is nothing to move a task to review for.
+        readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter.pr ??
+        null;
       const prNumber =
         openPr && (openPr.state === "review" || openPr.state === "accepted")
           ? openPr.number
           : null;
       if (prNumber !== null) {
-        await recordDeliveredNextStep(
-          db,
-          ctx,
-          input.projectSlug,
-          input.taskKey,
-          prNumber,
-        );
+        await recordDeliveredNextStep(db, ctx, input.projectSlug, input.taskKey, prNumber);
       }
+    }
+    // Ruling 136(a): EXACTLY ONE hand-off. The `delivered` re-queue, when the
+    // re-delivery fired it, already carries the outcome as a moved head;
+    // otherwise the operator is handed the decision with Viberr's own record
+    // of what the ceremony did, in its own field.
+    if (!operatorRequeued) {
+      const decisionNote = customDirective || input.note?.trim();
+      const handoff: ResolvedPacketOption = { kind: option.kind, title: option.t, serverOutcome };
+      if (decisionNote) handoff.note = decisionNote;
+      void autoInvokeOperator(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+        "packet-resolved",
+        { resolvedOption: handoff },
+      );
     }
   }
 
@@ -7438,6 +8035,10 @@ function acceptanceRefusalReason(
     (opts.blockedPacket
       ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
       : null) ??
+    // Ruling 135 (pass 34, F34-11): the delivered revision is not on the PR.
+    // Named ABOVE the conflict, which describes the head GitHub has, not the
+    // one that was reviewed; the remedy is to deliver, never to rebase.
+    unpushedRevisionBlockedReason(fm.pr, fm.workRevision?.headSha ?? null, taskKey) ??
     // P14-LV-07: a conflicting PR cannot be merged, so it cannot be accepted.
     conflictingPrBlockedReason(fm, taskKey)
   );
@@ -7604,6 +8205,8 @@ const pullHeadShaSchema = z
 /** `GET /compare/…` — only `status` is read; a body that doesn't carry a
  *  string one degrades to "no status", exactly as the raw read did. */
 const compareStatusSchema = z.object({ status: z.string().optional() }).catch({});
+/** Ruling 135: the one field the never-pushed probe reads. */
+const commitShaSchema = z.object({ sha: z.string() }).loose();
 
 /** @see acceptancePrHeadCheck — the refusal alone, for callers that need no pin. */
 export async function acceptancePrHeadMismatch(
@@ -7669,6 +8272,25 @@ async function evaluateAcceptancePrHead(
       compareStatusSchema,
     );
     if (!cmp.ok) {
+      // Ruling 135: the compare's base is the LOCAL delivered sha, so a 404
+      // is what a never-pushed revision looks like. One direct commit read
+      // confirms it, and that is a KNOWN mismatch, not an unverifiable head.
+      if (isMissingRefAnswer(cmp)) {
+        const probe = await gh.client.request(
+          "GET",
+          `/repos/${gh.repo}/commits/${rev.headSha}`,
+          commitShaSchema,
+        );
+        if (!probe.ok && isMissingRefAnswer(probe)) {
+          return {
+            refusal:
+              `${taskKey}'s delivered revision \`${rev.headSha.slice(0, 7)}\` is not on GitHub: ` +
+              `PR #${pr.number}'s head is \`${headSha.slice(0, 7)}\`. Deliver the branch to push it; ` +
+              `it cannot be accepted until the PR carries the reviewed revision.`,
+            verification: "verified",
+          };
+        }
+      }
       // Could not compare — unknown, not a refusal, but NOT a verification either.
       return { refusal: null, verification: "unverifiable" };
     }
@@ -7877,13 +8499,12 @@ function mergePendingCause(merge: AcceptanceMergeOutcome): string {
  * is honest about what merged. Every acceptance path appends this.
  */
 export function revisionDriftNote(fm: TaskFrontmatter): string {
-  const drift = fm.pr?.revisionDrift;
-  if (!drift || drift.aheadBy <= 0) return "";
-  const n = drift.aheadBy;
-  // F19-23: the noun was switched and the VERB was not, so a single-commit drift
-  // rendered "1 commit were added to the PR head" — live on VC-4's timeline and
-  // in the Activity stream, on the one sentence a Done task's record leans on.
-  return ` ${n === 1 ? "1 commit was" : `${n} commits were`} added to the PR head (\`${drift.headSha.slice(0, 12)}\`) after the review, outside the reviewed revision.`;
+  // Ruling 132 (pass 34, F34-14): the permanent record uses the SAME words as
+  // every live surface — authored commits were added outside the reviewed
+  // revision; a base refresh is recorded as a base refresh and never as
+  // unreviewed work (JC-8's timeline said "5 commits were added" for 4 base
+  // commits and Viberr's own merge). F19-23's noun/verb agreement rides along.
+  return sharedRevisionDriftNote(fm.pr?.revisionDrift);
 }
 
 /**
@@ -8272,6 +8893,8 @@ export async function applyAcceptanceWrite(
       const { maybeReconcileGoalForTask } = await import("./goal-actions.server");
       maybeReconcileGoalForTask(db, ctx, input.projectSlug, input.taskKey);
     })().catch(() => {});
+    // Ruling 131(e): an acceptance is the usual way a waited-on task is done.
+    maybeReleaseDependents(db, ctx, input.projectSlug);
   }
   // U3: `false` means a concurrent acceptance had already closed this task —
   // the caller's audit row and follow-up effects belong to THAT write, not to
@@ -8845,6 +9468,15 @@ export async function completeTaskMerge(
   };
 }
 
+/** What applying a card hands back to the route. */
+export interface AppliedRecommendation {
+  task: TaskSummary;
+  label: string;
+  /** Ruling 134(a): set when the card was a `delivery`, so the route's toast
+   *  can say what moved. */
+  delivery?: DeliveryOutcome;
+}
+
 export async function applyRecommendation(
   db: DatabaseSync,
   input: {
@@ -8864,7 +9496,7 @@ export async function applyRecommendation(
   },
   actor: TaskActor,
   ctx: TaskActionContext = {},
-): Promise<{ task: TaskSummary; label: string }> {
+): Promise<AppliedRecommendation> {
   const project = loadProjectContext(ctx, input.projectSlug);
   // Applying an operator recommendation resolves a pending governance decision
   // (symmetric with dismissRecommendation/resolvePacket): maintainer+ OR the
@@ -8919,6 +9551,7 @@ export async function applyRecommendation(
     : ctx;
 
   // Execute the recommended action through the governed mutation (RBAC inside).
+  let delivery: DeliveryOutcome | undefined;
   if (rec.kind === "run_agent" && rec.profileId) {
     // The operator recommended dispatching an agent (it can't under `recommend`
     // autonomy) — applying it runs exactly what the manual run-agent control
@@ -8984,6 +9617,9 @@ export async function applyRecommendation(
     if (outcome.status !== "delivered") {
       throw AppError.conflict(`Delivery did not complete: ${outcome.message}`);
     }
+    // Ruling 134(a): the person who applied the card is told what moved, through
+    // the same toast the task page's own control uses.
+    delivery = outcome;
   } else if (rec.kind === "accept_completion") {
     // The operator's "accept completion → Done" recommendation. Applying it is
     // the human acceptance of the review→done boundary: same semantics as
@@ -9020,7 +9656,12 @@ export async function applyRecommendation(
     details: { kind: rec.kind, label: rec.label },
   });
 
-  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), label: rec.label };
+  const applied: AppliedRecommendation = {
+    task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+    label: rec.label,
+  };
+  if (delivery) applied.delivery = delivery;
+  return applied;
 }
 
 /**

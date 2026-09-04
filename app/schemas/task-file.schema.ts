@@ -6,6 +6,8 @@ import {
   tolerantRowsOf,
   type FileDiagnostic,
 } from "./file-diagnostics";
+import { canonicalDependencyRef } from "~/shared/dependencies";
+import type { RevisionDrift } from "~/shared/revision-drift";
 
 /**
  * Zod schemas + tolerant parser for the `task.md` frontmatter and packet
@@ -284,6 +286,12 @@ export const recommendationSchema = z
     label: z.string().min(1),
     /** The operator's reasoning for the recommendation (rendered under it). */
     detail: z.string().default(""),
+    /** accept_completion — ruling 137 (pass 34, F34-15): the work revision the
+     *  offer was authored against (`workRevision.headSha`). The card renders
+     *  "for revision <sha7>", and `withdrawAcceptanceOffers` removes the card
+     *  when that revision is replaced or the task's decision state changes.
+     *  Absent on the other kinds and on cards written before this field. */
+    forHeadSha: z.string().optional(),
   })
   .loose();
 export type Recommendation = z.infer<typeof recommendationSchema>;
@@ -433,23 +441,104 @@ export const prRefSchema = z
     // P14-LV-07: same optional-key convention as `checks`/`review` — an absent
     // key is "never read", which is NOT the same as "merges cleanly".
     mergeable: z.enum(PR_MERGEABLE_VALUES).nullish().catch(null),
-    // R17-1 (F17-L12): the PR head is STRICTLY AHEAD of the reviewed/delivered
-    // revision — it contains it plus `aheadBy` extra commits pushed after the
-    // review. Acceptance still merges an ahead head (owner ruling: keep "ahead"),
-    // but the accept/force dialogs, the review-queue subline and the completion
-    // record must SURFACE that those extra commits ship unreviewed. Absent when
-    // the head equals the reviewed revision (or the drift is unknown). Same
-    // optional-key + `.catch(null)` convention as the facts above.
+    // Ruling 135 (pass 34, F34-11): the PR's head sha as GitHub last reported
+    // it. Absent = never read (the same optional-key convention as the facts
+    // above); carried forward by the reconciler and by a PR reuse; never
+    // inherited by a DIFFERENT PR number.
+    headSha: z.string().min(1).nullish().catch(null),
+    // R17-1 (F17-L12) as amended by ruling 132 (pass 34, F34-14): drift is the
+    // number of AUTHORED commits since the reviewed revision, with a base
+    // refresh Viberr itself made reported SEPARATELY and never as unreviewed
+    // work. `describeRevisionDrift` (app/shared/revision-drift.ts) is the ONE
+    // sentence every surface prints. Absent when the head equals the reviewed
+    // revision (or the drift was never measured). `merges` is `.min(0)`, not
+    // positive: `update_branch_from_base` runs a plain `git merge`, and a
+    // strictly-behind branch FAST-FORWARDS with zero merge commits.
     revisionDrift: z
       .object({
-        aheadBy: z.number().int().positive(),
         headSha: z.string().min(1),
+        authored: z.number().int().min(0),
+        baseRefresh: z
+          .object({
+            merges: z.number().int().min(0),
+            commits: z.number().int().min(0),
+          })
+          .nullable(),
+      })
+      .nullish()
+      .catch(null),
+    // Ruling 135 (pass 34, F34-11): the DELIVERED revision is not on the pull
+    // request. `behind` — origin's copy is an ancestor, a plain push
+    // fast-forwards; `diverged` — origin holds commits this workspace does not,
+    // a push is refused non-fast-forward; `unknown` — GitHub does not have the
+    // revision at all (a never-pushed sha: the compare answers `missing_ref` and
+    // a direct commit read 404s). Written by the reconciler AND by the workspace
+    // reconcile the moment a delivering run mints a new revision on a branch
+    // whose PR is open; cleared by a delivery that pushes; never recorded for a
+    // `verified` revision. Absent = the delivered revision is on the PR (or the
+    // fact was never measured) — consult it only through `unpushedRevisionOf`,
+    // which also refuses a record written for a revision that is no longer the
+    // task's current one.
+    unpushedRevision: z
+      .object({
+        revisionSha: z.string().min(1),
+        prHeadSha: z.string().min(1).nullable(),
+        relation: z.enum(["behind", "diverged", "unknown"]),
       })
       .nullish()
       .catch(null),
   })
   .loose();
 export type PrRef = z.infer<typeof prRefSchema>;
+export type UnpushedRevision = NonNullable<PrRef["unpushedRevision"]>;
+
+/** The stored `pr.revisionDrift`, typed as the shared drift record so the
+ *  file and the sentence builder can never disagree on the shape. */
+export type StoredRevisionDrift = RevisionDrift;
+
+/**
+ * Ruling 135: the recorded unpushed-revision fact, when it still describes the
+ * task's CURRENT delivered revision, or null. `currentRevisionSha` is the
+ * `workRevision.headSha` the caller holds (a `TaskSummary` carries only
+ * `workRevisionSha`, which is why the helper takes the sha and not the
+ * revision object). A record written for an older revision is stale and reads
+ * as nothing; a PR that is merged or closed has no push to offer.
+ */
+export function unpushedRevisionOf(
+  pr: PrRef | null | undefined,
+  currentRevisionSha: string | null,
+): UnpushedRevision | null {
+  if (!pr || !currentRevisionSha) return null;
+  if (pr.state === "merged" || pr.state === "closed") return null;
+  const record = pr.unpushedRevision;
+  if (!record) return null;
+  if (record.revisionSha !== currentRevisionSha) return null;
+  return record;
+}
+
+/**
+ * Ruling 135 — why an UNPUSHED delivered revision blocks acceptance, or null.
+ * Ranked ABOVE `conflictingPrBlockedReason` by every consumer: `mergeable:
+ * conflicting` describes the OLD head, and the fact the person can act on is
+ * that the delivered revision is not on the pull request. The remedy is to
+ * deliver ("push"), never to rebase: a behind or absent remote reaches the PR
+ * by a plain push; a diverged remote needs the history resolved first, and the
+ * sentence says which.
+ */
+export function unpushedRevisionBlockedReason(
+  pr: PrRef | null | undefined,
+  currentRevisionSha: string | null,
+  taskKey: string,
+): string | null {
+  const record = unpushedRevisionOf(pr, currentRevisionSha);
+  if (!record || !pr) return null;
+  const rev = record.revisionSha.slice(0, 7);
+  const head = record.prHeadSha ? `\`${record.prHeadSha.slice(0, 7)}\`` : "an older head";
+  if (record.relation === "diverged") {
+    return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number}, whose head ${head} holds commits this workspace does not. Resolve the branch history, then deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`;
+  }
+  return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number} (its head is ${head}). Deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`;
+}
 
 /** GitHub projection cache mirrored into the file by the Phase-7
  * reconciler — commits + change stats. Not human-edited truth. */
@@ -504,6 +593,11 @@ export const packetOptionSchema = z
      *  (discard the rejected work entirely, not just the task's board row).
      *  Resolution refuses it while the PR is still open. */
     deleteBranch: z.boolean().optional(),
+    /** edit_goal — ruling 138 (pass 34, U34-10): the proposed goal text
+     *  itself, written AS a goal (deliverable plus acceptance criteria). It is
+     *  what the goal editor opens with (`goalDraftForOption`); an option without
+     *  one prefills the title and detail verbatim. Refused on any other kind. */
+    goalDraft: z.string().optional(),
   })
   .loose();
 export type PacketOption = z.infer<typeof packetOptionSchema>;
@@ -527,6 +621,17 @@ export const taskPacketSchema = z
     /** Set when an `edit_goal` option was confirmed: the packet is decided
      *  and auto-clears when the edited goal lands (updateTaskGoal). */
     awaiting: z.enum(["goal_edit"]).optional(),
+    /** Ruling 138 (pass 34, F34-13): WHICH option was confirmed, stamped beside
+     *  `awaiting` so a reload can render the packet as decided (the chosen
+     *  option locked, one "Edit the goal" control) and rebuild the same goal
+     *  draft the confirm opened. Cleared with the packet. */
+    decided: z
+      .object({
+        optionIndex: z.number().int().min(0),
+        at: z.string().min(1),
+        byUserId: z.string().min(1),
+      })
+      .optional(),
     /** R15-14: profileId of the AGENT that raised this question, when one did.
      *  Resolving such a packet resumes that agent's own session with the answer
      *  rather than handing it to the operator to re-engage a cold run. Absent on
@@ -593,6 +698,44 @@ export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>;
 
 // -------------------------------------------------------- frontmatter
 
+/**
+ * Ruling 131: one `blockedBy` entry as stored — a spelling
+ * `app/shared/dependencies.ts` parses, CANONICALIZED on the way in (a task
+ * prefix upper-cased, a goal id lower-cased, whitespace collapsed) so the file
+ * carries exactly what the surfaces print and the resolver looks up.
+ */
+export const dependencyRefTextSchema = z
+  .string()
+  .transform((value, ctx) => {
+    const canonical = canonicalDependencyRef(value);
+    if (canonical === null) {
+      ctx.addIssue({
+        code: "custom",
+        message: `not a task key or a goal link (\`${value}\`)`,
+      });
+      return z.NEVER;
+    }
+    return canonical;
+  });
+
+/** Ruling 132: one recorded base refresh (see `baseRefreshes` below). */
+export const baseRefreshSchema = z
+  .object({
+    /** The merge commit `update_branch_from_base` created (full sha). The
+     *  refresh merges with `--no-ff`, so this is always a two-parent commit. */
+    mergeSha: z.string().min(1),
+    /** The base branch tip that was merged in (full sha). */
+    baseSha: z.string().min(1),
+    /** The base branch name, e.g. `main`. */
+    base: z.string().min(1),
+    /** How many base commits the refresh brought onto the task branch. */
+    commits: z.number().int().min(0),
+    /** UTC ISO instant the refresh was pushed. */
+    at: z.string().min(1),
+  })
+  .loose();
+export type BaseRefresh = z.infer<typeof baseRefreshSchema>;
+
 /** The field schemas, named so the tolerant parser below can reach them
  *  directly: it validates ONE field at a time (a bad field falls back with a
  *  diagnostic instead of dropping the task), so it never runs the composed
@@ -640,6 +783,17 @@ const taskFrontmatterFields = {
   /** Optional due date, an ISO date string `YYYY-MM-DD` (pass-25). Board shows
    *  it and flags overdue; null = none. */
   dueDate: z.string().nullable().default(null),
+  /** Ruling 131 (pass 34, Q34-11): what this task WAITS ON — task keys and
+   *  goal links in the same project, in the canonical spellings of
+   *  `app/shared/dependencies.ts` (`JC-6`, `goal-1 link 3`). Planning metadata
+   *  with one difference from priority, labels and due date: while the list
+   *  is non-empty the derived readiness is floored at `blocked`, the task owes
+   *  nobody anything (`waiting: none` unless a packet or recommendation is
+   *  open), the operator's create/transition/scheduled triggers are refused,
+   *  and Viberr releases the task itself when every entry is done. States are
+   *  resolved at READ time, never cached here. Parsed per row (a malformed
+   *  spelling drops only itself). */
+  blockedBy: z.array(dependencyRefTextSchema).default([]),
   /** R14-3: the task was archived — abandoned work, kept for the record.
    *  Archived tasks leave the board's default view and the review queue, keep
    *  their whole timeline, and can be restored. The one honest ending for a task
@@ -654,6 +808,16 @@ const taskFrontmatterFields = {
   workRevision: workRevisionSchema.nullable(),
   /** F10-15: per-engagement verdicts, each bound to the revision it judged. */
   verdicts: z.array(reviewVerdictSchema),
+  /** Ruling 132 (pass 34, F34-14): every base refresh the operator's
+   *  `update_branch_from_base` landed on the task branch, recorded the moment
+   *  the merge is pushed — the merge commit, the base tip it merged, the base
+   *  branch name, how many base commits it brought in, and when. A merge
+   *  commit listed here is a CLEAN merge by construction (that path aborts on
+   *  any conflict), which is how the reconciler tells Viberr's own base
+   *  refresh from an out-of-band merge that counts as authored drift. A
+   *  fast-forward refresh records `mergeSha === baseSha`. First-class like
+   *  `verdicts`; parsed per row. */
+  baseRefreshes: z.array(baseRefreshSchema),
   branch: z.string().nullable(),
   // P13-D-5: `repo` (the task-level repo override) lived here. The override was
   // deleted this pass by owner ruling — one project, one repo — and nothing can
@@ -983,10 +1147,15 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "priority",
   "labels",
   "dueDate",
+  // Ruling 131: listed because this is the unknown-key membership index and
+  // the file-formats §2 pin — serialization writes the whole frontmatter.
+  "blockedBy",
   "archived",
   "validation",
   "workRevision",
   "verdicts",
+  // Ruling 132: same reason as `blockedBy`.
+  "baseRefreshes",
   "branch",
   // P13-D-5: "repo" deliberately NOT listed — it is an unknown key now, so an
   // existing task.md keeps its line verbatim instead of losing it on rewrite.
@@ -1385,6 +1554,10 @@ export function parseTaskFrontmatter(
       taskFrontmatterFields.dueDate,
       null,
     ),
+    // Ruling 131: per-ROW, like every list whose loss would persist — one
+    // unparseable spelling drops only itself (with a diagnostic at
+    // `blockedBy[i]`), never the whole wait. Absent reads `[]`, silently.
+    blockedBy: tolerantRows(diagnostics, data, "blockedBy", dependencyRefTextSchema),
     // archived, likewise: absent means "not archived" and is not a diagnostic.
     archived: tolerant(
       diagnostics,
@@ -1416,6 +1589,16 @@ export function parseTaskFrontmatter(
       data,
       "verdicts",
       taskFrontmatterFields.verdicts.element,
+    ),
+    // Ruling 132: per-ROW for the same reason as verdicts — a recorded base
+    // refresh is what keeps a clean merge from counting as authored drift, so
+    // losing the whole list on one bad row would silently re-flag every
+    // refreshed PR. Absent reads `[]`, silently.
+    baseRefreshes: tolerantRows(
+      diagnostics,
+      data,
+      "baseRefreshes",
+      taskFrontmatterFields.baseRefreshes.element,
     ),
     branch: tolerant(
       diagnostics,

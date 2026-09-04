@@ -207,6 +207,21 @@ describe("gatherControllerContext", () => {
     expect(read.text).not.toContain("### task.md");
   });
 
+  it("ruling 131: a held task shows 'waits on N' in the board table and a 'waits on:' header line on the task read", async () => {
+    // Canary: remove the `waits on` header line (the task read loses it).
+    const { setTaskDependencies } = await import("~/server/tasks/dependencies.server");
+    await setTaskDependencies(app.db, { projectSlug: SLUG, taskKey: "VIB-153", blockedBy: ["VIB-142", "VIB-148"] }, { userId: arda.id, label: arda.email }, { dataRoot: app.dataRoot });
+    try {
+      const { gatherControllerContext } = await import("./controller-context.server");
+      const board = gatherControllerContext(app.db, { projectSlug: SLUG, taskKey: null, user: arda, dataRoot: app.dataRoot });
+      expect(board.text).toMatch(/- VIB-153 · .* · waits on 2/);
+      const task = gatherControllerContext(app.db, { projectSlug: SLUG, taskKey: "VIB-153", user: arda, dataRoot: app.dataRoot });
+      expect(task.text).toContain("waits on: VIB-142 (open), VIB-148 (open)");
+    } finally {
+      await setTaskDependencies(app.db, { projectSlug: SLUG, taskKey: "VIB-153", blockedBy: [] }, { userId: arda.id, label: arda.email }, { dataRoot: app.dataRoot });
+    }
+  });
+
   it("instance scope: the projects the person can see and their role", async () => {
     const { gatherControllerContext } = await import("./controller-context.server");
     const read = gatherControllerContext(app.db, {

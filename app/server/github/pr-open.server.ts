@@ -26,6 +26,7 @@ import {
   type GithubContextOptions,
 } from "./github-context.server";
 import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
+import { recordPrAdoption } from "./pr-adoption-record.server";
 import { mapPrToCacheState } from "./pr-linker.server";
 import {
   type FlagScopeViolationInput,
@@ -244,6 +245,14 @@ export type OpenTaskPrResult =
    *  must not arrive here — a task whose PR already exists has not "produced no
    *  change", and the delivery path acts on this by flagging the task `noChanges`. */
   | { status: "nothing_to_review"; message: string }
+  /** Ruling 128: GitHub refused the PR because the BASE branch does not exist
+   *  (422 `field: base, code: invalid`). The repository has no default branch
+   *  to open the pull request against; never a network failure. */
+  | { status: "base_branch_missing"; base: string; message: string }
+  /** Ruling 128: GitHub ANSWERED and refused, for a reason this reader does
+   *  not map (any other 422, a decode failure, an unmapped HTTP status). The
+   *  message quotes GitHub; it was not the network. */
+  | { status: "refused"; message: string }
   | { status: "network_unavailable"; message: string };
 
 /**
@@ -304,7 +313,20 @@ const ghCreatedPrSalvageSchema = z.object({
  */
 const ghValidationBodySchema = z
   .object({
-    errors: z.array(z.object({ message: z.string().catch("") })).catch([]),
+    errors: z
+      .array(
+        z.object({
+          message: z.string().catch(""),
+          // Ruling 128: GitHub's structured refusal row. A missing base branch
+          // answers `{resource: "PullRequest", field: "base", code: "invalid"}`
+          // with NO message, which is why the prose sniff below could never
+          // name it and the residual called it a network failure.
+          resource: z.string().optional().catch(undefined),
+          field: z.string().optional().catch(undefined),
+          code: z.string().optional().catch(undefined),
+        }),
+      )
+      .catch([]),
   })
   .catch({ errors: [] });
 
@@ -441,6 +463,24 @@ export async function openTaskPr(
         };
       }
       await writePrToTask(db, ref, input, gh, pr, actor, false, ctx, fm.pr);
+      // F34-9: a reuse of a DIFFERENT number is an adoption, recorded on its
+      // own (the "Opened PR" event and audit are gated on `created`).
+      if (fm.pr?.number !== pr.number) {
+        await recordPrAdoption(
+          db,
+          ref,
+          {
+            repo: gh.repo,
+            branch,
+            prNumber: pr.number,
+            previousPrNumber: fm.pr?.number ?? null,
+            previousState: fm.pr?.state ?? null,
+            headSha: pr.head?.sha ?? null,
+            source: "delivery",
+          },
+          actor,
+        );
+      }
       return { status: "ok", prNumber: pr.number, created: false, url: pr.html_url };
     }
     if (existing.kind === "network") {
@@ -621,10 +661,8 @@ export async function openTaskPr(
     // GitHub's refusal in one line: the envelope message plus the specific
     // reasons under it. Both halves matter — the distinguishing sentence rides
     // in either place depending on the endpoint and the error.
-    const reasons = ghValidationBodySchema
-      .parse(created.data)
-      .errors.map((e) => e.message)
-      .filter((reason) => reason.trim() !== "");
+    const rows = ghValidationBodySchema.parse(created.data).errors;
+    const reasons = rows.map((e) => e.message).filter((reason) => reason.trim() !== "");
     const detail =
       reasons.length > 0
         ? `${created.message}: ${reasons.join("; ")}`
@@ -641,11 +679,22 @@ export async function openTaskPr(
       const raced = await prAlreadyOnHead();
       if (raced) return raced;
     }
-    return { status: "network_unavailable", message: detail };
+    // Ruling 128 (F34-4): the base branch does not exist. GitHub sends the
+    // structured row with no message, so only the fields can say it.
+    if (rows.some((row) => row.field === "base" && row.code === "invalid")) {
+      return {
+        status: "base_branch_missing",
+        base: gh.defaultBranch,
+        message: `GitHub refused the pull request: its base branch \`${gh.defaultBranch}\` does not exist (422 base invalid).`,
+      };
+    }
+    return { status: "refused", message: detail };
   }
+  // Ruling 128: GitHub answered. An unmapped status or a body this reader
+  // could not decode is a REFUSAL that quotes GitHub, never "unreachable".
   return {
-    status: "network_unavailable",
-    message: created.kind === "http" ? created.message : "unknown",
+    status: "refused",
+    message: created.kind === "http" ? created.message : "GitHub answered 304 (not modified) to a create",
   };
 }
 
@@ -677,8 +726,16 @@ async function writePrToTask(
   // refreshing the SAME PR: this path never reads them, so rebuilding the ref
   // from scratch would blank both pills until the next 5-minute poll. A
   // DIFFERENT (freshly opened) PR correctly starts with neither.
-  const fresh = { number: pr.number, state, title: pr.title };
+  const fresh: PrRef = { number: pr.number, state, title: pr.title };
+  // Ruling 135: the PR head as GitHub reported it on THIS read. Carried across
+  // a reuse of the SAME number by the spread below; a different PR never
+  // inherits the old head (the salvage path passes no `head` at all).
+  if (pr.head?.sha) fresh.headSha = pr.head.sha;
   const next: PrRef = samePr ? { ...existingPr, ...fresh } : fresh;
+  // A recorded unpushed revision that the live head now carries is satisfied.
+  if (next.headSha && next.unpushedRevision?.revisionSha === next.headSha) {
+    delete next.unpushedRevision;
+  }
   const changed = JSON.stringify(existingPr) !== JSON.stringify(next);
   if (changed) {
     await patchTaskFrontmatter(ref, { pr: next });

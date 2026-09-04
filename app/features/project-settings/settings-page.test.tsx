@@ -80,6 +80,7 @@ const CREDENTIAL: SettingsViewData["credential"] = {
     { id: "pull_request:write", ok: false, source: "violation", flaggedTaskKey: "VIB-142" },
   ],
   openViolations: [],
+  advisories: [],
 };
 
 // The honest unconfigured state — a project with a credentialPolicy but no
@@ -95,6 +96,7 @@ const NO_CREDENTIAL: SettingsViewData["credential"] = {
   requiredScopes: ["repo", "workflow", "read:org", "pull_request:write"],
   scopes: [],
   openViolations: [],
+  advisories: [],
 };
 
 describe("ProjectPanel", () => {

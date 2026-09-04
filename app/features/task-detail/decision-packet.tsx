@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
+import { goalDraftForOption } from "~/shared/packet-goal-draft";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -123,6 +124,15 @@ export interface PacketArchiveDisclosure {
    * is a slot a literal can silently skip; a required one fails typecheck.
    */
   unownedPr: number | null;
+  /**
+   * C3 (pass 34, U34-8): this task's OWN open review pull request, when one
+   * stands — the exact state `deleteTaskRemoteBranch` refuses on ("a PR is
+   * open on the branch"), which both remote-branch ceremonies reach. Null when
+   * no PR of this task's own is open. Both dialogs warn with it BEFORE the
+   * button, instead of letting a person confirm a deletion the server will
+   * refuse (live: JC-6 and JC-3, both confirmed, both refused).
+   */
+  openPr: number | null;
 }
 
 /**
@@ -338,6 +348,10 @@ function PacketArchiveConfirm({
           </span>
         </div>
       )}
+      {/* C3 (pass 34, U34-8): this dialog reaches the same server refusal the
+          collision ceremony does, and used to only INFER that no PR stands
+          (from the operator's authoring rule). It says it outright now. */}
+      {deletesBranch && <OpenPrRow openPr={disclosure?.openPr ?? null} ceremony="archive" />}
       <div className="obs">
         <span className="k">After</span>
         <span>
@@ -421,6 +435,49 @@ function PacketDiscardConfirm({
 }
 
 /**
+ * C3 (pass 34, U34-8): what this task's OWN open pull request means for the
+ * ceremony about to run, said BEFORE the button rather than after the click.
+ * The two ceremonies reach different server rules, so they say different
+ * things (pass 34 review found one sentence used for both, and it was wrong
+ * on each): an ARCHIVE still archives and only keeps the branch, and a
+ * COLLISION resolution is not a deletion at all under ruling 136(b) — it
+ * pushes the delivered revision to that PR.
+ */
+function OpenPrRow({
+  openPr,
+  ceremony,
+}: {
+  openPr: number | null;
+  ceremony: "archive" | "collision";
+}) {
+  if (openPr === null) return null;
+  const pr = <span className="mono">#{openPr}</span>;
+  return (
+    <div className="obs warn" data-open-pr-warning="">
+      <span className="k">
+        {ceremony === "archive" ? "Branch kept" : "No deletion"}
+      </span>
+      {ceremony === "archive" ? (
+        <span>
+          This task&rsquo;s own pull request {pr} is still open, and Viberr never
+          deletes a branch a pull request is open on. The task is still archived;
+          the branch and {pr} stay exactly as they are. Merge or close {pr} on
+          GitHub first if you want the branch gone too.
+        </span>
+      ) : (
+        <span>
+          The pull request on this branch, {pr}, is this task&rsquo;s OWN review
+          pull request, so there is no stranger to clear: nothing is deleted and
+          nothing is closed. Confirming pushes this task&rsquo;s delivered
+          revision to {pr} and lifts the block; if the remote has diverged from
+          it, the block stays and a person reconciles the history.
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
  * F31-6 — a `resolve_remote_collision` option asks first, like its destructive
  * siblings: it deletes a REMOTE ref (the stale branch squatting on this task's
  * branch name) and closes the unrelated PR recorded on it, then re-delivers
@@ -432,6 +489,7 @@ function PacketCollisionConfirm({
   option,
   branch,
   unownedPr,
+  openPr,
   busy,
   onCancel,
   onConfirm,
@@ -441,6 +499,8 @@ function PacketCollisionConfirm({
   branch: string | null;
   /** The unrelated PR recorded on that branch (R15-15), when known. */
   unownedPr: number | null;
+  /** C3: this task's own open PR, which refuses the deletion. */
+  openPr: number | null;
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -450,15 +510,25 @@ function PacketCollisionConfirm({
   ) : (
     <>this task&rsquo;s branch</>
   );
+  // C3 (pass 34, U34-8): with NO unowned PR recorded there is no stranger —
+  // `resolveRemoteBranchCollision` deletes THIS task's own remote branch and
+  // closes nothing. Describing that as "the unrelated one squatting on this
+  // task's branch name" asked a person to confirm the deletion of their own
+  // pushed branch under somebody else's description.
+  const stranger = unownedPr !== null;
   return (
     <PacketDestructiveConfirm
-      ariaLabel="Clear this task's branch collision"
+      ariaLabel={
+        stranger
+          ? "Clear this task's branch collision"
+          : "Delete this task's remote branch and redeliver"
+      }
       screenLabel="Packet collision dialog"
       icon="alert"
-      heading="Clear the branch collision?"
+      heading={stranger ? "Clear the branch collision?" : "Delete this task's remote branch?"}
       subhead={option.t}
       footHint="Recorded as timeline events and audit rows."
-      confirmLabel="Clear collision & redeliver"
+      confirmLabel={stranger ? "Clear collision & redeliver" : "Delete branch & redeliver"}
       busy={busy}
       onCancel={onCancel}
       onConfirm={onConfirm}
@@ -466,29 +536,36 @@ function PacketCollisionConfirm({
       <div className="obs">
         <span className="k">Decision</span>
         <span>
-          Confirming &ldquo;{option.t}&rdquo; reclaims the branch name for this
-          task.
+          Confirming &ldquo;{option.t}&rdquo;{" "}
+          {stranger
+            ? "reclaims the branch name for this task."
+            : "removes this task's own remote branch and pushes its local work again."}
         </span>
       </div>
       <div className="obs warn">
         <span className="k">Deletes</span>
-        <span>
-          The stale branch {branchLabel} on GitHub, the unrelated one squatting
-          on this task&rsquo;s branch name
-          {unownedPr !== null ? (
-            <>
-              , and closes its pull request{" "}
-              <span className="mono">#{unownedPr}</span>
-            </>
-          ) : null}
-          . <strong>Deleting the remote branch cannot be undone.</strong>
-        </span>
+        {stranger ? (
+          <span>
+            The stale branch {branchLabel} on GitHub, the unrelated one squatting
+            on this task&rsquo;s branch name, and closes its pull request{" "}
+            <span className="mono">#{unownedPr}</span>.{" "}
+            <strong>Deleting the remote branch cannot be undone.</strong>
+          </span>
+        ) : (
+          <span>
+            This task&rsquo;s own remote branch {branchLabel} on GitHub. No
+            unrelated pull request is recorded on it, so nothing of anyone
+            else&rsquo;s is touched and no pull request is closed.{" "}
+            <strong>Deleting the remote branch cannot be undone.</strong>
+          </span>
+        )}
       </div>
+      <OpenPrRow openPr={openPr} ceremony="collision" />
       <div className="obs">
         <span className="k">Keeps</span>
         <span>
-          This task&rsquo;s local delivery. After the stale ref is gone it is
-          pushed fresh and the real review PR opens.
+          This task&rsquo;s local delivery. After the {stranger ? "stale " : ""}
+          ref is gone it is pushed fresh and the real review PR opens.
         </span>
       </div>
     </PacketDestructiveConfirm>
@@ -623,6 +700,7 @@ export function DecisionPacket({
   onResolveCustom,
   onRequestMaintainer,
   onAsk,
+  onEditGoal,
 }: {
   packet: PacketRender;
   busy: boolean;
@@ -654,6 +732,9 @@ export function DecisionPacket({
   /** UX19-9: what an `archive_task` resolution destroys, for its confirm. */
   archiveDisclosure?: PacketArchiveDisclosure;
   onResolve: (optionIndex: number, note: string) => void;
+  /** Ruling 138: a DECIDED `edit_goal` packet has one way out — the goal
+   *  editor, opened prefilled with the chosen option's draft. */
+  onEditGoal?: (draft: string) => void;
   /** Questionnaire packets (owner request 2026-08-20): resolve with the
    *  human's OWN directive instead of a canned option. The server runs it as
    *  the un-gated `custom` kind — sent back to an asking agent, requeued to
@@ -717,8 +798,9 @@ export function DecisionPacket({
    *  - `performDelivery` → `openTaskPr` treats a CLOSED cached PR as terminal
    *    and falls through to the create path (`pr-open.server.ts`): it opens a
    *    FRESH review PR and never reopens the closed one. Re-pushing a branch
-   *    with nothing new still reports `pushed` (`push-workspace.server.ts`), so
-   *    a PR closed by mistake really does come back through this door.
+   *    with nothing new answers `up_to_date` (ruling 134, `push-workspace.server.ts`)
+   *    and the PR open still runs, so a PR closed by mistake really does come
+   *    back through this door.
    *  - and NOTHING on that path touches the packet — `recordDeliveredNextStep`
    *    returns early (via `alreadyActionable`) precisely because a packet is
    *    open. So the last clause is
@@ -810,6 +892,81 @@ export function DecisionPacket({
     requestAnimationFrame(() => optionRefs.current[next]?.focus());
   };
 
+  // Ruling 138: a decided `edit_goal` packet reads as decided after a reload —
+  // the chosen option locked, no Confirm, and one control that opens the goal
+  // editor exactly as the confirm did. A packet stamped `awaiting` before the
+  // decision was recorded renders nothing special.
+  const decided = p.awaiting === "goal_edit" ? p.decided : undefined;
+  if (decided) {
+    const chosen = p.options[decided.optionIndex];
+    return (
+      <div className={"packet " + (isBlocked ? "blocked" : "input")} data-decided="">
+        <div className="packet-top">
+          <Pill kind={isBlocked ? "blocked" : "input"} dot sm>
+            {p.kind}
+          </Pill>
+          <span className="from">
+            from <Icon name="shield" />{" "}
+            <strong className="from-name">{p.from}</strong>
+          </span>
+        </div>
+        <div className="packet-body">
+          <h2>{p.title}</h2>
+          <p className="packet-lede">{renderInlineCode(p.body)}</p>
+          <div className="options" data-decided="">
+            {p.options.map((o, i) => (
+              <button
+                key={i}
+                type="button"
+                disabled
+                aria-disabled="true"
+                className={"opt" + (i === decided.optionIndex ? " sel" : "")}
+                data-chosen={i === decided.optionIndex ? "" : undefined}
+              >
+                <span className="radio" />
+                <span>
+                  <div className="ot">{o.t}</div>
+                  <div className="od">{o.d}</div>
+                </span>
+                {i === decided.optionIndex && (
+                  <span className="rec-tag">
+                    <Pill kind="info" sm>
+                      chosen
+                    </Pill>
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          <p className="deny-note spaced" data-decided-note="">
+            <Icon name="check" />
+            Decision made · save the edited goal to clear this packet
+          </p>
+          <div className="packet-actions">
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={onAsk}
+              title="Starts a comment mentioning @operator below. Send it to pull the operator in"
+            >
+              <Icon name="message" />
+              Ask operator
+            </button>
+            {canEditGoal && chosen && onEditGoal && (
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy}
+                onClick={() => onEditGoal(goalDraftForOption(chosen))}
+              >
+                Edit the goal
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={"packet " + (isBlocked ? "blocked" : "input")}>
       <div className="packet-top">
@@ -1175,6 +1332,7 @@ export function DecisionPacket({
           option={pendingOption}
           branch={archiveDisclosure?.branch ?? null}
           unownedPr={archiveDisclosure?.unownedPr ?? null}
+          openPr={archiveDisclosure?.openPr ?? null}
           busy={busy}
           onCancel={cancelConfirm}
           onConfirm={commitConfirm}

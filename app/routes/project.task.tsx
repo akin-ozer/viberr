@@ -1,3 +1,5 @@
+import { deliveryToast } from "~/features/task-detail/delivery-toast";
+import { goalDraftForOption } from "~/shared/packet-goal-draft";
 import {
   data,
   isRouteErrorResponse,
@@ -45,6 +47,8 @@ import {
   updateTaskGoal,
   userName,
 } from "~/server/tasks/task-actions.server";
+import { setTaskDependencies } from "~/server/tasks/dependencies.server";
+import { splitDependencyText } from "~/shared/dependencies";
 import { coercePriority } from "~/schemas/task-file.schema";
 import { resolveAcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -537,6 +541,24 @@ export async function action({ request, params }: Route.ActionArgs) {
         await setTaskMetadata(db, metaInput, actor);
         return { ok: true as const, intent, toast: "Task metadata updated" };
       }
+      case "set-task-dependencies": {
+        // Ruling 131: the Details panel's own form. The FULL list is submitted
+        // (comma- or newline-separated); an empty field clears the wait, which
+        // for a person IS the release. Validation refuses by name before any
+        // write, and the refusal surfaces on this form, never swallowed by the
+        // metadata form's close-on-success.
+        const entries = splitDependencyText(String(formData.get("blockedBy") ?? ""));
+        const result = await setTaskDependencies(db, { projectSlug, taskKey, blockedBy: entries }, actor);
+        return {
+          ok: true as const,
+          intent,
+          toast: !result.changed
+            ? "Dependencies unchanged"
+            : result.blockedBy.length > 0
+              ? `Waits on ${result.blockedBy.join(", ")}`
+              : "No longer waits on other work",
+        };
+      }
       case "resolve-packet": {
         const raw = Number(formData.get("option"));
         const optionIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
@@ -581,7 +603,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             : option.kind === "block_on_policy"
               ? // R20-1 (F20-5): the option UNBLOCKS + re-queues the operator now
                 // (it used to hold the task and deep-nav to settings).
-                "Policy / credential updated · the operator re-runs to re-check"
+                "Unblocked · the operator re-runs to re-check"
               : option.kind === "hold_runtime_debug"
                 ? "Held for runtime debug · the session is recorded per audit policy"
                 : option.kind === "retry_other_backend"
@@ -598,18 +620,14 @@ export async function action({ request, params }: Route.ActionArgs) {
           toast,
         };
         // F17-L3: a scoping (edit_goal) decision drops the human into the goal
-        // editor — prefill it with the CHOSEN option's deliverable so they
-        // don't have to retype the scope they just picked. The option title is
-        // the headline; its description carries the deliverable + acceptance.
-        // Every other kind ships NO `goalDraft` key at all, which is what tells
-        // the editor there is nothing to prefill.
+        // editor — prefill it with the CHOSEN option's draft so they don't
+        // have to retype the scope they just picked. Ruling 138: the ONE
+        // composition (`goalDraftForOption`) is shared with the reload path,
+        // so the editor opens the same text either way. Every other kind
+        // ships NO `goalDraft` key at all, which is what tells the editor
+        // there is nothing to prefill.
         if (option.kind !== "edit_goal") return resolved;
-        return {
-          ...resolved,
-          goalDraft: option.d?.trim()
-            ? `${option.t}\n\n${option.d.trim()}`
-            : option.t,
-        };
+        return { ...resolved, goalDraft: goalDraftForOption(option) };
       }
       case "request-maintainer-decision": {
         // F20-18: a contributor-OWNER holds no option they can settle on this
@@ -698,9 +716,8 @@ export async function action({ request, params }: Route.ActionArgs) {
           ? {
               ok: true as const,
               intent,
-              toast: outcome.created
-                ? `Delivered · opened review PR #${outcome.prNumber}`
-                : `Delivered · reusing open review PR #${outcome.prNumber}`,
+              // Ruling 134(a): one toast for every human delivery door.
+              toast: deliveryToast(outcome),
             }
           : data(
               {
@@ -931,7 +948,10 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast: `Applied · ${result.label}`,
+          // Ruling 134(a): an applied delivery card says what moved.
+          toast: result.delivery
+            ? `Applied · ${deliveryToast(result.delivery)}`
+            : `Applied · ${result.label}`,
         };
       }
       case "dismiss-recommendation": {

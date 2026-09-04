@@ -79,21 +79,30 @@ alike. There is no fallback engine and no other account to fall back to.
   explicitly absent. A `login` kind adds no secret: the vendor binary reads its own file.
 - Spawn env hygiene: every variable matching `CREDENTIAL_ENV_RE` (`API_KEY`, `TOKEN`,
   `SECRET`, `PASSWORD`, `PRIVATE_KEY`, `CREDENTIALS`, `AUTH` …), the private-runtime
-  set (`DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`) and **both vendor
+  set (`DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`), **both vendor
   homes** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME` — neither is credential-shaped, but a home
   is where a vendor binary keeps its credential, so an ambient one would let a run billed
-  to one person authenticate as whoever a leftover sign-in file names) is stripped from
-  the child (`filteredSpawnEnv`); the run service then adds exactly one principal's
-  credential on top, and `startRun` throws if the caller's own `env` overlay names a key
-  the credential owns. The run sink redacts those plaintext values from every persisted
-  line (`createRunSink(db, spec, { secrets })`) — the key belongs to one person and the
-  run console is visible to every project member.
+  to one person authenticate as whoever a leftover sign-in file names) **and every name
+  the app's own env schema declares** (`ENV_KEYS`: `NODE_ENV`, `PORT`, `VIBERR_DATA_ROOT`,
+  `BETTER_AUTH_URL`, the OAuth client ids, every `VIBERR_*` knob; ruling 142 — an agent
+  works in the project's repository, not in Viberr's process, and the container's
+  `NODE_ENV=production` / `PORT` broke a project's own `vitest` and `next start` inside a
+  run) is stripped from the child (`filteredSpawnEnv`). A name the schema does not
+  declare (`PATH`, `HOME`, locale, proxies, the image's `UV_*` caches) passes, which is
+  safe because the "no undeclared env reads" gate keeps the schema complete; the one
+  declared knob a child's tool depends on, `VIBERR_BROWSER_EXECUTABLE`, reaches the
+  browser MCP as argv from the server, never from the env. The same base serves every
+  spawned stdio MCP child (`mcpSpawnEnv`), the hosted sign-in driver and the vendor
+  sign-out. The run service then adds exactly one principal's credential on top, and
+  `startRun` throws if the caller's own `env` overlay names a key the credential owns. The run sink redacts those
+  plaintext values from every persisted line (`createRunSink(db, spec, { secrets })`) —
+  the key belongs to one person and the run console is visible to every project member.
 
 ### 2.3 Models and effort
 
 | Backend | Models (default first) | Efforts (default) | Rules |
 |---|---|---|---|
-| claude | `sonnet`, `opus`, `haiku` (aliases), plus any dated `claude-*` id containing a digit, plus the live `supportedModels()` list of the VIEWER's OWN connected Claude account (10 min cache keyed by that person's home, 15 s timeout; ruling 127) | `low medium high xhigh max` (`high`) | Alias or dated id runs verbatim; a string containing opus/haiku/sonnet maps to the alias; anything else falls back to the SDK default |
+| claude | `sonnet`, `opus`, `haiku` (aliases), plus a family alias carrying a bracketed context-window variant (`opus[1m]`, what the live catalog offers as "Opus (1M context)"), plus any dated `claude-*` id containing a digit, plus the live `supportedModels()` list of the VIEWER's OWN connected Claude account (10 min cache keyed by that person's home, 15 s timeout; ruling 127) | `low medium high xhigh max` (`high`) | Alias or dated id runs verbatim; a string containing opus/haiku/sonnet maps to the alias; the bracketed variant is split off FIRST, the base resolved, and the variant re-appended verbatim (`claude-opus[1m]` → `opus[1m]`, `claude-sonnet-4-5[1m]` unchanged), so it reaches the SDK and is known on a cold process (pass 34, F34-7); anything else falls back to the SDK default. Display: the live catalog row's name when cached, else "Claude Opus [1m]" |
 | codex | `gpt-5.6-terra`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5` (closed list) | `low medium high xhigh` (`medium`); `minimal` accepted at run time, never offered | A model persisted for the other backend is **substituted silently** at start with only a `run·model_substituted` log line |
 
 `/resources/model-catalog?backend=` serves `{ models, efforts, defaultModel,
@@ -102,7 +111,16 @@ The route resolves the viewer's own `runCredentialFor(db, user.id, "claude")` an
 it to the catalog; a viewer who has not connected Claude gets the curated list and no
 probe is spawned, and one person's live list is never served to another (the cache entry
 carries the home that produced it).
-Effort is ranked `minimal 0 … max 5` and clamped to the backend's list.
+Effort is ranked `minimal 0 … max 5` and clamped to the backend's list at RUN time only
+(`resolveRunEffort`, for a tier stored before the check existed); every write surface
+that takes a tier (`deploy_agent`, `update_agent_deployment`, and the profile editor for
+a CHANGED value) refuses an unlisted one by name first (ruling 139,
+`assertEffortForBackend`), and the editor re-seeds a stored tier the backend no longer
+lists to the default rather than offering it. The re-seed reads the SAME list the effort
+select renders — the selected model's own tiers when it narrows the backend-wide list —
+so a tier the picker never shows is never left standing to be saved, and picking a model
+with fewer tiers clamps the pick to one that model offers (the catalog default when it is
+among them, else its first).
 
 **Availability marks** (`model_availability`): a model is marked unavailable only from a
 real run failure whose redacted text matches `MODEL_UNSUPPORTED_RE`, and cleared by a
@@ -110,10 +128,25 @@ real success. Never a synthetic probe (ruling 19 generalised).
 
 **Quota and rate limits** (`instance_settings`): the run sink folds Claude
 `rate_limit_event` envelopes into `backendRateLimit.<backend>`; a quota-refused failure
-(terminal tag ending `·quota`) records `backendQuotaExhausted.<backend>` with the
-provider's sentence and a parsed reset instant (Claude `usage limit reached|<epoch>` is
-exact; Codex "try again at …" prose is resolved in UTC). Grace 24 h; an undated
-exhaustion expires after 6 h. Insights renders both; "no reading yet" is neutral.
+(terminal tag ending `·quota`) records `backendQuotaExhausted.<backend>` when the
+terminal line's `failure.windowRejected` says the provider rejected the window OR the
+provider's own sentence names a spent limit (`session | weekly | monthly | usage limit`,
+never transient rate-limit wording), with only the PROVIDER half of the line as its
+evidence and a reset instant that is the SDK's exact `resetsAt`, a Claude
+`usage limit reached|<epoch>` (exact), a `resets 11:50am (UTC)` clock resolved to the
+next UTC occurrence (`clock`, retired with the prose grace) or Codex "try again at …"
+prose resolved in UTC (`prose`). Grace 24 h for prose and clock; an undated exhaustion
+expires after 6 h. Ruling 130(d): every record (reading, exhaustion, credential refusal)
+names the account it billed (`credentialUserId`, `credentialLabel`, the run's
+principal under ruling 127); one latest record per backend, and a completed run by
+ANY person retires an exhaustion or refusal. The principal reaches Insights (org
+admin), `instance_health` (signed in) and the person's own Profile card; it is stripped
+from the unauthenticated `/resources/health` body. Insights renders both; "no reading
+yet" is neutral; a refused row says whose account, and a reading row names the hour
+of its reset. The Profile card (`getProfileBackends` → `lastRefusal`) shows the
+viewer's OWN record only: a `risk` "refused by the provider · <when>" pill with the
+provider's sentence, or a neutral "usage window spent · reopens <when>" pill, each
+stated as the last refusal Viberr observed, retired by any completed run.
 
 ### 2.4 Claude adapter
 
@@ -137,6 +170,24 @@ exhaustion expires after 6 h. Insights renders both; "no reading yet" is neutral
   `kind ∈ quota | auth | session_missing | unknown`; idle → `run·error·idle_timeout`;
   `error_max_turns` → `run·error·max_turns`. Provider text follows
   `"\n\nThe provider reported: "`.
+- Ruling 130(a) (pass 34): refusals are classified from the STRUCTURED envelope first
+  and from prose second, in the order spawn codes → `session_missing` → `quota` (a
+  `rate_limit_event` whose `status` is `rejected`, an assistant-envelope `error` of
+  `rate_limit` or `billing_error`, `api_error_status: 429`, or the prose regex now
+  including `session limit | weekly limit | monthly limit | out of credits | credit
+  balance`) → `auth` (`authentication_failed` or `oauth_org_not_allowed`, status 401/403,
+  or the prose regex) → `unknown`. The terminal `err` line carries a typed `failure`
+  record (`RunFailureFacts`: kind, `resetsAt`, `window`, `windowRejected`, `apiError`,
+  `apiErrorStatus`, `terminalReason`; the reset and window ride ONLY on a rejected
+  reading) beside its tag, and every reader consumes that record: the failure reason,
+  the packet builders, the controller's note, the Agent-logs footer for every run kind,
+  the quota store. The provider's API-error banner, streamed as an assistant message
+  with an `error` code, projects as an `err` line tagged `assistant·<code>` and can never
+  be selected as the agent's reply. A rejected `rate_limit_event` projects as an `err`
+  line tagged `rate_limit_event·rejected` (exempt from the console's telemetry
+  collapse) naming the window, the status and the absolute reset. U34-1: an error
+  result whose subtype is `success` is labelled `error`, with `· api <status>` and
+  `· <terminal_reason>` appended when the SDK sent them.
 
 ### 2.5 Codex adapter
 
@@ -231,12 +282,30 @@ and a `continuity` timeline event is written, so a lost effect is visible.
 ### 3.5 Failure kinds
 
 `RunFailureKind = quota | auth | unavailable | max_turns | idle_timeout |
-session_missing | unknown`, read from the terminal tag suffix first and regexes second.
-The completion pipeline opens a stuck-loop packet, notes model availability, and clears
-waiting to human. `retry_other_backend` is offered for `quota | auth | unavailable` only
-when the **task owner** has the other backend connected (ruling 127) — otherwise the
-retry would be refused for the same reason, and the refusal sentence already names the
-real remedy.
+session_missing | unknown`, read from the terminal line's typed `failure` record first,
+the tag suffix second and regexes last (ruling 130(a)). `runFailureReason` returns the
+record as `facts`; `projectRunsForTask` sets `failureKind` on every errored run's view
+(operator runs included) and flags `failedBackendUnavailable` from the class before the
+raw scan; the controller's turn note (ruling 130(b)) names a quota window's reset and
+the account switch, or an auth refusal's organization restriction, instead of "Say it
+again to retry", which stays only for an unclassified failure.
+The completion pipeline writes the `blocked` event, notes model availability, opens the
+stuck-loop packet and clears waiting to human. For `quota` and `auth` the event, the
+packet body and the controller's note are worded by ONE module,
+`app/server/tasks/run-failure-remedy.server.ts` (`describeRunFailure`, ruling 130(b)):
+the reason names the backend, the owner, the spent window and the reset instant
+(absolute UTC) or the organization restriction; the remedy is the owner's own move on
+Profile → Agent accounts. The packet's options come from the same module for
+`quota | auth | unavailable`: `retry_other_backend` first only when the **task owner**
+has the other backend connected (ruling 127 — otherwise the retry would be refused for
+the same reason), else a `request_edit` that sends the agent back once the window has
+reset or the account changed; `redirect` is present and never recommended for a
+backend failure (the agent did nothing wrong); `hold_runtime_debug` closes the set.
+`unavailable` keeps ruling 127's refusal sentence as its reason. A failed OPERATOR
+run's packet (`escalateFailedOperatorRun`) uses the same module: its recommended
+`block_on_policy` asserts only what the human says and records exactly that in its
+`ev`, never "policy / credential updated" (ruling 130(c)). A reason clause is
+terminated exactly once (the `..` of F34-12 is gone).
 
 ### 3.6 Resume, continuity, export
 
@@ -310,8 +379,26 @@ Telemetry tags are collapsed by `log-noise.ts`, and the console shows the redact
 - Git identity in the run: `<profileId>@viberr.local`; `GIT_CEILING_DIRECTORIES` is the
   task dir.
 
-Stage eligibility (`stages:` on the profile, `spanAll`) is asserted on assignment and
-dispatch; an empty list means eligible everywhere.
+Stage eligibility (`stages:` on the profile, `spanAll`) gates NEW engagements
+(`assignSpecialist`, `assignReviewer`, the dispatch's auto-engage); an empty list means
+eligible everywhere. Ruling 133 (pass 34): once a profile is the task's delivering
+engagement it runs at EVERY stage, on every door (the operator's `run_agent`, the Run
+control, a human @mention's resume, a schedule, `retry_other_backend`), for rework,
+conflict resolution and follow-ups; `runEligibilityFor` is the one home, and the
+`task.agent.run_started` audit row records `stageEligibility` (`declared`,
+`engaged-deliverer`, or `undeployed`), naming the exemption only when it was needed.
+A supporting engagement stays stage-scoped, and an unengaged profile whose session
+survives is judged by the new-engagement rule, so the @mention resume door
+(`assertResumeEligible`) refuses with the dispatcher's own sentence and posts the
+comment as a partial success.
+
+
+Before a delivering dispatch, `ensureTaskBranchBestEffort` prepares the task branch; a
+failure it cannot fix (credential rejected, GitHub unreachable, base branch missing and
+not creatable, or an unexpected throw) is disclosed once on the task timeline as a
+`github` event by `system:delivery`, audited as `github.branch.prepare_failed`, and logged
+on every attempt; the run still starts in its workspace and delivery retries the branch
+(F34-3, pass 34).
 
 ### 4.2 The `viberr_agent` toolkit (Claude specialists)
 
@@ -377,8 +464,11 @@ lane: a stored `recommend` is coerced to `off` on read (ruling 81). Delivery per
    `verdictAuthorized = engagement.verdictCapable ?? live verdict grant`.
 4. Question → packet using the live ask grant; evidence rows are written; browser
    working artifacts not cited are pruned (ruling 105).
-5. Error runs: `blocked` timeline event, model-availability note, stuck-loop packet
-   with `retry_other_backend`, waiting → human.
+5. Error runs: `blocked` timeline event (worded by `describeRunFailure` for a
+   classified refusal), model-availability note, stuck-loop packet whose options come
+   from the same module (`retry_other_backend` only when the owner has the other
+   backend; else "send the agent back to continue"; `redirect` never recommended),
+   waiting → human (ruling 130(b)).
 6. Finished deliverer runs reconcile what the agent pushed itself
    (`reconcileWorkspaceDelivery`).
 7. The operator reacts (`trigger: agent-reply`) when the reply is non-empty, differs
@@ -401,8 +491,14 @@ be deployed; audit `task.schedule.created`/`cancelled`). `startScheduleRunner` f
 boot and every 60 s: it claims in the file (lease = clone timeout + 5 min, 3 retries),
 skips moot schedules with an outcome (`skipped-done`, `skipped-archived`), starts the
 agent (`400` → failed, `409` → back to pending) or runs the operator with `trigger:
-scheduled`, and audits `task.schedule.fired`. A schedule pins no backend or autonomy
-(ruling 94).
+scheduled` and `scheduleId`, and audits `task.schedule.fired`. The outcomes a
+`run-operator` occurrence can end with: `claimed` (the claim-time row), `skipped-done`
+(terminal stage), `skipped-held` (ruling 131(d)), `skipped-packet` (ruling 141: a
+decision packet is open, the same refusal a person's Run operator gets), and
+`queued-behind-drive` (the run waits behind a live drive; a refusal at the front of the
+lease queue then writes the final `skipped-*` row with `atDrain: true` and a "Scheduled
+action skipped" note). None of the skips spends a retry. A schedule pins no backend or
+autonomy (ruling 94).
 
 ## 5. The capability catalog
 
@@ -441,6 +537,27 @@ matrix (ruling 39).
 Absent-grant polarity is deliberately not uniform: `dispatch-agents` and
 `use-web-search-fetch` absent ⇒ granted; `deliver-review-pr` absent ⇒ derived from
 workflow strictness; the grant-required family absent ⇒ withheld.
+
+**A save cannot revert a write it never saw** (pass 34, B5/U34-3). `updateAgentProfile`
+rebuilds the whole governed grant set from the SUBMITTED form, and the editor seeds that
+form once, at open time, so a modal opened before a concurrent write and saved after it
+reverted every grant that write changed and reported success. Every update now carries
+`deploymentFingerprint` — the sha256 of the deployment's grants (order-independent),
+extras and definition, NOT of the whole file, so an unrelated project edit never refuses
+a save — which the writer recomputes from the freshly parsed record inside its own lock
+and refuses on mismatch with "This profile changed while the editor was open." A refused
+save writes nothing and audits nothing: it is a validation refusal like every other one
+on this path. A create carries none (there is no prior record); the controller's
+`update_agent_deployment` sends the fingerprint of the record it just read, so its own
+read-modify-write inside one turn is never refused by itself.
+
+The controller's `update_agent_deployment` validates every capability patch against
+this catalogue per KIND and refuses an unknown or impossible id or mode by name before
+writing (ruling 139, `capabilityPatchRefusal`); the advisory row above has no toggle and
+is refused as such. The absent-grant polarity has ONE home, `absentGrantMode` in
+`agents-query.server.ts`: the roster materialises absent grants with it and the
+controller's `list_capabilities` publishes it as `whenUngranted`, so the Default column
+above is the create-seed value and never the runtime's answer for a missing grant.
 
 ## 6. Context mounting
 
@@ -539,6 +656,10 @@ base templates (`app/server/seed/assets/`, refreshed by hash through
 | `developer` | specialist | claude, codex (Claude first) | `sonnet` | ready, impl | `developer-expertise` / `architecture-notes`, `api-contracts` | direct: repo write, branch, commit/push, open PR, comments, ask, browser, egress, advisory items; human: merge, done |
 | `reviewer` | specialist | claude | `sonnet` | impl, review | `reviewer-expertise` / `api-contracts` | direct: read diff, validation suites, tests, evidence, quality flags, comments, ask, verdict, approve, request changes; human: merge, done, commit/push |
 | `controller` | controller | claude | `sonnet` | n/a | `controller-guide` / `controller-handbook` | none (tools are gated by the asker's RBAC) |
+
+The shipped operator doctrine (`operator.definition.md`, upgraded in place through
+`PRIOR_SHIPPED_HASHES`) tells the operator, since ruling 131, that a wait on other work
+is a fact with its own tool, `set_dependencies`, and never a packet.
 
 `ensureBaseAgentsDeployed` runs at boot: the operator is ensured on every project;
 Developer and Reviewer are backfilled only into a project with **no** specialists.

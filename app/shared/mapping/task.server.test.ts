@@ -26,6 +26,7 @@ function row(patch: Partial<TaskProjectionRow> = {}): TaskProjectionRow {
     priority: "normal",
     labels_json: "[]",
     due_date: null,
+    blocked_by_json: "[]",
     archived: 0,
     validation: "healthy",
     validation_block_reason: null,
@@ -80,8 +81,27 @@ function summarize(
     workflow,
     owner: null,
     accepted,
+    blockedBy: [],
   });
 }
+
+describe("ruling 131: the summary carries the caller's resolved dependency list", () => {
+  it("passes the resolved entries through verbatim (the mapper resolves nothing itself)", () => {
+    // Canary: omit `blockedBy` from the mapper's return object.
+    const entries = [
+      { ref: "VIB-2", label: "VIB-2", state: "open" as const, taskKey: "VIB-2", goalId: null },
+    ];
+    const summary = mapTaskProjectionRow(row({ blocked_by_json: '["VIB-2"]' }), {
+      stages: STAGES,
+      workflow: WORKFLOW,
+      owner: null,
+      accepted: false,
+      blockedBy: entries,
+    });
+    expect(summary.blockedBy).toBe(entries);
+    expect(summarize(row(), false).blockedBy).toEqual([]);
+  });
+});
 
 describe("displayReadiness derivation (F7-UI3)", () => {
   it("non-terminal tasks pass raw readiness through", () => {
@@ -160,6 +180,35 @@ describe("displayReadiness derivation (F7-UI3)", () => {
   it("an input packet never overrides a non-ready readiness (blocked stays blocked)", () => {
     const r = row({ readiness: "blocked", waiting: "human", packet_json: inputPacket });
     expect(summarize(r, false).displayReadiness).toBe("blocked");
+  });
+
+  it("ruling 138: a decided edit_goal packet reads 'goal edit pending' over input_required and a stored blocked, never over agent_working or a terminal state", () => {
+    // Canary: make the goal-edit branch return `readiness` unchanged and the
+    // input case reads "input_required" (the pill row is a TYPE, not a runtime,
+    // canary).
+    const decided = (type: "input" | "blocked") =>
+      JSON.stringify({
+        id: "pkt_2",
+        type,
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Scope needed",
+        body: "",
+        options: [{ kind: "edit_goal", t: "Specify the goal", d: "", rec: true }],
+        awaiting: "goal_edit",
+        decided: { optionIndex: 0, at: "2026-09-04T10:00:00.000Z", byUserId: "u-murat" },
+      });
+    expect(summarize(row({ readiness: "ready", waiting: "human", packet_json: decided("input") }), false).displayReadiness).toBe("goal_edit_pending");
+    expect(summarize(row({ readiness: "blocked", waiting: "human", packet_json: decided("blocked") }), false).displayReadiness).toBe("goal_edit_pending");
+    // An agent carrying the task still owns the slot.
+    expect(summarize(row({ readiness: "ready", waiting: "agent", packet_json: decided("input") }), false).displayReadiness).toBe("agent_working");
+    expect(summarize(row({ readiness: "blocked", waiting: "agent", packet_json: decided("blocked") }), false).displayReadiness).toBe("blocked");
+    // Never over a terminal state.
+    expect(summarize(row({ readiness: "ready", waiting: "human", packet_json: decided("input") }), true).displayReadiness).toBe("accepted");
+    // The render carries the decision for the card and the rail.
+    const s = summarize(row({ readiness: "ready", waiting: "human", packet_json: decided("input") }), false);
+    expect(s.packet?.awaiting).toBe("goal_edit");
+    expect(s.packet?.decided?.optionIndex).toBe(0);
   });
 
   it("an input packet on the agent's turn does not raise 'input required'", () => {
