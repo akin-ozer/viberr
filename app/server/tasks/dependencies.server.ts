@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { z } from "zod";
 import { AppError } from "~/server/errors/app-error.server";
 import {
@@ -437,10 +438,28 @@ export async function releaseTask(
   if (!existing) return false;
   const fm = existing.parsed.frontmatter;
   if (fm.archived || fm.blockedBy.length === 0) return false;
+  // Pass 34 review: a task that already reached the terminal stage is not
+  // waiting for anything — announcing "it can move again" there is false, and
+  // the operator hand-off it triggers is an unwatched paid turn on a closed
+  // task. Clear the list quietly instead, so the board stops rendering a wait
+  // that ended with the task.
+  const project = loadProjectContext(ctx, projectSlug);
+  if (isTerminalStage(fm.stage, project.stages)) {
+    await updateTaskFile(ref, (parsed) => {
+      clearDependencies(parsed);
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    return false;
+  }
   const entries = resolveDependencies(db, projectSlug, fm.blockedBy);
   if (!dependenciesSatisfied(entries)) return false;
+  // Pass 34 review: the satisfaction check above ran OUT of the lock. Re-read
+  // the list inside it and leave the file alone when it moved — otherwise a
+  // wait added between the two reads is dropped and announced as released.
+  const judged = JSON.stringify(fm.blockedBy);
   let cleared: string[] = [];
   await updateTaskFile(ref, (parsed) => {
+    if (JSON.stringify(parsed.frontmatter.blockedBy) !== judged) return;
     cleared = clearDependencies(parsed);
   });
   if (cleared.length === 0) return false; // a concurrent write got there first

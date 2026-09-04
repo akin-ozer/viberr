@@ -447,3 +447,80 @@ describe("the release engine", () => {
     expect(rows.some((r) => r.user_id === store.users.murat.id)).toBe(true);
   });
 });
+
+/**
+ * Pass 34 review: two ways the release engine spoke for a task it should not
+ * have — a DONE task announced as "released", and a list judged out of lock
+ * then cleared whatever the file held by then.
+ */
+describe("the release engine speaks only for a task that is actually waiting", () => {
+  it("a task already in the terminal stage is cleared QUIETLY: no note, no re-invoke", async () => {
+    // Canary: drop the terminal check — the closed task gets a "can move
+    // again" note and pays an unwatched operator turn.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-11", {
+        stage: "done",
+        waiting: "none",
+        blockedBy: ["VIB-2"],
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const runOperator = runOperatorStub();
+    const released = await releaseDependents(
+      store.db,
+      { dataRoot: store.dataRoot, deps: { runOperator } },
+      store.slug,
+    );
+    expect(released).toEqual([]);
+    const parsed = file(store, "VIB-11");
+    expect(parsed.frontmatter.blockedBy).toEqual([]); // cleared, so no stale chip
+    expect(parsed.timeline.some((e) => e.title === "Dependencies released")).toBe(false);
+    expect(runOperator.mock.calls).toHaveLength(0);
+  });
+
+  it("a wait added between the satisfaction check and the write is NOT dropped", async () => {
+    // Canary: clear whatever the file holds without re-reading the list —
+    // the newly added wait vanishes and a release is announced over it.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-12", {
+        stage: "impl",
+        waiting: "none",
+        readiness: "blocked",
+        blockedBy: ["VIB-2"],
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // The race, made deterministic: a concurrent writer adds an unsatisfied
+    // wait AFTER `releaseTask` judged the list and WHILE it waits for the file
+    // lock. The spy fires once, on the release's own write.
+    const writer = await import("~/server/files/task-writer.server");
+    const ref = { projectSlug: store.slug, taskKey: "VIB-12", dataRoot: store.dataRoot };
+    const real = writer.updateTaskFile;
+    const spy = vi
+      .spyOn(writer, "updateTaskFile")
+      .mockImplementationOnce(async (target, mutate) => {
+        // Land the concurrent write first, then let the release's mutator run
+        // against the file it produced.
+        await real(ref, (parsed) => {
+          parsed.frontmatter.blockedBy = ["VIB-2", "VIB-1"];
+        });
+        return real(target, mutate);
+      });
+    const runOperator = runOperatorStub();
+    const released = await releaseDependents(
+      store.db,
+      { dataRoot: store.dataRoot, deps: { runOperator } },
+      store.slug,
+    );
+    spy.mockRestore();
+    expect(released).toEqual([]);
+    expect(file(store, "VIB-12").frontmatter.blockedBy).toEqual(["VIB-2", "VIB-1"]);
+    expect(runOperator.mock.calls).toHaveLength(0);
+  });
+});
