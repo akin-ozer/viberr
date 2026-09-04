@@ -242,7 +242,9 @@ classified reason, "No coordination was performed.", the owner's own remedy, the
 provider's redacted words, a "Window reopens" observation when the reset instant is
 known; options from the same module, ruling 130(b)/(c)); a Codex run that produced no
 parseable plan (the stock blocked set, whose recommended option is "Re-run the operator
-now"); the branch-update conflict; and the
+now"); the branch-update conflict and push conflict (ruling 133(b): the redirect to the
+deliverer is offered only when that deliverer is deployed with repo-write, else resolving
+by hand is recommended and the body says why); and the
 `pr-diverged` recovery (closed PR → rework, `archive_task`, `archive_task` +
 `deleteBranch`; merged → no packet, accept instead; reopened → withdraw the moot
 packet).

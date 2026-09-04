@@ -623,6 +623,7 @@ describe("operatorDispatchAgent", () => {
       authority("full"),
     );
     const trace = listAuditEvents(store.db, { action: "task.operator.agent_selected" })[0]!;
+    // SAFETY: `task.operator.agent_selected` has ONE writer (recordAgentSelectionTrace); its details are this shape.
     const d = trace.details as AgentSelectionTrace;
     expect(d.candidates.find((c) => c.profileId === "developer")).toMatchObject({ eligibleForStage: true, alreadyEngaged: true, deliveringAtSelection: true });
     expect(d.candidates.find((c) => c.profileId === "helper")).toMatchObject({ eligibleForStage: false, alreadyEngaged: true, deliveringAtSelection: false });

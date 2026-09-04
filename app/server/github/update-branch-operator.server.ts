@@ -26,6 +26,8 @@ import {
   type UpdateBranchResult,
 } from "./update-branch.server";
 import type { Exec } from "./push-workspace.server";
+import { deliveringEngagement, type Engagement } from "~/schemas/task-file.schema";
+import { listDeployedSpecialists } from "~/server/tasks/specialist-run.server";
 
 /**
  * The DECISION half of "bring the task branch up to date" (N19 gap 9, owner
@@ -58,7 +60,34 @@ type BranchUpdateAuditDetails = {
   remoteHeadSha?: string | null;
   /** Ruling 132: the merge commit an `updated` refresh created. */
   mergeSha?: string;
+  /** Ruling 133(b): conflict packets only — who the packet offered as the
+   *  resolver: the deployed, repo-write delivering agent, or nobody. */
+  resolver?: "deliverer" | "none";
 };
+
+/** Ruling 133(b): who can resolve a conflict in product. A deliverer only
+ *  counts when its profile is deployed with a repo-write grant; otherwise the
+ *  packet must not promise a resolver that cannot execute. */
+type ConflictResolver =
+  | { kind: "deliverer"; name: string }
+  | { kind: "none"; reason: string };
+
+function conflictResolverFor(
+  ctx: TaskActionContext,
+  projectSlug: string,
+  fm: { engagements: Engagement[] },
+): ConflictResolver {
+  const deliverer = deliveringEngagement(fm);
+  if (!deliverer) return { kind: "none", reason: "this task has no delivering agent" };
+  const view = listDeployedSpecialists(projectSlug, ctx).find((s) => s.id === deliverer.profileId);
+  if (!view) {
+    return { kind: "none", reason: `its delivering agent (${deliverer.profileId}) is no longer deployed` };
+  }
+  if (view.capabilities?.delivery !== true) {
+    return { kind: "none", reason: `its delivering agent (${view.name}) holds no repo-write grant any more` };
+  }
+  return { kind: "deliverer", name: view.name };
+}
 
 /** The head sha origin's copy carries, when the state names one. */
 function remoteHeadOf(remote: RemoteBranchState): string | null {
@@ -134,39 +163,63 @@ export interface OperatorUpdateBranchInput {
  * "Operator re-engages the specialist with a summon note", which would file
  * "I'll fix the branch myself" under a sentence about summoning an agent.
  */
-function conflictOptions(branch: string, base: string) {
+function conflictOptions(
+  branch: string,
+  base: string,
+  resolver: ConflictResolver,
+  outcome: "conflict" | "push_conflict",
+) {
+  const byHand = {
+    kind: "custom" as const,
+    title: `Resolve \`${branch}\` yourself`,
+    detail:
+      outcome === "conflict"
+        ? `Merge \`${base}\` into the branch by hand and push it.`
+        : `Reconcile the branch with origin's copy by hand (merge or rebase locally) and push it.`,
+    ev:
+      `**Decision:** a person resolves \`${branch}\` against \`${base}\` directly. Viberr ` +
+      `re-checks the branch on the operator's next turn and reports it up to date.`,
+  };
+  const archive = {
+    kind: "archive_task" as const,
+    title: "Archive the task: the work is superseded",
+    detail: "Keeps the record and the branch; the task leaves the board.",
+    ev: `**Decision:** archive the task rather than resolve \`${branch}\` against \`${base}\`.`,
+  };
+  // Ruling 133(b): a packet offers only options that can execute. With no
+  // deployed, repo-write deliverer the in-product redirect would promise a
+  // resolver that does not exist, so resolving by hand is what is recommended.
+  if (resolver.kind === "none") {
+    return [{ ...byHand, recommended: true }, archive];
+  }
   return [
     {
       // `redirect` routes the decision back to the agent side (the resolver
-      // re-engages the deliverer). This is the IN-PRODUCT resolution and it is
-      // recommended for a reason: the base is now fetched into the delivering
-      // engagement's own workspace, so it can merge `origin/<base>` and resolve
-      // the files where it already has the context — without a second writer
-      // touching the branch.
+      // re-engages the deliverer, which runs at every stage, ruling 133). This
+      // is the IN-PRODUCT resolution and it is recommended for a reason: the
+      // base is now fetched into the delivering engagement's own workspace, so
+      // it can merge `origin/<base>` and resolve the files where it already has
+      // the context — without a second writer touching the branch.
       kind: "redirect" as const,
-      title: "Have the delivering agent resolve the conflict",
+      title:
+        outcome === "conflict"
+          ? `Have ${resolver.name} resolve the conflict`
+          : `Have ${resolver.name} reconcile the branch with origin`,
       detail:
-        `Its workspace already has \`origin/${base}\` fetched: it merges and resolves ` +
-        `the conflicting files, and the next delivery pushes the result.`,
+        outcome === "conflict"
+          ? `Its workspace already has \`origin/${base}\` fetched: it merges and resolves ` +
+            `the conflicting files, and the next delivery pushes the result.`
+          : `Its workspace fetches origin's copy of \`${branch}\`, merges the history it does not ` +
+            `have, and the next delivery pushes the result; nothing is forced.`,
       recommended: true,
       ev:
-        `**Decision:** the delivering agent resolves the conflict between \`${branch}\` and ` +
-        `\`${base}\` in its own workspace.`,
+        outcome === "conflict"
+          ? `**Decision:** ${resolver.name} resolves the conflict between \`${branch}\` and ` +
+            `\`${base}\` in its own workspace.`
+          : `**Decision:** ${resolver.name} reconciles \`${branch}\` with origin's copy in its own workspace.`,
     },
-    {
-      kind: "custom" as const,
-      title: `Resolve \`${branch}\` yourself`,
-      detail: `Merge \`${base}\` into the branch by hand and push it.`,
-      ev:
-        `**Decision:** a person resolves \`${branch}\` against \`${base}\` directly. Viberr ` +
-        `re-checks the branch on the operator's next turn and reports it up to date.`,
-    },
-    {
-      kind: "archive_task" as const,
-      title: "Archive the task: the work is superseded",
-      detail: "Keeps the record and the branch; the task leaves the board.",
-      ev: `**Decision:** archive the task rather than resolve \`${branch}\` against \`${base}\`.`,
-    },
+    byHand,
+    archive,
   ];
 }
 
@@ -237,7 +290,8 @@ export async function operatorUpdateBranchFromBase(
     taskKey: input.taskKey,
     dataRoot: ctx.dataRoot,
   };
-  if (!readTaskFile(ref)) {
+  const existing = readTaskFile(ref);
+  if (!existing) {
     return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
   }
 
@@ -266,6 +320,13 @@ export async function operatorUpdateBranchFromBase(
     details.remoteHeadSha = remoteHeadOf(result.remote);
   }
   if (result.status === "conflict") details.files = result.files;
+  // Ruling 133(b): who the conflict packet will offer as the resolver, decided
+  // once here so the audit row and the packet cannot disagree.
+  const resolver: ConflictResolver | null =
+    result.status === "conflict" || result.status === "push_conflict"
+      ? conflictResolverFor(ctx, input.projectSlug, existing.parsed.frontmatter)
+      : null;
+  if (resolver) details.resolver = resolver.kind;
   recordAudit(db, {
     action: "github.branch_update.operator",
     actor: OPERATOR_AUDIT_ACTOR,
@@ -370,12 +431,16 @@ export async function operatorUpdateBranchFromBase(
             ? `\`${result.branch}\` conflicts with \`${result.base}\``
             : `\`${result.branch}\` diverged from its remote`,
         body:
-          result.status === "conflict"
+          (result.status === "conflict"
             ? `The task branch cannot be brought up to date automatically. The merge was aborted and the branch is exactly as it was. A person decides how this is resolved.`
-            : `The remote branch holds commits this task's workspace does not, so the update was rolled back rather than forced. A person decides how this is resolved.`,
+            : `The remote branch holds commits this task's workspace does not, so the update was rolled back rather than forced. A person decides how this is resolved.`) +
+          (resolver?.kind === "none"
+            ? ` No delivering agent can resolve it in product: ${resolver.reason}. Resolving by hand is the recommended option.`
+            : ""),
         observations: [
           { k: "Branch", v: result.branch, code: true },
           { k: "Base", v: result.base, code: true },
+          { k: "Delivering agent", v: resolver?.kind === "deliverer" ? resolver.name : "none" },
           ...(conflictFiles.length
             ? [{ k: "Conflicting files", v: conflictFiles.join(", "), code: true }]
             : []),
@@ -383,7 +448,12 @@ export async function operatorUpdateBranchFromBase(
             ? [{ k: "git", v: result.detail, code: true }]
             : []),
         ],
-        options: conflictOptions(result.branch, result.base),
+        options: conflictOptions(
+          result.branch,
+          result.base,
+          resolver ?? { kind: "none", reason: "this task has no delivering agent" },
+          result.status,
+        ),
       },
       authority,
     );
