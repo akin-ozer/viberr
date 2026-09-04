@@ -214,8 +214,11 @@ Details that matter:
   resolves the branch history"), absent, or unknown with git's reason. It stays the
   base tool and never becomes a second push door. A lagging origin lands once on the
   timeline (the line is suppressed while the newest `github` event already says it);
-  the audit row `github.branch_update.operator` fires every call with `remote`,
-  `remoteHeadSha` and, on an update, `mergeSha`. Ruling 132: a successful update records
+  the audit row `github.branch_update.operator` fires on every call and always carries
+  the `status`; the rest is whatever the outcome actually held — `remote` and
+  `remoteHeadSha` when origin's copy was read (an update or an already-current answer,
+  not a conflict), `commits` and `mergeSha` on an update, the conflicting `files` on a
+  conflict, and the offered `resolver` on either conflict shape (ruling 133(b)). Ruling 132: a successful update records
   the refresh in `baseRefreshes` under the file lock, reconciles the task at once so
   `pr.revisionDrift` is re-measured now rather than by the poll, and writes its timeline
   line and tool message from the re-read, carrying the canonical drift sentence (or

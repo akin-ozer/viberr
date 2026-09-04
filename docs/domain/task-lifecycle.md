@@ -358,8 +358,10 @@ against GitHub before refusing and never strands on either arm, ruling 136), rec
 push moved the head of the task's open PR), and either re-queues a full-autonomy
 operator (`delivered`: a new PR or a moved head) or ensures a supervised operator left
 a "Move to Review" recommendation. A PR Viberr did not open but adopts (open, head equal
-to the delivered revision) is recorded as an adoption: a `github` event, the audit row
-`github.pr.adopted`, and a notification (F34-9). Rework on a task whose PR is already
+to the delivered revision) is recorded as an adoption: a `github` event and the audit
+row `github.pr.adopted` (F34-9); the reconciler's adoption also notifies the task's
+watchers, the delivery's does not, because the person who asked for it is reading the
+answer. Rework on a task whose PR is already
 open is delivered the same way: the push moves the PR's head; nobody is ever asked to
 push by hand. The task page offers the same door as "Push `<sha>` to PR #N" whenever
 the open PR does not carry the delivered revision (ruling 134(c)), and shows a disabled

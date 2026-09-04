@@ -204,15 +204,16 @@ the whole declared browser matrix (ruling 103).
 | Spec | Tests | Covers |
 |---|---|---|
 | `01-home-board.spec.ts` | 7 | seeded projects, board columns, drag-and-drop reorder and cross-stage moves, Escape cancels, Done-drop shows the accept dialog and still fails the verdict gate |
-| `02-feeds-profile.spec.ts` | 5 | review-queue partitions and row labels, activity day groups, mark-all-read, theme cookie |
+| `02-feeds-profile.spec.ts` | 6 | review-queue partitions and row labels, activity day groups, mark-all-read, theme cookie, Agent accounts with both backends unconnected |
 | `03-org-settings-store.spec.ts` | 3 | org settings tabs, heading scope, store browser creates a folder |
 | `04-palette-mobile.spec.ts` | 6 | ⌘K palette, board `?q=`, 375 px rail collapse, non-member 404 copy, touch targets |
 | `05-task-comment-composer.spec.ts` | 7 | Lexical composer keys, @-mention, undo, combobox a11y, zero page errors |
 | `06-activity-hydration.spec.ts` | 2 | clean hydration in `Pacific/Auckland`: the activity page and the task page (VIB-142 with its open accept card); both assert zero `pageerror` and a timestamp-only SSR first pass |
-| `07-accessibility.spec.ts` | 33 generated | axe WCAG 2.2 AA on 12 surfaces × 2 themes, dialogs, mobile rail, login |
+| `07-accessibility.spec.ts` | 35 generated | axe WCAG 2.2 AA on 12 surfaces and 4 dialogs × 2 themes, plus the mobile rail overlay and login in both themes |
+| `08-controller-dock.spec.ts` | 2 | the dock follows the surface you stand on and stays off the controller pages; at 375 px it is a bottom sheet with no sideways scroll |
 
-63 tests plus the setup project. The e2e gate is the only one that runs a real CLI
-entrypoint, and only `npm run seed:demo`: `backup`, `restore`, `rescan`, `keys` and
+68 tests plus the setup project (Playwright counts the setup itself, so its own total
+reads 69). The e2e gate is the only one that runs a real CLI entrypoint, and only `npm run seed:demo`: `backup`, `restore`, `rescan`, `keys` and
 `store:check` are exercised by no gate.
 
 The task-page half of `06-activity-hydration.spec.ts` covers the open-accept-card shape

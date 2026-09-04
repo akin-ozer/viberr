@@ -223,8 +223,10 @@ SHA equals the delivered revision** (ruling 35). An adoption is RECORDED (F34-9,
 revision) as KEY's review PR, replacing PR #M (state). Viberr did not open it…"), by
 the policy engine from the reconciler or by `system:delivery` from the delivery door,
 an audit row `github.pr.adopted {repo, branch, prNumber, previousPrNumber,
-previousState, headSha, source}`, and its own `policy` notification ("PR #N adopted for
-KEY", "…: replaces PR #M"); a refresh of the same number records nothing, and replacing
+previousState, headSha, source}`, and — from the RECONCILER, the door nobody is
+watching — its own `policy` notification ("PR #N adopted for KEY", "…: replaces PR
+#M"). The delivery door writes the event and the row without a notification: whoever
+asked for the delivery is reading its answer. A refresh of the same number records nothing, and replacing
 a LIVE cached PR wakes the operator with `pr-diverged` like a reopen does (a closed PR
 being replaced keeps the existing "live again" notice instead). Refusals: `merged`, `closed`,
 `no_revision`, `head_unknown`, `head_mismatch`. A refused match is a **branch name
