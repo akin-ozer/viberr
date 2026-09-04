@@ -13,6 +13,7 @@ import {
   githubFailureMessage,
   isMissingRefAnswer,
   type GithubResponse,
+  encodeRefPath,
 } from "./github-client.server";
 import type { GithubContext } from "./github-context.server";
 import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
@@ -158,7 +159,7 @@ export async function ensureDefaultBranch(
   ctx: EnsureDefaultBranchContext = {},
 ): Promise<EnsureDefaultBranchResult> {
   const base = gh.defaultBranch;
-  const refPath = `/repos/${gh.repo}/git/ref/heads/${encodeURIComponent(base)}`;
+  const refPath = `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${base}`)}`;
   const ref = await gh.client.request("GET", refPath, ghRefSchema);
   if (ref.ok) return { status: "exists", defaultBranch: base };
   if (!isMissingRefAnswer(ref)) {

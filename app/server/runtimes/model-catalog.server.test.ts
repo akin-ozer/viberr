@@ -575,4 +575,15 @@ describe("assertEffortForBackend / assertModelForBackend (ruling 139)", () => {
     expect(() => assertModelForBackend("claude", "opus[1m]")).not.toThrow();
     expect(() => assertModelForBackend("codex", "gpt-5.6-terra")).not.toThrow();
   });
+
+  it("pass 34 review: an id CODEX does not list is refused by name, never silently substituted", () => {
+    // Canary: drop the closed-catalogue branch — the controller stores
+    // `gpt-5.7-nova`, `resolveRunModel` substitutes the default at start, and
+    // every surface reports a model that never ran.
+    expect(() => assertModelForBackend("codex", "gpt-5.7-nova")).toThrow(
+      /"gpt-5\.7-nova" is not a model Codex offers\. Codex takes: /,
+    );
+    // Claude stays OPEN (dated ids and account-listed models run verbatim).
+    expect(() => assertModelForBackend("claude", "claude-fable-5-1")).not.toThrow();
+  });
 });

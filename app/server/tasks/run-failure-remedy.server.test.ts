@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, type TestStore } from "../../../test-support/test-store";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
@@ -136,5 +136,30 @@ describe("describeRunFailure", () => {
     expect(d.reason).toContain("the task owner's");
     expect(d.remedy).toContain("no owner to bill");
     expect(d.options.map((o) => o.kind)).toEqual(["request_edit", "redirect"]);
+  });
+});
+
+/**
+ * Pass 34 review: the reset label's clock is UTC, so its DAY must be too. On a
+ * host twelve hours ahead of UTC the label used to read the host's calendar
+ * date beside a UTC clock and call the pair UTC — wrong by a day on either
+ * side of midnight.
+ */
+describe("formatResetLabel is UTC on both halves", () => {
+  it("names the UTC day even when the host zone is a day ahead", async () => {
+    // Canary: use `formatCalendarDate` (host zone) for the day again — under
+    // Auckland the label reads "Sep 4, 2026 · 23:50 UTC", a day the clock
+    // contradicts. The zone is stubbed BEFORE the module (and its module-level
+    // Intl formatters) is imported, or the host's own zone decides the case.
+    vi.stubEnv("TZ", "Pacific/Auckland");
+    vi.resetModules();
+    try {
+      const { formatResetLabel: underAuckland } = await import("./run-failure-remedy.server");
+      // 2026-09-03T23:50Z is already 2026-09-04 in Auckland.
+      expect(underAuckland("2026-09-03T23:50:00.000Z")).toBe("Sep 3, 2026 · 23:50 UTC");
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 });

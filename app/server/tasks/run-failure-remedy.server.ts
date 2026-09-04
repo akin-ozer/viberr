@@ -2,7 +2,9 @@ import type { DatabaseSync } from "node:sqlite";
 import { findUserById } from "~/server/auth/user-store.server";
 import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
-import { formatCalendarDate, formatClockUTC, utcDayKey } from "~/shared/dates/format";
+import { formatClockUTC, utcDayKey,
+  formatCalendarDateUTC,
+} from "~/shared/dates/format";
 import type { RunFailure } from "./agent-reply.server";
 import type { OperatorPacketOptionInput } from "./operator-actions.server";
 
@@ -59,7 +61,10 @@ const BACKEND_NAME = { claude: "Claude", codex: "Codex" } as const satisfies Rec
  *  later; "today" would be a lie by then). */
 export function formatResetLabel(resetsAt: string | null | undefined): string | null {
   if (!resetsAt || Number.isNaN(Date.parse(resetsAt))) return null;
-  const day = formatCalendarDate(resetsAt) ?? utcDayKey(resetsAt);
+  // Pass 34 review: the clock below is UTC, so the DAY must be too — pairing a
+  // host-zone calendar date with a UTC clock and labelling the pair "UTC" is
+  // wrong by up to a day on either side of midnight.
+  const day = formatCalendarDateUTC(resetsAt) ?? utcDayKey(resetsAt);
   return `${day} · ${formatClockUTC(resetsAt)} UTC`;
 }
 

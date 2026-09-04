@@ -238,6 +238,18 @@ export function assertEffortForBackend(backend: RealBackend, effort: string): vo
  */
 export function assertModelForBackend(backend: RealBackend, model: string): void {
   const foreign = foreignModelBackend(backend, model);
+  // Pass 34 review: Codex's list is CLOSED (`CODEX_MODELS`), and
+  // `resolveRunModel` silently substitutes anything else at start — the same
+  // silent substitution ruling 139 refuses for effort. An id Codex does not
+  // list is refused here, by name, rather than stored and reported as what
+  // runs. The foreign-model sentence (F21-13) wins when it applies: it names
+  // the backend that DOES run the id, which is the more useful answer.
+  const id = model.trim();
+  if (!foreign && backend === "codex" && id && !isKnownModel("codex", id)) {
+    throw AppError.validation(
+      `"${id}" is not a model Codex offers. Codex takes: ${CODEX_MODELS.map((m) => m.value).join(", ")}.`,
+    );
+  }
   if (!foreign) return;
   throw AppError.validation(
     `${modelDisplayName(foreign, model)} is a ${BACKEND_LABEL[foreign]} model. ` +

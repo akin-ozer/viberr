@@ -40,6 +40,17 @@ const calendarDate = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
 });
 
+/** {@link calendarDate} pinned to UTC — for a label whose CLOCK is UTC, so the
+ *  day and the time cannot come from two different zones (pass 34 review: a
+ *  quota packet read "Sep 3, 2026 · 23:50 UTC" on a host twelve hours ahead,
+ *  where the UTC day was the 4th). */
+const calendarDateUTC = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
 function toDate(iso: string): Date {
   return new Date(iso);
 }
@@ -107,6 +118,13 @@ export function utcDayKey(iso: string): string {
   const d = toDate(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toISOString().slice(0, 10);
+}
+
+/** "Jul 3, 2027" in UTC — pair it with a UTC clock, never with a local one. */
+export function formatCalendarDateUTC(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = toDate(iso);
+  return Number.isNaN(d.getTime()) ? null : calendarDateUTC.format(d);
 }
 
 /** "Jul 3, 2027"; null for missing or invalid values. */
