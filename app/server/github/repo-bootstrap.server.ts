@@ -103,16 +103,39 @@ async function rootCommitOf(
   return oldest ? { sha: oldest } : { failure: { ok: false, kind: "network", message: "no commits" } };
 }
 
+/**
+ * Ruling 128 splits by EVIDENCE, not by failure: only a positive "there is no
+ * default ref and Viberr could not create it" refuses the push. A READ that did
+ * not answer proves nothing about the repository's state, so it degrades to
+ * `network_unavailable` — the status the pre-push gate lets through — and never
+ * tells a person their repository has no default branch.
+ *
+ * Pass 34 review: a READ used to send every non-network, non-401 failure to
+ * `bootstrap_failed`, so a GitHub 500 on `GET /git/ref/heads/main` refused the
+ * delivery of a task whose `main` was healthy and sent the person to create a
+ * branch that already existed. A 5xx, a 429 and a body the schema refuses are
+ * all unread probes. A CREATE is the other half of the split: a PUT or PATCH
+ * that failed means the base does not exist and could not be made, whatever
+ * the status, so it keeps refusing the push.
+ */
 function failureOf(
   result: GithubResponse<unknown>,
   defaultBranch: string,
   what: string,
+  evidence: "read" | "create",
 ): EnsureDefaultBranchResult {
   if (!result.ok && result.kind === "network") {
     return { status: "network_unavailable", message: result.message };
   }
   if (!result.ok && result.kind === "http" && result.status === 401) {
     return { status: "auth_failed", message: result.message };
+  }
+  const unread =
+    !result.ok &&
+    (result.kind === "decode" ||
+      (result.kind === "http" && (result.status >= 500 || result.status === 429)));
+  if (evidence === "read" && unread) {
+    return { status: "network_unavailable", message: githubFailureMessage(result) };
   }
   return {
     status: "bootstrap_failed",
@@ -142,22 +165,30 @@ export async function ensureDefaultBranch(
     if (ref.kind === "http" && ref.status === 403) {
       return await violation(db, scope, actor, ctx, `Reading branch \`${base}\` was refused.`);
     }
-    return failureOf(ref, base, `reading branch \`${base}\``);
+    return failureOf(ref, base, `reading branch \`${base}\``, "read");
   }
 
   // No ref. Empty repository, or a repository whose refs are task branches?
   const branches = await gh.client.request("GET", `/repos/${gh.repo}/branches`, ghBranchesSchema, {
     searchParams: { per_page: 1 },
   });
-  if (!branches.ok) {
-    if (branches.kind === "http" && branches.status === 403) {
-      return await violation(db, scope, actor, ctx, "Listing branches was refused.");
-    }
-    return failureOf(branches, base, "listing branches");
+  // Pass 34 review: an EMPTY repository answers this read with the same
+  // 409 `Git Repository is empty.` the ref read gets — the answer this module
+  // exists to act on. Reading it as a failure would refuse the very bootstrap
+  // it is the evidence for, so it counts as ZERO branches.
+  let branchCount: number;
+  if (branches.ok) {
+    branchCount = branches.data.length;
+  } else if (branches.kind === "http" && branches.status === 403) {
+    return await violation(db, scope, actor, ctx, "Listing branches was refused.");
+  } else if (isMissingRefAnswer(branches)) {
+    branchCount = 0;
+  } else {
+    return failureOf(branches, base, "listing branches", "read");
   }
 
   let outcome: Extract<EnsureDefaultBranchResult, { status: "bootstrapped" }>;
-  if (branches.data.length === 0) {
+  if (branchCount === 0) {
     const projectName =
       readProjectFile({ projectSlug: scope.projectSlug, dataRoot: ctx.dataRoot })?.parsed
         .frontmatter.name ?? scope.projectSlug;
@@ -186,17 +217,20 @@ export async function ensureDefaultBranch(
           `Creating the initial commit on \`${base}\` was refused.`,
         );
       }
-      return failureOf(put, base, `creating the initial commit on \`${base}\``);
+      return failureOf(put, base, `creating the initial commit on \`${base}\``, "create");
     }
     // Re-probe: the ref must exist now, or the bootstrap did not take.
     const again = await gh.client.request("GET", refPath, ghRefSchema);
     if (!again.ok) {
-      return failureOf(again, base, `confirming branch \`${base}\` after the initial commit`);
+      // The commit landed; this is the confirming READ. A 5xx here proves
+      // nothing about the ref, so it degrades rather than claiming the
+      // bootstrap did not take.
+      return failureOf(again, base, `confirming branch \`${base}\` after the initial commit`, "read");
     }
     outcome = { status: "bootstrapped", defaultBranch: base, how: "initial_commit", sha: put.data.commit.sha };
   } else {
     const repoInfo = await gh.client.request("GET", `/repos/${gh.repo}`, ghRepoSchema);
-    if (!repoInfo.ok) return failureOf(repoInfo, base, "reading the repository");
+    if (!repoInfo.ok) return failureOf(repoInfo, base, "reading the repository", "read");
     const from = repoInfo.data.default_branch;
     if (!from) {
       return {
@@ -206,7 +240,8 @@ export async function ensureDefaultBranch(
       };
     }
     const root = await rootCommitOf(gh, from);
-    if ("failure" in root) return failureOf(root.failure, base, `walking \`${from}\`'s history`);
+    // Walking history is a READ of the repository's commits.
+    if ("failure" in root) return failureOf(root.failure, base, `walking \`${from}\`'s history`, "read");
     const create = await gh.client.request("POST", `/repos/${gh.repo}/git/refs`, z.unknown(), {
       body: { ref: `refs/heads/${base}`, sha: root.sha },
     });
@@ -216,7 +251,7 @@ export async function ensureDefaultBranch(
       if (create.kind === "http" && create.status === 403) {
         return await violation(db, scope, actor, ctx, `Creating branch \`${base}\` was refused.`);
       }
-      return failureOf(create, base, `creating branch \`${base}\``);
+      return failureOf(create, base, `creating branch \`${base}\``, "create");
     }
     const patch = await gh.client.request("PATCH", `/repos/${gh.repo}`, z.unknown(), {
       body: { default_branch: base },

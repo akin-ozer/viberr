@@ -143,7 +143,13 @@ no credential, no repository and an unknown task are standing states and only lo
    a `repo` scope violation) refuses the push, with "Delivery could not run" naming the
    remedy; a probe that merely could not be READ (network, auth) pushes anyway and the
    PR-side wording is what the person sees. "Has no `main`" is never emitted on an
-   unread probe.
+   unread probe. Pass 34 review made that literal: a 5xx, a 429 or an unparseable
+   body on a READ (the ref probe, the branch listing, the confirming re-read, the
+   history walk) degrades to the unreachable status, while a failed CREATE (the
+   initial commit, the branch creation) keeps refusing, because it is positive
+   evidence the base could not be made. An empty repository's 409 `Git Repository
+   is empty.` on the branch listing counts as zero branches, the answer the
+   bootstrap acts on.
 1. **Push grant**: the deliverer must hold `execute-code-or-write-repo` /
    `commit-push-branch`; otherwise "Delivery withheld by policy".
 2. **`pushWorkspaceBranch`**: locate the delivering workspace; HEAD must be a task

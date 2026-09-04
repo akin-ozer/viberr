@@ -219,3 +219,70 @@ describe("ensureDefaultBranch (ruling 128)", () => {
     void gh;
   });
 });
+
+/**
+ * Pass 34 review (ruling 128's own split): the gate divides by EVIDENCE, not by
+ * failure. A read that did not answer proves nothing about the repository, so
+ * it must never tell a person their `main` is missing; a create that failed is
+ * positive evidence the base could not be made.
+ */
+describe("ensureDefaultBranch degrades an unread probe and refuses a failed create", () => {
+  it("a 5xx on the ref READ degrades instead of claiming the base is missing", async () => {
+    // Canary: send every non-network, non-401 read failure to
+    // `bootstrap_failed` again — delivery refuses a healthy `main`.
+    const store = setup();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { status: 500, body: { message: "boom" } },
+    });
+    const result = await ensureDefaultBranch(
+      store.db,
+      contextFor(store, gh),
+      { projectSlug: store.slug },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.status).toBe("network_unavailable");
+  });
+
+  it("a 5xx on the initial-commit CREATE still refuses the push", async () => {
+    const store = setup();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { status: 404, body: { message: "Not Found" } },
+      [`GET ${REPO_PATH}/branches`]: { body: [] },
+      [`PUT ${REPO_PATH}/contents/README.md`]: { status: 500, body: { message: "boom" } },
+    });
+    const result = await ensureDefaultBranch(
+      store.db,
+      contextFor(store, gh),
+      { projectSlug: store.slug },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(result).toMatchObject({ status: "bootstrap_failed", defaultBranch: "main" });
+  });
+
+  it("a 409 `Git Repository is empty` on the BRANCH listing is zero branches, not a failure", async () => {
+    // Canary: drop the `isMissingRefAnswer(branches)` arm — the empty
+    // repository this module exists to bootstrap is refused instead.
+    const store = setup();
+    let refCreated = false;
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: () =>
+        refCreated ? { body: { object: { sha: ROOT } } } : EMPTY_REF,
+      // The empty repository answers the BRANCH listing the same way.
+      [`GET ${REPO_PATH}/branches`]: EMPTY_REF,
+      [`PUT ${REPO_PATH}/contents/README.md`]: () => {
+        refCreated = true;
+        return { status: 201, body: { commit: { sha: ROOT } } };
+      },
+    });
+    const result = await ensureDefaultBranch(
+      store.db,
+      contextFor(store, gh),
+      { projectSlug: store.slug },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(result).toMatchObject({ status: "bootstrapped", how: "initial_commit" });
+  });
+});
