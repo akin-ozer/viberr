@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
@@ -249,6 +249,85 @@ function renderDetails(patch: Partial<TaskDetail>, canEdit: boolean) {
   ]);
   return render(<Stub initialEntries={["/"]} />);
 }
+
+describe("ruling 131: the Current-state Waiting-on row names the other work", () => {
+  it("reads 'Other work: …' while waiting is none and the list is non-empty; 'Nothing' otherwise", () => {
+    // Canary: drop the `blockedBy` arm and the row reads "Nothing".
+    const { container } = renderPanel({
+      waiting: "none",
+      blockedBy: [
+        { ref: "goal-1 link 2", label: "goal-1 link 2", state: "open", taskKey: null, goalId: "goal-1" },
+        { ref: "JC-3", label: "JC-3", state: "done", taskKey: "JC-3", goalId: null },
+      ],
+    });
+    expect(kv(container, "Waiting on")).toBe("Other work: goal-1 link 2, JC-3");
+    const row = [...container.querySelectorAll(".kv-row")].find((r) => r.querySelector(".k")?.textContent === "Waiting on")!;
+    expect(row.querySelector(".v span")?.getAttribute("title")).toBe("goal-1 link 2 · open · JC-3 · done");
+    // A human still owed something wins over the wait.
+    const { container: human } = renderPanel({ waiting: "human", blockedBy: [{ ref: "JC-3", label: "JC-3", state: "open", taskKey: "JC-3", goalId: null }] });
+    expect(kv(human, "Waiting on")).toBe("a human");
+    const { container: none } = renderPanel({ waiting: "none" });
+    expect(kv(none, "Waiting on")).toBe("Nothing");
+  });
+});
+
+describe("ruling 131: the Details panel's Blocked by row and its own form", () => {
+  const entries = [
+    { ref: "goal-1 link 2", label: "goal-1 link 2 (JC-3)", state: "done" as const, taskKey: "JC-3", goalId: "goal-1" },
+    { ref: "JC-6", label: "JC-6", state: "failed" as const, taskKey: "JC-6", goalId: null },
+    { ref: "JC-7", label: "JC-7", state: "open" as const, taskKey: "JC-7", goalId: null },
+  ];
+
+  function renderCapturing(patch: Partial<TaskDetail>, canEdit: boolean) {
+    const task = detail(patch);
+    const posted: Record<string, string>[] = [];
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <ToastProvider>
+            <TaskDetailsPanel task={task} canEdit={canEdit} />
+          </ToastProvider>
+        ),
+        action: async ({ request }) => {
+          const fd = await request.formData();
+          posted.push(Object.fromEntries([...fd.entries()].map(([k, v]) => [k, String(v)])));
+          return { ok: true };
+        },
+      },
+    ]);
+    return { ...render(<Stub initialEntries={["/"]} />), posted };
+  }
+
+  it("reads the wait as a kv row with each entry's state", () => {
+    const { container } = renderCapturing({ blockedBy: entries }, false);
+    expect(kv(container, "Blocked by")).toBe("goal-1 link 2 (JC-3) · doneJC-6 · archivedJC-7");
+    const { container: bare } = renderCapturing({}, false);
+    expect(kv(bare, "Blocked by")).toBe("Nothing");
+  });
+
+  it("edits through its OWN form and intent: the submitted list is the field's text, and an empty field clears", async () => {
+    // Canary: remove the dependency form (no "Edit what it waits on"), or
+    // route it through the metadata form's intent.
+    const { container, getByText, posted } = renderCapturing({ blockedBy: entries }, true);
+    fireEvent.click(getByText("Edit what it waits on"));
+    const form = container.querySelector<HTMLFormElement>("form[data-dependency-form]")!;
+    expect(form).toBeTruthy();
+    const input = form.querySelector<HTMLInputElement>('input[name="blockedBy"]')!;
+    // Prefilled with the CANONICAL refs, not the display labels.
+    expect(input.value).toBe("goal-1 link 2, JC-6, JC-7");
+    fireEvent.change(input, { target: { value: "JC-7, goal-2 link 1" } });
+    fireEvent.click(form.querySelector('button[type="submit"]')!);
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({ intent: "set-task-dependencies", blockedBy: "JC-7, goal-2 link 1" });
+    expect(posted[0]!.priority).toBeUndefined();
+  });
+
+  it("an archived task offers no dependency editor", () => {
+    const { queryByText } = renderCapturing({ blockedBy: entries, archived: true }, true);
+    expect(queryByText("Edit what it waits on")).toBeNull();
+  });
+});
 
 describe("TaskDetailsPanel", () => {
   it("reads the metadata as kv rows, matching the side-panel style", () => {

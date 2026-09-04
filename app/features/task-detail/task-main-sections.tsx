@@ -203,6 +203,26 @@ export function TaskHero({
             {task.goalRef.goalId} · link {task.goalRef.linkIndex}
           </Link>
         )}
+        {/* Ruling 131(a): what this task waits on, each entry a link (the
+            task page, or the project Controller page for a goal link) with
+            its resolved state when it is not simply open. */}
+        {task.blockedBy.map((entry) => (
+          <Link
+            key={entry.ref}
+            className="pill neutral sm hero-goal-chip"
+            data-wait-state={entry.state}
+            to={
+              entry.taskKey
+                ? `/projects/${task.projectSlug}/tasks/${entry.taskKey}`
+                : `/projects/${task.projectSlug}/controller`
+            }
+            title={`Waits on ${entry.label} (${entry.state})`}
+          >
+            <Icon name="lock" />
+            {entry.label}
+            {entry.state !== "open" ? ` · ${entry.state === "failed" ? "archived" : entry.state}` : ""}
+          </Link>
+        ))}
         <span className="hero-file">
           <Icon name="file" />
           <span>{task.filePath}</span>

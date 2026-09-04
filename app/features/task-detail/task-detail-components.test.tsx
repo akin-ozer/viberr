@@ -2986,6 +2986,30 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     expect(cancel.classList.contains("ghost")).toBe(true);
   });
 
+  it("ruling 131: the hero links each wait entry (task page, or the Controller page for a goal link) with its state when not open", () => {
+    // Canary: drop the `Link` wrapper (no anchors) or the state suffix.
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({
+          blockedBy: [
+            { ref: "JC-3", label: "JC-3", state: "done", taskKey: "JC-3", goalId: null },
+            { ref: "goal-1 link 3", label: "goal-1 link 3", state: "open", taskKey: null, goalId: "goal-1" },
+            { ref: "JC-6", label: "JC-6", state: "failed", taskKey: "JC-6", goalId: null },
+          ],
+        })}
+        stage={undefined}
+        canEditGoal
+      />,
+    );
+    const chips = [...container.querySelectorAll<HTMLAnchorElement>("a[data-wait-state]")];
+    expect(chips.map((a) => [a.textContent, a.getAttribute("href"), a.dataset.waitState])).toEqual([
+      ["JC-3 · done", "/projects/viberr-core/tasks/JC-3", "done"],
+      ["goal-1 link 3", "/projects/viberr-core/controller", "open"],
+      ["JC-6 · archived", "/projects/viberr-core/tasks/JC-6", "failed"],
+    ]);
+    for (const a of chips) expect(a.className).toContain("neutral");
+  });
+
   it("makes Save goal a primary CTA, visually distinct from Cancel", () => {
     const { container, getByText } = renderWithRouter(
       <TaskHero task={heroTask()} stage={undefined} canEditGoal />,

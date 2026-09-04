@@ -176,7 +176,12 @@ self, unknown, archived, unknown goal or link, a cycle through stored and declar
 edges), writes a "Dependencies updated" note and a `task.dependencies.updated` audit
 row, and settles `waiting: none` when nothing else is pending. While the list is
 non-empty the derived readiness is `blocked` and the card, list row and task page
-say what it waits on and in what state. An emptied list clears `heldAtStage`; a
+say what it waits on and in what state: the board's neutral "blocked by …" chip leads
+the state stack (its title lists every entry with its state; the readiness pill
+already carries the red), the hero renders one linked chip per entry, the
+Current-state row reads "Other work: …", the Details panel shows a "Blocked by" row
+with its own editor, and the operator run control carries a hold note with the
+button left enabled (a manual run still answers a person). An emptied list clears `heldAtStage`; a
 PERSON emptying it is the release itself (ruling 131(e)): the same two halves the
 engine uses (`clearDependencies`, then `announceRelease`: the "Dependencies released"
 note naming who cleared it, a stored `blocked` lifted to `ready`, the

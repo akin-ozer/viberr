@@ -464,6 +464,25 @@ export function TaskDetailsPanel({
   const fetcher = useFetcher<ActionResult>();
   useActionFeedback(fetcher);
   const [open, setOpen] = useState(false);
+  // Ruling 131 (pass 34): the wait has its OWN form, fetcher, toast and
+  // refusal. Riding the metadata form would let its close-on-success swallow
+  // a dependency refusal, and a bad reference is exactly what must stay on
+  // screen.
+  const depFetcher = useFetcher<ActionResult>();
+  useActionFeedback(depFetcher);
+  const [depOpen, setDepOpen] = useState(false);
+  const [depText, setDepText] = useState(task.blockedBy.map((e) => e.ref).join(", "));
+  const depHandled = useRef<unknown>(null);
+  useEffect(() => {
+    if (depFetcher.state !== "idle" || !depFetcher.data?.ok) return;
+    if (depHandled.current === depFetcher.data) return;
+    depHandled.current = depFetcher.data;
+    setDepOpen(false);
+  }, [depFetcher.state, depFetcher.data]);
+  const startDepEdit = () => {
+    setDepText(task.blockedBy.map((e) => e.ref).join(", "));
+    setDepOpen(true);
+  };
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
   const [labels, setLabels] = useState<string[]>(task.labels);
   const [due, setDue] = useState(task.dueDate ?? "");
@@ -574,7 +593,63 @@ export function TaskDetailsPanel({
                 )}
               </span>
             </div>
+            <div className="kv-row">
+              <span className="k">Blocked by</span>
+              <span className="v meta-chips" data-blocked-by={task.blockedBy.length}>
+                {task.blockedBy.length > 0 ? (
+                  task.blockedBy.map((e) => (
+                    <span
+                      key={e.ref}
+                      className="pill neutral sm"
+                      data-wait-state={e.state}
+                      title={`${e.label} · ${e.state}`}
+                    >
+                      {e.label}
+                      {e.state !== "open" ? ` · ${e.state === "failed" ? "archived" : e.state}` : ""}
+                    </span>
+                  ))
+                ) : (
+                  <span className="sub">Nothing</span>
+                )}
+              </span>
+            </div>
           </div>
+          {depOpen && (
+            <depFetcher.Form method="post" className="meta-edit-panel" data-dependency-form>
+              <input type="hidden" name="intent" value="set-task-dependencies" />
+              <input type="hidden" name="_csrf" value={csrf} />
+              <label className="meta-field">
+                <span className="meta-label">Blocked by</span>
+                <input
+                  className="mono"
+                  type="text"
+                  name="blockedBy"
+                  value={depText}
+                  placeholder="VIB-12, goal-1 link 3"
+                  aria-label="What this task waits on"
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(e) => setDepText(e.target.value)}
+                />
+                <span className="sub xs dim">
+                  Task keys and goal links in this project, comma-separated. Empty
+                  clears the wait and releases the task.
+                </span>
+              </label>
+              <div className="meta-edit-actions">
+                <button
+                  type="submit"
+                  className="btn primary sm"
+                  disabled={depFetcher.state !== "idle"}
+                >
+                  Save
+                </button>
+                <button type="button" className="btn sm" onClick={() => setDepOpen(false)}>
+                  Cancel
+                </button>
+              </div>
+            </depFetcher.Form>
+          )}
           {/* F26-13: an archived task's planning metadata is frozen (the server
               refuses the write too) — restore it first. */}
           {canEdit &&
@@ -583,10 +658,18 @@ export function TaskDetailsPanel({
                 Archived. Restore this task to edit its details.
               </p>
             ) : (
-              <button type="button" className="meta-edit-btn" onClick={startEdit}>
-                <Icon name="sliders" />
-                Edit details
-              </button>
+              <>
+                <button type="button" className="meta-edit-btn" onClick={startEdit}>
+                  <Icon name="sliders" />
+                  Edit details
+                </button>
+                {!depOpen && (
+                  <button type="button" className="meta-edit-btn" onClick={startDepEdit}>
+                    <Icon name="lock" />
+                    Edit what it waits on
+                  </button>
+                )}
+              </>
             ))}
         </>
       )}
@@ -847,6 +930,15 @@ export function CurrentStatePanel({
               </span>
             ) : task.waiting === "agent" ? (
               <span className="by-agent">Agent work</span>
+            ) : task.blockedBy.length > 0 ? (
+              // Ruling 131(a): a held task owes nobody anything; what it waits
+              // on is other work, named with each entry's live state.
+              <span
+                className="sub"
+                title={task.blockedBy.map((e) => `${e.label} · ${e.state}`).join(" · ")}
+              >
+                Other work: {task.blockedBy.map((e) => e.label).join(", ")}
+              </span>
             ) : (
               "Nothing"
             )}

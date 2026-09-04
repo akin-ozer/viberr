@@ -193,6 +193,45 @@ describe("ExecutionProfile — unowned copy matches the RBAC matrix (F19-11)", (
  * hazard is IME composition: an Enter that merely confirms a multibyte
  * candidate must not launch the billable operator run.
  */
+describe("ruling 131(d): the run control on a held task", () => {
+  const waits = () => ({
+    ...ownedTask(),
+    readiness: "blocked" as const,
+    displayReadiness: "blocked" as const,
+    waiting: "none" as const,
+    blockedBy: [
+      { ref: "goal-1 link 2", label: "goal-1 link 2", state: "open" as const, taskKey: null, goalId: "goal-1" },
+      { ref: "JC-3", label: "JC-3", state: "done" as const, taskKey: "JC-3", goalId: null },
+    ],
+  });
+  const runButton = (root: HTMLElement) =>
+    [...root.querySelectorAll<HTMLButtonElement>("button")].find((b) => /Run operator/.test(b.textContent ?? ""))!;
+
+  it("renders the hold note as sub copy and leaves Run operator ENABLED (a manual run still answers a person)", () => {
+    // Canary: pass the note through `blockedReason` and the button disables.
+    const { container } = renderExec({ task: waits(), runPrincipal: connectedPrincipal() });
+    const note = container.querySelector("[data-hold-note]")!;
+    expect(note.textContent).toBe(
+      "Waiting on other work (goal-1 link 2, JC-3). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.",
+    );
+    expect(note.className).toContain("sub");
+    expect(runButton(container).disabled).toBe(false);
+  });
+
+  it("an open packet keeps precedence: its reason renders and the button is disabled, the hold note is not shown", () => {
+    const { container } = renderExec({
+      task: {
+        ...waits(),
+        packet: { type: "blocked", kind: "Blocked decision", from: "operator", title: "t", body: "", observations: [], options: [] },
+      },
+      runPrincipal: connectedPrincipal(),
+    });
+    expect(container.querySelector("[data-hold-note]")).toBeNull();
+    expect(container.textContent).toContain("Open decision. Resolve it before running the operator.");
+    expect(runButton(container).disabled).toBe(true);
+  });
+});
+
 describe("OperatorRunControl steer input — Enter submits, IME-guarded", () => {
   function renderWithRunSpy() {
     const calls: string[] = [];

@@ -47,6 +47,7 @@ import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";
 import { Icon, type IconName } from "~/ui/icon";
+import type { DependencyRender } from "~/shared/dependencies";
 import { LabelInput } from "~/ui/label-input";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill, ReadinessPill, ValidationPill, validationLabel } from "~/ui/pill";
@@ -265,6 +266,23 @@ function WaitTag({ task }: { task: TaskSummary }) {
  * above guards it for free — an archived task is a terminal disposition and is
  * never "quiet".
  */
+/** Ruling 131: the wait chip's label (two entries, then "+N") and its title
+ *  (every entry with its resolved state). Shared by the card and the list row
+ *  through `StateSignals`. */
+export interface WaitChip {
+  label: string;
+  title: string;
+}
+
+export function waitChip(entries: readonly DependencyRender[]): WaitChip {
+  const shown = entries.slice(0, 2).map((e) => e.label);
+  const more = entries.length - shown.length;
+  return {
+    label: `blocked by ${shown.join(", ")}${more > 0 ? ` +${more}` : ""}`,
+    title: entries.map((e) => `${e.label} · ${e.state}`).join(" · "),
+  };
+}
+
 function StateSignals({ task }: { task: BoardTask }) {
   if (isArchived(task)) return null;
   // C2 (⇄ N20-14 / UXO-1): the validation pill asserts a LIVE obligation
@@ -290,6 +308,25 @@ function StateSignals({ task }: { task: BoardTask }) {
   // tags stay outside the fold: they are the card's status line, not the
   // red stack.
   const statePills: { key: string; label: string; node: ReactNode }[] = [];
+  // Ruling 131(a) (pass 34): the wait chip leads the stack. NEUTRAL, not
+  // `blocked`: the readiness pill already carries the red for a held task
+  // (the derived readiness is `blocked`), and pass 30's density rule forbids
+  // two equal-weight coral chips on one card. The chip names the first two
+  // entries and folds its OWN overflow into "+N"; every entry with its live
+  // state sits in the title.
+  if (task.blockedBy.length > 0) {
+    const wait = waitChip(task.blockedBy);
+    statePills.push({
+      key: "wait",
+      label: wait.label,
+      node: (
+        <span className="pill neutral sm" title={wait.title}>
+          <Icon name="lock" />
+          {wait.label}
+        </span>
+      ),
+    });
+  }
   // R16-6 (owner ruling, 2026-08-04): merge stays human-only, so a
   // full-autonomy task reaches the done stage with its PR still open —
   // `pr.state: "accepted"` is exactly "a human accepted the completion but the

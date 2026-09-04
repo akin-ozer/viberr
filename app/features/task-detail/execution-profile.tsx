@@ -5,6 +5,7 @@ import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
+import type { DependencyRender } from "~/shared/dependencies";
 import { AgentGlyph } from "~/ui/identity";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
@@ -329,10 +330,16 @@ function PromptInput({
  * (R22: the fired run resolves the live deployed profile). Full autonomy
  * still announces itself (F20-9's mirror); supervised is the quiet default.
  */
+/** Ruling 131(d): the run control's hold copy. */
+function holdNoteFor(entries: readonly DependencyRender[]): string {
+  return `Waiting on other work (${entries.map((e) => e.label).join(", ")}). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.`;
+}
+
 function OperatorRunControl({
   busy,
   disabled,
   blockedReason,
+  holdNote,
   defaultBackend,
   configuredAutonomy,
   runRefusal,
@@ -348,6 +355,11 @@ function OperatorRunControl({
    *  decision packet pauses coordination. Rendered copy (a `title` never opens
    *  on a disabled control). */
   blockedReason?: string;
+  /** Ruling 131(d): the task waits on other work. Rendered as `sub` copy with
+   *  the button left ENABLED: a manual run still answers a person, but the
+   *  operator will neither advance the task nor dispatch delivery while it
+   *  waits. An open packet's `blockedReason` keeps precedence. */
+  holdNote?: string;
   /** The operator profile's configured backend — displayed, not picked; the
    *  run resolves the live profile (P11-76 fall-through). */
   defaultBackend: "claude" | "codex";
@@ -453,6 +465,8 @@ function OperatorRunControl({
           Task closed. Reopen it to run the operator. Mentioning{" "}
           <code>@operator</code> in a comment still runs it.
         </span>
+      ) : holdNote ? (
+        <span className="sub" data-hold-note>{holdNote}</span>
       ) : null}
       <PendingSchedules
         schedules={schedules}
@@ -917,6 +931,9 @@ export function ExecutionProfile({
                       blockedReason:
                         "Open decision. Resolve it before running the operator.",
                     }
+                  : {})}
+                {...(!packetOpen && !closed && task.blockedBy.length > 0
+                  ? { holdNote: holdNoteFor(task.blockedBy) }
                   : {})}
                 defaultBackend={operatorBackend}
                 configuredAutonomy={operatorAutonomy}

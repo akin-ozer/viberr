@@ -2115,6 +2115,55 @@ describe("D9: the board announces moves to a screen reader", () => {
   });
 });
 
+describe("ruling 131: the wait chip on the card and the list row", () => {
+  const held = () =>
+    task({
+      key: "JC-9",
+      readiness: "blocked",
+      displayReadiness: "blocked",
+      waiting: "none",
+      blockedBy: [
+        { ref: "goal-1 link 2", label: "goal-1 link 2 (JC-3)", state: "done", taskKey: "JC-3", goalId: "goal-1" },
+        { ref: "goal-1 link 3", label: "goal-1 link 3", state: "open", taskKey: null, goalId: "goal-1" },
+        { ref: "JC-6", label: "JC-6", state: "failed", taskKey: "JC-6", goalId: null },
+      ],
+    });
+  const waitChipOf = (root: Element) =>
+    [...root.querySelectorAll(".pill.neutral.sm")].find((p) => (p.textContent ?? "").startsWith("blocked by "));
+
+  it("draws the NEUTRAL chip first, naming two entries and folding its own overflow, with every state in the title", () => {
+    // Canary: remove the `statePills.push` for the wait (no chip), or push it
+    // last (the fold below swallows it on a stormy card).
+    for (const view of [undefined, "list" as const]) {
+      const { container } = renderBoard([held()], view ? { view } : {});
+      const chip = waitChipOf(container)!;
+      expect(chip, `wait chip in ${view ?? "card"} view`).toBeTruthy();
+      expect(chip.textContent).toBe("blocked by goal-1 link 2 (JC-3), goal-1 link 3 +1");
+      expect(chip.className).not.toMatch(/\b(blocked|risk)\b/);
+      expect(chip.getAttribute("title")).toBe(
+        "goal-1 link 2 (JC-3) · done · goal-1 link 3 · open · JC-6 · failed",
+      );
+    }
+  });
+
+  it("leads the state stack: on a stormy card the wait chip is shown and the fold counts the rest", () => {
+    const stormy = task({
+      ...held(),
+      pr: { number: 124, state: "closed", title: "Attach a credential" },
+      prChecks: { total: 5, passing: 3, failing: 2, pending: 0, state: "failing" },
+      prReview: "changes_requested",
+      validation: "failing",
+    });
+    const { container } = renderBoard([stormy]);
+    const card = container.querySelector(".card")!;
+    expect(waitChipOf(card)).toBeTruthy();
+    const fold = [...card.querySelectorAll(".pill.neutral.sm")].find((p) => /^\+\d+$/.test(p.textContent ?? ""))!;
+    // wait + pr shown; checks, review, validation folded.
+    expect(fold.textContent).toBe("+3");
+    expect(fold.getAttribute("title")).not.toContain("blocked by");
+  });
+});
+
 describe("pass 30: the state-pill stack ranks instead of shouting", () => {
   const stormy = () =>
     task({
