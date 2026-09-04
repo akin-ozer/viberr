@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
+import { describeRevisionDrift } from "~/shared/revision-drift";
 import { cleanup, render } from "@testing-library/react";
 import { AcceptConfirm, type AcceptConfirmTask } from "./accept-confirm";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
@@ -213,6 +214,18 @@ describe("the revision-drift row agrees with its own number", () => {
 
   it("keeps the plural for more than one", () => {
     expect(withDrift(3)).toContain("3 authored commits since review merge unreviewed");
+  });
+
+  it("ruling 132: a base refresh prints the canonical sentence verbatim and is not a warning", () => {
+    // Canary: restore the count-based sentence (`authored + baseRefresh.commits`
+    // "commit(s) added since review; they merge unreviewed"), which renders 5
+    // for this fixture.
+    const record = { headSha: "a".repeat(40), authored: 0, baseRefresh: { merges: 1, commits: 4 } };
+    const text = open({ task: { pr: { number: 150, state: "review", title: "[VIB-151] work", revisionDrift: record } } });
+    expect(text).toContain(describeRevisionDrift(record).sentence);
+    expect(text).toContain("base refreshed · 1 merge commit · 4 base commits · 0 authored commits since review");
+    expect(text).not.toContain("unreviewed");
+    expect(text).not.toContain("5 commit");
   });
 });
 

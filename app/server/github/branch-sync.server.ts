@@ -183,13 +183,24 @@ export async function allocateTaskBranchName(
 
 // -------------------------------------------------------------- compare
 
+/** One compare commit: the short sha and first line the file records, plus
+ *  (ruling 132) the full sha and parents the drift classifier reads. */
+export interface BranchCompareCommit {
+  sha: string;
+  fullSha: string;
+  msg: string;
+  parents: string[];
+}
+
 export interface BranchCompare {
   aheadBy: number;
   behindBy: number;
   /** GitHub compare status: "ahead" | "behind" | "identical" | "diverged". */
   status: string;
-  /** Commits the branch is ahead by (short sha + first message line). */
-  commits: { sha: string; msg: string }[];
+  /** Commits the branch is ahead by (short sha + first message line, full
+   *  sha and parents). `taskCommits` projects the `{sha, msg}` pair the task
+   *  file keeps, so `github.commits` never changes shape. */
+  commits: BranchCompareCommit[];
   /**
    * F21-8 — how many entries of that list GitHub sent and this reader could not
    * decode. `commits` is consumed as the branch's FOOTPRINT (task-key commit
@@ -206,6 +217,12 @@ const ghCompareCommitSchema = z.object({
   sha: z.string(),
   commit: z
     .object({ message: z.string().optional().catch(undefined) })
+    .optional()
+    .catch(undefined),
+  /** Ruling 132: the parent shas, so a merge commit can be told from an
+   *  authored one. Tolerated entry by entry; an unreadable list reads as none. */
+  parents: z
+    .array(z.object({ sha: z.string() }).nullable().catch(null))
     .optional()
     .catch(undefined),
 });
@@ -264,7 +281,9 @@ export async function getBranchCompare(
         : [
             {
               sha: c.sha.slice(0, 7),
+              fullSha: c.sha,
               msg: (c.commit?.message ?? "").split("\n", 1)[0] ?? "",
+              parents: (c.parents ?? []).flatMap((p) => (p ? [p.sha] : [])),
             },
           ],
     );
@@ -327,11 +346,15 @@ export async function getBranchCompare(
  * prefix convention.
  */
 export function taskCommits(
-  commits: { sha: string; msg: string }[],
+  commits: readonly { sha: string; msg: string }[],
   taskKey: string,
 ): { sha: string; msg: string }[] {
   const prefix = `[${taskKey.toLowerCase()}]`;
-  return commits.filter((c) => c.msg.toLowerCase().startsWith(prefix));
+  // Ruling 132: the `{sha, msg}` projection lives HERE, so `github.commits`
+  // keeps its shape while the compare itself carries `fullSha` and `parents`.
+  return commits
+    .filter((c) => c.msg.toLowerCase().startsWith(prefix))
+    .map((c) => ({ sha: c.sha, msg: c.msg }));
 }
 
 /** Sync pill derivation (ruling 12): merged > behind > synced. */

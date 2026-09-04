@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { classifyRevisionDrift } from "~/shared/revision-drift";
 import type {
   GithubCache,
   PrMergeable,
@@ -502,11 +503,23 @@ async function reconcileTaskUnlocked(
       if (driftCompare.status === "ok") {
         const status = driftCompare.compare.status;
         if (status === "ahead" && driftCompare.compare.aheadBy > 0) {
-          revisionDrift = {
+          // Ruling 132: classify the commits since the reviewed revision
+          // (base commits, Viberr's own recorded merges, authored). An
+          // unclassifiable pass carries the cached record forward or records
+          // every commit as authored; it never writes "no drift" from silence.
+          const classified = classifyRevisionDrift({
             headSha: pr.headSha,
-            authored: driftCompare.compare.aheadBy,
-            baseRefresh: null,
-          };
+            since: driftCompare.compare,
+            base: compare,
+            recordedMergeShas: new Set(fm.baseRefreshes.map((r) => r.mergeSha)),
+          });
+          revisionDrift =
+            classified ??
+            cachedPr?.revisionDrift ?? {
+              headSha: pr.headSha,
+              authored: driftCompare.compare.aheadBy,
+              baseRefresh: null,
+            };
           unpushedMeasured = true;
         } else if (status === "identical") {
           unpushedMeasured = true;

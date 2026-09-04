@@ -245,6 +245,18 @@ and the note itself, used to assert the reused-key origin alone.)*
   count. Required reviewers are supporting engagements with `verdictCapable: true`.
 - **`validation`** derives from the two: `none`, `failing`, `healthy`, `bypassed`
   (after force-accept), `changed`.
+- **Revision drift is classified, not counted** (ruling 132, pass 34): `pr.revisionDrift`
+  is `{headSha, authored, baseRefresh: {merges, commits} | null}`. The reconciler
+  classifies each commit in `reviewedSha...head`: not among the branch's own commits
+  (the `default...branch` compare) is a base commit; a two-parent commit recorded in
+  `baseRefreshes[]` by `update_branch_from_base` is a clean merge; anything else,
+  including a merge Viberr did not make, is authored. It classifies only when both
+  compares are complete and the base compare was read; otherwise it carries the last
+  record or, with nothing to carry, records every commit as authored, never "no
+  drift". One function, `describeRevisionDrift`, turns the record into the sentence
+  every surface prints verbatim ("N authored commit(s) since review merge(s)
+  unreviewed", "base refreshed · 1 merge commit · 4 base commits · 0 authored commits
+  since review"); only authored commits are called unreviewed.
 - **A project member's GitHub approval counts as the verdict** (ruling 68) when the
   approval's `commit_id` equals the delivered head and the reviewer's login maps to
   exactly one non-disabled member through `users.github_handle`; the reconciler stores

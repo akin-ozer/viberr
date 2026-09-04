@@ -130,12 +130,43 @@ describe("getBranchCompare commit tolerance (F21-8)", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.compare.commits).toEqual([
-      { sha: "a91f7c2", msg: "[VIB-201] first" },
-      { sha: "4ce0b18", msg: "[VIB-201] third" },
+      { sha: "a91f7c2", fullSha: "a91f7c2ffff", msg: "[VIB-201] first", parents: [] },
+      { sha: "4ce0b18", fullSha: "4ce0b18ffff", msg: "[VIB-201] third", parents: [] },
     ]);
     expect(result.compare.droppedCommits).toBe(1);
     // The counters GitHub sent are untouched by the drop.
     expect(result.compare.aheadBy).toBe(3);
+  });
+
+  it("ruling 132: the reader carries the full sha and the parents, and `taskCommits` projects `{sha, msg}` only", async () => {
+    // Canary: remove `parents` from the reader; leave the projection out of
+    // `taskCommits` (the file would gain `fullSha` and `parents`).
+    const result = await getBranchCompare(
+      compareClient({
+        ahead_by: 2,
+        behind_by: 0,
+        status: "ahead",
+        commits: [
+          { sha: "a91f7c2ffff", commit: { message: "[VIB-201] first" }, parents: [{ sha: "0000000aaaa" }] },
+          { sha: "4ce0b18ffff", commit: { message: "[VIB-201] merge" }, parents: [{ sha: "a91f7c2ffff" }, { sha: "1111111bbbb" }] },
+        ],
+      }),
+      REPO,
+      "main",
+      "vib-201",
+    );
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.compare.commits[1]).toEqual({
+      sha: "4ce0b18",
+      fullSha: "4ce0b18ffff",
+      msg: "[VIB-201] merge",
+      parents: ["a91f7c2ffff", "1111111bbbb"],
+    });
+    expect(taskCommits(result.compare.commits, "VIB-201")).toEqual([
+      { sha: "a91f7c2", msg: "[VIB-201] first" },
+      { sha: "4ce0b18", msg: "[VIB-201] merge" },
+    ]);
   });
 
   it("a complete list reports nothing dropped", async () => {
@@ -315,7 +346,7 @@ describe("ensureTaskBranch", () => {
     expect(result).toMatchObject({ status: "synced", created: false });
     if (result.status === "synced") {
       expect(result.compare).toMatchObject({ aheadBy: 1, behindBy: 2 });
-      expect(result.compare?.commits[0]).toEqual({
+      expect(result.compare?.commits[0]).toMatchObject({
         sha: "a91f7c2",
         msg: "[VIB-202] work",
       });

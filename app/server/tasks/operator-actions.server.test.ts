@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describeRevisionDrift } from "~/shared/revision-drift";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { insertUser } from "~/server/auth/user-store.server";
 import {
@@ -3287,6 +3288,23 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
       authored: 2,
       baseRefresh: null,
     });
+  });
+
+  it("ruling 132: get_task carries the WHOLE drift record and the canonical sentence, so its read and the ceremony agree", () => {
+    // Canary: emit the old `{aheadBy, headSha}` object (or an empty sentence).
+    deployScopedRoster();
+    seedTask("review");
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    const file = readTaskFile(ref)!;
+    const record = { headSha: "cab10477beef1234", authored: 0, baseRefresh: { merges: 1, commits: 4 } };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: { ...file.parsed.frontmatter, pr: { number: 318, state: "review", title: "PR", revisionDrift: record } },
+      goal: file.parsed.goal,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const pr = snapshot().pr!;
+    expect(pr.revisionDrift).toEqual(record);
+    expect(pr.revisionDriftSentence).toBe(describeRevisionDrift(record).sentence);
   });
 });
 

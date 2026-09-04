@@ -450,6 +450,10 @@ inventory is not regenerated automatically and has drifted; the verified module 
     surfacing is on this pass's implementation backlog — the gate today pins only the delivered
     SHA", is stale: the divergence surfacing shipped (F17-L12) and the gate is containment-based
     — `accept-confirm.tsx` "N commits added since review", `task-actions.server.ts`.)*
+    *(Amended 2026-09-04, pass 34, ruling 132: the drift R17-1 discloses is now the number of
+    AUTHORED commits since the reviewed revision, with a base refresh reported apart; "N commits
+    added since review" became the classified sentence `describeRevisionDrift` prints, and only
+    authored commits are called unreviewed.)*
 43. **R17-2 (2026-08-04): a verified no-diff task is a first-class "Completed — no changes"
     outcome.** A task whose branch carries no diff against the base (or has no branch at all)
     may close to Done WITHOUT a PR or merge, through a distinct "Completed — no changes
@@ -2228,6 +2232,37 @@ by rewriting those paragraphs:*
     `ensureTaskBranch` in `branch-sync.server.ts`; `isMissingRefAnswer` in `github-client.server.ts`;
     the 422 arms in `pr-open.server.ts`; the pre-push gate and the rendering in
     `task-actions.server.ts`.)
+
+132. **Revision drift counts authored commits only; a base refresh is reported as what it is (owner,
+    2026-09-03, pass 34 Q34-12).** R17-1 measured drift as GitHub's `compare(reviewedSha...head).ahead_by`,
+    which counts every commit reachable from the PR head and not from the reviewed revision, so an
+    operator's `update_branch_from_base` (four commits from `main` plus the merge commit) made the
+    accept dialog, the review-queue subline and JC-8's permanent completion record say "5 commits
+    added since review; they merge unreviewed" while the operator's own read of the same task said
+    no drift at all. Drift is now the number of AUTHORED commits since the reviewed revision: the
+    commits in `reviewedSha...head` that are not reachable from the base branch and are not clean
+    merge commits. A clean merge commit is one the product itself made through
+    `update_branch_from_base` and recorded on the task as `baseRefreshes[]` the moment the merge
+    landed (that path merges with `--no-ff` and aborts on any conflict, so every recorded merge is a
+    real, clean merge by construction); a merge commit from anywhere else, a conflict-resolving
+    merge included, is an out-of-band write to the branch and counts. A base refresh is reported
+    separately and never as unreviewed work: `pr.revisionDrift` is `{ headSha, authored,
+    baseRefresh: { merges, commits } | null }`, and ONE function, `describeRevisionDrift` in
+    `app/shared/revision-drift.ts`, turns it into the sentence every surface prints verbatim. Its
+    consumers are the reconciler (which writes the fact), the operator's `get_task` read and turn
+    doctrine, the accept and force dialogs and "Complete merge", the review-queue subline (whose row
+    carries the whole record) and the completion record. A pass that cannot classify (either compare
+    unavailable, truncated or partly undecodable; the classification assumes the PR's base is the
+    project's default branch, the only base Viberr delivers to) carries the last measurement
+    forward, or, with no measurement to carry, records every commit since the reviewed revision as
+    authored; it never writes "no drift" from silence, and a commit it cannot classify counts as
+    authored. The operator's branch update records its merge commit and the base tip it merged,
+    re-measures drift in the same call and returns the sentence, so the operator and the ceremony
+    can no longer read two different facts about one head. Extends R17-1 and the F21-17 residual;
+    acceptance still merges an ahead head, honestly. (`classifyRevisionDrift`,
+    `describeRevisionDrift` in `app/shared/revision-drift.ts`; the compare reader in
+    `branch-sync.server.ts`; the drift block in `github-reconciler.server.ts`;
+    `update-branch-operator.server.ts`.)
 
 134. **Rework reaches its own open pull request: a delivery pushes whatever origin does not carry,
     reuses the PR, and says what moved (owner, 2026-09-04, pass 34 F34-11).**

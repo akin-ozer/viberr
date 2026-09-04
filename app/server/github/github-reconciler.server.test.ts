@@ -27,6 +27,7 @@ import {
   openScopeViolation,
 } from "~/server/projections/policy-violations.server";
 import type { PrRef, WorkRevision } from "~/schemas/task-file.schema";
+import type { RevisionDrift } from "~/shared/revision-drift";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import {
@@ -3080,5 +3081,114 @@ describe("F34-9: PR adoption is recorded", () => {
     const notes = listNotifications(store.db, store.users.arda.id).filter((n) => n.kind === "policy");
     expect(notes.map((n) => n.title)).toContain("PR #318 adopted for VIB-301: replaces PR #5");
     expect(wakes).toEqual(["pr-diverged"]);
+  });
+});
+
+/**
+ * Ruling 132 (pass 34, F34-14): the reconciler classifies the commits since
+ * the reviewed revision instead of counting them, so an operator's base
+ * refresh (four base commits plus its recorded merge) is reported as a base
+ * refresh and never as five unreviewed commits. Canaries: drop the
+ * `notOnBase` membership test; treat any two-parent commit as clean; remove the
+ * base-compare completeness guard.
+ */
+describe("ruling 132: drift is classified, not counted", () => {
+  const REV = "rev0delivered";
+  const HEAD = "headsha318";
+  const M = "m".repeat(40);
+  const commit = (sha: string, parents: string[] = ["p".repeat(40)]) => ({
+    sha,
+    commit: { message: `[VIB-301] ${sha.slice(0, 4)}` },
+    parents: parents.map((p) => ({ sha: p })),
+  });
+  const B = ["b1", "b2", "b3", "b4"].map((x) => x.padEnd(40, "0"));
+  const A0 = "a0".padEnd(40, "0");
+  function seedReviewed(opts: { recordMerge?: boolean; cachedDrift?: RevisionDrift } = {}) {
+    const store = setupTestStore(ctx);
+    const pr: PrRef = { number: 318, state: "review", title: "Attach execution workspace" };
+    if (opts.cachedDrift) pr.revisionDrift = opts.cachedDrift;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr,
+        workRevision: {
+          id: "rev_1", headSha: REV, treeSha: null, branch: "vib-301-workspace",
+          createdAt: "2026-08-04T08:00:00.000Z", sourceProfileId: "developer",
+        },
+        baseRefreshes: opts.recordMerge === false ? [] : [{ mergeSha: M, baseSha: B[3]!, base: "main", commits: 4, at: "2026-09-04T00:00:00.000Z" }],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler132" }, actor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    const run = async (routes: FakeRoutes) => {
+      await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, {
+        dataRoot: store.dataRoot,
+        fetchImpl: fakeGithubFetch(routes).fetchImpl,
+      });
+      return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    };
+    return { store, run };
+  }
+  /** The branch's OWN commits (base...branch): the reviewed A0 and the merge. */
+  const baseCompare = (commits: unknown[], extra: Partial<{ ahead_by: number }> = {}) => ({
+    body: { ahead_by: extra.ahead_by ?? commits.length, behind_by: 0, status: "ahead", commits },
+  });
+  const sinceRoute = `GET ${REPO_PATH}/compare/${REV}...${HEAD}`;
+  const baseRoute = `GET ${REPO_PATH}/compare/main...vib-301-workspace`;
+
+  it("a base refresh records `authored: 0` with the merge and base commits reported separately", async () => {
+    const { run } = seedReviewed();
+    const routes = happyRoutes();
+    routes[baseRoute] = baseCompare([commit(A0), commit(M, [A0, B[3]!])]);
+    routes[sinceRoute] = { body: { ahead_by: 5, behind_by: 0, status: "ahead", commits: [...B.map((b) => commit(b)), commit(M, [A0, B[3]!])] } };
+    const fm = await run(routes);
+    expect(fm.pr?.revisionDrift).toEqual({ headSha: HEAD, authored: 0, baseRefresh: { merges: 1, commits: 4 } });
+    // `github.commits` keeps its `{sha, msg}` shape (the reader's extra fields never reach the file).
+    for (const c of fm.github?.commits ?? []) expect(Object.keys(c).sort()).toEqual(["msg", "sha"]);
+  });
+
+  it("an authored commit on top of a refresh counts; a merge Viberr did not record counts as authored", async () => {
+    const { run } = seedReviewed();
+    const A2 = "a2".padEnd(40, "0");
+    const routes = happyRoutes();
+    routes[baseRoute] = baseCompare([commit(A0), commit(M, [A0, B[0]!]), commit(A2)]);
+    routes[sinceRoute] = { body: { ahead_by: 3, behind_by: 0, status: "ahead", commits: [commit(B[0]!), commit(M, [A0, B[0]!]), commit(A2)] } };
+    expect((await run(routes)).pr?.revisionDrift).toEqual({ headSha: HEAD, authored: 1, baseRefresh: { merges: 1, commits: 1 } });
+
+    const unrecorded = seedReviewed({ recordMerge: false });
+    expect((await unrecorded.run(routes)).pr?.revisionDrift).toEqual({ headSha: HEAD, authored: 2, baseRefresh: { merges: 0, commits: 1 } });
+  });
+
+  it("a fast-forward refresh records `{merges: 0, commits: N}`", async () => {
+    const { run } = seedReviewed({ recordMerge: false });
+    const routes = happyRoutes();
+    routes[baseRoute] = baseCompare([]);
+    routes[sinceRoute] = { body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [commit(B[0]!), commit(B[1]!)] } };
+    expect((await run(routes)).pr?.revisionDrift).toEqual({ headSha: HEAD, authored: 0, baseRefresh: { merges: 0, commits: 2 } });
+  });
+
+  it("an unclassifiable pass CARRIES the cached record, or records every commit as authored with nothing to carry", async () => {
+    const cached = { headSha: HEAD, authored: 0, baseRefresh: { merges: 1, commits: 4 } };
+    // The base compare answers 404 (`missing_ref`): the only status that reaches the drift block with no base compare.
+    const carried = seedReviewed({ cachedDrift: cached });
+    const routes = happyRoutes();
+    routes[baseRoute] = { status: 404, body: { message: "Not Found" } };
+    routes[sinceRoute] = { body: { ahead_by: 5, behind_by: 0, status: "ahead", commits: [...B.map((b) => commit(b)), commit(M, [A0, B[3]!])] } };
+    expect((await carried.run(routes)).pr?.revisionDrift).toEqual(cached);
+
+    const bare = seedReviewed();
+    expect((await bare.run(routes)).pr?.revisionDrift).toEqual({ headSha: HEAD, authored: 5, baseRefresh: null });
+
+    // A base compare with an undecodable entry is partial: carried, never classified.
+    const partial = seedReviewed({ cachedDrift: cached });
+    const partialRoutes = happyRoutes();
+    partialRoutes[baseRoute] = { body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [commit(A0), { commit: { message: "no sha" } }] } };
+    partialRoutes[sinceRoute] = routes[sinceRoute]!;
+    expect((await partial.run(partialRoutes)).pr?.revisionDrift).toEqual(cached);
   });
 });

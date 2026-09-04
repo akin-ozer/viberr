@@ -97,12 +97,75 @@ export function revisionDriftNote(drift: RevisionDrift | null | undefined): stri
   if (described.kind === "none" || !drift) return "";
   const head = `\`${drift.headSha.slice(0, 12)}\``;
   const refresh = drift.baseRefresh;
+  // The canonical sentence rides along verbatim, so the permanent record and
+  // every live surface can be matched word for word.
   if (described.kind === "base_refresh" && refresh) {
-    return ` The PR head (${head}) carries a base refresh made after the review (${plural(refresh.merges, "merge commit")}, ${plural(refresh.commits, "base commit")}) and no authored commits outside the reviewed revision.`;
+    return ` The PR head (${head}) carries a base refresh made after the review (${plural(refresh.merges, "merge commit")}, ${plural(refresh.commits, "base commit")}) and no authored commits outside the reviewed revision: ${described.sentence}.`;
   }
   const authored = `${drift.authored === 1 ? "1 authored commit was" : `${drift.authored} authored commits were`} added to the PR head (${head}) after the review, outside the reviewed revision`;
   if (described.kind === "both" && refresh) {
-    return ` ${authored}; the head also carries a base refresh (${plural(refresh.merges, "merge commit")}, ${plural(refresh.commits, "base commit")}).`;
+    return ` ${authored}; the head also carries a base refresh (${plural(refresh.merges, "merge commit")}, ${plural(refresh.commits, "base commit")}): ${described.sentence}.`;
   }
-  return ` ${authored}.`;
+  return ` ${authored}: ${described.sentence}.`;
+}
+
+/** One commit of a GitHub compare, as the drift classifier reads it. */
+export interface DriftCommit {
+  fullSha: string;
+  parents: readonly string[];
+}
+
+/** The slice of a compare the classifier needs: the counter GitHub sent, the
+ *  commits it listed, and how many entries the reader could not decode. */
+export interface DriftCompareSlice {
+  aheadBy: number;
+  commits: readonly DriftCommit[];
+  droppedCommits: number;
+}
+
+export interface ClassifyDriftInput {
+  headSha: string;
+  /** `reviewedSha...head`: every commit reachable from the head, not from the reviewed revision. */
+  since: DriftCompareSlice;
+  /** `base...branch` against the project's default branch: the branch's OWN commits. Null when it could not be read. */
+  base: DriftCompareSlice | null;
+  /** The merge commits `update_branch_from_base` made and recorded in `baseRefreshes[]`. */
+  recordedMergeShas: ReadonlySet<string>;
+}
+
+/**
+ * Ruling 132 (pass 34, F34-14): classify the commits since the reviewed
+ * revision. A commit not among the branch's own commits (it is reachable from
+ * the base) is a base commit; a two-parent commit Viberr itself recorded in
+ * `baseRefreshes` is a clean merge; anything else is AUTHORED, including a
+ * merge Viberr did not make. Fail-closed: the answer is null (unclassifiable)
+ * unless BOTH compares are complete (nothing dropped, every counted commit
+ * listed) and the base compare was read at all; the caller then carries the
+ * last measurement or records every commit as authored, never "no drift".
+ * The base compare is against the project's default branch, the only base
+ * Viberr delivers to; a PR retargeted elsewhere is unclassifiable by design.
+ */
+export function classifyRevisionDrift(input: ClassifyDriftInput): RevisionDrift | null {
+  const { since, base } = input;
+  const complete = (slice: DriftCompareSlice) =>
+    slice.droppedCommits === 0 && slice.commits.length >= slice.aheadBy;
+  if (!base || !complete(since) || !complete(base)) return null;
+  const branchOwn = new Set(base.commits.map((c) => c.fullSha));
+  let authored = 0;
+  let merges = 0;
+  let commits = 0;
+  for (const commit of since.commits) {
+    if (!branchOwn.has(commit.fullSha)) {
+      commits += 1;
+    } else if (commit.parents.length >= 2 && input.recordedMergeShas.has(commit.fullSha)) {
+      merges += 1;
+    } else {
+      authored += 1;
+    }
+  }
+  return {
+    headSha: input.headSha,
+    authored,
+    baseRefresh: merges > 0 || commits > 0 ? { merges, commits } : null,
+  };
 }

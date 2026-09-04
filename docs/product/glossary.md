@@ -81,6 +81,8 @@
 
 **Revision (work revision)** — the immutable identity of the work under review: `{id, headSha, treeSha, branch, createdAt, sourceProfileId, kind: delivered | verified}`. A new head with a different tree mints a new revision, which stales every prior verdict.
 
+**Revision drift** — how far the PR head has moved past the reviewed revision, recorded by the reconciler as `pr.revisionDrift {headSha, authored, baseRefresh}` (ruling 132). `authored` counts commits since the review that are the branch's own and not a merge Viberr recorded in `baseRefreshes`; `baseRefresh` counts the base commits and clean merges an `update_branch_from_base` brought in. `describeRevisionDrift` prints the one sentence every surface shows; only authored commits are "unreviewed". A base refresh is reported as a base refresh.
+
 **Ruling** — a numbered owner decision recorded in [decisions.md](../architecture/decisions.md). Code comments cite them as "ruling N"; superseded rulings are kept and marked, never deleted.
 
 **Run** — one execution of an agent through a backend: `agent_runs` row + raw NDJSON transcript. `kind` is a delivery axis (`operator | primary | reviewer | controller`); `state` is `queued | running | finished | error | interrupted`.

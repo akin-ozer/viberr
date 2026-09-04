@@ -295,8 +295,9 @@ Every writer to the terminal stage goes through one contract:
    branch, a PR or a delivered revision — or is demonstrably wedged by an open `blocked`
    packet (ruling 124).
 5. **PR head containment**: the PR head must contain the delivered commit. A head
-   ahead of the reviewed revision is accepted with a disclosed divergence ("N commits
-   added since review", ruling 42); a diverged head refuses; a compare GitHub answers
+   ahead of the reviewed revision is accepted with a disclosed divergence (ruling 42; since
+   ruling 132 the disclosure is the classified drift sentence: authored commits are named
+   unreviewed, a base refresh is named as one); a diverged head refuses; a compare GitHub answers
    404 to, confirmed by a 404 commit read, is a never-pushed revision and refuses with
    the same "deliver the branch" sentence (ruling 135) rather than passing as
    unverifiable. Force never bypasses this.

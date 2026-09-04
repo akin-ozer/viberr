@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { describeRevisionDrift } from "~/shared/revision-drift";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -2617,6 +2618,18 @@ describe("F19-23: the revision-drift note agrees with its own number", () => {
 
   it("says nothing at all when the merged head IS the reviewed one", () => {
     expect(revisionDriftNote(baseTaskFrontmatter("VIB-4"))).toBe("");
+  });
+
+  it("ruling 132: the permanent completion record names a base refresh as one, never as unreviewed commits", () => {
+    // Canary: restore the old body ("N commits were added to the PR head after
+    // the review") over the summed count.
+    const record = { headSha: HEAD, authored: 0, baseRefresh: { merges: 1, commits: 4 } };
+    const note = revisionDriftNote(
+      baseTaskFrontmatter("VIB-4", { pr: { number: 150, state: "review", title: "[VIB-4] work", revisionDrift: record } }),
+    );
+    expect(note).toContain(describeRevisionDrift(record).sentence);
+    expect(note).not.toMatch(/unreviewed/i);
+    expect(note).not.toContain("5 commits were added");
   });
 });
 

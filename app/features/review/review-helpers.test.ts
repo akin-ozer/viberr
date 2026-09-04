@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { describeRevisionDrift } from "~/shared/revision-drift";
 import { reviewRowSub, type ReviewRowView } from "./review-helpers";
 
 const base: ReviewRowView = {
@@ -78,6 +79,14 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
     });
     expect(diverged).toContain("holds commits the workspace does not");
     expect(diverged).toContain("Resolve the history");
+  });
+
+  it("ruling 132: a base refresh prints the canonical sentence verbatim, never 'unreviewed'", () => {
+    // Canary: restore the summed-count arm (`aheadBy`-style) over the record.
+    const record = { headSha: "b".repeat(40), authored: 0, baseRefresh: { merges: 1, commits: 4 } };
+    const sub = reviewRowSub({ ...base, pr: { number: 130, state: "review", revisionDrift: record } });
+    expect(sub).toContain(`PR #130 is open. ${describeRevisionDrift(record).sentence}.`);
+    expect(sub).not.toContain("unreviewed");
   });
 
   it("surfaces a conflicting PR — the state that used to be invisible (LV-07)", () => {

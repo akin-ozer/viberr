@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { describeRevisionDrift } from "~/shared/revision-drift";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -1167,6 +1168,25 @@ describe("pr-diverged turn instruction (both backends)", () => {
           unpushedRevisionSentence: "",
         },
       });
+
+    it("ruling 132: a base refresh is named as one, and never as unreviewed work", () => {
+      // Canary: restore the blanket UNREVIEWED paragraph for any non-zero total.
+      const record = { headSha: "cab10477beef1234", authored: 0, baseRefresh: { merges: 1, commits: 4 } };
+      const prompt = buildOperatorTurnPrompt(
+        snapshot({
+          pr: {
+            number: 318, state: "closed", title: "PR",
+            revisionDrift: record,
+            revisionDriftSentence: describeRevisionDrift(record).sentence,
+            headSha: null, unpushedRevision: null, unpushedRevisionSentence: "",
+          },
+        }),
+        "pr-diverged",
+      );
+      expect(prompt).toContain(describeRevisionDrift(record).sentence);
+      expect(prompt).toContain("base refresh Viberr itself merged");
+      expect(prompt).not.toContain("UNREVIEWED");
+    });
 
     it("names the unreviewed commits and demands them as a packet observation", () => {
       // Canary: drop `drift` from the closed-PR arm and every line fails.

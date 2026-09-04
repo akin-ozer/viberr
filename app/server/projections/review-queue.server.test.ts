@@ -850,3 +850,25 @@ describe("ruling 135: the queue row and the unpushed revision", () => {
     expect(stale.pr).toEqual({ number: 321, state: "review", headSha: "1".repeat(40) });
   });
 });
+
+/** Ruling 132: the queue row carries the WHOLE drift record (a projection of
+ *  the count alone dropped `baseRefresh` before the row was built). Canary:
+ *  restore `pr.revisionDrift = { headSha, authored }`. */
+describe("ruling 132: the queue row carries the whole drift record", () => {
+  it("baseRefresh rides through the real projection", () => {
+    const store = setupTestStore(ctx);
+    const record = { headSha: "b".repeat(40), authored: 0, baseRefresh: { merges: 1, commits: 4 } };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-105", {
+        title: "Refreshed",
+        stage: "review",
+        waiting: "human",
+        pr: { number: 330, state: "review", title: "Refreshed", revisionDrift: record },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot, viewerUserId: store.users.arda.id });
+    const row = [...queue.ready, ...queue.working].find((r) => r.key === "VIB-105")!;
+    expect(row.pr?.revisionDrift).toEqual(record);
+  });
+});

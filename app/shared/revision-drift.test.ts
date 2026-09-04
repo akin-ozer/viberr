@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeRevisionDrift, revisionDriftNote } from "./revision-drift";
+import { describeRevisionDrift, revisionDriftNote, classifyRevisionDrift } from "./revision-drift";
 
 const HEAD = "a4c790ce63ef0011223344556677889900aabbcc";
 
@@ -72,8 +72,9 @@ describe("revisionDriftNote — the completion record's suffix", () => {
   });
 
   it("names authored commits, with the verb agreeing (F19-23)", () => {
+    // The canonical sentence rides along verbatim (ruling 132).
     expect(revisionDriftNote({ headSha: HEAD, authored: 1, baseRefresh: null })).toBe(
-      " 1 authored commit was added to the PR head (`a4c790ce63ef`) after the review, outside the reviewed revision.",
+      " 1 authored commit was added to the PR head (`a4c790ce63ef`) after the review, outside the reviewed revision: 1 authored commit since review merges unreviewed.",
     );
     expect(revisionDriftNote({ headSha: HEAD, authored: 3, baseRefresh: null })).toContain(
       "3 authored commits were added",
@@ -89,6 +90,7 @@ describe("revisionDriftNote — the completion record's suffix", () => {
     expect(note).toContain("carries a base refresh made after the review");
     expect(note).toContain("1 merge commit, 4 base commits");
     expect(note).toContain("no authored commits");
+    expect(note).toContain(describeRevisionDrift({ headSha: HEAD, authored: 0, baseRefresh: { merges: 1, commits: 4 } }).sentence);
     expect(note).not.toMatch(/\d+ commits were added/);
   });
 
@@ -100,5 +102,59 @@ describe("revisionDriftNote — the completion record's suffix", () => {
     });
     expect(note).toContain("2 authored commits were added");
     expect(note).toContain("also carries a base refresh");
+  });
+});
+
+/**
+ * Ruling 132: the classifier. Base commits are the ones the branch's own
+ * compare does not list; a two-parent commit Viberr recorded is a clean merge;
+ * everything else is authored. Fail-closed on any incomplete compare. Canary:
+ * drop the `notOnBase` membership test (every base commit reads as authored).
+ */
+describe("classifyRevisionDrift (ruling 132)", () => {
+  const c = (fullSha: string, parents: string[] = ["p"]) => ({ fullSha, parents });
+  const M = "m".repeat(40);
+  const recorded = new Set([M]);
+  it("a base refresh: authored 0, the merge and base commits reported apart", () => {
+    const since = { aheadBy: 5, droppedCommits: 0, commits: [c("b1"), c("b2"), c("b3"), c("b4"), c(M, ["a0", "b4"])] };
+    const base = { aheadBy: 2, droppedCommits: 0, commits: [c("a0"), c(M, ["a0", "b4"])] };
+    expect(classifyRevisionDrift({ headSha: M, since, base, recordedMergeShas: recorded })).toEqual({
+      headSha: M,
+      authored: 0,
+      baseRefresh: { merges: 1, commits: 4 },
+    });
+  });
+  it("an authored commit on top of a refresh counts; a merge Viberr did not make counts as authored", () => {
+    const since = { aheadBy: 3, droppedCommits: 0, commits: [c("b1"), c(M, ["a0", "b1"]), c("a2")] };
+    const base = { aheadBy: 3, droppedCommits: 0, commits: [c("a0"), c(M, ["a0", "b1"]), c("a2")] };
+    expect(classifyRevisionDrift({ headSha: "a2", since, base, recordedMergeShas: recorded })).toEqual({
+      headSha: "a2",
+      authored: 1,
+      baseRefresh: { merges: 1, commits: 1 },
+    });
+    const foreign = { aheadBy: 2, droppedCommits: 0, commits: [c("b1"), c("x", ["a0", "b1"])] };
+    const baseF = { aheadBy: 2, droppedCommits: 0, commits: [c("a0"), c("x", ["a0", "b1"])] };
+    expect(classifyRevisionDrift({ headSha: "x", since: foreign, base: baseF, recordedMergeShas: recorded })).toEqual({
+      headSha: "x",
+      authored: 1,
+      baseRefresh: { merges: 0, commits: 1 },
+    });
+  });
+  it("a fast-forward refresh records {merges: 0, commits: N}", () => {
+    const since = { aheadBy: 2, droppedCommits: 0, commits: [c("b1"), c("b2")] };
+    const base = { aheadBy: 0, droppedCommits: 0, commits: [] };
+    expect(classifyRevisionDrift({ headSha: "b2", since, base, recordedMergeShas: recorded })).toEqual({
+      headSha: "b2",
+      authored: 0,
+      baseRefresh: { merges: 0, commits: 2 },
+    });
+  });
+  it("fails closed: a missing, truncated or partly undecodable compare is unclassifiable", () => {
+    const since = { aheadBy: 2, droppedCommits: 0, commits: [c("b1"), c("b2")] };
+    const base = { aheadBy: 0, droppedCommits: 0, commits: [] };
+    expect(classifyRevisionDrift({ headSha: "h", since, base: null, recordedMergeShas: recorded })).toBeNull();
+    expect(classifyRevisionDrift({ headSha: "h", since: { ...since, droppedCommits: 1 }, base, recordedMergeShas: recorded })).toBeNull();
+    expect(classifyRevisionDrift({ headSha: "h", since: { ...since, aheadBy: 3 }, base, recordedMergeShas: recorded })).toBeNull();
+    expect(classifyRevisionDrift({ headSha: "h", since, base: { ...base, droppedCommits: 1 }, recordedMergeShas: recorded })).toBeNull();
   });
 });
