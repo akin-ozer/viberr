@@ -534,6 +534,19 @@ Absent-grant polarity is deliberately not uniform: `dispatch-agents` and
 `use-web-search-fetch` absent ⇒ granted; `deliver-review-pr` absent ⇒ derived from
 workflow strictness; the grant-required family absent ⇒ withheld.
 
+**A save cannot revert a write it never saw** (pass 34, B5/U34-3). `updateAgentProfile`
+rebuilds the whole governed grant set from the SUBMITTED form, and the editor seeds that
+form once, at open time, so a modal opened before a concurrent write and saved after it
+reverted every grant that write changed and reported success. Every update now carries
+`deploymentFingerprint` — the sha256 of the deployment's grants (order-independent),
+extras and definition, NOT of the whole file, so an unrelated project edit never refuses
+a save — which the writer recomputes from the freshly parsed record inside its own lock
+and refuses on mismatch with "This profile changed while the editor was open." A refused
+save writes nothing and audits nothing: it is a validation refusal like every other one
+on this path. A create carries none (there is no prior record); the controller's
+`update_agent_deployment` sends the fingerprint of the record it just read, so its own
+read-modify-write inside one turn is never refused by itself.
+
 The controller's `update_agent_deployment` validates every capability patch against
 this catalogue per KIND and refuses an unknown or impossible id or mode by name before
 writing (ruling 139, `capabilityPatchRefusal`); the advisory row above has no toggle and

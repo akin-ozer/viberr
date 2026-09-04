@@ -190,6 +190,9 @@ cannot rejoin the gap silently — the typecheck refuses it.)*
   `e2e/06-activity-hydration.spec.ts`. *(Added 2026-09-04, pass 34 — `formatDayDotTimeUTC`
   used to sample `now` while documenting itself as the deterministic first pass, and four
   surfaces rendered a host-zone calendar date unguarded.)*
+- The agents page's `update-profile` intent carries the `deploymentFingerprint` the
+  loader shipped, and a save composed against a record a concurrent write replaced is
+  refused with "This profile changed while the editor was open." (pass 34, B5).
 - **The collision confirm renders TWO shapes** (pass 34, C3/U34-8): with an unowned PR
   recorded it names the stranger, its pull request and the stale branch ("Clear collision
   & redeliver"); with none it describes THIS task's own remote branch and says no pull

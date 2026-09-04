@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { z } from "zod";
 import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.schema";
@@ -175,6 +176,30 @@ const modeSchema = z.enum(["direct", "recommend", "human", "off"]);
 // the FIRST available model + the default effort — so we never hardcode a
 // specific id that could drift out of the list.
 
+/**
+ * B5 (pass 34, U34-3): the identity of the deployment record the editor read,
+ * over exactly the fields a profile save may overwrite — the governed grants
+ * (order-independent), the display-only extras and the definition. NOT the
+ * whole project file: an unrelated project edit (a member, a stage, another
+ * agent) must never refuse this save.
+ *
+ * `updateAgentProfile` rebuilds the whole governed grant set from the SUBMITTED
+ * form, and the modal seeds that form once, at open time. The file mutex makes
+ * the write atomic; it does not make it aware. A modal opened before a
+ * concurrent write and saved after it therefore reverted every governed grant
+ * that write changed, reported success and audited it.
+ */
+export function deploymentFingerprint(deployment: AgentDeployment): string {
+  const canonical = JSON.stringify({
+    capabilities: [...deployment.capabilities]
+      .map((g) => ({ capabilityId: g.capabilityId, mode: g.mode }))
+      .sort((a, b) => a.capabilityId.localeCompare(b.capabilityId)),
+    extras: deployment.extras,
+    definition: deployment.definition ?? null,
+  });
+  return createHash("sha256").update(canonical, "utf8").digest("hex").slice(0, 32);
+}
+
 const profileFormSchema = z.object({
   name: z.string().trim().min(1, "Name is required."),
   role: z.string().trim().min(1, "Role is required."),
@@ -188,6 +213,9 @@ const profileFormSchema = z.object({
    * a per-backend fallback when the string is empty. */
   model: z.string().default(""),
   effort: z.string().default(""),
+  /** B5: the `deploymentFingerprint` of the record the editor read. Required
+   *  on an update (see `updateAgentProfile`); a create has no prior record. */
+  fingerprint: z.string().default(""),
   caps: z.record(z.string(), modeSchema).default({}),
   /** Operator only: default autonomy the run uses (supervised | full). */
   autonomy: z.enum(["supervised", "full"]).optional(),
@@ -694,6 +722,16 @@ export async function updateAgentProfile(
     );
     if (!deployment) {
       throw AppError.notFound(`No agent profile ${input.profileId} in this project.`);
+    }
+    // B5 (pass 34, U34-3): the ONE place the current record and the submission
+    // are both in hand. A save that was composed against a different record
+    // writes nothing: it would silently revert every governed grant the write
+    // it never saw had changed. A validation refusal, so nothing is audited.
+    const seen = deploymentFingerprint(deployment);
+    if (form.fingerprint !== seen) {
+      throw AppError.conflict(
+        "This profile changed while the editor was open. Reopen it to see the current grants, then save again.",
+      );
     }
     const current = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
     const isOperator = current.kind === "operator";

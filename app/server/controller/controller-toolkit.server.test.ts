@@ -1362,3 +1362,56 @@ describe("create_task seats a named owner and takes dueDate (ruling 140)", () =>
     );
   });
 });
+
+/**
+ * B5 (pass 34, U34-3): the controller's own read-modify-write inside one turn
+ * is never refused by its own fingerprint; a hand-save landing between its
+ * read and its write IS.
+ */
+describe("update_agent_deployment carries the record it read (B5)", () => {
+  it("its own read-modify-write applies, and a save landing in between is refused", async () => {
+    // Canary: have the tool send a constant fingerprint — its own writes then
+    // fail, and a stale one succeeds.
+    const own = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      capabilities: [{ capabilityId: "comment-on-task", mode: "direct" }],
+    });
+    expect(own).toContain("[done]");
+
+    // A hand-save lands between a read and a write the tool performs. The tool
+    // reads the record at call time, so simulate the race by writing the file
+    // out from under an already-composed form.
+    const { updateAgentProfile, deploymentFingerprint } = await import(
+      "~/features/agents/agent-profile-actions.server"
+    );
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const deployment = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.agents.find((a) => a.profileId === "developer")!;
+    const staleForm = {
+      name: "Developer",
+      role: "Implementation",
+      backend: "claude" as const,
+      stages: ["impl"],
+      definition: "",
+      model: "sonnet",
+      effort: "high",
+      fingerprint: deploymentFingerprint(deployment),
+      caps: { "comment-on-task": "off" },
+      resources: { skills: [], mcps: [], kb: [] },
+    };
+    // The concurrent write.
+    await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      capabilities: [{ capabilityId: "ask-human", mode: "off" }],
+    });
+    const actor = { userId: ids.projectAdmin, label: "elif@viberr.dev" };
+    await expect(
+      updateAgentProfile(
+        app.db,
+        { projectSlug: SLUG, profileId: "developer", form: staleForm },
+        actor,
+        { dataRoot: app.dataRoot },
+      ),
+    ).rejects.toThrow("This profile changed while the editor was open.");
+  });
+});

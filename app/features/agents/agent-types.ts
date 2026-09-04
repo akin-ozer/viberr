@@ -102,6 +102,11 @@ export interface AgentProfileView {
   resources: { skills: string[]; mcps: string[]; kb: string[] };
   /** "template" = org base deployed here · "project" = created in-project. */
   source: "template" | "project";
+  /** B5 (pass 34, U34-3): the identity of the deployment record this view was
+   *  built from. The editor submits it back, and a save composed against a
+   *  different record is refused rather than reverting what it never saw.
+   *  Empty for a LIBRARY template, which has no deployment record yet. */
+  fingerprint: string;
 }
 
 /**

@@ -68,6 +68,10 @@ export interface ProfileFormPayload {
   name: string;
   role: string;
   backend: "codex" | "claude";
+  /** B5 (pass 34, U34-3): the deployment record this editor was opened on. An
+   *  update carries it back so a save composed against a record a concurrent
+   *  write replaced is refused instead of reverting it. Absent on a create. */
+  fingerprint?: string;
   stages: string[];
   definition: string;
   /** The long persona/instructions (system-prompt material, D6); "" = keep. */
@@ -1405,6 +1409,8 @@ export function CreateProfileModal({
       caps,
       resources: res,
     };
+    // B5: an EDIT carries the record it was opened on; a create has none.
+    if (initial?.fingerprint) payload.fingerprint = initial.fingerprint;
     // Autonomy is an OPERATOR field: a specialist payload must not carry the
     // key at all (the action's schema leaves it optional and the writer only
     // stores it for the operator).

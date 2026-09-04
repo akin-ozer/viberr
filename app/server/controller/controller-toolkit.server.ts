@@ -67,6 +67,7 @@ import {
   deployAgentProfileFromLibrary,
   updateAgentProfile,
   type SubmittedProfileForm,
+  deploymentFingerprint,
 } from "~/features/agents/agent-profile-actions.server";
 import {
   effectiveProfileView,
@@ -1780,6 +1781,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const baseForm = {
             name: view.name,
             role: view.role,
+            // B5 (pass 34, U34-3): the record THIS tool just read. Its own
+            // read-modify-write inside one turn is never refused by itself; a
+            // hand-save landing between the read and the write is.
+            fingerprint: deploymentFingerprint(deployment),
             backend,
             stages: args.stages ?? view.stages,
             definition: "",

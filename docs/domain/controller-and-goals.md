@@ -305,6 +305,11 @@ default (`create-task-branch` seeds `direct` and resolves `off` when absent). Th
 policy-dependent operator grants (`deliver-review-pr`, `update-task-branch`) are named as
 such and read from `get_project`.
 
+`update_agent_deployment` also carries the `deploymentFingerprint` of the record it just
+read (B5), so its own read-modify-write inside one turn is never refused by itself while a
+hand-save landing between that read and the write is, with the same by-name refusal shape:
+re-read, then write again.
+
 Effort is settable wherever model is (ruling 139): `deploy_agent` takes `model` and
 `effort` overrides and `update_agent_deployment` takes `effort`; both check the value
 against the backend's tier list (`assertEffortForBackend`, `assertModelForBackend` in

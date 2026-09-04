@@ -1,4 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
+import { deploymentFingerprint } from "./agent-profile-actions.server";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   AgentDeployment,
@@ -507,6 +508,8 @@ export function effectiveProfileView(
       kb: def?.resources?.kb ?? template?.resources.kb ?? [],
     },
     source: template ? "template" : "project",
+    // B5: the record this view was built from, for the editor to submit back.
+    fingerprint: deploymentFingerprint(deployment),
   };
   // The key is set ONLY when a real run earned the mark: an absent
   // `modelUnavailable` claims nothing about availability (ruling 19), so it must

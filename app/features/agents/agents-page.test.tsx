@@ -140,6 +140,7 @@ const LIGHTWEIGHT_WORKFLOW = [
 
 function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
   return {
+    fingerprint: "fp-fixture",
     id: "developer",
     kind: "specialist",
     name: "Developer",
@@ -2803,5 +2804,21 @@ describe("CreateProfileModal effort seeding (ruling 139)", () => {
     fireEvent.click(getByText("Save changes"));
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit.mock.calls[0]![0].effort).toBe("high");
+  });
+});
+
+/** B5 (pass 34, U34-3): the editor submits the record it was opened on. */
+describe("CreateProfileModal fingerprint (B5)", () => {
+  it("an EDIT carries the deployment's fingerprint back to the server", () => {
+    // Canary: drop the hidden field — the server then refuses every save
+    // (the create half, which must carry none, is pinned on the route).
+    const onSubmit = vi.fn();
+    const { getByText } = renderModal({
+      initial: mkProfile({ fingerprint: "fp-opened-on" }),
+      onSubmit,
+    });
+    fireEvent.click(getByText("Save changes"));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]![0].fingerprint).toBe("fp-opened-on");
   });
 });
