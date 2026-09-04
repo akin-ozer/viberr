@@ -130,6 +130,11 @@ export interface RunInputs {
   repo: string | null;
   /** A checkout actually landed in `cwd`. False → the agent ran on an empty dir. */
   cloned: boolean;
+  /** Ruling 129 (pass 34, Q34-5): what the pre-run refresh did to a REUSED
+   *  checkout, in words. Absent on a fresh clone, which needs none, and on a
+   *  run with no working tree. A refresh that could not run says so here
+   *  rather than leaving the reader to assume `origin/*` is current. */
+  workspaceRefresh?: string;
   /** This engagement DELIVERS (vs a supporting, read-only engagement). */
   delivers: boolean;
   /** Characters of persona (Claude systemPrompt / Codex developer instructions). */
