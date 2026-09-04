@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { encodeControllerInstrument } from "~/shared/mapping/actor.server";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -627,5 +628,55 @@ describe("audit-panel actor names (E32-8, pass 32)", () => {
     // `row.actor_label` back at the `actor` derivation in auditText).
     const agentRow = entries.find((e) => e.text.startsWith("Developer (Implementation) · Claude opened the Reviewer runtime session"));
     expect(agentRow, "agent audit rows must render the decoded actor name").toBeTruthy();
+  });
+});
+
+/**
+ * C5 (pass 34, U34-4): the Activity audit column keeps the controller
+ * instrument. The joined user name used to win outright, so a row written as
+ * `<email> · via controller` (ruling 99(b)) read exactly like one the same
+ * person wrote by hand — this is the ONE column that dropped the disclosure.
+ */
+describe("the audit column discloses the controller instrument (C5)", () => {
+  it("an instrumented row and a hand-written row read differently, and the filter still lists one option", () => {
+    // Canary: restore `row.actor_name ?? displayAuditActorLabel(...)`.
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    recordAudit(store.db, {
+      action: "project.policy.boundary_changed",
+      actor: { userId: arda.id, label: arda.email },
+      projectSlug: store.slug,
+      details: { from: "impl", to: "review", boundary: "auto" },
+    });
+    recordAudit(store.db, {
+      action: "project.policy.boundary_changed",
+      actor: { userId: arda.id, label: encodeControllerInstrument(arda.email) },
+      projectSlug: store.slug,
+      details: { from: "review", to: "done", boundary: "approval" },
+    });
+    const rows = listAuditLog(store.db, store.slug, { limit: 10 });
+    const viaController = rows.filter((r) => r.text.includes("(via the controller)"));
+    const byHand = rows.filter((r) => !r.text.includes("(via the controller)"));
+    expect(viaController).toHaveLength(1);
+    expect(byHand.length).toBeGreaterThan(0);
+    expect(viaController[0]!.text).toContain(`${arda.name} (via the controller)`);
+    expect(byHand[0]!.text).toContain(arda.name);
+    // One option per person: the filter compiles on COALESCE(u.name, label).
+    const options = auditFilterActors(store.db, store.slug);
+    expect(options.filter((o) => o.label.includes(arda.name))).toHaveLength(1);
+  });
+
+  it("a row whose user no longer resolves still reads as that person via the controller", () => {
+    // Canary: decode the instrument on the joined-name leg only — the userless
+    // row then renders a third way (the capitalised raw label).
+    const store = setupTestStore(ctx);
+    recordAudit(store.db, {
+      action: "project.policy.boundary_changed",
+      actor: { userId: null, label: encodeControllerInstrument("gone@viberr.dev") },
+      projectSlug: store.slug,
+      details: { from: "impl", to: "review", boundary: "auto" },
+    });
+    const row = listAuditLog(store.db, store.slug, { limit: 5 })[0]!;
+    expect(row.text).toContain("gone@viberr.dev (via the controller)");
   });
 });

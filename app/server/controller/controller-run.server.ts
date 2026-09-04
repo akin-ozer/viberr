@@ -1,4 +1,5 @@
 import path from "node:path";
+import { encodeControllerInstrument } from "~/shared/mapping/actor.server";
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
@@ -391,7 +392,7 @@ async function startTurnRun(
 
   const actor = {
     userId: input.user.id,
-    label: `${input.user.email} · via controller`,
+    label: encodeControllerInstrument(input.user.email),
   };
 
   let runId: string;

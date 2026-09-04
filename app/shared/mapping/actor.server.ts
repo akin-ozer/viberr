@@ -156,3 +156,26 @@ export function createActorResolver(
     }
   };
 }
+
+/**
+ * C5 (pass 34, U34-4): the controller INSTRUMENT on a human's audit label.
+ *
+ * Ruling 99(b) requires a controller-driven write to disclose the instrument:
+ * the person is the authority, the controller is the tool they used. Both
+ * producers (`controller-tool-guards.server.ts`, `controller-run.server.ts`)
+ * build that label here, so there is no second literal to drift from, and the
+ * Activity column decodes it here too.
+ */
+const CONTROLLER_INSTRUMENT_SUFFIX = " \u00b7 via controller";
+
+export function encodeControllerInstrument(email: string): string {
+  return `${email}${CONTROLLER_INSTRUMENT_SUFFIX}`;
+}
+
+/** The person behind an instrumented label, or null when there is no
+ *  instrument on it. */
+export function decodeControllerInstrument(raw: string): string | null {
+  return raw.endsWith(CONTROLLER_INSTRUMENT_SUFFIX)
+    ? raw.slice(0, -CONTROLLER_INSTRUMENT_SUFFIX.length)
+    : null;
+}

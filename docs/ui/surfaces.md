@@ -190,6 +190,14 @@ cannot rejoin the gap silently — the typecheck refuses it.)*
   `e2e/06-activity-hydration.spec.ts`. *(Added 2026-09-04, pass 34 — `formatDayDotTimeUTC`
   used to sample `now` while documenting itself as the deterministic first pass, and four
   surfaces rendered a host-zone calendar date unguarded.)*
+- The Activity **audit** column names a controller-driven write as the person **(via the
+  controller)** (ruling 99(b), pass 34 C5): both producers write one shared instrument
+  label and the column decodes it on both legs, so a row whose user no longer resolves
+  reads the same way. The ORG audit log keeps the RAW stored label on purpose: it is the
+  forensic surface. The actor filter still lists one option per person. The
+  runtime-session FOLD is unaffected (the instrument sits before the sentence), but a
+  folded run's collapsed summary names no actor, so the instrument on folded sessions is
+  readable only when the run is expanded.
 - The agents page's `update-profile` intent carries the `deploymentFingerprint` the
   loader shipped, and a save composed against a record a concurrent write replaced is
   refused with "This profile changed while the editor was open." (pass 34, B5).

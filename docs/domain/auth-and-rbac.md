@@ -231,6 +231,14 @@ skips that pass's purge. Two actions boot recovery uses as idempotency keys
 (`task.agent.replied`, `runtime.operator.plan_executed`) are exempt. The pass runs at
 boot and every 6 hours.
 
+**Reading a controller-driven write** (pass 34, C5). A write the controller makes for a
+person is audited under that person with the controller named as the instrument
+(`encodeControllerInstrument` in `app/shared/mapping/actor.server.ts`, ruling 99(b)). The
+Activity audit column renders it as "<name> (via the controller)" through
+`auditActorDisplay`, on both the joined-name and the userless leg. The org Audit log and
+`inspect_audit_log` keep the RAW stored label deliberately: they are the forensic
+surfaces, and the raw label is what `recordAudit` was handed.
+
 ## 6. Insights (`/insights`, org admin only)
 
 One aggregate query over `agent_runs` (`getInsightsSummary`): totals (runs, cost,

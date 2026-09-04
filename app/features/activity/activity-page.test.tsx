@@ -744,3 +744,33 @@ describe("per-panel feed filters (P21)", () => {
     ).toBe("");
   });
 });
+
+/**
+ * C5 (pass 34, U34-4): the instrument goes in front of the SENTENCE, so the
+ * runtime-session fold still recognises its own rows. `isRuntimeSessionOpen`
+ * matches on the sentence's tail, and a parenthetical appended AFTER it would
+ * silently stop every session run from folding.
+ */
+describe("C5: the controller instrument and the runtime-session fold", () => {
+  const opened = (actor: string): AuditLogEntryView => ({
+    id: `aud_${actor.length}`,
+    kind: "audit",
+    text: `${actor} opened the Claude runtime session. Recorded per audit policy on`,
+    taskKey: null,
+    occurredAt: "2026-09-04T10:00:00.000Z",
+    status: null,
+    resolvedAt: null,
+    resolvedBy: null,
+  });
+
+  it("an instrumented actor still folds; the same words appended AFTER the sentence do not", () => {
+    // Canary: append the parenthetical after the sentence instead.
+    expect(isRuntimeSessionOpen(opened("Arda Kaya (via the controller)"))).toBe(true);
+    expect(isRuntimeSessionOpen(opened("Arda Kaya"))).toBe(true);
+    const trailing: AuditLogEntryView = {
+      ...opened("Arda Kaya"),
+      text: `${opened("Arda Kaya").text} (via the controller)`,
+    };
+    expect(isRuntimeSessionOpen(trailing)).toBe(false);
+  });
+});

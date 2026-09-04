@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { encodeControllerInstrument } from "~/shared/mapping/actor.server";
 import {
   recordAudit,
   type AuditActor,
@@ -81,7 +82,7 @@ export function controllerToolGuards(
   user: ControllerToolUser,
   dataRoot?: string,
 ): ControllerToolGuards {
-  const actor = { userId: user.id, label: `${user.email} · via controller` };
+  const actor = { userId: user.id, label: encodeControllerInstrument(user.email) };
   const auditActor: AuditActor = actor;
 
   const orgAdmin = () => isOrgAdmin(db, user.id);

@@ -305,6 +305,11 @@ default (`create-task-branch` seeds `direct` and resolves `off` when absent). Th
 policy-dependent operator grants (`deliver-review-pr`, `update-task-branch`) are named as
 such and read from `get_project`.
 
+Every controller write is audited under the ASKING PERSON with the controller named as
+the instrument (ruling 99(b)); pass 34's C5 made the Activity audit column render that
+disclosure ("<name> (via the controller)") instead of dropping it for the joined user
+name.
+
 `update_agent_deployment` also carries the `deploymentFingerprint` of the record it just
 read (B5), so its own read-modify-write inside one turn is never refused by itself while a
 hand-save landing between that read and the write is, with the same by-name refusal shape:

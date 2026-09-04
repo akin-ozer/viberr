@@ -1484,3 +1484,25 @@ describe("invite_member seats the role it is given (C4)", () => {
     expect(await projectMd()).toBe(before);
   });
 });
+
+/**
+ * C5 (pass 34, U34-4): a write the controller made for a person reads, on the
+ * Activity audit column, as that person via the controller — the disclosure
+ * ruling 99(b) requires, which this column used to drop.
+ */
+describe("a controller write discloses its instrument on Activity (C5)", () => {
+  it("renders the person, named, with the instrument", async () => {
+    // Canary: revert the audit column to `row.actor_name ?? …`.
+    const reply = await call(ids.projectAdmin, "update_project_settings", {
+      description: "Set through the controller for the instrument case.",
+    });
+    expect(reply).toContain("[done]");
+    const { listAuditLog } = await import("~/server/projections/activity-feed.server");
+    const rows = listAuditLog(app.db, SLUG, { limit: 20 });
+    const instrumented = rows.filter((r) => r.text.includes("(via the controller)"));
+    expect(instrumented.length).toBeGreaterThan(0);
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const elif = findUserById(app.db, ids.projectAdmin)!;
+    expect(instrumented[0]!.text).toContain(`${elif.name} (via the controller)`);
+  });
+});
