@@ -580,11 +580,16 @@ export function AgentLogsPanel({
   // owner's missing connection rather than leaving the absent control
   // unexplained. `retryBackends === undefined` is "not asked", and claims
   // nothing about the owner.
+  // Pass 34 review: the "isn't connected" clause is about a retry this panel
+  // can offer, and only an AGENT run has one — an operator or controller run
+  // has no other backend to move to, so appending it there stated a
+  // credential fact that was often false and always irrelevant.
+  const retryOffered = cur!.kind === "primary" || cur!.kind === "reviewer";
   const retryClause = canRetryBackend
     ? `. Retry on ${altLabel}`
     : retryPossible
       ? ". A maintainer can retry it on the other backend"
-      : altBackend !== null && retryBackends !== undefined
+      : retryOffered && altBackend !== null && retryBackends !== undefined
         ? `. ${altLabel} isn't connected for the task owner, so there is no other backend to retry on`
         : "";
   const footer =

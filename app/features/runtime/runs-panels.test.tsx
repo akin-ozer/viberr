@@ -202,6 +202,42 @@ describe("AgentLogsPanel", () => {
       ),
     ).toBeTruthy();
 
+    // Pass 34 review: an OPERATOR run has no retry to offer here, so the
+    // credential clause (about a retry that does not exist) must not appear.
+    // Canary: drop the `retryOffered` gate — the operator footer claims the
+    // task owner has not connected Codex, whether or not they have.
+    rerender(
+      <AgentLogsPanel
+        runtime={[
+          mkRun({
+            id: "operator",
+            kind: "operator",
+            role: "Operator",
+            backend: "claude",
+            state: "error",
+            lifecycle: "error",
+            // The classified quota footer — the sentence ruling 130(a) added,
+            // which is where the clause was being appended.
+            failureKind: "quota",
+            failedBackendUnavailable: true,
+            altBackend: "codex",
+          }),
+        ]}
+        sel="operator"
+        onSel={() => {}}
+        onRetryBackend={onRetryBackend}
+        retryBackends={["claude"]}
+        linesByThread={{ operator: [] }}
+      />,
+    );
+    // Non-vacuity: the classified quota sentence IS on screen…
+    expect(container.querySelector(".logs-foot")!.textContent).toContain(
+      "refused this run: the account's usage window is spent",
+    );
+    // …and it does not carry the retry clause, which this run kind has no
+    // retry for.
+    expect(queryByText(/isn't connected for the task owner/)).toBeNull();
+
     // Owner connects Codex: the same run now carries a real offer.
     rerender(
       <AgentLogsPanel
