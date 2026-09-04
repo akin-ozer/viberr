@@ -700,6 +700,13 @@ export async function revalidateProjectCredential(
       s.ok && (s.source === "header" || s.source === "probe") ? [s.id] : [],
     ),
   );
+  // Ruling 144(c): a classic token's published list is header evidence for
+  // EVERY scope it names, not only the required ones, so an open `workflow`
+  // violation resolves on a re-check whose header now lists it.
+  for (const scope of validation.headerScopes ?? []) {
+    grantedScopes.add(scope);
+    provenScopes.add(scope);
+  }
   const resolvedViolations: ScopeViolationRecord[] = [];
   for (const violation of listScopeViolations(db, projectSlug, {
     status: "open",

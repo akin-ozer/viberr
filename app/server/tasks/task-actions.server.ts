@@ -5037,6 +5037,9 @@ export type DeliveryOutcome =
   | { status: "grant_withheld"; message: string }
   /** The push failed outright; no PR was opened over a possibly-stale remote. */
   | { status: "push_failed"; message: string }
+  /** Ruling 144: a workflow-file push refused for the `workflow` scope; the
+   *  violation is open on the task and the remedy is a human's. */
+  | { status: "scope_violation"; scope: string; message: string }
   | { status: "nothing_to_review"; message: string }
   | { status: "failed"; message: string };
 
@@ -5142,6 +5145,40 @@ export async function performDelivery(
     // P11-11 hardened by F15-15: a FAILED push leaves the remote missing (or
     // misrepresenting) the newest work — refuse to open a PR whose head would
     // not match the delivered commit, instead of opening one "best effort".
+    if (push.status === "push_refused_scope") {
+      // Ruling 144(c): the refusal is a scope violation on the task, with the
+      // policy event, the inbox notification, the credential-card flag and the
+      // rail count every other violation gets; the remedy names the control.
+      const files = push.files.map((f) => `\`${f}\``).join(", ") || "files under `.github/workflows/`";
+      const { flagScopeViolation, policyViolationText } = await import(
+        "~/server/github/scope-flag.server"
+      );
+      const flagInput: Parameters<typeof flagScopeViolation>[1] = {
+        projectSlug,
+        taskKey,
+        scope: push.scope,
+        detail: policyViolationText(push.scope, `pushing ${files} on \`${push.branch}\``),
+      };
+      if (actor.userId) flagInput.actor = { userId: actor.userId, label: actor.label };
+      await flagScopeViolation(db, flagInput, { dataRoot: ctx.dataRoot });
+      const remedy =
+        `Nothing was pushed and no review PR was opened. Grant the \`${push.scope}\` scope to the ` +
+        `project's token on GitHub, then use Re-check on the project's GitHub view, and deliver again.`;
+      const message =
+        push.phase === "before_push"
+          ? `${taskKey}'s branch changes ${files}, and the project's classic token has no \`${push.scope}\` scope: GitHub would refuse the push. ${remedy}`
+          : `GitHub refused to push ${files} on \`${push.branch}\`: the token lacks the \`${push.scope}\` scope (${push.reason}). ${remedy}`;
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Delivery push refused: workflow scope",
+        message,
+      );
+      return { status: "scope_violation", scope: push.scope, message };
+    }
+
     if (push.status === "push_failed" || push.status === "no_pat") {
       const message =
         `${taskKey}'s execution branch could not be pushed (${push.status === "no_pat" ? "no project credential" : push.reason}). ` +
@@ -5167,6 +5204,26 @@ export async function performDelivery(
           : undefined,
       );
       return { status: "push_failed", message };
+    }
+
+    // Ruling 144(c): a successful push of workflow files is the proof that
+    // resolves an open `workflow` violation on this project.
+    if (push.status === "pushed" && push.workflowFiles.length > 0) {
+      const { listScopeViolations } = await import(
+        "~/server/projections/policy-violations.server"
+      );
+      const { resolveScopeViolationWithEvent } = await import(
+        "~/server/github/scope-flag.server"
+      );
+      for (const violation of listScopeViolations(db, projectSlug, { status: "open" })) {
+        if (violation.scope !== "workflow") continue;
+        await resolveScopeViolationWithEvent(
+          db,
+          violation.id,
+          { userId: actor.userId, label: actor.label },
+          { dataRoot: ctx.dataRoot },
+        );
+      }
     }
 
     // A3: every REMAINING non-`pushed` outcome is a state no PR may be opened

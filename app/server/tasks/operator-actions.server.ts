@@ -2609,6 +2609,16 @@ export async function operatorDeliverForReview(
           `\`discard_branch\` here: it destroys this task's LOCAL commits and is ` +
           `refused while delivered work stands on the branch.`,
       };
+    case "scope_violation":
+      // Ruling 144: the remedy is a human's (grant the scope on GitHub, then
+      // Re-check); the violation is already on the task and in the inbox.
+      return {
+        outcome: "noop",
+        message:
+          `Delivery was refused for a missing \`${outcome.scope}\` scope: ${outcome.message} ` +
+          `A scope violation is open on the task; do not retry until the credential card shows the scope. ` +
+          `Do not ask an agent to push.`,
+      };
     case "grant_withheld":
     case "push_failed":
     case "nothing_to_review":

@@ -307,6 +307,11 @@ export function ConnectionsPanel({
                             {s.id}
                           </span>
                         ))}
+                        {(c.advisories ?? []).map((a) => (
+                          <span className="sub" key={a.id} data-advisory={a.id}>
+                            {a.text}
+                          </span>
+                        ))}
                         {unproven.length > 0 && (
                           <span
                             className="sub"

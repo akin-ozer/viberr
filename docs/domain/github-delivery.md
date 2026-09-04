@@ -26,6 +26,14 @@ default connection cannot be removed.
 2026-07-25). A project's `credentialPolicy.requiredScopes` in `project.md` overrides
 the list when non-empty; project creation writes `credentialPolicy: null`.
 
+**The `workflow` scope stays optional and is disclosed** (ruling 144, pass 34, closing
+G34-2). The validator records a classic token's full `x-oauth-scopes` list as
+`headerScopes` (null for fine-grained tokens, which publish nothing). The project
+credential card and the Connections row carry an ADVISORY, never a failed chip and never
+a validation failure: a classic token without `workflow` cannot push changes under
+`.github/workflows/`. An open `workflow` violation turns the advisory into "GitHub refused
+a push … (KEY)". A project that never ships CI never sees any of this.
+
 **Validation** (`pat-validator.server.ts`): `GET /user` (401 → `expired` or
 `revoked`; 5xx or network → `network_error`, which never downgrades a stored
 verdict), then `GET /repos/{repo}` when a repo is known (404 → `repo_not_found`; 403
@@ -148,7 +156,15 @@ no credential, no repository and an unknown task are standing states and only lo
    120-second timeout, and `pushed` carries the head it published and the remote head
    it replaced. A non-fast-forward is a `push_conflict` (a branch collision, never a
    credential error); other failures surface git's redacted words in a fenced "What
-   the push reported" block. An unreadable `ls-remote` never blocks the push.
+   the push reported" block. An unreadable `ls-remote` never blocks the push. Ruling
+   144(b): before pushing, delivery lists the files under `.github/workflows/` the push
+   changes as GitHub measures them (`git log --format= --name-only <origin head>..HEAD`,
+   falling back to the base only on a first push, so a workflow file already on origin
+   never refuses a push that does not touch it); a classic token whose published scopes
+   lack `workflow` is refused BEFORE GitHub is asked (`push_refused_scope`,
+   `before_push`), and GitHub's own refusal of such a push, on any token kind, is
+   classified the same way (`github`), never as a generic `push_failed`. The `pushed`
+   result carries `workflowFiles`.
 3. **Verified no-change**: `no_commits`, or `no_branch` on a task that never had a
    branch, PR, revision or commits, with `defaultBranchEvidence.verified === true`,
    sets `noChanges`, mints a `kind: verified` work revision at the default-branch head
@@ -304,6 +320,13 @@ successful merge (proves `pull_request:write`) or by re-validating the credentia
 `violation` chip linking to the flagged task), the rail Settings badge (open count),
 the task timeline and the inbox.
 
+Ruling 144(c): a workflow-file push refused for the `workflow` scope opens a `workflow`
+violation on the task through the same door (the `policy` event, the inbox notification,
+the credential-card flag, the rail count), and delivery answers `scope_violation` with a
+remedy that names the Grant / Re-check control on the project's GitHub view. It resolves
+on a re-check whose header lists `workflow` (header scopes are evidence for every scope
+they name), or on the next successful push of workflow files.
+
 ## 8. What agents get
 
 Agent runs hold **no GitHub credential**: workspaces are cut from a per-project bare
@@ -343,3 +366,6 @@ never gets the tool because a Codex mount would hand the child the credential.
   probed unless a project's `credentialPolicy` names them.
 - The README described creating a project and then attaching the repo; a repo and a
   connection for its owner are required at creation, and settings only repairs.
+- Ruling 18 promised that "a refused workflow-file push surfaces as a scope violation";
+  until pass 34 nothing implemented it (git push rejections never reached the violation
+  path). Ruling 144 implements the promise and adds the advisory and the pre-push refusal.

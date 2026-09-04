@@ -366,6 +366,51 @@ export interface ScopeChip {
   flaggedTaskKey?: string;
 }
 
+/**
+ * Ruling 144 (pass 34, G34-2): an ADVISORY about the credential that never
+ * fails validation and never renders as a missing chip. Today's one advisory:
+ * a classic token whose published scope list lacks `workflow`, which GitHub
+ * refuses for a push touching `.github/workflows/*`; or an open `workflow`
+ * violation, which is the same fact after GitHub said so. Fine-grained tokens
+ * publish nothing to read, so they get no advisory.
+ */
+export interface CredentialAdvisory {
+  id: "workflow_scope";
+  scope: "workflow";
+  source: "header" | "violation";
+  text: string;
+}
+
+/** Ruling 144(a): the advisories a validation and the open violations imply. */
+export function credentialAdvisories(
+  validation: PatValidation | null,
+  openViolations: readonly { scope: string; taskKey: string | null }[],
+): CredentialAdvisory[] {
+  const violation = openViolations.find((v) => v.scope === "workflow");
+  if (violation) {
+    return [
+      {
+        id: "workflow_scope",
+        scope: "workflow",
+        source: "violation",
+        text: `GitHub refused a push under .github/workflows/ with this token${violation.taskKey ? ` (${violation.taskKey})` : ""}: it lacks the workflow scope. Grant it on GitHub, then Re-check the credential.`,
+      },
+    ];
+  }
+  const header = validation?.headerScopes ?? null;
+  if (header && validation?.tokenKind === "classic" && !header.includes("workflow")) {
+    return [
+      {
+        id: "workflow_scope",
+        scope: "workflow",
+        source: "header",
+        text: "This classic token has no workflow scope, so it cannot push changes under .github/workflows/. Grant it on GitHub if a task will ship CI, then Re-check the credential.",
+      },
+    ];
+  }
+  return [];
+}
+
 export interface ProjectCredentialHealth {
   /** True when a real PAT row is bound to the project. */
   configured: boolean;
@@ -383,6 +428,8 @@ export interface ProjectCredentialHealth {
   scopes: ScopeChip[];
   /** Open violations for the project (newest first). */
   openViolations: ReturnType<typeof listScopeViolations>;
+  /** Ruling 144(a): advisories, never verdicts (see `CredentialAdvisory`). */
+  advisories: CredentialAdvisory[];
 }
 
 interface CredentialPolicyDisplay {
@@ -486,6 +533,7 @@ export function getProjectCredentialHealth(
       requiredScopes,
       scopes,
       openViolations,
+      advisories: credentialAdvisories(pat.validation, openViolations),
     };
   }
   // No bound PAT → honest "none" state, ALWAYS. A project may still declare a
@@ -506,5 +554,6 @@ export function getProjectCredentialHealth(
     requiredScopes,
     scopes,
     openViolations,
+    advisories: [],
   };
 }

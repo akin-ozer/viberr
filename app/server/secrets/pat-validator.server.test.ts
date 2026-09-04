@@ -572,6 +572,48 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
     ).not.toBeNull();
   });
 
+  it("ruling 144(c): a re-check resolves an open `workflow` violation once the header lists it, and not before", async () => {
+    // Canary: stop adding `headerScopes` to the granted set and the second
+    // re-check leaves the violation open.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-142", { stage: "review", ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    openScopeViolation(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      scope: "workflow",
+      detail: "GitHub refused a push of .github/workflows/ci.yml.",
+    });
+    const actor = { userId: store.users.arda.id, label: "arda" };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: CLASSIC }, actor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+
+    const without = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" }, headers: { "x-oauth-scopes": "repo" } },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO, permissions: { push: true } } },
+    });
+    await revalidateProjectCredential(store.db, store.slug, actor, { dataRoot: store.dataRoot, fetchImpl: without.fetchImpl, now: () => Date.now() });
+    expect(findOpenScopeViolation(store.db, store.slug, "workflow", "VIB-142")).not.toBeNull();
+
+    const withScope = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" }, headers: { "x-oauth-scopes": "repo, workflow" } },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO, permissions: { push: true } } },
+    });
+    const result = await revalidateProjectCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: withScope.fetchImpl,
+      // Past the reuse cooldown, so the re-check really reads GitHub again.
+      now: () => Date.now() + 60 * 60 * 1000,
+    });
+    expect(result.status).toBe("revalidated");
+    if (result.status === "revalidated") {
+      expect(result.resolvedViolations.map((v) => v.scope)).toEqual(["workflow"]);
+    }
+    expect(findOpenScopeViolation(store.db, store.slug, "workflow", "VIB-142")).toBeNull();
+  });
+
   it("grant flow: revalidation resolves the seeded VIB-142 violation and writes the policy event", async () => {
     const store = setupTestStore(ctx); // slug = viberr-core
     writeTask(store.dataRoot, store.slug, {

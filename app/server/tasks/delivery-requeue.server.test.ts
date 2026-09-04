@@ -48,6 +48,7 @@ const pushMock = vi.fn<typeof pushWorkspaceBranch>(async () => ({
   commits: 1,
   headSha: "a".repeat(40),
   remoteHeadBefore: null,
+workflowFiles: [],
 }));
 
 const openTaskPrMock = vi.fn<typeof openTaskPr>(async () => ({

@@ -272,6 +272,10 @@ inventory is not regenerated automatically and has drifted; the verified module 
     a user repository. Repository write is proven read-only from `GET /repos/{r}`
     `permissions.push`; without the probe, `pull_request:write` is reported `assumed` until
     first use. `read:org` is still honoured when a project requires it but is not a default.
+    *(Amended 2026-09-04, pass 34, ruling 144: the promise that "a refused workflow-file push
+    surfaces as a scope violation" is now implemented, with a classic-token advisory at attach
+    time and a refusal before the push when the token is known to lack `workflow`; the scope is
+    still not required.)*
 19. **Scope chips render proven verdicts only** (2026-07-25, recorded 2026-07-28). A chip
     is evidence: scope header, live probe, or open violation. `assumed`/`unchecked` render
     as an honest "unproven" line, never as a pseudo-check.
@@ -2380,6 +2384,35 @@ by rewriting those paragraphs:*
     `app/server/insights/insights-query.server.ts`; the prose definition in
     `docs/domain/auth-and-rbac.md` §6.)
 
+
+144. **The `workflow` scope stays optional, is disclosed on classic tokens, and a workflow-file push
+    is refused before it reaches GitHub when the token is known to lack it (2026-09-04, pass 34
+    G34-2, under Q34-10's direction to close the gap in the fix phase; confirmed by the owner as
+    Q34-15 on 2026-09-04; amends ruling 18).** Ruling 18 dropped `workflow` from the required set
+    and promised that "a refused workflow-file push surfaces as a scope violation when it
+    matters". Live (JC-6): GitHub rejected the push of `.github/workflows/ci.yml` with "refusing
+    to allow a Personal Access Token to create or update workflow … without `workflow` scope",
+    and the rejection reached the person only as the operator's packet 25 minutes later; no scope
+    violation, no chip, nothing at attach time, because git push rejections never went through
+    the violation path at all. Three parts. **(a)** The validator records a classic token's full
+    `x-oauth-scopes` list; the project credential card and the connection row say, as an
+    advisory that never fails validation, that a classic token without `workflow` cannot push
+    `.github/workflows/*`. Fine-grained tokens expose nothing to read, so they get no advisory.
+    **(b)** Before pushing, delivery lists the workflow files the branch changes AS GITHUB
+    MEASURES THEM (the ref update from the remote branch head, falling back to the base branch
+    only for a first push) and refuses with a named remedy before GitHub is asked when the bound
+    credential is a classic token without `workflow`; a branch whose workflow file already
+    reached the remote is never refused for a push that does not touch it. **(c)** A push GitHub
+    refuses for that reason, on any token kind, opens a `workflow` scope violation on the task
+    (the `policy` event, the inbox notification, the credential-card flag, the rail count),
+    resolved by a re-check whose header now lists `workflow` (header scopes are evidence for
+    every scope they name), or by the next successful push of workflow files; the remedy names
+    the Grant / Re-check control by name, and the operator is told the remedy is a human's.
+    `workflow` is still not required: a project that never ships CI never sees any of this.
+    (`credentialAdvisories` in `pat-store.server.ts`; `headerScopes` and the re-check sweep in
+    `pat-validator.server.ts`; `changedWorkflowFiles`, `isWorkflowScopeRejection` and the
+    `push_refused_scope` result in `push-workspace.server.ts`; the `scope_violation` outcome in
+    `task-actions.server.ts`; `credential-card.tsx`; `connections.server.ts`.)
 
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates

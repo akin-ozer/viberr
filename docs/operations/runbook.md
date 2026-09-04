@@ -150,6 +150,14 @@ a readiness downgrade (tolerant parsing):
   delete re-confirms a cached open PR against GitHub before refusing. "GitHub could not
   confirm whether PR #N is still open" means the check itself failed: nothing was deleted;
   resolve the packet again when GitHub answers.
+- **"Delivery push refused: workflow scope"** (ruling 144, pass 34): the task changes a file
+  under `.github/workflows/` and the project's token cannot push it (a classic token without
+  the `workflow` scope, refused before the push; or GitHub's own refusal on any token). A
+  `workflow` scope violation is open on the task and the credential card carries the
+  advisory. Grant `workflow` to the token on GitHub, then use **Re-check** (Grant scope) on
+  the project's GitHub view: the header now listing `workflow` resolves the violation, as
+  does the next successful push of workflow files. Then deliver again. Nothing here asks a
+  person to push.
 - Accept-completion merges the review PR; a missing `pull_request:write` scope surfaces
   as an open scope violation with a Grant-scope action (re-validate the PAT, 60 s
   cooldown) rather than a silent failure. Write permission is proven read-only from the

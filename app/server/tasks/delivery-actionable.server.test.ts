@@ -57,6 +57,7 @@ const pushMock = vi.fn<typeof pushWorkspaceBranch>(async () => ({
   commits: 1,
   headSha: "a".repeat(40),
   remoteHeadBefore: null,
+workflowFiles: [],
 }));
 
 const openTaskPrMock = vi.fn<typeof openTaskPr>(async () => ({
@@ -186,7 +187,7 @@ beforeEach(() => {
   installFakeRuntime();
   runOp.mockClear();
   pushMock.mockClear();
-  pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null });
+  pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
   openTaskPrMock.mockClear();
   openTaskPrMock.mockResolvedValue({
     status: "ok",

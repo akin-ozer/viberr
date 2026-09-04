@@ -85,7 +85,7 @@ const CONNECTIONS: ConnectionRecord[] = [
     id: "akin-ozer", owner: "akin-ozer", method: "PAT", patId: "pat_1",
     masked: "····0000", def: true, repos: null, expiresAt: null, daysLeft: null,
     validationState: "unvalidated", scopes: [], lastValidatedAt: null,
-    createdAt: "2026-07-01T09:00:00.000Z", boundProjects: 0,
+    createdAt: "2026-07-01T09:00:00.000Z", boundProjects: 0, advisories: [],
   },
   {
     id: "hepapi", owner: "hepapi", method: "PAT", patId: "pat_2",
@@ -96,7 +96,7 @@ const CONNECTIONS: ConnectionRecord[] = [
       { id: "workflow", ok: true, source: "header" },
       { id: "pull_request:write", ok: true, source: "header" },
     ], lastValidatedAt: "2026-07-01T09:00:00.000Z",
-    createdAt: "2026-07-01T09:05:00.000Z", boundProjects: 2,
+    createdAt: "2026-07-01T09:05:00.000Z", boundProjects: 2, advisories: [],
   },
 ];
 
@@ -165,7 +165,7 @@ describe("ConnectionsPanel", () => {
 
   it("A4: with no bound projects, the confirm keeps the harmless copy (no false sync-loss claim)", async () => {
     const unbound: ConnectionRecord[] = [
-      { ...CONNECTIONS[1]!, id: "solo", owner: "solo", def: false, boundProjects: 0 },
+      { ...CONNECTIONS[1]!, id: "solo", owner: "solo", def: false, boundProjects: 0, advisories: [] },
     ];
     const { getByLabelText, getByText, queryByText } = renderPanel(
       <ConnectionsPanel connections={unbound} />,

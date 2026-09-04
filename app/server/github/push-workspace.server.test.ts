@@ -10,13 +10,15 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import { createPat, recordPatValidation, setProjectCredential } from "~/server/secrets/pat-store.server";
+import type { PatValidation } from "~/schemas/github-pat.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   defaultExec,
   discardLocalTaskBranch,
   pushWorkspaceBranch,
+  isWorkflowScopeRejection,
   type ExecOutcome,
 } from "./push-workspace.server";
 
@@ -84,6 +86,9 @@ function fakeGit(opts: {
   remoteHead?: string | null;
   /** `ls-remote` fails outright (offline, refused). */
   lsRemoteFails?: boolean;
+  /** Ruling 144: what `git log --format= --name-only <range> -- .github/workflows/`
+   *  lists, keyed by range. Absent ranges list nothing. */
+  workflowFilesByRange?: Record<string, string[]>;
 }) {
   const calls: string[][] = [];
   /** The env the `ls-remote` read ran under (ruling 134: the askpass channel). */
@@ -101,6 +106,10 @@ function fakeGit(opts: {
       return sha
         ? { ok: true, stdout: sha, stderr: "" }
         : { ok: false, stdout: "", stderr: "" };
+    }
+    if (args.includes("--name-only")) {
+      const range = args[args.indexOf("--name-only") + 1] ?? "";
+      return { ok: true, stdout: (opts.workflowFilesByRange?.[range] ?? []).join("\n"), stderr: "" };
     }
     if (args.includes("ls-remote")) {
       if (opts.lsRemoteFails) return { ok: false, stdout: "", stderr: "fatal: could not read from remote" };
@@ -168,6 +177,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       commits: 2,
       headSha: "a".repeat(40),
       remoteHeadBefore: "b".repeat(40),
+    workflowFiles: [],
     });
     const pushCall = git.calls.find((c) => c.includes("push"));
     expect(pushCall).toEqual(["-C", expect.any(String), "push", "origin", "HEAD:refs/heads/vib-1-work"]);
@@ -217,7 +227,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
         db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
         dataRoot: store.dataRoot, exec: git.exec,
       });
-      expect(res).toMatchObject({ status: "pushed", headSha: "a".repeat(40), remoteHeadBefore: "0".repeat(40) });
+      expect(res).toMatchObject({ status: "pushed", headSha: "a".repeat(40), remoteHeadBefore: "0".repeat(40), workflowFiles: [] });
       expect(git.calls.filter((c) => c.includes("push"))).toHaveLength(1);
       expect(git.calls.filter((c) => c.includes("ls-remote"))).toHaveLength(1);
       // An absent remote branch (first push) records no previous head.
@@ -226,7 +236,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
         db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
         dataRoot: store.dataRoot, exec: first.exec,
       });
-      expect(fresh).toMatchObject({ status: "pushed", remoteHeadBefore: null });
+      expect(fresh).toMatchObject({ status: "pushed", remoteHeadBefore: null, workflowFiles: [] });
     });
 
     it("an unreadable ls-remote never blocks the push", async () => {
@@ -237,7 +247,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
         db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
         dataRoot: store.dataRoot, exec: git.exec,
       });
-      expect(res).toMatchObject({ status: "pushed", headSha: "a".repeat(40), remoteHeadBefore: null });
+      expect(res).toMatchObject({ status: "pushed", headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
       expect(git.calls.filter((c) => c.includes("push"))).toHaveLength(1);
     });
   });
@@ -367,7 +377,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
       dataRoot: store.dataRoot, exec: git.exec,
     });
-    expect(res).toEqual({ status: "pushed", branch: "vib-1-work", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: "b".repeat(40) });
+    expect(res).toEqual({ status: "pushed", branch: "vib-1-work", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: "b".repeat(40), workflowFiles: [] });
     // Staged everything, then committed with an inline identity + task-key message.
     expect(git.calls.some((c) => c.includes("add") && c.includes("-A"))).toBe(true);
     const commitCall = git.calls.find((c) => c.includes("commit"));
@@ -892,5 +902,96 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
       expect(out.reason).toContain("could not delete");
       expect(out.reason).not.toContain("ghp_SECRETTOKEN");
     }
+  });
+});
+
+/**
+ * Ruling 144 (pass 34, G34-2): the `workflow` scope. (b) Delivery measures the
+ * workflow files a push changes as GitHub measures them and refuses BEFORE the
+ * push when the bound classic token's published scopes lack `workflow`; (c)
+ * GitHub's own refusal is classified `push_refused_scope`, never the generic
+ * failure bucket. Canaries: remove the pre-push check; refuse whenever workflow
+ * files are present (ignore the token); measure against `origin/<default>`
+ * unconditionally; delete the classifier branch.
+ */
+describe("ruling 144: workflow-file pushes and the workflow scope", () => {
+  const CI = ".github/workflows/ci.yml";
+  const REMOTE = "b".repeat(40);
+  function bindPatWith(validation: Pick<PatValidation, "tokenKind" | "headerScopes">) {
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "t", token: "ghp_faketoken123" }, SYS);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, SYS);
+    recordPatValidation(store.db, pat.id, {
+      status: "valid",
+      checkedAt: new Date().toISOString(),
+      login: "bot",
+      tokenKind: validation.tokenKind,
+      expiresAt: null,
+      repo: null,
+      scopes: [],
+      missingScopes: [],
+      headerScopes: validation.headerScopes,
+      detail: "",
+    });
+  }
+  const push = (git: ReturnType<typeof fakeGit>) =>
+    pushWorkspaceBranch({ db: store.db, projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, exec: git.exec });
+
+  it("refuses BEFORE the push when a classic token lacks `workflow` and the push changes a workflow file", async () => {
+    bindPatWith({ tokenKind: "classic", headerScopes: ["repo"] });
+    const git = fakeGit({ branch: "vib-1-work", ahead: 1, remoteHead: REMOTE, workflowFilesByRange: { [`${REMOTE}..HEAD`]: [CI] } });
+    const res = await push(git);
+    expect(res).toMatchObject({ status: "push_refused_scope", scope: "workflow", phase: "before_push", files: [CI], branch: "vib-1-work" });
+    expect(res.status === "push_refused_scope" ? res.reason : "").toContain("no `workflow` scope");
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+  });
+
+  it("pushes when the token lists `workflow`, and when the scopes are unknown (fine-grained)", async () => {
+    bindPatWith({ tokenKind: "classic", headerScopes: ["repo", "workflow"] });
+    const listed = await push(fakeGit({ branch: "vib-1-work", ahead: 1, remoteHead: REMOTE, workflowFilesByRange: { [`${REMOTE}..HEAD`]: [CI] } }));
+    expect(listed).toMatchObject({ status: "pushed", workflowFiles: [CI] });
+
+    // Rebinding the project to a fine-grained token: no published list to read.
+    bindPatWith({ tokenKind: "fine_grained", headerScopes: null });
+    const unknown = await push(fakeGit({ branch: "vib-1-work", ahead: 1, remoteHead: REMOTE, workflowFilesByRange: { [`${REMOTE}..HEAD`]: [CI] } }));
+    expect(unknown).toMatchObject({ status: "pushed", workflowFiles: [CI] });
+  });
+
+  it("a branch whose workflow file already reached origin is never refused for a push that does not touch it", async () => {
+    bindPatWith({ tokenKind: "classic", headerScopes: ["repo"] });
+    const git = fakeGit({
+      branch: "vib-1-work",
+      ahead: 3,
+      remoteHead: REMOTE,
+      // GitHub measures the ref update from origin's head: nothing under
+      // .github/ there. The base range would list ci.yml, and must not be used.
+      workflowFilesByRange: { [`${REMOTE}..HEAD`]: [], "origin/main..HEAD": [CI] },
+    });
+    const res = await push(git);
+    expect(res).toMatchObject({ status: "pushed", workflowFiles: [] });
+    // A FIRST push (no remote branch) measures from the base.
+    const first = await push(fakeGit({ branch: "vib-1-work", ahead: 1, remoteHead: null, workflowFilesByRange: { "origin/main..HEAD": [CI] } }));
+    expect(first).toMatchObject({ status: "push_refused_scope", phase: "before_push", files: [CI] });
+  });
+
+  it("GitHub's own rejection is `push_refused_scope`, never a generic `push_failed`", async () => {
+    bindPatWith({ tokenKind: "fine_grained", headerScopes: null });
+    const git = fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      remoteHead: REMOTE,
+      workflowFilesByRange: { [`${REMOTE}..HEAD`]: [CI] },
+      pushOk: false,
+      pushStderr:
+        "remote: error: refusing to allow a Personal Access Token to create or update workflow `.github/workflows/ci.yml` without `workflow` scope\n" +
+        " ! [remote rejected] HEAD -> vib-1-work (refusing to allow a Personal Access Token to create or update workflow)",
+    });
+    const res = await push(git);
+    expect(res).toMatchObject({ status: "push_refused_scope", scope: "workflow", phase: "github", files: [CI] });
+    expect(res.status === "push_refused_scope" ? res.reason : "").toContain("without `workflow` scope");
+  });
+
+  it("the classifier does not mistake a protected-branch rejection for a scope refusal", () => {
+    expect(isWorkflowScopeRejection("remote: error: GH006: Protected branch update failed for refs/heads/vib-1-work.")).toBe(false);
+    expect(isWorkflowScopeRejection("refusing to allow an OAuth App to create or update workflow `.github/workflows/x.yml` without `workflow` scope")).toBe(true);
   });
 });

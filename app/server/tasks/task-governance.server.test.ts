@@ -1721,7 +1721,7 @@ describe("resolvePacket kind matrix", () => {
         deps: {
           pushWorkspaceBranch: async () => {
             pushes.push("push");
-            return { status: "pushed", branch: "vib-1-work", commits: 1, headSha: pushed, remoteHeadBefore: "0".repeat(40) };
+            return { status: "pushed", branch: "vib-1-work", commits: 1, headSha: pushed, remoteHeadBefore: "0".repeat(40), workflowFiles: [] };
           },
         },
       },
@@ -1782,7 +1782,7 @@ describe("resolvePacket kind matrix", () => {
         deps: {
           pushWorkspaceBranch: async () => {
             pushes.push("push");
-            return { status: "pushed", branch: "vib-1-work", commits: 1, headSha: "1".repeat(40), remoteHeadBefore: null };
+            return { status: "pushed", branch: "vib-1-work", commits: 1, headSha: "1".repeat(40), remoteHeadBefore: null, workflowFiles: [] };
           },
         },
       },

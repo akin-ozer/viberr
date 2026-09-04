@@ -355,7 +355,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
 
   it("a delivered push opens (or reuses) the PR and reports it", async () => {
     seed({ stage: "review", branch: "vib-1" });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 9,
@@ -401,7 +401,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       packet: CONFLICT_PACKET,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 11,
@@ -460,7 +460,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       packet: COLLISION_CONFLICT_PACKET,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 13,
@@ -535,7 +535,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       packet: COLLISION_PACKET,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 14,
@@ -580,7 +580,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       packet: REJECT_PACKET,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 12,
@@ -764,6 +764,7 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
       commits: 1,
       headSha: "385047c".padEnd(40, "0"),
       remoteHeadBefore: "6004958".padEnd(40, "0"),
+    workflowFiles: [],
     });
     openPrMock.mockResolvedValue({ status: "ok", prNumber: 4, created: false, url: "https://x/pull/4" });
     const r = await operatorDeliverForReview(
@@ -820,7 +821,7 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
 
   it("F17-1: the operator's delivery calls openTaskPr operator-authorized (so the PR-open event is the Operator, not a guest)", async () => {
     seed({ stage: "review", branch: "vib-1" });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 9,
@@ -846,7 +847,7 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
 describe("R15-2 safety net (b): manual delivery from the task page", () => {
   it("maintainer delivers; the act is audited github.delivery.manual", async () => {
     seed({ stage: "review", branch: "vib-1" });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 12,
@@ -907,7 +908,7 @@ describe("R15-2: an applied `delivery` recommendation performs the delivery", ()
 
   it("apply → performDelivery; a delivered outcome consumes the card", async () => {
     seed({ stage: "review", branch: "vib-1", recommendations: [REC] });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 21,

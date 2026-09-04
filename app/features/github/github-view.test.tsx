@@ -45,6 +45,7 @@ const violationCredential: ProjectCredentialHealth = {
     },
   ],
   openViolations: [],
+  advisories: [],
 };
 
 const healthyCredential: ProjectCredentialHealth = {
@@ -192,6 +193,25 @@ describe("CredentialCard states", () => {
     expect(container.querySelector(".cred-ok")!.textContent).toContain(
       "All required scopes proven. Secrets stay isolated from task records and timelines.",
     );
+  });
+
+  it("ruling 144(a): an advisory renders as a line, never as a missing chip or a warning", () => {
+    // Canary: render the advisory only when the scope is granted (filter it out).
+    const { container } = render(
+      <CredentialCard
+        credential={{
+          ...healthyCredential,
+          advisories: [{ id: "workflow_scope", scope: "workflow", source: "header", text: "This classic token has no workflow scope, so it cannot push changes under .github/workflows/." }],
+        }}
+        onOpenTask={() => {}}
+      />,
+    );
+    const line = container.querySelector('[data-advisory="workflow_scope"]');
+    expect(line?.textContent).toContain("cannot push changes under .github/workflows/");
+    expect(container.querySelector(".cred-warn")).toBeNull();
+    expect(container.querySelectorAll(".scope-chip.miss").length).toBe(0);
+    const none = render(<CredentialCard credential={healthyCredential} onOpenTask={() => {}} />);
+    expect(none.container.querySelector("[data-advisory]")).toBeNull();
   });
 
   it("assumed scopes render NO chip — the honest 'unproven' line instead", () => {

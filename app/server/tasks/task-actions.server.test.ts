@@ -21,6 +21,7 @@ import type {
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { insertUser } from "~/server/auth/user-store.server";
+import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import {
@@ -3618,6 +3619,49 @@ describe("recordAgentCompletion attachments (P21 — the producing message names
  * could not be READ pushes anyway and never claims the base is missing.
  */
 describe("ruling 128: performDelivery bootstraps the base before the first push", () => {
+  // Ruling 144(c): a refused workflow-file push opens a `workflow` scope
+  // violation on the task with its remedy, opens no PR, and the next
+  // successful push of workflow files resolves it. Canaries: route
+  // `push_refused_scope` into the `push_failed` arm; drop the resolve.
+  it("ruling 144: a refused workflow push opens the violation with the remedy, and no PR", async () => {
+    pushMock.mockClear();
+    const store = prepared();
+    seedDeliverable(store);
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { body: { object: { sha: ROOT } } },
+      [`POST ${REPO_PATH}/pulls`]: { status: 201, body: { number: 1, html_url: "https://x/pull/1", title: "t", state: "open" } },
+    });
+    pushMock.mockResolvedValueOnce({
+      status: "push_refused_scope",
+      branch: "vib-1",
+      scope: "workflow",
+      phase: "before_push",
+      files: [".github/workflows/ci.yml"],
+      reason: "the project's classic token has no `workflow` scope, and this push changes `.github/workflows/ci.yml`",
+    });
+    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    expect(outcome).toMatchObject({ status: "scope_violation", scope: "workflow" });
+    expect(outcome.status === "scope_violation" ? outcome.message : "").toContain("Re-check on the project's GitHub view");
+    expect(github.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
+    const open = listScopeViolations(store.db, store.slug, { status: "open" });
+    expect(open.map((v) => [v.scope, v.taskKey])).toEqual([["workflow", "VIB-1"]]);
+    const timeline = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline;
+    expect(timeline.some((e) => e.text.includes("Delivery push refused: workflow scope") || e.text.includes("`.github/workflows/ci.yml`"))).toBe(true);
+
+    // The next successful push of workflow files is the proof that resolves it.
+    pushMock.mockResolvedValueOnce({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "a".repeat(40),
+      remoteHeadBefore: null,
+      workflowFiles: [".github/workflows/ci.yml"],
+    });
+    const again = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    expect(again.status).toBe("delivered");
+    expect(listScopeViolations(store.db, store.slug, { status: "open" })).toEqual([]);
+  });
+
   const REPO_PATH = "/repos/akin-ozer/viberr";
   const ROOT = "d2e0fb0".padEnd(40, "0");
 
@@ -3667,6 +3711,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
       commits: 1,
       headSha: "a".repeat(40),
       remoteHeadBefore: null,
+   workflowFiles: [],
     });
     const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
     expect(outcome.status).toBe("delivered");
@@ -3704,7 +3749,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
     const offline = prepared();
     seedDeliverable(offline);
     pushMock.mockClear();
-    pushMock.mockResolvedValueOnce({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null });
+    pushMock.mockResolvedValueOnce({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
     const { unreachableFetch } = await import("../../../test-support/fake-github");
     const outcome = await performDelivery(
       offline.db,
@@ -3760,6 +3805,7 @@ describe("ruling 134: the pushed-head event on a reused PR", () => {
       commits: 1,
       headSha: "385047c".padEnd(40, "0"),
       remoteHeadBefore: "6004958".padEnd(40, "0"),
+    workflowFiles: [],
     });
     const outcome = await manualDeliverForReview(
       store.db,
