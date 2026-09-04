@@ -1,4 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { z } from "zod";
+import { goalLinkSchema } from "~/schemas/goal-file.schema";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
@@ -930,6 +932,56 @@ describe("chained goals — retry re-parks when its task cannot be created", () 
             "contributor";
         },
       );
+    }
+  });
+});
+
+/**
+ * Pass 34 review (ruling 131's projection half): `goal_projections.links_json`
+ * is only rewritten when the goal file's content hash changes, so an existing
+ * store's rows carry links written before `blockedBy` existed — and the
+ * Controller page reads `l.blockedBy.length` off exactly those rows.
+ */
+describe("listGoals parses stored links instead of asserting their shape", () => {
+  it("a row written before ruling 131 reads blockedBy as an empty list, not undefined", async () => {
+    // Canary: restore `links = decoded as GoalLink[]` — `blockedBy` comes back
+    // undefined and the Controller page's `l.blockedBy.length` throws.
+    const { createGoal, listGoals } = await import("./goal-actions.server");
+    const goal = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Chain with a pre-131 projection row",
+        links: [
+          { title: "First", goal: "First. Done when merged." },
+          { title: "Second", goal: "Second. Done when merged." },
+        ],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    // SAFETY: the projection row exists (the goal was just created) and
+    // `links_json` is NOT NULL with a '[]' default, so this SELECT answers one
+    // row with that one string column.
+    const row = app.db
+      .prepare(`SELECT links_json FROM goal_projections WHERE goal_id = ?`)
+      .get(goal.goalId) as { links_json: string };
+    // The pre-ruling row shape: the same links with the key that did not exist
+    // yet removed. Parsed with the schema that tolerates its absence, so this
+    // fixture cannot drift from what the reader accepts.
+    const legacy = z
+      .array(goalLinkSchema)
+      .parse(JSON.parse(row.links_json))
+      .map(({ blockedBy: _dropped, ...rest }) => rest);
+    app.db
+      .prepare(`UPDATE goal_projections SET links_json = ? WHERE goal_id = ?`)
+      .run(JSON.stringify(legacy), goal.goalId);
+
+    const read = listGoals(app.db, SLUG).find((g) => g.id === goal.goalId)!;
+    expect(read.links.length).toBeGreaterThan(0);
+    for (const link of read.links) {
+      expect(link.blockedBy).toEqual([]);
+      expect(link.blockedBy.length).toBe(0);
     }
   });
 });

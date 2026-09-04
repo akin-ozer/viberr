@@ -6,6 +6,7 @@ import {
   type GoalFrontmatter,
   type GoalLink,
   type ParsedGoalFile,
+  goalLinkSchema,
 } from "~/schemas/goal-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import {
@@ -1110,11 +1111,13 @@ export function listGoals(db: DatabaseSync, projectSlug: string): GoalView[] {
     try {
       const decoded: unknown = JSON.parse(r.links_json);
       if (Array.isArray(decoded)) {
-        // SAFETY: `links_json` has ONE writer — `rebuildGoalFile` stores
-        // `JSON.stringify` of the goal file's schema-parsed `GoalLink[]` (with
-        // a '[]' column default). Array.isArray guards the shape class; a
-        // hand-edited row can only mis-shape this read model's display.
-        links = decoded as GoalLink[];
+        // Pass 34 review: PARSED, not asserted. A row written before ruling 131
+        // has no per-link `blockedBy` key, and the Controller page reads
+        // `l.blockedBy.length` off exactly these rows — the assertion promised a
+        // field an existing store does not carry. The schema's own default
+        // fills it, so an old row reads `blockedBy: []` instead of crashing the
+        // render, whatever the derivation-version rebuild has or has not done.
+        links = z.array(goalLinkSchema).catch([]).parse(decoded);
       }
     } catch {
       links = [];
