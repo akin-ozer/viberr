@@ -1111,3 +1111,47 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
     expect(eventCount()).toBe(3);
   });
 });
+
+/**
+ * Ruling 131 (pass 34): the projection carries `blockedBy` verbatim and the
+ * DERIVED readiness floors at `blocked` while the list is non-empty; the
+ * stored value is untouched (the floor never improves anything).
+ *
+ * Canary: pass `dependenciesListed: false` into `deriveReadiness` and the
+ * derived `blocked` assertion fails while the column still fills.
+ */
+describe("task dependencies projection (ruling 131)", () => {
+  it("stores blocked_by_json verbatim and floors the derived readiness at blocked, leaving the stored value alone", () => {
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-7", {
+          readiness: "ready",
+          blockedBy: ["goal-1 link 2", "goal-1 link 3", "goal-1 link 4"],
+        }),
+      });
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-8", { readiness: "ready" }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+      // SAFETY: the three selected columns are TEXT NOT NULL on `task_projections`.
+      const rows = store.db
+        .prepare(
+          `SELECT task_key, readiness, stored_readiness, blocked_by_json FROM task_projections WHERE task_key IN ('VIB-7', 'VIB-8') ORDER BY task_key`,
+        )
+        .all() as { task_key: string; readiness: string; stored_readiness: string; blocked_by_json: string }[];
+      expect(rows).toEqual([
+        {
+          task_key: "VIB-7",
+          readiness: "blocked",
+          stored_readiness: "ready",
+          blocked_by_json: JSON.stringify(["goal-1 link 2", "goal-1 link 3", "goal-1 link 4"]),
+        },
+        { task_key: "VIB-8", readiness: "ready", stored_readiness: "ready", blocked_by_json: "[]" },
+      ]);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+});

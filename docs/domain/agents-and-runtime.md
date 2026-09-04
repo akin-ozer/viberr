@@ -79,15 +79,24 @@ alike. There is no fallback engine and no other account to fall back to.
   explicitly absent. A `login` kind adds no secret: the vendor binary reads its own file.
 - Spawn env hygiene: every variable matching `CREDENTIAL_ENV_RE` (`API_KEY`, `TOKEN`,
   `SECRET`, `PASSWORD`, `PRIVATE_KEY`, `CREDENTIALS`, `AUTH` …), the private-runtime
-  set (`DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`) and **both vendor
+  set (`DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`), **both vendor
   homes** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME` — neither is credential-shaped, but a home
   is where a vendor binary keeps its credential, so an ambient one would let a run billed
-  to one person authenticate as whoever a leftover sign-in file names) is stripped from
-  the child (`filteredSpawnEnv`); the run service then adds exactly one principal's
-  credential on top, and `startRun` throws if the caller's own `env` overlay names a key
-  the credential owns. The run sink redacts those plaintext values from every persisted
-  line (`createRunSink(db, spec, { secrets })`) — the key belongs to one person and the
-  run console is visible to every project member.
+  to one person authenticate as whoever a leftover sign-in file names) **and every name
+  the app's own env schema declares** (`ENV_KEYS`: `NODE_ENV`, `PORT`, `VIBERR_DATA_ROOT`,
+  `BETTER_AUTH_URL`, the OAuth client ids, every `VIBERR_*` knob; ruling 142 — an agent
+  works in the project's repository, not in Viberr's process, and the container's
+  `NODE_ENV=production` / `PORT` broke a project's own `vitest` and `next start` inside a
+  run) is stripped from the child (`filteredSpawnEnv`). A name the schema does not
+  declare (`PATH`, `HOME`, locale, proxies, the image's `UV_*` caches) passes, which is
+  safe because the "no undeclared env reads" gate keeps the schema complete; the one
+  declared knob a child's tool depends on, `VIBERR_BROWSER_EXECUTABLE`, reaches the
+  browser MCP as argv from the server, never from the env. The same base serves every
+  spawned stdio MCP child (`mcpSpawnEnv`), the hosted sign-in driver and the vendor
+  sign-out. The run service then adds exactly one principal's credential on top, and
+  `startRun` throws if the caller's own `env` overlay names a key the credential owns. The run sink redacts those
+  plaintext values from every persisted line (`createRunSink(db, spec, { secrets })`) —
+  the key belongs to one person and the run console is visible to every project member.
 
 ### 2.3 Models and effort
 

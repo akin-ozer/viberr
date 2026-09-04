@@ -258,6 +258,25 @@ logs are structured JSON on stdout. Full layout with retention:
   2026-09-02, pass 32 — C01-A3.)* It does **not** take the writer lock: a
   backup that refused to run on a live instance would be no backup at all.
 
+  **Where it runs.** On this deployment a backup of the LIVE root runs inside the
+  container, never from the host: it opens the database (read-only, but a host-side
+  reader of a file the container writes, over the bind mount, maps the same WAL index
+  and is the dual-writer hazard by another name; the runbook's
+  [Readers, and where they must run](./runbook.md#readers-and-where-they-must-run) has
+  the SIGBUS it produced). It needs an explicit `--out`, because the default
+  `./backups` is `/app/backups` inside the container and is lost with it, and
+  `createBackup` refuses a destination under the data root it is backing up, so the
+  artefact goes to a container-local directory and is copied out at once:
+
+  ```bash
+  docker compose exec -T app npm run backup -- --out /tmp/viberr-backups
+  docker compose cp app:/tmp/viberr-backups/. ./backups/
+  ```
+
+  With the container down the root is plain files, and `npm run backup -- --out ./backups`
+  from the repo root is fine (`.env`'s `VIBERR_DATA_ROOT` must name the mounted directory,
+  `./docker-data` as in `.env.example`). *(Corrected 2026-09-04, pass 34 — D34-1.)*
+
   Read the artefact's own README for what it excludes. Two exclusions matter most:
   `runtimes/` (live agent logins, now one set per person under `runtimes/users/` — opt in
   with `--include-runtimes`, and then treat the artefact as a secret), and
@@ -324,17 +343,26 @@ rescan refills the projection tables from `projects/`. Users, sessions, sealed P
 audit, notifications, org resources and run history survive. There is no CLI for this
 today — the self-heal path runs it only for a corrupt file — so it is a scripted
 one-off; write it against that module's table list rather than inventing one, and take
-`npm run backup` first either way.
+a backup first either way (the in-container form under *Persistence, backup & restore*,
+or from the host once the container is down).
 
 **Lossy — delete and rebuild.** Simpler, and acceptable on a throwaway or freshly seeded
 root:
 
 ```bash
-npm run backup                       # FIRST — see the cost below
 docker compose down                  # one writer per root; never delete state while it runs
+npm run backup -- --out ./backups    # only now, with nothing writing the root; see the cost below
 rm ./docker-data/state/projection.sqlite*   # -wal and -shm too
 docker compose up -d                 # migrations re-apply, projections rebuild from projects/
 ```
+
+The backup sits below the `down` on purpose. Taken from the host while the container ran,
+it opened the live database across the bind mount (`.env.example` points
+`VIBERR_DATA_ROOT` at `./docker-data`, the very directory compose mounts), which is the
+reader-side hazard under the runbook's
+[Readers, and where they must run](./runbook.md#readers-and-where-they-must-run). To take
+it without stopping first, use the in-container form under *Persistence, backup &
+restore*. *(Corrected 2026-09-04, pass 34 — D34-1.)*
 
 **Name the cost before you run it.** The projection *tables* are derived and rebuild from
 `projects/` at boot — but they share the file with rows that exist nowhere else: users and

@@ -150,8 +150,15 @@ A task owns a PR only if that task opened it (ruling 34). A PR found on the task
 branch that the task does not reference is **adopted only when it is open and its head
 SHA equals the delivered revision** (ruling 35). Refusals: `merged`, `closed`,
 `no_revision`, `head_unknown`, `head_mismatch`. A refused match is a **branch name
-collision** (task keys restart at 1 on a new data root, so `vib-4` on GitHub may still
-carry an old instance's work), recorded as `github.unownedPr` and blocking delivery.
+collision**, recorded as `github.unownedPr` and blocking delivery. Two origins reach it
+and the refusal cannot tell them apart, so neither the note nor this page asserts one: an
+unowned OPEN pull request that appeared on the branch AFTER Viberr allocated the name
+(the case ruling 122(d) keeps the packet for; JC-8 hit it in pass 34), or a branch
+recorded before ruling 122 under a task key an older data root had already used (keys
+restart at 1 on a new data root, so `vib-4` on GitHub may still carry an old instance's
+work; names allocated since take a suffix when the canonical one is spoken for). The
+remedy is the same either way. *(Corrected 2026-09-04, pass 34 — U34-6: this paragraph,
+and the note itself, used to assert the reused-key origin alone.)*
 
 | Remedy | What it does | Gate |
 |---|---|---|

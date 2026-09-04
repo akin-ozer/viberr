@@ -295,25 +295,31 @@ describe("loader", () => {
   it("derives live deployments — VIB-151 crew incl. its running runs (inserted above, not seeded)", async () => {
     const data = await runLoader(ids.arda);
     const vib151 = data.deployments.filter((d) => d.taskKey === "VIB-151");
+    // F34-5: the status is read from each engagement's own run row. The
+    // primary and the r0 reviewer have running rows (beforeAll) and say so; the
+    // operator has none, so it is "on call" even though the task is
+    // agent-waiting.
     expect(vib151.map((d) => [d.profileId, d.engagement, d.status])).toEqual([
-      ["operator", "operator", "coordinating"],
+      ["operator", "operator", "on call"],
       ["developer", "primary", "working"],
-      ["reviewer", "reviewer", "anchored · on call"],
+      ["reviewer", "reviewer", "working"],
     ]);
     // The running claude primary + codex r0 reviewer inserted in beforeAll.
     expect(vib151.find((d) => d.engagement === "primary")!.running).toBe(true);
     expect(vib151.find((d) => d.engagement === "reviewer")!.running).toBe(true);
+    expect(vib151.find((d) => d.engagement === "operator")!.running).toBe(false);
 
     // Done tasks contribute nothing; triage tasks have no operator.
     expect(data.deployments.some((d) => d.taskKey === "VIB-139")).toBe(false);
     expect(data.deployments.some((d) => d.taskKey === "VIB-166")).toBe(false);
 
-    // VIB-142 (review · waiting human): packet open / waiting on human.
+    // VIB-142 (review · waiting human, no runs): packet open / waiting on
+    // human for every engagement kind — the reviewer reads by the same rule.
     const vib142 = data.deployments.filter((d) => d.taskKey === "VIB-142");
     expect(vib142.map((d) => d.status)).toEqual([
       "packet open",
       "waiting on human",
-      "anchored · on call",
+      "waiting on human",
     ]);
   });
 

@@ -194,3 +194,26 @@ cannot rejoin the gap silently — the typecheck refuses it.)*
   and the console explains a withheld one (see
   [../domain/task-lifecycle.md](../domain/task-lifecycle.md), the owner-is-who-a-run-bills
   bullet).
+- **Every Agents Live row states what a run is doing** (F34-5): an engagement's status is
+  read from its own `agent_runs` row first — "coordinating" (operator) and "working" name a
+  running row and are the only rows that pulse, "queued" a run admitted but not yet given a
+  slot — and only an engagement with no live row reads the task's `waiting` ("packet open"
+  with a packet, "waiting on a human", "on call"). The rule is the same for every
+  engagement kind; the mock's "anchored · on call" reviewer literal is gone. The stats row
+  counts runs in flight ("agent threads with a run in flight") and task-level waiting
+  ("agent threads on tasks waiting on a human · this project" — an engagement running on a
+  human-waiting task still counts there). Pinned by
+  `app/server/projections/agent-deployments.server.test.ts`, `agents-page.test.tsx` and
+  `retired-vocabulary.test.tsx`. *(Added 2026-09-04, pass 34 — B3: the projection derived
+  "working" from `waiting === "agent"`, so a deliverer whose run had finished read "working"
+  for as long as the operator's turns kept the task agent-waiting, while the reviewer that
+  was running read idle.)*
+- **The Eligible stages panel says what "N of M stages" gates** (ruling 133 clause c): under
+  the chips it always renders "Eligibility decides where this profile may be newly engaged.
+  Once it delivers a task it may be prompted on that task at any stage." and appends "A
+  supporting or reviewing engagement runs only at the stages above." only for a profile that
+  is actually scoped on this board — not for `spanAll`, an empty declaration, or a
+  declaration that resolves to nothing here (R14-1 rule 3), where naming "the stages above"
+  would name a scope the profile does not have. The profile editor's Eligible stages hint
+  reads "stages where this profile may be newly engaged". Pinned by `agents-page.test.tsx`.
+  *(Added 2026-09-04, pass 34 — A22.)*

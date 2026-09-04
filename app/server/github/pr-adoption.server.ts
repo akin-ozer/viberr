@@ -96,10 +96,22 @@ function refusalCause(input: {
 }
 
 /**
- * The ONE branch-collision sentence, shared by every refusing site so the two
- * symptoms of one cause (a stale branch under a reused task key, and the
- * non-fast-forward push it also produces) read as the same problem instead of
- * two unrelated GitHub mysteries.
+ * The ONE branch-collision note, shared by every refusing site (the poller's
+ * reconcile, the workspace reconcile after a run, PR open) so a refused match
+ * reads as the same problem wherever it surfaces instead of three unrelated
+ * GitHub mysteries.
+ *
+ * It names the two shapes ruling 122(d) keeps the collision packet for and
+ * asserts NEITHER, because a refused match cannot tell them apart: an unowned
+ * OPEN pull request that appeared on the branch AFTER Viberr allocated the
+ * name (pass 34, U34-6: JC-8 hit this one at 10:17:52Z while the note blamed
+ * the other), and a branch recorded before ruling 122 under a task key an
+ * older data root had already used (keys restart at 1; names allocated since
+ * take a suffix when the canonical one is spoken for). The remedy is the same
+ * either way, so the note commits to the remedy and not to a cause.
+ *
+ * The `**Branch name collision:**` opener is the marker the reconciler, the
+ * divergence wake, PR open and their tests key on; keep it byte-identical.
  */
 export function prAdoptionRefusalNote(input: {
   refusal: PrAdoptionRefusal;
@@ -111,10 +123,12 @@ export function prAdoptionRefusalNote(input: {
   return (
     `**Branch name collision:** GitHub already has PR #${input.prNumber} on branch ` +
     `\`${input.branch}\`, but it is NOT ${input.taskKey}'s review PR: ${refusalCause(input)}. ` +
-    `Viberr will not track it as one. This happens when a task key is reused (a new data ` +
-    `root restarts keys at 1) and the old name was already spoken for. Tasks that pick ` +
-    `their branch from now on take a suffixed name instead (ruling 122), so this only ` +
-    `reaches a task whose branch was recorded before that. Resolve it with a ` +
+    `Viberr will not track it as one. Either that pull request was opened on ` +
+    `\`${input.branch}\` after Viberr allocated the name to ${input.taskKey}, or ` +
+    `${input.taskKey}'s branch was recorded before ruling 122 under a task key an older ` +
+    `data root had already used (keys restart at 1; names allocated since take a suffix ` +
+    `when the canonical one is spoken for), and Viberr cannot tell which from here. ` +
+    `Resolve it with a ` +
     `\`resolve_remote_collision\` decision (closes the unrelated PR, deletes the stale ` +
     `remote branch \`${input.branch}\`, and re-delivers this task's work) before delivering.`
   );

@@ -380,15 +380,23 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(getInsightsSummary(empty, NOW).oversight.coordination.share).toBeNull();
   });
 
-  it("computes key↔branch↔PR traceability over tasks with a delivery footprint", () => {
+  it("ruling 143: traceability counts delivered revisions and recorded PRs; an allocated branch alone is not a delivery", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
-    // Traced: branch + PR both recorded.
+    // Traced: a delivered revision with branch + PR both recorded.
     insertTask(db, { key: "VIB-1", branch: "vib-1", prJson: '{"number":9}', revisionSha: "a".repeat(40) });
-    // Delivered but NOT traced: a branch with no PR.
-    insertTask(db, { key: "VIB-2", branch: "vib-2" });
+    // Delivered but NOT traced: a work revision that never reached a PR. It
+    // STAYS in the denominator on purpose — an unpushed delivery is exactly
+    // the untraceable one the metric exists to find.
+    insertTask(db, { key: "VIB-2", branch: "vib-2", revisionSha: "b".repeat(40) });
     // No footprint at all → out of the denominator.
     insertTask(db, { key: "VIB-3" });
+    // Branch only. Ruling 122 allocates the name at first dispatch, before an
+    // agent has written anything, so this task has delivered nothing (JC-7 in
+    // pass 34: "7 of 8 delivered tasks" with this one among the eight).
+    // CANARY: put `|| t.branch != null` back in the denominator and it counts
+    // (3 delivered, 1 traced).
+    insertTask(db, { key: "VIB-4", branch: "vib-4" });
 
     const g = getInsightsSummary(db, NOW).oversight;
     expect(g.traceability.deliveredTasks).toBe(2);

@@ -7,8 +7,10 @@ import {
   CAP_MODAL_CATALOG,
   CAP_MODAL_DEFAULTS,
   MODAL_CAP_IDS,
+  OPERATOR_CAP_IDS,
   OPERATOR_CAP_MODES,
   SPECIALIST_CAP_MODES,
+  capabilityPatchRefusal,
 } from "./capability-catalog";
 import { capabilitiesToActionLabels } from "./agents-query.server";
 
@@ -151,5 +153,87 @@ describe("capabilitiesToActionLabels", () => {
       [],
     );
     expect(buckets.direct).toEqual(["not-a-real-cap"]);
+  });
+});
+
+/**
+ * Ruling 139 (pass 34, F34-2): `capabilityPatchRefusal` refuses by name,
+ * from the catalogue sets alone. Every governed id at a legal mode returns
+ * null; everything else is named with the valid ids.
+ *
+ * Canary: validate against the UNION of both kinds' governed ids and the
+ * "operator id on a specialist" case answers null.
+ */
+describe("capabilityPatchRefusal (ruling 139)", () => {
+  it("every governed id at a legal mode returns null, for both kinds", () => {
+    for (const id of MODAL_CAP_IDS) {
+      const legal = id === "report-validation-verdict"
+        ? (["direct", "off"] as const)
+        : ALWAYS_HUMAN_CAPABILITY_IDS.includes(id)
+          ? (["human"] as const)
+          : (["direct", "human", "off"] as const);
+      for (const mode of legal) {
+        expect(capabilityPatchRefusal("agent", [{ capabilityId: id, mode }]), `${id} ${mode}`).toBeNull();
+      }
+    }
+    for (const id of OPERATOR_CAP_IDS) {
+      for (const mode of ["direct", "recommend", "human", "off"] as const) {
+        expect(capabilityPatchRefusal("operator", [{ capabilityId: id, mode }]), `${id} ${mode}`).toBeNull();
+      }
+    }
+    expect(capabilityPatchRefusal("agent", [])).toBeNull();
+  });
+
+  it("names an unknown id, lists the valid ones and points at list_capabilities; nothing else in the batch is judged first", () => {
+    const refusal = capabilityPatchRefusal("agent", [
+      { capabilityId: "commit-push-branch", mode: "direct" },
+      { capabilityId: "push", mode: "direct" },
+    ])!;
+    expect(refusal).toContain('No capability answers to "push"');
+    expect(refusal).toContain("commit-push-branch");
+    expect(refusal).toContain("list_capabilities");
+    expect(refusal).toContain("Nothing was written");
+  });
+
+  it("an operator id on a specialist (and the reverse) is refused as belonging to the other kind", () => {
+    expect(capabilityPatchRefusal("agent", [{ capabilityId: "dispatch-agents", mode: "direct" }])).toContain(
+      '"dispatch-agents" is an operator capability and cannot be set on a specialist',
+    );
+    expect(capabilityPatchRefusal("operator", [{ capabilityId: "use-browser", mode: "direct" }])).toContain(
+      '"use-browser" is a specialist capability and cannot be set on the operator',
+    );
+  });
+
+  it("a specialist `recommend`, a non-human mode on an always-human id, and a verdict grant at `human` are refused", () => {
+    // Canary (verdict): delete branch (e) and the `human` verdict case answers null.
+    expect(capabilityPatchRefusal("agent", [{ capabilityId: "use-browser", mode: "recommend" }])).toContain(
+      "recommend is an operator-only mode",
+    );
+    expect(capabilityPatchRefusal("agent", [{ capabilityId: "merge-pull-request", mode: "direct" }])).toContain(
+      "reserved for humans",
+    );
+    expect(capabilityPatchRefusal("agent", [{ capabilityId: "report-validation-verdict", mode: "human" }])).toContain(
+      "takes only direct or off",
+    );
+  });
+
+  it("an advisory (matrix-only) id is refused AS matrix-only, never as 'no such id'", () => {
+    // Canary: fold the advisory branch into (a) and the wording assertion fails.
+    const refusal = capabilityPatchRefusal("agent", [{ capabilityId: "approve-review", mode: "direct" }])!;
+    expect(refusal).toContain("matrix-only capability with no toggle");
+    expect(refusal).not.toContain("No capability answers to");
+  });
+
+  it("carries no em or en dash (client-safe copy)", () => {
+    for (const patches of [
+      [{ capabilityId: "push", mode: "direct" as const }],
+      [{ capabilityId: "dispatch-agents", mode: "direct" as const }],
+      [{ capabilityId: "use-browser", mode: "recommend" as const }],
+      [{ capabilityId: "merge-pull-request", mode: "off" as const }],
+      [{ capabilityId: "report-validation-verdict", mode: "human" as const }],
+      [{ capabilityId: "approve-review", mode: "direct" as const }],
+    ]) {
+      expect(capabilityPatchRefusal("agent", patches)).not.toMatch(/[–—]/);
+    }
   });
 });

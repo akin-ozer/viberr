@@ -13,7 +13,7 @@
 
 **Agent account** — one person's connection to one backend, on Profile → Agent accounts (ruling 127). One row per `(user, backend)` in `user_backend_credentials`, replaced when they connect a different way. Three `kind`s: `login` (a hosted sign-in run by the unmodified vendor binary; the credential file lives in that person's runtime home under `runtimes/users/<userId>/`, and Viberr holds no secret at all), `api_key` and `access_token` (a pasted value, sealed, shown only as its last 4 characters). `method` records which vendor flow signed in: `claudeai | console | device`.
 
-**Agent profile / template** — an org-level markdown file `agents/profiles/<id>.md` describing an agent: `kind` (`operator | specialist | controller`), backends, model, effort, eligible stages, resources (skills, MCPs, KBs), persona body. Templates are **deployed** into projects.
+**Agent profile / template** — an org-level markdown file `agents/profiles/<id>.md` describing an agent: `kind` (`operator | specialist | controller`), backends, model, effort, eligible stages (`stages` / `spanAll`: where the profile may be **newly engaged** on a task, resolved per board by R14-1's three steps; ruling 133), resources (skills, MCPs, KBs), persona body. Templates are **deployed** into projects.
 
 **Always-human capabilities** — `merge-pull-request`, `transition-to-done`, `change-project-policy`. A server invariant (`ALWAYS_HUMAN_CAPABILITY_IDS`); no stored grant can hand them to an agent.
 
@@ -47,7 +47,7 @@
 
 **Dispatch** — running a deployed agent on a task (`run_agent` for the operator, `run-agent` intent for humans). Running an unengaged profile **engages** it; delivering iff the task has no deliverer and the profile holds repo-write, supporting otherwise (ruling 98).
 
-**Engagement** — an entry in `task.md` `engagements[]`: `{profileId, backend, role, delivers, verdictCapable, pinnedBackend?}`. At most one has `delivers: true` (the **delivering engagement**, owner of workspace, branch and PR). Others are **supporting engagements**; a supporting engagement with `verdictCapable: true` is a **required reviewer**.
+**Engagement** — an entry in `task.md` `engagements[]`: `{profileId, backend, role, delivers, verdictCapable, pinnedBackend?}`. At most one has `delivers: true` (the **delivering engagement**, owner of workspace, branch and PR). Others are **supporting engagements**; a supporting engagement with `verdictCapable: true` is a **required reviewer**. Stage eligibility gates NEW engagements only (ruling 133): once a profile is the task's delivering engagement it may be prompted or resumed on that task at every stage, while a supporting engagement runs only at the stages its profile declares.
 
 **Goal (chained goal)** — one outcome decomposed into an ordered chain of tasks, canonical at `projects/<slug>/goals/<id>.md` (`status` `active | paused | attention | completed | cancelled`, `onFailure` `pause | continue`, links with `pending | active | done | failed | skipped`). Tasks are created lazily as links complete; each task carries `goalRef`.
 

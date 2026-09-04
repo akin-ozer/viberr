@@ -14,6 +14,7 @@ import {
   encodeRefPath,
   githubFailureMessage,
   type GithubClient,
+  type GithubResponse,
 } from "./github-client.server";
 import {
   getProjectGithubContext,
@@ -88,6 +89,18 @@ type BranchNameProbe =
   | { kind: "auth"; message: string }
   | { kind: "network"; message: string };
 
+/**
+ * Ruling 128: is this ref-read answer "there is no such ref"? A 404, or a 409
+ * whose message says the repository is empty (`Git Repository is empty.`, what
+ * GitHub answers on a repository with no refs at all) — never a network
+ * failure. Shared by the name probe, `ensureTaskBranch` and the bootstrap.
+ */
+export function isMissingRefAnswer(result: GithubResponse<unknown>): boolean {
+  if (result.ok || result.kind !== "http") return false;
+  if (result.status === 404) return true;
+  return result.status === 409 && /empty/i.test(result.message);
+}
+
 async function probeBranchName(
   client: GithubClient,
   repo: string,
@@ -106,7 +119,7 @@ async function probeBranchName(
   if (ref.kind === "http" && ref.status === 403) {
     return { kind: "forbidden", what: `Reading branch \`${branch}\` was refused.` };
   }
-  if (!(ref.kind === "http" && ref.status === 404)) {
+  if (!isMissingRefAnswer(ref)) {
     return { kind: "network", message: githubFailureMessage(ref) };
   }
 

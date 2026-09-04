@@ -126,3 +126,35 @@ export function decodeActorRef(raw: string): FileActorRef {
 export function agentBackendName(backend: "codex" | "claude"): string {
   return backend === "codex" ? "Codex" : "Claude";
 }
+
+
+// ------------------------------------- the controller instrument (pass 34)
+
+/** Ruling 99(b): an audit row written by a person THROUGH the controller
+ *  carries the instrument in its `actor_label`. ONE vocabulary for the two
+ *  producers (the controller run and its tool guards) and the one reader (the
+ *  Activity page's audit column, U34-4). */
+const CONTROLLER_INSTRUMENT_SUFFIX = " · via controller";
+
+export function encodeControllerInstrument(label: string): string {
+  return `${label}${CONTROLLER_INSTRUMENT_SUFFIX}`;
+}
+
+export interface ControllerInstrument {
+  /** The person's own label (the email), with the suffix removed. */
+  label: string;
+  /** True when the row was written through the controller. */
+  viaController: boolean;
+}
+
+/** Split an audit `actor_label` into the person's own label and whether the
+ *  controller was the instrument. A label without the suffix decodes as itself. */
+export function decodeControllerInstrument(raw: string): ControllerInstrument {
+  if (raw.endsWith(CONTROLLER_INSTRUMENT_SUFFIX)) {
+    return {
+      label: raw.slice(0, raw.length - CONTROLLER_INSTRUMENT_SUFFIX.length),
+      viaController: true,
+    };
+  }
+  return { label: raw, viaController: false };
+}

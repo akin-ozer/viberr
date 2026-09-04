@@ -7,8 +7,11 @@ import type {
   ClaudeQueryOptions,
 } from "./claude-runtime.server";
 import {
+  assertEffortForBackend,
+  assertModelForBackend,
   claudeProbeOptions,
   curatedCatalog,
+  effortsFor,
   defaultEffortFor,
   defaultModelFor,
   foreignModelBackend,
@@ -500,5 +503,40 @@ describe("foreignModelBackend (F21-13)", () => {
     expect(foreignModelBackend("codex", "gpt-9-imaginary")).toBeNull();
     expect(foreignModelBackend("claude", "")).toBeNull();
     expect(foreignModelBackend("claude", null)).toBeNull();
+  });
+});
+
+/**
+ * Ruling 139 (pass 34, G34-1): the save-time effort/model assertions the
+ * controller's typed write surfaces and the profile editor share.
+ *
+ * Canary: route `assertEffortForBackend` through `resolveRunEffort` (clamp
+ * instead of refuse) and the refusal cases answer nothing.
+ */
+describe("assertEffortForBackend / assertModelForBackend (ruling 139)", () => {
+  it("accepts every tier the backend offers and refuses the rest by name, listing the tiers", () => {
+    for (const backend of ["claude", "codex"] as const) {
+      for (const tier of effortsFor(backend)) {
+        expect(() => assertEffortForBackend(backend, tier)).not.toThrow();
+      }
+    }
+    expect(() => assertEffortForBackend("codex", "max")).toThrow(
+      /"max" is not an effort tier Codex offers\. Codex takes: low, medium, high, xhigh\./,
+    );
+    expect(() => assertEffortForBackend("claude", "ultra")).toThrow(/Claude takes: low, medium, high, xhigh, max/);
+    expect(() => assertEffortForBackend("claude", "")).toThrow(/"\(empty\)" is not an effort tier/);
+    // Codex `minimal` is accepted at run time but NOT offered: the write
+    // surfaces refuse it; the editor only refuses it when CHANGED (A34).
+    expect(() => assertEffortForBackend("codex", "minimal")).toThrow();
+  });
+
+  it("refuses a model the OTHER backend recognises, with the F21-13 sentence, and passes an open Claude id", () => {
+    expect(() => assertModelForBackend("claude", "gpt-5.6-terra")).toThrow(
+      /GPT-5\.6 Terra is a Codex model\. Claude cannot run it\. Pick a model from the Claude list\./,
+    );
+    expect(() => assertModelForBackend("codex", "opus")).toThrow(/is a Claude model\. Codex cannot run it/);
+    expect(() => assertModelForBackend("claude", "claude-sonnet-4-5")).not.toThrow();
+    expect(() => assertModelForBackend("claude", "opus[1m]")).not.toThrow();
+    expect(() => assertModelForBackend("codex", "gpt-5.6-terra")).not.toThrow();
   });
 });

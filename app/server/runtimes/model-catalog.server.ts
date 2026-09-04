@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { AppError } from "~/server/errors/app-error.server";
 import { logger } from "~/server/logging/logger.server";
 import { DATED_CLAUDE_ID_RE } from "~/shared/model-ids";
 import type { RunCredential } from "./backend-credentials.server";
@@ -192,6 +193,53 @@ export function defaultModelFor(backend: RealBackend): string {
 /** The default reasoning effort for a backend (from the curated catalog). */
 export function defaultEffortFor(backend: RealBackend): string {
   return (backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED).defaultEffort;
+}
+
+/** Display names for the refusal sentences below. */
+const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const satisfies Record<RealBackend, string>;
+
+/** The effort tiers a backend OFFERS (the curated list; Codex's accepted but
+ *  unoffered `minimal` is deliberately absent, see `CODEX_EFFORTS`). */
+export function effortsFor(backend: RealBackend): readonly string[] {
+  return (backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED).efforts;
+}
+
+/**
+ * Ruling 139 (pass 34, G34-1): refuse an effort tier the backend does not
+ * list, BY NAME, at save time. `resolveRunEffort` clamps an unknown tier at
+ * run time, which is the same silent substitution F21-13 closed for models:
+ * the controller answered `[done]` for an `effort: "max"` it had stripped, and
+ * a Codex deployment saved with `max` would have run `xhigh`. Lives on the
+ * write surfaces that take a typed argument (`deploy_agent`,
+ * `update_agent_deployment`) and, for a CHANGED value only, in the profile
+ * editor: an unconditional refusal there would make a deployment storing a
+ * legitimately preserved tier (Codex `minimal`) unsaveable.
+ */
+export function assertEffortForBackend(backend: RealBackend, effort: string): void {
+  const e = effort.trim();
+  const tiers = effortsFor(backend);
+  if (tiers.includes(e)) return;
+  throw AppError.validation(
+    `"${e || "(empty)"}" is not an effort tier ${BACKEND_LABEL[backend]} offers. ` +
+      `${BACKEND_LABEL[backend]} takes: ${tiers.join(", ")}.`,
+  );
+}
+
+/**
+ * Ruling 139: the F21-13 check, extracted so the controller's typed write
+ * surfaces and the profile editor refuse a foreign model with ONE sentence.
+ * Only a model the OTHER backend recognises is refused: the Claude catalogue is
+ * open (a dated id or a live-only id passes), so "unknown here" alone is not
+ * evidence of a mistake.
+ */
+export function assertModelForBackend(backend: RealBackend, model: string): void {
+  const foreign = foreignModelBackend(backend, model);
+  if (!foreign) return;
+  throw AppError.validation(
+    `${modelDisplayName(foreign, model)} is a ${BACKEND_LABEL[foreign]} model. ` +
+      `${BACKEND_LABEL[backend]} cannot run it. Pick a model from the ` +
+      `${BACKEND_LABEL[backend]} list.`,
+  );
 }
 
 // The dated-id rule lives in ~/shared/model-ids (ruling 106 review, D1): the

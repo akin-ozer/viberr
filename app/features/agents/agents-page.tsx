@@ -487,6 +487,16 @@ function DeleteConfirm({
  * then structural role, then "means nothing here → unrestricted". Re-deriving
  * it locally is what made the panel and the run guard disagree in the first
  * place, so this panel now asks the same function the guard does.
+ *
+ * Ruling 133 (F34-16): the chips and the count said WHERE without saying what
+ * the where gates. Eligibility decides where a profile may be NEWLY engaged;
+ * the task's delivering engagement, once made, may be prompted or resumed on
+ * that task at every stage (rework, conflict resolution, follow-ups), while a
+ * supporting engagement stays stage-scoped. The panel states the first half
+ * always and the scoping half only for a profile that is actually scoped here
+ * — for `spanAll`, an empty list, or a list that resolves to nothing on this
+ * board, "the stages above" would name a scope that does not exist and
+ * contradict the R14-1 note two lines below.
  */
 export function StageEligibility({
   a,
@@ -551,6 +561,12 @@ export function StageEligibility({
           </span>
         ))}
       </div>
+      <p className="fine sm">
+        Eligibility decides where this profile may be newly engaged. Once it
+        delivers a task it may be prompted on that task at any stage.
+        {!unrestricted &&
+          " A supporting or reviewing engagement runs only at the stages above."}
+      </p>
       {/* R14-1: a declaration that resolves to nothing here no longer disables
           the profile — silently disabling every agent on a re-templated board is
           the failure we actually observed (Lightweight Lab, ids todo/doing/done).
@@ -1128,16 +1144,16 @@ const ENGAGEMENT_ORDER = { operator: 0, primary: 1, reviewer: 2 } as const;
 export function AgentStats({
   profiles,
   operators,
-  working,
+  running,
   waiting,
 }: {
   /** Approved profiles on this project, operator included. */
   profiles: number;
   /** Operator ENGAGEMENTS — one per active task. */
   operators: number;
-  /** Engagements whose status is `working`. */
-  working: number;
-  /** Engagements parked on a human (waiting, or holding an open packet). */
+  /** Engagements with a run in flight (`d.running`, F34-5). */
+  running: number;
+  /** Engagements on a task whose `waiting` is `human` (`d.taskWaiting`). */
   waiting: number;
 }) {
   return (
@@ -1155,13 +1171,14 @@ export function AgentStats({
         <div className="l">tasks with a live operator</div>
       </div>
       <div className="ag-stat">
-        <div className="n agent">{working}</div>
+        <div className="n agent">{running}</div>
         {/* U12: this read "specialists in a working state" — the retired noun,
             on the page whose own comment says the word is dropped. What is
-            counted is ENGAGEMENTS in a working state, the same unit the
-            "waiting on a human" stat beside it counts, so it says the same
-            word for it. */}
-        <div className="l">agent threads in a working state</div>
+            counted is ENGAGEMENTS, the same unit the "waiting on a human" stat
+            beside it counts, so it says the same word for it. F34-5: "in a
+            working state" was the task's `waiting` flag wearing a run's
+            clothes; the number is now runs in flight, and the label says so. */}
+        <div className="l">agent threads with a run in flight</div>
       </div>
       <div className="ag-stat">
         <div className="n human">{waiting}</div>
@@ -1169,8 +1186,10 @@ export function AgentStats({
             THIS project, while the board counted tasks and Home counted the
             viewer's own decisions org-wide — three different questions with
             near-identical copy, side by side in one session. Each surface now
-            names its own scope. */}
-        <div className="l">agent threads waiting on a human · this project</div>
+            names its own scope. F34-5: the waiting is the TASK's (an engagement
+            can be running on a task that waits on a human), so the label names
+            the task as the thing that waits. */}
+        <div className="l">agent threads on tasks waiting on a human · this project</div>
       </div>
     </div>
   );
@@ -1463,10 +1482,17 @@ export function AgentsPage({
   );
 
   const operators = deployments.filter((d) => d.engagement === "operator").length;
-  const working = deployments.filter((d) => d.status === "working").length;
-  const waiting = deployments.filter(
-    (d) => d.status === "waiting on human" || d.status === "packet open",
-  ).length;
+  // F34-5: runs in flight, the same claim the sidebar pulse and the profile
+  // hero make (`counts` above, F26-2). This counted `status === "working"`
+  // back when the projection derived that word from the task's `waiting`
+  // flag, so the card read "5 agent threads in a working state" with one run
+  // alive; the status is run-derived now, and `running` is the fact itself.
+  const running = deployments.filter((d) => d.running).length;
+  // The waiting count is TASK-level on purpose: an engagement whose run is in
+  // flight on a human-waiting task now says "working" (F34-5), and counting
+  // by status would silently drop it here. `taskWaiting` is the task's own
+  // flag, and the label says whose waiting it is.
+  const waiting = deployments.filter((d) => d.taskWaiting === "human").length;
 
   const onOpen = (taskKey: string) =>
     navigate(`/projects/${projectSlug}/tasks/${taskKey}`);
@@ -1635,7 +1661,7 @@ export function AgentsPage({
       <AgentStats
         profiles={profiles.length}
         operators={operators}
-        working={working}
+        running={running}
         waiting={waiting}
       />
 

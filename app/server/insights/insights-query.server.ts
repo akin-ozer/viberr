@@ -64,8 +64,16 @@ export interface OversightSummary {
   /** Active (non-archived, non-terminal-stage) tasks with a definite next
    *  actor: `waiting` names human/agent, or a human owns the task. */
   clarity: { activeTasks: number; clearTasks: number; pct: number | null };
-  /** Of tasks with any delivery footprint (revision/branch/PR), how many carry
-   *  BOTH the task-key branch and a recorded PR — the key↔branch↔PR chain. */
+  /** Of DELIVERED tasks — a delivered work revision or a recorded PR — how
+   *  many carry BOTH the task branch and a recorded PR, the key↔branch↔PR
+   *  chain (ruling 143). An allocated branch alone is NOT a delivery: ruling
+   *  122 names the branch at first dispatch, before an agent has written
+   *  anything, so counting it grew the denominator to every task that ever
+   *  engaged a deliverer (pass 34, U34-9: "7 of 8 delivered tasks" while one
+   *  of the eight had delivered nothing). The residue is deliberate: a
+   *  delivered revision with NO pull request stays in the denominator,
+   *  because an unpushed delivery is exactly the untraceable one this number
+   *  exists to find. */
   traceability: { deliveredTasks: number; tracedTasks: number; pct: number | null };
   /** How long an operator-opened decision/blocked packet waits for the human,
    *  from the packet-opened audit row to its task's next packet-resolved row. */
@@ -323,9 +331,11 @@ function oversightSummary(
     (t) => t.waiting !== "none" || t.owner_user_id != null,
   ).length;
 
-  // 2. Key↔branch↔PR traceability over tasks with any delivery footprint.
+  // 2. Key↔branch↔PR traceability over DELIVERED tasks: a delivered revision
+  // or a recorded PR. A branch alone is not a delivery — ruling 122 allocates
+  // the name at first dispatch, before any work exists (ruling 143, U34-9).
   const delivered = tasks.filter(
-    (t) => t.work_revision_sha != null || t.branch != null || t.pr_json != null,
+    (t) => t.work_revision_sha != null || t.pr_json != null,
   );
   const traced = delivered.filter(
     (t) => t.branch != null && t.pr_json != null,

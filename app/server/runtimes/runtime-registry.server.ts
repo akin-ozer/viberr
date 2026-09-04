@@ -7,6 +7,7 @@ import {
   createCodexAdapter,
   type CodexFactory,
 } from "./codex-runtime.server";
+import { ENV_KEYS } from "~/server/config/env.server";
 
 /**
  * Runtime registry: constructs the two provider adapters and hands one back
@@ -29,7 +30,9 @@ import {
  *    Both adapters are built on a base env with EVERY credential-shaped
  *    variable stripped, so a child process starts from a blank credential
  *    slate and sees only what the run service explicitly adds for its
- *    principal.
+ *    principal — and, since ruling 142, with every name the app's own env
+ *    schema declares stripped too ({@link APP_CONFIG_ENV}), so the child
+ *    never sees this server's configuration either.
  *  - {@link createAdapters} / {@link selectAdapter} — construction and lookup.
  */
 
@@ -68,14 +71,49 @@ const PRIVATE_RUNTIME_ENV_RE =
 const RUNTIME_HOME_ENV_RE = /^(?:CLAUDE_CONFIG_DIR|CODEX_HOME)$/;
 
 /**
- * The server's environment with every credential-shaped and private-runtime
- * variable removed — the base both adapters spawn on.
+ * Ruling 142 (pass 34, U34-7): the app's OWN configuration, stripped for a
+ * different reason than the credentials.
+ *
+ * `ENV_KEYS` is every name the env schema declares — `NODE_ENV`, `PORT`,
+ * `VIBERR_DATA_ROOT`, `BETTER_AUTH_URL`, the OAuth client ids, the unlock
+ * flags, every `VIBERR_*` knob. None of it is a secret; it is simply not the
+ * child's. An agent works in the PROJECT's repository and a stdio MCP server
+ * is somebody else's program: the container's `NODE_ENV=production` and
+ * `PORT=5173` rode into a Developer run's shell and broke the project's own
+ * `vitest` and `next start` until the agent unset them by hand. Every
+ * JavaScript project's tooling reads exactly those two names, and the rest of
+ * the list is one grep away from the same surprise.
+ *
+ * Keyed on the schema rather than a hand-written list so a knob added there is
+ * excluded the same day; the "no undeclared env reads" gate
+ * (`env.server.test.ts`) is what keeps the schema — and so this set — complete.
+ * A name the schema does NOT declare still passes: PATH, HOME, locale, proxies,
+ * the image's `UV_*` caches and the `LOG_LEVEL` / `VIBERR_E2E_*` /
+ * `VIBERR_CLAUDE_TEST_MARKER` reads the gate allows are not Viberr's
+ * configuration, and a child may legitimately need them. Nothing a child needs
+ * comes from a declared name: `VIBERR_BROWSER_EXECUTABLE`, the one knob a
+ * child's tool depends on, is read by the PARENT and handed to the browser MCP
+ * as argv (`specialist-browser-mcp.server.ts`); the agent toolkit and the
+ * controller's `viberr_ops` mount are in-process SDK servers that read the
+ * validated env themselves.
+ */
+const APP_CONFIG_ENV: ReadonlySet<string> = new Set(ENV_KEYS);
+
+/**
+ * The server's environment with every credential-shaped, private-runtime and
+ * app-configuration variable removed — the base both adapters spawn on, and
+ * the base every stdio MCP child (`mcpSpawnEnv`) and the sign-in driver
+ * (`backend-login.server.ts`) start from.
  *
  * Both SDKs REPLACE the child env with the object they are handed (verified in
  * the bundled `sdk.mjs`: `env = options.env` when provided), so this filtering
  * is real, not advisory. Ordinary runtime settings (PATH/HOME/locale/proxy)
  * survive so stdio MCP servers (`npx …`) and the CLIs' own machinery keep
- * working; nothing that looks like a secret does.
+ * working; nothing that looks like a secret does, and nothing the app's env
+ * schema declares does either (ruling 142, {@link APP_CONFIG_ENV}): the rule is
+ * "every declared name is stripped, an undeclared name passes", so the child
+ * never inherits this server's `NODE_ENV`, `PORT` or data root, while a
+ * name the schema does not know is by definition not Viberr's configuration.
  *
  * Ruling 127: this base carries NO provider credential and NO home — the
  * credential names go by {@link CREDENTIAL_ENV_RE}, the two home names by
@@ -93,7 +131,8 @@ export function filteredSpawnEnv(): Record<string, string> {
         entry[1] !== undefined &&
         !CREDENTIAL_ENV_RE.test(entry[0]) &&
         !PRIVATE_RUNTIME_ENV_RE.test(entry[0]) &&
-        !RUNTIME_HOME_ENV_RE.test(entry[0]),
+        !RUNTIME_HOME_ENV_RE.test(entry[0]) &&
+        !APP_CONFIG_ENV.has(entry[0]),
     ),
   );
 }

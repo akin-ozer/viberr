@@ -2189,6 +2189,57 @@ by rewriting those paragraphs:*
     `run-principal.server.ts`, `backend-login.server.ts`; the surface is Profile → Agent accounts
     with the poll route `/resources/backend-login`.)
 
+142. **A run's shell carries none of Viberr's own configuration (2026-09-04, pass 34 U34-7).**
+    Ruling 127 built the spawn base around what a child must not learn about OTHER people's
+    credentials. Pass 34 found the other half: the base still handed every child this server's
+    own runtime settings. The JC-6 Developer run saw `NODE_ENV=production` and `PORT=5173`,
+    which broke `vitest` and `next start` inside a repository whose tooling reads exactly those
+    names, and the agent had to unset them by hand. An agent works in the project's repository,
+    not in Viberr's process, and a registered stdio MCP server is somebody else's program, so
+    `filteredSpawnEnv` now also strips **every name the env schema declares** (`ENV_KEYS`:
+    `NODE_ENV`, `PORT`, `VIBERR_DATA_ROOT`, `BETTER_AUTH_URL`, the OAuth client ids,
+    `VIBERR_TRUST_PROXY`, the unlock flags and every other `VIBERR_*` knob), keyed on the schema
+    rather than a hand-written list so a knob declared tomorrow is stripped tomorrow. The rule is
+    the mechanism, not a list: a declared name is stripped whatever its value (an empty string
+    included); a name the schema does NOT declare still passes, which is safe precisely because
+    the "no undeclared env reads" gate (`env.server.test.ts`) keeps the schema complete, and the
+    few undeclared reads it allows are either credential-shaped and stripped by the regex
+    (`VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`) or harmless in a child (`LOG_LEVEL`,
+    `VIBERR_E2E_*`, the test markers). Ordinary host settings (PATH, HOME, locale, proxies) and
+    the image's deliberate agent-facing `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` survive.
+    Nothing a child needs comes from a declared name: `VIBERR_BROWSER_EXECUTABLE` is read by the
+    server and handed to the browser MCP as `--executable-path`, and the agent toolkit and the
+    controller's `viberr_ops` mount are in-process SDK servers. The same base serves every
+    spawned stdio MCP child (`mcpSpawnEnv`), the hosted sign-in driver and the vendor logout, so
+    all of them lose the server's configuration in the same change. The
+    `docs/operations/configuration.md` sentence claiming the runtime "never inherits its own
+    environment" becomes true instead of aspirational, with a dated correction. The three
+    existing exclusions (`CREDENTIAL_ENV_RE`, the private-runtime names, both vendor homes) are
+    unchanged. Extends ruling 127. (`APP_CONFIG_ENV` / `filteredSpawnEnv` in
+    `app/server/runtimes/runtime-registry.server.ts`; `ENV_KEYS` in
+    `app/server/config/env.server.ts`.)
+
+143. **An allocated branch is not a delivery (2026-09-04, pass 34 U34-9).** Ruling 122
+    moved branch naming to allocation time, at first dispatch, before an agent has
+    written anything. The Insights traceability metric had been counting "has a branch"
+    as delivery footprint since before that ruling, so its denominator quietly grew to
+    include every task that ever engaged a deliverer: live in pass 34 the card read
+    "7 of 8 delivered tasks carry branch + PR" while one of the eight, JC-7, had
+    delivered nothing at all. The PRD's outcome is about executed tasks. The denominator
+    is therefore tasks carrying a delivered work revision or a recorded pull request; a
+    delivered revision with no pull request stays in it on purpose, because an unpushed
+    delivery is exactly an untraceable one. The numerator stays branch AND pull request,
+    which is what makes an untraceable delivery visible. A task whose only footprint is
+    the allocated branch is out of both, and the test pins that fixture explicitly
+    (`VIB-4` in `insights-query.server.test.ts`: branch only, must not count). The card's
+    own subline, "N of M delivered tasks carry branch + PR", does not change: with this
+    denominator it is finally true. This is a consequence of ruling 122 recorded where
+    a number a person reads changed. (`getInsightsSummary` and the
+    `OversightSummary.traceability` comment in
+    `app/server/insights/insights-query.server.ts`; the prose definition in
+    `docs/domain/auth-and-rbac.md` §6.)
+
+
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates
 that pass and remains unnumbered.)*

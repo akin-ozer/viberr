@@ -697,7 +697,7 @@ function StagesField({
     <div className="field" role="group" aria-labelledby={capId}>
       <span className="flabel" id={capId}>
         Eligible stages<span className="req">*</span>
-        <span className="fhint">stages this profile may work in</span>
+        <span className="fhint">stages where this profile may be newly engaged</span>
       </span>
       <div className="pick-chips">
         {stages.map((s) => (

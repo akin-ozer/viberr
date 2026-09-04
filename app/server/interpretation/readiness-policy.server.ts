@@ -27,24 +27,42 @@ import {
 
 export interface ReadinessDerivation {
   readiness: Readiness;
-  /** True when diagnostics forced a worse value than the stored one. */
+  /** True when a floor forced a worse value than the stored one. */
   downgraded: boolean;
   /** The floor imposed by diagnostics, when any. */
   diagnosticsFloor: Readiness | null;
+  /** Ruling 131: the floor imposed by a non-empty `blockedBy` list (`blocked`),
+   *  or null when the task waits on nothing. */
+  dependencyFloor: Readiness | null;
 }
 
 export function deriveReadiness(input: {
   /** Parsed stored readiness; null when missing/invalid in the file. */
   storedReadiness: Readiness | null;
   diagnostics: FileDiagnostic[];
+  /** Ruling 131 (pass 34): the task's `blockedBy` list is non-empty. While it
+   *  is, readiness floors at `blocked` (rank 3, so it can never IMPROVE a
+   *  stored value): the task waits on other work and nothing on it should
+   *  read as ready. The list's states are resolved at read time; the floor
+   *  reads only that a list exists. Optional so the parse-only callers keep
+   *  their shape. */
+  dependenciesListed?: boolean;
 }): ReadinessDerivation {
   const stored: Readiness = input.storedReadiness ?? "ready";
-  const floor = worstReadinessEffect(input.diagnostics);
+  const diagnosticsFloor = worstReadinessEffect(input.diagnostics);
+  const dependencyFloor: Readiness | null = input.dependenciesListed ? "blocked" : null;
+  const floors = [diagnosticsFloor, dependencyFloor].filter(
+    (f): f is Readiness => f !== null,
+  );
+  const floor =
+    floors.length === 0
+      ? null
+      : floors.reduce((worst, f) => (READINESS_RANK[f] > READINESS_RANK[worst] ? f : worst));
 
   if (floor && READINESS_RANK[floor] > READINESS_RANK[stored]) {
-    return { readiness: floor, downgraded: true, diagnosticsFloor: floor };
+    return { readiness: floor, downgraded: true, diagnosticsFloor, dependencyFloor };
   }
-  return { readiness: stored, downgraded: false, diagnosticsFloor: floor };
+  return { readiness: stored, downgraded: false, diagnosticsFloor, dependencyFloor };
 }
 
 /**

@@ -238,6 +238,16 @@ duration, a 30-day daily chart, oversight metrics (owner clarity, branch and PR
 traceability, packet resolution times from audit rows, time to review, long
 timelines) and the latest backend quota readings. Read-only; nothing here writes.
 
+Branch and PR traceability counts, over the tasks that have **delivered** (a delivered
+work revision or a recorded pull request), how many carry both the task branch and a
+recorded PR. An allocated branch alone is not a delivery: ruling 122 names the branch at
+first dispatch, before an agent has written anything, so a task that only ever engaged a
+deliverer stays out of the denominator (ruling 143). A delivered revision with no PR
+stays in it on purpose; an unpushed delivery is exactly the untraceable one the number
+exists to show. *(Corrected 2026-09-04, pass 34 — U34-9: the denominator used to admit
+any task with a branch, and the card read "7 of 8 delivered tasks carry branch + PR"
+while one of the eight had delivered nothing.)*
+
 ## 7. Profile and preferences (`/profile`)
 
 Identity (name, title; audit `profile.updated`), notification routing (six in-app
