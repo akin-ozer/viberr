@@ -6,12 +6,15 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { createNotification } from "~/server/projections/notifications.server";
+import {
+  createNotification,
+  listNotifications,
+} from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import type { ParsedTaskFile, Recommendation } from "~/schemas/task-file.schema";
-import {
-  recordRecommendationWithdrawal,
+import {  recordRecommendationWithdrawal,
   withdrawAcceptanceOffers,
+  notifyOwnerSeatChange,
 } from "./task-mutation.server";
 
 /**
@@ -128,5 +131,56 @@ describe("recordRecommendationWithdrawal", () => {
     recordRecommendationWithdrawal(store.db, { projectSlug: store.slug, taskKey: "JC-3", withdrawal: w3, cause: { kind: "packet", title: "t" }, actor });
     expect(unread()).toBe(1);
     expect(listAuditEvents(store.db).filter((e) => e.action === "task.recommendation.withdrawn")).toHaveLength(2);
+  });
+});
+
+/**
+ * Ruling 140(b) (pass 34, U34-11): the seat-change notifier never writes a row
+ * to the person who performed the act, and fails OPEN when the store refuses.
+ */
+describe("notifyOwnerSeatChange", () => {
+  it("writes the row for someone else, and NOTHING for the actor themselves", () => {
+    // Canary: drop the `recipientUserId === actor.userId` guard — the actor
+    // gets a row telling them about their own act.
+    const store = setupTestStore(ctx);
+    const actor = { userId: store.users.arda.id, label: store.users.arda.email };
+    const told = notifyOwnerSeatChange(store.db, {
+      projectSlug: store.slug,
+      recipientUserId: store.users.murat.id,
+      actor,
+      actorName: "Arda",
+      change: { kind: "handed_off", taskKey: "JC-3" },
+    });
+    expect(told).toEqual({ userId: store.users.murat.id });
+    const row = listNotifications(store.db, store.users.murat.id).find((n) => n.kind === "ownership")!;
+    expect(row.title).toBe("Arda handed you JC-3");
+    expect(row.taskKey).toBe("JC-3");
+
+    const self = notifyOwnerSeatChange(store.db, {
+      projectSlug: store.slug,
+      recipientUserId: store.users.arda.id,
+      actor,
+      actorName: "Arda",
+      change: { kind: "taken_over", taskKey: "JC-3" },
+    });
+    expect(self).toBeNull();
+    expect(
+      listNotifications(store.db, store.users.arda.id).filter((n) => n.kind === "ownership"),
+    ).toHaveLength(0);
+  });
+
+  it("fails OPEN when the store refuses the row, and says the write failed", () => {
+    // Canary: let the throw escape — a mutation that already landed would fail
+    // on its notification.
+    const store = setupTestStore(ctx);
+    store.db.exec(`DROP TABLE notifications`);
+    const answer = notifyOwnerSeatChange(store.db, {
+      projectSlug: store.slug,
+      recipientUserId: store.users.murat.id,
+      actor: { userId: store.users.arda.id, label: store.users.arda.email },
+      actorName: "Arda",
+      change: { kind: "admin_released", taskKey: "JC-3" },
+    });
+    expect(answer).toEqual({ skipped: "failed" });
   });
 });

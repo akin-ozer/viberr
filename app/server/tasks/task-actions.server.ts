@@ -122,6 +122,7 @@ import {
   withdrawAcceptanceOffers,
   type OfferWithdrawalSlot,
   type OfferWithdrawalCause,
+  notifyOwnerSeatChange,
 } from "./task-mutation.server";
 import {
   createTaskFile,
@@ -705,6 +706,24 @@ export async function createTask(
   });
   reprojectTask(db, ctx, input.projectSlug, key);
 
+  // Ruling 140(b): a creation that seats someone ELSE tells them, in the same
+  // shape a hand-off uses; the audit row then says whether they were told.
+  const createdDetails: NonNullable<AuditEventInput["details"]> = {
+    title,
+    stage: stageId,
+    ownerUserId: frontmatter.ownerUserId,
+    seat,
+  };
+  if (seat === "named" && namedOwnerId && creator) {
+    const seatNotified = notifyOwnerSeatChange(db, {
+      projectSlug: input.projectSlug,
+      recipientUserId: namedOwnerId,
+      actor: creator,
+      actorName: userName(db, creator.userId),
+      change: { kind: "seated_at_creation", taskKey: key },
+    });
+    if (seatNotified) createdDetails.notified = seatNotified;
+  }
   recordAudit(db, {
     action: "task.created",
     actor: { userId: actor.userId, label: actor.label },
@@ -712,7 +731,7 @@ export async function createTask(
     subjectId: key,
     projectSlug: input.projectSlug,
     taskKey: key,
-    details: { title, stage: stageId, ownerUserId: frontmatter.ownerUserId, seat },
+    details: createdDetails,
   });
 
   // A dedicated operator coordinates every active task (ADR-002): auto-invoke
@@ -4452,6 +4471,27 @@ export async function setOwner(
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
+  // Ruling 140(b): tell the person whose seat changed — the new owner on a
+  // hand-off, the DISPLACED owner on a takeover. Losing the seat takes away
+  // the credential principal role, the review duty and the acceptance
+  // authority, so it is not a smaller fact than gaining it. Nobody is told
+  // about their own act. The notifier runs BEFORE the audit row so the row can
+  // say whether the person was told, and why not when they were not.
+  const seatRecipient = isTake ? currentOwnerId : input.targetUserId;
+  const notified = seatRecipient
+    ? notifyOwnerSeatChange(db, {
+        projectSlug: input.projectSlug,
+        recipientUserId: seatRecipient,
+        actor,
+        actorName: userName(db, actor.userId),
+        change: { kind: isTake ? "taken_over" : "handed_off", taskKey: input.taskKey },
+      })
+    : null;
+  const ownershipDetails: NonNullable<AuditEventInput["details"]> = {
+    previousOwnerUserId: currentOwnerId,
+    newOwnerUserId: input.targetUserId,
+  };
+  if (notified) ownershipDetails.notified = notified;
   recordAudit(db, {
     action: isTake ? "task.ownership.taken" : "task.ownership.handed_off",
     actor: { userId: actor.userId, label: actor.label },
@@ -4459,10 +4499,7 @@ export async function setOwner(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: {
-      previousOwnerUserId: currentOwnerId,
-      newOwnerUserId: input.targetUserId,
-    },
+    details: ownershipDetails,
   });
 
   // Ownership is a human bookkeeping action (claiming the review/acceptance
@@ -4536,6 +4573,22 @@ export async function releaseOwner(
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
+  // Ruling 140(b): an ADMIN release takes the seat away from someone; they are
+  // told, in the same shape a hand-off uses. A self-release notifies nobody.
+  const releaseNotified = isSelf
+    ? null
+    : notifyOwnerSeatChange(db, {
+        projectSlug: input.projectSlug,
+        recipientUserId: currentOwnerId,
+        actor,
+        actorName: userName(db, actor.userId),
+        change: { kind: "admin_released", taskKey: input.taskKey },
+      });
+  const releaseDetails: NonNullable<AuditEventInput["details"]> = {
+    previousOwnerUserId: currentOwnerId,
+    forced: !isSelf,
+  };
+  if (releaseNotified) releaseDetails.notified = releaseNotified;
   recordAudit(db, {
     action: isSelf ? "task.ownership.released" : "task.ownership.admin_released",
     actor: { userId: actor.userId, label: actor.label },
@@ -4543,7 +4596,7 @@ export async function releaseOwner(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: { previousOwnerUserId: currentOwnerId, forced: !isSelf },
+    details: releaseDetails,
   });
 
   return summaryOrThrow(db, input.projectSlug, input.taskKey);

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { listNotifications } from "~/server/projections/notifications.server";
 import type { DatabaseSync } from "node:sqlite";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import { describeRevisionDrift } from "~/shared/revision-drift";
@@ -4063,5 +4064,143 @@ describe("ruling 140(a): a named owner at creation", () => {
       "A named owner is seated by a person; an operator-created task starts unowned.",
     );
     expect(listAuditEvents(store.db).length).toBe(before);
+  });
+});
+
+/**
+ * Ruling 140(b) (pass 34, U34-11): the person whose owner seat changed is
+ * told. Under ruling 127 the seat is the credential principal and the
+ * acceptance authority, so Omar learned he owned JC-15 from the failure packet
+ * his missing credential produced.
+ */
+describe("ruling 140(b): a seat change notifies the person whose seat it is", () => {
+  const ownershipRows = (store: TestStore, userId: string) =>
+    listNotifications(store.db, userId).filter((n) => n.kind === "ownership");
+
+  it("a hand-off tells the new owner; a takeover tells the DISPLACED owner; the actor is never told", async () => {
+    // Canary: delete the notifier call in the hand-off branch of setOwner.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.murat.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const handed = ownershipRows(store, store.users.murat.id);
+    expect(handed).toHaveLength(1);
+    expect(handed[0]!.title).toContain(`${store.users.arda.name} handed you VIB-1`);
+    expect(handed[0]!.text).toContain("reviewer and acceptance authority");
+    expect(handed[0]!.taskKey).toBe("VIB-1");
+    expect(ownershipRows(store, store.users.arda.id)).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.ownership.handed_off" })[0]!.details,
+    ).toMatchObject({ notified: { userId: store.users.murat.id } });
+
+    // Arda (admin) takes the occupied seat back: MURAT is the one who loses it.
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.arda.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const displaced = ownershipRows(store, store.users.murat.id);
+    expect(displaced).toHaveLength(2);
+    expect(displaced[0]!.title).toContain(`${store.users.arda.name} took over VIB-1`);
+    expect(ownershipRows(store, store.users.arda.id)).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.ownership.taken" })[0]!.details,
+    ).toMatchObject({ notified: { userId: store.users.murat.id } });
+  });
+
+  it("an admin release tells the released owner; a self-take and a self-release tell nobody", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { ownerUserId: null }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // Self-take of an OPEN seat: nobody is told.
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-2", targetUserId: store.users.murat.id },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(ownershipRows(store, store.users.murat.id)).toHaveLength(0);
+
+    // Admin release: the released owner is told.
+    await releaseOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-2" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const released = ownershipRows(store, store.users.murat.id);
+    expect(released).toHaveLength(1);
+    expect(released[0]!.title).toContain(`${store.users.arda.name} released you from VIB-2`);
+    expect(
+      listAuditEvents(store.db, { action: "task.ownership.admin_released" })[0]!.details,
+    ).toMatchObject({ notified: { userId: store.users.murat.id } });
+
+    // Self-release: nobody is told, and the row records no notification.
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-2", targetUserId: store.users.murat.id },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    await releaseOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-2" },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(ownershipRows(store, store.users.murat.id)).toHaveLength(1);
+    const selfRelease = listAuditEvents(store.db, { action: "task.ownership.released" })[0]!;
+    expect(selfRelease.details).not.toHaveProperty("notified");
+  });
+
+  it("a silenced category drops the row and the audit says so", async () => {
+    // Canary: pass `bypassPrefs` in the notifier — the row lands and the audit
+    // claims the person was told.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { setNotifRoutingPref } = await import("~/features/profile/profile-actions.server");
+    setNotifRoutingPref(store.db, store.users.murat.id, "ownership", false);
+
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-3", targetUserId: store.users.murat.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(ownershipRows(store, store.users.murat.id)).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.ownership.handed_off" })[0]!.details,
+    ).toMatchObject({ notified: { skipped: "silenced" } });
+  });
+
+  it("a creation that names someone else tells them", async () => {
+    const store = prepared();
+    const created = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Yours from birth", ownerUserId: store.users.murat.id },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const rows = ownershipRows(store, store.users.murat.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.title).toContain(`created ${created.key} with you as owner`);
+    expect(
+      listAuditEvents(store.db, { action: "task.created" })[0]!.details,
+    ).toMatchObject({ notified: { userId: store.users.murat.id } });
   });
 });

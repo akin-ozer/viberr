@@ -155,6 +155,99 @@ export interface TaskWatcherNotice {
 }
 
 /** Notify the owner and project supervisors, respecting routing preferences. */
+/** Ruling 140(b): why the owner seat changed hands, in the words the row uses. */
+export type OwnerSeatChange =
+  | { kind: "handed_off"; taskKey: string }
+  | { kind: "seated_at_creation"; taskKey: string }
+  | { kind: "taken_over"; taskKey: string }
+  | { kind: "admin_released"; taskKey: string };
+
+/** Ruling 140(b): what became of the one row this notifier tries to write —
+ *  recorded on the audit row so a silenced preference and a broken store never
+ *  read the same. */
+export type OwnerSeatNotified =
+  | { userId: string }
+  | { skipped: "silenced" }
+  | { skipped: "failed" };
+
+/** The row a seat change writes: its heading and its body. */
+interface OwnerSeatRow {
+  title: string;
+  text: string;
+}
+
+function ownerSeatText(change: OwnerSeatChange, actorName: string): OwnerSeatRow {
+  const seatMeans =
+    "The owner is this task's human reviewer and acceptance authority, and every agent run on it uses the owner's own Claude and Codex accounts.";
+  switch (change.kind) {
+    case "handed_off":
+      return {
+        title: `${actorName} handed you ${change.taskKey}`,
+        text: `You own ${change.taskKey} now. ${seatMeans}`,
+      };
+    case "seated_at_creation":
+      return {
+        title: `${actorName} created ${change.taskKey} with you as owner`,
+        text: `You own ${change.taskKey} from its first turn. ${seatMeans}`,
+      };
+    case "taken_over":
+      return {
+        title: `${actorName} took over ${change.taskKey}`,
+        text: `You no longer own ${change.taskKey}: ${actorName} holds the seat, with its review and acceptance authority, and runs on it bill their accounts now.`,
+      };
+    case "admin_released":
+      return {
+        title: `${actorName} released you from ${change.taskKey}`,
+        text: `You no longer own ${change.taskKey}. The seat is open to any contributor or above; until someone takes it, nobody holds its review and acceptance authority and no agent run on it can be billed.`,
+      };
+  }
+}
+
+/**
+ * Ruling 140(b) (pass 34, U34-11): tell the person whose owner seat changed.
+ * Under ruling 127 the seat is the credential principal and the acceptance
+ * authority, so a seat that changes hands silently is a bill and a duty
+ * someone learns about from the first failure packet.
+ *
+ * Never notifies the ACTOR about their own act (a self-take and a self-release
+ * notify nobody), and fails OPEN: a store that refuses the row is logged and
+ * reported back as `{ skipped: "failed" }` rather than failing the mutation
+ * that already landed. The caller puts the answer on its audit row.
+ */
+export function notifyOwnerSeatChange(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    recipientUserId: string;
+    actor: TaskActor;
+    actorName: string;
+    change: OwnerSeatChange;
+  },
+): OwnerSeatNotified | null {
+  if (input.recipientUserId === input.actor.userId) return null;
+  const { title, text } = ownerSeatText(input.change, input.actorName);
+  try {
+    const id = createNotification(db, {
+      userId: input.recipientUserId,
+      kind: "ownership",
+      title,
+      text,
+      projectSlug: input.projectSlug,
+      taskKey: input.change.taskKey,
+    });
+    // `createNotification` answers null when the reader silenced the category.
+    return id ? { userId: input.recipientUserId } : { skipped: "silenced" };
+  } catch (error) {
+    logger.error("notifyOwnerSeatChange failed", {
+      projectSlug: input.projectSlug,
+      taskKey: input.change.taskKey,
+      recipient: input.recipientUserId,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return { skipped: "failed" };
+  }
+}
+
 export function notifyTaskWatchers(
   db: DatabaseSync,
   notice: TaskWatcherNotice,

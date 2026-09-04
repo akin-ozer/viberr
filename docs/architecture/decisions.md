@@ -2596,6 +2596,35 @@ by rewriting those paragraphs:*
     `agents-query.server.ts` `absentGrantMode`, `agent-profile-actions.server.ts`,
     `model-catalog.server.ts` `assertEffortForBackend`.)
 
+140. **The owner seat is named at creation, seated before the first run, and every seat change is
+    told to the person whose seat it is (owner, 2026-09-04, pass 34 G34-3 / U34-11).** Ruling 127 made
+    the owner the credential principal and the acceptance authority; a seat that changes hands without
+    telling the person is a bill and a duty they learn about from the first failure packet, which is
+    how Omar learned he owned JC-15. **(a)** `createTask` takes an optional `ownerUserId`: a member who
+    can own tasks (the hand-off rule of `setOwner`, contributor or above, one shared check
+    `requireOwnable`), seated in the same `task.md` write that creates the task and before the
+    operator's `create` trigger, so the first triage run already bills the named owner and is refused
+    honestly when they have no credential, instead of running once on the creator's account. The
+    controller's `create_task` takes `owner` (an email, or `me`; the release word `none` is refused by
+    name at creation) and `dueDate` beside priority and labels; `priority: urgent` IS the urgent flag,
+    because `urgent` is derived from priority and never a second input (F26-16). The `task.created`
+    row records `seat: creator | named | none`. **(b)** A notification kind `ownership`, with its own
+    routing category, reaches the new owner on a hand-off or a creation that names them. The row names
+    who did it and what the seat means under ruling 127, opens the task page, and never enters
+    "Waiting on you" (that panel is fed by pending decisions, not by notification kind); the audit row
+    records whether the person was told and, when they were not, WHY (`notified: {userId}` /
+    `{skipped: "silenced"}` / `{skipped: "failed"}`), so a silenced preference and a broken store never
+    read the same. Nobody is told about their own take or release, and a member removal releases seats
+    silently because the person is leaving. Because kinds are a CHECK constraint on `notifications`,
+    the boot integrity check now compares that constraint against the kinds the code declares
+    (`projectionCheckGaps`), so a data root that predates a new kind is reported rather than silently
+    dropping every row of it. The PREVIOUS owner is told on a takeover and the released owner on an
+    admin release, through the same notifier: losing the seat takes away the credential principal
+    role, the review duty and the acceptance authority, so it is not a smaller fact than gaining it.
+    (`task-actions.server.ts` `createTask` / `setOwner` / `releaseOwner`, `task-mutation.server.ts`
+    `notifyOwnerSeatChange`, `notification.server.ts`, `notification-prefs.ts`, `notification-meta.ts`,
+    `0001_baseline.sql`, `boot.server.ts`, `controller-toolkit.server.ts` `create_task`.)
+
 141. **A scheduled operator re-run is refused while a decision packet is open, and no occurrence is
     recorded as fired when no run happened (2026-09-04, pass 34 F34-8).** Ruling 76 refuses a
     human-pressed "Run operator" while a packet is open because coordination is paused and the turn

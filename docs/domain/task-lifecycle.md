@@ -208,7 +208,15 @@ supervisors, and the operator re-invoked with `dependencies-released`).
 - `owner-take` / `owner-assign` / `owner-release` (`own-task`, contributor+;
   takeover of another owner needs the acceptance tier; `release-any-ownership` is
   admin). Ownership changes are `assign` timeline events; admin releases are audited.
-  Removing a member releases their tasks.
+  Removing a member releases their tasks. **Every seat change tells the person whose
+  seat it is** (ruling 140(b), `notifyOwnerSeatChange`): the new owner on a hand-off or
+  a creation that named them, the DISPLACED owner on a takeover, the released owner on
+  an admin release. Nobody is told about their own take or release, and a member removal
+  stays silent (the person is leaving). The row is kind `ownership` with its own routing
+  toggle, opens the task page and never enters "Waiting on you"; the audit row carries
+  `notified` — the user id, or `skipped: "silenced" | "failed"` — so a silenced
+  preference and a broken store never read the same, and the notifier fails open rather
+  than failing a write that already landed.
 - **The owner is who a run bills** (ruling 127). Every task run — operator, specialist,
   resume, scheduled, boot recovery, retry — resolves `resolveTaskRunPrincipal` first and
   spawns with the owner's own backend credential; the run row records them in
@@ -444,7 +452,9 @@ Kinds: `packet` (a decision waits, `ptype` `input | blocked`), `approval` (a sta
 approval or acceptance waits), `mention`, `quality`, `policy` (a violation or
 refusal), `controller` (goal progress), `dependency` (ruling 131: the work a task
 waited on landed and it was released, or a dependency can never complete because its
-task was archived; its own routing toggle, "dependencies"), and `ownership`.
+task was archived; its own routing toggle, "dependencies"), and `ownership` (ruling
+140(b): the reader's owner seat changed hands, addressed to that one person rather than
+to the watcher set).
 Recipients are the task owner plus project admins and maintainers, honouring each
 person's routing toggles; a toggle off drops only the row, never the note, the audit
 row or the operator re-invoke. Loading a
