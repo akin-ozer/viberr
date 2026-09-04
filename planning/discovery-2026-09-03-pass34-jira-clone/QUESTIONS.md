@@ -23,6 +23,7 @@ the dependency, and a person must re-resolve every held task when the foundation
 waits on (settable by operator, controller, humans); shown on board + task page; the operator
 does not nudge it; Viberr re-triggers the operator when the dependency reaches Done;
 chain-created tasks inherit dependencies the controller declares on the goal link.
+→ ruling 131 (`docs/architecture/decisions.md`), implemented in pass 34 A8–A15.
 
 ## Q34-12 · Drift definition after a base refresh (asked 11:23Z)
 

@@ -853,6 +853,7 @@ describe("task anchoring (ruling 121)", () => {
     );
     // [] clears.
     expect(await call(ids.maintainer, "update_goal", { goalId, op: "edit_link", index: 2, blockedBy: [] })).toContain("waits on nothing");
+    // SAFETY: same shape as above.
     after = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { blockedBy: string[] }[] };
     expect(after.links[1]!.blockedBy).toEqual([]);
     // SAFETY: `list_goals` maps every link to `{index, title, status, taskKey, blockedBy}`.
@@ -860,6 +861,7 @@ describe("task anchoring (ruling 121)", () => {
     expect(listed.find((g) => g.id === goalId)!.links.map((l) => l.blockedBy)).toEqual([[], []]);
     // add_link with a wait.
     expect(await call(ids.maintainer, "update_goal", { goalId, op: "add_link", title: "Third", goal: "Third thing.", blockedBy: ["VIB-148"] })).toContain("[done] Link 3 added.");
+    // SAFETY: same shape as above.
     after = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { blockedBy: string[] }[] };
     expect(after.links[2]!.blockedBy).toEqual(["VIB-148"]);
   });

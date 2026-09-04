@@ -38,8 +38,25 @@ real person do something absurd get an `F`; cosmetic items are not filed.
 | U34-10 | edit_goal draft | low | confirmed | Confirming an `edit_goal` option prefills the goal editor with the option's title + detail verbatim (`goalDraft`). When the operator authored the option as a proposal ("Rewrite the goal to match search.md exactly: …", JC-9) that is a usable draft; when it authored it as an instruction ("Confirming opens the goal editor: replace … I deliver straight after", JC-6) the person is handed an instruction as the goal. The operator prompt never says the detail becomes the draft. |
 | U34-11 | ownership handoff | medium | confirmed | Handing a task to another person (`set_task_owner` via the controller; the same path as the task page's hand-off) writes the audit row and the `assign` timeline event but sends the new owner NO notification. Under ruling 127 the new owner is the credential principal and the acceptance authority; Omar learned he owned JC-15 only from the failure packet that his missing Claude credential produced 2 minutes later (that packet DID notify him). |
 | D34-1 | docs / runbook | medium | confirmed | `docs/operations` runbook (~line 197) tells an operator to read the projection DB from the host with `sqlite3` while the container runs. Doing exactly that during this pass (host `sqlite3` polling over VirtioFS) preceded the container's SIGBUS crash at 09:12:46Z (exit 135); the memory file `docker-data-dual-writer-hazard` and ruling F18-5 already say one process per data root. The runbook must say "never read the live DB from the host; use `docker exec … node -e` with `readOnly: true`" and show that command. |
+| Q34-11 | task dependencies | high | fixed (ruling 131) | Three of five chains stalled behind goal-1 and every operator had only a decision packet to say so with (JC-7 held as `waiting: human`, JC-9's packet used as a "standing token" after five paid runs). Nothing watched the thing being waited for. Fixed in pass 34 A8–A15: `blockedBy` on the task (and per goal link), floored readiness, a held doctrine and fire-time refusals for the operator, and a release engine that clears the list, notifies and re-invokes the operator itself. |
 
 ## Detail
+
+### Q34-11 — a task names what it waits on; Viberr holds it without a packet and releases it (ruling 131)
+
+Owner answer to the pass-34 question: task-level `blockedBy`, auto-released. Implemented
+as rulings 131(a)–(f): the fact lives on the task (`blockedBy: []`, task keys and goal
+links, readiness floored at `blocked`, `waiting: none`), three writers behind one
+validating gate (`setTaskDependencies`; cycles walk declared goal-link edges too),
+chain-created tasks inherit a link's declared wait, the operator refuses `create` /
+`transition` / `scheduled` at fire time and runs a replacing held doctrine otherwise,
+and the release engine (task-write hooks plus the goal runner's tick) clears, notifies
+(`dependency` kind) and re-invokes with `dependencies-released`. The two live holds
+convert by setting the list; the conversion is pinned by
+`app/server/tasks/dependencies-conversion.server.test.ts` against the real
+`runOperator`. Docs: `task-lifecycle.md` §3/§6/§9, `operator.md` §3–§6,
+`controller-and-goals.md` §4/§7, `runbook.md` "A task waits on other work".
+
 
 ### F34-1 — a per-person auth refusal is "unknown" and the remedy offered is a retry
 

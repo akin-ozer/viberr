@@ -136,6 +136,42 @@ a readiness downgrade (tolerant parsing):
   the connected Claude account's organization does not allow it: the remedy is on that
   person's Profile → Agent accounts, never a retry.
 
+## A task waits on other work (ruling 131)
+
+A task whose `blockedBy` list is non-empty is HELD, not stuck: its readiness is floored
+at `blocked`, the card leads with a neutral "blocked by …" chip, the task page names
+each entry with its live state, and `waiting` is `none` unless a packet or a
+recommendation is open. Nothing is owed by anyone while it waits.
+
+- **Who set it:** the task page's "Edit what it waits on" form, the controller's
+  `update_task` / `create_task` / a goal link, or the operator's `set_dependencies`
+  tool. Every write is a "Dependencies updated" note and a `task.dependencies.updated`
+  audit row; a bad reference is refused by name (unknown, archived, self, a cycle).
+- **Why the operator is quiet:** `create`, `transition` and `scheduled` triggers are
+  refused at fire time (`refused: "blocked-by"`, no run, no cost) and the stranded
+  backstop never nudges a held task. A run that does start (an @mention, a resolved
+  packet, a manual run) is told the wait and told not to advance, dispatch delivery or
+  open a packet about it. A scheduled `run-operator` occurrence retires as
+  `skipped-held` with a note; a scheduled `run-agent` still fires.
+- **How it releases:** when every entry is done (its task at the terminal stage; its
+  goal link done or skipped) the release engine, which runs from the same task-write
+  hooks that advance goal chains and from the goal runner's minute tick, clears the
+  list, writes "Dependencies released", lifts a stored `blocked` to `ready`, clears
+  `heldAtStage`, notifies the owner and supervisors (kind `dependency`, its own
+  toggle) and re-invokes the operator with `dependencies-released`. A person emptying
+  the list is the same release.
+- **It never releases** when an entry is archived: the dependent gets one "Waiting on
+  archived work" note, its watchers one notification, and it is left `waiting: human`
+  until someone edits the list; the entry renders as "archived".
+- **Converting an old hold** (the live JC-7 / JC-9 shapes): set the list on the task
+  page first (setting a wait never touches a packet), then resolve any standing packet
+  with its recommended option; that one reactive turn reads the wait and stops. The
+  projection column `blocked_by_json` is additive: an existing data root takes
+  `ALTER TABLE task_projections ADD COLUMN blocked_by_json TEXT NOT NULL DEFAULT '[]'`
+  through the boot integrity path, never a re-baseline (the file also carries users,
+  sessions and sealed PATs), and never a host-side write against the running
+  container.
+
 ## GitHub / PAT issues
 
 - Per-project credential health and scope violations show on the GitHub view and the
