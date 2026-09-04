@@ -303,7 +303,11 @@ describe("the controller dock (ruling 121)", () => {
     const trigger = await screen.findByRole("button", { name: "Controller · viberr" });
     expect(trigger.hasAttribute("aria-controls")).toBe(false);
     fireEvent.click(trigger);
-    await screen.findByRole("dialog", { name: "Controller dock" });
+    // The panel mounts only once the stub's loader resolves, so this wait is
+    // scheduler-bound, not behaviour-bound: on a saturated machine (the full
+    // suite runs 340+ files in parallel) the default 1s lapses while the app
+    // is still correct. The assertion is unchanged — the dialog must open.
+    await screen.findByRole("dialog", { name: "Controller dock" }, { timeout: 5_000 });
     expect(trigger.getAttribute("aria-controls")).toBe("controller-dock-panel");
     expect(document.getElementById("controller-dock-panel")).not.toBeNull();
   });
