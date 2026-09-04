@@ -1,5 +1,9 @@
 import { existsSync, rmSync } from "node:fs";
 import { PROJECT_ROLES, ROLE_LABEL } from "~/shared/rbac";
+import {
+  isReservedTaskPrefix,
+  RESERVED_TASK_PREFIX_REFUSAL,
+} from "~/shared/dependencies";
 import { deleteProjectNotifications } from "~/server/projections/notifications.server";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -204,6 +208,7 @@ export async function updateProjectIdentity(
   if (!/^[A-Z]{1,4}$/.test(prefix)) {
     throw AppError.validation("Task prefix must be 1 to 4 letters.");
   }
+  if (isReservedTaskPrefix(prefix)) throw AppError.validation(RESERVED_TASK_PREFIX_REFUSAL);
   const description = input.description.trim();
 
   const changedFields: string[] = [];

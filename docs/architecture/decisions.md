@@ -2328,7 +2328,10 @@ by rewriting those paragraphs:*
     home), the board card, the list row and the task page say what it waits on and in what state,
     and the task owes nobody anything (`waiting: none` unless a packet or a recommendation is open).
     A goal-link entry resolves to a task key the moment the chain creates that link's task and
-    renders as both. States are resolved at read time, never cached. **(b) Three writers, one
+    renders as both. States are resolved at read time, never cached. `GOAL` is reserved as a
+    task-key prefix for the same grammar: `GOAL-1` reads as a goal reference missing its link, so
+    a project keyed that way could never be waited on and every writer of `taskPrefix` (creation,
+    project settings, the controller's `update_project_settings`) refuses it by name. **(b) Three writers, one
     gate.** Humans set the list on the task page; the controller sets it through `create_task`,
     `update_task` and per goal link on `create_goal` / `update_goal`, under the asking person's own
     gate; the operator records it with its `set_dependencies` tool (gated like packets, `generate-

@@ -28,6 +28,7 @@ import {
   repairProjectRepo,
   repoFootprintTasks,
   setBranchCleanup,
+  updateProjectIdentity,
   NEW_STAGE_COLORS,
 } from "./settings-actions.server";
 
@@ -52,6 +53,11 @@ afterEach(ctx.cleanup);
 
 function admin(store: TestStore) {
   return { userId: store.users.arda.id, label: store.users.arda.email };
+}
+
+function prefixOf(store: TestStore): string {
+  return readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+    .parsed.frontmatter.taskPrefix;
 }
 
 function workflowOf(store: TestStore): WorkflowBoundary[] {
@@ -783,5 +789,40 @@ describe("inviteMember", () => {
     // No new account → no temp password to hand over.
     expect(result.tempPassword).toBeUndefined();
     expect(result.toast).toBe(`Added ${store.users.deniz.email}, who joins as Viewer`);
+  });
+});
+
+
+/**
+ * Pass 34 review: `GOAL` is the one prefix a project cannot take. The
+ * dependency grammar (ruling 131) reads `GOAL-1` as a goal chain's reference
+ * missing its link, so tasks keyed that way could never be waited on.
+ */
+describe("the reserved task prefix", () => {
+  it("refuses GOAL, in any casing, and leaves the stored prefix alone", async () => {
+    // Canary: drop the isReservedTaskPrefix guard in updateProjectIdentity —
+    // the project takes the prefix and its tasks become unwaitable.
+    const store = setup();
+    const fileCtx = { dataRoot: store.dataRoot };
+    for (const typed of ["GOAL", "goal", "Goal"]) {
+      await expect(
+        updateProjectIdentity(
+          store.db,
+          { projectSlug: store.slug, name: "Viberr Core", prefix: typed, description: "" },
+          admin(store),
+          fileCtx,
+        ),
+      ).rejects.toThrow(/not available as a task prefix/i);
+    }
+    expect(prefixOf(store)).toBe("VIB");
+    // A neighbouring four-letter prefix is still fine.
+    const ok = await updateProjectIdentity(
+      store.db,
+      { projectSlug: store.slug, name: "Viberr Core", prefix: "GOAT", description: "" },
+      admin(store),
+      fileCtx,
+    );
+    expect(ok.changed).toBe(true);
+    expect(prefixOf(store)).toBe("GOAT");
   });
 });

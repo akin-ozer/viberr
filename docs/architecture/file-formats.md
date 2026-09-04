@@ -282,7 +282,9 @@ blockedBy:                        # ruling 131: what this task WAITS ON, in exac
                                   # create/transition/scheduled triggers, and is
                                   # cleared by the release engine when every entry
                                   # is done. States are resolved at read time,
-                                  # never stored. Parsed per row
+                                  # never stored. Parsed per row. `GOAL` is a
+                                  # reserved taskPrefix: `GOAL-1` would read as
+                                  # a goal reference missing its link
 acceptance: forced                # optional; N20-14 — set when an admin force-accepted
 goalRef: null                     # ruling 99: { goalId, linkIndex } for a chained-goal task
 createdAt: 2026-07-03T06:00:00.000Z

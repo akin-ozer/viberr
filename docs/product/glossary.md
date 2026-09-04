@@ -75,7 +75,7 @@
 
 **Provenance** — the `provenance` table: what the projector and reconciler observed, and when. Not retained; not user-facing except freshness chips.
 
-**Blocked by** — a task's `blockedBy` list (ruling 131): the task keys and goal links (`goal-1 link 3`) in the same project it waits on. While non-empty the derived readiness is floored at `blocked`, the card, list row and task page say what it waits on and in what state (resolved at read time), the task is never "gone quiet", and Viberr releases it itself when every entry is done.
+**Blocked by** — a task's `blockedBy` list (ruling 131): the task keys and goal links (`goal-1 link 3`) in the same project it waits on. While non-empty the derived readiness is floored at `blocked`, the card, list row and task page say what it waits on and in what state (resolved at read time), the task is never "gone quiet", and Viberr releases it itself when every entry is done. No project may take `GOAL` as its task prefix: `GOAL-1` reads as a goal reference missing its link, so its tasks could never be waited on.
 
 **Readiness** — the stored 4-value enum `ready | input_required | inconsistency_risk_detected | blocked` (ruling 1), derived only in `readiness-policy.server.ts`; a non-empty `blockedBy` floors the derived value at `blocked` (ruling 131). Surfaces additionally render the derived display value `agent_working` while `waiting === "agent"` (ruling 91) and "accepted" for done-stage tasks.
 

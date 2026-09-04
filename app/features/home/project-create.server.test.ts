@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -407,6 +409,25 @@ describe("createProject — policy preset shapes REAL governance", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/GitHub repository is required/i);
+  });
+
+  it("refuses the reserved GOAL prefix before it creates anything", async () => {
+    // Canary: drop the isReservedTaskPrefix guard in createProject — the
+    // project is created and every task it keys becomes unwaitable.
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+    vi.stubGlobal("fetch", vi.fn());
+    await expect(
+      createProject(
+        store.db,
+        { name: "Goal Keeper", key: "goal", owner: "akin-ozer", repoName: "goal-keeper", policy: "balanced" },
+        ACTOR,
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/not available as a task prefix/i);
+    // Nothing was created, and no repo call was attempted.
+    expect(existsSync(join(store.dataRoot, "projects", "goal-keeper"))).toBe(false);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 
   it("a repo NAME without an owner is rejected", async () => {

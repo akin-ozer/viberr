@@ -43,6 +43,25 @@ export interface DependencyRender {
 export const DEPENDENCY_GRAMMAR_HINT =
   "a task key like JC-6, or a goal link like goal-1 link 3";
 
+/**
+ * The one task-key prefix a project may not take. `goal-1 link 3` names a
+ * goal chain's link, so a bare `GOAL-1` is read as a goal reference missing
+ * its link (see {@link parseDependencyRef}) — a project keyed `GOAL` could
+ * never appear in anyone's `blockedBy`. Every writer of `taskPrefix` refuses
+ * it by name instead of shipping a project whose tasks cannot be waited on.
+ */
+export const RESERVED_TASK_PREFIX = "GOAL";
+
+/** Is this prefix the reserved one? Case-insensitive: the writers upper-case
+ *  before storing, so `goal` and `Goal` are the same refusal. */
+export function isReservedTaskPrefix(prefix: string): boolean {
+  return prefix.trim().toUpperCase() === RESERVED_TASK_PREFIX;
+}
+
+/** What a writer tells the person who typed it. */
+export const RESERVED_TASK_PREFIX_REFUSAL =
+  `"${RESERVED_TASK_PREFIX}" is not available as a task prefix: a dependency spelled GOAL-1 reads as a goal chain's reference, so those tasks could never be waited on. Pick another prefix.`;
+
 const TASK_REF_RE = /^([A-Za-z]+)-(\d+)$/;
 const GOAL_LINK_RE = /^(goal-\d+)\s+link\s+(\d+)$/i;
 

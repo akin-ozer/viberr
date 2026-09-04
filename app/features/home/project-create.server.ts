@@ -14,6 +14,10 @@ import {
   projectFilePath,
 } from "~/server/files/file-store-root.server";
 import { createProjectFile } from "~/server/files/project-writer.server";
+import {
+  isReservedTaskPrefix,
+  RESERVED_TASK_PREFIX_REFUSAL,
+} from "~/shared/dependencies";
 import { getConnection } from "~/server/org/connections.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
@@ -304,6 +308,7 @@ async function createProjectImpl(
   if (!/^[A-Z]{2,4}$/.test(key)) {
     throw AppError.validation("Task key must be 2-4 letters.");
   }
+  if (isReservedTaskPrefix(key)) throw AppError.validation(RESERVED_TASK_PREFIX_REFUSAL);
   const owner = input.owner.trim();
   const repoName = input.repoName.trim();
   // Repo-bound projects only (owner ruling 2026-07-17, reverses F10): every
