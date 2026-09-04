@@ -89,6 +89,9 @@ function fakeGit(opts: {
   /** Ruling 144: what `git log --format= --name-only <range> -- .github/workflows/`
    *  lists, keyed by range. Absent ranges list nothing. */
   workflowFilesByRange?: Record<string, string[]>;
+  /** Pass 34 review: the `git log` that measures those files FAILS (a shallow
+   *  clone with no `origin/<default>`, a truncated history). */
+  workflowLogFails?: boolean;
 }) {
   const calls: string[][] = [];
   /** The env the `ls-remote` read ran under (ruling 134: the askpass channel). */
@@ -108,6 +111,9 @@ function fakeGit(opts: {
         : { ok: false, stdout: "", stderr: "" };
     }
     if (args.includes("--name-only")) {
+      if (opts.workflowLogFails) {
+        return { ok: false, stdout: "", stderr: "fatal: bad revision 'origin/main..HEAD'" };
+      }
       const range = args[args.indexOf("--name-only") + 1] ?? "";
       return { ok: true, stdout: (opts.workflowFilesByRange?.[range] ?? []).join("\n"), stderr: "" };
     }
@@ -988,6 +994,19 @@ describe("ruling 144: workflow-file pushes and the workflow scope", () => {
     const res = await push(git);
     expect(res).toMatchObject({ status: "push_refused_scope", scope: "workflow", phase: "github", files: [CI] });
     expect(res.status === "push_refused_scope" ? res.reason : "").toContain("without `workflow` scope");
+  });
+
+  it("an UNMEASURED push reports null, is not refused before the push, and claims nothing", async () => {
+    // Canary: return `[]` from changedWorkflowFiles when history cannot answer
+    // — the degraded read then reads as "this push changes no workflow files",
+    // which the delivery would take as proof (ruling 144(c)).
+    bindPatWith({ tokenKind: "classic", headerScopes: ["repo"] });
+    const git = fakeGit({ branch: "vib-1-work", ahead: 1, remoteHead: null, workflowLogFails: true });
+    const res = await push(git);
+    expect(res).toMatchObject({ status: "pushed", workflowFiles: null });
+    // The push was attempted: an unmeasurable range refuses nothing on its own,
+    // and GitHub's own answer classifies it.
+    expect(git.calls.some((c) => c.includes("push"))).toBe(true);
   });
 
   it("the classifier does not mistake a protected-branch rejection for a scope refusal", () => {

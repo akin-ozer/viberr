@@ -72,8 +72,10 @@ export type PushWorkspaceResult =
        *  or null when the branch did not exist on origin or could not be read. */
       remoteHeadBefore: string | null;
       /** Ruling 144: the files under `.github/workflows/` this push changed, as
-       *  GitHub measures them (from origin's head, or the base on a first push). */
-      workflowFiles: string[];
+       *  GitHub measures them (from origin's head, or the base on a first push).
+       *  `null` when history could not answer — an unmeasured push, which is
+       *  not the same claim as a measured empty list. */
+      workflowFiles: string[] | null;
     }
   /**
    * Ruling 144: a push of `.github/workflows/*` refused for the `workflow`
@@ -282,7 +284,7 @@ async function changedWorkflowFiles(
   repoDir: string,
   remoteHead: string | null,
   defaultBranch: string,
-): Promise<string[]> {
+): Promise<string[] | null> {
   const listFrom = async (range: string): Promise<string[] | null> => {
     const res = await exec(
       "git",
@@ -296,7 +298,13 @@ async function changedWorkflowFiles(
     const files = await listFrom(`${remoteHead}..HEAD`);
     if (files) return files;
   }
-  return (await listFrom(`origin/${defaultBranch}..HEAD`)) ?? [];
+  // Pass 34 review: `null` is "history could not answer" (a shallow clone with
+  // no `origin/<default>`, an unreadable remote head), NOT "no workflow files
+  // changed". An empty array is a MEASUREMENT; conflating the two let a
+  // degraded read silently stand in for proof — the pre-push refusal skipped
+  // and, worse, ruling 144(c)'s resolution of a standing violation claimed
+  // nothing was pushed when nothing was measured.
+  return listFrom(`origin/${defaultBranch}..HEAD`);
 }
 
 /**
@@ -753,7 +761,7 @@ export async function pushWorkspaceBranch(
     const askpass = createGitHubAskpassEnv({ token });
     let pushedHead = "";
     let pushedRemoteBefore: string | null = null;
-    let pushedWorkflowFiles: string[] = [];
+    let pushedWorkflowFiles: string[] | null = null;
     try {
       // Ruling 134: what does origin hold for this branch right now? Read
       // BEFORE the push so the delivery can say what moved, and skip the push
@@ -796,8 +804,17 @@ export async function pushWorkspaceBranch(
       // answer, classified below.
       const workflowFiles = await changedWorkflowFiles(exec, repoDir, pushedRemoteBefore, defaultBranch);
       pushedWorkflowFiles = workflowFiles;
+      if (workflowFiles === null) {
+        // Nothing to refuse on and nothing to prove with: the push goes ahead
+        // and GitHub's own answer classifies it (ruling 144(c)).
+        logger.info("could not measure the workflow files this push changes", {
+          taskKey,
+          branch,
+        });
+      }
       const validation = credential?.validation ?? null;
       if (
+        workflowFiles !== null &&
         workflowFiles.length > 0 &&
         validation?.tokenKind === "classic" &&
         validation.headerScopes !== null &&
@@ -829,14 +846,14 @@ export async function pushWorkspaceBranch(
           logger.info("workspace branch push refused by GitHub: workflow scope", {
             taskKey,
             branch,
-            files: workflowFiles,
+            files: workflowFiles ?? [],
           });
           return {
             status: "push_refused_scope",
             branch,
             scope: "workflow",
             phase: "github",
-            files: workflowFiles,
+            files: workflowFiles ?? [],
             reason: oneLine(redactGitOutput(pushRes.stderr, { token })) || "GitHub refused the workflow-file push",
           };
         }

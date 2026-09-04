@@ -5460,8 +5460,11 @@ export async function performDelivery(
     }
 
     // Ruling 144(c): a successful push of workflow files is the proof that
-    // resolves an open `workflow` violation on this project.
-    if (push.status === "pushed" && push.workflowFiles.length > 0) {
+    // resolves an open `workflow` violation on this project. A push whose
+    // workflow files could NOT be measured (`null`, a degraded history read)
+    // proves nothing and leaves the violation standing — an empty list is a
+    // measurement, an absent one is not.
+    if (push.status === "pushed" && (push.workflowFiles?.length ?? 0) > 0) {
       const { listScopeViolations } = await import(
         "~/server/projections/policy-violations.server"
       );

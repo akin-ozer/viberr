@@ -3696,6 +3696,22 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
     const timeline = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline;
     expect(timeline.some((e) => e.text.includes("Delivery push refused: workflow scope") || e.text.includes("`.github/workflows/ci.yml`"))).toBe(true);
 
+    // A push whose workflow files could NOT be measured proves nothing: the
+    // violation stands. Canary: read `null` as an empty list in the resolve
+    // arm — an unmeasured push then clears a violation it never disproved.
+    pushMock.mockResolvedValueOnce({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "c".repeat(40),
+      remoteHeadBefore: null,
+      workflowFiles: null,
+    });
+    await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    expect(
+      listScopeViolations(store.db, store.slug, { status: "open" }).map((v) => v.scope),
+    ).toEqual(["workflow"]);
+
     // The next successful push of workflow files is the proof that resolves it.
     pushMock.mockResolvedValueOnce({
       status: "pushed",

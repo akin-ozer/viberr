@@ -170,7 +170,10 @@ no credential, no repository and an unknown task are standing states and only lo
    lack `workflow` is refused BEFORE GitHub is asked (`push_refused_scope`,
    `before_push`), and GitHub's own refusal of such a push, on any token kind, is
    classified the same way (`github`), never as a generic `push_failed`. The `pushed`
-   result carries `workflowFiles`.
+   result carries `workflowFiles` — a measured list, `[]` for a push that changes none,
+   and `null` when history could not answer at all (a truncated clone with no
+   `origin/<default>`): an unmeasured push refuses nothing on its own and proves
+   nothing either.
 3. **Verified no-change**: `no_commits`, or `no_branch` on a task that never had a
    branch, PR, revision or commits, with `defaultBranchEvidence.verified === true`,
    sets `noChanges`, mints a `kind: verified` work revision at the default-branch head
@@ -343,7 +346,9 @@ violation on the task through the same door (the `policy` event, the inbox notif
 the credential-card flag, the rail count), and delivery answers `scope_violation` with a
 remedy that names the Grant / Re-check control on the project's GitHub view. It resolves
 on a re-check whose header lists `workflow` (header scopes are evidence for every scope
-they name), or on the next successful push of workflow files.
+they name), or on the next successful push of workflow files. A push whose workflow
+files could not be measured (`workflowFiles: null`) leaves the violation standing: the
+absence of a measurement is not the proof the ruling asks for.
 
 ## 8. What agents get
 
