@@ -1564,3 +1564,62 @@ describe("F21-13 — a model foreign to the chosen backend is refused", () => {
     });
   });
 });
+
+/**
+ * Ruling 139 (pass 34, G34-1): the profile editor refuses a CHANGED effort
+ * tier the backend does not offer, by name; an UNCHANGED stale tier a
+ * deployment legitimately stores (Codex `minimal`, accepted but not offered)
+ * still saves an unrelated field.
+ */
+describe("effort tiers on the editor path (ruling 139)", () => {
+  it("refuses a CHANGED out-of-list tier and names the valid ones", async () => {
+    // Canary: make `assertEffortForBackend` a no-op — "ultra" lands in project.md.
+    const result = await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "developer",
+      payload: JSON.stringify({
+        name: "Developer",
+        role: "Implementation",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "",
+        model: "sonnet",
+        effort: "ultra",
+        caps: {},
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    });
+    expect(refusalStatus(result)).toBe(400);
+    expect(refusalError(result)).toContain('"ultra" is not an effort tier Claude offers. Claude takes: low, medium, high, xhigh, max.');
+    expect(readFileSync(path.join(app.dataRoot, "projects/viberr-core/project.md"), "utf8")).not.toContain("effort: ultra");
+  });
+
+  it("an UNCHANGED stale tier still saves an unrelated field", async () => {
+    // Canary: refuse unconditionally in the writer — the preserved `minimal`
+    // makes the form unsaveable.
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    await updateProjectFile({ projectSlug: "viberr-core", dataRoot: app.dataRoot }, (p) => {
+      const dep = p.frontmatter.agents.find((a) => a.profileId === "developer")!;
+      dep.definition = { ...dep.definition!, backends: ["codex"], model: "gpt-5.5", effort: "minimal" };
+    });
+    const result = saved(await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "developer",
+      payload: JSON.stringify({
+        name: "Developer (renamed)",
+        role: "Implementation",
+        backend: "codex",
+        stages: ["impl"],
+        definition: "",
+        model: "gpt-5.5",
+        effort: "minimal",
+        caps: {},
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    }));
+    expect(result.ok).toBe(true);
+    const file = readFileSync(path.join(app.dataRoot, "projects/viberr-core/project.md"), "utf8");
+    expect(file).toContain("Developer (renamed)");
+    expect(file).toContain("effort: minimal");
+  });
+});

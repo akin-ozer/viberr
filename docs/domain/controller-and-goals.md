@@ -305,6 +305,17 @@ default (`create-task-branch` seeds `direct` and resolves `off` when absent). Th
 policy-dependent operator grants (`deliver-review-pr`, `update-task-branch`) are named as
 such and read from `get_project`.
 
+Effort is settable wherever model is (ruling 139): `deploy_agent` takes `model` and
+`effort` overrides and `update_agent_deployment` takes `effort`; both check the value
+against the backend's tier list (`assertEffortForBackend`, `assertModelForBackend` in
+`model-catalog.server.ts`) BEFORE the write and refuse by name, listing the tiers, so the
+controller can never store a tier the runtime would silently clamp. A backend switch with
+no effort resets to that backend's default and the reply says so; the deployed-audit row
+records the model and effort written. The profile editor shares the check for a CHANGED
+value only, so a deployment that legitimately stores a preserved tier (Codex `minimal`)
+stays editable, and the editor re-seeds a stored tier the backend does not list instead of
+offering it.
+
 ## 5. The `viberr_ops` diagnostics server (ruling 107)
 
 An in-process, read-only MCP server mounted on **every** controller turn with no

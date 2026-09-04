@@ -1244,3 +1244,76 @@ describe("get_project and list_capabilities read the catalogue (ruling 139)", ()
     expect(modeOf(read.agents.find((a) => a.profileId === "developer")!, "comment-on-task")).toBe("direct");
   });
 });
+
+/**
+ * Ruling 139 (pass 34, G34-1): effort is settable wherever model is, judged
+ * by name against the backend at save time, never clamped at run time.
+ */
+describe("effort and model at deploy are settable and refused by name (ruling 139)", () => {
+  interface ProjectRead {
+    agents: { profileId: string; backends: string[]; model: string; effort: string }[];
+  }
+  async function developer(): Promise<ProjectRead["agents"][number]> {
+    // SAFETY: the tool answers the JSON it built; the fields asserted are its own.
+    const read = JSON.parse(await call(ids.projectAdmin, "get_project")) as ProjectRead;
+    return read.agents.find((a) => a.profileId === "developer")!;
+  }
+
+  it("update_agent_deployment sets effort, refuses a tier the backend does not offer by name, and resets on a backend switch", async () => {
+    // Canary: remove `effort` from the schema, or drop the assert on the write surface.
+    // Backend-agnostic: earlier cases in this sequential store may have
+    // switched the developer, so every tier is chosen for the CURRENT backend.
+    const before = await developer();
+    const current = before.backends[0] === "codex" ? "codex" : "claude";
+    const other = current === "claude" ? "codex" : "claude";
+    const label = { claude: "Claude", codex: "Codex" } as const;
+    const tiers = { claude: "low, medium, high, xhigh, max", codex: "low, medium, high, xhigh" } as const;
+    const top = current === "claude" ? "max" : "xhigh";
+    const set = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", effort: top });
+    expect(set).toContain("[done]");
+    expect(set).toContain(`Effort is now ${top}`);
+    expect((await developer()).effort).toBe(top);
+
+    const refused = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", effort: "ultra" });
+    expect(refused).toContain(`[error] "ultra" is not an effort tier ${label[current]} offers. ${label[current]} takes: ${tiers[current]}.`);
+    expect((await developer()).effort).toBe(top); // nothing written
+
+    // A tier the OTHER backend does not list, sent with the switch: refused, nothing written.
+    const foreignTier = other === "codex" ? "max" : "minimal";
+    const wrongBackend = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", backend: other, effort: foreignTier });
+    expect(wrongBackend).toContain(`[error] "${foreignTier}" is not an effort tier ${label[other]} offers`);
+    expect((await developer()).backends).toEqual(before.backends);
+
+    const otherDefault = other === "codex" ? "medium" : "high";
+    const switched = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", backend: other });
+    expect(switched).toContain(`Backend switched to ${label[other]}: effort reset to its default (${otherDefault})`);
+    const after = await developer();
+    expect(after.backends).toEqual([other]);
+    expect(after.effort).toBe(otherDefault);
+    // Restore the fixture for the other cases.
+    await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", backend: current, model: before.model, effort: before.effort || top });
+  });
+
+  it("deploy_agent pins model and effort, audits them, and refuses an unknown tier before the write", async () => {
+    // Canary: keep `defaultEffortFor(backend)` at the deploy write (the override is ignored).
+    const minted = await call(ids.orgAdmin, "save_global_agent", {
+      name: "Effort Probe",
+      backend: "claude",
+      summary: "Probes the deploy overrides.",
+      stages: ["impl"],
+    });
+    expect(minted).toContain("[done]");
+    const refused = await call(ids.projectAdmin, "deploy_agent", { profileId: "effort-probe", effort: "ultra" });
+    expect(refused).toContain('[error] "ultra" is not an effort tier Claude offers');
+    const deployed = await call(ids.projectAdmin, "deploy_agent", { profileId: "effort-probe", model: "opus", effort: "max" });
+    expect(deployed).toContain("[done] Effort Probe deployed");
+    expect(deployed).toContain("Runs on Claude with model opus at effort max.");
+    // SAFETY: the tool answers the JSON it built; the fields asserted are its own.
+    const read = JSON.parse(await call(ids.projectAdmin, "get_project")) as ProjectRead;
+    const probe = read.agents.find((a) => a.profileId === "effort-probe")!;
+    expect(probe.model).toBe("opus");
+    expect(probe.effort).toBe("max");
+    const row = listAuditEvents(app.db, { action: "project.agent_profile.deployed" })[0]!;
+    expect(row.details).toMatchObject({ name: "Effort Probe", model: "opus", effort: "max" });
+  });
+});

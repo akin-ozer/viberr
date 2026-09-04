@@ -196,7 +196,11 @@ export function useModelCatalog(
       catalog.models.some((m) => m.value === model) ||
       (backend === "claude" && claudeModelRunsVerbatim(model));
     if (!model || !known) setModel(catalog.defaultModel);
-    if (!effort) setEffort(catalog.defaultEffort);
+    // Ruling 139: a stored tier the backend does not list (a preserved Codex
+    // `minimal`, or a tier from the other backend) is re-seeded to the
+    // default, because the save would refuse it by name and the editor must
+    // not offer what it cannot save.
+    if (!effort || !catalog.efforts.includes(effort)) setEffort(catalog.defaultEffort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog]);
 
@@ -668,9 +672,6 @@ export function ModelEffortFields({
             disabled={!backend || catalogLoading}
             >
             {(!backend || effort === "") && <option value="">no effort yet</option>}
-            {effort && !effortOptions.includes(effort) && (
-              <option value={effort}>{effortLabel(effort)}</option>
-            )}
             {effortOptions.map((e) => (
               <option key={e} value={e}>
                 {effortLabel(e)}

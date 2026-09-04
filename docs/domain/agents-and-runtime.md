@@ -111,7 +111,12 @@ The route resolves the viewer's own `runCredentialFor(db, user.id, "claude")` an
 it to the catalog; a viewer who has not connected Claude gets the curated list and no
 probe is spawned, and one person's live list is never served to another (the cache entry
 carries the home that produced it).
-Effort is ranked `minimal 0 … max 5` and clamped to the backend's list.
+Effort is ranked `minimal 0 … max 5` and clamped to the backend's list at RUN time only
+(`resolveRunEffort`, for a tier stored before the check existed); every write surface
+that takes a tier (`deploy_agent`, `update_agent_deployment`, and the profile editor for
+a CHANGED value) refuses an unlisted one by name first (ruling 139,
+`assertEffortForBackend`), and the editor re-seeds a stored tier the backend no longer
+lists to the default rather than offering it.
 
 **Availability marks** (`model_availability`): a model is marked unavailable only from a
 real run failure whose redacted text matches `MODEL_UNSUPPORTED_RE`, and cleared by a

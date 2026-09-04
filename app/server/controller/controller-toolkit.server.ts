@@ -1,5 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  assertEffortForBackend,
+  assertModelForBackend,
+  defaultEffortFor,
+  defaultModelFor,
+} from "~/server/runtimes/model-catalog.server";
+import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
   UNIFIED_CAP_CATALOG,
   capabilityById,
@@ -1648,21 +1654,27 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "deploy_agent",
-      "Deploy a global agent template into the project (from list_global_agents; delivery starts withheld until an admin opens it up). Project admin. No removal exists here.",
+      "Deploy a global agent template into the project (from list_global_agents; delivery starts withheld until an admin opens it up). Project admin. No removal exists here. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's model and the backend's default effort. The reply states what was stored.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
+        model: z.string().optional().describe("Model id for the template's backend (see the profile's backend in list_global_agents)."),
+        effort: z.string().optional().describe("Effort tier the backend offers: Claude low|medium|high|xhigh|max, Codex low|medium|high|xhigh."),
       },
-      runWith(async (args: { projectSlug?: string; profileId: string }) => {
+      runWith(async (args: { projectSlug?: string; profileId: string; model?: string; effort?: string }) => {
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "manage this project's agents");
-        const result = await deployAgentProfileFromLibrary(
-          db,
-          { projectSlug: slug, profileId: args.profileId },
-          actor,
-          { dataRoot },
-        );
-        return `[done] ${result.name} deployed on ${slug}. Delivery starts withheld; open it up with update_agent_deployment when the profile should write the repo.`;
+        const deployInput: Parameters<typeof deployAgentProfileFromLibrary>[1] = {
+          projectSlug: slug,
+          profileId: args.profileId,
+        };
+        if (args.model) deployInput.model = args.model;
+        if (args.effort) deployInput.effort = args.effort;
+        const result = await deployAgentProfileFromLibrary(db, deployInput, actor, { dataRoot });
+        const stored = result.applied
+          ? ` Runs on ${result.applied.backend === "codex" ? "Codex" : "Claude"} with model ${result.applied.model} at effort ${result.applied.effort}.`
+          : "";
+        return `[done] ${result.name} deployed on ${slug}.${stored} Delivery starts withheld; open it up with update_agent_deployment when the profile should write the repo.`;
       }),
     ),
     "deploy_agent",
@@ -1680,6 +1692,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .optional(),
         backend: z.enum(["claude", "codex"]).optional(),
         model: z.string().optional(),
+        effort: z
+          .string()
+          .optional()
+          .describe(
+            "Effort tier the deployment's backend offers (Claude low|medium|high|xhigh|max, Codex low|medium|high|xhigh); refused by name otherwise. A backend switch with no effort resets to that backend's default.",
+          ),
         stages: z.array(z.string()).optional(),
         autonomy: z.enum(["supervised", "full"]).optional().describe("Operator only."),
       },
@@ -1690,6 +1708,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           capabilities?: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[];
           backend?: "claude" | "codex";
           model?: string;
+          effort?: string;
           stages?: string[];
           autonomy?: "supervised" | "full";
         }) => {
@@ -1722,15 +1741,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const caps: Record<string, string> = {};
           for (const grant of deployment.capabilities) caps[grant.capabilityId] = grant.mode;
           for (const patch of args.capabilities ?? []) caps[patch.capabilityId] = patch.mode;
+          // Ruling 139: effort is settable wherever model is, judged by name
+          // against the backend the deployment will run on, BEFORE the write.
+          // A backend switch with no effort resets to that backend's default
+          // and the reply says so; an unchanged backend keeps the stored tier.
+          const currentBackend = view.backends[0] === "codex" ? "codex" : "claude";
+          const backend = args.backend ?? currentBackend;
+          const switched = backend !== currentBackend;
+          if (args.effort !== undefined) assertEffortForBackend(backend, args.effort);
+          if (args.model !== undefined) assertModelForBackend(backend, args.model);
+          const effort = args.effort ?? (switched ? defaultEffortFor(backend) : view.effort);
           const baseForm = {
             name: view.name,
             role: view.role,
-            backend: args.backend ?? (view.backends[0] === "codex" ? "codex" : "claude"),
+            backend,
             stages: args.stages ?? view.stages,
             definition: "",
             persona: "",
-            model: args.model ?? view.model,
-            effort: view.effort,
+            model: args.model ?? (switched ? defaultModelFor(backend) : view.model),
+            effort,
             caps,
             resources: view.resources,
           };
@@ -1753,7 +1782,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const governance = result.governanceNotice
             ? ` ${result.governanceNotice.message}`
             : "";
-          return `[done] ${result.name} updated on ${slug}.${governance}${notices}`;
+          const reset =
+            switched && args.effort === undefined && result.applied
+              ? ` Backend switched to ${backend === "codex" ? "Codex" : "Claude"}: effort reset to its default (${result.applied.effort})${args.model === undefined ? ` and model to ${result.applied.model}` : ""}.`
+              : "";
+          const stored =
+            args.effort !== undefined && result.applied ? ` Effort is now ${result.applied.effort}.` : "";
+          return `[done] ${result.name} updated on ${slug}.${reset}${stored}${governance}${notices}`;
         },
       ),
     ),

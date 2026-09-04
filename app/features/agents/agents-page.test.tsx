@@ -2783,3 +2783,25 @@ describe("F34-5: the Agents stats and the pulse read runs, not the waiting flag"
     expect(deploymentDot(mkDeployment({ status: "queued", running: false }))).toBe(false);
   });
 });
+
+/** Ruling 139: the editor never offers a tier it cannot save. */
+describe("CreateProfileModal effort seeding (ruling 139)", () => {
+  it("a profile whose stored effort is out of the backend's list shows the backend default and submits it", async () => {
+    // Canary: restore the preserved `<option value={effort}>` (the stale tier
+    // stays selected and is submitted).
+    const onSubmit = vi.fn();
+    const { container, findByLabelText, getByText } = renderModal({
+      initial: mkProfile({ backends: ["claude"], model: "sonnet", effort: "ultra" }),
+      onSubmit,
+    });
+    // SAFETY: the modal renders its Effort control as a <select>, which is
+    // what the label resolves to.
+    const select = (await findByLabelText("Effort")) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("high"));
+    expect([...select.options].map((o) => o.value)).not.toContain("ultra");
+    expect(container.querySelector("option[value=ultra]")).toBeNull();
+    fireEvent.click(getByText("Save changes"));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]![0].effort).toBe("high");
+  });
+});
