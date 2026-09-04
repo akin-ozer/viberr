@@ -1,3 +1,4 @@
+import { deliveryToast } from "~/features/task-detail/delivery-toast";
 import {
   data,
   isRouteErrorResponse,
@@ -698,9 +699,8 @@ export async function action({ request, params }: Route.ActionArgs) {
           ? {
               ok: true as const,
               intent,
-              toast: outcome.created
-                ? `Delivered · opened review PR #${outcome.prNumber}`
-                : `Delivered · reusing open review PR #${outcome.prNumber}`,
+              // Ruling 134(a): one toast for every human delivery door.
+              toast: deliveryToast(outcome),
             }
           : data(
               {
@@ -931,7 +931,10 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast: `Applied · ${result.label}`,
+          // Ruling 134(a): an applied delivery card says what moved.
+          toast: result.delivery
+            ? `Applied · ${deliveryToast(result.delivery)}`
+            : `Applied · ${result.label}`,
         };
       }
       case "dismiss-recommendation": {

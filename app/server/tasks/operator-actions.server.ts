@@ -24,6 +24,7 @@ import {
   type RecommendationKind,
   type TaskFileEvent,
   type TaskPacket,
+  unpushedRevisionOf,
 } from "~/schemas/task-file.schema";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 import {
@@ -2455,6 +2456,10 @@ type DeliveryAuditDetails = {
   status: string;
   /** Present only when a review PR actually exists. */
   prNumber?: number;
+  /** Ruling 134: the head the delivery left on the PR, and whether the push
+   *  (or the PR open) MOVED anything — `delivered` only. */
+  headSha?: string | null;
+  moved?: boolean;
 };
 
 /** The move an operator transition asks `transitionStage` to perform. */
@@ -2492,29 +2497,46 @@ export async function operatorDeliverForReview(
   if (!existing) {
     return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
   }
-  const pr = existing.parsed.frontmatter.pr;
-  if (pr && pr.state !== "closed" && pr.state !== "merged") {
-    // Idempotent: a live PR already stands for review. performDelivery would
-    // reuse it, but a fresh push of an unchanged workspace is wasted motion —
-    // report the live PR instead.
-    return {
-      outcome: "noop",
-      message: `PR #${pr.number} is already open for review; there is nothing to deliver.`,
-    };
-  }
+  // Ruling 134 (pass 34, F34-11): NO cached-state short-circuit. The old
+  // "PR #N is already open for review; there is nothing to deliver" answered
+  // before `performDelivery` ran, so every commit an agent made after the first
+  // delivery (a reviewer-requested rework, a resolved base conflict, the whole
+  // JC-6 scaffold) stayed in the workspace. Delivery is defined by the REMOTE:
+  // `pushWorkspaceBranch` reads origin's head and answers `up_to_date` when
+  // there is nothing to push, and THAT is the only honest noop.
+  const fm = existing.parsed.frontmatter;
+  const livePr = fm.pr && fm.pr.state !== "closed" && fm.pr.state !== "merged" ? fm.pr : null;
   if (g === "recommend") {
+    // The recommend arm reads the RECORDED fact, never the cache: with an open
+    // PR and no unpushed revision on the record there is nothing to propose.
+    const unpushed = unpushedRevisionOf(fm.pr, fm.workRevision?.headSha ?? null);
+    if (livePr && !unpushed) {
+      return {
+        outcome: "noop",
+        message: `PR #${livePr.number} already carries the delivered revision${fm.workRevision ? ` \`${fm.workRevision.headSha.slice(0, 7)}\`` : ""}; there is nothing to deliver.`,
+      };
+    }
     await addRecommendation(
       db,
       ctx,
       input.projectSlug,
       input.taskKey,
-      { kind: "delivery", label: "Deliver the branch & open the review PR" },
+      {
+        kind: "delivery",
+        label: livePr && unpushed
+          ? `Push \`${unpushed.revisionSha.slice(0, 7)}\` to PR #${livePr.number}`
+          : "Deliver the branch & open the review PR",
+      },
       input.reason ??
-        "The work is committed and ready for review; delivering pushes the task branch and opens the review PR.",
+        (livePr && unpushed
+          ? `The delivered revision \`${unpushed.revisionSha.slice(0, 7)}\` is not on PR #${livePr.number}; delivering pushes it to that PR.`
+          : "The work is committed and ready for review; delivering pushes the task branch and opens the review PR."),
     );
     return {
       outcome: "recommended",
-      message: "Recommended delivering the branch & opening the review PR.",
+      message: livePr && unpushed
+        ? `Recommended pushing \`${unpushed.revisionSha.slice(0, 7)}\` to PR #${livePr.number}.`
+        : "Recommended delivering the branch & opening the review PR.",
     };
   }
   // F17-1: delivery THROUGH the operator's own tool is operator-authorized by
@@ -2532,7 +2554,11 @@ export async function operatorDeliverForReview(
   // The PR number exists only on a DELIVERED outcome; a `prNumber` key on a
   // failed delivery would name a pull request that was never opened.
   const details: DeliveryAuditDetails = { status: outcome.status };
-  if (outcome.status === "delivered") details.prNumber = outcome.prNumber;
+  if (outcome.status === "delivered") {
+    details.prNumber = outcome.prNumber;
+    details.headSha = outcome.headSha;
+    details.moved = outcome.moved;
+  }
   recordAudit(db, {
     action: "github.delivery.operator",
     actor: OPERATOR_AUDIT_ACTOR,
@@ -2543,15 +2569,20 @@ export async function operatorDeliverForReview(
     details,
   });
   switch (outcome.status) {
-    case "delivered":
-      return {
-        outcome: "done",
-        message:
-          `Delivered: push ${outcome.pushStatus === "pushed" ? "succeeded" : `skipped (${outcome.pushStatus})`}, ` +
-          (outcome.created
-            ? `opened review PR #${outcome.prNumber}.`
-            : `reusing open review PR #${outcome.prNumber}.`),
-      };
+    case "delivered": {
+      // Ruling 134(a): the message names what MOVED. A reuse whose push moved
+      // the head says so with the sha; a reuse that pushed nothing is the one
+      // honest noop, and it reads as one.
+      const sha = outcome.headSha ? ` \`${outcome.headSha.slice(0, 7)}\`` : "";
+      const message = outcome.created
+        ? `Delivered: pushed${sha} and opened review PR #${outcome.prNumber}.`
+        : outcome.moved
+          ? `Delivered: pushed${sha} to the open review PR #${outcome.prNumber} (its head moved; the reviewers judge the new revision).`
+          : outcome.pushStatus === "up_to_date"
+            ? `Nothing to push: PR #${outcome.prNumber} already carries${sha || " the workspace head"}.`
+            : `Delivered: push skipped (${outcome.pushStatus}), reusing open review PR #${outcome.prNumber}.`;
+      return { outcome: "done", message };
+    }
     case "push_conflict":
       return {
         outcome: "noop",

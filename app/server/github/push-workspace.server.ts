@@ -61,7 +61,20 @@ export type DefaultBranchEvidence =
   | { verified: false; why: string };
 
 export type PushWorkspaceResult =
-  | { status: "pushed"; branch: string; commits: number }
+  | {
+      status: "pushed";
+      branch: string;
+      commits: number;
+      /** Ruling 134: the workspace head the push published (full sha), or null
+       *  when git could not name HEAD (the push still ran). */
+      headSha: string | null;
+      /** Ruling 134: origin's head for the branch BEFORE the push (full sha),
+       *  or null when the branch did not exist on origin or could not be read. */
+      remoteHeadBefore: string | null;
+    }
+  /** Ruling 134: origin already carries the workspace head; no push ran.
+   *  The only honest noop for a delivery: the PR (if any) is up to date. */
+  | { status: "up_to_date"; branch: string; headSha: string }
   /** B-GH1/F15-15: the remote branch holds commits the local delivery does not
    *  (non-fast-forward) — a HISTORY divergence, never a credential problem. The
    *  branch is carried so recovery copy can name what diverged. */
@@ -107,6 +120,8 @@ export type PushWorkspaceResult =
       stderrExcerpt?: string;
     };
 
+/** Ruling 134: the pre-push read of origin's branch head. */
+const LS_REMOTE_TIMEOUT_MS = 30_000;
 /** Ceiling for the branch push itself (the one network step here). Shared with
  *  the branch-update path, which pushes the same branch the same way. */
 export const PUSH_TIMEOUT_MS = 120_000;
@@ -466,10 +481,18 @@ export interface PushWorkspaceBranchInput {
 
 /**
  * Push the task's workspace branch to origin using the project PAT. Returns a
- * typed result; never throws. `pushed` means the remote now carries the local
- * commits (a `git push` with nothing new still reports `pushed`); `no_commits`
- * means the branch had no local commits ahead of the default branch; every
- * other status is a degraded reason the caller can log or surface.
+ * typed result; never throws.
+ *
+ * Ruling 134 (pass 34, F34-11): delivery is defined by the REMOTE, not by a
+ * cached PR state. Before pushing, origin's head for the branch is read
+ * (`git ls-remote --heads origin <branch>`, under the same askpass env as the
+ * push): equal to the workspace HEAD → `up_to_date`, no push; otherwise the
+ * push runs and `pushed` carries the head it published and the remote head
+ * it replaced (`remoteHeadBefore`, null when the branch was absent on origin
+ * or could not be read). An unreadable HEAD skips the compare and pushes as
+ * before, with `headSha: null`. `no_commits` means the branch had no local
+ * commits ahead of the default branch; every other status is a degraded
+ * reason the caller can log or surface.
  */
 export async function pushWorkspaceBranch(
   input: PushWorkspaceBranchInput,
@@ -671,7 +694,42 @@ export async function pushWorkspaceBranch(
     if (!token) return { status: "no_pat", reason: "no project credential" };
 
     const askpass = createGitHubAskpassEnv({ token });
+    let pushedHead = "";
+    let pushedRemoteBefore: string | null = null;
     try {
+      // Ruling 134: what does origin hold for this branch right now? Read
+      // BEFORE the push so the delivery can say what moved, and skip the push
+      // entirely when origin already carries the workspace head.
+      const headSha = await revParse(exec, repoDir, "HEAD");
+      pushedHead = headSha;
+      let remoteHeadBefore: string | null = null;
+      if (headSha) {
+        const remoteRes = await exec(
+          "git",
+          ["-C", repoDir, "ls-remote", "--heads", "origin", branch],
+          { cwd: repoDir, timeoutMs: LS_REMOTE_TIMEOUT_MS, env: askpass.env },
+        );
+        if (remoteRes.ok) {
+          const remoteSha = remoteRes.stdout.trim().split(/\s+/)[0] ?? "";
+          remoteHeadBefore = /^[0-9a-f]{40}$/i.test(remoteSha) ? remoteSha : null;
+          pushedRemoteBefore = remoteHeadBefore;
+          if (remoteHeadBefore === headSha) {
+            logger.info("workspace branch already on origin — no push needed", {
+              taskKey,
+              branch,
+            });
+            return { status: "up_to_date", branch, headSha };
+          }
+        } else {
+          // An unreadable remote never blocks the push: the push itself is the
+          // authority, and a non-fast-forward is still classified below.
+          logger.info("could not read origin's head for the branch before pushing", {
+            taskKey,
+            branch,
+            detail: redactGitOutput(remoteRes.stderr, { token }),
+          });
+        }
+      }
       const pushRes = await exec(
         "git",
         ["-C", repoDir, "push", "origin", `HEAD:refs/heads/${branch}`],
@@ -739,7 +797,13 @@ export async function pushWorkspaceBranch(
     // The RESULT's `commits` is a number by contract, so an unreadable history
     // reports 0 there — the push happened, the count is the only thing we don't
     // know, and the log line above is where that difference is stated.
-    return { status: "pushed", branch, commits: localAhead ?? 0 };
+    return {
+      status: "pushed",
+      branch,
+      commits: localAhead ?? 0,
+      headSha: pushedHead || null,
+      remoteHeadBefore: pushedRemoteBefore,
+    };
   } catch (error) {
     // F19-18: "unexpected error" named nothing either. Same redacted channel.
     const detail = redactGitOutput(gitErrorText(error), { token });

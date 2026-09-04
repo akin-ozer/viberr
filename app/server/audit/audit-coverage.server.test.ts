@@ -344,6 +344,72 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
+        // Ruling 128 (pass 34): an empty repository is bootstrapped, and the
+        // repository-level write is audited like a credential assignment.
+        name: "ensureDefaultBranch (bootstraps an empty repository)",
+        action: "github.repo.bootstrapped",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+          const { createPat, setProjectCredential } = await import(
+            "~/server/secrets/pat-store.server"
+          );
+          const { getProjectGithubContext } = await import("~/server/github/github-context.server");
+          const { ensureDefaultBranch } = await import("~/server/github/repo-bootstrap.server");
+          const patActor = { userId: store.users.arda.id, label: store.users.arda.email };
+          const pat = createPat(
+            store.db,
+            { userId: store.users.arda.id, label: "bot", token: "ghp_coverage000000000000000000000002" },
+            patActor,
+          );
+          setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+          let bootstrapped = false;
+          const gh = fakeGithubFetch({
+            "GET /repos/akin-ozer/viberr/git/ref/heads/main": () =>
+              bootstrapped
+                ? { body: { object: { sha: "d".repeat(40) } } }
+                : { status: 409, body: { message: "Git Repository is empty." } },
+            "GET /repos/akin-ozer/viberr/branches": { body: [] },
+            "PUT /repos/akin-ozer/viberr/contents/README.md": () => {
+              bootstrapped = true;
+              return { status: 201, body: { commit: { sha: "d".repeat(40) } } };
+            },
+          });
+          const context = getProjectGithubContext(store.db, store.slug, { fetchImpl: gh.fetchImpl });
+          if (context.status !== "ok") throw new Error(context.status);
+          await ensureDefaultBranch(
+            store.db,
+            context,
+            { projectSlug: store.slug, taskKey: "VIB-1" },
+            patActor,
+            { dataRoot: store.dataRoot },
+          );
+        },
+      },
+      {
+        // Pass 34 (F34-9): a PR adoption is recorded by every door.
+        name: "recordPrAdoption (a human-opened PR replaces the task's closed one)",
+        action: "github.pr.adopted",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { recordPrAdoption } = await import("~/server/github/pr-adoption-record.server");
+          await recordPrAdoption(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+            {
+              repo: "akin-ozer/viberr",
+              branch: "vib-1",
+              prNumber: 6,
+              previousPrNumber: 5,
+              previousState: "closed",
+              headSha: "e".repeat(40),
+              source: "reconciler",
+            },
+            { userId: null, label: "system:policy-engine" },
+          );
+        },
+      },
+      {
         // C05-H (pass 32): the collision remedy's PR close was locked only in
         // task-governance; the designated coverage file names it too.
         name: "resolveRemoteBranchCollision (closes the unowned PR)",

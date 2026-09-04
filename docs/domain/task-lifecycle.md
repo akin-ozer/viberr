@@ -247,14 +247,20 @@ anything ambiguous fails closed with the reason recorded.
 
 Delivery (push the task branch, open the review PR) is an operator decision executed
 by the server (ruling 21); humans trigger it with the `deliver-review` intent
-(`run-agents` or the owner). `performDelivery` pushes the workspace branch
-(auto-committing a dirty tree, refusing a non-fast-forward as a `push_conflict`),
-detects a verified empty branch as a no-change outcome, opens or adopts the PR
-(adoption only when the PR is open **and** its head is the delivered revision;
-anything else is a branch collision), records `github.pr.opened`, and either re-queues
-a full-autonomy operator (`delivered`) or ensures a supervised operator left a
-"Move to Review" recommendation. Entering the review stage with no PR writes a typed
-event, never silence. Details in [github-delivery.md](github-delivery.md).
+(`run-agents` or the owner). `performDelivery` makes sure the repository's default
+branch exists first (ruling 128: an empty repository is bootstrapped, never
+misreported as unreachable), pushes the workspace branch (auto-committing a dirty
+tree, refusing a non-fast-forward as a `push_conflict`; reading origin's head first
+and answering `up_to_date` when there is nothing to push, ruling 134), detects a
+verified empty branch as a no-change outcome, opens or adopts the PR (adoption only
+when the PR is open **and** its head is the delivered revision; anything else is a
+branch collision), records `github.pr.opened` (or "Pushed `<sha>` to PR #N" when a
+push moved the head of the task's open PR), and either re-queues a full-autonomy
+operator (`delivered`: a new PR or a moved head) or ensures a supervised operator left
+a "Move to Review" recommendation. Rework on a task whose PR is already open is
+delivered the same way: the push moves the PR's head; nobody is ever asked to push by
+hand. Entering the review stage with no PR writes a typed event, never silence.
+Details in [github-delivery.md](github-delivery.md).
 
 ## 11. Acceptance and the endings
 

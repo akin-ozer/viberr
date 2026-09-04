@@ -82,6 +82,17 @@ characters; last 8 lines, 600 characters.
   caches the repo-access check for 30 seconds. Credential detail is stripped from
   loader payloads for readers without `grant-github-scope` (ruling 65).
 
+- **An empty repository is bootstrapped, never misreported** (ruling 128, pass 34). A
+  repository with no refs at all, or one whose only refs are task branches, has no
+  default branch to open a pull request against. Viberr creates it itself, before a
+  task's first branch: an initial commit (`README.md` naming the project) through the
+  Contents API on a repository with no refs, or the configured default branch at the
+  first commit of GitHub's current default (a task branch pushed before the ruling)
+  with the repository default restored. Both are disclosed on the task timeline and
+  audited as `github.repo.bootstrapped` (`repo-bootstrap.server.ts`). Live in pass 34
+  the first delivery into an empty `akin-ozer/jira-clone` pushed `jc-1` as the
+  repository's first ref and every surface said "GitHub was unreachable".
+
 Only github.com is supported; there is no GitHub Enterprise host configuration.
 
 ## 3. The delivery pipeline
@@ -110,16 +121,26 @@ best-effort: a task that cannot reach GitHub still runs.
 `delivery` recommendation, and the task page's Deliver button
 (`manualDeliverForReview`, `run-agents` or the owner, audit `github.delivery.manual`):
 
+0. **The base exists** (ruling 128): `ensureDefaultBranch` runs before the push, exactly
+   as it runs from `ensureTaskBranch` at dispatch. The gate splits by EVIDENCE: only a
+   positive "there is no default ref and Viberr could not create it" (`bootstrap_failed`,
+   a `repo` scope violation) refuses the push, with "Delivery could not run" naming the
+   remedy; a probe that merely could not be READ (network, auth) pushes anyway and the
+   PR-side wording is what the person sees. "Has no `main`" is never emitted on an
+   unread probe.
 1. **Push grant**: the deliverer must hold `execute-code-or-write-repo` /
    `commit-push-branch`; otherwise "Delivery withheld by policy".
 2. **`pushWorkspaceBranch`**: locate the delivering workspace; HEAD must be a task
    branch (the default branch means `no_branch`, with evidence from three read-only
    probes); auto-commit a dirty tree as `[KEY] deliver working-tree changes from the
-   agent run`; count commits ahead of `origin/<default>` (0 → `no_commits`); push
-   `HEAD:refs/heads/<branch>` under the askpass env with a 120-second timeout. A
-   non-fast-forward is a `push_conflict` (a branch collision, never a credential
-   error); other failures surface git's redacted words in a fenced "What the push
-   reported" block.
+   agent run`; count commits ahead of `origin/<default>` (0 → `no_commits`); read
+   origin's head for the branch (`git ls-remote --heads origin <branch>`, under the
+   askpass env, 30 s): equal to the workspace HEAD → `up_to_date`, no push (ruling
+   134); otherwise push `HEAD:refs/heads/<branch>` under the askpass env with a
+   120-second timeout, and `pushed` carries the head it published and the remote head
+   it replaced. A non-fast-forward is a `push_conflict` (a branch collision, never a
+   credential error); other failures surface git's redacted words in a fenced "What
+   the push reported" block. An unreadable `ls-remote` never blocks the push.
 3. **Verified no-change**: `no_commits`, or `no_branch` on a task that never had a
    branch, PR, revision or commits, with `defaultBranchEvidence.verified === true`,
    sets `noChanges`, mints a `kind: verified` work revision at the default-branch head
@@ -131,12 +152,28 @@ best-effort: a task that cannot reach GitHub still runs.
    (a relative link would 404 on github.com), the goal, a change summary and evidence
    from the live compare, and a footer stating that review and merge are
    human-authorized. A 403 opens a `pull_request:write` scope violation; a 2xx whose
-   body fails to decode is salvaged by PR number. Audit `github.pr.opened` on
-   creation; `pr: {number, state: review, title}` is written to the task.
-5. **Afterwards**: `noChanges` is cleared, a stale push-conflict packet is withdrawn, a
-   full-autonomy operator is re-queued with the `delivered` trigger, and a supervised
-   operator-authorized delivery records a "Move to <review>" recommendation (audit
-   `github.delivery.next_step`).
+   body fails to decode is salvaged by PR number. The 422 arms are typed (ruling 128):
+   "No commits between" is `nothing_to_review`; "already exists" re-reads the head;
+   `field: base, code: invalid` is `base_branch_missing` (the repository has no base
+   branch; the timeline names the two remedies: delete the task branch locally and let
+   the deliverer re-cut it from the bootstrapped base, or resolve the unrelated
+   history by hand); any other 422 and any unmapped HTTP status is `refused`, quoting
+   GitHub. Neither is ever reported as a network failure. Audit `github.pr.opened` on
+   creation; `pr: {number, state: review, title, headSha}` is written to the task.
+5. **Afterwards**: `noChanges` is cleared, a stale push-conflict packet is withdrawn, and
+   what MOVED decides the follow-up (ruling 134): a newly opened PR, or a push that
+   moved the head of a reused PR (recorded as "Pushed `<sha>` to **PR #N** for review
+   (was `<old>`)" with the same author rule as "Opened PR", and in the delivery audit
+   row's `headSha` / `moved`), re-queues a full-autonomy operator with the `delivered`
+   trigger; a reuse that pushed nothing (`up_to_date`) re-queues nothing, so the loop
+   ruling 48 guarded against cannot start. A supervised operator-authorized delivery
+   records a "Move to <review>" recommendation (audit `github.delivery.next_step`).
+   Every human door that performs a delivery (the task page's control, an applied
+   `delivery` recommendation) says what moved through one shared toast
+   (`deliveryToast`). The operator's `deliver_for_review` has NO cached-state
+   short-circuit any more: "PR #N is already open; there is nothing to deliver" was
+   the sentence that stranded every rework in pass 34 (F34-11); the only honest noop
+   is the push itself answering `up_to_date`.
 
 `reconcileWorkspaceDelivery` runs after every finished delivering run and after a
 push: it reads the clone, mints or refreshes the work revision only when the branch
@@ -243,8 +280,9 @@ never gets the tool because a Codex mount would hand the child the credential.
 ## 9. Identifiers and knobs
 
 - Audit: `github.pat.*`, `github.credential.*`, `org.connection.*`, `secrets.resealed`,
-  `project.repo.updated`, `github.branch.created|deleted`,
-  `github.branch_update.operator`, `github.pr.opened|merged|merge_refused|closed_unowned`,
+  `project.repo.updated`, `github.repo.bootstrapped` (ruling 128, a repository-level
+  change like `github.credential.assigned`), `github.branch.created|deleted`,
+  `github.branch_update.operator`, `github.pr.opened|adopted|merged|merge_refused|closed_unowned`,
   `github.reconcile.task|project`, `github.scope_violation.opened|resolved`,
   `github.workspace.branch_reconciled|pr_linked`,
   `github.delivery.manual|operator|next_step`, `task.agent.github_read`,
@@ -255,7 +293,8 @@ never gets the tool because a Codex mount would hand the child the credential.
   `completion`, `transition`.
 - Constants: request timeout 20 s with one retry on 5xx; repo-access cache 30 s;
   connection re-proof after 24 h; revalidation cooldown 60 s; poll every 5 min, 20
-  tasks per project per tick, 4 concurrent; stale after 1 h; push timeout 120 s;
+  tasks per project per tick, 4 concurrent; stale after 1 h; pre-push `ls-remote`
+  30 s; push timeout 120 s;
   fetch timeout 300 s; merge timeout 60 s; clone and mirror ceiling
   `VIBERR_GIT_CLONE_TIMEOUT_MS` (15 min).
 

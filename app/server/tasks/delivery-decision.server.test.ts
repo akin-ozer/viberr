@@ -355,7 +355,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
 
   it("a delivered push opens (or reuses) the PR and reports it", async () => {
     seed({ stage: "review", branch: "vib-1" });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 9,
@@ -401,7 +401,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       packet: CONFLICT_PACKET,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 11,
@@ -460,7 +460,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       packet: COLLISION_CONFLICT_PACKET,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 13,
@@ -501,6 +501,8 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     );
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
     github = fakeGithubFetch({
+      // Ruling 128: the delivery reads the base ref before pushing.
+      "GET /repos/akin-ozer/viberr/git/ref/heads/main": { body: { object: { sha: "c".repeat(40) } } },
       "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
       "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 204, body: "" },
     });
@@ -533,7 +535,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       packet: COLLISION_PACKET,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 14,
@@ -578,7 +580,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       packet: REJECT_PACKET,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 12,
@@ -742,21 +744,66 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
     expect(audits).toContain("github.delivery.operator");
   });
 
-  it("a live open PR makes delivery a noop (idempotent — no wasted re-push)", async () => {
+  /**
+   * Ruling 134 (pass 34, F34-11): the old pin here ("a live open PR makes
+   * delivery a noop") WAS the bug. `operatorDeliverForReview` answered from
+   * the cached `pr.state` before `performDelivery` ran, so rework on a task
+   * with an open PR was never pushed. The push now runs; the ONLY honest noop
+   * is the push itself answering `up_to_date`.
+   */
+  it("a live open PR no longer short-circuits: rework is pushed to it and the message names what moved", async () => {
+    // Canary: restore the deleted cached-state pre-check and the push never runs.
     seed({
       stage: "review",
       branch: "vib-1",
       pr: { number: 4, state: "review", title: "[VIB-1] t" },
     });
+    pushMock.mockResolvedValue({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "385047c".padEnd(40, "0"),
+      remoteHeadBefore: "6004958".padEnd(40, "0"),
+    });
+    openPrMock.mockResolvedValue({ status: "ok", prNumber: 4, created: false, url: "https://x/pull/4" });
     const r = await operatorDeliverForReview(
       store.db,
       dataCtx(),
       { projectSlug: store.slug, taskKey: "VIB-1" },
       authority(),
     );
-    expect(r.outcome).toBe("noop");
-    expect(r.message).toContain("PR #4");
-    expect(pushMock).not.toHaveBeenCalled();
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    expect(r.outcome).toBe("done");
+    expect(r.message).toContain("pushed `385047c` to the open review PR #4");
+    // The timeline records the moved head, attributed to the Operator.
+    const event = fm().timeline.find((e) => e.text.startsWith("Pushed `385047c`"));
+    expect(event?.text).toBe("Pushed `385047c` to **PR #4** for review (was `6004958`).");
+    expect(event?.actor).toEqual({ kind: "operator" });
+    expect(fm().frontmatter.pr?.headSha).toBe("385047c".padEnd(40, "0"));
+    const audit = listAuditEvents(store.db, {}).find((a) => a.action === "github.delivery.operator");
+    expect(audit?.details).toMatchObject({ status: "delivered", prNumber: 4, moved: true, headSha: "385047c".padEnd(40, "0") });
+  });
+
+  it("nothing to push is the only honest noop: an `up_to_date` push reads as 'already carries'", async () => {
+    // Canary: return `done`/"Delivered" regardless of `moved` and the message fails.
+    seed({
+      stage: "review",
+      branch: "vib-1",
+      pr: { number: 4, state: "review", title: "[VIB-1] t" },
+    });
+    pushMock.mockResolvedValue({ status: "up_to_date", branch: "vib-1", headSha: "385047c".padEnd(40, "0") });
+    openPrMock.mockResolvedValue({ status: "ok", prNumber: 4, created: false, url: "https://x/pull/4" });
+    const r = await operatorDeliverForReview(
+      store.db,
+      dataCtx(),
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority(),
+    );
+    expect(r.outcome).toBe("done");
+    expect(r.message).toContain("Nothing to push: PR #4 already carries `385047c`");
+    expect(fm().timeline.some((e) => e.text.startsWith("Pushed"))).toBe(false);
+    const audit = listAuditEvents(store.db, {}).find((a) => a.action === "github.delivery.operator");
+    expect(audit?.details).toMatchObject({ status: "delivered", moved: false });
   });
 
   it("explicit off denies the delivery", async () => {
@@ -773,7 +820,7 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
 
   it("F17-1: the operator's delivery calls openTaskPr operator-authorized (so the PR-open event is the Operator, not a guest)", async () => {
     seed({ stage: "review", branch: "vib-1" });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 1 });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 9,
@@ -799,7 +846,7 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
 describe("R15-2 safety net (b): manual delivery from the task page", () => {
   it("maintainer delivers; the act is audited github.delivery.manual", async () => {
     seed({ stage: "review", branch: "vib-1" });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 12,
@@ -860,7 +907,7 @@ describe("R15-2: an applied `delivery` recommendation performs the delivery", ()
 
   it("apply → performDelivery; a delivered outcome consumes the card", async () => {
     seed({ stage: "review", branch: "vib-1", recommendations: [REC] });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2 });
+    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null });
     openPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 21,

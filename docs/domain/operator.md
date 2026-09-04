@@ -67,7 +67,7 @@ resources, persona, whether the operator is deployed, and `humanGatedBeforeWork`
 | `goal-updated` | re-scope | `updateTaskGoal` |
 | `agent-reply` | react | the agent completion pipeline |
 | `pr-diverged` | recover | the GitHub reconciler on an out-of-band PR change |
-| `delivered` | proceed | a full-autonomy delivery that opened a new PR (ruling 48) |
+| `delivered` | proceed | a full-autonomy delivery that opened a new PR, or whose push moved the head of the task's open PR (rulings 48 and 134) |
 | `packet-resolved` | proceed | `resolvePacket`, when no asking agent absorbed the answer |
 | `scheduled` | re-check | the schedule runner |
 | `manual` | coordinate | the Run-operator control, an `@operator` comment, boot recovery, the controller's `run_agent_on_task` |
@@ -171,10 +171,17 @@ Details that matter:
   The operator **cannot merge**: it records `pr.state: accepted` (merge pending) and a
   human completes the merge (`complete-merge` intent). A racing human acceptance wins
   the lock and the operator's audit row is skipped.
-- **Delivery.** `deliver_for_review` runs `performDelivery`; a supervised delivery
-  always leaves an actionable next step (a "Move to Review" recommendation) when the
-  operator recorded none (ruling 58); a full-autonomy delivery re-queues the operator
-  with the `delivered` trigger (ruling 48).
+- **Delivery.** `deliver_for_review` runs `performDelivery`, with NO cached-state
+  short-circuit (ruling 134): rework on a task whose PR is already open is pushed to
+  that PR and the tool result names what moved ("pushed `<sha>` to the open review PR
+  #N"); the only noop is the push itself answering `up_to_date` ("Nothing to push: PR
+  #N already carries `<sha>`"). Under `recommend` the card reads the RECORDED
+  `pr.unpushedRevision` fact and proposes "Push `<sha>` to PR #N". A supervised
+  delivery always leaves an actionable next step (a "Move to Review" recommendation)
+  when the operator recorded none (ruling 58); a full-autonomy delivery whose PR is
+  new or whose head moved re-queues the operator with the `delivered` trigger (rulings
+  48 and 134). The doctrine and the seeded persona say that pushing is never a
+  person's job and never an agent's.
 
 ## 6. Decision packets
 

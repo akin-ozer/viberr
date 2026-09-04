@@ -343,3 +343,28 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
     expect(skill).toContain("## The context you are handed");
   });
 });
+
+/**
+ * Ruling 134 (pass 34, F34-11): the shipped operator doctrine says that
+ * rework on an open PR is delivered with `deliver_for_review`, and that
+ * pushing is never a person's or an agent's job. The outgoing sha256 is
+ * listed so an unedited store copy upgrades at boot.
+ *
+ * Canary: revert the persona sentence (or drop the outgoing hash) and the
+ * matching assertion fails.
+ */
+describe("the operator doctrine upgrade in place (ruling 134)", () => {
+  const assetsDir = path.join(import.meta.dirname, "assets");
+  it("carries the rework-delivery sentence and lists its outgoing version", async () => {
+    const { PRIOR_SHIPPED_HASHES, assetHash } = await import("./default-assets.server");
+    const definition = readFileSync(path.join(assetsDir, "operator.definition.md"), "utf8");
+    expect(definition).toContain("shows `pr.unpushedRevision`, call `deliver_for_review`");
+    expect(definition).toContain("Pushing is never a person's job and never an agent's.");
+    expect(definition).not.toMatch(/[–—]/);
+    const rel = path.join("agents", "definitions", "operator.md");
+    expect(PRIOR_SHIPPED_HASHES[rel]).toContain(
+      "9462381afd6c87b991f5653610252ac2e7a4815b039709d818bbecec1db7532e",
+    );
+    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(assetHash(definition));
+  });
+});

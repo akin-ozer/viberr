@@ -136,6 +136,14 @@ a readiness downgrade (tolerant parsing):
 - Per-project credential health and scope violations show on the GitHub view and the
   task. Diagnostics distinguish `insufficient_scope`, `expired`, `revoked`,
   `repo_not_found`, `org_approval_missing`, `network_error`.
+- **An empty repository needs nothing from you** (ruling 128, pass 34). Viberr creates
+  the default branch itself before a task's first branch (an initial commit through the
+  Contents API, or the configured default at the first commit of a task branch GitHub
+  made the default), disclosed on the task timeline and audited as
+  `github.repo.bootstrapped`. "Delivery could not run … Viberr could not create it"
+  names the one case that needs a person: the credential cannot write the repository
+  (a `repo` scope violation opens) or GitHub refused the create; fix that, then deliver
+  again. A delivery never pushes a task branch as the repository's first ref.
 - Accept-completion merges the review PR; a missing `pull_request:write` scope surfaces
   as an open scope violation with a Grant-scope action (re-validate the PAT, 60 s
   cooldown) rather than a silent failure. Write permission is proven read-only from the

@@ -55,6 +55,8 @@ const pushMock = vi.fn<typeof pushWorkspaceBranch>(async () => ({
   status: "pushed",
   branch: "vib-1",
   commits: 1,
+  headSha: "a".repeat(40),
+  remoteHeadBefore: null,
 }));
 
 const openTaskPrMock = vi.fn<typeof openTaskPr>(async () => ({
@@ -184,7 +186,7 @@ beforeEach(() => {
   installFakeRuntime();
   runOp.mockClear();
   pushMock.mockClear();
-  pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 1 });
+  pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null });
   openTaskPrMock.mockClear();
   openTaskPrMock.mockResolvedValue({
     status: "ok",
@@ -242,6 +244,8 @@ describe("F32-7 — a collision resolution's redelivery leaves a next step", () 
     );
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
     const github = fakeGithubFetch({
+      // Ruling 128: the delivery reads the base ref before pushing.
+      "GET /repos/akin-ozer/viberr/git/ref/heads/main": { body: { object: { sha: "c".repeat(40) } } },
       "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
       "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 204, body: "" },
     });
@@ -601,13 +605,16 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
       created: false,
       url: "http://x/pull/147",
     });
+    // Ruling 134(b): a reuse re-queues nothing only when the push moved
+    // nothing; a moved head is a new review subject (delivery-requeue C2).
+    pushMock.mockResolvedValueOnce({ status: "up_to_date", branch: "vib-1", headSha: "a".repeat(40) });
     expect(await deliver()).toBe("delivered");
     await flush();
     // R18-2/R19-4: the guaranteed card is the SUPERVISED safety net only. Under
     // full autonomy the operator drives, so it is never handed a card — and a
-    // reuse (created:false) re-queues nothing, so full-autonomy-reuse leaves
-    // neither a re-queue nor a card. (A's owner-ruled gate overruled B's broader
-    // "card as the safety net" here.)
+    // reuse whose push moved nothing re-queues nothing, so full-autonomy-reuse
+    // leaves neither a re-queue nor a card. (A's owner-ruled gate overruled B's
+    // broader "card as the safety net" here.)
     expect(runOp).not.toHaveBeenCalled();
     expect(recs()).toHaveLength(0);
   });

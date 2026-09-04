@@ -39,7 +39,9 @@
 
 **Decision packet** — the one open structured question on a task (`## Packet` in `task.md`): `type` `input | blocked`, observations, and options whose `kind` is one of `PACKET_OPTION_KINDS` (`accept_completion`, `request_edit`, `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`, `archive_task`, `discard_branch`, `resolve_remote_collision`, `custom`). Resolution dispatches on the kind, never the title (ruling 7).
 
-**Delivery** — pushing the task branch and opening the review PR. An operator decision (capability `deliver-review-pr`, ruling 21) executed by the server; specialists never push. Humans can trigger it directly (`deliver-review` intent).
+**Delivery** — pushing the task branch and opening the review PR. An operator decision (capability `deliver-review-pr`, ruling 21) executed by the server; specialists never push and nobody pushes by hand. Humans can trigger it directly (`deliver-review` intent). Delivery is defined by the remote (ruling 134): the push reads origin's head first, answers `up_to_date` when it already carries the workspace head, and otherwise pushes and says what moved; rework on a task whose PR is already open is delivered the same way and moves that PR's head.
+
+**Repository bootstrap** — ruling 128: when the project's default branch has no ref (an empty repository, or one whose only refs are task branches), Viberr creates it before a task's first branch, by an initial commit or at the first commit of GitHub's current default, disclosed on the timeline and audited as `github.repo.bootstrapped`.
 
 **Deployment** — a `project.md` `agents[]` entry `{profileId, capabilities, extras, definition?}` that puts a template on a project with a project-effective capability policy.
 

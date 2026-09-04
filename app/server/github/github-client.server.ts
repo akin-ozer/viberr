@@ -412,3 +412,18 @@ export function tokenExpirationFrom(headers: Headers): string | null {
   const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? raw : date.toISOString();
 }
+
+
+/**
+ * Ruling 128 (pass 34): is this ref-read answer "there is no such ref"? A 404,
+ * or a 409 whose message says the repository is empty (`Git Repository is
+ * empty.`, what GitHub answers on a repository with no refs at all) — never a
+ * network failure. Shared by the branch-name probe, `ensureTaskBranch` and the
+ * repository bootstrap. Lives on the client leaf so both sides can import it
+ * without a cycle.
+ */
+export function isMissingRefAnswer(result: GithubResponse<unknown>): boolean {
+  if (result.ok || result.kind !== "http") return false;
+  if (result.status === 404) return true;
+  return result.status === 409 && /empty/i.test(result.message);
+}

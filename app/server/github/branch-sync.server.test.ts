@@ -401,26 +401,25 @@ describe("ensureTaskBranch", () => {
       ),
     ).toEqual({ status: "no_pat_configured", repo: "akin-ozer/viberr" });
 
-    // Default branch missing on the remote.
+    // Ruling 128: the default branch missing on the remote is BOOTSTRAPPED,
+    // then the task branch is cut from it. (This case used to assert a typed
+    // `default_branch_missing` that no caller consumed.) The base cannot be
+    // created at all → `bootstrap_failed`.
     const store = setupWithCredential("VIB-206", "vib-206-x");
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/git/ref/heads/vib-206-x`]: {
-        status: 404,
-        body: { message: "Not Found" },
-      },
-      [`GET ${REPO_PATH}/git/ref/heads/main`]: {
-        status: 404,
-        body: { message: "Not Found" },
-      },
+    const failing = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/vib-206-x`]: { status: 404, body: { message: "Not Found" } },
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { status: 404, body: { message: "Not Found" } },
+      [`GET ${REPO_PATH}/branches`]: { body: [] },
+      [`PUT ${REPO_PATH}/contents/README.md`]: { status: 500, body: { message: "boom" } },
     });
     expect(
       await ensureTaskBranch(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-206" },
         ACTOR,
-        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+        { dataRoot: store.dataRoot, fetchImpl: failing.fetchImpl },
       ),
-    ).toEqual({ status: "default_branch_missing", defaultBranch: "main" });
+    ).toMatchObject({ status: "bootstrap_failed", defaultBranch: "main" });
 
     // Unknown task.
     expect(
@@ -431,6 +430,47 @@ describe("ensureTaskBranch", () => {
         { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch({}).fetchImpl },
       ),
     ).toEqual({ status: "task_not_found" });
+  });
+});
+
+/**
+ * Ruling 128 (pass 34, F34-4): on an EMPTY repository `ensureTaskBranch`
+ * bootstraps `main` (an initial commit through the Contents API) and then cuts
+ * the task branch from it, recording the bootstrap on the timeline and in the
+ * audit log. Canary: restore the old 404 arm (return `bootstrap_failed`
+ * without calling `ensureDefaultBranch`) and the PUT never runs.
+ */
+describe("ruling 128: ensureTaskBranch bootstraps an empty repository", () => {
+  it("creates `main` with an initial commit, then the task branch from it", async () => {
+    const store = setupWithCredential("VIB-207", "vib-207");
+    const ROOT = "d2e0fb0".padEnd(40, "0");
+    let bootstrapped = false;
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/vib-207`]: { status: 404, body: { message: "Not Found" } },
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: () =>
+        bootstrapped
+          ? { body: { object: { sha: ROOT } } }
+          : { status: 409, body: { message: "Git Repository is empty." } },
+      [`GET ${REPO_PATH}/branches`]: { body: [] },
+      [`PUT ${REPO_PATH}/contents/README.md`]: () => {
+        bootstrapped = true;
+        return { status: 201, body: { commit: { sha: ROOT } } };
+      },
+      [`POST ${REPO_PATH}/git/refs`]: { status: 201, body: { ref: "refs/heads/vib-207" } },
+      [`GET ${REPO_PATH}/compare/main...vib-207`]: compareRoute([]),
+    });
+    const result = await ensureTaskBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-207" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result).toMatchObject({ status: "synced", branch: "vib-207", created: true });
+    expect(gh.callsTo(`PUT ${REPO_PATH}/contents/README.md`)).toHaveLength(1);
+    expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)[0]!.body).toEqual({ ref: "refs/heads/vib-207", sha: ROOT });
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-207", dataRoot: store.dataRoot })!;
+    expect(file.parsed.timeline.some((e) => e.type === "github" && e.text.includes("Bootstrapped the repository"))).toBe(true);
+    expect(listAuditEvents(store.db).some((e) => e.action === "github.repo.bootstrapped")).toBe(true);
   });
 });
 

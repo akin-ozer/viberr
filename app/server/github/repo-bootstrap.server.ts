@@ -9,10 +9,13 @@ import {
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { logger } from "~/server/logging/logger.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { githubFailureMessage, type GithubResponse } from "./github-client.server";
+import {
+  githubFailureMessage,
+  isMissingRefAnswer,
+  type GithubResponse,
+} from "./github-client.server";
 import type { GithubContext } from "./github-context.server";
 import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
-import { isMissingRefAnswer } from "./branch-sync.server";
 
 /**
  * Ruling 128 (pass 34, Q34-2 / F34-4): Viberr bootstraps the default branch

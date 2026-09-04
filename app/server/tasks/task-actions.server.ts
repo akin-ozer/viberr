@@ -5010,9 +5010,19 @@ export type DeliveryOutcome =
       url: string;
       /** True when this delivery CREATED the PR; false when one was reused. */
       created: boolean;
-      /** The raw push status ("pushed", or a benign non-push such as
-       *  "no_commits" when an agent already delivered with its own creds). */
+      /** The raw push status ("pushed", "up_to_date", or a benign non-push
+       *  such as "no_commits" when an agent already delivered with its own
+       *  creds). */
       pushStatus: string;
+      /** Ruling 134: the workspace head the delivery left on the PR (full
+       *  sha), or null when git could not name it. */
+      headSha: string | null;
+      /** Ruling 134: the PR was opened, or the push moved its head. A reuse
+       *  that pushed nothing is `false`, and re-queues nothing (ruling 48). */
+      moved: boolean;
+      /** Ruling 134(b): a `delivered` operator run was queued for this outcome
+       *  (full autonomy, moved head). */
+      operatorRequeued: boolean;
     }
   /** F15-15/B-GH1: the remote branch diverged (non-fast-forward). No PR was
    *  opened — it would review the stale remote content, not the delivery. */
@@ -5045,6 +5055,25 @@ export async function performDelivery(
   try {
     const canCommitPush = await resolveDeliveryPushGrant(ctx, projectSlug, taskKey);
 
+    // 0. Ruling 128 (F34-4): the base branch must exist BEFORE the push, or a
+    //    task branch becomes an empty repository's first ref. The gate splits by
+    //    EVIDENCE: only a positive "there is no default ref and Viberr could not
+    //    create it" (`bootstrap_failed`, `scope_violation`) refuses the push; a
+    //    probe that merely could not be READ (network, auth) pushes anyway and
+    //    the PR-side wording is what the person sees.
+    const bootstrap = await ensureDefaultBranchBeforePush(db, ctx, projectSlug, taskKey, actor);
+    if (bootstrap.status === "bootstrap_failed" || bootstrap.status === "scope_violation") {
+      const message =
+        bootstrap.status === "bootstrap_failed"
+          ? `${taskKey}'s repository has no \`${bootstrap.defaultBranch}\` branch and Viberr could not create it (${bootstrap.reason}). ` +
+            `Nothing was pushed: a task branch must never become the repository's first ref. ` +
+            `Create \`${bootstrap.defaultBranch}\` on GitHub (or fix what GitHub named), then deliver again.`
+          : `${taskKey}'s repository has no default branch and creating it was refused: the project credential lacks the \`repo\` scope (a scope violation is open on the task). ` +
+            `Nothing was pushed. Grant the scope or create the branch on GitHub, then deliver again.`;
+      await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Delivery could not run", message);
+      return { status: "failed", message };
+    }
+
     // 1. Push the workspace commits to the remote task branch.
     const pushWorkspaceBranch =
       ctx.deps?.pushWorkspaceBranch ??
@@ -5056,7 +5085,9 @@ export async function performDelivery(
       canCommitPush,
       ...dataCtx,
     });
-    if (push.status !== "pushed") {
+    // Ruling 134: `up_to_date` is an ordinary delivery (origin already carries
+    // the head); only a real non-push is worth a log line.
+    if (push.status !== "pushed" && push.status !== "up_to_date") {
       logger.info("workspace push before review PR did not push", {
         taskKey,
         status: push.status,
@@ -5137,7 +5168,9 @@ export async function performDelivery(
     // (a review PR whose head is not the delivery), reached through four
     // quieter doors. `no_commits` in particular was also what a FAILED
     // `git rev-list` looked like before push-workspace learned to say "unknown".
-    if (push.status !== "pushed") {
+    // Ruling 134: `up_to_date` (origin already carries the head) flows through
+    // the reconcile and `openTaskPr` exactly like `pushed`.
+    if (push.status !== "pushed" && push.status !== "up_to_date") {
       // F19-21 (pass 19) — R17-2's "Completed — no changes required" outcome was
       // UNREACHABLE for the task shape ruling 43 named. `noChanges` had exactly
       // two writers, both requiring a delivery that got far enough to see an
@@ -5384,13 +5417,29 @@ export async function performDelivery(
       // human manual delivery gets neither — the human who just clicked Deliver is
       // present and needs no card. That keeps R18-2's full-autonomy behaviour
       // byte-for-byte unchanged and covers every other operator delivery.
+      // Ruling 134: did anything MOVE? A newly opened PR, or a push that moved
+      // the head of a reused PR. A reuse that pushed nothing (`up_to_date`)
+      // moved nothing and re-queues nothing, so ruling 48's loop cannot start.
+      const moved = result.created || push.status === "pushed";
+      const headSha = push.status === "pushed" || push.status === "up_to_date" ? push.headSha : null;
+      if (!result.created && push.status === "pushed") {
+        await recordPushedHead(db, ctx, projectSlug, taskKey, {
+          prNumber: result.prNumber,
+          headSha: push.headSha,
+          remoteHeadBefore: push.remoteHeadBefore,
+          actor,
+        });
+      }
+      let operatorRequeued = false;
       const { resolveOperatorAuthority } = await import("./operator-actions.server");
       const autonomy =
         ctx.operatorRun?.autonomy ??
         resolveOperatorAuthority(ctx, projectSlug).autonomy;
       if (autonomy === "full") {
-        // Only a NEWLY opened PR re-queues: a reuse changed nothing (R18-2).
-        if (result.created) {
+        // Ruling 48 as amended by ruling 134(b): a newly opened PR, OR a head
+        // the push moved, is a new review subject and re-queues the operator.
+        if (moved) {
+          operatorRequeued = true;
           void autoInvokeOperator(
             db,
             ctx,
@@ -5415,6 +5464,9 @@ export async function performDelivery(
         url: result.url,
         created: result.created,
         pushStatus: push.status,
+        headSha,
+        moved,
+        operatorRequeued,
       };
     }
     logger.info("review PR not opened", { taskKey, reason: result.status });
@@ -5460,6 +5512,23 @@ export async function performDelivery(
         },
       );
       return { status: "nothing_to_review", message };
+    }
+    // Ruling 128 (F34-4): GitHub ANSWERED. A missing base branch and any other
+    // refusal are named as what they are, never as "unreachable" and never with
+    // "fix the credential settings" (nothing is wrong with them).
+    if (result.status === "base_branch_missing") {
+      const message =
+        `No pull request could be opened for ${taskKey}: ${result.message} ` +
+        `The task branch was pushed, so a delivery from this workspace cannot re-cut it: delete the task branch locally and let the deliverer re-cut it from the bootstrapped \`${result.base}\`, or resolve the unrelated history by hand; then deliver again.`;
+      await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Review PR could not be opened", message);
+      return { status: "failed", message };
+    }
+    if (result.status === "refused") {
+      const message =
+        `No pull request could be opened for ${taskKey}: GitHub refused it (${result.message}). ` +
+        `Fix what GitHub named, then deliver again.`;
+      await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Review PR could not be opened", message);
+      return { status: "failed", message };
     }
     // DG-5: a GitHub/credential FAILURE (auth, network, missing PAT/repo) is
     // surfaced so a human knows the review PR is missing and why.
@@ -5548,7 +5617,12 @@ export async function manualDeliverForReview(
     taskKey: input.taskKey,
     details:
       outcome.status === "delivered"
-        ? { status: outcome.status, prNumber: outcome.prNumber }
+        ? {
+            status: outcome.status,
+            prNumber: outcome.prNumber,
+            headSha: outcome.headSha,
+            moved: outcome.moved,
+          }
         : { status: outcome.status },
   });
   return outcome;
@@ -5560,6 +5634,88 @@ export async function manualDeliverForReview(
  * something a human must see, not just a log line. Best-effort — a failure to
  * surface only logs.
  */
+/**
+ * Ruling 128: make sure the project's default branch exists before the push.
+ * Reads the GitHub context the same way the PR open does; a project with no
+ * repository or credential is `skipped` (the push path reports those itself).
+ */
+async function ensureDefaultBranchBeforePush(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  actor: TaskActor,
+): Promise<
+  | Awaited<ReturnType<typeof import("~/server/github/repo-bootstrap.server").ensureDefaultBranch>>
+  | { status: "skipped" }
+> {
+  const { getProjectGithubContext } = await import("~/server/github/github-context.server");
+  const ghOptions: GithubContextOptions = {};
+  if (ctx.fetchImpl) ghOptions.fetchImpl = ctx.fetchImpl;
+  const gh = getProjectGithubContext(db, projectSlug, ghOptions);
+  if (gh.status !== "ok") return { status: "skipped" };
+  const { ensureDefaultBranch } = await import("~/server/github/repo-bootstrap.server");
+  return ensureDefaultBranch(
+    db,
+    gh,
+    { projectSlug, taskKey },
+    { userId: actor.userId, label: actor.label },
+    { dataRoot: ctx.dataRoot },
+  );
+}
+
+/**
+ * Ruling 134(a): a push that MOVED the head of a reused PR is recorded on the
+ * timeline ("Pushed `<sha7>` to **PR #N** for review (was `<old7>`)"), with the
+ * same author rule the "Opened PR" event uses (operator → the Operator; a
+ * human → that human), and `pr.headSha` is brought up to the pushed head so
+ * a recorded unpushed revision it satisfies is cleared in the same write.
+ * Nothing is written when git could not name the pushed head.
+ */
+async function recordPushedHead(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  input: {
+    prNumber: number;
+    headSha: string | null;
+    remoteHeadBefore: string | null;
+    actor: TaskActor;
+  },
+): Promise<void> {
+  if (!input.headSha) return;
+  const humanUserId =
+    !ctx.operatorAuthorized && input.actor.userId ? input.actor.userId : null;
+  const nameHint = humanUserId ? userName(db, humanUserId) : null;
+  const actor: FileActorRef = ctx.operatorAuthorized
+    ? { kind: "operator" }
+    : humanUserId
+      ? { kind: "human", userId: humanUserId, nameHint }
+      : { kind: "system", systemId: "delivery" };
+  const headSha = input.headSha;
+  await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "github",
+      actor,
+      title: null,
+      text:
+        `Pushed \`${headSha.slice(0, 7)}\` to **PR #${input.prNumber}** for review` +
+        (input.remoteHeadBefore ? ` (was \`${input.remoteHeadBefore.slice(0, 7)}\`)` : "") +
+        ".",
+      toAgent: false,
+      evidence: null,
+    });
+    const pr = parsed.frontmatter.pr;
+    if (pr && pr.number === input.prNumber) {
+      pr.headSha = headSha;
+      if (pr.unpushedRevision?.revisionSha === headSha) delete pr.unpushedRevision;
+    }
+  });
+  reprojectTask(db, ctx, projectSlug, taskKey);
+}
+
 async function surfaceDeliveryEvent(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -8847,6 +9003,15 @@ export async function completeTaskMerge(
   };
 }
 
+/** What applying a card hands back to the route. */
+export interface AppliedRecommendation {
+  task: TaskSummary;
+  label: string;
+  /** Ruling 134(a): set when the card was a `delivery`, so the route's toast
+   *  can say what moved. */
+  delivery?: DeliveryOutcome;
+}
+
 export async function applyRecommendation(
   db: DatabaseSync,
   input: {
@@ -8866,7 +9031,7 @@ export async function applyRecommendation(
   },
   actor: TaskActor,
   ctx: TaskActionContext = {},
-): Promise<{ task: TaskSummary; label: string }> {
+): Promise<AppliedRecommendation> {
   const project = loadProjectContext(ctx, input.projectSlug);
   // Applying an operator recommendation resolves a pending governance decision
   // (symmetric with dismissRecommendation/resolvePacket): maintainer+ OR the
@@ -8921,6 +9086,7 @@ export async function applyRecommendation(
     : ctx;
 
   // Execute the recommended action through the governed mutation (RBAC inside).
+  let delivery: DeliveryOutcome | undefined;
   if (rec.kind === "run_agent" && rec.profileId) {
     // The operator recommended dispatching an agent (it can't under `recommend`
     // autonomy) — applying it runs exactly what the manual run-agent control
@@ -8986,6 +9152,9 @@ export async function applyRecommendation(
     if (outcome.status !== "delivered") {
       throw AppError.conflict(`Delivery did not complete: ${outcome.message}`);
     }
+    // Ruling 134(a): the person who applied the card is told what moved, through
+    // the same toast the task page's own control uses.
+    delivery = outcome;
   } else if (rec.kind === "accept_completion") {
     // The operator's "accept completion → Done" recommendation. Applying it is
     // the human acceptance of the review→done boundary: same semantics as
@@ -9022,7 +9191,12 @@ export async function applyRecommendation(
     details: { kind: rec.kind, label: rec.label },
   });
 
-  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), label: rec.label };
+  const applied: AppliedRecommendation = {
+    task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+    label: rec.label,
+  };
+  if (delivery) applied.delivery = delivery;
+  return applied;
 }
 
 /**

@@ -43,6 +43,7 @@ import {
   releaseTasksOwnedBy,
   setOwner,
   clearWaitingToHuman,
+  manualDeliverForReview,
   performDelivery,
   revisionDriftNote,
   specialistReplyDirective,
@@ -3607,5 +3608,174 @@ describe("recordAgentCompletion attachments (P21 — the producing message names
         dataRoot: store.dataRoot,
       })!.diagnostics,
     ).toEqual([]);
+  });
+});
+
+/**
+ * Ruling 128 (pass 34, F34-4): the base branch is created BEFORE the first
+ * push, and the pre-push gate splits by EVIDENCE — only a positive "no default
+ * ref and Viberr could not create it" refuses the push; a probe that merely
+ * could not be READ pushes anyway and never claims the base is missing.
+ */
+describe("ruling 128: performDelivery bootstraps the base before the first push", () => {
+  const REPO_PATH = "/repos/akin-ozer/viberr";
+  const ROOT = "d2e0fb0".padEnd(40, "0");
+
+  function seedDeliverable(store: TestStore): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_bootstrap0000000000001" },
+      actor(store.users.arda),
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor(store.users.arda));
+  }
+
+  it("bootstraps `main` before the first push and records it (the bootstrap line is timeline[1], under the PR event)", async () => {
+    // Canary: gate the bootstrap on the absence of the `pushWorkspaceBranch`
+    // dep (skip it when a dep is injected) and the PUT never runs here.
+    pushMock.mockClear();
+    const store = prepared();
+    seedDeliverable(store);
+    let bootstrapped = false;
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: () =>
+        bootstrapped
+          ? { body: { object: { sha: ROOT } } }
+          : { status: 409, body: { message: "Git Repository is empty." } },
+      [`GET ${REPO_PATH}/branches`]: { body: [] },
+      [`PUT ${REPO_PATH}/contents/README.md`]: () => {
+        bootstrapped = true;
+        return { status: 201, body: { commit: { sha: ROOT } } };
+      },
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 1, html_url: "https://x/pull/1", title: "[VIB-1] t", state: "open", head: { sha: "a".repeat(40) } },
+      },
+    });
+    pushMock.mockResolvedValueOnce({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "a".repeat(40),
+      remoteHeadBefore: null,
+    });
+    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    expect(outcome.status).toBe("delivered");
+    expect(github.callsTo(`PUT ${REPO_PATH}/contents/README.md`)).toHaveLength(1);
+    // The bootstrap ran BEFORE the push.
+    const putIndex = github.calls.findIndex((c) => c.method === "PUT");
+    expect(putIndex).toBeGreaterThan(-1);
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    const timeline = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline;
+    expect(timeline[0]!.text).toContain("Opened **PR #1**");
+    expect(timeline[1]!.text).toContain("Bootstrapped the repository");
+    expect(timeline[1]!.text).toContain("`d2e0fb0`");
+  });
+
+  it("refuses to push when the base cannot be CREATED, and pushes anyway when the probe merely could not be READ", async () => {
+    // Canary: route `network_unavailable` into the refusing arm and the second
+    // half fails (no push, and a sentence claiming the base is missing).
+    pushMock.mockClear();
+    const store = prepared();
+    seedDeliverable(store);
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { status: 409, body: { message: "Git Repository is empty." } },
+      [`GET ${REPO_PATH}/branches`]: { body: [] },
+      [`PUT ${REPO_PATH}/contents/README.md`]: { status: 500, body: { message: "boom" } },
+    });
+    const refused = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    expect(refused.status).toBe("failed");
+    expect(refused.status === "failed" ? refused.message : "").toContain("has no `main` branch and Viberr could not create it");
+    expect(refused.status === "failed" ? refused.message : "").toContain("Nothing was pushed");
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!.text).toContain("could not create it");
+
+    // The probe could not be READ: the push proceeds, and no surface claims
+    // the base is missing.
+    const offline = prepared();
+    seedDeliverable(offline);
+    pushMock.mockClear();
+    pushMock.mockResolvedValueOnce({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null });
+    const { unreachableFetch } = await import("../../../test-support/fake-github");
+    const outcome = await performDelivery(
+      offline.db,
+      { dataRoot: offline.dataRoot, deps: { pushWorkspaceBranch: pushMock }, fetchImpl: unreachableFetch() },
+      offline.slug,
+      "VIB-1",
+      actor(offline.users.arda),
+    );
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    expect(outcome.status).toBe("failed");
+    const text = getTaskDetail(offline.db, offline.slug, "VIB-1")!.timeline[0]!.text;
+    expect(text).not.toContain("has no `main`");
+    expect(text).toContain("unreachable");
+  });
+});
+
+/**
+ * Ruling 134(a): a push that moved the head of a REUSED PR is recorded on the
+ * timeline with the same author rule the "Opened PR" event uses — a human
+ * delivery renders as that human. Canary: drop the `recordPushedHead` call.
+ */
+describe("ruling 134: the pushed-head event on a reused PR", () => {
+  it("writes `Pushed <sha> to PR #N (was <old>)` attributed to the human who delivered, and records the head on the PR", async () => {
+    const REPO_PATH = "/repos/akin-ozer/viberr";
+    pushMock.mockClear();
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1",
+        ownerUserId: store.users.arda.id,
+        pr: {
+          number: 4,
+          state: "review",
+          title: "[VIB-1] t",
+          headSha: "6004958".padEnd(40, "0"),
+          unpushedRevision: { revisionSha: "385047c".padEnd(40, "0"), prHeadSha: "6004958".padEnd(40, "0"), relation: "unknown" },
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_pushed00000000000001" }, actor(store.users.arda));
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor(store.users.arda));
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { body: { object: { sha: "c".repeat(40) } } },
+      [`GET ${REPO_PATH}/pulls/4`]: {
+        body: { number: 4, html_url: "https://x/pull/4", title: "[VIB-1] t", state: "open", merged: false, head: { sha: "385047c".padEnd(40, "0") } },
+      },
+    });
+    pushMock.mockResolvedValueOnce({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "385047c".padEnd(40, "0"),
+      remoteHeadBefore: "6004958".padEnd(40, "0"),
+    });
+    const outcome = await manualDeliverForReview(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      deliveryCtx(store),
+    );
+    expect(outcome).toMatchObject({ status: "delivered", created: false, moved: true, headSha: "385047c".padEnd(40, "0") });
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const event = file.parsed.timeline.find((e) => e.text.startsWith("Pushed `385047c`"))!;
+    expect(event.text).toBe("Pushed `385047c` to **PR #4** for review (was `6004958`).");
+    expect(event.actor).toMatchObject({ kind: "human", userId: store.users.arda.id });
+    expect(file.parsed.frontmatter.pr?.headSha).toBe("385047c".padEnd(40, "0"));
+    // The push satisfied the recorded unpushed revision.
+    expect(file.parsed.frontmatter.pr).not.toHaveProperty("unpushedRevision");
+    const audit = listAuditEvents(store.db).find((e) => e.action === "github.delivery.manual");
+    expect(audit?.details).toMatchObject({ status: "delivered", moved: true, headSha: "385047c".padEnd(40, "0") });
   });
 });

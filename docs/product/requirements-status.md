@@ -57,7 +57,7 @@ credential principal's own account rather than a deployment-wide one.)*
 | FR28 | Progress review without raw logs | IMPLEMENTED | live phase/step in `features/runtime/runs-panels.tsx`, evidence separation, typed events |
 | FR29 | Authenticate to GitHub, access authorized repos | IMPLEMENTED | sealed PATs (`server/secrets/*`), `server/github/github-client.server.ts`, connections; PAT-only, no GitHub App |
 | FR30 | Every task executes against its project's repo | IMPLEMENTED | `project-file.schema.ts`, `pr-open.server.ts` |
-| FR31 | Task-key branches; delivery is an operator decision; agents never push; review-without-PR announced | IMPLEMENTED as amended | `branch-sync.server.ts`, `pr-open.server.ts`, `task-actions.performDelivery`, `specialist-tool-policy.ts` |
+| FR31 | Task-key branches; delivery is an operator decision; agents never push; review-without-PR announced; an empty repository is bootstrapped (ruling 128); rework reaches the open PR (ruling 134) | IMPLEMENTED as amended | `branch-sync.server.ts`, `repo-bootstrap.server.ts`, `pr-open.server.ts`, `push-workspace.server.ts`, `task-actions.performDelivery`, `specialist-tool-policy.ts` |
 | FR32 | Branch/PR status alongside task state | IMPLEMENTED | `features/github/github-view.tsx`, `github-pills.ts`, 5-min reconcile poller |
 | FR33 | Auditable history; 90-day retention; export-before-purge; admin download | IMPLEMENTED | `server/audit/*`, `server/db/retention.server.ts`, `routes/org.settings.audit-export.ts`, S3 push; the pass also runs every 6 h (the PRD says "on every boot") |
 | FR34 | Secrets isolated from artifacts, comments, audit | IMPLEMENTED | spawn-env filter, sink and git-output redaction, `GIT_ASKPASS`, audit `details` rule |

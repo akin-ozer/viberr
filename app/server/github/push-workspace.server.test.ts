@@ -77,17 +77,36 @@ function fakeGit(opts: {
    *  through, so the tree stays dirty and 0-ahead — the shape that used to be
    *  read as a verified zero-diff. */
   commitFails?: boolean;
+  /** Ruling 134: what `git ls-remote --heads origin <branch>` answers — the
+   *  sha origin holds for the branch, `null` for "no such branch", or absent
+   *  for "same as HEAD" (the default: the fixtures below started on a lagging
+   *  remote before ruling 134 existed). */
+  remoteHead?: string | null;
+  /** `ls-remote` fails outright (offline, refused). */
+  lsRemoteFails?: boolean;
 }) {
   const calls: string[][] = [];
+  /** The env the `ls-remote` read ran under (ruling 134: the askpass channel). */
+  const envs: { args: string[]; env: NodeJS.ProcessEnv | undefined }[] = [];
   let committed = false;
-  const exec = vi.fn(async (_file: string, args: string[]) => {
+  const HEAD = "a".repeat(40);
+  const exec = vi.fn(async (_file: string, args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
     calls.push(args);
+    envs.push({ args, env: options?.env });
     if (args.includes("--abbrev-ref")) return { ok: true, stdout: opts.branch, stderr: "" };
     if (args.includes("--verify")) {
-      const sha = opts.revs?.[args[args.length - 1]!];
+      const rev = args[args.length - 1]!;
+      if (rev === "HEAD" && !opts.revs?.HEAD) return { ok: true, stdout: HEAD, stderr: "" };
+      const sha = opts.revs?.[rev];
       return sha
         ? { ok: true, stdout: sha, stderr: "" }
         : { ok: false, stdout: "", stderr: "" };
+    }
+    if (args.includes("ls-remote")) {
+      if (opts.lsRemoteFails) return { ok: false, stdout: "", stderr: "fatal: could not read from remote" };
+      if (opts.remoteHead === null) return { ok: true, stdout: "", stderr: "" };
+      const sha = opts.remoteHead ?? "b".repeat(40);
+      return { ok: true, stdout: `${sha}\trefs/heads/${opts.branch}\n`, stderr: "" };
     }
     if (args.includes("for-each-ref")) {
       return { ok: true, stdout: (opts.refs ?? ["main"]).join("\n"), stderr: "" };
@@ -132,7 +151,7 @@ function fakeGit(opts: {
     }
     return { ok: true, stdout: "", stderr: "" };
   });
-  return { exec, calls };
+  return { exec, calls, envs };
 }
 
 describe("pushWorkspaceBranch (F-GH3)", () => {
@@ -143,9 +162,84 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
       dataRoot: store.dataRoot, exec: git.exec,
     });
-    expect(res).toEqual({ status: "pushed", branch: "vib-1-work", commits: 2 });
+    expect(res).toEqual({
+      status: "pushed",
+      branch: "vib-1-work",
+      commits: 2,
+      headSha: "a".repeat(40),
+      remoteHeadBefore: "b".repeat(40),
+    });
     const pushCall = git.calls.find((c) => c.includes("push"));
     expect(pushCall).toEqual(["-C", expect.any(String), "push", "origin", "HEAD:refs/heads/vib-1-work"]);
+  });
+
+  /**
+   * Ruling 134 (pass 34, F34-11): delivery is defined by the REMOTE. Origin's
+   * head for the branch is read before the push; equal → no push at all.
+   */
+  describe("ruling 134: the pre-push remote read", () => {
+    it("a workspace HEAD origin already carries is `up_to_date` and runs no push", async () => {
+      // Canary: delete the early `up_to_date` return and this pushes anyway.
+      bindPat();
+      const git = fakeGit({ branch: "vib-1-work", ahead: 2, remoteHead: "a".repeat(40) });
+      const res = await pushWorkspaceBranch({
+        db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+        dataRoot: store.dataRoot, exec: git.exec,
+      });
+      expect(res).toEqual({ status: "up_to_date", branch: "vib-1-work", headSha: "a".repeat(40) });
+      expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+      // The remote was read under the askpass env, the same channel the push uses.
+      const ls = git.calls.find((c) => c.includes("ls-remote"))!;
+      expect(ls).toEqual(["-C", expect.any(String), "ls-remote", "--heads", "origin", "vib-1-work"]);
+      const lsEnv = git.envs.find((e) => e.args.includes("ls-remote"))!.env;
+      expect(lsEnv?.GIT_TERMINAL_PROMPT).toBe("0");
+      expect(lsEnv?.GIT_CONFIG_KEY_0).toBe("credential.helper");
+    });
+
+    it("the remote read and the push share ONE credential channel", async () => {
+      bindPat();
+      const git = fakeGit({ branch: "vib-1-work", ahead: 1, remoteHead: "0".repeat(40) });
+      await pushWorkspaceBranch({
+        db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+        dataRoot: store.dataRoot, exec: git.exec,
+      });
+      const lsEnv = git.envs.find((e) => e.args.includes("ls-remote"))!.env;
+      const pushEnv = git.envs.find((e) => e.args.includes("push"))!.env;
+      expect(lsEnv).toBe(pushEnv);
+    });
+
+    it("a lagging origin is pushed exactly once, and the result names the head it replaced", async () => {
+      // Canary: return the `pushed` literal without reading ls-remote — the
+      // remote head reads null on a lagging origin and the ls-remote call is gone.
+      bindPat();
+      const git = fakeGit({ branch: "vib-1-work", ahead: 1, remoteHead: "0".repeat(40) });
+      const res = await pushWorkspaceBranch({
+        db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+        dataRoot: store.dataRoot, exec: git.exec,
+      });
+      expect(res).toMatchObject({ status: "pushed", headSha: "a".repeat(40), remoteHeadBefore: "0".repeat(40) });
+      expect(git.calls.filter((c) => c.includes("push"))).toHaveLength(1);
+      expect(git.calls.filter((c) => c.includes("ls-remote"))).toHaveLength(1);
+      // An absent remote branch (first push) records no previous head.
+      const first = fakeGit({ branch: "vib-1-work", ahead: 1, remoteHead: null });
+      const fresh = await pushWorkspaceBranch({
+        db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+        dataRoot: store.dataRoot, exec: first.exec,
+      });
+      expect(fresh).toMatchObject({ status: "pushed", remoteHeadBefore: null });
+    });
+
+    it("an unreadable ls-remote never blocks the push", async () => {
+      // Canary: fail the push when ls-remote fails and this reads `push_failed`.
+      bindPat();
+      const git = fakeGit({ branch: "vib-1-work", ahead: 1, lsRemoteFails: true });
+      const res = await pushWorkspaceBranch({
+        db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+        dataRoot: store.dataRoot, exec: git.exec,
+      });
+      expect(res).toMatchObject({ status: "pushed", headSha: "a".repeat(40), remoteHeadBefore: null });
+      expect(git.calls.filter((c) => c.includes("push"))).toHaveLength(1);
+    });
   });
 
   it("no-ops when there are no local commits ahead AND a clean tree", async () => {
@@ -273,7 +367,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
       dataRoot: store.dataRoot, exec: git.exec,
     });
-    expect(res).toEqual({ status: "pushed", branch: "vib-1-work", commits: 1 });
+    expect(res).toEqual({ status: "pushed", branch: "vib-1-work", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: "b".repeat(40) });
     // Staged everything, then committed with an inline identity + task-key message.
     expect(git.calls.some((c) => c.includes("add") && c.includes("-A"))).toBe(true);
     const commitCall = git.calls.find((c) => c.includes("commit"));

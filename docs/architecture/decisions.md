@@ -511,6 +511,10 @@ inventory is not regenerated automatically and has drifted; the verified module 
     PR fires it; the re-triggered run can never re-deliver (the deliver tool no-ops on a live PR),
     and the chain shares `OPERATOR_TRANSITION_CHAIN_CAP`. (`performDelivery` in
     `app/server/tasks/task-actions.server.ts`; the `delivered` trigger in `operator-run.server.ts`)
+    *(Amended 2026-09-04, pass 34, ruling 134(b): "only a NEWLY opened PR fires it" became "a newly
+    opened PR, or a head the push moved", and the deliver tool no longer no-ops on a live PR; a
+    reuse whose push moved nothing (`up_to_date`) still re-queues nothing, which is what keeps the
+    loop this ruling guarded against from starting.)*
 
 49. **R18-3 (2026-08-05): the SDK-native skill/command catalog is governed OUT of runs.** A
     spawned agent run loads ONLY Viberr's granted skills. The per-task workspace clone's own
@@ -2188,6 +2192,69 @@ by rewriting those paragraphs:*
     (`app/server/runtimes/user-homes.server.ts`, `backend-credentials.server.ts`,
     `run-principal.server.ts`, `backend-login.server.ts`; the surface is Profile → Agent accounts
     with the poll route `/resources/backend-login`.)
+
+128. **Viberr bootstraps the default branch of an empty repository itself (owner, 2026-09-03, pass 34
+    Q34-2).** Live (JC-1 on `akin-ozer/jira-clone`): the pre-dispatch branch hook found no `main`
+    ref and said nothing; the delivery push then created `jc-1` as the repository's FIRST ref,
+    GitHub made it the default branch, `POST /pulls` failed 422 `base: invalid`, and every surface,
+    the tool result, the timeline, the audit row and the operator's packet reported "GitHub was
+    unreachable (network error). Fix the repository/credential settings" while GitHub answered
+    every call. Three lies (cause, remedy, state) and no way out: nothing in the product could
+    create `main`, and the one thing the exercise forbids is a person pushing by hand. The rule:
+    when the project's default branch has no ref, Viberr creates it BEFORE the task's first
+    branch. On a repository with no refs at all it authors an initial commit (`README.md` naming
+    the project) through the Contents API, which GitHub accepts on an empty repository where the
+    Git Data ref and commit endpoints answer 409, and the branch that commit lands on is the
+    default. On a repository whose only refs are task branches pushed before this ruling it
+    creates the default branch at the first commit of GitHub's current default branch and
+    restores the configured name as the repository default, the repair the owner approved live
+    (Q34-3). Both are disclosed on the task timeline and audited as `github.repo.bootstrapped`.
+    The bootstrap runs from `ensureTaskBranch` (both dispatch paths, ruling 122(c)) and again
+    from `performDelivery` before the push; a delivery whose base cannot be CREATED does not push
+    at all, so a task branch is never the first ref of a repository, while a probe that merely
+    could not be READ (a transient network or auth failure) does not block the push and does not
+    claim the base is missing. A 422 `base: invalid` on `POST /pulls` is `base_branch_missing`
+    and says so; any other unmapped 422, decode failure or unmapped HTTP status is `refused` and
+    quotes GitHub; neither is ever reported as a network failure, and a 409 "Git Repository is
+    empty" on a ref read is a missing ref, not a network failure. (`app/server/github/repo-bootstrap.server.ts`;
+    `ensureTaskBranch` in `branch-sync.server.ts`; `isMissingRefAnswer` in `github-client.server.ts`;
+    the 422 arms in `pr-open.server.ts`; the pre-push gate and the rendering in
+    `task-actions.server.ts`.)
+
+134. **Rework reaches its own open pull request: a delivery pushes whatever origin does not carry,
+    reuses the PR, and says what moved (owner, 2026-09-04, pass 34 F34-11).**
+    `operatorDeliverForReview` answered "PR #N is already open for review; there is nothing to
+    deliver" for any cached non-terminal `pr.state`, before `performDelivery` ran, so every commit
+    an agent made after the first delivery (a reviewer-requested rework, a resolved base conflict,
+    the whole JC-6 scaffold) stayed in the workspace: the operator reported nothing pending, the
+    reviewer approved the local revision, the accept dialog bound to a sha GitHub had never seen,
+    `update_branch_from_base` said "already up to date", and the task page hid the Deliver control
+    because a PR existed. Three rules. **(a) Delivery is defined by the remote, not by the
+    cache.** `pushWorkspaceBranch` reads origin's head for the task branch before pushing (under
+    the same credential channel as the push), pushes when it differs, answers `up_to_date` when
+    it does not, and the delivered outcome carries the head sha and the previous remote head; the
+    operator's cached-state short-circuit is deleted, and the only honest noop is "PR #N already
+    carries `<sha>`". A head the push moved on a reused PR is recorded on the timeline ("Pushed
+    `<sha>` to **PR #N** for review (was `<old>`)", the same author rule as "Opened PR") and in
+    the delivery audit row (`headSha`, `moved`), and every human door that performs a delivery
+    (the task page's control and an applied operator recommendation) says what moved through one
+    shared toast. An unreadable `ls-remote` never blocks the push. **(b) A head the push moved is
+    a new review subject.** Ruling 48's "only a NEWLY opened PR re-queues" becomes "a newly opened
+    PR, or a head the push moved"; a reuse that pushed nothing still re-queues nothing, so the
+    loop ruling 48 guarded against cannot start. **(c) A person may always perform that push, and
+    the operator is told to.** The task page offers the control whenever the delivered revision
+    is not on the open PR ("Push `<sha>` to PR #N", ruling 135's record) and not only when no live
+    PR stands, while a DIVERGED branch gets the fact and a disabled control naming the refusal
+    the server would give rather than a button that then fails; `update_branch_from_base` reports
+    the remote copy of the branch beside its base answer (current, behind by N, diverged, absent)
+    and points at `deliver_for_review` instead of pronouncing a lagging branch "already up to
+    date"; the operator's tool description, its doctrine and the seeded persona say that pushing
+    an unpushed revision is this tool's job and never a person's or an agent's. Pushing remains
+    the server's act on the operator's or a person's decision (ruling 21 unchanged).
+    (`pushWorkspaceBranch` in `app/server/github/push-workspace.server.ts`; `performDelivery`,
+    `recordPushedHead` in `app/server/tasks/task-actions.server.ts`; `operatorDeliverForReview` in
+    `operator-actions.server.ts`; `deliveryToast` in `app/features/task-detail/delivery-toast.ts`;
+    `updateWorkspaceBranchFromBase`; the push control in `task-side-panels.tsx`.)
 
 142. **A run's shell carries none of Viberr's own configuration (2026-09-04, pass 34 U34-7).**
     Ruling 127 built the spawn base around what a child must not learn about OTHER people's

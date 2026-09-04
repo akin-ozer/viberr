@@ -562,6 +562,56 @@ describe("openTaskPr", () => {
     expect(fm.pr).toBeNull();
   });
 
+  it("ruling 128: a 422 with `field: base, code: invalid` is `base_branch_missing`, never `network_unavailable`", async () => {
+    // Canary: remove `field`/`code` from `ghValidationBodySchema` and this
+    // reads `refused` (the residual), not the typed base outcome.
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 422,
+        // Exactly what GitHub sent on JC-1: a structured row with NO message.
+        body: {
+          message: "Validation Failed",
+          errors: [{ resource: "PullRequest", field: "base", code: "invalid" }],
+        },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res).toMatchObject({ status: "base_branch_missing", base: "main" });
+    expect(res.status === "base_branch_missing" ? res.message : "").toContain("`main` does not exist");
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toBeNull();
+  });
+
+  it("ruling 128: an unmapped 422 is `refused` and carries GitHub's own words", async () => {
+    // Canary: return `network_unavailable` from the residual again.
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 422,
+        body: {
+          message: "Validation Failed",
+          errors: [{ resource: "PullRequest", code: "custom", message: "A pull request title is required" }],
+        },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("refused");
+    expect(res.status === "refused" ? res.message : "").toContain("A pull request title is required");
+  });
+
   it("F21-9: an UNREADABLE head probe never falls through to create", async () => {
     // The probe answered 200 with a payload the reader refused, so whether a PR
     // already occupies `head` is UNKNOWN. Before this, an unreadable answer was
@@ -714,8 +764,10 @@ describe("openTaskPr", () => {
       { ...ACTOR, userId: store.users.arda.id },
       { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
     );
-    expect(res.status).toBe("network_unavailable");
-    if (res.status !== "network_unavailable") throw new Error("expected network_unavailable");
+    // Ruling 128: GitHub ANSWERED, so an unmapped 422 is `refused` (quoting
+    // GitHub), never `network_unavailable`.
+    expect(res.status).toBe("refused");
+    if (res.status !== "refused") throw new Error("expected refused");
     expect(res.message).toContain("base is invalid");
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toBeNull();

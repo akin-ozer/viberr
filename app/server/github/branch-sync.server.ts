@@ -13,9 +13,11 @@ import { logger } from "~/server/logging/logger.server";
 import {
   encodeRefPath,
   githubFailureMessage,
+  isMissingRefAnswer,
   type GithubClient,
-  type GithubResponse,
 } from "./github-client.server";
+import { ensureDefaultBranch } from "./repo-bootstrap.server";
+export { isMissingRefAnswer };
 import {
   getProjectGithubContext,
   type GithubContextFailure,
@@ -88,18 +90,6 @@ type BranchNameProbe =
   | { kind: "forbidden"; what: string }
   | { kind: "auth"; message: string }
   | { kind: "network"; message: string };
-
-/**
- * Ruling 128: is this ref-read answer "there is no such ref"? A 404, or a 409
- * whose message says the repository is empty (`Git Repository is empty.`, what
- * GitHub answers on a repository with no refs at all) — never a network
- * failure. Shared by the name probe, `ensureTaskBranch` and the bootstrap.
- */
-export function isMissingRefAnswer(result: GithubResponse<unknown>): boolean {
-  if (result.ok || result.kind !== "http") return false;
-  if (result.status === 404) return true;
-  return result.status === 409 && /empty/i.test(result.message);
-}
 
 async function probeBranchName(
   client: GithubClient,
@@ -387,7 +377,9 @@ export type EnsureBranchResult =
     }
   | GithubContextFailure
   | { status: "task_not_found" }
-  | { status: "default_branch_missing"; defaultBranch: string }
+  /** Ruling 128: the default branch had no ref and Viberr could not create
+   *  it. A positive "no base" — the delivery gate refuses to push on it. */
+  | { status: "bootstrap_failed"; defaultBranch: string; reason: string }
   | { status: "scope_violation"; scope: string; violationId: string }
   | { status: "auth_failed"; message: string }
   | { status: "network_unavailable"; message: string };
@@ -481,18 +473,41 @@ export async function ensureTaskBranch(
     if (existing.kind === "http" && existing.status === 401) {
       return { status: "auth_failed", message: existing.message };
     }
-    if (existing.kind === "http" && existing.status === 404) {
-      // 2. Resolve the default branch head…
-      const baseRef = await gh.client.request(
+    if (isMissingRefAnswer(existing)) {
+      // 2. Resolve the default branch head… Ruling 128: when it has no ref
+      //    (an empty repository, or one whose only refs are task branches),
+      //    Viberr creates it FIRST, so a task branch is never the repository's
+      //    first ref. Only a positive "could not create it" refuses; a probe
+      //    that could not be read degrades exactly as before.
+      let baseRef = await gh.client.request(
         "GET",
         `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${gh.defaultBranch}`)}`,
         ghRefSchema,
       );
+      if (!baseRef.ok && isMissingRefAnswer(baseRef)) {
+        const bootstrap = await ensureDefaultBranch(
+          db,
+          gh,
+          { projectSlug: input.projectSlug, taskKey: input.taskKey },
+          actor,
+          { dataRoot: ctx.dataRoot },
+        );
+        if (bootstrap.status === "bootstrap_failed") return bootstrap;
+        if (bootstrap.status === "scope_violation") return bootstrap;
+        if (bootstrap.status === "auth_failed") return bootstrap;
+        if (bootstrap.status === "network_unavailable") return bootstrap;
+        baseRef = await gh.client.request(
+          "GET",
+          `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${gh.defaultBranch}`)}`,
+          ghRefSchema,
+        );
+      }
       if (!baseRef.ok) {
-        if (baseRef.kind === "http" && baseRef.status === 404) {
+        if (isMissingRefAnswer(baseRef)) {
           return {
-            status: "default_branch_missing",
+            status: "bootstrap_failed",
             defaultBranch: gh.defaultBranch,
+            reason: `\`${gh.defaultBranch}\` still has no ref after the bootstrap`,
           };
         }
         if (baseRef.kind === "network") {

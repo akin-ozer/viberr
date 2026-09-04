@@ -46,6 +46,8 @@ const pushMock = vi.fn<typeof pushWorkspaceBranch>(async () => ({
   status: "pushed",
   branch: "vib-1",
   commits: 1,
+  headSha: "a".repeat(40),
+  remoteHeadBefore: null,
 }));
 
 const openTaskPrMock = vi.fn<typeof openTaskPr>(async () => ({
@@ -209,7 +211,9 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
     expect(fm.waiting).toBe("human");
   });
 
-  it("C. a PR REUSE (created:false) does not re-trigger, even under full autonomy", async () => {
+  it("C. a PR REUSE whose push pushed NOTHING (`up_to_date`) does not re-trigger, even under full autonomy", async () => {
+    // Ruling 134(b): a reuse that pushed nothing moved nothing.
+    pushMock.mockResolvedValueOnce({ status: "up_to_date", branch: "vib-1", headSha: "a".repeat(40) });
     openTaskPrMock.mockResolvedValue({
       status: "ok",
       prNumber: 7,
@@ -225,9 +229,33 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
       "VIB-1",
       OPERATOR_TASK_ACTOR,
     );
-    expect(outcome.status).toBe("delivered");
+    expect(outcome).toMatchObject({ status: "delivered", moved: false, operatorRequeued: false });
     await flush();
     expect(runOp).not.toHaveBeenCalled();
+  });
+
+  it("C2. ruling 134(b): a reuse whose push MOVED the head re-queues exactly once", async () => {
+    // Canary: revert the re-queue condition to `if (result.created)` and no run is queued.
+    openTaskPrMock.mockResolvedValue({
+      status: "ok",
+      prNumber: 7,
+      created: false,
+      url: "http://x/pull/7",
+    });
+    deployOperator("full");
+    seedTask();
+    const outcome = await performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot, deps: DEPS },
+      store.slug,
+      "VIB-1",
+      OPERATOR_TASK_ACTOR,
+    );
+    expect(outcome).toMatchObject({ status: "delivered", created: false, moved: true, operatorRequeued: true });
+    await waitFor(() => runOp.mock.calls.length > 0, "the re-queued operator run");
+    await flush();
+    expect(runOp).toHaveBeenCalledTimes(1);
+    expect(runOp.mock.calls[0]![1]).toMatchObject({ trigger: "delivered" });
   });
 
   it("D. no operator deployed → no re-trigger, delivery still ok", async () => {

@@ -717,8 +717,9 @@ export function DecisionPacket({
    *  - `performDelivery` → `openTaskPr` treats a CLOSED cached PR as terminal
    *    and falls through to the create path (`pr-open.server.ts`): it opens a
    *    FRESH review PR and never reopens the closed one. Re-pushing a branch
-   *    with nothing new still reports `pushed` (`push-workspace.server.ts`), so
-   *    a PR closed by mistake really does come back through this door.
+   *    with nothing new answers `up_to_date` (ruling 134, `push-workspace.server.ts`)
+   *    and the PR open still runs, so a PR closed by mistake really does come
+   *    back through this door.
    *  - and NOTHING on that path touches the packet — `recordDeliveredNextStep`
    *    returns early (via `alreadyActionable`) precisely because a packet is
    *    open. So the last clause is
