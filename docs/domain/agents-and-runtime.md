@@ -116,7 +116,11 @@ Effort is ranked `minimal 0 … max 5` and clamped to the backend's list at RUN 
 that takes a tier (`deploy_agent`, `update_agent_deployment`, and the profile editor for
 a CHANGED value) refuses an unlisted one by name first (ruling 139,
 `assertEffortForBackend`), and the editor re-seeds a stored tier the backend no longer
-lists to the default rather than offering it.
+lists to the default rather than offering it. The re-seed reads the SAME list the effort
+select renders — the selected model's own tiers when it narrows the backend-wide list —
+so a tier the picker never shows is never left standing to be saved, and picking a model
+with fewer tiers clamps the pick to one that model offers (the catalog default when it is
+among them, else its first).
 
 **Availability marks** (`model_availability`): a model is marked unavailable only from a
 real run failure whose redacted text matches `MODEL_UNSUPPORTED_RE`, and cleared by a

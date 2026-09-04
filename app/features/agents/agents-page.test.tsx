@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -2531,6 +2532,121 @@ describe("CreateProfileModal — a provider-refused model is disabled + explaine
     expect(err).toBeTruthy();
     expect(err.textContent).toContain("not supported");
     expect(err.textContent).toContain("Pick another model.");
+  });
+});
+
+/**
+ * Pass 34 review — the effort re-seed and the effort select must read the SAME
+ * list. The re-seed judged the stored tier against the backend-wide list while
+ * the select renders the selected model's own (narrower) list, so a stored
+ * `max` on a model that stops at `high` stood as the picker's value with no
+ * option to match, and the save would refuse it by name (ruling 139).
+ */
+describe("CreateProfileModal — a tier the selected model does not offer is re-seeded", () => {
+  const NARROWING: ModelCatalog = {
+    models: [
+      {
+        value: "haiku",
+        displayName: "Claude Haiku",
+        description: "Fast.",
+        supportsEffort: true,
+        efforts: ["low", "medium"],
+      },
+      {
+        value: "opus",
+        displayName: "Claude Opus",
+        description: "Most capable.",
+        supportsEffort: true,
+        efforts: ["low", "medium", "high", "xhigh", "max"],
+      },
+    ],
+    efforts: ["low", "medium", "high", "xhigh", "max"],
+    defaultModel: "opus",
+    defaultEffort: "high",
+  };
+
+  function mount(initial: AgentProfileView) {
+    const onSubmit = vi.fn();
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <CreateProfileModal
+            initial={initial}
+            stages={STAGES}
+            projectName="Viberr Core"
+            busy={false}
+            error={null}
+            onClose={() => {}}
+            onSubmit={onSubmit}
+          />
+        ),
+      },
+      { path: "/resources/model-catalog", loader: () => ({ data: NARROWING }) },
+    ]);
+    const view = render(<Stub initialEntries={["/"]} />);
+    const effortSelect = () =>
+      view.container.querySelector<HTMLSelectElement>("select[aria-label='Effort']")!;
+    return { ...view, onSubmit, effortSelect };
+  }
+
+  it("saves a tier the model actually offers, never the one it never showed", async () => {
+    // Canary: point seedEffort back at `catalog.efforts` — `max` is on the
+    // backend-wide list, so it survives the re-seed and is SAVED even though
+    // the picker only ever showed low/medium (the browser renders the first
+    // option for an unmatched value, so the screen looks fine and the stored
+    // value is the one ruling 139's save refuses).
+    const { onSubmit, effortSelect, getByText } = mount(
+      mkProfile({ backends: ["claude"], model: "haiku", effort: "max" }),
+    );
+    await waitFor(() => {
+      expect([...effortSelect().options].map((o) => o.value)).toEqual(["low", "medium"]);
+    });
+    // The clamp is an effect on the catalog answer: let its state update
+    // commit before submitting, or the click reads the render before it.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    fireEvent.click(getByText("Save changes"));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    // The catalog default (`high`) is not on offer either, so the first tier
+    // the model does offer is what stands and what gets saved.
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ model: "haiku", effort: "low" });
+  });
+
+  it("keeps the catalog default when the selected model does offer it", async () => {
+    const { onSubmit, effortSelect, getByText } = mount(
+      mkProfile({ backends: ["claude"], model: "opus", effort: "" }),
+    );
+    await waitFor(() => expect(effortSelect().value).toBe("high"));
+    // The clamp is an effect on the catalog answer: let its state update
+    // commit before submitting, or the click reads the render before it.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    fireEvent.click(getByText("Save changes"));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ model: "opus", effort: "high" });
+  });
+
+  it("clamps the pick when the person SWITCHES to a model with fewer tiers", async () => {
+    // Canary: delete the [model] effect — the editor keeps `max` while the
+    // picker shows low/medium and saves it.
+    const { onSubmit, effortSelect, container, getByText } = mount(
+      mkProfile({ backends: ["claude"], model: "opus", effort: "max" }),
+    );
+    await waitFor(() => expect(effortSelect().value).toBe("max"));
+    const modelSelect = container.querySelector<HTMLSelectElement>("select[aria-label='Model']")!;
+    fireEvent.change(modelSelect, { target: { value: "haiku" } });
+    await waitFor(() => {
+      expect([...effortSelect().options].map((o) => o.value)).toEqual(["low", "medium"]);
+    });
+    // The clamp is an effect on the catalog answer: let its state update
+    // commit before submitting, or the click reads the render before it.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    fireEvent.click(getByText("Save changes"));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ model: "haiku", effort: "low" });
   });
 });
 

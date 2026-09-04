@@ -147,6 +147,29 @@ export interface ModelCatalogState {
   effortOptions: string[];
 }
 
+/** Clamp the effort pick to the tiers `model` offers: the catalog default when
+ *  that model offers it, else its first tier. A pick already on offer stands. */
+function seedEffort(
+  catalog: ModelCatalog,
+  model: string,
+  effort: string,
+  setEffort: (v: string) => void,
+): void {
+  const offered = effortsFor(catalog, model);
+  if (effort && offered.includes(effort)) return;
+  const fallback = offered.includes(catalog.defaultEffort) ? catalog.defaultEffort : offered[0];
+  setEffort(fallback ?? catalog.defaultEffort);
+}
+
+/** The effort tiers the picker offers for one model: the model's own list when
+ *  it constrains them, else the backend-wide list. The re-seed above and the
+ *  rendered select read the SAME list, so the editor never stands on a tier it
+ *  does not show. */
+function effortsFor(catalog: ModelCatalog, model: string): string[] {
+  const selected = catalog.models.find((m) => m.value === model) ?? null;
+  return selected?.efforts?.length ? selected.efforts : catalog.efforts;
+}
+
 export function useModelCatalog(
   backend: "codex" | "claude" | "",
   model: string,
@@ -199,14 +222,29 @@ export function useModelCatalog(
     const known =
       catalog.models.some((m) => m.value === model) ||
       (backend === "claude" && claudeModelRunsVerbatim(model));
-    if (!model || !known) setModel(catalog.defaultModel);
+    const nextModel = !model || !known ? catalog.defaultModel : model;
+    if (nextModel !== model) setModel(nextModel);
     // Ruling 139: a stored tier the backend does not list (a preserved Codex
     // `minimal`, or a tier from the other backend) is re-seeded to the
     // default, because the save would refuse it by name and the editor must
-    // not offer what it cannot save.
-    if (!effort || !catalog.efforts.includes(effort)) setEffort(catalog.defaultEffort);
+    // not offer what it cannot save. Judged against the tiers the select will
+    // actually RENDER for the model that will be selected — a model may narrow
+    // the backend-wide list, and checking the wide one would leave a tier
+    // standing that the picker never shows and the save refuses.
+    seedEffort(catalog, nextModel, effort, setEffort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog]);
+
+  // A model change can NARROW the tiers on offer. The pick is clamped to what
+  // the picker now shows, so the editor never stands on a tier it does not
+  // render and the save would refuse by name. The model itself is untouched
+  // here: a cleared model while a backend switch is in flight must stay
+  // cleared until the new catalog answers (F21-13) — the effect above's job.
+  useEffect(() => {
+    if (!catalog || !model) return;
+    seedEffort(catalog, model, effort, setEffort);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model]);
 
   // Effort options come from the selected model (when it constrains them),
   // else the backend-wide list. Hidden entirely when the model has no effort.
@@ -215,10 +253,7 @@ export function useModelCatalog(
     [catalog, model],
   );
   const showEffort = !catalog || !selectedModel || selectedModel.supportsEffort;
-  const effortOptions =
-    selectedModel?.efforts && selectedModel.efforts.length
-      ? selectedModel.efforts
-      : (catalog?.efforts ?? []);
+  const effortOptions = catalog ? effortsFor(catalog, model) : [];
 
   return {
     catalog,
