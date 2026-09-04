@@ -739,8 +739,15 @@ describe("openTaskPr", () => {
     // Reused, not created — a second POST would 422 all over again.
     expect(res.created).toBe(false);
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(1);
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
-    expect(fm.pr).toMatchObject({ number: 92, state: "review" });
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed;
+    expect(parsed.frontmatter.pr).toMatchObject({ number: 92, state: "review" });
+    // F34-9: the delivery door records the adoption on its own, and no "opened".
+    // Canary: drop the `recordPrAdoption` call from `prAlreadyOnHead`.
+    const adopted = parsed.timeline.filter((e) => e.type === "github" && e.text.includes("Adopted **PR #92**"));
+    expect(adopted).toHaveLength(1);
+    expect(adopted[0]!.actor).toEqual({ kind: "system", systemId: "delivery" });
+    expect(listAuditEvents(store.db, { action: "github.pr.adopted" })[0]!.details).toMatchObject({ prNumber: 92, source: "delivery" });
+    expect(listAuditEvents(store.db, { action: "github.pr.opened" })).toHaveLength(0);
   });
 
   it("an UNRELATED 422 is neither an empty branch nor a collision", async () => {

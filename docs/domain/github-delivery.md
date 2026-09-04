@@ -114,7 +114,15 @@ already carries a `branch:` keeps it verbatim — nothing in flight is renamed.
 paths: the operator's (`operatorDispatchAgent`) and a human's (`dispatchAgentRun`), the
 second added by ruling 122(c) because a human-dispatched delivering run used to reach the
 agent prompt with no branch recorded and fall back to the canonical key. Both are
-best-effort: a task that cannot reach GitHub still runs.
+best-effort: a task that cannot reach GitHub still runs. The hook returns its typed
+result and DISCLOSES the failures a person can act on (F34-3, pass 34): `auth_failed`,
+`network_unavailable`, `bootstrap_failed` and a throw each write one `github` timeline
+event by `system:delivery` ("No task branch could be allocated on GitHub before
+dispatch: …" or "Branch `x` could not be confirmed on GitHub before dispatch: …"), an
+audit row `github.branch.prepare_failed {branch, status, detail}` and a warn log line;
+a repeat of the same failure within an hour writes no second line (the log still says
+every attempt); `synced` and `scope_violation` write nothing new (the flag already did);
+no credential, no repository and an unknown task are standing states and only log.
 
 `performDelivery` is the shared core behind the operator's `deliver_for_review`
 (capability `deliver-review-pr`, audit `github.delivery.operator`), an applied
@@ -185,7 +193,15 @@ workspace through the same adoption rule (audit `github.workspace.branch_reconci
 
 A task owns a PR only if that task opened it (ruling 34). A PR found on the task's
 branch that the task does not reference is **adopted only when it is open and its head
-SHA equals the delivered revision** (ruling 35). Refusals: `merged`, `closed`,
+SHA equals the delivered revision** (ruling 35). An adoption is RECORDED (F34-9, pass
+34): one `github` timeline event ("Adopted **PR #N** (head `sha`, the delivered
+revision) as KEY's review PR, replacing PR #M (state). Viberr did not open it…"), by
+the policy engine from the reconciler or by `system:delivery` from the delivery door,
+an audit row `github.pr.adopted {repo, branch, prNumber, previousPrNumber,
+previousState, headSha, source}`, and its own `policy` notification ("PR #N adopted for
+KEY", "…: replaces PR #M"); a refresh of the same number records nothing, and replacing
+a LIVE cached PR wakes the operator with `pr-diverged` like a reopen does (a closed PR
+being replaced keeps the existing "live again" notice instead). Refusals: `merged`, `closed`,
 `no_revision`, `head_unknown`, `head_mismatch`. A refused match is a **branch name
 collision**, recorded as `github.unownedPr` and blocking delivery. Two origins reach it
 and the refusal cannot tell them apart, so neither the note nor this page asserts one: an
@@ -303,7 +319,7 @@ never gets the tool because a Codex mount would hand the child the credential.
 - Audit: `github.pat.*`, `github.credential.*`, `org.connection.*`, `secrets.resealed`,
   `project.repo.updated`, `github.repo.bootstrapped` (ruling 128, a repository-level
   change like `github.credential.assigned`), `github.branch.created|deleted`,
-  `github.branch_update.operator`, `github.collision.resolved`, `github.pr.opened|adopted|merged|merge_refused|closed_unowned`,
+  `github.branch_update.operator`, `github.branch.prepare_failed`, `github.collision.resolved`, `github.pr.opened|adopted|merged|merge_refused|closed_unowned`,
   `github.reconcile.task|project`, `github.scope_violation.opened|resolved`,
   `github.workspace.branch_reconciled|pr_linked`,
   `github.delivery.manual|operator|next_step`, `task.agent.github_read`,

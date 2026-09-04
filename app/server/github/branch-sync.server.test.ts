@@ -6,7 +6,7 @@ import {
   setupTestStore,
   writeTask,
 } from "../../../test-support/test-store";
-import { fakeGithubFetch } from "../../../test-support/fake-github";
+import { fakeGithubFetch , unreachableFetch } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
@@ -15,7 +15,7 @@ import { createPat, setProjectCredential } from "~/server/secrets/pat-store.serv
 import { createGithubClient } from "./github-client.server";
 import {
   deriveSyncState,
-  ensureTaskBranch,
+  ensureTaskBranch, ensureTaskBranchBestEffort,
   getBranchCompare,
   taskBranchName,
   taskCommits,
@@ -499,5 +499,89 @@ describe("ref paths (B11)", () => {
     // ref resolved rather than 404ing into the idempotent create path.
     expect(gh.callsTo(`GET ${REPO_PATH}/git/ref/heads/vib-900`)).toHaveLength(1);
     expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)).toHaveLength(0);
+  });
+});
+
+/** A 2xx whose headers throw on read: the one shape that still reaches
+ *  `ensureTaskBranch` as a THROW (`rateLimitFrom(response.headers)` sits
+ *  outside both try blocks), so the hook's own catch is exercised. */
+function unreadableResponse(): Response {
+  const response = new Response("{}", { status: 200 });
+  Object.defineProperty(response, "headers", {
+    get(): never {
+      throw new TypeError("terminated");
+    },
+  });
+  return response;
+}
+
+/**
+ * F34-3 (pass 34): the pre-dispatch branch hook returns its typed result and
+ * discloses the failures a person can act on, once, on the timeline and in the
+ * audit log. Canaries: restore the void `try { … } catch {}` body; keep the
+ * catch but drop the disclosure; disclose every non-synced status (the
+ * no-credential case writes a line); remove the dedupe (a repeat writes twice).
+ */
+describe("F34-3: ensureTaskBranchBestEffort discloses prepare failures", () => {
+  const prepare = (store: ReturnType<typeof setupWithCredential>, fetchImpl: typeof fetch, taskKey = "VIB-201") =>
+    ensureTaskBranchBestEffort(
+      store.db,
+      { projectSlug: store.slug, taskKey },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl },
+    );
+  const events = (store: ReturnType<typeof setupWithCredential>, taskKey = "VIB-201") =>
+    readTaskFile({ projectSlug: store.slug, taskKey, dataRoot: store.dataRoot })!.parsed.timeline.filter((e) => e.type === "github");
+
+  it("a network failure is disclosed on the timeline and audited, with the typed result returned", async () => {
+    const store = setupWithCredential();
+    const result = await prepare(store, unreachableFetch());
+    expect(result.status).toBe("network_unavailable");
+    const lines = events(store);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.text).toContain("No task branch could be allocated on GitHub before dispatch: GitHub was unreachable");
+    expect(lines[0]!.actor).toEqual({ kind: "system", systemId: "delivery" });
+    const audit = listAuditEvents(store.db, { action: "github.branch.prepare_failed" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.details).toMatchObject({ status: "network_unavailable", branch: null });
+  });
+
+  it("a THROWN error is disclosed too, and a recorded branch changes the sentence", async () => {
+    const store = setupWithCredential("VIB-201", "vib-201-x");
+    const exploding: typeof fetch = async () => unreadableResponse();
+    const result = await prepare(store, exploding);
+    expect(result.status).toBe("threw");
+    const lines = events(store);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.text).toContain("Branch `vib-201-x` could not be confirmed on GitHub before dispatch: the branch preparation failed unexpectedly");
+    expect(listAuditEvents(store.db, { action: "github.branch.prepare_failed" })[0]!.details).toMatchObject({ status: "threw", branch: "vib-201-x" });
+  });
+
+  it("a project with no credential writes nothing: a standing state is not a failure line", async () => {
+    const bare = setupTestStore(ctx);
+    writeTask(bare.dataRoot, bare.slug, { frontmatter: baseTaskFrontmatter("VIB-205") });
+    rebuildAll(bare.db, { dataRoot: bare.dataRoot });
+    const result = await ensureTaskBranchBestEffort(
+      bare.db,
+      { projectSlug: bare.slug, taskKey: "VIB-205" },
+      ACTOR,
+      { dataRoot: bare.dataRoot, fetchImpl: fakeGithubFetch({}).fetchImpl },
+    );
+    expect(result.status).toBe("no_pat_configured");
+    expect(readTaskFile({ projectSlug: bare.slug, taskKey: "VIB-205", dataRoot: bare.dataRoot })!.parsed.timeline).toEqual([]);
+    expect(listAuditEvents(bare.db, { action: "github.branch.prepare_failed" })).toHaveLength(0);
+  });
+
+  it("a REPEAT of the same failure writes one line and one audit row, not three", async () => {
+    const store = setupWithCredential();
+    await prepare(store, unreachableFetch());
+    await prepare(store, unreachableFetch());
+    await prepare(store, unreachableFetch());
+    expect(events(store)).toHaveLength(1);
+    expect(listAuditEvents(store.db, { action: "github.branch.prepare_failed" })).toHaveLength(1);
+    // A DIFFERENT status is a new fact and lands.
+    const exploding: typeof fetch = async () => unreadableResponse();
+    await prepare(store, exploding);
+    expect(events(store)).toHaveLength(2);
   });
 });

@@ -7,6 +7,7 @@ import {
   patchTaskFrontmatter,
   readTaskFile,
   resolveTaskFilePath,
+  appendTimelineEvent,
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { logger } from "~/server/logging/logger.server";
@@ -353,17 +354,127 @@ export function deriveSyncState(input: {
  * is told what to check out. Non-fatal by design — a task that cannot reach
  * GitHub still runs, and delivery re-checks the name.
  */
+export type BranchPrepareResult =
+  | EnsureBranchResult
+  /** `ensureTaskBranch` threw: something no typed arm anticipated. */
+  | { status: "threw"; message: string };
+
+/** Repeats of the SAME prepare failure within this window write no second
+ *  line (the operator's hook runs on every delivering dispatch, and JC-1 took
+ *  three attempts in four minutes); the log still says every attempt. */
+export const PREPARE_FAILURE_REPEAT_MS = 60 * 60 * 1000;
+
+/**
+ * F34-3 (pass 34): the pre-dispatch hook used to be `try { … } catch {}`
+ * returning void, so every typed non-`synced` result was discarded, a throw was
+ * swallowed, and no surface said the repository could not take a task branch
+ * (live, JC-1's allocation failed on the missing base and nothing said so).
+ * The result is now returned, and the failures a person can act on are
+ * disclosed ONCE on the timeline, audited, and logged: `auth_failed`,
+ * `network_unavailable`, `bootstrap_failed`, `threw`. `synced` and
+ * `scope_violation` write nothing new (the flag already wrote the event, the
+ * notification and the audit row); `no_pat_configured`, `no_repo_configured`
+ * and `task_not_found` are standing project states and only log. Never throws:
+ * coordination proceeds without a branch when GitHub is absent.
+ */
 export async function ensureTaskBranchBestEffort(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: AuditActor,
   ctx: EnsureBranchContext = {},
-): Promise<void> {
+): Promise<BranchPrepareResult> {
+  let result: BranchPrepareResult;
   try {
-    await ensureTaskBranch(db, input, actor, ctx);
-  } catch {
-    // Non-fatal: coordination proceeds without a branch when GitHub is absent.
+    result = await ensureTaskBranch(db, input, actor, ctx);
+  } catch (error) {
+    result = {
+      status: "threw",
+      message: error instanceof Error ? error.message : String(error),
+    };
   }
+  try {
+    await disclosePrepareFailure(db, input, result, ctx);
+  } catch (error) {
+    logger.warn("branch preparation failure could not be disclosed", {
+      taskKey: input.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  return result;
+}
+
+/** The half of the disclosure that depends on the failure kind. */
+function prepareFailureDetail(result: BranchPrepareResult): string | null {
+  switch (result.status) {
+    case "auth_failed":
+      return `GitHub rejected the project credential (${result.message})`;
+    case "network_unavailable":
+      return `GitHub was unreachable (${result.message})`;
+    case "bootstrap_failed":
+      return `the repository has no \`${result.defaultBranch}\` branch and Viberr could not create it (${result.reason})`;
+    case "threw":
+      return `the branch preparation failed unexpectedly (${result.message})`;
+    default:
+      return null;
+  }
+}
+
+async function disclosePrepareFailure(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  result: BranchPrepareResult,
+  ctx: EnsureBranchContext,
+): Promise<void> {
+  if (result.status === "synced" || result.status === "scope_violation") return;
+  const detail = prepareFailureDetail(result);
+  if (detail === null) {
+    logger.info("branch preparation skipped: standing project state", {
+      taskKey: input.taskKey,
+      status: result.status,
+    });
+    return;
+  }
+  const taskRef = { projectSlug: input.projectSlug, taskKey: input.taskKey, dataRoot: ctx.dataRoot };
+  const file = readTaskFile(taskRef);
+  const branch = file?.parsed.frontmatter.branch ?? null;
+  const text = branch
+    ? `Branch \`${branch}\` could not be confirmed on GitHub before dispatch: ${detail}. The run proceeds in the workspace; delivery retries the branch.`
+    : `No task branch could be allocated on GitHub before dispatch: ${detail}. The run proceeds in the workspace; delivery retries the branch.`;
+  logger.warn("branch preparation failed before dispatch", {
+    taskKey: input.taskKey,
+    status: result.status,
+    branch,
+  });
+  if (!file) return;
+  // Deduped: the same status for the same branch within the repeat window
+  // writes no second line and no second audit row.
+  const newest = file.parsed.timeline.find((e) => e.type === "github");
+  if (
+    newest &&
+    newest.text === text &&
+    Date.now() - Date.parse(newest.occurredAt) < PREPARE_FAILURE_REPEAT_MS
+  ) {
+    return;
+  }
+  await appendTimelineEvent(taskRef, {
+    occurredAt: new Date().toISOString(),
+    type: "github",
+    actor: { kind: "system", systemId: "delivery" },
+    title: null,
+    text,
+    toAgent: false,
+    evidence: null,
+  });
+  rebuildPath(db, resolveTaskFilePath(taskRef), { dataRoot: ctx.dataRoot });
+  recordAudit(db, {
+    action: "github.branch.prepare_failed",
+    actor: { userId: null, label: "system:delivery" },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { branch, status: result.status, detail },
+  });
 }
 
 export type EnsureBranchResult =

@@ -935,6 +935,73 @@ describe("R15-2 safety net (b): the manual delivery control", () => {
     expect(getByText).toBeTruthy();
   });
 
+  it("ruling 134(c): offers the push control when the open PR does not carry the delivered revision, and it submits deliver-review", async () => {
+    // Canary: revert the visibility condition to "no live PR" and the button
+    // is gone while PR #9 is open.
+    const rev = "9".repeat(40);
+    const { container, submitted } = renderPage({
+      canDeliver: true,
+      task: {
+        workRevisionSha: rev,
+        pr: {
+          number: 9, state: "review", title: "x", headSha: "1".repeat(40),
+          unpushedRevision: { revisionSha: rev, prHeadSha: "1".repeat(40), relation: "behind" },
+        },
+      },
+    });
+    const btn = findButton(container, "Push 9999999 to PR #9");
+    expect(btn).toBeDefined();
+    expect(btn!.disabled).toBe(false);
+    expect(container.textContent).toContain("Unpushed");
+    expect(container.textContent).toContain("is not on PR #9");
+    fireEvent.click(btn!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("deliver-review");
+  });
+
+  it("ruling 134(c): hides the push control when the recorded record is stale", () => {
+    // Canary: drop the revision comparison in `unpushedRevisionOf`.
+    const { container } = renderPage({
+      canDeliver: true,
+      task: {
+        workRevisionSha: "7".repeat(40),
+        pr: {
+          number: 9, state: "review", title: "x", headSha: "1".repeat(40),
+          unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" },
+        },
+      },
+    });
+    expect(findButton(container, "Push 9999999 to PR #9")).toBeUndefined();
+    expect(findButton(container, "Deliver branch & open PR")).toBeUndefined();
+    expect(container.textContent).not.toContain("Unpushed");
+  });
+
+  it("ruling 134(c): a diverged relation renders the row and a DISABLED control naming the refusal", () => {
+    // Canary: render the primary (enabled) control for `diverged`.
+    const rev = "9".repeat(40);
+    const { container } = renderPage({
+      canDeliver: true,
+      task: {
+        workRevisionSha: rev,
+        pr: {
+          number: 9, state: "review", title: "x", headSha: "1".repeat(40),
+          unpushedRevision: { revisionSha: rev, prHeadSha: "1".repeat(40), relation: "diverged" },
+        },
+      },
+    });
+    const btn = findButton(container, "Push 9999999 to PR #9");
+    expect(btn).toBeDefined();
+    expect(btn!.disabled).toBe(true);
+    expect(btn!.title).toContain("refused as non-fast-forward");
+    expect(container.textContent).toContain("Unpushed");
+  });
+
+  // Ruling 134(c): the record's journey through the REAL projection (write the
+  // task file, run the workspace reconcile, rebuild, load the detail, evaluate
+  // the exact expression this panel renders from) is proven in
+  // app/server/projections/task-detail-unpushed.server.test.ts, a node-env
+  // test: the server modules it drives do not run under this file's jsdom.
+
   it("hides once a live PR stands, and entirely without delivery authority", () => {
     const withPr = renderPage({
       canDeliver: true,

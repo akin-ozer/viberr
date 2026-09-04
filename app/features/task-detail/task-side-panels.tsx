@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { unpushedRevisionOf } from "~/schemas/task-file.schema";
 import { Link, useFetcher } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import {
@@ -34,6 +35,13 @@ import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 function viewerRole(myRole: string | null): ProjectRole | null {
   return PROJECT_ROLES.find((role) => role === myRole) ?? null;
 }
+
+/** Ruling 134(c): the push control's label, with its own busy text and tooltip. */
+export const PUSH_LABEL = (rev: string, prNumber: number): string =>
+  `Push ${rev} to PR #${prNumber}`;
+/** The refusal the server would give a plain push of a diverged branch. */
+export const DIVERGED_PUSH_REFUSAL =
+  "Origin's copy of this branch holds commits the workspace does not, so a plain push would be refused as non-fast-forward. Resolve the branch history first; the operator can open a decision packet for it.";
 
 export function GithubTrace({
   task,
@@ -104,6 +112,19 @@ export function GithubTrace({
   delivering?: boolean;
   merging?: boolean;
 }) {
+  // Ruling 134(c) / 135: the recorded unpushed revision, current only.
+  const unpushed = unpushedRevisionOf(task.pr, task.workRevisionSha ?? null);
+  const prTerminal =
+    !task.pr || task.pr.state === "closed" || task.pr.state === "merged";
+  const pushOffer =
+    task.pr && !prTerminal && unpushed
+      ? {
+          prNumber: task.pr.number,
+          rev: unpushed.revisionSha.slice(0, 7),
+          head: unpushed.prHeadSha ? unpushed.prHeadSha.slice(0, 7) : null,
+          relation: unpushed.relation,
+        }
+      : null;
   // Admin escape hatch (DG-2): acceptance is wedged either by the acceptance gate
   // itself (`acceptance.blockedReason` — the live, full-order refusal) OR by an open
   // blocked decision packet a crashed run left behind. Surfaced for admins
@@ -339,24 +360,53 @@ export function GithubTrace({
             ))}
           </div>
         )}
+        {/* Ruling 135: the delivered revision is not on the open PR. Named
+            beside the branch so the push control below reads from a fact. */}
+        {pushOffer && (
+          <div className="kv-row">
+            <span className="k">Unpushed</span>
+            <span className="v">
+              <span className="mono">{pushOffer.rev}</span> is not on PR{" "}
+              <span className="mono">#{pushOffer.prNumber}</span>
+              {pushOffer.head ? (
+                <>
+                  {" "}(its head is <span className="mono">{pushOffer.head}</span>)
+                </>
+              ) : null}
+            </span>
+          </div>
+        )}
         {/* R15-2 safety net (b): with delivery now an operator decision, a
             human with authority can always ship the branch by hand — shown when
-            no live PR stands (none yet, or the last one closed/merged). */}
-        {onDeliver &&
-          (!task.pr ||
-            task.pr.state === "closed" ||
-            task.pr.state === "merged") && (
-            <button
-              type="button"
-              className="btn primary sm panel-act"
-              disabled={delivering}
-              onClick={onDeliver}
-              title="Push the delivering agent's branch and open the review PR (audited)"
-            >
-              <Icon name="branch" />
-              {delivering ? "Delivering…" : "Deliver branch & open PR"}
-            </button>
-          )}
+            no live PR stands (none yet, or the last one closed/merged) and,
+            since ruling 134(c), whenever the open PR does not carry the
+            delivered revision: the same door pushes the revision to that PR.
+            A DIVERGED remote gets the fact and a disabled control naming the
+            refusal the server would give, never a button that then fails. */}
+        {onDeliver && (prTerminal || pushOffer) && (
+          <button
+            type="button"
+            className="btn primary sm panel-act"
+            disabled={delivering || pushOffer?.relation === "diverged"}
+            onClick={onDeliver}
+            title={
+              pushOffer?.relation === "diverged"
+                ? DIVERGED_PUSH_REFUSAL
+                : pushOffer
+                  ? "Push the delivered revision to the open review PR (audited)"
+                  : "Push the delivering agent's branch and open the review PR (audited)"
+            }
+          >
+            <Icon name="branch" />
+            {pushOffer
+              ? delivering
+                ? "Pushing…"
+                : PUSH_LABEL(pushOffer.rev, pushOffer.prNumber)
+              : delivering
+                ? "Delivering…"
+                : "Deliver branch & open PR"}
+          </button>
+        )}
         {/* F19-24: this is a Done writer — it finishes the acceptance by
             performing the irreversible merge, and it is the mandatory human half
             of EVERY full-autonomy operator acceptance (R16-6). It used to merge

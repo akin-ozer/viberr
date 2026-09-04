@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -2956,5 +2957,128 @@ describe("ruling 135: the unpushed delivered revision", () => {
     vRoutes[compareRoute] = { status: 404, body: { message: "Not Found" } };
     vRoutes[commitRoute] = { status: 404, body: { message: "Not Found" } };
     expect((await verified.run(vRoutes)).pr).not.toHaveProperty("unpushedRevision");
+  });
+});
+
+/**
+ * F34-9 (pass 34): PR adoption is recorded. Adopting a PR Viberr did not open
+ * (found on the branch with the delivered head, ruling 35) writes one `github`
+ * event naming the PR, its head and the PR it replaces, an audit row
+ * `github.pr.adopted`, and its own notification; a refresh of the same number
+ * writes nothing; replacing a LIVE cached PR wakes the operator. Canaries:
+ * delete the `recordPrAdoption` call; fire on every `ownsAPr` (the refresh
+ * writes a second line).
+ */
+describe("F34-9: PR adoption is recorded", () => {
+  const REV = "rev0delivered";
+  function adoptionRoutes(): FakeRoutes {
+    const pr = {
+      number: 318,
+      title: "Attach execution workspace",
+      state: "open",
+      draft: false,
+      merged: false,
+      merged_at: null,
+      head: { sha: REV },
+      additions: 4,
+      deletions: 1,
+      changed_files: 2,
+    };
+    return {
+      [`GET ${REPO_PATH}/compare/main...vib-301-workspace`]: {
+        body: { ahead_by: 1, behind_by: 0, status: "ahead", commits: [] },
+      },
+      [`GET ${REPO_PATH}/pulls`]: { body: [pr] },
+      [`GET ${REPO_PATH}/pulls/318`]: { body: pr },
+      [`GET ${REPO_PATH}/commits/${REV}/check-runs`]: { body: { total_count: 0, check_runs: [] } },
+    };
+  }
+  function seedDelivered(pr: PrRef | null) {
+    const store = setupTestStore(ctx);
+    const fmPatch: Parameters<typeof baseTaskFrontmatter>[1] = {
+      title: "Attach execution workspace",
+      stage: "review",
+      branch: "vib-301-workspace",
+      ownerUserId: store.users.arda.id,
+      workRevision: {
+        id: "rev_1",
+        headSha: REV,
+        treeSha: null,
+        branch: "vib-301-workspace",
+        createdAt: "2026-08-04T08:00:00.000Z",
+        sourceProfileId: "developer",
+      },
+    };
+    if (pr) fmPatch.pr = pr;
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-301", fmPatch) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler349" }, actor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    return { store, actor };
+  }
+  const adoptedLines = (store: ReturnType<typeof setupTestStore>) =>
+    readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.timeline.filter(
+      (e) => e.type === "github" && e.text.includes("Adopted **PR #"),
+    );
+
+  it("adopting a human-opened PR on the delivered head writes the event, the audit row and a notification; a refresh writes nothing", async () => {
+    const { store, actor } = seedDelivered(null);
+    const wakes: string[] = [];
+    const ctxWith = {
+      dataRoot: store.dataRoot,
+      fetchImpl: fakeGithubFetch(adoptionRoutes()).fetchImpl,
+      wakeOperator: async (_db: DatabaseSync, _ctx: { dataRoot?: string }, _slug: string, _key: string, trigger: string) => {
+        wakes.push(trigger);
+      },
+    };
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, ctxWith);
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toMatchObject({ number: 318, state: "review", headSha: REV });
+    const lines = adoptedLines(store);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.text).toContain("Adopted **PR #318** (head `rev0del`, the delivered revision) as VIB-301's review PR.");
+    expect(lines[0]!.text).toContain("Viberr did not open it");
+    expect(lines[0]!.actor).toEqual({ kind: "system", systemId: "policy-engine" });
+    const audit = listAuditEvents(store.db, { action: "github.pr.adopted" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.details).toMatchObject({ prNumber: 318, previousPrNumber: null, headSha: REV, source: "reconciler" });
+    const notes = listNotifications(store.db, store.users.arda.id).filter((n) => n.kind === "policy");
+    expect(notes.map((n) => n.title)).toContain("PR #318 adopted for VIB-301");
+    // A first adoption informs; it does not wake the operator.
+    expect(wakes).toEqual([]);
+
+    // A refresh of the SAME number, with a fact that changed (a check landed)
+    // so the pass really writes: still one adoption line, one audit row.
+    const refreshed = adoptionRoutes();
+    refreshed[`GET ${REPO_PATH}/commits/${REV}/check-runs`] = {
+      body: { total_count: 1, check_runs: [{ status: "completed", conclusion: "success" }] },
+    };
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, {
+      ...ctxWith,
+      fetchImpl: fakeGithubFetch(refreshed).fetchImpl,
+    });
+    expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter.pr?.checks?.total).toBe(1);
+    expect(adoptedLines(store)).toHaveLength(1);
+    expect(listAuditEvents(store.db, { action: "github.pr.adopted" })).toHaveLength(1);
+  });
+
+  it("replacing a LIVE cached PR names the replaced PR and wakes the operator", async () => {
+    const { store, actor } = seedDelivered({ number: 5, state: "review", title: "old" });
+    const wakes: string[] = [];
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: fakeGithubFetch(adoptionRoutes()).fetchImpl,
+      wakeOperator: async (_db: DatabaseSync, _ctx: { dataRoot?: string }, _slug: string, _key: string, trigger: string) => {
+        wakes.push(trigger);
+      },
+    });
+    const lines = adoptedLines(store);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.text).toContain("replacing PR #5 (review)");
+    expect(listAuditEvents(store.db, { action: "github.pr.adopted" })[0]!.details).toMatchObject({ previousPrNumber: 5, previousState: "review" });
+    const notes = listNotifications(store.db, store.users.arda.id).filter((n) => n.kind === "policy");
+    expect(notes.map((n) => n.title)).toContain("PR #318 adopted for VIB-301: replaces PR #5");
+    expect(wakes).toEqual(["pr-diverged"]);
   });
 });

@@ -489,6 +489,32 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
+        // F34-3: a pre-dispatch branch preparation failure is audited.
+        name: "ensureTaskBranchBestEffort (network failure before dispatch)",
+        action: "github.branch.prepare_failed",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { unreachableFetch } = await import("../../../test-support/fake-github");
+          const { createPat, setProjectCredential } = await import(
+            "~/server/secrets/pat-store.server"
+          );
+          const { ensureTaskBranchBestEffort } = await import("~/server/github/branch-sync.server");
+          const patActor = { userId: store.users.arda.id, label: store.users.arda.email };
+          const pat = createPat(
+            store.db,
+            { userId: store.users.arda.id, label: "bot", token: "ghp_coverage000000000000000000000003" },
+            patActor,
+          );
+          setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+          await ensureTaskBranchBestEffort(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1" },
+            actorArda(),
+            { dataRoot: store.dataRoot, fetchImpl: unreachableFetch() },
+          );
+        },
+      },
+      {
         name: "revalidateProjectCredential (grant-scope attempt, no PAT)",
         action: "github.credential.revalidated",
         run: () =>

@@ -322,6 +322,14 @@ Telemetry tags are collapsed by `log-noise.ts`, and the console shows the redact
 Stage eligibility (`stages:` on the profile, `spanAll`) is asserted on assignment and
 dispatch; an empty list means eligible everywhere.
 
+
+Before a delivering dispatch, `ensureTaskBranchBestEffort` prepares the task branch; a
+failure it cannot fix (credential rejected, GitHub unreachable, base branch missing and
+not creatable, or an unexpected throw) is disclosed once on the task timeline as a
+`github` event by `system:delivery`, audited as `github.branch.prepare_failed`, and logged
+on every attempt; the run still starts in its workspace and delivery retries the branch
+(F34-3, pass 34).
+
 ### 4.2 The `viberr_agent` toolkit (Claude specialists)
 
 Mounted only when at least one tool is granted; Codex specialists get the outcome

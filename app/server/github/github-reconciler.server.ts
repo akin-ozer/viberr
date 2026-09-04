@@ -34,6 +34,11 @@ import {
   type BranchSyncState,
 } from "./branch-sync.server";
 import { encodeRefPath, GITHUB_API_BASE, isMissingRefAnswer } from "./github-client.server";
+import {
+  prAdoptionText,
+  recordPrAdoption,
+  type PrAdoptionRecordInput,
+} from "./pr-adoption-record.server";
 
 /** Ruling 135: the one field the never-pushed probe reads. */
 const commitShaSchema = z.object({ sha: z.string() }).loose();
@@ -693,6 +698,28 @@ async function reconcileTaskUnlocked(
   // counter-event: a human who fixed the situation ON GITHUB left Viberr
   // holding a stale "needs a decision" state forever.
   const prJustReopened = fm.pr?.state === "closed" && newPr?.state === "review";
+  // F34-9 (pass 34): an ADOPTION (a different or first PR now tracks the
+  // branch with the delivered head) is recorded on its own, with its own
+  // notification. The reopen text above already covers a closed PR being
+  // replaced, so the adoption notice fires only when no reopen notice does; a
+  // replacement of a LIVE cached PR wakes the operator like a reopen.
+  const adopted = pr && ownsAPr && !sameAsCached ? pr : null;
+  const adoptionInput: PrAdoptionRecordInput | null = adopted
+    ? {
+        repo: gh.repo,
+        branch,
+        prNumber: adopted.number,
+        previousPrNumber: fm.pr?.number ?? null,
+        previousState: fm.pr?.state ?? null,
+        headSha: adopted.headSha ?? null,
+        source: "reconciler",
+      }
+    : null;
+  const prReplacedLive =
+    adopted !== null &&
+    fm.pr !== null &&
+    fm.pr.state !== "closed" &&
+    fm.pr.state !== "merged";
   const reopenedText = prJustReopened
     ? fm.pr!.number === newPr!.number
       ? `**Note:** PR #${newPr!.number} was reopened on GitHub. ${fm.key}'s review is live again and the closed-PR block is lifted.`
@@ -832,6 +859,29 @@ async function reconcileTaskUnlocked(
     rebuildPath(db, resolveTaskFilePath(ref), {
       dataRoot: ctx.dataRoot,
     });
+    if (adoptionInput) {
+      await recordPrAdoption(db, ref, adoptionInput, actor);
+      if (!prJustReopened) {
+        const { notifyTaskWatchers } = await import(
+          "~/server/tasks/task-actions.server"
+        );
+        notifyTaskWatchers(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            kind: "policy",
+            title:
+              adoptionInput.previousPrNumber !== null
+                ? `PR #${adoptionInput.prNumber} adopted for ${fm.key}: replaces PR #${adoptionInput.previousPrNumber}`
+                : `PR #${adoptionInput.prNumber} adopted for ${fm.key}`,
+            text: prAdoptionText(fm.key, adoptionInput),
+            from: POLICY_ENGINE_NOTIFY_FROM,
+          },
+          { dataRoot: ctx.dataRoot },
+        );
+      }
+    }
     // Notify the task's supervisors (owner + admins/maintainers) so the
     // divergence reaches an inbox, not just the timeline. Dynamic import keeps
     // the reconciler free of a static task-actions cycle (mirrors mergeTaskPr).
@@ -877,7 +927,8 @@ async function reconcileTaskUnlocked(
       mergedButNotDone ||
       closedButActive ||
       acceptedClosedExternally ||
-      prJustReopened
+      prJustReopened ||
+      prReplacedLive
     ) {
       const wake =
         ctx.wakeOperator ??

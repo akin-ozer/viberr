@@ -26,6 +26,7 @@ import {
   type GithubContextOptions,
 } from "./github-context.server";
 import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
+import { recordPrAdoption } from "./pr-adoption-record.server";
 import { mapPrToCacheState } from "./pr-linker.server";
 import {
   type FlagScopeViolationInput,
@@ -462,6 +463,24 @@ export async function openTaskPr(
         };
       }
       await writePrToTask(db, ref, input, gh, pr, actor, false, ctx, fm.pr);
+      // F34-9: a reuse of a DIFFERENT number is an adoption, recorded on its
+      // own (the "Opened PR" event and audit are gated on `created`).
+      if (fm.pr?.number !== pr.number) {
+        await recordPrAdoption(
+          db,
+          ref,
+          {
+            repo: gh.repo,
+            branch,
+            prNumber: pr.number,
+            previousPrNumber: fm.pr?.number ?? null,
+            previousState: fm.pr?.state ?? null,
+            headSha: pr.head?.sha ?? null,
+            source: "delivery",
+          },
+          actor,
+        );
+      }
       return { status: "ok", prNumber: pr.number, created: false, url: pr.html_url };
     }
     if (existing.kind === "network") {
