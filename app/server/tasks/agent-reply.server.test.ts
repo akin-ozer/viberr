@@ -783,6 +783,19 @@ describe("runFailureReason (F7-RUN1)", () => {
     t: "", ev: "err", tag: "error", text: "", ...partial,
   });
 
+  it("ruling 130(a): the typed `failure` record wins, rides through, and `session limit` prose classifies quota", () => {
+    // Canary: remove the `last.failure` read (the facts vanish; the kind
+    // still comes from the tag).
+    const facts = {
+      kind: "quota" as const, resetsAt: "2026-09-06T19:50:00.000Z", window: "five_hour", windowRejected: true,
+      apiError: null, apiErrorStatus: 429, terminalReason: "api_error",
+    };
+    const structured = classify([errLine({ tag: "run·error·quota", text: "The Claude account is over its usage quota.", failure: facts })]);
+    expect(structured).toMatchObject({ kind: "quota", facts });
+    const prose = classify([errLine({ tag: "error", text: "You've hit your session limit for now." })]);
+    expect(prose?.kind).toBe("quota");
+  });
+
   it("trusts the structured `·<kind>` tag over the generic prose (codex path)", () => {
     // The redaction-safe auth message does NOT match the auth prose regex on
     // its own; the classified tag is what routes it correctly.

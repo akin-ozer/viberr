@@ -109,7 +109,8 @@ describe("projectEnvelope — Claude stream-json", () => {
       rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: "high" },
     });
     expect(partial.facts.rateLimit?.utilization).toBeNull();
-    expect(partial.display?.text).toContain("?");
+    // Ruling 130(a): the placeholder says what is missing instead of `?`.
+    expect(partial.display?.text).toContain("utilization not reported");
   });
 });
 
@@ -226,5 +227,57 @@ describe("projectEnvelope — Codex JSONL", () => {
       tag: "web_search",
       text: "react router v8 loaders",
     });
+  });
+});
+
+/**
+ * Ruling 130(a) / U34-1 (pass 34): the provider's structured refusal facts
+ * are projected, never lost. Canaries: delete the `if (e.error)` branch (the
+ * banner projects as reply text); drop `api_error_status`/`terminal_reason`
+ * from the schema; restore `${e.subtype || "error"}` in the result text.
+ */
+describe("ruling 130(a): structured refusal facts", () => {
+  it("an assistant envelope carrying `error` projects as an err line, never as reply text", () => {
+    const { display, facts } = projectEnvelope("claude", {
+      type: "assistant",
+      error: "oauth_org_not_allowed",
+      message: { content: [{ type: "text", text: "You are not allowed to use this account here." }] },
+    });
+    expect(display).toMatchObject({ ev: "err", tag: "assistant·oauth_org_not_allowed" });
+    expect(display?.text).toContain("not allowed");
+    expect(facts.apiError).toBe("oauth_org_not_allowed");
+    // A plain assistant message stays reply text.
+    expect(projectEnvelope("claude", { type: "assistant", message: { content: [{ type: "text", text: "hi" }] } }).display?.ev).toBe("text");
+  });
+
+  it("result facts carry `api_error_status` / `terminal_reason`; the label is never `success` on an error", () => {
+    const refused = projectEnvelope("claude", {
+      type: "result", subtype: "success", is_error: true, num_turns: 1, usage: {},
+      api_error_status: 403, terminal_reason: "api_error",
+    });
+    expect(refused.facts).toMatchObject({ isError: true, apiErrorStatus: 403, terminalReason: "api_error" });
+    expect(refused.display?.text).toBe("error · 1 turns · api 403 · api_error");
+    expect(refused.display?.stats?.subtype).toBe("error");
+    const maxTurns = projectEnvelope("claude", { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 9, usage: {} });
+    expect(maxTurns.display?.text).toBe("error_max_turns · 9 turns");
+    const ok = projectEnvelope("claude", { type: "result", subtype: "success", is_error: false, num_turns: 2, usage: {}, duration_ms: 1000, total_cost_usd: 0.1 });
+    expect(ok.display?.text).toContain("success · 2 turns");
+    expect(ok.facts.apiErrorStatus).toBeNull();
+  });
+
+  it("a REJECTED rate-limit line names the window, the status and the reset, and is not telemetry", () => {
+    const { display, facts } = projectEnvelope("claude", {
+      type: "rate_limit_event",
+      rate_limit_info: { status: "rejected", rateLimitType: "five_hour", utilization: null, resetsAt: 1_788_781_800, isUsingOverage: false },
+    });
+    expect(display).toMatchObject({ ev: "err", tag: "rate_limit_event·rejected" });
+    expect(display?.text).toBe("rate limit · five_hour · rejected · utilization not reported · resets 2026-09-07 11:50 UTC");
+    expect(facts.rateLimit?.status).toBe("rejected");
+    const allowed = projectEnvelope("claude", {
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.4, resetsAt: null, isUsingOverage: false },
+    });
+    expect(allowed.display).toMatchObject({ ev: "meta", tag: "rate_limit_event" });
+    expect(allowed.display?.text).toBe("rate limit · five_hour · allowed · 40%");
   });
 });

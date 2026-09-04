@@ -146,6 +146,24 @@ exhaustion expires after 6 h. Insights renders both; "no reading yet" is neutral
   `kind ∈ quota | auth | session_missing | unknown`; idle → `run·error·idle_timeout`;
   `error_max_turns` → `run·error·max_turns`. Provider text follows
   `"\n\nThe provider reported: "`.
+- Ruling 130(a) (pass 34): refusals are classified from the STRUCTURED envelope first
+  and from prose second, in the order spawn codes → `session_missing` → `quota` (a
+  `rate_limit_event` whose `status` is `rejected`, an assistant-envelope `error` of
+  `rate_limit` or `billing_error`, `api_error_status: 429`, or the prose regex now
+  including `session limit | weekly limit | monthly limit | out of credits | credit
+  balance`) → `auth` (`authentication_failed` or `oauth_org_not_allowed`, status 401/403,
+  or the prose regex) → `unknown`. The terminal `err` line carries a typed `failure`
+  record (`RunFailureFacts`: kind, `resetsAt`, `window`, `windowRejected`, `apiError`,
+  `apiErrorStatus`, `terminalReason`; the reset and window ride ONLY on a rejected
+  reading) beside its tag, and every reader consumes that record: the failure reason,
+  the packet builders, the controller's note, the Agent-logs footer for every run kind,
+  the quota store. The provider's API-error banner, streamed as an assistant message
+  with an `error` code, projects as an `err` line tagged `assistant·<code>` and can never
+  be selected as the agent's reply. A rejected `rate_limit_event` projects as an `err`
+  line tagged `rate_limit_event·rejected` (exempt from the console's telemetry
+  collapse) naming the window, the status and the absolute reset. U34-1: an error
+  result whose subtype is `success` is labelled `error`, with `· api <status>` and
+  `· <terminal_reason>` appended when the SDK sent them.
 
 ### 2.5 Codex adapter
 
@@ -240,7 +258,13 @@ and a `continuity` timeline event is written, so a lost effect is visible.
 ### 3.5 Failure kinds
 
 `RunFailureKind = quota | auth | unavailable | max_turns | idle_timeout |
-session_missing | unknown`, read from the terminal tag suffix first and regexes second.
+session_missing | unknown`, read from the terminal line's typed `failure` record first,
+the tag suffix second and regexes last (ruling 130(a)). `runFailureReason` returns the
+record as `facts`; `projectRunsForTask` sets `failureKind` on every errored run's view
+(operator runs included) and flags `failedBackendUnavailable` from the class before the
+raw scan; the controller's turn note (ruling 130(b)) names a quota window's reset and
+the account switch, or an auth refusal's organization restriction, instead of "Say it
+again to retry", which stays only for an unclassified failure.
 The completion pipeline opens a stuck-loop packet, notes model availability, and clears
 waiting to human. `retry_other_backend` is offered for `quota | auth | unavailable` only
 when the **task owner** has the other backend connected (ruling 127) — otherwise the

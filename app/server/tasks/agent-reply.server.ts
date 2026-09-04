@@ -611,6 +611,11 @@ export function runFailureReason(
   // "authenticate"), so re-classifying the prose would drop codex quota/auth
   // failures to `unknown`. Backends that emit no class (plain err lines) still
   // fall through to the prose regexes below.
+  // Ruling 130(a): the adapter's typed record wins outright; the tag suffix
+  // is the same fact for lines written before the record existed.
+  if (last.failure) {
+    return withProviderText({ kind: last.failure.kind, text, facts: last.failure }, providerText);
+  }
   const tag = last.tag ?? "";
   const taggedKind = TAGGED_FAILURE_KINDS.find((k) => tag.endsWith(`·${k}`));
   if (taggedKind) return withProviderText({ kind: taggedKind, text }, providerText);
@@ -622,7 +627,7 @@ export function runFailureReason(
       ? "session_missing"
       : /is unavailable|no usable credential/i.test(text)
         ? "unavailable"
-        : /usage limit|quota|rate limit|too many requests|429/i.test(text)
+        : /usage limit|quota|rate limit|too many requests|429|session limit|weekly limit|monthly limit|out of credits|credit balance/i.test(text)
           ? "quota"
           : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
             ? "auth"

@@ -388,3 +388,34 @@ describe("projectRunsForTask — bounded log window", () => {
     });
   });
 });
+
+/**
+ * Ruling 130(a): the projection consults the CLASSIFIED terminal line first,
+ * for every run kind, so a refusal whose raw tail carries no prose signature
+ * is still flagged, on a specialist and on an operator run alike. Canary:
+ * remove the tag/failure clause (the raw scan alone flags nothing here).
+ */
+describe("ruling 130(a): the classified failure reaches the view for every run kind", () => {
+  it("flags a run whose classified tag is ·auth or ·quota even when the raw tail carries no signature", () => {
+    insert({ id: "run_auth", threadId: "primary", kind: "primary", backend: "claude", state: "error", credentialUserId: "u_owner" });
+    insertRunLine(db, {
+      runId: "run_auth", seq: 0, occurredAt: "2026-09-04T00:00:00.000Z", raw: JSON.stringify({ type: "result" }),
+      display: {
+        t: "00:00:00", ev: "err", tag: "run·error·auth", text: "refused",
+        failure: { kind: "auth", resetsAt: null, window: null, windowRejected: false, apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error" },
+      },
+    });
+    insert({ id: "run_op", threadId: "operator", kind: "operator", backend: "claude", state: "error", credentialUserId: "u_owner" });
+    insertRunLine(db, {
+      runId: "run_op", seq: 0, occurredAt: "2026-09-04T00:00:01.000Z", raw: JSON.stringify({ type: "result" }),
+      display: { t: "00:00:01", ev: "err", tag: "run·error·quota", text: "spent" },
+    });
+    const views = projectRunsForTask(db, SLUG, TASK);
+    const primary = views.find((v) => v.id === "primary")!;
+    expect(primary.failedBackendUnavailable).toBe(true);
+    expect(primary.failureKind).toBe("auth");
+    const operator = views.find((v) => v.id === "operator")!;
+    expect(operator.failedBackendUnavailable).toBe(true);
+    expect(operator.failureKind).toBe("quota");
+  });
+});

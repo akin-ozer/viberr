@@ -934,3 +934,31 @@ describe("AgentLogsPanel — run inputs (P19-G11)", () => {
     expect(queryByText("show what this run was given")).toBeNull();
   });
 });
+
+/**
+ * Ruling 130(a): the Agent-logs footer selects its SENTENCE from the
+ * classified failure for every run kind; the retry button stays gated on the
+ * offer. Canary: restore the kind gate on the sentence (operator runs fall
+ * back to "continuity error").
+ */
+describe("ruling 130(a): the classified footer", () => {
+  it("an OPERATOR run tagged run·error·quota renders the classified footer, and no retry button", () => {
+    const run = mkRun({ id: "operator", kind: "operator", state: "error", lifecycle: "error", failureKind: "quota", failedBackendUnavailable: true });
+    const { getByText, queryByText } = render(
+      <AgentLogsPanel runtime={[run]} sel="operator" onSel={() => {}} linesByThread={{ operator: [] }} />,
+    );
+    expect(getByText(/Claude refused this run: the account's usage window is spent/)).toBeTruthy();
+    // The state pill follows the class too: no "continuity error" anywhere.
+    expect(getByText("refused · quota")).toBeTruthy();
+    expect(queryByText(/continuity error/)).toBeNull();
+    expect(queryByText(/Retry on/)).toBeNull();
+  });
+
+  it("an auth refusal on a specialist names the provider's rejection", () => {
+    const run = mkRun({ state: "error", lifecycle: "error", failureKind: "auth", failedBackendUnavailable: true });
+    const { getByText } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(getByText(/Claude refused this run: the account was rejected by the provider/)).toBeTruthy();
+  });
+});

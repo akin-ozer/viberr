@@ -1011,3 +1011,69 @@ describe("claude adapter run phases (R21-4a / FR28)", () => {
     expect(exit).toMatchObject({ outcome: "finished" });
   });
 });
+
+/**
+ * Ruling 130(a): refusals are classified from the structured envelope first
+ * and the terminal line carries the typed facts. Canaries: remove the
+ * structured arms (`quotaByEvidence` / `authByEvidence`); drop the
+ * `windowRejected` gate in `failureFacts`; require evidence for the quota arm.
+ */
+describe("ruling 130(a): structured classification", () => {
+  const run = async (messages: unknown[], opts: { throwAfter?: number } = {}) => {
+    const { q } = fakeQuery(messages, opts);
+    const adapter = createClaudeAdapter({ queryFn: () => q });
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: (e) => (exit = e) });
+    await drain();
+    return { lines, exit, terminal: lines.find((l) => (l.display?.tag ?? "").startsWith("run·error·")) };
+  };
+
+  it("a 403 `oauth_org_not_allowed` classifies `run·error·auth` from the envelope and names Profile → Agent accounts", async () => {
+    const { lines, terminal } = await run([
+      { type: "assistant", error: "oauth_org_not_allowed", message: { content: [{ type: "text", text: "You are not allowed here." }], usage: {} } },
+      { type: "result", subtype: "success", is_error: true, num_turns: 1, usage: {}, api_error_status: 403, terminal_reason: "api_error", result: "" },
+    ]);
+    expect(terminal?.display?.tag).toBe("run·error·auth");
+    expect(terminal?.display?.text).toContain("oauth_org_not_allowed");
+    expect(terminal?.display?.text).toContain("Profile → Agent accounts");
+    expect(terminal?.display?.failure).toEqual({
+      kind: "auth", resetsAt: null, window: null, windowRejected: false,
+      apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error",
+    });
+    // The banner is an error line, never the reply.
+    expect(lines.find((l) => l.display?.tag === "assistant·oauth_org_not_allowed")?.display?.ev).toBe("err");
+    expect(lines.some((l) => l.display?.ev === "text")).toBe(false);
+  });
+
+  it("a session-limit refusal after a REJECTED rate-limit reading classifies quota with the exact reset; an ALLOWED reading carries none", async () => {
+    const rejected = await run([
+      { type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "five_hour", utilization: null, resetsAt: 1_788_781_800, isUsingOverage: false } },
+      { type: "result", subtype: "success", is_error: true, num_turns: 1, usage: {}, api_error_status: 429, result: "You've hit your session limit." },
+    ]);
+    expect(rejected.terminal?.display?.tag).toBe("run·error·quota");
+    expect(rejected.terminal?.display?.failure).toMatchObject({
+      kind: "quota", windowRejected: true, window: "five_hour", resetsAt: "2026-09-07T11:50:00.000Z", apiErrorStatus: 429,
+    });
+    expect(rejected.terminal?.display?.text).toContain("five hour window is spent");
+    expect(rejected.terminal?.display?.text).toContain("reopens at 2026-09-07 11:50 UTC");
+
+    const allowed = await run([
+      { type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.5, resetsAt: 1_788_781_800, isUsingOverage: false } },
+      { type: "result", subtype: "error_during_execution", is_error: true, num_turns: 1, usage: {}, result: "429 too many requests" },
+    ]);
+    expect(allowed.terminal?.display?.tag).toBe("run·error·quota");
+    expect(allowed.terminal?.display?.failure).toMatchObject({ windowRejected: false, resetsAt: null, window: null });
+  });
+
+  it("a thrown stream error with no envelope evidence still classifies by prose", async () => {
+    const { q } = fakeQuery([], { rejectWith: new Error("Claude AI weekly limit reached") });
+    const adapter = createClaudeAdapter({ queryFn: () => q });
+    const lines: EmittedLine[] = [];
+    adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
+    await drain();
+    const terminal = lines.find((l) => (l.display?.tag ?? "").startsWith("run·error·"));
+    expect(terminal?.display?.tag).toBe("run·error·quota");
+    expect(terminal?.display?.failure).toMatchObject({ kind: "quota", windowRejected: false, apiError: null });
+  });
+});

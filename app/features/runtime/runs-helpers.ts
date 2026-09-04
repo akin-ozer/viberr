@@ -44,6 +44,17 @@ export function runStatePill(run: RunView): RunStateBadge {
     };
   }
   if (run.lifecycle === "queued") return { kind: "neutral", label: "queued" };
+  // Ruling 130(a): the pill is a reader of the failure too. A classified
+  // refusal names its class; "continuity error" is only an unclassified one.
+  if (run.state === "error" && run.failureKind === "quota") {
+    return { kind: "blocked", label: "refused · quota" };
+  }
+  if (run.state === "error" && run.failureKind === "auth") {
+    return { kind: "blocked", label: "refused · account" };
+  }
+  if (run.state === "error" && run.failureKind === "unavailable") {
+    return { kind: "blocked", label: "backend unavailable" };
+  }
   return RUN_STATE[run.state] ?? RUN_STATE.idle;
 }
 

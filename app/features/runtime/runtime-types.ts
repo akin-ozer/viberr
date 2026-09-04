@@ -11,7 +11,7 @@
  *   friendly console model. `runs.md` §3.2 is the authoritative shape.
  */
 
-import type { RunFailureFacts } from "~/shared/run-failure";
+import type { RunFailureFacts, RunFailureKind } from "~/shared/run-failure";
 
 /** Lifecycle stored in agent_runs.state (orchestrator ruling 11). */
 export type RunState =
@@ -297,6 +297,9 @@ export interface RunView {
   /** The run failed because its backend was unavailable / quota-limited (not a
    *  genuine task failure). The UI offers a one-click retry on `altBackend`. */
   failedBackendUnavailable?: boolean;
+  /** Ruling 130(a): the classified failure kind of an errored run, for EVERY
+   *  run kind; the Agent-logs footer selects its sentence from this. */
+  failureKind?: RunFailureKind;
   /** The OTHER backend to retry on when this one is unavailable (D4). */
   altBackend?: "claude" | "codex";
   phase: string | null;

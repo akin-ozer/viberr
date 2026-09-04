@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { TAGGED_FAILURE_KINDS, type RunFailureKind } from "~/shared/run-failure";
 import {
   runBoundaryLine,
   type LogLine,
@@ -190,10 +191,21 @@ function projectRow(
   // UI-38 fixed once already, and false twice over here: nothing streamed and
   // no session was lost.
   const noPrincipal = row.credential_user_id === null;
+  // Ruling 130(a): the CLASSIFIED terminal line is consulted first, for every
+  // run kind (four of pass 34's six live refusals were operator runs); the raw
+  // scan stays as the fallback for lines written before the class existed.
+  const terminal = [...lines].reverse().find((l) => l.ev === "err" && (l.failure || (l.tag ?? "").startsWith("run·")));
+  const failureKind: RunFailureKind | undefined =
+    row.state !== "error"
+      ? undefined
+      : (terminal?.failure?.kind ??
+        TAGGED_FAILURE_KINDS.find((k) => (terminal?.tag ?? "").endsWith(`·${k}`)));
+  const classifiedUnavailable =
+    failureKind === "quota" || failureKind === "auth" || failureKind === "unavailable";
   const failedBackendUnavailable =
     row.state === "error" &&
-    !op &&
-    (lines.some((l) => l.ev === "err" && l.tag === "run·unavailable") ||
+    (classifiedUnavailable ||
+      lines.some((l) => l.ev === "err" && l.tag === "run·unavailable") ||
       isBackendUnavailableError(raw));
   const view: ProjectedRunView = {
     id: row.thread_id,
@@ -235,6 +247,7 @@ function projectRow(
     lineCount: logWindow.totalLines,
     logWindow,
   };
+  if (failureKind) view.failureKind = failureKind;
   // Absent entirely on a run that failed for any other reason. `altBackend` is
   // the D4 offer and rides only when there is a person for the retry to bill
   // (ruling 127): without it the panel states the failure and offers nothing,

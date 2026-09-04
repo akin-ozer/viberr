@@ -30,6 +30,13 @@ export interface EnvelopeFacts {
   isError?: boolean;
   /** True when this is a terminal result envelope (claude result). */
   isResult?: boolean;
+  /** Ruling 130(a): the assistant envelope's `error` code (`oauth_org_not_allowed`,
+   *  `rate_limit`, …) when the provider streamed its API-error banner. */
+  apiError?: string | null;
+  /** Ruling 130(a): the result envelope's `api_error_status` (403, 429, …). */
+  apiErrorStatus?: number | null;
+  /** Ruling 130(a): the result envelope's `terminal_reason` (`api_error`, …). */
+  terminalReason?: string | null;
   /** A `rate_limit_event`'s live quota reading (claude only today) — folded
    *  into the instance-wide backend-quota store by the sink, so approaching
    *  exhaustion is visible BEFORE a run fails on it (pass-29 gap 3.2). */
@@ -165,6 +172,10 @@ const claudeEnvelopeFields = z.object({
   duration_ms: wireCount,
   duration_api_ms: wireCount,
   is_error: wireFlag,
+  /** Ruling 130(a): the result's HTTP status when the API refused the run, and
+   *  the SDK's terminal reason. Nullable on purpose: absent is "not sent". */
+  api_error_status: z.number().nullable().catch(null),
+  terminal_reason: wireText,
   /** `rate_limit_event` payload — the SDK's live utilization report. Nullable
    *  numbers (not wireCount) on purpose: a missing utilization must read as
    *  "not reported", never as a fabricated 0% that looks like a fresh quota. */
@@ -288,14 +299,23 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
       // the SAME tag the client already groups as telemetry.
       const info = e.rate_limit_info;
       const pct =
-        info?.utilization != null ? `${Math.round(info.utilization * 100)}%` : "?";
+        info?.utilization != null
+          ? `${Math.round(info.utilization * 100)}%`
+          : "utilization not reported";
+      // Ruling 130(a): the display names the window, the STATUS and the reset
+      // instant (absolute UTC, never relative). A REJECTED reading is the one
+      // a human must see, so it carries its own tag suffix: the console's
+      // telemetry collapse keys on the bare `rate_limit_event` tag.
+      const rejected = info?.status === "rejected";
+      const reset =
+        info?.resetsAt != null ? ` · resets ${absoluteUtc(info.resetsAt)}` : "";
       return {
         display: {
           t,
-          ev: "meta",
-          tag: "rate_limit_event",
+          ev: rejected ? "err" : "meta",
+          tag: rejected ? "rate_limit_event·rejected" : "rate_limit_event",
           text: info
-            ? `rate limit · ${info.rateLimitType || "window"} at ${pct}${info.isUsingOverage ? " · overage" : ""}`
+            ? `rate limit · ${info.rateLimitType || "window"} · ${info.status || "status not reported"} · ${pct}${info.isUsingOverage ? " · overage" : ""}${reset}`
             : "rate limit event",
         },
         facts: info ? { rateLimit: info } : {},
@@ -326,6 +346,21 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
     }
     case "assistant": {
       const content = e.message.content;
+      // Ruling 130(a): the provider streams its API-error banner ("You are not
+      // allowed to …") as an assistant message carrying an `error` code. It is
+      // an error line, never the agent's reply, so it can never be selected as
+      // the reply comment.
+      if (e.error) {
+        return {
+          display: {
+            t,
+            ev: "err",
+            tag: `assistant·${e.error}`,
+            text: summarizeContent(content) || e.error,
+          },
+          facts: { apiError: e.error },
+        };
+      }
       const toolUse = content.find((b) => b.type === "tool_use");
       if (toolUse) {
         const text = summarizeToolInput(toolUse.name, toolUse.input);
@@ -347,8 +382,20 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
       const cached = e.usage.cache_read_input_tokens;
       const outTok = e.usage.output_tokens;
       const durSec = Math.round(e.duration_ms / 1000);
+      // U34-1: the SDK ends an API-refused run with `subtype: "success"` and
+      // `is_error: true`, which printed "result · success" one line above the
+      // failure. An error result's label is its subtype unless that subtype is
+      // "success", in which case it is "error"; the API status and terminal
+      // reason follow when the SDK sent them.
+      const outcome = e.is_error
+        ? e.subtype && e.subtype !== "success"
+          ? e.subtype
+          : "error"
+        : "success";
       const text = e.is_error
-        ? `${e.subtype || "error"} · ${e.num_turns} turns`
+        ? `${outcome} · ${e.num_turns} turns` +
+          (e.api_error_status != null ? ` · api ${e.api_error_status}` : "") +
+          (e.terminal_reason ? ` · ${e.terminal_reason}` : "")
         : `success · ${e.num_turns} turns · ${durSec}s · $${e.total_cost_usd.toFixed(2)}`;
       return {
         display: {
@@ -357,7 +404,7 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
           tag: "result",
           text,
           stats: {
-            subtype: e.is_error ? e.subtype : undefined,
+            subtype: e.is_error ? outcome : undefined,
             dur: e.duration_ms,
             api: e.duration_api_ms,
             turns: e.num_turns,
@@ -373,12 +420,21 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
           turns: e.num_turns,
           isError: e.is_error,
           isResult: true,
+          apiErrorStatus: e.api_error_status,
+          terminalReason: e.terminal_reason || null,
         },
       };
     }
     default:
       return null;
   }
+}
+
+/** An epoch-seconds instant as absolute UTC (`2026-09-03 11:50 UTC`). */
+function absoluteUtc(epochSeconds: number): string {
+  const d = new Date(epochSeconds * 1000);
+  if (Number.isNaN(d.getTime())) return String(epochSeconds);
+  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 /** Human-readable summary of an assistant/user content array. */

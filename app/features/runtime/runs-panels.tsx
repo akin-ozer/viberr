@@ -602,7 +602,13 @@ export function AgentLogsPanel({
               (cur!.finished ? finishedClock(cur!.finished, hydrated) : "−") +
               "; thread can be re-engaged"
             : cur!.state === "error"
-              ? backendUnavailable
+              ? // Ruling 130(a): the SENTENCE follows the classified failure
+                // for every run kind; the retry clause follows the OFFER.
+                cur!.failureKind === "quota"
+                ? `${cur!.backend === "codex" ? "Codex" : "Claude"} refused this run: the account's usage window is spent (the error line names the reset and the account remedy)${retryClause}`
+                : cur!.failureKind === "auth"
+                  ? `${cur!.backend === "codex" ? "Codex" : "Claude"} refused this run: the account was rejected by the provider (an organization restriction or a rejected credential; the error line names the remedy)${retryClause}`
+                  : backendUnavailable
                 ? // Ruling 127: the same `run·unavailable` classification now
                   // also covers "the account this run bills has not connected
                   // the backend", so the footer states the CLASS and lets the

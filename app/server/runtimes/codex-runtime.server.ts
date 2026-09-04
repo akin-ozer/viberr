@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { emptyRunFailureFacts } from "~/shared/run-failure";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import type {
@@ -741,7 +742,12 @@ export function createCodexAdapter(
         const { display, facts } = projectEnvelope("codex", event, occurredAt);
         cb.onLine({
           raw: JSON.stringify(event),
-          display: display ? { ...display, tag: `${display.tag}·${kind}` } : display,
+          // Ruling 130(a): the same typed record the Claude adapter attaches;
+          // Codex streams no structured refusal facts, so every field but the
+          // kind is unknown.
+          display: display
+            ? { ...display, tag: `${display.tag}·${kind}`, failure: emptyRunFailureFacts(kind) }
+            : display,
           facts,
           occurredAt,
         });

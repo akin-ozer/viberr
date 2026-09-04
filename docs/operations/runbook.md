@@ -126,10 +126,15 @@ a readiness downgrade (tolerant parsing):
 - A row that silently stops updating almost always means a schema or CHECK problem:
   `rebuildPath` swallows the throw into a provenance `error` row and the log line
   `projection rebuild failed`. Read the boot integrity WARN.
-- A run that ended with `continuity error` in the runs panel is any error run; open the
-  log console for the provider's own words (`The provider reported: …`) and the failure
-  kind on the terminal tag (`quota`, `auth`, `idle_timeout`, `max_turns`,
-  `session_missing`, `unavailable`).
+- A run that ended in error: the Agent-logs footer names the classified cause for every
+  run kind (ruling 130(a)): "refused this run: the account's usage window is spent" or
+  "the account was rejected by the provider"; `continuity error` is now only an
+  unclassified failure. The terminal line in the log console carries the kind on its
+  tag (`quota`, `auth`, `idle_timeout`, `max_turns`, `session_missing`, `unavailable`),
+  the typed facts (the window, the absolute reset, the API status and code) and the
+  provider's own words (`The provider reported: …`). A 403 `oauth_org_not_allowed` means
+  the connected Claude account's organization does not allow it: the remedy is on that
+  person's Profile → Agent accounts, never a retry.
 
 ## GitHub / PAT issues
 
