@@ -157,7 +157,20 @@ function DockShell({ context }: { context: DockContext }) {
   // Restore per-tab state AFTER hydration: reading storage during render would
   // disagree with the server's closed markup.
   useEffect(() => {
-    setOpen(readSession(OPEN_KEY) === "1");
+    const stored = readSession(OPEN_KEY) === "1";
+    // A click can be queued BEFORE this effect runs. React flushes passive
+    // effects after the commit that paints the trigger, so there is a real gap
+    // in which the button is on screen, clickable, and this restore has not
+    // read storage yet - long enough for a fast hand, and wide open on a
+    // saturated machine. Writing the stored answer over the top of the
+    // person's own closed the panel they had just opened, or, when both
+    // updates landed in one batch, meant it never opened at all.
+    //
+    // The panel starts closed and nothing else opens it, so an `open` that is
+    // already true here can ONLY be that click - and it is the newer decision,
+    // so it wins. (`selected` needs no such guard: every writer of it is
+    // inside the panel, which cannot have been open yet.)
+    setOpen((clicked) => clicked || stored);
     setSelected(readSelected());
     restored.current = true;
   }, []);
