@@ -930,6 +930,24 @@ describe("codex failure classification survives redaction into runFailureReason 
     expect(reason?.text).not.toContain("/data/codex/sessions");
   });
 
+  it("a provider overload / 5xx classifies as 'overloaded' (parity with the Claude adapter's structural class), never 'unknown'", async () => {
+    // Codex streams no structured status, so the leg is prose-only, on the
+    // signatures the run projection has always read as backend unavailability.
+    // BEFORE: `unknown`, whose sentence sends the human to "review its
+    // authentication and runtime configuration" for the provider's own outage.
+    for (const text of [
+      "server_error: The server is currently overloaded, please try again later",
+      "503 Service Unavailable from api.openai.com",
+    ]) {
+      const reason = await classifyThrownFailure(text);
+      expect(reason?.kind, text).toBe("overloaded");
+      expect(reason?.text).toBe(
+        "Codex could not serve this run: the provider was overloaded or failed on its own side. Nothing about the account or the task is wrong; retry in a few minutes.",
+      );
+      expect(reason?.text).not.toMatch(/review .*(authentication|credential)/i);
+    }
+  });
+
   it("an unclassifiable failure classifies as 'unknown'", async () => {
     const reason = await classifyThrownFailure(
       "segmentation fault in /opt/codex/bin during run",

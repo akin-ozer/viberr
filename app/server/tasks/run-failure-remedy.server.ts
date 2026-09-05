@@ -145,6 +145,17 @@ export function describeRunFailure(
         ? `${owner.name} connects ${backend} on ${profile}${ownerHasOther ? `, or the run is retried on ${BACKEND_NAME[other]}` : ""}.`
         : `Seat an owner who has ${backend} connected on ${profile}.`;
       break;
+    case "overloaded": {
+      // The provider's side, not the account's: nobody has a move to make on
+      // Profile, so the remedy is the one thing that is true — retry, on the
+      // same backend once the provider recovers or on the other one now.
+      const status = facts?.apiErrorStatus ?? null;
+      const code = facts?.apiError ?? null;
+      const overloaded = status === 529 || code === "overloaded";
+      reason = `${backend} could not serve ${runWord}: the provider ${overloaded ? "was overloaded" : "failed on its own side"}${status ? ` (HTTP ${status}${code && code !== "overloaded" ? `, ${code}` : ""})` : code ? ` (${code})` : ""}.`;
+      remedy = `Nothing about ${whose} account or the task is wrong. Retry in a few minutes${ownerHasOther ? `, or run it on ${BACKEND_NAME[other]} now` : ""}.`;
+      break;
+    }
     case "max_turns":
       reason = `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} hit its turn cap before finishing.`;
       remedy = "Re-run it with a narrower directive, or split the work.";
@@ -243,7 +254,8 @@ function specialistOptions(
     title: "Redirect with sharper guidance",
     detail: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
   };
-  const backendFailure = kind === "quota" || kind === "auth" || kind === "unavailable";
+  const backendFailure =
+    kind === "quota" || kind === "auth" || kind === "unavailable" || kind === "overloaded";
   if (backendFailure) {
     const options: OperatorPacketOptionInput[] = [];
     if (ownerHasOther) {
@@ -264,13 +276,20 @@ function specialistOptions(
           ? `The window has reset${resetLabel ? ` (${resetLabel})` : ""}, or the ${backend} account changed: send ${handle} back to continue`
           : kind === "auth"
             ? `A different ${backend} account or an API key is connected: send ${handle} back to continue`
-            : `${backend} is connected now: send ${handle} back to continue`,
-      detail: "Closes this decision and re-runs the agent on the owner's current account with the same directive.",
+            : kind === "overloaded"
+              ? `Retry ${handle} on ${backend} now: the provider was overloaded, nothing was changed`
+              : `${backend} is connected now: send ${handle} back to continue`,
+      detail:
+        kind === "overloaded"
+          ? "Closes this decision and re-runs the agent on the same account with the same directive. If the provider is still overloaded you get a new decision packet."
+          : "Closes this decision and re-runs the agent on the owner's current account with the same directive.",
       recommended: !ownerHasOther,
       ev:
         kind === "quota"
           ? "**Decision:** the usage window has reset or the account was switched; the agent continues. No project policy was changed."
-          : `**Decision:** the ${backend} credential was changed on the owner's profile; the agent continues.`,
+          : kind === "overloaded"
+            ? `**Decision:** ${backend} was overloaded; the agent is retried as it was. No account or project policy was changed.`
+            : `**Decision:** the ${backend} credential was changed on the owner's profile; the agent continues.`,
     });
     options.push(redirect);
     return options;

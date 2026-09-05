@@ -16,6 +16,16 @@ export type RunFailureKind =
   | "quota"
   | "auth"
   | "unavailable"
+  /** The PROVIDER could not serve the run: overloaded (HTTP 529, the API's
+   *  `overloaded` error) or failing on its own side (5xx, `server_error`).
+   *  Neither the account nor the task is at fault, so it is neither `quota`
+   *  (whose remedy is the account's window or a different account) nor
+   *  `unavailable` (no credential principal to spawn with): the honest remedy
+   *  is a retry, on the same backend once the provider recovers or on the
+   *  other one now. The Claude Agent SDK ≥ 0.3.223 ends a run it gave up on
+   *  after repeated 529s with `api_error_status: 529`, so this class is read
+   *  from that fact first and from prose ("overloaded", "503") second. */
+  | "overloaded"
   | "max_turns"
   /** The stream produced nothing for the whole idle window — the run was HUNG,
    *  not failed by the task. Both adapters emit it (P13-RT-11). */
@@ -36,6 +46,7 @@ export const TAGGED_FAILURE_KINDS = [
   "quota",
   "auth",
   "unavailable",
+  "overloaded",
   "max_turns",
   "idle_timeout",
   "session_missing",

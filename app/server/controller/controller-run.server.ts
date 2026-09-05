@@ -520,6 +520,17 @@ function failedTurnNote(failure: RunFailure | null): string {
       (failure.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "")
     );
   }
+  if (failure?.kind === "overloaded") {
+    // The provider's side: a retry IS the remedy here, so the sentence says so
+    // and names what is NOT wrong (the account), where quota/auth send the
+    // person to Profile.
+    const status = facts?.apiErrorStatus ? ` (HTTP ${facts.apiErrorStatus})` : "";
+    return (
+      `I could not finish this turn: Claude was overloaded or failed on its side${status}. ` +
+      "Nothing about your account is wrong. Say it again in a few minutes." +
+      (failure.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "")
+    );
+  }
   const detail = "the run did not complete";
   return (
     `I could not finish this turn: ${detail}.` +

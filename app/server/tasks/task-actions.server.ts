@@ -3882,8 +3882,11 @@ export async function applyAgentCompletionEffects(
     const described = describeRunFailure(db, describeInput);
     // Ruling 130(b): a classified refusal is worded ONCE, by the leaf. The
     // other kinds keep their own sentences below; `unavailable` is ruling
-    // 127's refusal sentence, already naming the person and the remedy.
-    const classified = failure?.kind === "quota" || failure?.kind === "auth";
+    // 127's refusal sentence, already naming the person and the remedy. A
+    // provider-side `overloaded` failure is worded by the leaf too: its remedy
+    // (retry; nothing to fix) is the same one for operator and specialist.
+    const classified =
+      failure?.kind === "quota" || failure?.kind === "auth" || failure?.kind === "overloaded";
     const reasonText = classified
       ? described.reason
       : failure?.kind === "unavailable"
@@ -3957,7 +3960,8 @@ export async function applyAgentCompletionEffects(
     const backendFailure =
       failure?.kind === "quota" ||
       failure?.kind === "auth" ||
-      failure?.kind === "unavailable";
+      failure?.kind === "unavailable" ||
+      failure?.kind === "overloaded";
     const stuck: Parameters<typeof openStuckLoopPacket>[2] = {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,

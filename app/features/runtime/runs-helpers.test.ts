@@ -88,6 +88,12 @@ describe("runStatePill (ruling 11 lifecycle mapping)", () => {
   it("queued → neutral 'queued'", () => {
     expect(runStatePill({ ...base, state: "idle", lifecycle: "queued" })).toEqual({ kind: "neutral", label: "queued" });
   });
+  it("a classified provider overload → blocked 'provider overloaded', not 'continuity error' (ruling 130(a) reader)", () => {
+    expect(runStatePill({ ...base, state: "error", lifecycle: "error", failureKind: "overloaded" })).toEqual({
+      kind: "blocked",
+      label: "provider overloaded",
+    });
+  });
   it("interrupted → neutral 'interrupted · by <actor>'", () => {
     const p = runStatePill({ ...base, state: "idle", lifecycle: "interrupted", interruptedBy: { userId: "u1", label: "Arda Kaya" } });
     expect(p.kind).toBe("neutral");

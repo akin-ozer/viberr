@@ -8,7 +8,10 @@
 > 2026-09-02 against `pass32/implementation` @ `478bed0`. Updated 2026-09-02 for
 > ruling 127 (branch `claude/per-user-codex-auth-difdnn`): §§2.1, 2.2, 2.3, 3.1, 3.5,
 > 3.6, 3.7 and gotcha 8 now describe the per-person credential principal, and the closing
-> paragraph no longer claims the credentials are environment variables. The operator's own behaviour is in
+> paragraph no longer claims the credentials are environment variables. Updated 2026-09-06 for
+> the Claude Agent SDK upgrade 0.3.220 → 0.3.261: §2.4 (the `permissionPrompts` option, the
+> `permission_denied` console line, the task-tool denylist note) and §§2.4/2.5/3.5 (the new
+> `overloaded` failure class, read from the SDK's `api_error_status: 529`). The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -151,6 +154,9 @@ stated as the last refusal Viberr observed, retired by any completed run.
 ### 2.4 Claude adapter
 
 - Query options: `permissionMode: autonomous ? "bypassPermissions" : "default"`,
+  `permissionPrompts: "none"` on every run (SDK ≥ 0.3.259: nobody answers a prompt in a
+  server-spawned run, so a tool the mode would ask about is denied at once with a reason
+  the model can act on; binds only on the `default` seam, bypass never prompts),
   `maxTurns` (default 2000, `VIBERR_CLAUDE_MAX_TURNS`), `strictMcpConfig: true`,
   `plugins: []`, `settingSources: ["project"]` only when native skills are mounted
   (else `[]`), `disallowedTools` (binds even under bypass), `allowedTools` for the
@@ -158,7 +164,10 @@ stated as the last refusal Viberr observed, retired by any completed run.
   controller runs and is `{ preset: "claude_code", append }` for specialists.
 - Denylists: `BASE_DENIED_BUILTINS` (Skill, Task*, Workflow, Cron*, ScheduleWakeup,
   RemoteTrigger, Monitor, PushNotification, SendMessage, DesignSync, Enter/ExitWorktree;
-  `Skill` is re-allowed when native skills are mounted); operator read-only =
+  `Skill` is re-allowed when native skills are mounted; SDK 0.3.233 took `TaskCreate`/
+  `TaskGet`/`TaskUpdate`/`TaskList` out of the default tool surface on Opus 4.8, Sonnet 5,
+  Fable 5 and newer, and the denies stay because older models still expose them and the
+  fence must not depend on the profile's model); operator read-only =
   `Bash Edit MultiEdit Write NotebookEdit`; supporting runs additionally lose `Bash(git
   push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr merge:*)`; capability-derived denies in
   §4.3.
@@ -167,7 +176,7 @@ stated as the last refusal Viberr observed, retired by any completed run.
 - `MANAGED_SETTINGS.claudeMdExcludes` is passed but the SDK drops it (documented inert);
   the effective CLAUDE.md exclusion is the `settings.json` written by skill-mount.
 - Success = a `result` envelope with `!is_error`. Failures tag `run·error·<kind>` with
-  `kind ∈ quota | auth | session_missing | unknown`; idle → `run·error·idle_timeout`;
+  `kind ∈ quota | auth | overloaded | session_missing | unknown`; idle → `run·error·idle_timeout`;
   `error_max_turns` → `run·error·max_turns`. Provider text follows
   `"\n\nThe provider reported: "`.
 - Ruling 130(a) (pass 34): refusals are classified from the STRUCTURED envelope first
@@ -175,8 +184,17 @@ stated as the last refusal Viberr observed, retired by any completed run.
   `rate_limit_event` whose `status` is `rejected`, an assistant-envelope `error` of
   `rate_limit` or `billing_error`, `api_error_status: 429`, or the prose regex now
   including `session limit | weekly limit | monthly limit | out of credits | credit
-  balance`) → `auth` (`authentication_failed` or `oauth_org_not_allowed`, status 401/403,
-  or the prose regex) → `unknown`. The terminal `err` line carries a typed `failure`
+  balance`) → `auth` (`authentication_failed`, `oauth_org_not_allowed` or `account_on_hold`,
+  status 401/403, or the prose regex) → `overloaded` (a result the SDK ended on a
+  provider-side status — `api_error_status: 529` or another 5xx, structural since SDK
+  0.3.223 — an assistant-envelope `error` of `overloaded` or `server_error`, or the prose
+  regex `overloaded | 500/502/503/529 | temporarily unavailable | service unavailable |
+  server error`) → `unknown`. A provider-side status is where the run ENDED, so an earlier
+  `rate_limit` banner the SDK retried through does not re-route it to `quota`; a REJECTED
+  rate-limit reading still does. With no prose at all (an API-refused result under
+  `subtype: "success"`), the structured facts classify and no provider sentence is
+  quoted — the word `success` used to be appended as "the provider reported". The
+  terminal `err` line carries a typed `failure`
   record (`RunFailureFacts`: kind, `resetsAt`, `window`, `windowRejected`, `apiError`,
   `apiErrorStatus`, `terminalReason`; the reset and window ride ONLY on a rejected
   reading) beside its tag, and every reader consumes that record: the failure reason,
@@ -187,7 +205,12 @@ stated as the last refusal Viberr observed, retired by any completed run.
   line tagged `rate_limit_event·rejected` (exempt from the console's telemetry
   collapse) naming the window, the status and the absolute reset. U34-1: an error
   result whose subtype is `success` is labelled `error`, with `· api <status>` and
-  `· <terminal_reason>` appended when the SDK sent them.
+  `· <terminal_reason>` appended when the SDK sent them. A `system/permission_denied`
+  frame (SDK ≥ 0.3.223: a tool call a deny rule, the mode or an unanswerable prompt
+  refused — a supporting run reaching for `git push`, say) projects as an `err` line
+  tagged `permission_denied` whose `name` is the tool and whose text is `denied by
+  <decision_reason_type>: <decision_reason>` (the SDK's rejection sentence when no reason
+  was given), so the attempt is visible in the console instead of a dim meta row.
 
 ### 2.5 Codex adapter
 
@@ -209,7 +232,9 @@ stated as the last refusal Viberr observed, retired by any completed run.
   servers are skipped. A bearer-token HTTP MCP is therefore unauthenticated on Codex.
 - No `maxTurns`; idle 15 min (`VIBERR_CODEX_IDLE_TIMEOUT_MS`); interrupt settle 20 s.
 - Success requires `turn.completed` with no top-level `turn.failed`/`error`; item-level
-  errors are non-fatal. Same failure kinds as Claude on the tag suffix.
+  errors are non-fatal. Same failure kinds as Claude on the tag suffix; `overloaded` is
+  prose-only here (Codex streams no status): `overloaded | 500/502/503/529 | temporarily
+  unavailable | service unavailable | server error`, matched after quota and auth.
 - Structured output: when a specialist has a verdict, ask or evidence grant, the run
   carries `outputSchema = AGENT_OUTCOME_JSON_SCHEMA` and the envelope replaces the tool
   calls a Claude specialist would make. The Codex operator returns a plan the server
@@ -307,7 +332,7 @@ and a `continuity` timeline event is written, so a lost effect is visible.
 
 ### 3.5 Failure kinds
 
-`RunFailureKind = quota | auth | unavailable | max_turns | idle_timeout |
+`RunFailureKind = quota | auth | unavailable | overloaded | max_turns | idle_timeout |
 session_missing | unknown`, read from the terminal line's typed `failure` record first,
 the tag suffix second and regexes last (ruling 130(a)). `runFailureReason` returns the
 record as `facts`; `projectRunsForTask` sets `failureKind` on every errored run's view
@@ -315,6 +340,15 @@ record as `facts`; `projectRunsForTask` sets `failureKind` on every errored run'
 raw scan; the controller's turn note (ruling 130(b)) names a quota window's reset and
 the account switch, or an auth refusal's organization restriction, instead of "Say it
 again to retry", which stays only for an unclassified failure.
+`overloaded` (added with the Agent SDK 0.3.261 upgrade) is the provider's side, not the
+account's: the Claude adapter reads it from `api_error_status: 529`/5xx or the `overloaded`
+/ `server_error` banner codes, the Codex adapter from the same prose signatures the raw
+scan uses. Its remedy is a retry — the same backend once the provider recovers, or the
+other one now (`retry_other_backend` when the owner has it connected) — never Profile →
+Agent accounts; the same-backend option asserts only that nothing was changed. The
+footer reads "could not serve this run: the provider was overloaded or failed on its
+side", the pill `provider overloaded`, the controller's note "Say it again in a few
+minutes", and the projection counts it as the backend being unavailable (the retry offer).
 The completion pipeline writes the `blocked` event, notes model availability, opens the
 stuck-loop packet and clears waiting to human. For `quota` and `auth` the event, the
 packet body and the controller's note are worded by ONE module,

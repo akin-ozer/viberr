@@ -159,7 +159,20 @@ const claudeEnvelopeFields = z.object({
   cwd: wireTextOrBlank,
   tools: z.array(z.unknown()).catch(() => []),
   mcp_servers: z.array(z.object({ name: wireText }).catch(() => ({ name: "" }))).catch(() => []),
-  message: z.object({ content: claudeBlocks }).catch(() => ({ content: [] })),
+  /** Two shapes share the key: the API message object of an `assistant`/`user`
+   *  envelope (its `content` blocks), and the plain rejection SENTENCE of a
+   *  `system/permission_denied` frame (SDK ≥ 0.3.223) — read as `text`. */
+  message: z
+    .union([
+      z.string().transform((text) => ({ content: claudeBlocks.parse([]), text })),
+      z.object({ content: claudeBlocks }).transform((m) => ({ content: m.content, text: "" })),
+    ])
+    .catch(() => ({ content: claudeBlocks.parse([]), text: "" })),
+  /** `system/permission_denied`: the tool the run was refused, and why (the
+   *  deciding component's reason and its kind — `rule`, `mode`, `classifier`…). */
+  tool_name: wireTextOrBlank,
+  decision_reason: wireTextOrBlank,
+  decision_reason_type: wireTextOrBlank,
   usage: z
     .object({
       input_tokens: wireCount,
@@ -344,6 +357,25 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
         return {
           display: { t, ev: "init", tag: "system·init", text },
           facts: { sessionId: e.session_id || null, model: e.model || null },
+        };
+      }
+      // SDK ≥ 0.3.223: a tool call the permission layer REFUSED — a deny rule
+      // (`Bash(git push:*)` on a supporting run, a grant-derived deny), the
+      // mode, or a prompt nobody was there to answer. The run went on, but a
+      // human reading the console must see the attempt and the refusal (a
+      // supporting agent reaching for `git push` is the VIB-30 class), so it is
+      // an error-class line named after the tool, never a dim meta row.
+      if (e.subtype === "permission_denied") {
+        const reason = e.decision_reason || e.message.text;
+        const by = e.decision_reason_type ? ` by ${e.decision_reason_type}` : "";
+        // The tool rides `name` (rendered bold before the text, like a tool
+        // line), so the text names it only when there is none to render.
+        const text = `${e.tool_name ? "" : "tool call "}denied${by}${reason ? `: ${reason}` : ""}`;
+        return {
+          display: e.tool_name
+            ? { t, ev: "err", tag: "permission_denied", name: e.tool_name, text }
+            : { t, ev: "err", tag: "permission_denied", text },
+          facts: {},
         };
       }
       // api_retry / compact_boundary / … — surface as a dim meta line.

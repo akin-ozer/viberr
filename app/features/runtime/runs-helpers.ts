@@ -55,6 +55,9 @@ export function runStatePill(run: RunView): RunStateBadge {
   if (run.state === "error" && run.failureKind === "unavailable") {
     return { kind: "blocked", label: "backend unavailable" };
   }
+  if (run.state === "error" && run.failureKind === "overloaded") {
+    return { kind: "blocked", label: "provider overloaded" };
+  }
   return RUN_STATE[run.state] ?? RUN_STATE.idle;
 }
 

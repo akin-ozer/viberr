@@ -90,6 +90,59 @@ describe("projectEnvelope — Claude stream-json", () => {
     expect(projectEnvelope("claude", { type: "brand_new_2027" }).display?.ev).toBe("meta");
   });
 
+  it("system/permission_denied (SDK ≥ 0.3.223) → an err line naming the refused tool and the reason, never a dim meta row", () => {
+    // Agent SDK 0.3.261 upgrade: a tool call the permission layer refused — a
+    // deny rule such as `Bash(git push:*)` on a supporting run — now reaches the
+    // stream as its own frame. It used to fall to the generic system branch and
+    // render as `system·permission_denied` in meta grey, so a human scanning the
+    // console for the VIB-30 class (a review agent reaching for `git push`) saw
+    // nothing. Canary: remove the `permission_denied` branch and `ev` is "meta".
+    const denied = projectEnvelope("claude", {
+      type: "system",
+      subtype: "permission_denied",
+      tool_name: "Bash",
+      tool_use_id: "toolu_01",
+      decision_reason_type: "rule",
+      decision_reason: "Bash(git push:*) is denied for this run",
+      message: "Permission to use Bash has been denied.",
+      uuid: "u1",
+      session_id: "s1",
+    });
+    expect(denied.display).toEqual({
+      t: expect.any(String),
+      ev: "err",
+      tag: "permission_denied",
+      name: "Bash",
+      text: "denied by rule: Bash(git push:*) is denied for this run",
+    });
+    expect(denied.facts).toEqual({});
+
+    // No deciding component's reason → the SDK's rejection sentence (the string
+    // `message`, which shares its key with the assistant envelope's object).
+    const noReason = projectEnvelope("claude", {
+      type: "system",
+      subtype: "permission_denied",
+      tool_name: "Edit",
+      tool_use_id: "toolu_02",
+      message: "The session has no approval surface.",
+      uuid: "u2",
+      session_id: "s1",
+    });
+    expect(noReason.display).toMatchObject({ ev: "err", name: "Edit", text: "denied: The session has no approval surface." });
+
+    // A frame missing even the tool name still says what happened.
+    const bare = projectEnvelope("claude", { type: "system", subtype: "permission_denied" });
+    expect(bare.display).toMatchObject({ ev: "err", tag: "permission_denied", text: "tool call denied" });
+    expect(bare.display).not.toHaveProperty("name");
+
+    // The assistant/user envelopes' object `message` is untouched by the shared key.
+    const assistant = projectEnvelope("claude", {
+      type: "assistant",
+      message: { content: [{ type: "text", text: "hello" }] },
+    });
+    expect(assistant.display).toMatchObject({ ev: "text", text: "hello" });
+  });
+
   it("rate_limit_event → meta line + rateLimit facts (pass 29 quota telemetry)", () => {
     const raw = {
       type: "rate_limit_event",

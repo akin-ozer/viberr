@@ -1008,4 +1008,20 @@ describe("ruling 130(a): the classified footer", () => {
     );
     expect(getByText(/Claude refused this run: the account was rejected by the provider/)).toBeTruthy();
   });
+
+  it("a provider overload (Agent SDK 0.3.261 upgrade) names the provider's side and clears the account; the pill reads 'provider overloaded'", () => {
+    // Canary: drop the `overloaded` arm and the footer falls to the
+    // backend-unavailable sentence, which blames "quota, rate limit, or an
+    // account that cannot run it" for the provider's own outage.
+    const run = mkRun({ state: "error", lifecycle: "error", failureKind: "overloaded", failedBackendUnavailable: true });
+    const { getByText, queryByText } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(
+      getByText(/Claude could not serve this run: the provider was overloaded or failed on its side; nothing about the account is wrong, retry in a few minutes/),
+    ).toBeTruthy();
+    expect(getByText("provider overloaded")).toBeTruthy();
+    expect(queryByText(/quota, rate limit/)).toBeNull();
+    expect(queryByText(/continuity error/)).toBeNull();
+  });
 });
