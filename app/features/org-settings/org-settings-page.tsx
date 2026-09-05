@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
-import { useNavigate, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import type { OrgSettingsView } from "~/server/org/org-view.server";
 import type { S3AuditConfigView } from "~/server/audit/s3-config.server";
 import type { AuditBrowseRow } from "~/server/audit/audit-browse.server";
@@ -93,7 +93,6 @@ export function OrgSettingsPage({
   // save or delete publishes — so this page revalidates instead of showing a
   // stale "re-scanned just now" until a manual reload.
   useLiveUpdates([sseScopes.user()]);
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = resolveOrgTab(searchParams.get("tab"));
   // The badge counts RESOURCES — knowledge bases, MCP servers, skills. It used
@@ -134,11 +133,11 @@ export function OrgSettingsPage({
 
   return (
     <main className="home-shell" data-screen-label="Instance settings">
+      {/* Ruling 145: the way back is the header's brand and its Home crumb, as
+          it is on the board's own settings page. The button that used to sit
+          here was this surface's only navigation, and a third control for the
+          same trip once the header arrived. */}
       <div className="set-head">
-        <button type="button" className="btn ghost sm" onClick={() => navigate("/")}>
-          <Icon name="arrow" className="r180" />
-          Projects
-        </button>
         <div>
           {/* R15-13: was "Viberr settings", which collides with a PROJECT
               named Viberr — the surface that is not about that project was the

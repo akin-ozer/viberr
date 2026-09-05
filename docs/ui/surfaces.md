@@ -38,10 +38,10 @@ POST.
 | `/projects/:slug/settings` | `project.settings.tsx` | member, form (admin for writes) | project profile, stages, members, repository, branch cleanup, archive/delete | `save-project`, `add-stage`, `rename-stage`, `remove-stage`, `reorder-stages`, `invite`, `remove-member`, `set-credential`, `clear-credential`, `grant-scope`, `repair-repo`, `set-branch-cleanup`, `archive-project`, `delete-project` |
 | `/projects/:slug/tasks/:key` | `project.task.tsx` | member, form | task detail: state (the "Waiting on" row reads "Other work: …" for a held task), the hero's wait chips (one neutral link per `blockedBy` entry with its state, ruling 131), execution profile (the operator run control carries a hold note with Run left enabled), packet, recommendations, Details (a "Blocked by" row and its own "Edit what it waits on" form), timeline, runs, GitHub trace (with the "Unpushed" row and the "Push `<sha>` to PR #N" control when the open PR lacks the delivered revision, ruling 134(c); disabled with the refusal named for a diverged remote), diagnostics | `comment`, `transition`, `update-goal`, `set-task-metadata`, `set-task-dependencies` (ruling 131: the full `blockedBy` list, empty clears and releases), `owner-take`, `owner-release`, `owner-assign`, `run-agent`, `run-operator`, `run-interrupt`, `release-agent`, `resolve-packet`, `apply-recommendation`, `dismiss-recommendation`, `deliver-review`, `accept-completion`, `force-accept`, `complete-merge`, `request-maintainer-decision`, `schedule-action`, `cancel-schedule`, `archive-task`, `restore-task` |
 | `/projects/:slug/tasks/:key/attachments/:file` | `task-attachment.ts` | member | raw bytes, whitelist renders inline, `?download=1` forces the save dialog (ruling 105) | |
-| `/org/settings` | `org.settings.tsx` | org admin | tabs: Users & access, GitHub connections, Sign-in & SSO, Agent resources, Controller settings; audit export card; concurrency | see §3 |
+| `/org/settings` | `org.settings.tsx` | org admin | tabs: Users & access, GitHub connections, Sign-in & SSO, Agent resources, Controller settings; audit export card; concurrency; under the standalone-page header (ruling 145) | see §3 |
 | `/org/settings/audit-export` | `org.settings.audit-export.ts` | org admin | CSV/JSON download, 100 000-row cap | |
 | `/controller` | `controller.tsx` | user (CSRF checked as a result, not a throw) | instance controller conversation (per user); with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send`, `interrupt` (`conversationId`, `runId`) |
-| `/insights` | `insights.tsx` | org admin | run analytics: counts, cost, tokens, outcomes, backend quota readings (a refused or exhausted row names whose account, a reading names the hour of its reset, ruling 130(d)) | |
+| `/insights` | `insights.tsx` | org admin | run analytics: counts, cost, tokens, outcomes, backend quota readings (a refused or exhausted row names whose account, a reading names the hour of its reset, ruling 130(d)); under the standalone-page header (ruling 145) | |
 | `/profile` | `profile.tsx` | user | identity, password, **Agent accounts** (ruling 127: connect Claude and Codex for yourself; ruling 130(d): each connected card shows the last refusal Viberr observed on YOUR account, never another person's), GitHub identity disconnect, theme, motion, notification and timeline prefs | `identity`, `change-password`, `github-disconnect`, `set-motion`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
 | `/notifications` | `notifications.tsx` | user | newest 200, auto-read on viewing the target | |
 | `/notifications/read` | `notifications.read.tsx` | user | fetcher target | `read-all` |
@@ -84,6 +84,16 @@ Intents behind `project.task.tsx` are explained in
   double-registering.
 - **Topbar**: project crumb, notifications bell (popover), user menu ("Instance
   settings" for org admins, "<name> · settings" for project settings).
+- **The standalone-page header** (ruling 145) is the same header on the instance
+  pages that render outside the workspace: brand → Home, a `Home › <page>` crumb,
+  the ⌘K trigger, the bell and the account menu. `palette-shell` mounts it, and
+  `standalonePageLabel` (`shell/nav.ts`) is the list of routes that take it —
+  `/org/settings` and `/insights`. Neither page carries a back button any more:
+  the brand and the crumb root are the way back, as they are on the board's own
+  settings page. The three routes NOT on the list keep their own chrome, for a
+  reason each: `/profile` and `/notifications` render inside a `showModal()`
+  overlay that covers the viewport, and `/controller` has its own identity
+  header and a layout that scrolls inside itself.
 - **Live updates** are mounted by the workspace layout, Home, Notifications and the
   controller page; every governed change arrives by loader revalidation. The rail
   shows "live updates paused" while the stream reconnects.

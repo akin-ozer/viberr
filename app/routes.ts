@@ -17,9 +17,12 @@ export default [
   // planning-artifacts/ux-design-specification.md). Without this wrapper the
   // ⌘K palette — which `home-page.tsx` calls "one shortcut app-wide" — never
   // reached them: a viewer on /profile had to navigate back to a shell first.
-  // The pathless layout keeps their URLs unchanged and mounts only the shortcut
-  // + palette; Home and the workspace mount it themselves, so nothing
-  // double-registers.
+  // The pathless layout keeps their URLs unchanged; Home and the workspace
+  // mount the shortcut themselves, so nothing double-registers.
+  //
+  // Ruling 145 gave it a second job: the app header the standalone PAGES were
+  // missing (`palette-shell.tsx` renders it for the routes `standalonePageLabel`
+  // names — today /org/settings and /insights).
   layout("routes/palette-shell.tsx", [
     // The real tabbed org-settings surface (org profile, members, resources).
     route("org/settings", "routes/org.settings.tsx"),
@@ -27,13 +30,15 @@ export default [
     // what it answers and applies is gated per tool call on that user's own
     // authority.
     route("controller", "routes/controller.tsx"),
-    // Audit-log download (CSV/JSON) — org-admin gated file response.
-    route("org/settings/audit-export", "routes/org.settings.audit-export.ts"),
     // Instance-wide agent-run analytics (org-admin).
     route("insights", "routes/insights.tsx"),
     route("profile", "routes/profile.tsx"),
     route("notifications", "routes/notifications.tsx"),
   ]),
+  // Audit-log download (CSV/JSON) — org-admin gated file response. OUTSIDE the
+  // layout above: it renders no component (the loader answers with the file
+  // itself), so the shortcut and the header it mounts have nothing to do here.
+  route("org/settings/audit-export", "routes/org.settings.audit-export.ts"),
 
   // Resource actions (fetcher targets, no UI).
   route("notifications/read", "routes/notifications.read.tsx"),

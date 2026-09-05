@@ -2763,6 +2763,42 @@ by rewriting those paragraphs:*
     `push_refused_scope` result in `push-workspace.server.ts`; the `scope_violation` outcome in
     `task-actions.server.ts`; `credential-card.tsx`; `connections.server.ts`.)
 
+145. **Every standalone page carries the app header (owner, 2026-09-05).** Asked of the four
+    Settings tiles on Home: "all of these settings pages should show header when opened as
+    well, build it just like settings inside the board page so our UI feels holistic."
+    A project surface — the board's own Settings included — sits under the workspace topbar:
+    brand, crumb trail, ⌘K search, notifications bell, account menu. The instance surfaces
+    behind those tiles sat under nothing. Opening "Users & access" or "Insights" replaced the
+    whole app with a bare page whose only navigation was an in-page back button, and a
+    notification arriving while you were in settings had nowhere to appear. **(a)** The
+    `palette-shell` layout — already the one mount point for the ⌘K shortcut on those routes —
+    renders `PageTopbar` above the page: the brand links Home, the crumb reads `Home ›
+    <page>` with `aria-current` on the leaf, and the trigger, bell and menu are the SAME
+    components the workspace topbar and Home render (the palette trigger was hoisted into
+    `palette-trigger.tsx` so the two headers cannot drift). **(b)** The pages drop their
+    in-page back buttons ("← Projects", "Home"): the brand and the crumb root are that
+    navigation, and the board's settings page has never had one. **(c)** Which routes take
+    it is a list, `standalonePageLabel` in `shell/nav.ts` — `/org/settings` and `/insights`
+    today. `/profile` and `/notifications` are deliberately excluded: both render their whole
+    surface inside a `showModal()` overlay that covers the viewport, so a header behind one
+    would be a dimmed sliver. `/controller` is excluded too — it carries its own identity
+    header (name, model, scope) and a full-height layout that scrolls inside itself. **(d)**
+    The layout's loader reads nothing at all on a route with no header, so the excluded three
+    cost exactly what they cost before and their own guards stay the only ones that speak;
+    `/org/settings/audit-export` moved OUT of the layout, being a file response with no
+    component. Two things the live run taught, both pinned: a revalidation is a single-fetch
+    data request (`/org/settings.data?tab=resources`), so the loader normalises that pathname
+    before asking whether this route is a page — and the SHAPE of the layout's tree is decided
+    by the route alone, never by loader data, because the first version swapped the shell for
+    a fragment when a revalidation came back without a header, which unmounted the page and
+    closed the file browser an admin had open mid-edit. One thing came free: the standalone
+    pages now render inside Home's own page shell (`.home`), which is what makes the body
+    scroll — `/insights` had rendered straight into an `overflow: hidden` body, so anything
+    below the fold was unreachable.
+    (`features/shell/page-topbar.tsx`, `palette-trigger.tsx`, `nav.ts`;
+    `routes/palette-shell.tsx`; the 1080px chip tier in `app.css` is scoped to
+    `button.top-search .kbd` — the trigger — rather than to one header.)
+
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates
 that pass and remains unnumbered.)*

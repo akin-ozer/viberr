@@ -935,14 +935,21 @@ describe("app.css breakpoints (P16-F8)", () => {
 });
 
 describe("app.css palette reachability on touch (P16-G3)", () => {
-  it("hides the shortcut chip in the workspace topbar only", () => {
+  it("hides the shortcut chip on the palette TRIGGER only", () => {
     // The 1080 tier used to hide `.kbd` unscoped. On Home `button.kbd` IS the
     // palette trigger (the only caller of `onOpenPalette` besides the keyboard
     // hook), and `.kbd` is also the command palette's own "esc" hint — so a
     // 1000px-wide window lost both to a rule about breadcrumb room.
-    // `.topbar >` matters: the palette renders inside the topbar, so a
-    // descendant selector would still swallow its "esc" chip.
-    expect(CODE).toMatch(/\.topbar > \.top-search \.kbd\s*\{\s*display:\s*none/);
+    //
+    // Ruling 145: the scope is `button.top-search` rather than `.topbar >`.
+    // The trigger is one shared component now (`palette-trigger.tsx`), rendered
+    // by the workspace topbar AND by the standalone-page header, so a rule
+    // written around one header would have missed the other. `button.` is the
+    // real distinction: a chip inside a button-trigger is a HINT, Home's
+    // `button.kbd` inside `div.top-search` is the control. It also keeps the
+    // palette's own "esc" chip, which renders inside the topbar but not inside
+    // the trigger.
+    expect(CODE).toMatch(/button\.top-search \.kbd\s*\{\s*display:\s*none/);
     expect(CODE, "an unscoped `.kbd { display: none }` takes Home's palette with it")
       .not.toMatch(/(?:^|[};])\s*\.kbd\s*\{\s*display:\s*none/m);
   });
@@ -962,6 +969,17 @@ describe("app.css palette reachability on touch (P16-G3)", () => {
     // "⌘K" is not a thing a phone can type; the magnifier is the affordance.
     expect(trigger![1]).toMatch(/font-size:\s*0/);
     expect(narrow![1]).toMatch(/\.home-top \.top-search > \.ico\s*\{[^}]*pointer-events:\s*none/);
+  });
+
+  it("takes the trigger's LABEL with it when the box collapses (ruling 145)", () => {
+    // The standalone-page header puts a palette BUTTON in `.home-top`'s search
+    // box, where Home has an input. The 900 tier squares that box off at 36px,
+    // and the 720 tier is where `.top-search-label` normally goes — so between
+    // the two the label had nowhere to sit and painted across the bell.
+    const narrow = CODE.match(/@media \(max-width: 900px\)\s*\{([\s\S]*?)\n\}/);
+    expect(narrow![1]).toMatch(
+      /\.home-top \.top-search-label\s*\{[^}]*display:\s*none/,
+    );
   });
 
   it("gives the collapsed triggers a finger-sized target", () => {
@@ -2316,14 +2334,19 @@ describe("app.css hides no control at any width (R19-12)", () => {
     expect(HIDDEN.every((h) => h.query.includes("width"))).toBe(true);
     // The stripper is what makes the nesting stack trustworthy: topbar.tsx's
     // P13-D-37 note quotes `<div>` and `<span class="cur">` inside a comment,
-    // and an unbalanced phantom `<div>` corrupts every chain after it.
-    const topbar = ELEMENTS.filter((el) => el.file.endsWith("shell/topbar.tsx"));
-    const kbd = topbar.find((el) => el.classes.has("kbd"));
-    expect(kbd, "topbar's ⌘K chip must be found").toBeTruthy();
+    // and an unbalanced phantom `<div>` corrupts every chain after it. The
+    // canary rides the ⌘K chip, which lives in the shared trigger component
+    // (ruling 145) — inside the button whose tag is what scopes the 1080 tier.
+    const trigger = ELEMENTS.filter((el) =>
+      el.file.endsWith("shell/palette-trigger.tsx"),
+    );
+    const kbd = trigger.find((el) => el.classes.has("kbd"));
+    expect(kbd, "the palette trigger's ⌘K chip must be found").toBeTruthy();
+    expect(kbd!.tag).toBe("span");
     expect(
-      kbd!.chain.map((f) => [...f.classes]).flat(),
-      "and must be seen inside .topbar > .top-search",
-    ).toEqual(expect.arrayContaining(["topbar", "top-search"]));
+      kbd!.chain.map((f) => [f.tag, ...f.classes]).flat(),
+      "and must be seen inside button.top-search",
+    ).toEqual(expect.arrayContaining(["button", "top-search"]));
   });
 
   it("removes no interactive element under a width query", () => {
@@ -2341,12 +2364,12 @@ describe("app.css hides no control at any width (R19-12)", () => {
     expect(found.sort()).toEqual(Object.keys(UNFIXED_HIDDEN).sort());
   });
 
-  it("does not let `.topbar > .top-search .kbd` stand in for Home's palette button", () => {
+  it("does not let `button.top-search .kbd` stand in for Home's palette button", () => {
     // The scoping P16-G3 fought for, checked from the markup rather than from
-    // the selector text: the chip the 1080 tier hides is topbar.tsx's <span>,
+    // the selector text: the chip the 1080 tier hides is the trigger's <span>,
     // and home-sections.tsx's <button className="kbd"> — the only other caller
     // of `onOpenPalette` — is NOT matched by it.
-    const rule = HIDDEN.find((h) => h.selector === ".topbar > .top-search .kbd");
+    const rule = HIDDEN.find((h) => h.selector === "button.top-search .kbd");
     expect(rule, "the scoped chip rule must be seen by the sweep").toBeTruthy();
     expect(rule!.resolved, "and must resolve against the markup").toBe(true);
     expect(rule!.self).toEqual([]);
@@ -2355,7 +2378,7 @@ describe("app.css hides no control at any width (R19-12)", () => {
       (el) => el.file.endsWith("home/home-sections.tsx") && el.classes.has("kbd"),
     );
     expect(homeButton?.tag).toBe("button");
-    expect(matchesSelector(homeButton!, ".topbar > .top-search .kbd")).toBe(false);
+    expect(matchesSelector(homeButton!, "button.top-search .kbd")).toBe(false);
   });
 
   it("treats a component boundary as opaque — a control can hide behind it", () => {

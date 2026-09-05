@@ -7,6 +7,7 @@ import { ToastProvider } from "~/ui/toast";
 import type { NotificationView } from "~/features/notifications/notification-item";
 import { BELL_LIST_CAP, TopBell } from "./top-bell";
 import { UserMenu } from "./user-menu";
+import { PageTopbar } from "./page-topbar";
 import { Topbar } from "./topbar";
 import { Rail } from "./rail";
 
@@ -421,5 +422,64 @@ describe("F15-18/UI-C: the mobile rail overlay has a keyboard way out", () => {
     // Escape belongs to whatever dialog or popover is open; the rail must not
     // consume it just because the shell is on screen.
     expect(toggles()).toBe(0);
+  });
+});
+
+/**
+ * Ruling 145 — the app header on the standalone pages.
+ *
+ * Every project surface, the board's own Settings included, sits under a header
+ * with the brand, the ⌘K search, the bell and the account menu. The instance
+ * surfaces behind Home's Settings tiles had none of it, so opening "Users &
+ * access" or "Insights" replaced the whole app with a bare page. These pin what
+ * the header IS: the same four parts, in one place, naming where the reader is.
+ */
+describe("ruling 145: the standalone-page header", () => {
+  function headerFor(title: string) {
+    let opened = 0;
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <PageTopbar
+              title={title}
+              user={USER}
+              theme="system"
+              notifications={[notification(1)]}
+              unread={3}
+              onOpenPalette={() => (opened += 1)}
+            />
+          </ToastProvider>
+        ),
+      },
+      { path: "/", Component: () => <p>home</p> },
+    ]);
+    return {
+      ...render(<Stub initialEntries={["/org/settings"]} />),
+      opens: () => opened,
+    };
+  }
+
+  it("names where the reader is, under a crumb that leads back to Home", () => {
+    const { getByRole, getByText } = headerFor("Instance settings");
+    // The brand and the crumb root are the way back — the pages dropped their
+    // in-page back buttons for exactly these two.
+    expect(getByRole("link", { name: /Viberr/ }).getAttribute("href")).toBe("/");
+    expect(getByRole("link", { name: "Home" }).getAttribute("href")).toBe("/");
+    const current = getByText("Instance settings");
+    expect(current.getAttribute("aria-current")).toBe("page");
+    expect(getByRole("navigation", { name: "Breadcrumb" })).toBeTruthy();
+  });
+
+  it("carries the same search, bell and account menu as the workspace", () => {
+    const { getByLabelText, getByText, opens } = headerFor("Insights");
+    fireEvent.click(getByLabelText("Search tasks, branches, agents, projects"));
+    expect(opens(), "the palette trigger reports to the layout").toBe(1);
+    // The bell badge and the account menu were simply absent on these pages:
+    // a notification arriving while you were in settings had nowhere to show.
+    fireEvent.click(getByLabelText(/Notifications/));
+    expect(getByText("3 unread")).toBeTruthy();
+    expect(getByLabelText(/Account/)).toBeTruthy();
   });
 });
