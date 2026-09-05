@@ -191,6 +191,51 @@ const stagesSchema = z.array(stageSchema);
 const workflowSchema = z.array(workflowBoundarySchema);
 const membersSchema = z.array(memberSchema);
 const agentsSchema = z.array(agentDeploymentSchema);
+
+/** Just enough of a raw deployment row to reach its grant list, decoded rather
+ *  than type-guarded (the rest of the row is passed through untouched). */
+const rawDeploymentSchema = z
+  .object({ capabilities: z.array(z.unknown()).optional() })
+  .loose();
+
+/**
+ * `agents` is parsed per ROW like every other frontmatter list, but each row's
+ * `capabilities` was a plain `z.array(capabilityGrantSchema)` — so ONE
+ * malformed grant failed the whole deployment, and the per-row tolerance then
+ * dropped the entire agent: its other grants, its extras, its definition. The
+ * next project write serialized that loss, which is exactly the whole-array
+ * fallback the tolerant-parse rule exists to forbid (F31-C5 fixed the same
+ * shape for packet options).
+ *
+ * Split the grants per row here, with a diagnostic naming each one dropped, so
+ * a bad grant costs its own line and nothing else. A grant is authority, so
+ * dropping one is also the fail-closed direction — but never silently.
+ */
+function cleanAgentGrants(
+  diagnostics: FileDiagnostic[],
+  data: RawFrontmatter,
+  path: string,
+): RawFrontmatter[string] {
+  const rows = data[path];
+  if (!Array.isArray(rows)) return rows;
+  return rows.map((row, i) => {
+    const decoded = rawDeploymentSchema.safeParse(row);
+    if (!decoded.success || decoded.data.capabilities === undefined) return row;
+    const kept = decoded.data.capabilities.filter((grant, j) => {
+      const parsed = capabilityGrantSchema.safeParse(grant);
+      if (parsed.success) return true;
+      diagnostics.push(
+        diagWarning(
+          "frontmatter.invalid_field",
+          `Frontmatter \`${path}[${i}].capabilities[${j}]\` is invalid (${parsed.error.issues[0]?.message ?? "unparseable"}) — dropping this grant, keeping the deployment.`,
+          `${path}[${i}].capabilities[${j}]`,
+        ),
+      );
+      return false;
+    });
+    return { ...decoded.data, capabilities: kept };
+  });
+}
 const projectCredentialPolicySchema = credentialPolicySchema.nullable();
 const guardrailsSchema = z.array(guardrailSchema);
 
@@ -418,7 +463,12 @@ export function parseProjectFrontmatter(
     stages: tolerantArray(diagnostics, data, "stages", stagesSchema, true),
     workflow: tolerantArray(diagnostics, data, "workflow", workflowSchema),
     members: tolerantArray(diagnostics, data, "members", membersSchema),
-    agents: tolerantArray(diagnostics, data, "agents", agentsSchema),
+    agents: tolerantArray(
+      diagnostics,
+      { ...data, agents: cleanAgentGrants(diagnostics, data, "agents") },
+      "agents",
+      agentsSchema,
+    ),
     credentialPolicy: tolerant(
       diagnostics,
       data,

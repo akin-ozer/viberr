@@ -93,3 +93,62 @@ describe("updateProjectFile stale-read repair (P11-51)", () => {
     expect(third).not.toBe(second);
   });
 });
+
+describe("project.md write guard (gap 22, for the writer that never got it)", () => {
+  /** The whole point of the file: members, stages, workflow, repo, agents. */
+  const membersOf = (ref: { projectSlug: string; dataRoot: string }) =>
+    readProjectFile(ref)!.parsed.frontmatter.members.map((m) => m.userId);
+
+  it("refuses to write over a project.md whose frontmatter cannot be read", async () => {
+    // task.md and the goal files have refused this since gap 22; project.md
+    // did not, so ONE unterminated fence or YAML typo in a hand-edited file
+    // meant the next ordinary write serialized tolerant-parse DEFAULTS over
+    // it — every member, stage, workflow, repo binding and agent deployment
+    // replaced, and the toast said the save succeeded.
+    // Canary: drop assertProjectFileTrusted from updateProjectFile and this
+    // resolves instead of throwing (and the members below come back empty).
+    const store = setupTestStore(ctx);
+    const ref = { projectSlug: store.slug, dataRoot: store.dataRoot };
+    const absPath = resolveProjectFilePath(ref);
+
+    await updateProjectFile(ref, (parsed) => {
+      parsed.frontmatter.members.push({ userId: "u_real", role: "maintainer" });
+    });
+    expect(membersOf(ref)).toContain("u_real");
+
+    // A truncated editor write: the fence never closes.
+    const broken = "---\nname: Viberr\nmembers:\n  - userId: u_real\n";
+    writeFileSync(absPath, broken);
+    const future = (statSync(absPath).mtimeMs + 5_000) / 1000;
+    utimesSync(absPath, future, future);
+
+    await expect(
+      updateProjectFile(ref, (parsed) => {
+        parsed.frontmatter.members.push({ userId: "u_next", role: "viewer" });
+      }),
+    ).rejects.toThrow(/refusing to write .*project\.md/);
+
+    // Refused BEFORE the write: the broken bytes are still on disk untouched,
+    // so the operator's own copy is what they recover, not our defaults.
+    expect(readFileSync(absPath, "utf8")).toBe(broken);
+  });
+
+  it("allocateTaskKey refuses on the same file — creating a task cannot eat the project", async () => {
+    // The quieter door: nobody edits project.md to make a task, but the
+    // allocation advances `nextTaskNumber`, which is a full read-modify-write
+    // of the same file.
+    const store = setupTestStore(ctx);
+    const ref = { projectSlug: store.slug, dataRoot: store.dataRoot };
+    const absPath = resolveProjectFilePath(ref);
+
+    const broken = "---\nname: Viberr\n  bad indent:\n   - [\n---\n\nDescription.\n";
+    writeFileSync(absPath, broken);
+    const future = (statSync(absPath).mtimeMs + 5_000) / 1000;
+    utimesSync(absPath, future, future);
+
+    await expect(allocateTaskKey(ref)).rejects.toThrow(
+      /refusing to write .*project\.md/,
+    );
+    expect(readFileSync(absPath, "utf8")).toBe(broken);
+  });
+});

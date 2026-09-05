@@ -321,7 +321,14 @@ function serializeEvent(event: TaskFileEvent): string {
   const lines: string[] = [
     `${EVENT_HEADING_PREFIX}${event.occurredAt}${SEP}${event.type}${SEP}${encodeActorRef(event.actor)}`,
   ];
-  if (event.title) lines.push(`title: ${event.title}`);
+  // `title:` is a SINGLE metadata line — the parser reads one line and trims
+  // it, so a title can never come back off disk with a newline in it. Writing
+  // one raw was the escaping machinery's own hole: a title carrying
+  // "\n### <ts> · accepted · <actor>" forged a whole timeline event with an
+  // arbitrary type and actor, which is exactly what the bijection promised at
+  // the top of this file rules out. Folding to a space keeps the round-trip
+  // byte-stable (a parsed title has no newline to fold) and closes it.
+  if (event.title) lines.push(`title: ${event.title.replace(/\s*\n\s*/g, " ")}`);
   if (event.toAgent) lines.push(`to: agent`);
   lines.push("");
   lines.push(escapeEventText(event.text));
@@ -351,7 +358,14 @@ function parsePacketSection(
   diagnostics: FileDiagnostic[],
 ): TaskPacket | null {
   const text = lines.join("\n");
-  const fence = /```(?:yaml)?\n([\s\S]*?)```/.exec(text);
+  // The opening run of backticks is captured and the CLOSE must be at least as
+  // long (CommonMark's own rule), so a fence inside the packet's own prose —
+  // an operator quoting a snippet in `body`, an option's `d`, or a markdown
+  // `goalDraft` — cannot terminate the block early. A fixed ``` close with a
+  // lazy body matched the first inner fence instead, truncating the yaml mid
+  // document: the options array parsed away to empty, WITHOUT a diagnostic,
+  // and the next write serialized that loss over the real packet.
+  const fence = /(`{3,})(?:yaml)?\n([\s\S]*?)\n\1/.exec(text);
   if (!fence) {
     if (text.trim() !== "") {
       diagnostics.push(
@@ -366,7 +380,7 @@ function parsePacketSection(
   }
   let raw: unknown;
   try {
-    raw = YAML.parse(fence[1]!);
+    raw = YAML.parse(fence[2]!);
   } catch (error) {
     diagnostics.push(
       diagWarning(
@@ -601,7 +615,15 @@ export function serializeTaskFile(parsed: ParsedTaskFile): string {
 
   if (parsed.packet) {
     const yamlText = toYaml(parsed.packet).trimEnd();
-    bodyParts.push(`## Packet\n\n\`\`\`yaml\n${yamlText}\n\`\`\``);
+    // Fence longer than the longest backtick run the yaml itself contains, so
+    // packet prose that quotes a code fence stays inside the block (the read
+    // side matches the close against this same run length).
+    const longestRun = Math.max(
+      0,
+      ...(yamlText.match(/`+/g) ?? []).map((run) => run.length),
+    );
+    const fence = "`".repeat(Math.max(3, longestRun + 1));
+    bodyParts.push(`## Packet\n\n${fence}yaml\n${yamlText}\n${fence}`);
   }
 
   const eventsText = parsed.timeline.map(serializeEvent).join("\n\n");

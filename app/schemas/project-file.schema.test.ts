@@ -78,3 +78,53 @@ describe("parseProjectFrontmatter — per-entry tolerance (F18)", () => {
     expect(diagnostics.some((d) => d.path === "members")).toBe(true);
   });
 });
+
+describe("parseProjectFrontmatter — one bad capability grant costs only itself", () => {
+  it("keeps the deployment and its other grants, and names the dropped grant", () => {
+    // `capabilities` was a plain z.array(capabilityGrantSchema), so ONE bad
+    // grant failed the whole deployment row and the per-row tolerance then
+    // dropped the ENTIRE agent — its other grants, its extras, its definition
+    // — and the next project write serialized that away. Exactly the
+    // whole-array fallback the rule forbids (F31-C5 fixed the same shape for
+    // packet options).
+    // Canary: replace the `agents:` value with a plain
+    // `tolerantArray(diagnostics, data, "agents", agentsSchema)` and the
+    // deployment disappears entirely.
+    const { frontmatter, diagnostics } = parseProjectFrontmatter(
+      {
+        slug: "proj",
+        agents: [
+          {
+            profileId: "developer",
+            capabilities: [
+              { capabilityId: "write-repo", mode: "direct" },
+              { mode: "direct" }, // malformed: no capabilityId
+              { capabilityId: "run-tests", mode: "direct" },
+            ],
+            extras: [{ label: "bespoke", mode: "direct" }],
+          },
+        ],
+      },
+      { fallbackSlug: "proj" },
+    );
+
+    // The agent is still deployed…
+    expect(frontmatter.agents.map((a) => a.profileId)).toEqual(["developer"]);
+    const deployment = frontmatter.agents[0]!;
+    // …with every grant that parsed, and everything else on the row intact.
+    expect(deployment.capabilities.map((c) => c.capabilityId)).toEqual([
+      "write-repo",
+      "run-tests",
+    ]);
+    expect(deployment.extras.map((e) => e.label)).toEqual(["bespoke"]);
+    // The dropped grant is reported at its own index, not the deployment's.
+    expect(
+      diagnostics.some((d) => d.path === "agents[0].capabilities[1]"),
+      "the bad grant must be named",
+    ).toBe(true);
+    expect(
+      diagnostics.some((d) => d.path === "agents[0]"),
+      "the deployment itself is not a casualty",
+    ).toBe(false);
+  });
+});
