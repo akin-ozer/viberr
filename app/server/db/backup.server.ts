@@ -232,8 +232,22 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
     if (!existsSync(from)) continue;
     cpSync(from, path.join(storeRoot, name), {
       recursive: true,
-      // `*.tmp` is a half-written atomic write in flight; it is never content.
-      filter: (src) => !src.endsWith(".tmp"),
+      filter: (src) => {
+        // `*.tmp` is a half-written atomic write in flight; it is never content.
+        if (src.endsWith(".tmp")) return false;
+        if (name !== "projects") return true;
+        // Neither a task's git CHECKOUT nor a project's bare MIRROR is
+        // canonical state: both are re-derivable from the remote, both can be
+        // mid-write by a live agent run (so the copy is torn), and together
+        // they dwarf the files that are truth — on this tree, 17M of workspace
+        // against 168K of project/task markdown. Copying them also silently
+        // put a task's whole source checkout inside an artefact whose manifest
+        // never mentioned it.
+        const parts = path.relative(from, src).split(path.sep);
+        if (parts[1] === ".repo-mirror") return false;
+        if (parts[1] === "tasks" && parts[3] === "workspace") return false;
+        return true;
+      },
     });
     copied.push(name);
   }
@@ -311,6 +325,7 @@ function excludes(includeRuntimes: boolean): string[] {
     "state/writer.lock — the running process's lock; restoring one would refuse the next boot.",
     "The encryption key itself. VIBERR_SECRET_ENCRYPTION_KEY lives in the environment, NOT in this artefact: without it every sealed secret in the database is unreadable (GitHub PATs, MCP credentials, sign-in provider secrets, the S3 audit-export key, and each person's agent-backend API keys). Back the key up separately.",
     "*.tmp — atomic writes in flight, never content.",
+    "projects/*/tasks/*/workspace/ and projects/*/.repo-mirror/ — each task's git checkout and each project's bare mirror. Re-derivable from the remote (the next run re-clones and re-fetches), and a live run may be mid-write, so a copy would be torn as well as large.",
   ];
 }
 
@@ -452,7 +467,13 @@ export interface RestoreBackupOptions {
 export function restoreBackup(options: RestoreBackupOptions): RestoreResult {
   const manifest = readManifest(options.artefact);
   const dataRoot = getDataRoot(options.dataRoot);
-  const occupied = occupiedPaths(dataRoot);
+  // Only the optional dirs this artefact will actually overwrite (see below):
+  // a restore that carries no `runtimes/` must not displace the live one, or
+  // it would sign every person out of their agent backends for nothing.
+  const occupied = occupiedPaths(
+    dataRoot,
+    OPTIONAL_STORE_DIRS.filter((d) => manifest.store.dirs.includes(d)),
+  );
   if (occupied.length > 0 && !options.force) {
     throw new Error(
       `${dataRoot} already holds data (${occupied.join(", ")}). A restore REPLACES it. ` +
@@ -544,10 +565,20 @@ export function restoreBackup(options: RestoreBackupOptions): RestoreResult {
  * of any process still watching it). `runtimes/` is never listed — a restore
  * must not wipe the agent CLI logins it deliberately does not carry.
  */
-function occupiedPaths(dataRoot: string): string[] {
+/** `alsoDirs` carries the OPTIONAL dirs this particular restore is going to
+ *  write. `runtimes/` is not in the default list on purpose: a restore from an
+ *  artefact that carries no runtimes must leave everyone's live agent logins
+ *  exactly where they are. But when the artefact DOES carry them, the restore
+ *  copies straight over the live ones — so they have to be counted as occupied
+ *  here, or the "already holds data" refusal never mentions them and the
+ *  displacement never moves them aside. */
+function occupiedPaths(
+  dataRoot: string,
+  alsoDirs: readonly string[] = [],
+): string[] {
   if (!existsSync(dataRoot)) return [];
   const names: string[] = [];
-  for (const name of BACKED_UP_STORE_DIRS) {
+  for (const name of [...BACKED_UP_STORE_DIRS, ...alsoDirs]) {
     const full = path.join(dataRoot, name);
     if (!existsSync(full)) continue;
     if (readdirSync(full).length > 0) names.push(name);
@@ -576,8 +607,13 @@ function renderRestore(result: Omit<RestoreResult, "text">): string {
   if (result.displacedTo) {
     lines.push(`  the replaced data was moved to ${result.displacedTo} (not deleted)`);
   }
+  // This line used to be unconditional, and was simply false for an artefact
+  // taken with --include-runtimes: that restore copies straight over every
+  // person's live agent CLI logins. Say which of the two actually happened.
   lines.push(
-    "  runtimes/ was left exactly as it was — a restore never touches anyone's agent CLI logins",
+    result.restoredDirs.includes("runtimes")
+      ? "  runtimes/ WAS REPLACED from the artefact — everyone's agent CLI logins are now the ones this backup was taken with, and each person may need to reconnect on Profile → Agent accounts"
+      : "  runtimes/ was left exactly as it was — this restore did not touch anyone's agent CLI logins",
     "",
     "VIBERR_SECRET_ENCRYPTION_KEY is not part of the artefact: without the key this backup was taken under, every sealed secret is unreadable (GitHub PATs, MCP credentials, sign-in provider secrets, the S3 audit-export key, and each person's agent-backend API keys).",
     "Start the app — boot reconciles the projection against the restored files.",

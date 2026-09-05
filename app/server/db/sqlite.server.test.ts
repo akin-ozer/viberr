@@ -234,3 +234,43 @@ describe("shutdownDatabase", () => {
     expect(() => shutdownDatabase()).not.toThrow();
   });
 });
+
+describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", () => {
+  it("creates user_backend_credentials on a root that predates ruling 127", () => {
+    // The healer's own sibling miss: ruling 127 added BOTH the
+    // `agent_runs.credential_user_id` column and the `user_backend_credentials`
+    // table to the squashed baseline, but only the column was added to the
+    // healer's list. 0001 never re-runs, so a root created before that commit
+    // booted with the column and WITHOUT the table — and the first read of
+    // Profile → Agent accounts, or the first run start, 500s on "no such
+    // table". Canary: drop the table from BASELINE_TABLES and this fails.
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-ubc-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(`CREATE TABLE users (id TEXT PRIMARY KEY)`);
+      db.prepare(`INSERT INTO users (id) VALUES (?)`).run("u1");
+      const hasTable = () =>
+        db
+          .prepare(
+            `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`,
+          )
+          .get("user_backend_credentials") !== undefined;
+      expect(hasTable(), "the old root starts without it").toBe(false);
+      ensureBaselineColumns(db);
+      expect(hasTable(), "the healer must create it").toBe(true);
+      // The shape readers actually name, and idempotent on the next boot.
+      db.prepare(
+        `INSERT INTO user_backend_credentials
+           (id, user_id, backend, kind, detail_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run("ubc_1", "u1", "claude", "login", "{}", "t", "t");
+      ensureBaselineColumns(db);
+      expect(
+        db.prepare(`SELECT COUNT(*) AS n FROM user_backend_credentials`).get(),
+      ).toEqual({ n: 1 });
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -191,6 +191,25 @@ const BASELINE_TABLES: readonly string[] = [
      result_json TEXT NOT NULL,
      checked_at TEXT NOT NULL
    )`,
+  // Ruling 127: the per-person agent backends. Same sibling as the
+  // `runs.credential_user_id` column above — that commit added the column to
+  // BASELINE_COLUMNS but left the TABLE it points at out of this list, so a
+  // root created before it boots with the column and without the table and
+  // 500s the first time anyone opens Profile → Agent accounts or starts a run.
+  `CREATE TABLE IF NOT EXISTS user_backend_credentials (
+     id TEXT PRIMARY KEY,
+     user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+     backend TEXT NOT NULL CHECK (backend IN ('claude', 'codex')),
+     kind TEXT NOT NULL CHECK (kind IN ('login', 'api_key', 'access_token')),
+     method TEXT,
+     secret_box TEXT,
+     secret_suffix TEXT,
+     detail_json TEXT NOT NULL DEFAULT '{}',
+     verified_at TEXT,
+     created_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL,
+     UNIQUE (user_id, backend)
+   )`,
 ];
 
 /** Indexes the baseline gained after a root applied it. `IF NOT EXISTS` makes

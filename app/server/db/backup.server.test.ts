@@ -365,3 +365,122 @@ describe("restoreStoreFile", () => {
     ).toThrow(/not in this backup/);
   });
 });
+
+describe("createBackup — re-derivable git trees stay out of the artefact", () => {
+  it("skips each task's workspace checkout and each project's bare mirror", () => {
+    // Both live UNDER projects/, which is copied recursively, so the artefact
+    // carried every task's full source checkout and every project's bare
+    // mirror: on the tree this was found on, 17M of git against 168K of the
+    // markdown that is actually truth — copied while a live run could be
+    // mid-write, and never named in the manifest's own excludes list.
+    // Canary: drop the two `parts[...]` clauses from the cpSync filter and
+    // both files below come back.
+    const f = fixture();
+    const proj = path.join(f.dataRoot, "projects", "viberr-core");
+    const ws = path.join(proj, "tasks", "VIB-1", "workspace", "src");
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(path.join(ws, "index.ts"), "export const x = 1;\n");
+    const mirror = path.join(proj, ".repo-mirror", "acme__app.git", "objects");
+    mkdirSync(mirror, { recursive: true });
+    writeFileSync(path.join(mirror, "pack.idx"), "binary");
+
+    const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
+    const stored = path.join(backup.dir, "store", "projects", "viberr-core");
+
+    expect(
+      existsSync(path.join(stored, "tasks", "VIB-1", "workspace")),
+      "a task checkout is re-cloneable, not backed up",
+    ).toBe(false);
+    expect(
+      existsSync(path.join(stored, ".repo-mirror")),
+      "a bare mirror is re-fetchable, not backed up",
+    ).toBe(false);
+    // The canonical file beside them still is.
+    expect(existsSync(path.join(stored, "tasks", "VIB-1", "task.md"))).toBe(true);
+    // And the manifest says so instead of leaving an operator to guess.
+    expect(
+      readManifest(backup.dir).excludes.some((line) => line.includes("workspace/")),
+    ).toBe(true);
+  });
+});
+
+describe("restore and the per-person agent logins under runtimes/", () => {
+  /** An artefact taken WITH the runtime homes, plus a live root that already
+   *  holds a different person's session. */
+  function withRuntimes() {
+    const f = fixture();
+    const home = path.join(f.dataRoot, "runtimes", "users", "u_arda", "codex-home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(path.join(home, "auth.json"), '{"token":"FROM-THE-BACKUP"}');
+    const backup = createBackup({
+      dataRoot: f.dataRoot,
+      destination: f.out,
+      includeRuntimes: true,
+    });
+    return { f, backup, home };
+  }
+
+  it("displaces the live logins instead of silently overwriting them, and says so", async () => {
+    // `occupiedPaths` scanned only BACKED_UP_STORE_DIRS, so `runtimes/` was
+    // never "occupied": the refusal never mentioned it, the displacement never
+    // moved it aside, and the restore copied over every live auth.json with no
+    // undo — while the report said "runtimes/ was left exactly as it was".
+    // Canary: drop the OPTIONAL_STORE_DIRS filter from the occupiedPaths call
+    // and the live token below is gone with no displaced copy.
+    const { backup } = withRuntimes();
+
+    // A DIFFERENT live root, already holding somebody's current session.
+    const live = ctx.makeTempDir();
+    const liveHome = path.join(live, "runtimes", "users", "u_arda", "codex-home");
+    mkdirSync(liveHome, { recursive: true });
+    writeFileSync(path.join(liveHome, "auth.json"), '{"token":"LIVE-RIGHT-NOW"}');
+
+    const result = restoreBackup({
+      artefact: backup.dir,
+      dataRoot: live,
+      force: true,
+    });
+
+    // The artefact's copy is what is live now…
+    expect(readFileSync(path.join(liveHome, "auth.json"), "utf8")).toContain(
+      "FROM-THE-BACKUP",
+    );
+    // …but the session it replaced was moved aside, not destroyed.
+    expect(result.displacedTo).not.toBeNull();
+    const displaced = path.join(
+      result.displacedTo!,
+      "runtimes",
+      "users",
+      "u_arda",
+      "codex-home",
+      "auth.json",
+    );
+    expect(existsSync(displaced), "the live login must be recoverable").toBe(true);
+    expect(readFileSync(displaced, "utf8")).toContain("LIVE-RIGHT-NOW");
+    // And the report says what happened, rather than the opposite.
+    expect(result.text).toContain("runtimes/ WAS REPLACED");
+  });
+
+  it("a restore that carries no runtimes leaves the live logins alone", async () => {
+    // The other half: displacing unconditionally would sign everyone out for
+    // nothing on an ordinary restore.
+    const f = fixture();
+    const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
+
+    const live = ctx.makeTempDir();
+    const liveHome = path.join(live, "runtimes", "users", "u_arda", "codex-home");
+    mkdirSync(liveHome, { recursive: true });
+    writeFileSync(path.join(liveHome, "auth.json"), '{"token":"UNTOUCHED"}');
+
+    const result = restoreBackup({
+      artefact: backup.dir,
+      dataRoot: live,
+      force: true,
+    });
+
+    expect(readFileSync(path.join(liveHome, "auth.json"), "utf8")).toContain(
+      "UNTOUCHED",
+    );
+    expect(result.text).toContain("runtimes/ was left exactly as it was");
+  });
+});
