@@ -14,6 +14,7 @@ import {
   applyOAuthUser,
   isOAuthWhitelisted,
   linkOAuth,
+  recordSignIn,
   type OAuthProvider,
 } from "~/server/auth/oauth-provision.server";
 import { getEnv } from "~/server/config/env.server";
@@ -319,6 +320,17 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
         // verified) while refusing an unverified one. `credential` never reaches
         // the social-linking path, so it is a harmless no-op here.
         trustedProviders: ["credential"],
+        // Copy the provider profile's ADDITIONAL fields onto an existing user
+        // when a social account is linked to it. `githubHandle` is declared in
+        // `user.additionalFields` above and produced by the GitHub provider's
+        // `mapProfileToUser`, but that only ever reached a user better-auth
+        // CREATED. Someone who already had a local Viberr account and then
+        // signed in with GitHub therefore never got a handle recorded — and
+        // `pr-human-approval.server.ts` matches a PR reviewer to a Viberr user
+        // by `lower(github_handle)`, so ruling R19-B's human approval silently
+        // never counted for them. better-auth never rewrites `email` /
+        // `emailVerified` here, so a link still cannot rebind an identity.
+        updateUserInfoOnLink: true,
       },
     },
     // Whitelist + provisioning: better-auth owns the OAuth dance; these hooks
@@ -358,6 +370,14 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
         create: {
           after: (account) => {
             linkOAuth(deps.db, account.userId, account.providerId);
+            return Promise.resolve();
+          },
+        },
+      },
+      session: {
+        create: {
+          after: (session) => {
+            recordSignIn(deps.db, String(session.userId));
             return Promise.resolve();
           },
         },

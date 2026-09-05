@@ -7,6 +7,7 @@ import {
   applyOAuthUser,
   isOAuthWhitelisted,
   linkOAuth,
+  recordSignIn,
 } from "./oauth-provision.server";
 import { findUserByEmail, insertUser } from "./user-store.server";
 
@@ -266,5 +267,60 @@ describe("linkOAuth", () => {
     linkOAuth(db, user.id, "github");
     expect(findUserByEmail(db, "link@viberr.dev")?.idp).toBe("github");
     expect(listAuditEvents(db, { action: "auth.oauth.login" })).toHaveLength(1);
+  });
+});
+
+describe("recordSignIn — the per-sign-in seam that was missing", () => {
+  /** better-auth's own row, as its `user.additionalFields` writes it. */
+  function identity(db: DatabaseSync, id: string, handle: string | null): void {
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt", "githubHandle")
+       VALUES (?, ?, ?, 1, ?, ?, ?)`,
+    ).run(id, "Selin", "selin@viberr.dev", now, now, handle);
+  }
+
+  it("stamps last_login_at and audits, on a sign-in that creates no user and links no account", () => {
+    // Only `user.create.after` and `account.create.after` were wired, so an
+    // existing person signing in again hit NEITHER: `last_login_at` stayed
+    // null (the org Users list reads it to say "whitelisted" vs "active", so
+    // every OAuth member read as never-signed-in forever) and the sign-in left
+    // no audit row.
+    // Canary: drop the `session.create.after` hook and both go back to empty.
+    const db = ctx.makeDb();
+    insertUser(db, { id: "u_1", email: "selin@viberr.dev", name: "Selin", role: "member", idp: "github" });
+    identity(db, "u_1", null);
+    expect(findUserByEmail(db, "selin@viberr.dev")?.lastLoginAt ?? null).toBeNull();
+
+    recordSignIn(db, "u_1");
+
+    expect(findUserByEmail(db, "selin@viberr.dev")?.lastLoginAt).toBeTruthy();
+    expect(listAuditEvents(db, { action: "auth.sign_in" })).toHaveLength(1);
+  });
+
+  it("records the github handle for an account LINKED to an existing local user", () => {
+    // `mapProfileToUser` only ever reached a user better-auth CREATED, so
+    // somebody who already had a local account and then signed in with GitHub
+    // never got `users.github_handle` — and `pr-human-approval.server.ts`
+    // matches a PR reviewer by `lower(github_handle)`, so ruling R19-B's human
+    // approval silently never counted for them.
+    // Canary: remove the handle mirror from recordSignIn (or
+    // `updateUserInfoOnLink`, which is what puts it on the better-auth row).
+    const db = ctx.makeDb();
+    insertUser(db, { id: "u_2", email: "selin@viberr.dev", name: "Selin", role: "member", idp: "local" });
+    // The link happened: better-auth's row now carries the provider handle.
+    identity(db, "u_2", "Selin-Aksoy");
+    expect(findUserByEmail(db, "selin@viberr.dev")?.githubHandle ?? null).toBeNull();
+
+    recordSignIn(db, "u_2");
+
+    // Normalised the same way every other handle is (lowercased, no leading @).
+    expect(findUserByEmail(db, "selin@viberr.dev")?.githubHandle).toBe("selin-aksoy");
+    expect(listAuditEvents(db, { action: "auth.github_handle.recorded" })).toHaveLength(1);
+
+    // Idempotent: signing in again records the login, not the handle again.
+    recordSignIn(db, "u_2");
+    expect(listAuditEvents(db, { action: "auth.github_handle.recorded" })).toHaveLength(1);
+    expect(listAuditEvents(db, { action: "auth.sign_in" })).toHaveLength(2);
   });
 });
