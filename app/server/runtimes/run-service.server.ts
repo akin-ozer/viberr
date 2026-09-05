@@ -16,6 +16,10 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
+import {
+  canInterruptControllerRun,
+  controllerRunRoute,
+} from "~/server/controller/controller-conversations.server";
 import { getMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
 import {
   RUN_PHASE,
@@ -1744,24 +1748,35 @@ export async function interruptRun(
     throw AppError.notFound(`Run ${input.runId} not found on ${input.taskKey}.`);
   }
 
-  // RBAC — the `run-agents` action (rbac.ts single source: admin|maintainer),
-  // the same tier that opens runtime sessions, resolved through the ONE
-  // authority path (project-authority.server) so the Policy display and this
-  // guard can't drift — and org admins pass as the audited D2 override.
-  const members = listProjectMembers(db, input.projectSlug);
-  requireRunAgents(
-    db,
-    {
-      slug: input.projectSlug,
-      memberRoles: new Map(members.map((m) => [m.userId, m.role])),
-      // Interrupt is a de-escalation (STOP a run), not a new mutation — the F17
-      // archived gate blocks STARTING work; a run left in flight when a project
-      // is archived must still be stoppable, so this path never gates on archived.
-      archived: false,
-    },
-    actor,
-    "interrupt this runtime session",
-  );
+  if (run.kind === "controller") {
+    // Ruling 99: a controller turn has no project to be a member of. It is
+    // stoppable by the two people who may read it — the conversation's owner,
+    // whose turn and whose Claude account it is, and a live org admin — and
+    // the refusal is 404-shaped like every other non-owner answer about a
+    // conversation, so "not yours" and "never existed" stay indistinguishable.
+    if (!canInterruptControllerRun(db, run, { id: actor.userId })) {
+      throw AppError.notFound(`Run ${input.runId} not found on ${input.taskKey}.`);
+    }
+  } else {
+    // RBAC — the `run-agents` action (rbac.ts single source: admin|maintainer),
+    // the same tier that opens runtime sessions, resolved through the ONE
+    // authority path (project-authority.server) so the Policy display and this
+    // guard can't drift — and org admins pass as the audited D2 override.
+    const members = listProjectMembers(db, input.projectSlug);
+    requireRunAgents(
+      db,
+      {
+        slug: input.projectSlug,
+        memberRoles: new Map(members.map((m) => [m.userId, m.role])),
+        // Interrupt is a de-escalation (STOP a run), not a new mutation — the F17
+        // archived gate blocks STARTING work; a run left in flight when a project
+        // is archived must still be stoppable, so this path never gates on archived.
+        archived: false,
+      },
+      actor,
+      "interrupt this runtime session",
+    );
+  }
 
   if (run.state !== "running" && run.state !== "queued") {
     // Idempotent no-op — the run already reached a terminal state.
@@ -1799,7 +1814,17 @@ export async function interruptRun(
       runId: input.runId,
       threadId: run.thread_id,
       state: "interrupted",
+      controller: controllerRunRoute(db, run),
     });
+    // The run reached its terminal state with no adapter to report it, so the
+    // completion callback the starter registered would never fire: `launch`'s
+    // onExit is its only other trigger, and there is no process to exit. A
+    // reserved specialist run's completion effects, and a queued controller
+    // turn's settle (which releases the conversation's lease and records that
+    // the turn was stopped), were both lost that way — the page then read
+    // "working" until a restart replayed recovery. Same precondition as the
+    // spawn-crash race: terminal state, no live handle, so fire it now.
+    fireIfAlreadyTerminal(db, input.runId);
     // F28-R1: a run interrupted while still RESERVED (its workspace clone is in
     // flight, so no live handle exists yet) must release its committed
     // concurrency slot NOW. Otherwise the slot stays counted against the cap —

@@ -63,8 +63,8 @@ Identity facts:
 
 | Surface | Who | Notes |
 |---|---|---|
-| `/controller` | any signed-in user | Instance scope. `?c=<id>` selects a conversation; `?all=1` lets an org admin list everyone's. |
-| `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Goals panel**. Eighth item in the workspace rail. |
+| `/controller` | any signed-in user | Instance scope. `?c=<id>` selects a conversation; `?all=1` lets an org admin list everyone's. With a thread open, the thread's execution (§2.2). |
+| `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Goals panel**. Eighth item in the workspace rail. Same execution panels as the instance page. |
 | Org settings → Controller tab | org admins | Configures the controller itself (§6). |
 | **The dock**, on every signed-in surface | any signed-in user | Ruling 121: a floating Controller button, bottom-right, opening a non-modal panel bound to the place the person is standing (§2.1). Hidden on the two controller pages and on `/login`. |
 | `/resources/controller` | any signed-in user; project and task scopes require membership | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn. |
@@ -142,6 +142,43 @@ overlay, which would leave the dock inert behind it.
   failures (expired session, stale CSRF) come back as `{ ok:false, error }` and show as an
   error toast, never as the root boundary.
 
+### 2.2 The open thread's execution
+
+A controller turn is a run like any other (§3), so with a thread open both pages show
+it the way the task page shows a task's runs, fed by the same projection
+(`listRunsForTask(db, "", <conversation id>)`, the ruling-99 scope): every turn of the
+thread resumes the same agent, so the runs group into ONE console entry with `run N of
+M` boundaries between turns.
+
+- **Live run** (above the transcript, only while a turn is `running`): the run's phase
+  and last tool step, elapsed from the run's own `started_at`, turns and tokens off the
+  run row, the model, **View logs** (scrolls to the console and selects the thread) and
+  **Interrupt**. Turns and tokens refresh with the loader: the 5-second poll, and the
+  `controller.updated` reference a lifecycle flip now publishes (the sink routes a
+  controller run's state changes there instead of the task-scoped `run.state-changed`).
+- **Interrupt** is offered to the conversation's owner and to org admins
+  (`canInterruptTurn`); it confirms first (D6, "Interrupt this turn?" / "Interrupt
+  turn") and posts `intent=interrupt` with the conversation and the run id. The engine's
+  `interruptRun` gates a controller run on `canInterruptControllerRun` (owner or live org
+  admin, the same two people who may read its log; a stranger gets the 404 shape) instead
+  of the project membership the run has none of, then settles the turn: the transcript
+  records "This turn was stopped before I could answer." and the lease is released, so
+  the next message starts a fresh turn. A turn stopped while still queued (no adapter to
+  exit) is settled the same way, because the engine now fires the run's completion
+  callback from its no-live-handle arm.
+- **Agent logs** (below the composer): the grouped console with the `{ } raw` and follow
+  toggles, the session-id chip and the backward paging of `/resources/run-log`, behind
+  the owner-or-admin gate that serves the raw view. Live tailing is the controller channel
+  of `useRunLogStream`: the sink publishes `controller.log-appended {conversationId,
+  userId, runId, threadId, seq}` to the OWNER's `user` stream for every stored line
+  (`controllerRunRoute` resolves the owner once per run), the console fetches the lines
+  since its cursor, and the frame is a stream event `useLiveUpdates` ignores
+  (`SSE_STREAM_EVENTS`), so one turn's tool calls never revalidate every surface the
+  person has open. A supervising org admin reading someone else's thread sees the same
+  console off the loader's poll; the frames are the owner's. The streaming footer says
+  "never in the transcript" here, where the task record does not exist.
+- Neither panel renders for a thread that has not run yet.
+
 ## 3. Conversations and turns
 
 Storage is app-owned SQLite, the same family as notifications and sessions:
@@ -205,11 +242,14 @@ owner-routed SSE event `controller.updated`.
 Everything the run machinery gives every other run applies: raw NDJSON transcript,
 line redaction, token accounting, the run-log console (owner or org admin, via
 `canReadControllerRunLog`, the same gate `/resources/run-log` and the session export
-apply), and boot orphan finalization. Boot also gives any conversation whose turn a
+apply; rendered on the controller pages, §2.2), the interrupt (`canInterruptControllerRun`,
+§2.2) and boot orphan finalization. Boot also gives any conversation whose turn a
 restart orphaned an honest "interrupted by a server restart" note
-(`recoverControllerConversations`). Run-log SSE events are suppressed for controller
-runs (they would fail the wire schema's non-empty-slug rule); the page polls instead.
-Insights labels them `controller (instance)`.
+(`recoverControllerConversations`). The task-scoped run stream cannot carry a controller
+run (the wire schema's non-empty-slug rule, and an empty slug would match every `projects`
+firehose), so `run-events.server.ts` routes a controller run's frames to the conversation
+owner instead: `controller.log-appended` per stored line, and the `controller.updated`
+reference for a lifecycle change. Insights labels them `controller (instance)`.
 
 ## 4. The `viberr_controller` toolkit
 
@@ -473,6 +513,9 @@ currently sees no controls, and must redirect conversationally.
   completed), addressed to the goal creator, from the "Controller" agent identity.
   The category has a routing toggle in the profile, default on.
 - SSE: `controller.updated {conversationId, userId}` (owner-routed),
+  `controller.log-appended {conversationId, userId, runId, threadId, seq}` (owner-routed,
+  one per stored console line of a controller run; a stream event, tailed by the console
+  and ignored by `useLiveUpdates`),
   `goal.updated {projectSlug, goalId}` (project-routed).
 - Timeline: `comment` events authored by `controller` with the trailer
   `_Posted by the controller for <name>._`.

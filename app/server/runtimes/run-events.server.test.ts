@@ -45,10 +45,10 @@ interface TestClient {
   names(): string[];
 }
 
-function connect(scopes: SseScope[]): TestClient {
+function connect(scopes: SseScope[], userId = "u_watcher"): TestClient {
   const writes: string[] = [];
   connectSseClient({
-    userId: "u_watcher",
+    userId,
     scopes,
     lastEventId: null,
     write: (chunk) => {
@@ -260,6 +260,82 @@ describe("publishRunStateChanged", () => {
     const stats = getSseBrokerStats();
     expect(stats.headId).toBe(headBefore);
     expect(stats.bufferedEvents).toBe(0);
+  });
+});
+
+/**
+ * Ruling 99, the other half: a controller turn DOES stream — to its owner.
+ *
+ * The guard above keeps a controller run off the project routes; without a
+ * route of its own the controller page had no console at all (the run row
+ * existed, the lines were stored, nobody was told). The sink now resolves the
+ * conversation behind the run once (`controllerRunRoute`) and these publishers
+ * route the same reference-only frame to that person's `user` stream as
+ * `controller.log-appended`, and a lifecycle flip as the `controller.updated`
+ * reference the page already revalidates on.
+ */
+describe("a controller run's frames route to the conversation owner", () => {
+  const route = { conversationId: "cconv_01H8XABCDEF", userId: "u_owner" };
+
+  it("a console line reaches the owner's user stream, and nobody else", () => {
+    // Canary: drop the `input.controller` arm of publishRunLogAppended — the
+    // empty-slug guard then swallows the frame and the owner sees nothing.
+    const owner = connect([{ kind: "user" }], "u_owner");
+    const stranger = connect([{ kind: "user" }], "u_other");
+    const home = connect([{ kind: "projects" }], "u_owner");
+    const board = connect([{ kind: "project", slug: "viberr-core" }], "u_owner");
+
+    publishRunLogAppended({
+      projectSlug: "",
+      taskKey: route.conversationId,
+      runId: "run_ctl",
+      threadId: "thr_ctl",
+      seq: 4,
+      controller: route,
+    });
+
+    expect(owner.names()).toEqual(["stream.open", "controller.log-appended"]);
+    expect(stranger.names()).not.toContain("controller.log-appended");
+    // The person's own Home firehose and board stream are not `user`-scoped
+    // connections: the frame is for the console, which subscribes `user`.
+    expect(home.names()).not.toContain("controller.log-appended");
+    expect(board.names()).not.toContain("controller.log-appended");
+    // Reference-only, like the task frame, and valid on the wire — this path
+    // has no validator downstream (see the file comment).
+    const payload = sseEventSchema.parse(JSON.parse(dataLines(owner.writes).at(-1)!));
+    expect(payload).toEqual({
+      type: "controller.log-appended",
+      entityId: route.conversationId,
+      occurredAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      data: {
+        conversationId: route.conversationId,
+        userId: "u_owner",
+        runId: "run_ctl",
+        threadId: "thr_ctl",
+        seq: 4,
+      },
+    });
+  });
+
+  it("a lifecycle change reaches the owner as the conversation reference", () => {
+    // Canary: drop the `input.controller` arm of publishRunStateChanged.
+    const owner = connect([{ kind: "user" }], "u_owner");
+    const stranger = connect([{ kind: "user" }], "u_other");
+
+    publishRunStateChanged({
+      projectSlug: "",
+      taskKey: route.conversationId,
+      runId: "run_ctl",
+      threadId: "thr_ctl",
+      state: "running",
+      controller: route,
+    });
+
+    expect(owner.names()).toEqual(["stream.open", "controller.updated"]);
+    expect(stranger.names()).toEqual(["stream.open"]);
+    const payload = sseEventSchema.parse(JSON.parse(dataLines(owner.writes).at(-1)!));
+    expect(payload.type).toBe("controller.updated");
+    expect(payload.data).toEqual({ conversationId: route.conversationId, userId: "u_owner" });
   });
 });
 

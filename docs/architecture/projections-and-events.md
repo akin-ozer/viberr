@@ -139,13 +139,20 @@ and zod-parses every event against `sseEventSchema` before publishing.
 Two publishers bypass the projection emitter on purpose: the run stream
 (`run.log-appended {runId, seq}`, `run.state-changed {state}`, task-scoped,
 reference-only so the dedicated log consumer fetches content from
-`/resources/run-log`) and `controller.updated` (user-scoped).
+`/resources/run-log`) and the controller's frames (`controller.updated` and
+`controller.log-appended {conversationId, userId, runId, threadId, seq}`, both routed to
+the conversation owner's `user` stream; a controller run has no task scope, so the
+sink hands `run-events.server.ts` the owner route `controllerRunRoute` resolved and the
+same two publishers route there).
 
 **The complete wire event list** (`SSE_EVENT_NAMES`): `task.updated`, `task.removed`,
 `project.updated`, `project.removed`, `projection.rebuilt`, `notification.created`,
-`notification.read`, `violation.updated`, `run.log-appended`, `run.state-changed`,
-`controller.updated`, `goal.updated`, plus the control events `stream.open {headId}`
-and `stream.resync`.
+`notification.read`, `violation.updated`, `resource.updated`, `run.log-appended`,
+`run.state-changed`, `controller.updated`, `controller.log-appended`, `goal.updated`, plus
+the control events `stream.open {headId}` and `stream.resync`. `controller.log-appended`
+is a **stream event** (`SSE_STREAM_EVENTS` in `event-types.ts`): one frame per console
+line on the `user` scope every signed-in surface subscribes, so `useLiveUpdates` does not
+revalidate on it; only the dedicated log consumer handles it.
 
 **The broker** (`sse-broker.server.ts`): one connection per browser tab on
 `/resources/events` (401 JSON when signed out, since an `EventSource` cannot render a

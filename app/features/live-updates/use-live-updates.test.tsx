@@ -179,6 +179,26 @@ describe("useLiveUpdates", () => {
     expect(loaderRuns).toBe(0);
   });
 
+  it("ignores a stream event: one console line must not refetch every surface", () => {
+    // `controller.log-appended` rides the `user` scope, which this hook
+    // subscribes on Home, every board and the settings page for the bell. It
+    // is the dedicated log consumer's frame; a revalidation here would run all
+    // of those loaders once per tool call of a controller turn.
+    // Canary: drop the `SSE_STREAM_EVENTS` clause in the listener loop.
+    render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
+    act(() => {
+      FakeEventSource.last().emit("controller.log-appended", "10");
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+    });
+    expect(loaderRuns).toBe(0);
+    // The conversation reference beside it still revalidates, as before.
+    act(() => {
+      FakeEventSource.last().emit("controller.updated", "11");
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+    });
+    expect(loaderRuns).toBe(1);
+  });
+
   it("closes the stream and cancels pending revalidation on unmount", () => {
     const { unmount } = render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
     const es = FakeEventSource.last();

@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import { createRoutesStub } from "react-router";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createRoutesStub, type ActionFunction } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { ControllerPage, surfaceLabel } from "./controller-page";
 import type { ControllerSurfaceView } from "./controller-query.server";
+import type { RunView } from "~/features/runtime/runtime-types";
 
 /**
  * Ruling 121 on the full controller page: the project is named, task-anchored
@@ -39,6 +40,8 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     conversation: null,
     messages: [],
     turn: { working: false, runId: null },
+    runtime: [],
+    canInterruptTurn: false,
     goals: [],
     viewerOwnsActive: false,
     showingAll: false,
@@ -75,22 +78,22 @@ describe("ruling 131(c): the Goals panel names what a link waits on", () => {
   });
 });
 
-function renderPage(v: ControllerSurfaceView, search = "") {
+function renderPage(v: ControllerSurfaceView, search = "", action?: ActionFunction) {
+  const page: Parameters<typeof createRoutesStub>[0][number] = {
+    path: "projects/:slug/controller",
+    Component: () => (
+      <ToastProvider>
+        <ControllerPage view={v} projectSlug="viberr-core" canRedirectGoals={false} />
+      </ToastProvider>
+    ),
+  };
+  if (action) page.action = action;
   const Stub = createRoutesStub([
     {
       id: "root",
       path: "/",
       loader: () => ({ csrf: "tok", theme: "system", motion: "full" }),
-      children: [
-        {
-          path: "projects/:slug/controller",
-          Component: () => (
-            <ToastProvider>
-              <ControllerPage view={v} projectSlug="viberr-core" canRedirectGoals={false} />
-            </ToastProvider>
-          ),
-        },
-      ],
+      children: [page],
     },
   ]);
   return render(<Stub initialEntries={[`/projects/viberr-core/controller${search}`]} />);
@@ -270,5 +273,128 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     expect(box.disabled).toBe(true);
     expect(box.placeholder).toContain("only the conversation's owner");
     expect(box.placeholder).not.toContain("Claude");
+  });
+});
+
+/**
+ * Ruling 99, the execution half of the page: a controller turn is a run like
+ * any other, so the page shows the run the way the task page does — the
+ * Live-run strip (what it is doing, for how long, how many turns and tokens,
+ * on which model, and Interrupt for whoever may stop it) and the Agent-logs
+ * console with the turn's own lines.
+ */
+describe("the open conversation's execution", () => {
+  const conversation: NonNullable<ControllerSurfaceView["conversation"]> = {
+    id: "cnv_b",
+    userId: "u1",
+    userLabel: "arda@viberr.dev",
+    projectSlug: "viberr-core",
+    taskKey: null,
+    title: "Board thread",
+    createdAt: "2026-09-01T10:00:00.000Z",
+    updatedAt: "2026-09-01T10:00:00.000Z",
+    lastMessageAt: "2026-09-01T10:00:00.000Z",
+  };
+  const run: RunView = {
+    id: "controller",
+    serverRunId: "run_ctl",
+    role: "Controller",
+    kind: "controller",
+    profileId: "controller",
+    who: { kind: "agent", backend: "claude", name: "Controller", role: "Controller" },
+    backend: "claude",
+    sdk: "Claude Agent SDK",
+    model: "claude-opus-4-8",
+    sid: "sess-ctl",
+    exportable: false,
+    state: "running",
+    lifecycle: "running",
+    interruptedBy: null,
+    phase: "Working",
+    step: "viberr_controller · list_tasks",
+    startedAt: new Date(Date.now() - 65_000).toISOString(),
+    finished: null,
+    turns: 3,
+    tokens: 1200,
+    lines: [{ t: "10:00:01", ev: "text", tag: "assistant", text: "Reading the board." }],
+    raw: ['{"type":"assistant"}'],
+    lineCount: 1,
+    logWindow: { totalLines: 1, hasMore: false, runIds: ["run_ctl"], oldest: null, headSeq: 0 },
+  };
+  const working = (over: Partial<ControllerSurfaceView> = {}) =>
+    view({
+      conversation,
+      viewerOwnsActive: true,
+      turn: { working: true, runId: "run_ctl" },
+      runtime: [run],
+      canInterruptTurn: true,
+      ...over,
+    });
+
+  it("renders the strip (elapsed, turns, tokens, model, View logs, Interrupt) and the console", async () => {
+    // Canary: render only the transcript's "is working" row again and every
+    // assertion below fails.
+    const { container } = renderPage(working(), "?c=cnv_b");
+    await screen.findByText("Live run");
+    expect(screen.getByText("1 agent running")).toBeTruthy();
+    expect(screen.getByText("Working")).toBeTruthy();
+    expect(screen.getByText("viberr_controller · list_tasks")).toBeTruthy();
+    // Elapsed derives from the run's own startedAt (~65 s), never a counter;
+    // `useElapsed` reads the clock after mount, so wait for its first tick.
+    await screen.findByText(/^01:0[56]$/);
+    const cells = [...container.querySelectorAll(".run-cell")].map((c) => c.textContent);
+    expect(cells[0]).toMatch(/^Elapsed01:0[56]$/);
+    expect(cells.slice(1)).toEqual(["Turns3", "Tokens1.2k", "Runtimeclaude-opus-4-8"]);
+    expect(screen.getByRole("button", { name: "View logs" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Interrupt" })).toBeTruthy();
+    // The console, with the turn's line and the transcript-shaped footer.
+    expect(screen.getByText("Agent logs")).toBeTruthy();
+    expect(screen.getByText("Reading the board.")).toBeTruthy();
+    expect(container.textContent).toContain("never in the transcript");
+    // The strip sits above the transcript; the console below the composer.
+    const main = container.querySelector(".ctl-main")!;
+    const order = [...main.children].map((el) => el.className.split(" ")[0]);
+    expect(order).toEqual(["runbar", "panel", "ctl-composer", "panel"]);
+  });
+
+  it("hides Interrupt from a viewer who may not stop the turn", async () => {
+    renderPage(working({ canInterruptTurn: false, viewerOwnsActive: false }), "?c=cnv_b");
+    await screen.findByText("Live run");
+    expect(screen.queryByRole("button", { name: "Interrupt" })).toBeNull();
+    expect(screen.getByRole("button", { name: "View logs" })).toBeTruthy();
+  });
+
+  it("Interrupt confirms first, then posts the conversation and the run", async () => {
+    // Canary: submit from the strip's button directly, or post the thread id
+    // instead of the server run id, and the recorded form differs.
+    const posted: Record<string, string>[] = [];
+    renderPage(working(), "?c=cnv_b", async ({ request }) => {
+      const form = await request.formData();
+      posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
+      return { ok: true, toast: "Turn interrupted. The transcript records that it was stopped." };
+    });
+    await screen.findByText("Live run");
+    fireEvent.click(screen.getByRole("button", { name: "Interrupt" }));
+    expect(posted).toEqual([]);
+    const dialog = await screen.findByRole("alertdialog", { name: "Interrupt this turn?" });
+    expect(dialog.getAttribute("data-screen-label")).toBe("Interrupt turn dialog");
+    expect(dialog.textContent).toContain("the transcript records that the turn was stopped");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Interrupt turn" }));
+    });
+    await screen.findByText("Turn interrupted. The transcript records that it was stopped.");
+    expect(posted).toEqual([
+      { _csrf: "tok", intent: "interrupt", conversationId: "cnv_b", runId: "run_ctl" },
+    ]);
+  });
+
+  it("renders neither panel for a thread that has not run yet", async () => {
+    const { container } = renderPage(
+      view({ conversation, viewerOwnsActive: true, runtime: [], canInterruptTurn: true }),
+      "?c=cnv_b",
+    );
+    await screen.findByText("Board thread");
+    expect(container.querySelector(".runbar")).toBeNull();
+    expect(screen.queryByText("Agent logs")).toBeNull();
   });
 });

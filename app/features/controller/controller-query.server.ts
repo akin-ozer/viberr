@@ -14,6 +14,8 @@ import {
 } from "~/server/controller/controller-conversations.server";
 import { resolveControllerConfig } from "~/server/controller/controller-profile.server";
 import { conversationTurnState } from "~/server/controller/controller-run.server";
+import { listRunsForTask } from "~/server/runtimes/run-service.server";
+import type { RunView } from "~/features/runtime/runtime-types";
 import { listGoals, type GoalView } from "~/server/tasks/goal-actions.server";
 
 /**
@@ -35,6 +37,17 @@ export interface ControllerSurfaceView {
   conversation: ControllerConversation | null;
   messages: ControllerMessage[];
   turn: { working: boolean; runId: string | null };
+  /**
+   * The open conversation's controller runs, projected the way the task page's
+   * runtime is: one console entry (every turn of a thread resumes the same
+   * agent, so the group carries the `run N of M` boundaries) with the bounded
+   * window of its newest lines and the cursor for the rest. Feeds the Live-run
+   * strip and the Agent-logs console. Empty with no conversation open.
+   */
+  runtime: RunView[];
+  /** The viewer may stop the working turn: the conversation's owner or an org
+   *  admin (`canInterruptControllerRun`, re-checked by the engine on submit). */
+  canInterruptTurn: boolean;
   /** Project surface only. */
   goals: GoalView[] | null;
   viewerOwnsActive: boolean;
@@ -124,6 +137,13 @@ export function getControllerSurface(
     turn: conversation
       ? conversationTurnState(db, conversation.id)
       : { working: false, runId: null },
+    // Ruling 99: a controller run is stored at `project_slug = ''` with the
+    // conversation id for its task key, which is the scope the grouping
+    // projection is asked for here.
+    runtime: conversation ? listRunsForTask(db, "", conversation.id) : [],
+    canInterruptTurn: conversation
+      ? conversation.userId === viewer.id || admin
+      : false,
     goals: scope ? listGoals(db, scope) : null,
     viewerOwnsActive: conversation ? conversation.userId === viewer.id : false,
     showingAll,

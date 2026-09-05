@@ -594,7 +594,10 @@ export function AgentLogsPanel({
         : "";
   const footer =
     cur!.state === "running"
-      ? "streaming: raw output stays here as evidence, never in the task record"
+      ? // A controller turn's record is its transcript (ruling 99), not a task.
+        cur!.kind === "controller"
+        ? "streaming: raw output stays here as evidence, never in the transcript"
+        : "streaming: raw output stays here as evidence, never in the task record"
       : cur!.lifecycle === "queued"
         ? // UI-57: a QUEUED run is not an idle thread. The strip renders only for
           // `running`, so a queued run used to show a "queued" pill next to the

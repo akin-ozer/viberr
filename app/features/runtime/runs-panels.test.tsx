@@ -123,6 +123,17 @@ describe("AgentLogsPanel", () => {
     expect(container.querySelector(".logs-bar .pill.agent")).not.toBeNull();
   });
 
+  it("a controller turn's streaming footer names the transcript, not a task record", () => {
+    // Ruling 99: the console now renders on the controller page too, where
+    // "the task record" names a thing the run does not have.
+    const run = mkRun({ id: "controller", kind: "controller", role: "Controller",
+      who: { kind: "agent", backend: "claude", name: "Controller", role: "Controller" } });
+    const { getByText } = render(
+      <AgentLogsPanel runtime={[run]} sel="controller" onSel={() => {}} linesByThread={{}} />,
+    );
+    expect(getByText("streaming: raw output stays here as evidence, never in the transcript")).toBeTruthy();
+  });
+
   it("done thread: 'run finished at …' footer, no cursor", () => {
     const run = mkRun({ state: "done", lifecycle: "finished", finished: "9:41" });
     const { container, getByText } = render(

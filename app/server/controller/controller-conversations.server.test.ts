@@ -384,6 +384,197 @@ describe("conversation access", () => {
  * and boot recovery cannot see them either, since the newest message is now the
  * controller's own note rather than a user's.
  */
+/**
+ * Stopping a turn from the controller page.
+ *
+ * `interruptControllerTurn` hands the engine the ruling-99 scope of a
+ * controller run so neither page has to know it, and the engine's interrupt
+ * asks `canInterruptControllerRun` instead of a project membership the run
+ * has none of. A stopped turn settles like a finished one: the transcript
+ * records that it was stopped, and the lease is released so the next message
+ * starts a fresh turn instead of queueing behind a run that is gone.
+ */
+describe("stopping a turn", () => {
+  async function startWorkingTurn() {
+    const { createConversation } = await import("./controller-conversations.server");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { queueFakeRun } = await import("../../../test-support/fake-runtime");
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: null,
+    });
+    queueFakeRun({
+      lines: [{ t: "1", ev: "text", tag: "assistant", text: "thinking about it" }],
+      sessionId: "sess-stop",
+      keepRunning: true,
+    });
+    const result = await runControllerTurn(app.db, {
+      conversationId: conversation.id,
+      text: "Do something slow.",
+      user: { id: ownerId, email: "selin@viberr.dev", name: "Selin", orgRole: "member" },
+      dataRoot: app.dataRoot,
+    });
+    if (result.state !== "started") throw new Error(`turn ${result.state}`);
+    return { conversationId: conversation.id, runId: result.runId };
+  }
+
+  async function settled(runId: string): Promise<void> {
+    const { getRun } = await import("~/server/runtimes/run-store.server");
+    for (let i = 0; i < 200; i += 1) {
+      const state = getRun(app.db, runId)?.state;
+      if (state && state !== "running" && state !== "queued") break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    // The settle runs from the completion callback on a later tick.
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  it("the owner stops it: the run is interrupted, the transcript says so, the lease is released", async () => {
+    // Canary: make interruptRun's controller branch throw for everyone and
+    // this rejects; drop the branch entirely and the empty member map refuses
+    // the owner the same way.
+    const { interruptControllerTurn, conversationTurnState } = await import(
+      "./controller-run.server"
+    );
+    const { listMessages } = await import("./controller-conversations.server");
+    const { getRun } = await import("~/server/runtimes/run-store.server");
+    const { conversationId, runId } = await startWorkingTurn();
+    expect(conversationTurnState(app.db, conversationId)).toEqual({ working: true, runId });
+
+    const result = await interruptControllerTurn(
+      app.db,
+      { conversationId, runId, dataRoot: app.dataRoot },
+      { userId: ownerId, label: "selin@viberr.dev" },
+    );
+    expect(result.outcome).toBe("interrupted");
+    await settled(runId);
+
+    const run = getRun(app.db, runId)!;
+    expect(run.state).toBe("interrupted");
+    expect(run.interrupted_by).toBe(ownerId);
+    const messages = listMessages(app.db, conversationId);
+    expect(messages.at(-1)).toMatchObject({
+      author: "controller",
+      runId,
+      text: "This turn was stopped before I could answer.",
+    });
+    expect(conversationTurnState(app.db, conversationId).working).toBe(false);
+  });
+
+  it("another member gets the not-found shape; an org admin may stop it", async () => {
+    const { interruptControllerTurn } = await import("./controller-run.server");
+    const { conversationId, runId } = await startWorkingTurn();
+    await expect(
+      interruptControllerTurn(
+        app.db,
+        { conversationId, runId, dataRoot: app.dataRoot },
+        { userId: otherMemberId, label: "murat@viberr.dev" },
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+    const result = await interruptControllerTurn(
+      app.db,
+      { conversationId, runId, dataRoot: app.dataRoot },
+      { userId: orgAdminId, label: "arda@viberr.dev" },
+    );
+    expect(result.outcome).toBe("interrupted");
+    await settled(runId);
+  });
+
+  it("a run id from another thread is not found on this conversation", async () => {
+    const { interruptControllerTurn } = await import("./controller-run.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const { conversationId, runId } = await startWorkingTurn();
+    const other = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: null,
+    });
+    await expect(
+      interruptControllerTurn(
+        app.db,
+        { conversationId: other.id, runId, dataRoot: app.dataRoot },
+        { userId: ownerId, label: "selin@viberr.dev" },
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+    // Clean up the live fake run so nothing writes after the DB closes.
+    await interruptControllerTurn(
+      app.db,
+      { conversationId, runId, dataRoot: app.dataRoot },
+      { userId: ownerId, label: "selin@viberr.dev" },
+    );
+    await settled(runId);
+  });
+});
+
+/**
+ * The wiring the console depends on, end to end through the real sink: a
+ * controller turn's stored lines reach the OWNER's user stream as
+ * `controller.log-appended`, and its lifecycle reaches it as the
+ * `controller.updated` reference. Nobody else's stream hears either.
+ */
+describe("a working turn streams to its owner", () => {
+  it("publishes controller.log-appended per line and controller.updated for the lifecycle", async () => {
+    // Canary: drop `controller` from the sink's line publish and the owner
+    // receives the lifecycle references but never a line.
+    const { connectSseClient } = await import("~/server/events/sse-broker.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { queueFakeRun } = await import("../../../test-support/fake-runtime");
+    const { getRun } = await import("~/server/runtimes/run-store.server");
+    const { sseEventSchema } = await import("~/schemas/sse-event.schema");
+
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: null,
+    });
+    const listen = (userId: string) => {
+      const writes: string[] = [];
+      connectSseClient({ userId, scopes: [{ kind: "user" }], lastEventId: null, write: (c) => { writes.push(c); } });
+      return () =>
+        writes
+          .flatMap((chunk) => chunk.split("\n"))
+          .filter((line) => line.startsWith("data: "))
+          .map((line) => sseEventSchema.parse(JSON.parse(line.slice("data: ".length))));
+    };
+    const owner = listen(ownerId);
+    const other = listen(otherMemberId);
+
+    queueFakeRun({
+      lines: [
+        { t: "1", ev: "text", tag: "assistant", text: "one" },
+        { t: "2", ev: "text", tag: "assistant", text: "two" },
+      ],
+      sessionId: "sess-stream",
+    });
+    const result = await runControllerTurn(app.db, {
+      conversationId: conversation.id,
+      text: "Stream this.",
+      user: { id: ownerId, email: "selin@viberr.dev", name: "Selin", orgRole: "member" },
+      dataRoot: app.dataRoot,
+    });
+    if (result.state !== "started") throw new Error(`turn ${result.state}`);
+    for (let i = 0; i < 200; i += 1) {
+      const state = getRun(app.db, result.runId)?.state;
+      if (state && state !== "running" && state !== "queued") break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const lines = owner().filter((e) => e.type === "controller.log-appended");
+    expect(lines.map((e) => e.data)).toEqual([
+      { conversationId: conversation.id, userId: ownerId, runId: result.runId, threadId: expect.any(String), seq: 0 },
+      { conversationId: conversation.id, userId: ownerId, runId: result.runId, threadId: expect.any(String), seq: 1 },
+    ]);
+    const updated = owner().filter((e) => e.type === "controller.updated");
+    expect(updated.length).toBeGreaterThan(0);
+    expect(updated.every((e) => e.data.conversationId === conversation.id)).toBe(true);
+    // Another member's user stream heard nothing of this conversation.
+    expect(other().filter((e) => e.type !== "stream.open")).toEqual([]);
+  });
+});
+
 describe("a failed queued start accounts for the messages behind it", () => {
   it("names how many follow-ups were dropped", async () => {
     const { createConversation, appendMessage, listMessages } = await import(

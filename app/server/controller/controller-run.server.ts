@@ -24,9 +24,11 @@ import {
 } from "~/server/runtimes/run-principal.server";
 import type { RunMcpServers } from "~/server/runtimes/adapter.server";
 import {
+  interruptRun,
   registerRunCompletion,
   resumeRun,
   startRun,
+  type InterruptResult,
   type ResumeRunInput,
   type StartRunInput,
 } from "~/server/runtimes/run-service.server";
@@ -600,6 +602,32 @@ async function settleTurn(
     });
     map.delete(conversationId);
   }
+}
+
+/**
+ * Stop the turn a conversation is working on.
+ *
+ * A controller run lives at `project_slug = ''` with the conversation id for
+ * its task key (ruling 99), which is the one fact both controller pages would
+ * otherwise have to spell out to reach `interruptRun`. The engine keeps the
+ * whole interrupt (the live handle or the terminal write, the audit row, the
+ * slot release, the completion fire that settles this turn) and asks
+ * `canInterruptControllerRun` for the authority; the run must be the
+ * conversation's own, so a run id from another thread is "not found" here
+ * exactly as it would be for a stranger.
+ */
+export async function interruptControllerTurn(
+  db: DatabaseSync,
+  input: { conversationId: string; runId: string; dataRoot?: string },
+  actor: { userId: string; label: string },
+): Promise<InterruptResult> {
+  const engineInput: Parameters<typeof interruptRun>[1] = {
+    projectSlug: "",
+    taskKey: input.conversationId,
+    runId: input.runId,
+  };
+  if (input.dataRoot) engineInput.dataRoot = input.dataRoot;
+  return interruptRun(db, engineInput, actor);
 }
 
 /** Live turn state for the conversation surface. */

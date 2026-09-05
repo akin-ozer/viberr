@@ -266,14 +266,22 @@ Consumers: `GET /resources/run-log?runId=&since=|before=&limit=` (1..500, member
 controller runs by conversation ownership) returns `{ runId, threadId, state, lines,
 headSeq, oldestSeq, hasMore }`. The client `useRunLogStream` keeps its own `EventSource`
 on the task scope, fetches since `headSeq` on each reference, revalidates once on
-`run.state-changed`, and pages backwards 200 lines at a time. Controller runs publish
-no SSE (`projectSlug === ""`).
+`run.state-changed`, and pages backwards 200 lines at a time. Its controller channel
+(`source: { kind: "controller", conversationId }`) subscribes the `user` scope instead
+and tails `controller.log-appended` frames for the open conversation only: a controller
+run has no task scope, so the sink resolves the conversation owner once per run
+(`controllerRunRoute`) and both publishers route there (lines as
+`controller.log-appended`, state changes as the `controller.updated` reference).
 
 ### 3.4 Interrupt and completion
 
-`interruptRun` needs `run-agents` (admin or maintainer, non-archived): a live handle gets
-`handle.interrupt()` and `interruptedBy`; a dead one is patched to `interrupted` and its
-slot released; audit `runtime.run.interrupted`. The sink's `finalize` lets the first
+`interruptRun` needs `run-agents` (admin or maintainer, non-archived) for a task run, and
+for a controller run `canInterruptControllerRun` (the conversation's owner or a live org
+admin; anyone else gets the 404 shape): a live handle gets `handle.interrupt()` and
+`interruptedBy`; a dead one is patched to `interrupted`, its slot released, and the run's
+registered completion callback fired from that arm (there is no adapter exit to fire it
+otherwise, so a reserved specialist's completion effects and a queued controller turn's
+settle were lost); audit `runtime.run.interrupted`. The sink's `finalize` lets the first
 terminal writer win, sets `finishedAt`, clears the backend's quota-exhaustion record on
 `finished`, drains the pending queue, then fires the registered completion callback. A
 callback that throws goes through `noteCompletionEffectsLost`: waiting flips to human

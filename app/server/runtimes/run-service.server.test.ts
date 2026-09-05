@@ -1582,6 +1582,35 @@ describe("a reservation interrupted while the workspace is prepared", () => {
     expect(listRunsForTaskRows(store.db, store.slug, "VIB-1")).toHaveLength(1);
   });
 
+  /**
+   * The row reached `interrupted` with no adapter to report it, so nothing
+   * else can ever fire the completion callback the starter registered:
+   * `launch`'s onExit is its only other trigger and there is no process to
+   * exit. A queued controller turn stopped this way never settled — its lease
+   * held, the conversation read "working" until a restart — and a reserved
+   * specialist's completion effects were lost the same way.
+   */
+  it("fires the registered completion callback, once, with the interrupted row", async () => {
+    // Canary: drop the `fireIfAlreadyTerminal` call from interruptRun's
+    // no-live-handle arm and `fired` stays null.
+    const reservation = reserve();
+    let fired: string | null = null;
+    let count = 0;
+    registerRunCompletion(reservation.runId, (finished) => {
+      fired = finished.state;
+      count += 1;
+    }, store.db);
+    expect(fired).toBeNull();
+
+    expect((await stop(reservation.runId)).outcome).toBe("interrupted");
+    expect(fired).toBe("interrupted");
+    expect(count).toBe(1);
+    // Consumed on fire: the reservation's later abandon() finds no callback to
+    // fire a second time.
+    reservation.abandon("preparation stopped");
+    expect(count).toBe(1);
+  });
+
   it("abandon() leaves the recorded interrupt alone", async () => {
     // The wrapper's catch releases the reservation when preparation throws —
     // and the refusal above IS such a throw. Stamping `error` over `interrupted`

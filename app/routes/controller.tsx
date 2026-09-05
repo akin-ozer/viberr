@@ -9,7 +9,10 @@ import {
   createConversation,
   listConversations,
 } from "~/server/controller/controller-conversations.server";
-import { runControllerTurn } from "~/server/controller/controller-run.server";
+import {
+  interruptControllerTurn,
+  runControllerTurn,
+} from "~/server/controller/controller-run.server";
 import {
   ControllerPage,
   NEW_CONVERSATION_PARAM,
@@ -114,6 +117,26 @@ export async function action({ request }: Route.ActionArgs) {
         return { ok: true as const, conversationId };
       }
       return { ok: true as const, conversationId };
+    }
+    if (intent === "interrupt") {
+      // The Live-run strip's Interrupt, confirmed on the page. The engine
+      // decides who may stop a controller turn (its owner or an org admin) and
+      // settles the turn so the transcript records that it was stopped.
+      const result = await interruptControllerTurn(
+        db,
+        {
+          conversationId: String(formData.get("conversationId") ?? ""),
+          runId: String(formData.get("runId") ?? ""),
+        },
+        { userId: auth.user.id, label: auth.user.email },
+      );
+      return {
+        ok: true as const,
+        toast:
+          result.outcome === "interrupted"
+            ? "Turn interrupted. The transcript records that it was stopped."
+            : "That turn had already ended.",
+      };
     }
     return data({ ok: false as const, error: "Unknown action." }, { status: 400 });
   } catch (cause) {

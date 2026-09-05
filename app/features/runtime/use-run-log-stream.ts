@@ -19,6 +19,13 @@ import {
  * `run.state-changed` it revalidates the task loader ONCE so the run strip /
  * pills flip (lifecycle is loader-owned).
  *
+ * Two SOURCES (ruling 99): a task's runs, on the task scope as above, and a
+ * controller conversation's runs, which have no task scope — their frames
+ * reach the conversation owner's `user` stream as `controller.log-appended`
+ * (`run-events.server.ts`). The controller channel only tails: the page it
+ * serves already revalidates on `controller.updated` through `useLiveUpdates`,
+ * so a lifecycle flip needs no second revalidation from here.
+ *
  * Seeded from the loader's `runtime[].lines`; the append-only design means
  * `follow`/auto-scroll in the panel just works.
  *
@@ -27,6 +34,11 @@ import {
  * loader did not ship, prepending pages, so the console stays the agent's whole
  * history on the task (UI-53) without loading it all at once.
  */
+
+/** What the stream follows: a task's runs, or a controller conversation's. */
+export type RunLogSource =
+  | { kind: "task"; projectSlug: string; taskKey: string }
+  | { kind: "controller"; conversationId: string };
 
 /** One console line with its display projection + exact stored envelope. */
 export interface StreamedLine {
@@ -87,6 +99,25 @@ const runStateChangedSchema = z.object({
   }),
 });
 
+/** The controller channel's frame: the same reference, keyed by conversation. */
+const controllerLogAppendedSchema = z.object({
+  data: z.object({
+    conversationId: z.string(),
+    runId: z.string(),
+    threadId: z.string(),
+    seq: z.number(),
+  }),
+});
+
+/** One phrase for "this stream is not yours", per source: the task channel's
+ *  logs are project-member material, a controller turn's are the conversation
+ *  owner's (and org admins'). */
+function forbiddenNote(kind: RunLogSource["kind"]): string {
+  return kind === "task"
+    ? "project-member only"
+    : "for the conversation's owner and org admins only";
+}
+
 /** Per-thread bookkeeping: the run id + the highest seq we hold. */
 interface ThreadCursor {
   runId: string;
@@ -141,8 +172,7 @@ function seedPageCursor(window: RunLogWindow): PageCursor {
 }
 
 export function useRunLogStream(input: {
-  projectSlug: string;
-  taskKey: string;
+  source: RunLogSource;
   /** thread id → { runId, the loader's window of lines, its window meta }. */
   threads: {
     threadId: string;
@@ -160,7 +190,12 @@ export function useRunLogStream(input: {
    *  Opening a stream that can only fail is worse than not opening one. */
   enabled?: boolean;
 }): RunLogState {
-  const { projectSlug, taskKey } = input;
+  const { source } = input;
+  // One key per stream: what re-seeds, what re-subscribes and what freezes.
+  const streamKey =
+    source.kind === "task"
+      ? `task:${source.projectSlug}/${source.taskKey}`
+      : `controller:${source.conversationId}`;
   const enabled = input.enabled !== false;
   const [streamError, setStreamError] = useState<string | null>(null);
   const revalidator = useRevalidator();
@@ -204,18 +239,18 @@ export function useRunLogStream(input: {
    * we already hold loses nothing.
    */
   const pagedRef = useRef<Set<string>>(new Set());
-  const taskRef = useRef(`${projectSlug} ${taskKey}`);
+  const streamRef = useRef(streamKey);
   const threadsKey =
-    `${projectSlug} ${taskKey}|` +
+    `${streamKey}|` +
     input.threads
       .map((t) => `${t.threadId}:${t.runId ?? ""}:${t.lines.length}:${t.window.headSeq}`)
       .join("|");
 
   useEffect(() => {
-    // A different task entirely → nothing is frozen, everything re-seeds.
-    const taskId = `${projectSlug} ${taskKey}`;
-    if (taskRef.current !== taskId) {
-      taskRef.current = taskId;
+    // A different task (or conversation) entirely → nothing is frozen,
+    // everything re-seeds.
+    if (streamRef.current !== streamKey) {
+      streamRef.current = streamKey;
       pagedRef.current = new Set();
     }
     const paged = pagedRef.current;
@@ -281,7 +316,7 @@ export function useRunLogStream(input: {
       ctl.abort();
       pagingRef.current = new Set();
     };
-  }, [projectSlug, taskKey]);
+  }, [streamKey]);
 
   /**
    * P13-D-11: one page older. Walks `logWindow.runIds` backwards — page the
@@ -323,7 +358,7 @@ export function useRunLogStream(input: {
           if (!res.ok) {
             fail(
               res.status === 403
-                ? "Older lines are project-member only."
+                ? `Older lines are ${forbiddenNote(source.kind)}.`
                 : `Could not load older lines: the log endpoint returned ${res.status}.`,
             );
             return;
@@ -402,7 +437,7 @@ export function useRunLogStream(input: {
         pagingRef.current.delete(threadId);
       }
     })();
-  }, []);
+  }, [source.kind]);
 
   useEffect(() => {
     // Live tailing is progressive enhancement: where the host provides no
@@ -430,11 +465,12 @@ export function useRunLogStream(input: {
           { headers: { Accept: "application/json" }, signal: abort.signal },
         );
         if (!res.ok) {
-          // UI-30: a 403 here means the viewer is not a project member. It used
-          // to be swallowed, leaving a console that silently stopped following.
+          // UI-30: a 403 here means the viewer is not a project member (or, on
+          // the controller channel, not the conversation's owner). It used to
+          // be swallowed, leaving a console that silently stopped following.
           setStreamError(
             res.status === 403
-              ? "Live tail stopped: raw run logs are project-member only."
+              ? `Live tail stopped: raw run logs are ${forbiddenNote(source.kind)}.`
               : `Live tail stopped: the log endpoint returned ${res.status}.`,
           );
           return;
@@ -471,56 +507,81 @@ export function useRunLogStream(input: {
       }
     };
 
-    const source = new EventSource(
-      buildEventsUrl([sseScopes.task(projectSlug, taskKey)]),
+    /** A reference to a run we hold a cursor for: fetch what is past it. */
+    const onAppended = (runId: string, seq: number) => {
+      const cursor = cursorsRef.current.get(runId);
+      const since = cursor ? cursor.headSeq : -1;
+      if (seq <= since) return;
+      void fetchTail(runId, since);
+    };
+
+    const stream = new EventSource(
+      buildEventsUrl([
+        source.kind === "task"
+          ? sseScopes.task(source.projectSlug, source.taskKey)
+          : sseScopes.user(),
+      ]),
     );
     // UI-03: an EventSource that receives a non-200 (an expired session 401s)
     // FAILS the connection per spec — it never reconnects. Nothing observed
     // that, so the console silently froze. Report it instead.
-    source.onerror = () => {
-      if (source.readyState === EventSource.CLOSED) {
+    stream.onerror = () => {
+      if (stream.readyState === EventSource.CLOSED) {
         setStreamError(
           "Live tail disconnected. Reload the page to resume following.",
         );
       }
     };
-    source.onopen = () => setStreamError(null);
-    source.addEventListener("run.log-appended", (event) => {
-      try {
-        const parsed = runLogAppendedSchema.safeParse(JSON.parse(event.data));
-        if (!parsed.success) return;
-        const d = parsed.data.data;
-        if (d.projectSlug !== projectSlug || d.taskKey !== taskKey) return;
-        const cursor = cursorsRef.current.get(d.runId);
-        const since = cursor ? cursor.headSeq : -1;
-        if (d.seq <= since) return;
-        void fetchTail(d.runId, since);
-      } catch {
-        // Malformed frame — ignore.
-      }
-    });
-    source.addEventListener("run.state-changed", (event) => {
-      try {
-        const parsed = runStateChangedSchema.safeParse(JSON.parse(event.data));
-        if (!parsed.success) return;
-        if (
-          parsed.data.data.projectSlug !== projectSlug ||
-          parsed.data.data.taskKey !== taskKey
-        ) {
-          return;
+    stream.onopen = () => setStreamError(null);
+    if (source.kind === "task") {
+      stream.addEventListener("run.log-appended", (event) => {
+        try {
+          const parsed = runLogAppendedSchema.safeParse(JSON.parse(event.data));
+          if (!parsed.success) return;
+          const d = parsed.data.data;
+          if (d.projectSlug !== source.projectSlug || d.taskKey !== source.taskKey) return;
+          onAppended(d.runId, d.seq);
+        } catch {
+          // Malformed frame — ignore.
         }
-        void revalidateRef.current();
-      } catch {
-        // Malformed frame — ignore.
-      }
-    });
+      });
+      stream.addEventListener("run.state-changed", (event) => {
+        try {
+          const parsed = runStateChangedSchema.safeParse(JSON.parse(event.data));
+          if (!parsed.success) return;
+          if (
+            parsed.data.data.projectSlug !== source.projectSlug ||
+            parsed.data.data.taskKey !== source.taskKey
+          ) {
+            return;
+          }
+          void revalidateRef.current();
+        } catch {
+          // Malformed frame — ignore.
+        }
+      });
+    } else {
+      // The `user` stream carries every conversation of this person; only the
+      // open one is tailed here.
+      stream.addEventListener("controller.log-appended", (event) => {
+        try {
+          const parsed = controllerLogAppendedSchema.safeParse(JSON.parse(event.data));
+          if (!parsed.success) return;
+          const d = parsed.data.data;
+          if (d.conversationId !== source.conversationId) return;
+          onAppended(d.runId, d.seq);
+        } catch {
+          // Malformed frame — ignore.
+        }
+      });
+    }
 
     return () => {
       abort.abort();
-      source.close();
+      stream.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectSlug, taskKey, enabled]);
+  }, [streamKey, enabled]);
 
   return { linesByThread, streamError, olderByThread, loadOlder };
 }

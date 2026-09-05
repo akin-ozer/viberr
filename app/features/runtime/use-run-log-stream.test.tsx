@@ -6,6 +6,7 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import {
   useRunLogStream,
   type OlderLogState,
+  type RunLogSource,
   type StreamedLine,
 } from "./use-run-log-stream";
 import { runBoundaryLine, type LogLine, type RunLogWindow } from "./runtime-types";
@@ -37,6 +38,15 @@ function DataRouter({ children }: { children: ReactNode }) {
 interface RunLogAppended {
   projectSlug: string;
   taskKey: string;
+  runId: string;
+  threadId: string;
+  seq: number;
+}
+
+/** The `controller.log-appended` frame body (ruling 99: keyed by conversation). */
+interface ControllerLogAppended {
+  conversationId: string;
+  userId: string;
   runId: string;
   threadId: string;
   seq: number;
@@ -78,7 +88,7 @@ class FakeEventSource {
   close() {
     this.closed = true;
   }
-  emit(name: string, data: RunLogAppended) {
+  emit(name: string, data: RunLogAppended | ControllerLogAppended) {
     for (const fn of this.listeners.get(name) ?? []) {
       fn(new MessageEvent(name, { data: JSON.stringify({ data }) }));
     }
@@ -121,13 +131,14 @@ let state: {
 function Probe({
   enabled = true,
   threads,
+  source = { kind: "task", projectSlug: "viberr-core", taskKey: "VIB-142" },
 }: {
   enabled?: boolean;
   threads?: Thread[];
+  source?: RunLogSource;
 }) {
   state = useRunLogStream({
-    projectSlug: "viberr-core",
-    taskKey: "VIB-142",
+    source,
     threads: threads ?? [
       { threadId: "primary", runId: "run_1", lines: [], window: win() },
     ],
@@ -542,5 +553,79 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
       );
     });
     expect(texts()).toEqual(["b0", "b1", "b2", "b3", "b4", "b5"]);
+  });
+});
+
+/**
+ * Ruling 99: the controller channel. A controller conversation's runs have no
+ * task scope, so their frames come down the owner's `user` stream as
+ * `controller.log-appended`; the console follows the OPEN conversation only.
+ */
+describe("the controller channel", () => {
+  const conversation: RunLogSource = { kind: "controller", conversationId: "cnv_1" };
+  const frame = (over: Partial<ControllerLogAppended> = {}): ControllerLogAppended => ({
+    conversationId: "cnv_1",
+    userId: "u_owner",
+    runId: "run_1",
+    threadId: "controller",
+    seq: 0,
+    ...over,
+  });
+  const tail = (text: string, seq = 0): FakeResponse => ({
+    ok: true,
+    json: () =>
+      Promise.resolve({
+        data: { threadId: "controller", headSeq: seq, lines: [{ seq, display: line(text), raw: "{}" }] },
+      }),
+  });
+  const thread: Thread = { threadId: "controller", runId: "run_1", lines: [], window: win() };
+
+  it("subscribes the user scope and tails the open conversation's frames", async () => {
+    // Canary: subscribe the task scope for both kinds, or drop the
+    // `controller.log-appended` listener, and no line ever arrives.
+    fetchMock.mockResolvedValue(tail("Reading the board."));
+    render(<Probe source={conversation} threads={[thread]} />, { wrapper: DataRouter });
+    const es = FakeEventSource.last();
+    expect(es.url).toBe("/resources/events?scope=user");
+
+    await act(async () => {
+      es.emit("controller.log-appended", frame());
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("/resources/run-log?runId=run_1&since=-1");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(state.linesByThread.controller!.map((l) => l.display.text)).toEqual(["Reading the board."]);
+  });
+
+  it("ignores another conversation's frames on the same user stream", async () => {
+    // Canary: drop the conversationId comparison and a frame from any thread
+    // of this person fetches into the open console.
+    fetchMock.mockResolvedValue(tail("elsewhere"));
+    render(<Probe source={conversation} threads={[thread]} />, { wrapper: DataRouter });
+    await act(async () => {
+      FakeEventSource.last().emit(
+        "controller.log-appended",
+        frame({ conversationId: "cnv_other", runId: "run_9" }),
+      );
+      await Promise.resolve();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(state.linesByThread.controller).toEqual([]);
+  });
+
+  it("names the conversation's owner in the refusal, not project membership", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+    render(<Probe source={conversation} threads={[thread]} />, { wrapper: DataRouter });
+    await act(async () => {
+      FakeEventSource.last().emit("controller.log-appended", frame());
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(state.streamError).toBe(
+      "Live tail stopped: raw run logs are for the conversation's owner and org admins only.",
+    );
   });
 });

@@ -372,6 +372,68 @@ describe("canReadControllerRunLog: the log follows the conversation", () => {
   });
 });
 
+// ---------------------------------------------- canInterruptControllerRun
+
+/** `canInterruptControllerRun` for one asker, against a stored run row. */
+async function mayInterrupt(userId: string, runId: string): Promise<boolean> {
+  const [{ canInterruptControllerRun }, { getRun }] = await Promise.all([
+    import("./controller-conversations.server"),
+    import("~/server/runtimes/run-store.server"),
+  ]);
+  const run = getRun(app.db, runId);
+  expect(run, `run ${runId} must exist for this assertion to mean anything`)
+    .not.toBeNull();
+  return canInterruptControllerRun(app.db, run!, { id: userId });
+}
+
+describe("canInterruptControllerRun: stopping a turn follows the conversation too", () => {
+  /**
+   * The run engine's `interruptRun` gates a task run on project membership
+   * (`run-agents`), which a controller run has none of: before this predicate
+   * the engine answered every controller interrupt with an empty member map,
+   * i.e. a refusal for the owner of the very turn. Same two people as the
+   * log, stated separately (a widening of one is a decision about that one).
+   */
+  it("the owner and a live org admin may stop the turn; a project admin may not", async () => {
+    expect(await mayInterrupt(ids.owner, CONTROLLER_RUN)).toBe(true);
+    expect(await mayInterrupt(ids.orgAdmin, CONTROLLER_RUN)).toBe(true);
+    expect(await mayInterrupt(ids.outsiderAdmin, CONTROLLER_RUN)).toBe(true);
+    expect(await mayInterrupt(ids.projectAdmin, CONTROLLER_RUN)).toBe(false);
+    expect(await mayInterrupt(ids.nonMember, CONTROLLER_RUN)).toBe(false);
+  });
+
+  it("answers only for controller runs, and fails closed on a dangling one", async () => {
+    expect(await mayInterrupt(ids.owner, PROJECT_RUN)).toBe(false);
+    expect(await mayInterrupt(ids.orgAdmin, DANGLING_RUN)).toBe(false);
+  });
+});
+
+// ----------------------------------------------------- controllerRunRoute
+
+describe("controllerRunRoute: where a controller run's live frames go", () => {
+  /**
+   * Ruling 99: the frames of a controller turn route to its conversation
+   * OWNER's user stream (there is no task scope to route on). The resolver is
+   * asked once per run by the sink and by the engine's no-handle interrupt.
+   */
+  it("names the conversation and its owner for a controller run", async () => {
+    const [{ controllerRunRoute }, { getRun }] = await Promise.all([
+      import("./controller-conversations.server"),
+      import("~/server/runtimes/run-store.server"),
+    ]);
+    expect(controllerRunRoute(app.db, getRun(app.db, CONTROLLER_RUN)!)).toEqual({
+      conversationId,
+      userId: ids.owner,
+    });
+    // A project run carrying the owner's conversation id in `task_key` (the
+    // fixture that would resolve without the kind check) routes nowhere here:
+    // its frames are task-scoped, and this must never re-route them.
+    expect(controllerRunRoute(app.db, getRun(app.db, PROJECT_RUN)!)).toBeNull();
+    // A controller run whose conversation is gone has no owner to stream to.
+    expect(controllerRunRoute(app.db, getRun(app.db, DANGLING_RUN)!)).toBeNull();
+  });
+});
+
 // ------------------------------------------- GET /resources/run-log wire
 
 /** The route's answer for one asker and one run id. */

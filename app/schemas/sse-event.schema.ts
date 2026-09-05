@@ -43,6 +43,13 @@ export const SSE_EVENT_NAMES = [
   // started/settled). Routed to the conversation OWNER's user-scoped
   // connections only; reference-only, the page revalidates its own loader.
   "controller.updated",
+  // The controller's half of the runtime stream: one reference per console
+  // line of a controller turn (`project_slug = ''`, so the task-scoped
+  // `run.log-appended` cannot carry it). Routed to the conversation OWNER's
+  // user-scoped connections; consumed ONLY by the dedicated log consumer
+  // (`SSE_STREAM_EVENTS` in event-types.ts keeps it out of the surface-wide
+  // revalidation every `user`-scoped page runs on the other names).
+  "controller.log-appended",
   // Ruling 99 — a chained goal changed (created, link advanced, redirected).
   // Project-routed like task.updated; the goals panel revalidates.
   "goal.updated",
@@ -153,6 +160,21 @@ export const sseEventSchema = z.discriminatedUnion("type", [
     data: z.object({
       conversationId: z.string().min(1),
       userId: z.string().min(1),
+    }),
+  }),
+  z.object({
+    type: z.literal("controller.log-appended"),
+    entityId,
+    occurredAt,
+    // Compact reference only, like `run.log-appended`: the console fetches the
+    // lines since `seq` from `/resources/run-log`, where the owner gate and the
+    // output redaction live.
+    data: z.object({
+      conversationId: z.string().min(1),
+      userId: z.string().min(1),
+      runId: z.string().min(1),
+      threadId: z.string().min(1),
+      seq: z.number().int().nonnegative(),
     }),
   }),
   z.object({
