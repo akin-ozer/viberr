@@ -819,6 +819,55 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
     ).toThrow();
   });
 
+  it("refuses when the remote cannot answer, instead of destroying commits", async () => {
+    // The ruling-17 guard ran `ls-remote` with NO credential, so on a private
+    // repo it always failed to authenticate — and `--exit-code` made that
+    // failure indistinguishable from "origin does not carry it", so the branch
+    // was deleted anyway and the outcome recorded a check that never happened.
+    // Canary: treat a failed ls-remote as "not on the remote" again and this
+    // returns "deleted" with the commits gone.
+    const repoDir = initWorkspaceRepo(true);
+    // A real origin the check cannot reach: the question EXISTS and goes
+    // unanswered, which is the case that must refuse.
+    git(repoDir, ["remote", "add", "origin", "https://example.invalid/acme/app.git"]);
+
+    const out = await discardLocalTaskBranch({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      branch: "vib-1-work",
+      defaultBranch: "main",
+      dataRoot: store.dataRoot,
+      // Only the REMOTE question fails; every local git call is the real one,
+      // so the branch really exists and really would be deletable.
+      exec: async (_file, args) => {
+        if (args.includes("ls-remote")) {
+          return {
+            ok: false,
+            stdout: "",
+            stderr:
+              "fatal: could not read Username for 'https://example.invalid': terminal prompts disabled",
+          };
+        }
+        try {
+          return { ok: true, stdout: git(repoDir, args.slice(2)), stderr: "" };
+        } catch (error) {
+          return { ok: false, stdout: "", stderr: String(error) };
+        }
+      },
+    });
+
+    expect(out.status).toBe("failed");
+    if (out.status === "failed") {
+      expect(out.reason).toContain("could not confirm");
+      expect(out.reason).toContain("vib-1-work");
+    }
+    // The commits are still there — nothing was destroyed on an unanswered
+    // safety question.
+    expect(() =>
+      git(repoDir, ["rev-parse", "--verify", "refs/heads/vib-1-work"]),
+    ).not.toThrow();
+  });
+
   it("steps off the branch when HEAD is on it, then deletes", async () => {
     const repoDir = initWorkspaceRepo(true);
     git(repoDir, ["checkout", "-q", "vib-1-work"]); // HEAD now ON the branch
