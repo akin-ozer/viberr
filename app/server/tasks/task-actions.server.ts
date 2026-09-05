@@ -2156,7 +2156,9 @@ async function prepareAgentReplyEvent(
   // ambiguous name is a NEW-4 failure with no other surface: the agent cannot
   // retag itself and the fan-out below would drop the handle in silence
   // (B-FD2 / S5-G3).
-  const text = withAmbiguityDisclosure(db, separated);
+  // F33-9: with the slug the disclosure also covers a handle belonging to a
+  // real person who is not a member HERE — which the fan-out drops.
+  const text = withAmbiguityDisclosure(db, separated, projectSlug);
   // F22-12: an agent's automatic final report sometimes REPEATS a mid-run
   // `post_comment` verbatim — the tool asks it not to, but that is advisory.
   // Flag (do NOT drop here) when the text repeats a comment THIS run posted; the
@@ -2165,7 +2167,9 @@ async function prepareAgentReplyEvent(
   // `text` and the un-separated form (`separated === replyText` when the
   // evidence-separation guardrail is off, so no second disclosure pass).
   const candidates =
-    separated === replyText ? [text] : [text, withAmbiguityDisclosure(db, replyText)];
+    separated === replyText
+      ? [text]
+      : [text, withAmbiguityDisclosure(db, replyText, projectSlug)];
   const duplicatedText = duplicatedOwnCommentText(
     db,
     ctx,
@@ -4092,8 +4096,13 @@ export async function applyAgentCompletionEffects(
   // packet that finally opened named the wrong reason. (The evidence-separation
   // half of this asymmetry is per-project and pre-dates this; the disclosure is
   // unconditional, so it fires on exactly the repeated text.)
+  // The SAME arguments the stored comment was written with, `projectSlug`
+  // included (F33-9) — the whole point of this line is that both sides of the
+  // comparison carry the identical transform. Omitting the slug here while the
+  // writer passes it would reopen the asymmetry described above, just on the
+  // non-member half instead of the ambiguous one.
   const replyForCompare = replyText
-    ? withAmbiguityDisclosure(db, replyText)
+    ? withAmbiguityDisclosure(db, replyText, input.projectSlug)
     : replyText;
   // Hunt 2026-08-29: the mechanical cc line varies with the DISPATCH SOURCE
   // (present only for dispatched runs, naming that run's dispatcher), so two
@@ -7433,6 +7442,9 @@ export async function resolvePacket(
           taskKey: input.taskKey,
           branch: localBranch,
           defaultBranch,
+          // The ruling-17 "is it on origin?" check needs the project's PAT, or
+          // it cannot answer on a private repo.
+          db,
         };
         if (ctx.dataRoot) discard.dataRoot = ctx.dataRoot;
         const local = await discardLocalTaskBranch(discard);
@@ -7508,6 +7520,9 @@ export async function resolvePacket(
         taskKey: input.taskKey,
         branch,
         defaultBranch,
+        // As above: the remote check needs the project's PAT to answer on a
+        // private repo, and refuses rather than guessing when it cannot.
+        db,
       };
       if (ctx.dataRoot) discard.dataRoot = ctx.dataRoot;
       const outcome = await discardLocalTaskBranch(discard);

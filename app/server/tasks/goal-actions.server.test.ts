@@ -1054,3 +1054,118 @@ describe("remove_pending_link refuses to renumber under a live reference", () =>
     ).resolves.toBeDefined();
   });
 });
+
+describe("goal link indexes stay a gapless sequence", () => {
+  it("a blank-titled link leaves no hole, and add_link cannot re-mint a live index", async () => {
+    // Numbering ran BEFORE the blank filter, so [A, "", C] produced indexes
+    // 1 and 3 with a length of 2 — and `add_link` minted `length + 1`, i.e. a
+    // SECOND index 3. Every by-index lookup (declared waits, status, the task
+    // binding) then had two links it could not tell apart.
+    // Canary: move `.filter` back after `.map` in createGoal, or restore
+    // `fm.links.length + 1` in add_link, and the duplicate returns.
+    const { createGoal, updateGoal, getGoalView } = await import(
+      "./goal-actions.server"
+    );
+    const created = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Gapless chain",
+        description: "One blank link in the middle.",
+        links: [
+          { title: "Link one", goal: "First deliverable. Done when merged." },
+          { title: "   ", goal: "Dropped: no title." },
+          { title: "Link three", goal: "Third deliverable. Done when merged." },
+        ],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+
+    const after = getGoalView(SLUG, created.goalId, { dataRoot: app.dataRoot })!;
+    expect(after.links.map((l) => l.index)).toEqual([1, 2]);
+
+    await updateGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        goalId: created.goalId,
+        action: {
+          op: "add_link",
+          title: "Link four",
+          goal: "Fourth deliverable. Done when merged.",
+        },
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+
+    const indexes = getGoalView(SLUG, created.goalId, {
+      dataRoot: app.dataRoot,
+    })!.links.map((l) => l.index);
+    expect(indexes).toEqual([1, 2, 3]);
+    expect(new Set(indexes).size, "no two links share an index").toBe(
+      indexes.length,
+    );
+  });
+});
+
+describe("removing a link sees another goal's PENDING wait on it", () => {
+  it("refuses while a sibling goal's not-yet-started link still waits on the removed index", async () => {
+    // Ruling 131(c) waits are stored BY INDEX, so a removal renumbers whatever
+    // points past it. The guard checked this goal's own links and every task's
+    // blockedBy — but a sibling goal's link only becomes a task when the chain
+    // reaches it, so a still-pending sibling declaration was invisible and got
+    // silently re-pointed at a different link.
+    // Canary: drop the `listGoals` loop from referencesToLinksFrom and the
+    // removal below succeeds instead of naming the holder.
+    const { createGoal, updateGoal } = await import("./goal-actions.server");
+    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+
+    const base = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Base chain",
+        links: [
+          { title: "Base one", goal: "One. Done when merged." },
+          { title: "Base two", goal: "Two. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    // Link 2 here is PENDING — the chain has not reached it, so it has no task.
+    await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Dependent chain",
+        links: [
+          { title: "Independent first", goal: "Runs now. Done when merged." },
+          {
+            title: "Waits on base two",
+            goal: "Later. Done when merged.",
+            blockedBy: [`${base.goalId} link 2`],
+          },
+        ],
+      },
+      actor,
+      ctx,
+    );
+
+    await expect(
+      updateGoal(
+        app.db,
+        {
+          projectSlug: SLUG,
+          goalId: base.goalId,
+          action: { op: "remove_pending_link", index: 2 },
+        },
+        actor,
+        ctx,
+      ),
+    ).rejects.toThrow(/link 2/);
+  });
+});

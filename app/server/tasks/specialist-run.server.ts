@@ -1216,6 +1216,23 @@ async function dispatchAgentRun(
   let existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
 
+  // An ARCHIVED task refuses every other governed mutation — acceptance
+  // (`archivedTaskBlockedReason`), transitions and drags
+  // (`archivedTaskMoveBlockedReason`), a scheduled occurrence
+  // (`schedule.server.ts`) and `removeReviewer` — but the dispatch checked
+  // nothing, so an abandoned task could still start a real, billable run that
+  // wrote to its workspace and its timeline. Worse, when that dispatch
+  // auto-engaged a NEW seat the seat could not be released again:
+  // `removeReviewer` refuses on archived and has no admin escape, so the only
+  // way back was to restore the task. Note this is deliberately the ARCHIVED
+  // gate only — ruling 133 licenses engaging an eligible profile at any STAGE,
+  // terminal included, so a closed-but-not-archived task is untouched here.
+  if (existing.parsed.frontmatter.archived) {
+    throw AppError.validation(
+      `${input.taskKey} is archived — restore it before running an agent on it.`,
+    );
+  }
+
   let engagement = input.profileId
     ? (existing.parsed.frontmatter.engagements.find(
         (e) => e.profileId === input.profileId,

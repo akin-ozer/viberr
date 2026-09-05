@@ -183,7 +183,14 @@ export async function createGoal(
   if (title.length < 3) {
     throw AppError.validation("Give the goal a title of at least 3 characters.");
   }
+  // Filter BEFORE numbering. Numbering first and dropping blank-titled rows
+  // afterwards left a HOLE in the sequence — [A, "", C] became indexes 1 and 3
+  // with a length of 2 — and `add_link` mints `fm.links.length + 1`, so the
+  // next link came back as another index 3 and the chain carried two links
+  // that every by-index lookup (waits, status, the task binding) could not
+  // tell apart.
   const links = input.links
+    .filter((l) => l.title.trim().length > 0)
     .map(
       (l, i): GoalLink => ({
         index: i + 1,
@@ -194,8 +201,7 @@ export async function createGoal(
         note: null,
         blockedBy: l.blockedBy ?? [],
       }),
-    )
-    .filter((l) => l.title.length > 0);
+    );
   if (links.length < 1) {
     throw AppError.validation("A goal chain needs at least one link.");
   }
@@ -342,6 +348,18 @@ function referencesToLinksFrom(
   for (const l of fm.links) {
     if (l.index !== fromIndex && affected(l.blockedBy)) holders.push(`link ${l.index}`);
   }
+  // Ruling 131(c) makes a wait on ANOTHER goal's link first-class, and that
+  // declaration lives in the sibling GOAL file. Once a sibling link's task
+  // exists the task query below catches it — but links are created LAZILY, so
+  // a still-pending sibling link has no task yet and was invisible here: the
+  // removal renumbered underneath it and silently re-pointed the wait at a
+  // different link. Same projection the task half already trusts.
+  for (const other of listGoals(db, projectSlug)) {
+    if (other.id === fm.id) continue;
+    for (const l of other.links) {
+      if (affected(l.blockedBy ?? [])) holders.push(`${other.id} link ${l.index}`);
+    }
+  }
   // SAFETY: both columns are NOT NULL on `task_projections` (`blocked_by_json`
   // carries a '[]' default), so every row answers these two strings.
   const rows = db
@@ -477,7 +495,11 @@ export async function updateGoal(
           }
           const title = op.title.trim();
           if (!title) throw AppError.validation("Give the link a title.");
-          const nextIndex = fm.links.length + 1;
+          // Highest index + 1, not length + 1: a chain that ever acquired a
+          // hole (see createGoal above) would otherwise re-mint an index that
+          // is already in use.
+          const nextIndex =
+            fm.links.reduce((max, l) => Math.max(max, l.index), 0) + 1;
           fm.links.push({
             index: nextIndex,
             title,

@@ -564,3 +564,65 @@ describe("the sweep notices a dead wait whatever killed it", () => {
     ).toHaveLength(1);
   });
 });
+
+
+describe("the archive hook and the convergent sweep state the same fact once", () => {
+  it("two archived dependencies produce two notes, not a third from the sweep", async () => {
+    // `dead` was FILTERED by the archived key, so the per-key hook spelled
+    // "VIB-5 can never complete" while the convergent sweep spelled
+    // "VIB-5, VIB-9 can never complete". The idempotence guard is an exact
+    // text match by design, so it never matched ACROSS the two doors and the
+    // sweep re-stated facts the hooks had already recorded — a duplicate
+    // timeline note and a duplicate notification for the owner.
+    // Canary: restore the `.filter((e) => archivedKey === null || …)` on
+    // `dead` and the sweep adds a third note here.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    for (const key of ["VIB-5", "VIB-9"]) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, { stage: "impl", waiting: "none" }),
+      });
+    }
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-14", {
+        stage: "impl",
+        waiting: "none",
+        blockedBy: ["VIB-5", "VIB-9"],
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runOperator = runOperatorStub();
+    const ctxWith = { dataRoot: store.dataRoot, deps: { runOperator } };
+
+    const notes = () =>
+      file(store, "VIB-14").timeline.filter(
+        (e) => e.title === "Waiting on work that cannot complete",
+      );
+
+    // Each archive is a real, new fact, so each earns its own note.
+    await setTaskArchived(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-5", archived: true },
+      actor(store, "arda"),
+      ctxWith,
+    );
+    expect(notes()).toHaveLength(1);
+    await setTaskArchived(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-9", archived: true },
+      actor(store, "arda"),
+      ctxWith,
+    );
+    expect(notes()).toHaveLength(2);
+    // The second note states the WHOLE truth, which is what makes the sweep
+    // agree with it instead of restating it in different words.
+    expect(notes()[0]!.text).toContain("VIB-5");
+    expect(notes()[0]!.text).toContain("VIB-9");
+
+    // The sweep now recognises its own sentence and adds nothing.
+    await releaseDependents(store.db, ctxWith, store.slug);
+    await noteDeadDependency(store.db, ctxWith, store.slug, null);
+    expect(notes(), "the sweep must not restate what the hooks said").toHaveLength(2);
+  });
+});

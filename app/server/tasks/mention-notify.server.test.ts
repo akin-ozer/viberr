@@ -311,6 +311,30 @@ describe("mentions stay inside the project (F33-9)", () => {
 
   const localPartOf = (email: string) => email.split("@")[0]!;
 
+  it("a MACHINE-authored comment discloses the non-member tag, which needs the project slug", () => {
+    // `withAmbiguityDisclosure`'s third argument is what lets it resolve
+    // membership at all — its own docblock says "pass it whenever the comment
+    // belongs to a project, or a non-member tag is dropped without the author
+    // being told". Every writing call site omitted it, so a machine-authored
+    // comment disclosed the AMBIGUOUS half and stayed silent about the
+    // non-member half, which the fan-out drops. An agent cannot retag itself,
+    // so its comment is the only surface a human would ever read this on.
+    // Canary: drop the slug argument and the disclosure comes back unchanged.
+    const store = setupTestStore(ctx);
+    project(store);
+    const handle = localPartOf(store.users.deniz.email);
+    const text = `@${handle} can you look at this sandbox probe?`;
+
+    // Without the slug: nothing to say, because membership is unknown.
+    expect(withAmbiguityDisclosure(store.db, text)).toBe(text);
+
+    // With it: the author is told the tag reached nobody.
+    const disclosed = withAmbiguityDisclosure(store.db, text, store.slug);
+    expect(disclosed).not.toBe(text);
+    expect(disclosed).toContain(handle);
+    expect(disclosed).toContain("not a member");
+  });
+
   it("a non-member is NOT notified, and the handle comes back as a non-delivery", () => {
     const store = setupTestStore(ctx);
     project(store);
