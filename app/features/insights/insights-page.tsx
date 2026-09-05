@@ -95,7 +95,9 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
               label="Output tokens"
               value={fmtTokens(totals.outputTokens)}
               icon="memory"
-              sub={`${fmtTokens(totals.inputTokens)} in · ${fmtTokens(totals.cachedInputTokens)} cached`}
+              // `in` is the whole prompt of every call on both backends and
+              // `cached` the subset of it served from the prompt cache.
+              sub={`${fmtTokens(totals.inputTokens)} in (${fmtTokens(totals.cachedInputTokens)} cached)`}
             />
             <StatCard
               // R26-3 (owner ruling): "Completion rate", not "Success rate" — this

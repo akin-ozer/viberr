@@ -136,6 +136,58 @@ function sinkWithSecrets(runId: string, secrets: string[], threadId = "primary")
   return createRunSink(store.db, spec(runId), { secrets });
 }
 
+/**
+ * The Claude adapter's live prompt sum over distinct API messages equalled the
+ * result's input on every stored run, so a non-empty result BELOW the live sum
+ * can only mean the live fold double-counted (an SDK that stopped sending
+ * `message.id`). The max fold would then keep the larger, wrong number in
+ * silence; the sink says so instead. An errored result carries an empty usage
+ * (zeros), which is not that signature.
+ */
+describe("the sink names a result that lands below the live sum", () => {
+  const usageLine = (usage: { input_tokens: number; cached_input_tokens: number; output_tokens: number }, isResult = false): EmittedLine => ({
+    raw: JSON.stringify({ type: isResult ? "result" : "assistant" }),
+    display: { t: "00:00:00", ev: isResult ? "result" : "text", tag: isResult ? "result" : "assistant", text: "x" },
+    facts: isResult ? { usage, isResult: true } : { usage },
+    occurredAt: new Date().toISOString(),
+  });
+
+  it("warns once, and the row keeps the larger figure", () => {
+    // Canary: drop the `f.isResult && … < inputTokens` warning in the sink.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const runId = "run_overshoot";
+    const sink = sinkFor(runId);
+    sink.line(usageLine({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 10 }));
+    sink.line(usageLine({ input_tokens: 900, cached_input_tokens: 700, output_tokens: 300 }, true));
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toBe("run usage: the result's input is below the live sum");
+    expect(warn.mock.calls[0]![1]).toMatchObject({ runId, live: 1000, result: 900 });
+    // SAFETY: the statement selects two INTEGER NOT NULL columns (0001_baseline)
+    // of the row `sinkFor` just upserted under this id.
+    const row = store.db.prepare(`SELECT input_tokens, output_tokens FROM agent_runs WHERE id = ?`).get(runId) as { input_tokens: number; output_tokens: number };
+    expect(row).toEqual({ input_tokens: 1000, output_tokens: 300 });
+    warn.mockRestore();
+  });
+
+  it("stays quiet for an errored result's empty usage", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const sink = sinkFor("run_quiet");
+    sink.line(usageLine({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 10 }));
+    sink.line(usageLine({ input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 }, true));
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("stays quiet for a result that matches the live sum", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const sink = sinkFor("run_exact");
+    sink.line(usageLine({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 10 }));
+    sink.line(usageLine({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 300 }, true));
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
 describe("createLineRedactor", () => {
   it("replaces the credential values this process injects into agent envs", () => {
     const redact = createLineRedactor();

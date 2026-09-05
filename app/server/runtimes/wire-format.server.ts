@@ -163,10 +163,16 @@ const claudeEnvelopeFields = z.object({
   usage: z
     .object({
       input_tokens: wireCount,
+      cache_creation_input_tokens: wireCount,
       cache_read_input_tokens: wireCount,
       output_tokens: wireCount,
     })
-    .catch(() => ({ input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 })),
+    .catch(() => ({
+      input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      output_tokens: 0,
+    })),
   total_cost_usd: wireCount,
   num_turns: wireCount,
   duration_ms: wireCount,
@@ -268,6 +274,13 @@ type CodexEnvelope = z.infer<typeof codexEnvelopeFields>;
  *     on both adapters' hottest path, to buy a type the schemas re-widen on the
  *     very next statement.
  */
+/** The result line's token clause, one shape on both backends: the whole
+ *  prompt, its cache-read subset, the output. */
+function usageText(inTok: number, cached: number, outTok: number): string {
+  const k = (n: number) => `${(n / 1000).toFixed(1)}k`;
+  return `in ${k(inTok)} (cached ${k(cached)}) · out ${k(outTok)} tokens`;
+}
+
 export function projectEnvelope(
   backend: "claude" | "codex",
   // eslint-disable-next-line anti-slop/no-unknown-parameters -- see above
@@ -378,7 +391,18 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
       return { display: { t, ev: isError ? "err" : "out", tag: "tool_result", text }, facts: {} };
     }
     case "result": {
-      const inTok = e.usage.input_tokens;
+      // Claude reports the prompt in three DISJOINT figures: the uncached slice
+      // (`input_tokens`, two tokens per call on every real run), the tokens
+      // written to the prompt cache and the tokens read back from it. Codex's
+      // `input_tokens` is the whole prompt with its cache subsets inside it,
+      // and every reader of the run row (the strip's Tokens, Insights) adds
+      // input to output as "tokens processed". So the row's `input_tokens` is
+      // the WHOLE prompt on both backends and `cached_input_tokens` the
+      // cache-read subset of it. Before this the Claude row held the uncached
+      // slice alone, and the strip read a median 60x below the provider's own
+      // total on the runs this instance had stored.
+      const inTok =
+        e.usage.input_tokens + e.usage.cache_creation_input_tokens + e.usage.cache_read_input_tokens;
       const cached = e.usage.cache_read_input_tokens;
       const outTok = e.usage.output_tokens;
       const durSec = Math.round(e.duration_ms / 1000);
@@ -396,7 +420,7 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
         ? `${outcome} · ${e.num_turns} turns` +
           (e.api_error_status != null ? ` · api ${e.api_error_status}` : "") +
           (e.terminal_reason ? ` · ${e.terminal_reason}` : "")
-        : `success · ${e.num_turns} turns · ${durSec}s · $${e.total_cost_usd.toFixed(2)}`;
+        : `success · ${e.num_turns} turns · ${durSec}s · $${e.total_cost_usd.toFixed(2)} · ${usageText(inTok, cached, outTok)}`;
       return {
         display: {
           t,
@@ -485,8 +509,7 @@ function projectCodex(e: CodexEnvelope, t: string): ProjectedEnvelope | null {
       const inTok = e.usage.input_tokens;
       const cached = e.usage.cached_input_tokens;
       const outTok = e.usage.output_tokens;
-      const text =
-        `in ${(inTok / 1000).toFixed(1)}k (cached ${(cached / 1000).toFixed(1)}k) · out ${(outTok / 1000).toFixed(1)}k tokens`;
+      const text = usageText(inTok, cached, outTok);
       return {
         display: { t, ev: "result", tag: "turn.completed", text, usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok } },
         // Each completed turn counts as one turn (codex has no cumulative

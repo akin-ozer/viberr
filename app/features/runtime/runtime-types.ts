@@ -77,7 +77,8 @@ export interface LogLine {
   input?: Record<string, JsonValue> | null;
   /** Codex non-zero exit → the line is `err` + raw `status:"failed"`. */
   exit?: number;
-  /** Claude result stats → raw result envelope fields. */
+  /** Claude result stats, in the run row's terms: `in` is the whole prompt
+   *  (uncached + cache writes + cache reads), `cached` its cache-read subset. */
   stats?: {
     subtype?: string;
     dur: number;
@@ -314,7 +315,11 @@ export interface RunView {
   /** Display-only finished label (mock `finished`, e.g. "9:41"). */
   finished: string | null;
   turns: number;
-  /** Cumulative real token usage (input+output). No fabrication. */
+  /** Total tokens the provider processed for the run: the whole prompt of
+   *  every call (cache reads and writes included) plus the output, i.e. the
+   *  row's `input_tokens + output_tokens`, which means the same thing on both
+   *  backends (wire-format.server.ts normalizes Claude's three prompt figures
+   *  into one). Real usage envelopes only; a lower bound until the result. */
   tokens: number;
   /** The projected log lines for the group's bounded window (newest last),
    * with UI-53's synthetic `── resumed · run N of M ──` boundaries between

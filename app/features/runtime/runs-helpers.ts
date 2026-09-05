@@ -86,6 +86,9 @@ export function fmtClock(s: number): string {
 }
 
 export function fmtTok(n: number): string {
+  // An honest count (the whole prompt of every call) crosses a million on a
+  // long run; "4526k" is not a number a person reads.
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   return n >= 100000 ? Math.round(n / 1000) + "k" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
 }
 

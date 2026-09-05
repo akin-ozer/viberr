@@ -230,7 +230,10 @@ inventory is not regenerated automatically and has drifted; the verified module 
     the mock pills (queued → neutral "queued"; interrupted → neutral
     "interrupted · by \<actor\>" footer). Raw NDJSON/JSONL is truth; the log line display is
     a projection. Elapsed derives from `startedAt`; tokens come from real usage envelopes
-    only, never estimates.
+    only, never estimates. The stored token columns carry ONE meaning on both backends:
+    `input_tokens` is the whole prompt of every call (Claude's cache reads and writes
+    folded in at the wire boundary), `cached_input_tokens` its cache-read subset
+    ([agents-and-runtime §3.1](../domain/agents-and-runtime.md#31-persistence)).
 12. **PR states.** merged → done pill; open/draft → "in review"; closed-unmerged → risk
     pill "closed". Sync pill precedence is merged > behind > synced, derived from real
     compare data.
