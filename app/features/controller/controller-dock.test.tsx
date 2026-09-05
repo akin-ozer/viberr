@@ -110,8 +110,11 @@ function mount(opts: MountOptions) {
 /**
  * Review finding 11: the mount-time restore effect writes the open flag back
  * only after it has read it, so this is a true happens-after — waiting on the
- * write is how a test knows the restore has landed and its clicks will not be
- * overwritten by it.
+ * write is how a test knows the restore has landed.
+ *
+ * It is no longer how a test protects a click from it: the restore now yields
+ * to an `open` the person has already set, and the test below pins that. This
+ * is only for the cases that want the settled per-tab state before they look.
  */
 async function restored(expected: "0" | "1" = "0") {
   await waitFor(() =>
@@ -147,6 +150,45 @@ describe("the controller dock (ruling 121)", () => {
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByLabelText("Message to the controller")),
     );
+    expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("1");
+  });
+
+  it("keeps an open the person clicked before the restore had read storage", async () => {
+    // The flake this closed. React flushes passive effects AFTER the commit
+    // that paints the trigger, so the button is on screen and clickable while
+    // the mount-time restore has still not read sessionStorage — and the
+    // restore used to write its own answer over the person's. Under full-suite
+    // load that ordering came up about one run in three, and took a different
+    // test with it each time (the poll, the two sends, the focus fallback, the
+    // entry animation), every one of them failing on a dock that had simply
+    // stayed shut.
+    //
+    // Clicking from INSIDE the read is how a test gets that interleaving on
+    // purpose rather than waiting for a loaded machine to hand it over: both
+    // updates land in one batch, the person's first, which is the losing order.
+    const storage: Storage = Object.getPrototypeOf(window.sessionStorage);
+    const read = storage.getItem;
+    const spy = vi
+      .spyOn(storage, "getItem")
+      .mockImplementation(function (this: Storage, key: string) {
+        if (key === "viberr.dock.open") {
+          document.querySelector<HTMLButtonElement>(".dock-fab")?.click();
+        }
+        return read.call(this, key);
+      });
+    try {
+      mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView() });
+      await screen.findByRole("dialog", { name: "Controller dock" });
+    } finally {
+      spy.mockRestore();
+    }
+    // The click won outright, and counts as the person's own open: focus goes
+    // to the composer the moment the view enables it, the way it does for any
+    // other open they asked for…
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText("Message to the controller")),
+    );
+    // …and it is their choice the tab remembers, not the stored one.
     expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("1");
   });
 
@@ -303,11 +345,11 @@ describe("the controller dock (ruling 121)", () => {
     const trigger = await screen.findByRole("button", { name: "Controller · viberr" });
     expect(trigger.hasAttribute("aria-controls")).toBe(false);
     fireEvent.click(trigger);
-    // The panel mounts only once the stub's loader resolves, so this wait is
-    // scheduler-bound, not behaviour-bound: on a saturated machine (the full
-    // suite runs 340+ files in parallel) the default 1s lapses while the app
-    // is still correct. The assertion is unchanged — the dialog must open.
-    await screen.findByRole("dialog", { name: "Controller dock" }, { timeout: 5_000 });
+    // No loader stands between the click and the panel: `open` alone renders
+    // it, inside the click's own act. A 5 s timeout used to sit here for a
+    // "saturated machine" that was really the restore race above — a dock that
+    // never opened waits out any budget you give it.
+    await screen.findByRole("dialog", { name: "Controller dock" });
     expect(trigger.getAttribute("aria-controls")).toBe("controller-dock-panel");
     expect(document.getElementById("controller-dock-panel")).not.toBeNull();
   });
