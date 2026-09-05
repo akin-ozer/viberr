@@ -202,11 +202,23 @@ function projectRow(
         TAGGED_FAILURE_KINDS.find((k) => (terminal?.tag ?? "").endsWith(`·${k}`)));
   const classifiedUnavailable =
     failureKind === "quota" || failureKind === "auth" || failureKind === "unavailable";
+  const taggedUnavailable = lines.some(
+    (l) => l.ev === "err" && l.tag === "run·unavailable",
+  );
+  // A real FALLBACK, which is what the note above says it is. As an `||` arm
+  // the raw prose scan also fired for runs that WERE classified — as something
+  // else — so a hung or turn-capped run whose log tail merely mentioned "rate
+  // limit", "429" or "quota" (an agent quoting an API error it handled, say)
+  // was reported as a backend-availability failure and offered a retry on the
+  // other backend, which fixes nothing. When the run carries a classification,
+  // that classification decides; the scan only speaks for lines written before
+  // the class existed.
+  const classified = failureKind !== undefined || taggedUnavailable;
   const failedBackendUnavailable =
     row.state === "error" &&
-    (classifiedUnavailable ||
-      lines.some((l) => l.ev === "err" && l.tag === "run·unavailable") ||
-      isBackendUnavailableError(raw));
+    (classified
+      ? classifiedUnavailable || taggedUnavailable
+      : isBackendUnavailableError(raw));
   const view: ProjectedRunView = {
     id: row.thread_id,
     serverRunId: row.id,

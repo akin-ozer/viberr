@@ -1803,6 +1803,12 @@ export function markMcpServerUnreachableFromRun(
   name: string,
   reason: string,
 ): void {
+  // SAFETY: `id` is TEXT NOT NULL on `org_mcp_servers`, so a matched row always
+  // carries one; an unmatched name is the documented no-op.
+  const row = db
+    .prepare(`SELECT id FROM org_mcp_servers WHERE name = ?`)
+    .get(name) as { id: string } | undefined;
+  if (!row) return;
   const now = new Date().toISOString();
   db.prepare(
     `UPDATE org_mcp_servers
@@ -1810,6 +1816,13 @@ export function markMcpServerUnreachableFromRun(
            updated_at = ?
      WHERE name = ?`,
   ).run(now, reason, now, name);
+  // This writes the SAME shared health row every other MCP writer publishes on
+  // (`saveMcpServer`, `testMcpServer`), but it was the one that stayed silent —
+  // and it is the writer most likely to fire while somebody is looking, because
+  // it runs from a background agent run rather than from their own click. An
+  // open Settings tab therefore kept rendering a server as up until the next
+  // manual reload.
+  publishResourceUpdated("mcp", row.id);
 }
 
 // ---------------------------------------------------------------- skills

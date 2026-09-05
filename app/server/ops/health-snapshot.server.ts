@@ -119,16 +119,26 @@ export function healthSnapshot(
   if (!kbWatcher) degraded.push("kbWatcher");
   if (!lock) degraded.push("lock");
   if (disk && disk.status !== "ok") degraded.push("disk");
-  // F32-4/F32-9: a backend whose last word was "refused" cannot run work until
-  // the credential is fixed or the window reopens — that is degraded in the
-  // plain sense, and the entry names which fact so the reader is not sent
-  // hunting. An unconfigured backend stays NOT degraded (R17-5); this is only
-  // ever a configured backend that answered a real run with a refusal.
+  // Ruling 146 (owner, 2026-09-06) — SUPERSEDES the F32-4/F32-9 entries that
+  // used to be pushed here (`credential:<backend>` / `quota:<backend>`).
+  //
+  // Those predate ruling 127, when a backend credential was a deployment-wide
+  // fact and "Claude is refused" really was an instance outage. Since 127 the
+  // credential is PER PERSON, so the refusal this reads is one person's — and
+  // pushing it into `degraded` made `?probe=readiness` answer 503 for the whole
+  // instance because somebody's key expired, which drains traffic from an
+  // instance that is serving everyone else perfectly well.
+  //
+  // It loses no visibility: the refusal is already rendered per person on
+  // Insights (the account label, the refusing run and the provider's own text)
+  // and on Profile. This endpoint reports INSTANCE facts, and the only
+  // instance-level backend fact is `backends.<b>.connectedUsers` below — which
+  // is a count, never a verdict, exactly as the route's contract says.
+  //
+  // The readings themselves still ride the RESPONSE BODY (`quota` below), so an
+  // operator polling this endpoint sees them; they simply no longer decide
+  // whether the instance is ready to serve.
   const quota = latestBackendRateLimits(db);
-  for (const row of quota) {
-    if (row.credentialRefused) degraded.push(`credential:${row.backend}`);
-    if (row.exhausted) degraded.push(`quota:${row.backend}`);
-  }
 
   const browser = browserRuntimeStatus();
 

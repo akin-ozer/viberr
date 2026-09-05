@@ -876,6 +876,46 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     expect(() => markMcpServerUnreachableFromRun(db, "nope", "x")).not.toThrow();
   });
 
+  it("F20-10 sibling: the run-mount writer announces the change like every other MCP writer", async () => {
+    // It writes the SAME shared health row `saveMcpServer` and `testMcpServer`
+    // publish `resource.updated` on, but stayed silent — and it is the writer
+    // most likely to fire while somebody is looking, because it runs from a
+    // background agent run rather than from their own click. An open Settings
+    // tab kept rendering the server as up until a manual reload.
+    // Canary: drop the publishResourceUpdated call and no event arrives.
+    const { db } = setup();
+    const { connectSseClient, resetSseBrokerForTests } = await import(
+      "~/server/events/sse-broker.server"
+    );
+    const { mcp } = await saveMcpServer(
+      db,
+      { name: "everything", transport: "stdio", target: "npx -y @mcp/everything", cred: "" },
+      ACTOR,
+      { spawnImpl: fakeMcpSpawn(16) },
+    );
+
+    resetSseBrokerForTests();
+    const writes: string[] = [];
+    connectSseClient({
+      userId: "u_watcher",
+      scopes: [{ kind: "user" }],
+      lastEventId: null,
+      write: (chunk) => writes.push(chunk),
+    });
+    try {
+      markMcpServerUnreachableFromRun(db, "everything", "it failed to start");
+      const events = writes
+        .flatMap((chunk) => chunk.split("\n"))
+        .filter((line) => line.startsWith("event: "))
+        .map((line) => line.slice("event: ".length));
+      expect(events).toContain("resource.updated");
+      // …naming the row that actually changed.
+      expect(writes.join("")).toContain(mcp.id);
+    } finally {
+      resetSseBrokerForTests();
+    }
+  });
+
   it("F20-8: a broken-pipe write to a fast-exiting child settles `down`, never crashes", async () => {
     // Without the stdin 'error' handler the async EPIPE is an uncaught fatal
     // that took the whole server down. Canary: remove the handler and the

@@ -42,6 +42,8 @@ import {
   listMcpServers,
   listSkills,
   resolveStoreTarget,
+  KB_REFRESH_MODES,
+  type KbRefreshMode,
   saveKnowledgeBase,
   saveMcpServer,
   saveSkill,
@@ -472,7 +474,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       {
         id: z.string().optional().describe("Existing KB id to update; omit to create."),
         name: z.string(),
-        refresh: z.enum(["manual", "on change", "nightly"]).optional(),
+        // The shared constant, not a hand-copied list: "nightly" was retired
+        // when it turned out nothing ever scheduled it (see KB_REFRESH_MODES),
+        // but this tool kept advertising it, so the controller could pick a
+        // mode that was silently coerced to "on change" behind its back.
+        refresh: z.enum(KB_REFRESH_MODES).optional(),
         doc: z
           .object({
             path: z.string().describe("File name inside the KB folder, e.g. conventions.md."),
@@ -485,7 +491,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         async (args: {
           id?: string;
           name: string;
-          refresh?: "manual" | "on change" | "nightly";
+          refresh?: KbRefreshMode;
           doc?: { path: string; content: string };
         }) => {
           requireOrgAdmin("manage knowledge bases");

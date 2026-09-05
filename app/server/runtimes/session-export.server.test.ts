@@ -292,6 +292,36 @@ describe("buildResumeScript", () => {
     expect(decodeEmbedded(body)).toBe(expected);
   });
 
+  it("scrubs a provider credential the transcript captured, and stays parseable", () => {
+    // The run sink redacts Viberr's own .jsonl and the console (P13-U-1), but
+    // this bundle embedded the VENDOR's transcript verbatim — the sibling
+    // channel that bypassed it. One `env`-printing tool call puts the run's
+    // credential in there, and since ruling 127 that is somebody's PERSONAL
+    // key, while any member of the run's project can download this file.
+    // Canary: drop the `redact(...)` around the readFileSync and the token
+    // below comes back in the decoded payload.
+    const leaked = `sk-ant-api03-${"x".repeat(40)}`;
+    const lines = [
+      { type: "assistant", sessionId: sid, cwd, message: { role: "assistant", content: `ANTHROPIC_API_KEY=${leaked}` } },
+    ];
+    writeClaudeSession(sid, cwd, lines);
+    const located = locateTranscript("claude", OWNER, sid)!;
+    const { body } = buildResumeScript(located, { taskKey: "CTL-1" });
+
+    const decoded = decodeEmbedded(body);
+    expect(decoded, "the credential must not ride the download").not.toContain(leaked);
+    // Still a usable transcript: every line parses, and the envelope around
+    // the redacted value is intact so `claude --resume` can read it.
+    // SAFETY: every line written by `writeClaudeSession` above is a JSON
+    // object carrying a string `type`, and redaction only shortens string
+    // VALUES (the marker has no quote or backslash), so the shape is unchanged.
+    const parsed = decoded
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map((l) => JSON.parse(l) as { type: string });
+    expect(parsed.map((l) => l.type)).toEqual(["assistant"]);
+  });
+
   it("codex: keeps the rollout filename and prints `codex resume`", () => {
     const dir = codexDir("05");
     const origName = `rollout-2026-07-05T12-00-00-${sid}.jsonl`;

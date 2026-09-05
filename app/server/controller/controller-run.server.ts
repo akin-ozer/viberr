@@ -411,6 +411,14 @@ async function startTurnRun(
       workdir,
       actor,
     };
+    // The controller's model, like its effort, is read fresh per turn — the
+    // start path below already resolves it. Without this a model changed in
+    // settings never reached an EXISTING conversation (every turn after the
+    // first resumes), so the instance kept running the old one while the
+    // system prompt built above named the new one.
+    // `ResumeRunInput.model` exists for exactly this: "lets a comment-resume
+    // pick up the agent profile's CURRENT model".
+    resumeInput.model = resolveRunModel("claude", config.model);
     if (config.effort) resumeInput.effort = config.effort;
     if (dataRoot) resumeInput.dataRoot = dataRoot;
     const resumed = await resumeRun(db, resumeInput);

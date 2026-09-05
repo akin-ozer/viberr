@@ -212,6 +212,54 @@ describe("projectRunsForTask grouping", () => {
     expect(view!.altBackend).toBeUndefined();
   });
 
+  it("a CLASSIFIED failure is not overridden by quota words in its own log tail", () => {
+    // The raw prose scan is documented as a fallback for lines written before
+    // the failure class existed, but it was an `||` arm, so it also fired for
+    // runs that WERE classified — as something else. A hung or turn-capped run
+    // whose console merely mentions "rate limit"/"429"/"quota" (an agent
+    // quoting an API error it already handled) was then reported as a
+    // backend-availability failure and offered a retry on the other backend,
+    // which fixes nothing and hides the real cause.
+    // Canary: put `isBackendUnavailableError(raw)` back as an `||` arm.
+    insert({
+      id: "run_c",
+      threadId: "primary",
+      kind: "primary",
+      backend: "claude",
+      state: "error",
+    });
+    insertRunLine(db, {
+      runId: "run_c",
+      seq: 0,
+      occurredAt: "2026-07-12T00:00:00.000Z",
+      raw: JSON.stringify({
+        type: "error",
+        text: "the upstream API answered 429 rate limit; retried and continued",
+      }),
+      display: {
+        t: "00:00:00",
+        ev: "err",
+        tag: "run·max_turns",
+        text: "the run exceeded its turn cap",
+        failure: {
+          kind: "max_turns",
+          resetsAt: null,
+          window: null,
+          windowRejected: false,
+          apiError: null,
+          apiErrorStatus: null,
+          terminalReason: null,
+        },
+      },
+    });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.state).toBe("error");
+    expect(
+      view!.failedBackendUnavailable,
+      "the classification decides, not words in the log",
+    ).toBeUndefined();
+  });
+
   it("does NOT flag a genuine task failure as backend-unavailable", () => {
     insert({ id: "run_f", threadId: "primary", kind: "primary", backend: "codex", state: "error" });
     insertRunLine(db, {

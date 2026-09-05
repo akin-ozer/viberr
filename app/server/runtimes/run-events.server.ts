@@ -64,7 +64,14 @@ export function publishRunLogAppended(input: {
         seq: input.seq,
       },
     },
-    { projectSlug: input.projectSlug, taskKey: input.taskKey },
+    // Ruling-free perf fix (owner, 2026-09-06): keep project- and task-scoped
+    // delivery exactly as it is — a board showing this task is a legitimate
+    // recipient and that is pinned — but keep this OFF the all-projects
+    // firehose. It is one reference per console line, and Home subscribes
+    // `projects`, so a single agent run was re-running Home's loaders once per
+    // line of output. `run.state-changed` stays on the firehose: that one is a
+    // real project fact and fires a handful of times per run.
+    { projectSlug: input.projectSlug, taskKey: input.taskKey, skipFirehose: true },
   );
 }
 

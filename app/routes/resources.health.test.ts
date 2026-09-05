@@ -172,6 +172,41 @@ describe("/resources/health — honest status (gap 17)", () => {
     expect(body.lock).toBeNull();
   });
 
+  it("ruling 146: one person's refused credential does not make the INSTANCE unready", async () => {
+    // Before ruling 146 this pushed `credential:<backend>` into `degraded`, so
+    // `?probe=readiness` answered 503 for the whole deployment because ONE
+    // member's key expired — and an orchestrator drained traffic from an
+    // instance serving everyone else fine. Since ruling 127 the credential is
+    // per person, so that is not an instance fact.
+    // Canary: push `credential:`/`quota:` back into `degraded` in
+    // health-snapshot.server.ts and the readiness probe below 503s again.
+    const { getDb } = await import("~/server/db/sqlite.server");
+    const { recordBackendCredentialRefusal, clearBackendCredentialRefusal } =
+      await import("~/server/runtimes/backend-quota.server");
+    const db = getDb();
+    recordBackendCredentialRefusal(db, "claude", {
+      credentialUserId: "u_selin",
+      credentialLabel: "selin@viberr.dev",
+      providerText: "authentication_failed: the api key is invalid",
+      runId: "run_1",
+      observedAt: "2026-09-06T00:00:00.000Z",
+    });
+    try {
+      const { body, status } = await probe();
+      expect(body.status).toBe("ok");
+      expect(body.degraded).toEqual([]);
+      expect(status).toBe(200);
+      // …and the instance is still READY to serve, which is the whole point.
+      const ready = await probe("/resources/health?probe=readiness");
+      expect(ready.status).toBe(200);
+      // The reading is not lost — it rides the body, where Insights and
+      // Profile already render it per person.
+      expect(JSON.stringify(ready.body)).toContain("authentication_failed");
+    } finally {
+      clearBackendCredentialRefusal(db, "claude");
+    }
+  });
+
   it("reports a per-backend CONNECTED-USER count, and zero is never degraded (R17-5, ruling 127)", async () => {
     // Ruling 127 replaced "is this backend configured on the instance" with the
     // only instance-level fact that survives a per-person credential model: how

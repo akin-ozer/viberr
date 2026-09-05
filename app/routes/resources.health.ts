@@ -43,6 +43,14 @@ import { healthSnapshot } from "~/server/ops/health-snapshot.server";
  *    deployment, and reporting zero as a fault would make a normal instance
  *    alarm forever (R17-5: a never-checked thing renders neutral, not
  *    alarming).
+ *  - A per-person BACKEND fact — one member's refused credential, one member's
+ *    spent quota — is **NOT** degraded either (ruling 146, owner 2026-09-06,
+ *    superseding the F32-4/F32-9 entries). Those entries predate ruling 127,
+ *    when a credential was deployment-wide and a refusal really was an instance
+ *    outage; now it is one person's key, and letting it 503 this probe drained
+ *    traffic from an instance serving everyone else. The readings stay in the
+ *    response body (`quota`) and are rendered per person on Insights and
+ *    Profile — this endpoint reports instance facts, not somebody's account.
  *  - `disk: null` (unmeasurable) is NOT degraded — "we could not measure" is
  *    not "there is no space", and `build` identity is informational only.
  *

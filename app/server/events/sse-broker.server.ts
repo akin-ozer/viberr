@@ -83,6 +83,14 @@ export interface SseRoute {
   taskKey?: string;
   userId?: string;
   broadcast?: boolean;
+  /** Skip the all-projects firehose. For a high-frequency event whose only
+   *  consumers are scoped to the project or the task — one reference PER
+   *  CONSOLE LINE of a run, in practice. Home subscribes `projects`, so
+   *  without this a single agent run re-ran Home's loaders once per line of
+   *  output. Project- and task-scoped subscribers are unaffected: a board
+   *  showing that task IS a legitimate recipient (pinned in
+   *  run-events.server.test.ts) and still gets it. */
+  skipFirehose?: boolean;
 }
 
 export function routeMatchesConnection(
@@ -98,7 +106,7 @@ export function routeMatchesConnection(
   if (route.broadcast) return true;
   if (route.projectSlug === undefined) return false;
   return conn.scopes.some((s) => {
-    if (s.kind === "projects") return true; // all-projects firehose
+    if (s.kind === "projects") return route.skipFirehose !== true;
     if (s.kind === "project") return s.slug === route.projectSlug;
     if (s.kind === "task") {
       return (
