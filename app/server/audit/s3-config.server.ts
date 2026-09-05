@@ -4,6 +4,10 @@ import {
   openSecretRotating,
   sealSecret,
 } from "~/server/secrets/secret-box.server";
+import {
+  recordAudit,
+  type AuditActor,
+} from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
 import type { S3Config } from "./s3-put.server";
 
@@ -123,6 +127,7 @@ export function setS3AuditConfig(
     accessKeyId: string;
     secretAccessKey?: string;
   },
+  actor: AuditActor,
 ): void {
   const bucket = input.bucket.trim();
   const region = input.region.trim();
@@ -156,9 +161,40 @@ export function setS3AuditConfig(
     secretBox,
     new Date().toISOString(),
   );
+  // This row decides WHERE the audit log gets shipped, so repointing it is a
+  // governed action in the plain sense — and it was the one governed action
+  // that left no trace in the log it redirects. Non-secret fields only: the
+  // access key id is what the settings form already renders; the secret is a
+  // sealed box and never leaves this module.
+  recordAudit(db, {
+    action: "org.audit_export.target_saved",
+    actor,
+    subjectKind: "s3_audit_config",
+    subjectId: ROW_ID,
+    details: {
+      bucket,
+      region,
+      prefix: input.prefix?.trim() ?? "",
+      endpoint: input.endpoint?.trim() ?? "",
+      accessKeyId,
+      created: existing === null,
+      secretRotated: Boolean(newSecret),
+    },
+  });
 }
 
 /** Remove the S3 target entirely. */
-export function clearS3AuditConfig(db: DatabaseSync): void {
+export function clearS3AuditConfig(db: DatabaseSync, actor: AuditActor): void {
+  const existing = readRow(db);
   db.prepare(`DELETE FROM s3_audit_config WHERE id = ?`).run(ROW_ID);
+  recordAudit(db, {
+    action: "org.audit_export.target_cleared",
+    actor,
+    subjectKind: "s3_audit_config",
+    subjectId: ROW_ID,
+    details: {
+      bucket: existing?.bucket ?? "",
+      region: existing?.region ?? "",
+    },
+  });
 }

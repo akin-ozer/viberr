@@ -51,6 +51,7 @@ import {
   serializeAuditExport,
 } from "~/server/audit/audit-export.server";
 import { putObjectToS3 } from "~/server/audit/s3-put.server";
+import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { listRecentAuditEvents } from "~/server/audit/audit-browse.server";
 import {
   controllerSectionLocks,
@@ -273,7 +274,7 @@ export async function action({ request }: Route.ActionArgs) {
             accessKeyId: field("accessKeyId"),
             // Blank keeps the existing sealed secret (edit without re-typing).
             secretAccessKey: field("secretAccessKey"),
-          });
+          }, actor);
         } catch (error) {
           return fail(
             error instanceof Error ? error.message : "Could not save the S3 target.",
@@ -282,7 +283,7 @@ export async function action({ request }: Route.ActionArgs) {
         return ok("S3 audit-export target saved.");
       }
       case "s3-config-clear": {
-        clearS3AuditConfig(db);
+        clearS3AuditConfig(db, actor);
         return ok("S3 audit-export target removed.");
       }
       case "audit-export-s3": {
@@ -322,6 +323,23 @@ export async function action({ request }: Route.ActionArgs) {
             `S3 upload failed (HTTP ${result.status}). ${result.error.slice(0, 200)}`.trim(),
           );
         }
+        // Shipping the whole audit log off-box is itself a governed action —
+        // and the only record of it used to be the object in the bucket, which
+        // is precisely the place someone covering their tracks controls.
+        recordAudit(db, {
+          action: "org.audit_export.shipped",
+          actor,
+          subjectKind: "s3_audit_config",
+          subjectId: "s3",
+          details: {
+            bucket: config.bucket,
+            region: config.region,
+            objectKey,
+            format,
+            rowCount: rows.length,
+            bytes: body.byteLength,
+          },
+        });
         return ok(`Exported ${rows.length} audit rows to S3 (${objectKey}).`);
       }
 

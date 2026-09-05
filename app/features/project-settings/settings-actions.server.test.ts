@@ -17,11 +17,15 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { WorkflowBoundary } from "~/schemas/project-file.schema";
 import { branchCleanupOnMerge } from "~/server/github/branch-cleanup.server";
+import { recordRepoAccess } from "~/server/github/repo-health.server";
+import { createNotification } from "~/server/projections/notifications.server";
 import { findUserByEmail } from "~/server/auth/user-store.server";
 import { listOrgUsers } from "~/server/org/org-users.server";
 import {
   addStage,
+  deleteProject,
   inviteMember,
+  removeMember,
   removeStage,
   renameStage,
   reorderStages,
@@ -824,5 +828,157 @@ describe("the reserved task prefix", () => {
     );
     expect(ok.changed).toBe(true);
     expect(prefixOf(store)).toBe("GOAT");
+  });
+});
+
+describe("deleteProject leaves no app-owned rows behind", () => {
+  it("clears the credential binding and the cached repo probe with the project", async () => {
+    // Neither table has an FK to `projects` and a rebuild deliberately does not
+    // touch them, so both outlived the delete. The binding is the one with
+    // visible fallout: the connections panel counts these rows per PAT to
+    // report how many projects a connection is bound to, so an orphan made
+    // that count — and the removal disclosure built on it — plainly wrong.
+    // Canary: drop clearProjectCredential / deleteRepoHealth from
+    // deleteProject and both counts below come back non-zero.
+    const store = setupTestStore(ctx);
+    const actor = admin(store);
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "github_pat_delete01" },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    recordRepoAccess(store.db, store.slug, {
+      status: "connected",
+      repo: "acme/app",
+      remoteDefaultBranch: "main",
+      private: false,
+    });
+
+    const bound = () =>
+      store.db
+        .prepare(
+          `SELECT COUNT(*) AS c FROM project_github_credentials WHERE pat_id = ?`,
+        )
+        .get(pat.id);
+    const health = () =>
+      store.db
+        .prepare(
+          `SELECT COUNT(*) AS c FROM project_github_health WHERE project_slug = ?`,
+        )
+        .get(store.slug);
+    expect(bound()).toEqual({ c: 1 });
+    expect(health()).toEqual({ c: 1 });
+
+    const name = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter.name;
+    await deleteProject(
+      store.db,
+      { projectSlug: store.slug, confirmName: name },
+      actor,
+      { dataRoot: store.dataRoot },
+    );
+
+    // The PAT itself survives — it belongs to the person, not the project.
+    expect(bound(), "no orphan inflating the bound-projects count").toEqual({ c: 0 });
+    expect(health(), "no stale probe for a slug that may be reused").toEqual({ c: 0 });
+    expect(
+      store.db.prepare(`SELECT COUNT(*) AS c FROM github_pats WHERE id = ?`).get(pat.id),
+    ).toEqual({ c: 1 });
+  });
+});
+
+describe("deleteProject stops the agents it is deleting", () => {
+  it("interrupts in-flight runs before the files go", async () => {
+    // Nothing stopped them, so a delete left every running agent going against
+    // a workspace that no longer existed — still billing the owner's provider
+    // account — and unstoppable afterwards, because the only interrupt door is
+    // the task route and that 404s once the project is gone.
+    // Canary: drop the interrupt loop from deleteProject and the run below is
+    // still 'running' after the project is deleted.
+    const store = setupTestStore(ctx);
+    const actor = admin(store);
+    const now = new Date().toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO agent_runs
+           (id, project_slug, task_key, thread_id, kind, role, backend, model,
+            agent_profile_id, state, started_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'primary', 'Developer', 'claude', 'sonnet',
+                 'developer', 'running', ?, ?, ?)`,
+      )
+      .run("run_live", store.slug, "VIB-1", "thr_1", now, now, now);
+
+    const stateOf = () =>
+      store.db
+        .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
+        .get("run_live");
+    expect(stateOf()).toEqual({ state: "running" });
+
+    const name = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter.name;
+    await deleteProject(
+      store.db,
+      { projectSlug: store.slug, confirmName: name },
+      actor,
+      { dataRoot: store.dataRoot },
+    );
+
+    expect(stateOf(), "the run must not outlive its project").not.toEqual({
+      state: "running",
+    });
+  });
+});
+
+describe("removeMember clears the notifications they can no longer open", () => {
+  it("drops the removed member's rows for that project, and nobody else's", async () => {
+    // deleteProject already does this (F2: an orphan dead-ends on a 404). A
+    // removal is the same harm through the other door — and the harder one:
+    // the project still EXISTS, so `countUnreadNotifications`' deleted-project
+    // discount does not cover it, and the ex-member's bell kept counting rows
+    // that 403 on click.
+    // Canary: drop deleteMemberProjectNotifications from removeMember and the
+    // removed member's row survives.
+    const store = setupTestStore(ctx);
+    const actor = admin(store);
+    const target = store.users.selin;
+    const mine = createNotification(store.db, {
+      userId: target.id,
+      kind: "mention",
+      title: "You were mentioned",
+      text: "Have a look",
+      projectSlug: store.slug,
+      bypassPrefs: true,
+    });
+    const someoneElse = createNotification(store.db, {
+      userId: store.users.arda.id,
+      kind: "mention",
+      title: "Also mentioned",
+      text: "Have a look",
+      projectSlug: store.slug,
+      bypassPrefs: true,
+    });
+    expect(mine).not.toBeNull();
+    expect(someoneElse).not.toBeNull();
+
+    await removeMember(
+      store.db,
+      { projectSlug: store.slug, targetUserId: target.id },
+      actor,
+      { dataRoot: store.dataRoot },
+    );
+
+    const rows = store.db
+      .prepare(`SELECT user_id FROM notifications WHERE project_slug = ?`)
+      .all(store.slug);
+    expect(rows).toEqual([{ user_id: store.users.arda.id }]);
+
+    // …and the removal says how many it dropped, rather than doing it quietly.
+    const audit = listAuditEvents(store.db, { action: "project.member.removed" });
+    expect((audit[0]?.details ?? {}).notificationsDropped).toBe(1);
   });
 });

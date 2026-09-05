@@ -253,6 +253,26 @@ export function deleteProjectNotifications(db: DatabaseSync, projectSlug: string
   );
 }
 
+/** One person's notifications for one project — what a member REMOVAL leaves
+ *  behind. `deleteProjectNotifications` covers the project going away, and
+ *  `countUnreadNotifications` already discounts rows whose project is gone; a
+ *  removed member is the third case, and the only one where the project still
+ *  EXISTS, so their rows kept rendering and kept counting while every click
+ *  dead-ended on a project they can no longer reach. */
+export function deleteMemberProjectNotifications(
+  db: DatabaseSync,
+  projectSlug: string,
+  userId: string,
+): number {
+  return Number(
+    db
+      .prepare(
+        `DELETE FROM notifications WHERE project_slug = ? AND user_id = ?`,
+      )
+      .run(projectSlug, userId).changes,
+  );
+}
+
 export function countUnreadNotifications(
   db: DatabaseSync,
   userId: string,
