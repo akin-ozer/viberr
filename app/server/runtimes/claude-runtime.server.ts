@@ -511,13 +511,21 @@ const claudeEnvelopeSchema = z
       })
       .nullable()
       .catch(null),
-    /** `assistant` envelopes: this step's usage counters. Anything that is not
-     *  a finite number counts as 0, exactly as the run row folds it. */
+    /** Set on every envelope a subagent (the Agent tool) produced. Their
+     *  usage is not part of the result's `usage` (main loop only), so the live
+     *  fold leaves them out too. */
+    parent_tool_use_id: z.string().nullable().catch(null),
+    /** `assistant` envelopes: the API message's id (one message yields one
+     *  envelope per content block, all carrying the same usage) and its
+     *  `message_start` usage. Anything that is not a finite number counts as 0,
+     *  exactly as the run row folds it. */
     message: z
       .object({
+        id: z.string().nullable().catch(null),
         usage: z.object({
           input_tokens: z.number().catch(0),
           output_tokens: z.number().catch(0),
+          cache_creation_input_tokens: z.number().catch(0),
           cache_read_input_tokens: z.number().catch(0),
         }),
       })
@@ -532,33 +540,46 @@ const claudeEnvelopeSchema = z
     api_error_status: null,
     terminal_reason: null,
     rate_limit_info: null,
+    parent_tool_use_id: null,
     message: null,
   });
 type ClaudeEnvelope = z.infer<typeof claudeEnvelopeSchema>;
 
-/** The live token counters one streamed step contributes. */
+/** The live token counters one API message contributes, in the run row's
+ *  terms (wire-format.server.ts, `result`): `input_tokens` is the WHOLE prompt
+ *  of the call (uncached slice + cache writes + cache reads),
+ *  `cached_input_tokens` its cache-read subset. */
 interface StepUsage {
+  /** The API message id: the dedupe key across the envelopes of one message.
+   *  Null when the SDK sent none, which counts the envelope once. */
+  messageId: string | null;
   input_tokens: number;
   output_tokens: number;
   cached_input_tokens: number;
 }
 
 /**
- * Per-step usage from a Claude `assistant` envelope, or null when the envelope
- * is not an assistant message or carries no usage at all. Used to grow the live
- * token counter during a run (the final `result` envelope supplies the
+ * One API message's usage from a Claude `assistant` envelope, or null when the
+ * envelope is not an assistant message or carries no usage at all. Used to grow
+ * the live token counter during a run (the final `result` envelope supplies the
  * authoritative totals).
  */
 function assistantUsage(envelope: ClaudeEnvelope): StepUsage | null {
   if (envelope.type !== "assistant") return null;
   const usage = envelope.message?.usage;
   if (!usage) return null;
-  const { input_tokens, output_tokens, cache_read_input_tokens } = usage;
-  if (input_tokens === 0 && output_tokens === 0 && cache_read_input_tokens === 0) {
+  const { input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens } = usage;
+  if (
+    input_tokens === 0 &&
+    output_tokens === 0 &&
+    cache_creation_input_tokens === 0 &&
+    cache_read_input_tokens === 0
+  ) {
     return null;
   }
   return {
-    input_tokens,
+    messageId: envelope.message?.id ?? null,
+    input_tokens: input_tokens + cache_creation_input_tokens + cache_read_input_tokens,
     output_tokens,
     cached_input_tokens: cache_read_input_tokens,
   };
@@ -1086,15 +1107,34 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         queryHandle = q;
 
         // Live usage accumulation so the run row GROWS during streaming instead
-        // of staying 0 until the final result. Claude assistant messages carry
-        // per-step usage (input = the growing context size, output = tokens for
-        // that step); we surface a cumulative view — max input, summed output,
-        // and a per-message turn count — which the sink folds and the result
-        // envelope then overwrites with the authoritative totals.
+        // of staying 0 until the final result. The SDK yields one `assistant`
+        // envelope PER CONTENT BLOCK of an API message, each carrying that
+        // message's `message_start` usage: the prompt figures (uncached slice,
+        // cache writes, cache reads) are final for the call, `output_tokens` is
+        // a placeholder of a few tokens, and every block repeats the same
+        // numbers under the same `message.id`. So the fold counts each id ONCE
+        // and SUMS: every call re-reads its whole prompt, and the sum over
+        // distinct ids reproduced `result.usage` exactly on every run this
+        // instance had stored. (It used to max the uncached slice and sum the
+        // placeholders, which pinned the live strip at a few hundred tokens
+        // while the run was at a few million.) Output stays a lower bound until
+        // the result's total lands; the sink's max fold lets the result win.
+        // Subagent traffic (`parent_tool_use_id`) is left out: the result's
+        // `usage` covers the main loop only, and a live figure above the final
+        // one would read as a regression.
+        //
+        // Turns follow the SDK's own `num_turns` counter: one, plus every
+        // `user` message that flows through the loop (each tool result is one,
+        // so parallel tool calls count separately, and a skill body the SDK
+        // injects counts too). That matched `result.num_turns` on every stored
+        // run; counting assistant envelopes, as this used to, over-counted on
+        // all but the single-turn one.
+        let liveUsers = 0;
         let liveTurns = 0;
         let liveOut = 0;
         let liveIn = 0;
         let liveCached = 0;
+        const seenMessages = new Set<string>();
 
         try {
           armIdle();
@@ -1119,13 +1159,22 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               resultErrorText = envelope.result;
               evidence.apiErrorStatus = envelope.api_error_status;
               evidence.terminalReason = envelope.terminal_reason;
+            } else if (envelope.type === "user") {
+              liveUsers += 1;
+              liveTurns = 1 + liveUsers;
+              facts.turns = liveTurns;
             } else {
-              const u = assistantUsage(envelope);
+              const u = envelope.parent_tool_use_id ? null : assistantUsage(envelope);
               if (u) {
-                liveTurns += 1;
-                liveOut += u.output_tokens;
-                liveIn = Math.max(liveIn, u.input_tokens);
-                liveCached = Math.max(liveCached, u.cached_input_tokens);
+                const firstOfMessage =
+                  u.messageId === null || !seenMessages.has(u.messageId);
+                if (firstOfMessage) {
+                  if (u.messageId !== null) seenMessages.add(u.messageId);
+                  liveIn += u.input_tokens;
+                  liveCached += u.cached_input_tokens;
+                  liveOut += u.output_tokens;
+                }
+                liveTurns = Math.max(liveTurns, 1);
                 facts.usage = {
                   input_tokens: liveIn,
                   cached_input_tokens: liveCached,

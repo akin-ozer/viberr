@@ -224,6 +224,24 @@ stated as the last refusal Viberr observed, retired by any completed run.
   started_at, finished_at, turns, input_tokens, cached_input_tokens, output_tokens,
   total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key,
   credential_user_id`.
+- **Token columns mean the same thing on both backends.** `input_tokens` is the total
+  input the provider processed for the run, cache reads and cache writes included: Codex
+  `usage.input_tokens` verbatim (its cache figures are subsets of it); Claude
+  `result.usage.input_tokens + cache_creation_input_tokens + cache_read_input_tokens`,
+  normalized in `wire-format.server.ts` (Claude reports the three as disjoint figures,
+  and the uncached slice alone is two tokens per call). `cached_input_tokens` is the
+  subset of `input_tokens` served from the prompt cache (Codex `cached_input_tokens`,
+  Claude `cache_read_input_tokens`) and is never larger than `input_tokens`.
+  `output_tokens` is the provider's figure. `turns` is Claude's `result.num_turns` (one
+  plus the `user`-type messages that flowed through the SDK loop, so every tool result
+  counts) and Codex's count of completed turns. The strip's **Tokens** is
+  `input_tokens + output_tokens`: total tokens processed. During a Claude run the row
+  holds the adapter's live lower bound (each API message's whole prompt summed once per
+  `message.id`, output as the `message_start` placeholders), folded by max; the result
+  envelope supplies the final figures. Claude `result.usage` covers the main loop only
+  while `total_cost_usd` also covers side-model calls, so tokens and cost sit on slightly
+  different bases; a resumed Codex thread reports the thread's cumulative total. Claude
+  rows written before this normalization hold the uncached slice only.
 - `credential_user_id` (ruling 127) is the run's **credential principal**: whose account
   it billed. It is written on the reserved row and on the started row, carried in the
   `runtime.run.started` audit, and read back by the transcript locator and the run

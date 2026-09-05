@@ -53,7 +53,12 @@ describe("projectEnvelope — Claude stream-json", () => {
       duration_ms: 132400,
       duration_api_ms: 98120,
       total_cost_usd: 0.31,
-      usage: { input_tokens: 812, cache_read_input_tokens: 38210, output_tokens: 2140 },
+      usage: {
+        input_tokens: 812,
+        cache_creation_input_tokens: 1000,
+        cache_read_input_tokens: 38210,
+        output_tokens: 2140,
+      },
     };
     const { display, facts } = projectEnvelope("claude", raw);
     expect(display?.ev).toBe("result");
@@ -61,7 +66,18 @@ describe("projectEnvelope — Claude stream-json", () => {
     expect(facts.isError).toBe(false);
     expect(facts.costUsd).toBe(0.31);
     expect(facts.turns).toBe(4);
-    expect(facts.usage).toEqual({ input_tokens: 812, cached_input_tokens: 38210, output_tokens: 2140 });
+    // The run row's terms: `input_tokens` is the WHOLE prompt (Claude's three
+    // disjoint prompt figures summed), `cached_input_tokens` its cache-read
+    // subset. Canary: read `usage.input_tokens` alone again and the row goes
+    // back to the two-tokens-per-call figure the strip showed for months.
+    expect(facts.usage).toEqual({ input_tokens: 40022, cached_input_tokens: 38210, output_tokens: 2140 });
+    expect(display?.stats).toMatchObject({ in: 40022, cached: 38210, out: 2140 });
+    expect(display?.text).toBe("success · 4 turns · 132s · $0.31 · in 40.0k (cached 38.2k) · out 2.1k tokens");
+  });
+
+  it("a result without cache figures keeps the plain input", () => {
+    const raw = { type: "result", subtype: "success", is_error: false, num_turns: 1, duration_ms: 1000, total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 3 } };
+    expect(projectEnvelope("claude", raw).facts.usage).toEqual({ input_tokens: 10, cached_input_tokens: 0, output_tokens: 3 });
   });
 
   it("result with error subtype → isError true", () => {

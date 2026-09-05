@@ -167,12 +167,37 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(exit).toMatchObject({ outcome: "finished", effectiveBackend: "claude", sessionId: "sess-1" });
   });
 
-  it("accumulates live usage + turns from assistant messages so the counter grows during the run", async () => {
+  /**
+   * The live fold, on the stream's real shape (taken from a stored run): the SDK
+   * yields one `assistant` envelope per content block, every block of one API
+   * message repeating that message's `message_start` usage under the same
+   * `message.id`; the prompt figures are final for the call and `output_tokens`
+   * is a placeholder of a few tokens. The fold used to count every envelope as
+   * a turn, max the uncached input slice (two tokens per call) and sum the
+   * placeholders, so the live strip read a few hundred tokens while the run was
+   * at a few million, and Turns over-counted on every multi-turn run.
+   */
+  it("live usage sums each API message's whole prompt once, and turns follow the SDK's counter", async () => {
+    const usage = (cc: number, cr: number, out: number) => ({
+      input_tokens: 2,
+      cache_creation_input_tokens: cc,
+      cache_read_input_tokens: cr,
+      output_tokens: out,
+    });
     const messages = [
       { type: "system", subtype: "init", session_id: "s", model: "claude-sonnet-4-5", tools: [], mcp_servers: [] },
-      { type: "assistant", message: { content: [{ type: "text", text: "step 1" }], usage: { input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 0 } } },
-      { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: {} }], usage: { input_tokens: 1500, output_tokens: 50, cache_read_input_tokens: 200 } } },
-      { type: "result", subtype: "success", is_error: false, num_turns: 2, usage: { input_tokens: 1500, output_tokens: 150 }, total_cost_usd: 0.05 },
+      // One API message, two content blocks: identical usage, same id.
+      { type: "assistant", message: { id: "msg_1", content: [{ type: "thinking", thinking: "…" }], usage: usage(2796, 10300, 8) } },
+      { type: "assistant", message: { id: "msg_1", content: [{ type: "tool_use", name: "Bash", input: {} }], usage: usage(2796, 10300, 8) } },
+      { type: "user", message: { content: [{ type: "tool_result", content: "ok" }] } },
+      { type: "assistant", message: { id: "msg_2", content: [{ type: "tool_use", name: "Read", input: {} }], usage: usage(861, 13096, 25) } },
+      { type: "user", message: { content: [{ type: "tool_result", content: "ok" }] } },
+      // A user message the SDK injected (a skill body): the SDK counts it too.
+      { type: "user", message: { content: [{ type: "text", text: "Base directory for this skill: …" }] } },
+      // A subagent's message: outside the result's `usage`, so outside the fold.
+      { type: "assistant", parent_tool_use_id: "toolu_sub", message: { id: "msg_sub", content: [{ type: "text", text: "sub" }], usage: usage(0, 5000, 4) } },
+      { type: "assistant", message: { id: "msg_3", content: [{ type: "text", text: "done" }], usage: usage(4438, 13957, 3) } },
+      { type: "result", subtype: "success", is_error: false, num_turns: 4, duration_ms: 12000, usage: { input_tokens: 6, cache_creation_input_tokens: 8095, cache_read_input_tokens: 37353, output_tokens: 900 }, total_cost_usd: 0.05 },
     ];
     const { q } = fakeQuery(messages);
     const adapter = createClaudeAdapter({ queryFn: () => q });
@@ -180,18 +205,31 @@ describe("claude adapter (SDK, injected fake query)", () => {
     adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
     await drain();
 
-    // System init: no usage yet.
     expect(lines[0]!.facts.usage).toBeUndefined();
-    // 1st assistant: cumulative usage appears (turn 1).
-    expect(lines[1]!.facts.usage).toEqual({ input_tokens: 1000, cached_input_tokens: 0, output_tokens: 100 });
+    // msg_1: its whole prompt (2 + 2796 + 10300), cache reads as the subset,
+    // the placeholder output; the SDK's counter starts at one.
+    expect(lines[1]!.facts.usage).toEqual({ input_tokens: 13098, cached_input_tokens: 10300, output_tokens: 8 });
     expect(lines[1]!.facts.turns).toBe(1);
-    // 2nd assistant (a tool_use): input grows (max 1500), output SUMS (150),
-    // cached grows (200), turn 2 — so the live counter climbs.
-    expect(lines[2]!.facts.usage).toEqual({ input_tokens: 1500, cached_input_tokens: 200, output_tokens: 150 });
-    expect(lines[2]!.facts.turns).toBe(2);
-    // Result: authoritative totals (untouched by the live accumulator).
-    expect(lines[3]!.facts.usage).toEqual({ input_tokens: 1500, cached_input_tokens: 0, output_tokens: 150 });
+    // The second block of the SAME message changes nothing. Canary: drop the
+    // `seenMessages` dedupe and this doubles.
+    expect(lines[2]!.facts.usage).toEqual({ input_tokens: 13098, cached_input_tokens: 10300, output_tokens: 8 });
+    // A tool result is one more turn, on the user line itself.
     expect(lines[3]!.facts.turns).toBe(2);
+    // msg_2 adds its own whole prompt: 13098 + (2 + 861 + 13096).
+    expect(lines[4]!.facts.usage).toEqual({ input_tokens: 27057, cached_input_tokens: 23396, output_tokens: 33 });
+    expect(lines[4]!.facts.turns).toBe(2);
+    expect(lines[5]!.facts.turns).toBe(3);
+    expect(lines[6]!.facts.turns).toBe(4);
+    // The subagent envelope carries no usage facts and moves nothing.
+    expect(lines[7]!.facts.usage).toBeUndefined();
+    // msg_3: 27057 + (2 + 4438 + 13957) — and the live prompt figures now EQUAL
+    // the result's (6 + 8095 + 37353), so the sink's max fold has nothing to
+    // correct on the input side; output is the placeholders' lower bound.
+    expect(lines[8]!.facts.usage).toEqual({ input_tokens: 45454, cached_input_tokens: 37353, output_tokens: 36 });
+    expect(lines[8]!.facts.turns).toBe(4);
+    // Result: the SDK's totals in the same terms, untouched by the accumulator.
+    expect(lines[9]!.facts.usage).toEqual({ input_tokens: 45454, cached_input_tokens: 37353, output_tokens: 900 });
+    expect(lines[9]!.facts.turns).toBe(4);
   });
 
   it("errors when the result envelope is is_error", async () => {
@@ -1011,18 +1049,26 @@ describe("claude adapter run phases (R21-4a / FR28)", () => {
     expect(steps[2]).toBe(steps[1]);
   });
 
-  it("falls back to a climbing turn count before the first tool call", async () => {
+  it("falls back to the SDK's turn count before the first tool call", async () => {
+    // Two assistant envelopes with no user message between them are blocks of
+    // ONE turn (the SDK's `num_turns` is one plus the user messages that flow
+    // through its loop); the tool result is what starts the next. The fallback
+    // used to count envelopes, and over-counted on every multi-turn run.
     const phases = capturePhases([
       { type: "system", subtype: "init", session_id: "s", model: "claude-sonnet-4-5", tools: [], mcp_servers: [] },
       { type: "assistant", message: { content: [{ type: "text", text: "one" }], usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0 } } },
       { type: "assistant", message: { content: [{ type: "text", text: "two" }], usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0 } } },
-      { type: "result", subtype: "success", is_error: false, num_turns: 2, usage: { input_tokens: 1, output_tokens: 2 }, total_cost_usd: 0 },
+      { type: "user", message: { content: [{ type: "tool_result", content: "ok" }] } },
+      { type: "assistant", message: { content: [{ type: "text", text: "three" }], usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0 } } },
+      { type: "result", subtype: "success", is_error: false, num_turns: 2, usage: { input_tokens: 3, output_tokens: 3 }, total_cost_usd: 0 },
     ]);
     await drain();
 
     const steps = phases.filter(([p]) => p === "Working").map(([, s]) => s);
     expect(steps[1]).toBe("turn 1");
-    expect(steps[2]).toBe("turn 2");
+    expect(steps[2]).toBe("turn 1");
+    expect(steps[3]).toBe("turn 2");
+    expect(steps[4]).toBe("turn 2");
   });
 
   it("is optional — an adapter caller without onPhase still runs (the pre-R21-4 contract)", async () => {

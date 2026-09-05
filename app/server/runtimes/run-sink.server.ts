@@ -228,10 +228,11 @@ export function createRunSink(
   let sessionId: string | null = spec.resumeSessionId ?? null;
   let started = false;
 
-  // Running usage totals — usage envelopes are cumulative per turn for codex,
-  // and aggregate on the final result for claude; we take the max/last so a
-  // partial run never regresses the counter (tokens/cost from real envelopes
-  // ONLY — no fabrication).
+  // Running usage totals. Both adapters emit CUMULATIVE figures (Codex's
+  // turn.completed carries the thread's running total; the Claude adapter sums
+  // its distinct API calls, and the result envelope then carries the SDK's own
+  // total), so max per field keeps the row monotone and lets the final figure
+  // win (tokens/cost from real envelopes ONLY — no fabrication).
   let turns = 0;
   let inputTokens = 0;
   let cachedInputTokens = 0;
@@ -398,6 +399,18 @@ export function createRunSink(
         if (f.sessionId) sessionId = f.sessionId;
         if (f.turns != null && f.turns > turns) turns = f.turns;
         if (f.usage) {
+          // The Claude adapter's live sum over distinct API calls equalled the
+          // result's input on every stored run. A non-empty result BELOW the
+          // live sum is the one signature of a double-counting live fold (an
+          // SDK that stopped sending `message.id`), and max would then keep
+          // the larger, wrong number: say so.
+          if (f.isResult && f.usage.input_tokens > 0 && f.usage.input_tokens < inputTokens) {
+            logger.warn("run usage: the result's input is below the live sum", {
+              runId: spec.runId,
+              live: inputTokens,
+              result: f.usage.input_tokens,
+            });
+          }
           inputTokens = Math.max(inputTokens, f.usage.input_tokens);
           cachedInputTokens = Math.max(cachedInputTokens, f.usage.cached_input_tokens);
           outputTokens = Math.max(outputTokens, f.usage.output_tokens);

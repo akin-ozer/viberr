@@ -51,6 +51,9 @@ describe("fmtTok boundaries (runs.md §7)", () => {
     expect(fmtTok(99999)).toBe("100.0k");
     expect(fmtTok(100000)).toBe("100k");
     expect(fmtTok(128442)).toBe("128k");
+    // The whole-prompt count of a long run crosses a million.
+    expect(fmtTok(1_000_000)).toBe("1.0M");
+    expect(fmtTok(4_526_112)).toBe("4.5M");
   });
 });
 
