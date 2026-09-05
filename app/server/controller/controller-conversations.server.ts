@@ -143,11 +143,60 @@ export function canReadControllerRunLog(
   run: { kind: string; task_key: string },
   user: { id: string },
 ): boolean {
+  return ownsOrSupervisesControllerRun(db, run, user);
+}
+
+/** May this user STOP this controller turn? The same two people who may read
+ *  its log: the owner, whose turn and whose Claude account it is, and a live
+ *  org admin (supervision). Its own name, because stopping is not reading: a
+ *  later widening of one must be a decision about that one, never a side
+ *  effect of the other. The run engine's `interruptRun` asks this for a
+ *  controller run instead of the project membership a controller run has none
+ *  of. */
+export function canInterruptControllerRun(
+  db: DatabaseSync,
+  run: { kind: string; task_key: string },
+  user: { id: string },
+): boolean {
+  return ownsOrSupervisesControllerRun(db, run, user);
+}
+
+function ownsOrSupervisesControllerRun(
+  db: DatabaseSync,
+  run: { kind: string; task_key: string },
+  user: { id: string },
+): boolean {
   if (run.kind !== "controller") return false;
   const conversation = getConversation(db, run.task_key);
   if (!conversation) return false;
   if (conversation.userId === user.id) return true;
   return isOrgAdmin(db, user.id);
+}
+
+/** Where a controller run's LIVE frames go: its conversation, and the owner
+ *  whose `user` stream carries them. */
+export interface ControllerRunRoute {
+  conversationId: string;
+  userId: string;
+}
+
+/**
+ * Ruling 99: a controller turn has no task scope (`project_slug = ''`), so its
+ * console lines and lifecycle flips cannot ride the task-routed run stream.
+ * They route to the conversation's owner instead: the one person whose page
+ * is tailing them (a supervising org admin reads the same console off the
+ * loader's poll). Null for every other run kind, and for a controller run
+ * whose conversation is gone, which then publishes to nobody, as before.
+ */
+export function controllerRunRoute(
+  db: DatabaseSync,
+  run: { kind: string; task_key: string },
+): ControllerRunRoute | null {
+  if (run.kind !== "controller") return null;
+  const conversation = getConversation(db, run.task_key);
+  return conversation
+    ? { conversationId: conversation.id, userId: conversation.userId }
+    : null;
 }
 
 export function getConversation(

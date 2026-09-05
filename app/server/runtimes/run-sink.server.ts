@@ -16,6 +16,7 @@ import {
 } from "./backend-quota.server";
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 import { findUserById } from "~/server/auth/user-store.server";
+import { controllerRunRoute } from "~/server/controller/controller-conversations.server";
 import { publishRunLogAppended, publishRunStateChanged } from "./run-events.server";
 import { CREDENTIAL_ENV_RE } from "./runtime-registry.server";
 import {
@@ -252,6 +253,13 @@ export function createRunSink(
     return { credentialUserId: userId, credentialLabel: user ? user.name || user.email : null };
   })();
 
+  // Ruling 99: a controller turn's frames route to its conversation owner (it
+  // has no task scope to route on). Resolved once per run, like the principal.
+  const controller =
+    spec.kind === "controller"
+      ? controllerRunRoute(db, { kind: spec.kind, task_key: spec.taskKey })
+      : null;
+
   const publishState = (state: RunState) => {
     publishRunStateChanged({
       projectSlug: spec.projectSlug,
@@ -259,6 +267,7 @@ export function createRunSink(
       runId: spec.runId,
       threadId: spec.threadId,
       state,
+      controller,
     });
   };
 
@@ -363,6 +372,7 @@ export function createRunSink(
         runId: spec.runId,
         threadId: spec.threadId,
         seq,
+        controller,
       });
     } catch (error) {
       logger.error("run divergence marker could not be persisted", {
@@ -526,6 +536,7 @@ export function createRunSink(
             runId: spec.runId,
             threadId: spec.threadId,
             seq,
+            controller,
           });
         }
       } catch (error) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Link,
   useFetcher,
@@ -19,6 +19,9 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
+import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
+import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 
 /**
  * The controller surface (ruling 99): a conversation list, one transcript,
@@ -154,13 +157,29 @@ export function ControllerPage({
       </header>
       <div className="ctl-layout">
         <div className="ctl-main">
-          <Transcript view={view} />
-          <Composer
-            view={view}
-            csrf={csrf}
-            send={send}
-            conversationId={view.conversation?.id ?? null}
-          />
+          {view.conversation ? (
+            // Keyed by conversation: the log selection and the stream cursors
+            // belong to ONE thread, and switching threads starts them over.
+            <ConversationRuntime
+              key={view.conversation.id}
+              view={view}
+              csrf={csrf}
+              conversationId={view.conversation.id}
+            >
+              <Transcript view={view} />
+              <Composer
+                view={view}
+                csrf={csrf}
+                send={send}
+                conversationId={view.conversation.id}
+              />
+            </ConversationRuntime>
+          ) : (
+            <>
+              <Transcript view={view} />
+              <Composer view={view} csrf={csrf} send={send} conversationId={null} />
+            </>
+          )}
         </div>
         <aside className="ctl-side">
           {view.goals !== null && (
@@ -174,6 +193,127 @@ export function ControllerPage({
         </aside>
       </div>
     </main>
+  );
+}
+
+/**
+ * The open conversation's EXECUTION, on this surface: the task page's two
+ * runtime panels, fed by the same projection (`view.runtime`, asked for the
+ * ruling-99 scope a controller run is stored under).
+ *
+ * - The **Live run** strip while a turn is working: what the controller is
+ *   doing (its phase and last tool step), elapsed from the run's own start,
+ *   turns and tokens off the run row (refreshed by the page's poll and by the
+ *   `controller.updated` reference a lifecycle flip publishes), the model,
+ *   View logs, and Interrupt for the conversation's owner or an org admin
+ *   (`canInterruptTurn`; the engine re-checks). Interrupt confirms first (D6):
+ *   a stopped turn settles with "This turn was stopped before I could answer."
+ *   and nothing it was about to apply is applied.
+ * - The **Agent logs** console below the composer: every turn of the thread as
+ *   one grouped stream with `run N of M` boundaries, tailed live through the
+ *   controller channel of `useRunLogStream` (`controller.log-appended` on the
+ *   owner's user stream) and paged backwards through `/resources/run-log`,
+ *   behind the same owner-or-admin gate that serves the raw view.
+ *
+ * Wraps the transcript and composer so the strip sits above the conversation
+ * and the console below it, with one owner for the selection and the stream.
+ * Renders neither panel for a thread that has not run yet.
+ */
+function ConversationRuntime({
+  view,
+  csrf,
+  conversationId,
+  children,
+}: {
+  view: ControllerSurfaceView;
+  csrf: string;
+  conversationId: string;
+  children: ReactNode;
+}) {
+  const runtime = view.runtime;
+  const [sel, setSel] = useState<string | null>(null);
+  const [confirmInterrupt, setConfirmInterrupt] = useState<string | null>(null);
+  const stop = useFetcher<ActionResult>();
+  const push = useToast();
+  const answeredRef = useRef<ActionResult | null>(null);
+  useEffect(() => {
+    if (stop.state !== "idle" || !stop.data || answeredRef.current === stop.data) return;
+    answeredRef.current = stop.data;
+    if (stop.data.toast) push(stop.data.toast, stop.data.ok ? "success" : "error");
+    else if (!stop.data.ok && stop.data.error) push(stop.data.error, "error");
+  }, [stop.state, stop.data, push]);
+
+  const { linesByThread, streamError, olderByThread, loadOlder } = useRunLogStream({
+    source: { kind: "controller", conversationId },
+    threads: runtime.map((r) => ({
+      threadId: r.id,
+      runId: r.serverRunId,
+      lines: r.lines.map((display, i) => ({ display, raw: r.raw[i] ?? "" })),
+      window: r.logWindow,
+    })),
+    hasActiveRun: runtime.some((r) => r.state === "running"),
+  });
+
+  const stopping = stop.state !== "idle";
+  const onInterrupt = (threadId: string) => {
+    const run = runtime.find((r) => r.id === threadId);
+    if (!run || stopping) return;
+    const body = new FormData();
+    body.set("_csrf", csrf);
+    body.set("intent", "interrupt");
+    body.set("conversationId", conversationId);
+    body.set("runId", run.serverRunId);
+    stop.submit(body, { method: "post" });
+  };
+  const onViewLogs = (threadId: string) => {
+    setSel(threadId);
+    requestAnimationFrame(() => {
+      // Optional-chained CALL, as the transcript's own scroll: jsdom's Element
+      // carries no `scrollIntoView`.
+      document
+        .querySelector('[data-comment-anchor="agent-logs"]')
+        ?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  return (
+    <>
+      {runtime.length > 0 && (
+        <LiveRunPanel
+          runtime={runtime}
+          onViewLogs={onViewLogs}
+          onInterrupt={(id) => setConfirmInterrupt(id)}
+          canInterrupt={view.canInterruptTurn}
+          interrupting={stopping}
+        />
+      )}
+      {children}
+      {runtime.length > 0 && (
+        <AgentLogsPanel
+          runtime={runtime}
+          sel={sel}
+          onSel={setSel}
+          linesByThread={linesByThread}
+          streamError={streamError}
+          olderByThread={olderByThread}
+          onLoadOlder={loadOlder}
+        />
+      )}
+      {confirmInterrupt && (
+        <ConfirmDialog
+          screenLabel="Interrupt turn dialog"
+          title="Interrupt this turn?"
+          body="The controller stops where it is. Anything it was about to apply is not applied, and the transcript records that the turn was stopped. You can send your message again afterward."
+          confirmLabel="Interrupt turn"
+          busy={stopping}
+          onCancel={() => setConfirmInterrupt(null)}
+          onConfirm={() => {
+            onInterrupt(confirmInterrupt);
+            setConfirmInterrupt(null);
+          }}
+        />
+      )}
+    </>
   );
 }
 

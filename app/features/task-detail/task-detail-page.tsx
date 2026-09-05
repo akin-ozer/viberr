@@ -359,8 +359,7 @@ export function TaskDetailPage({
   // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
   // live lines via run.log-appended; revalidates on run.state-changed.
   const { linesByThread, streamError, olderByThread, loadOlder } = useRunLogStream({
-    projectSlug: task.projectSlug,
-    taskKey: task.key,
+    source: { kind: "task", projectSlug: task.projectSlug, taskKey: task.key },
     threads: runtime.map((r) => ({
       threadId: r.id,
       runId: r.serverRunId,

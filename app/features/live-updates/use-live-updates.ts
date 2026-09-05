@@ -3,6 +3,7 @@ import { useRevalidator } from "react-router";
 import {
   buildEventsUrl,
   SSE_CONTROL_EVENTS,
+  SSE_STREAM_EVENTS,
   SSE_EVENT_NAMES,
 } from "./event-types";
 
@@ -158,7 +159,10 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
     const url = buildEventsUrl(scopeKey.split(SCOPE_SEPARATOR));
     const source = new EventSource(url);
     for (const name of SSE_EVENT_NAMES) {
-      if (!SSE_CONTROL_EVENTS.includes(name)) {
+      // A stream event (one per console line) is the dedicated log consumer's
+      // to handle; revalidating every surface of the person on each would turn
+      // one controller turn into a loader storm.
+      if (!SSE_CONTROL_EVENTS.includes(name) && !SSE_STREAM_EVENTS.includes(name)) {
         source.addEventListener(name, scheduleRevalidate);
       }
     }
