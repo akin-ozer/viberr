@@ -57,7 +57,13 @@ Status codes: the bare URL is a **liveness** probe and returns `200` even when d
 `?probe=readiness` (or `?probe=ready`) returns `503` with the same body while
 `degraded[]` is non-empty; `503 { "ok": false, "status": "down" }` when the snapshot
 itself threw (database unreachable). A zero `connectedUsers`, an unavailable browser and a
-`null` disk reading are deliberately **not** degraded. The compose healthchecks call the liveness
+`null` disk reading are deliberately **not** degraded — and neither is a per-person backend
+refusal. *(Confirmed 2026-09-06, ruling 146: this table was already right and the CODE had
+drifted from it. `health-snapshot.server.ts` was pushing `credential:<backend>` and
+`quota:<backend>` into `degraded`, so one member's expired key made `?probe=readiness` 503
+for the whole instance and an orchestrator drained a deployment that was serving everyone
+else. Those readings stay in the response body under `quota`, and Insights and Profile
+render them per person.)* The compose healthchecks call the liveness
 form, so a degraded instance never fails the Docker healthcheck.
 
 The boot log (structured JSON on stdout) prints one `boot integrity check` line: data

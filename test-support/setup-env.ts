@@ -1,3 +1,7 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 /**
  * Vitest setup: hermetic env for the test suite. The app's env parser
  * hard-requires two secrets at the first `getEnv()` call (fail-fast boot
@@ -78,3 +82,23 @@ for (const key of [
  * child process — and should not exist in this suite.
  */
 process.env.GIT_ALLOW_PROTOCOL = "file";
+
+/**
+ * Fail closed against the DEVELOPER'S LIVE DATA ROOT.
+ *
+ * `storeRoot(dataRoot?)` falls back to `getEnv().VIBERR_DATA_ROOT`, and
+ * `loadEnvFile()` runs at module scope — i.e. after this file — so without a
+ * value here a developer's `.env` (`VIBERR_DATA_ROOT=./data`) becomes the
+ * fallback for the whole suite. Every harness passes an explicit `dataRoot`
+ * today, so nothing writes there now; the point is that the day ONE test path
+ * forgets to, it writes — and deletes — inside the real store, which is the
+ * dual-writer hazard the deployment doc calls out (a WAL clobber there has
+ * already cost PATs and run logs once). A temp root makes that mistake land
+ * somewhere harmless instead of somewhere expensive.
+ *
+ * `??=`, matching the secrets above: an explicit export still wins, but the
+ * ambient `.env` never does.
+ */
+process.env.VIBERR_DATA_ROOT ??= mkdtempSync(
+  path.join(tmpdir(), "viberr-suite-root-"),
+);

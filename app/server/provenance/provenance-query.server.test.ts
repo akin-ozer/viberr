@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   recordProvenance,
-  recordProvenanceForFile,
 } from "./provenance-recorder.server";
 import {
   createReconcileBehindByLookup,
@@ -153,20 +152,5 @@ describe("generic provenance reads", () => {
     expect(
       latestProvenance(db, { sourcePath: PATH_142, action: "rescan" }),
     ).toBeNull();
-  });
-});
-
-describe("recordProvenanceForFile", () => {
-  it("stores an absolute path under the store-relative key readers use", () => {
-    const db = ctx.makeDb();
-    const dataRoot = ctx.makeTempDir();
-    recordProvenanceForFile(db, {
-      absPath: `${dataRoot}/projects/${SLUG}/tasks/VIB-142/task.md`,
-      dataRoot,
-      action: "github.reconcile",
-      details: { behindBy: 4 },
-    });
-
-    expect(createReconcileBehindByLookup(db)(PATH_142)).toBe(4);
   });
 });

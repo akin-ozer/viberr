@@ -186,9 +186,20 @@ deleted; the health example returned `{"claude":"real","codex":"unavailable"}`.)
 
 ```bash
 cp .env.example .env        # fill in the two required secrets
+mkdir -p docker-data && sudo chown 1000:1000 docker-data   # Linux, rootful daemon — see below
 docker compose up -d --build
 docker compose logs -f app  # boot integrity log: dirs, migrations, counts, users, build, disk
 ```
+
+*(Added 2026-09-05.)* **Create `docker-data/` yourself, owned by uid 1000.** The image does
+`chown node:node /data`, but compose bind-mounts `./docker-data` over that path and a bind
+mount shadows the image's directory entirely — the HOST directory's ownership is what the
+container sees. On Linux with a rootful daemon, a missing bind-mount source is created by
+the daemon as **root**, so the container's `node` user (uid 1000) cannot write it, and the
+app crash-loops at boot with `EACCES` before it can create `state/` or take the writer
+lock. `sudo chown 1000:1000 docker-data` fixes it; the image's own `chown` only ever
+applies when `/data` is NOT bind-mounted (a named volume, say). Rootless Docker and Docker
+Desktop on macOS/Windows map ownership for you and need none of this.
 
 - Migrations apply automatically at boot; no manual migrate step is needed.
 - On an **empty** users table the bootstrap admin is created from `VIBERR_SEED_ADMIN_EMAIL`
@@ -277,11 +288,17 @@ logs are structured JSON on stdout. Full layout with retention:
   from the repo root is fine (`.env`'s `VIBERR_DATA_ROOT` must name the mounted directory,
   `./docker-data` as in `.env.example`). *(Corrected 2026-09-04, pass 34 — D34-1.)*
 
-  Read the artefact's own README for what it excludes. Two exclusions matter most:
+  Read the artefact's own README for what it excludes. Three exclusions matter most:
   `runtimes/` (live agent logins, now one set per person under `runtimes/users/` — opt in
-  with `--include-runtimes`, and then treat the artefact as a secret), and
+  with `--include-runtimes`, and then treat the artefact as a secret),
   **`VIBERR_SECRET_ENCRYPTION_KEY` itself**, which lives in the
-  environment. Without that key every sealed PAT, MCP credential and personal backend API
+  environment, and the git trees under `projects/` — each task's
+  `tasks/<KEY>/workspace/` checkout and each project's `.repo-mirror/` bare mirror.
+  *(Added 2026-09-05: those two were being copied. They are re-derivable from the remote,
+  a live run can be mid-write so the copy would be torn, and they dwarf what is actually
+  truth — on the tree this was found on, 17M of git against 168K of project and task
+  markdown. Restoring a stale checkout over a fresh one was never wanted; the next run
+  re-clones and re-fetches.)* Without that key every sealed PAT, MCP credential and personal backend API
   key in the backed-up database is unreadable, so back the key up separately.
 
   The older advice — copy `./docker-data` wholesale, being careful to include the

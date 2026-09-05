@@ -132,6 +132,10 @@ COPY --from=build --chown=node:node /app/app ./app
 COPY --from=build --chown=node:node /app/tsconfig.json ./tsconfig.json
 
 # Data root must exist and be writable by the non-root user.
+# NOTE: this only takes effect when /data is NOT bind-mounted. compose.yml
+# mounts ./docker-data over it, and a bind mount shadows the image directory
+# completely — the host path's ownership is what the container sees. See
+# "First run" in docs/operations/deployment.md for the one-line host-side fix.
 RUN mkdir -p /data && chown node:node /data
 
 USER node

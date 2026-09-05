@@ -2799,6 +2799,24 @@ by rewriting those paragraphs:*
     `routes/palette-shell.tsx`; the 1080px chip tier in `app.css` is scoped to
     `button.top-search .kbd` — the trigger — rather than to one header.)
 
+146. **A per-person backend refusal is not an instance fault (owner, 2026-09-06, pass 35).**
+    `/resources/health` reports INSTANCE facts. Since ruling 127 an agent-backend credential
+    belongs to a PERSON, so "Claude refused" is a statement about one member's account, not
+    about this deployment — and `health-snapshot.server.ts` was still pushing
+    `credential:<backend>` and `quota:<backend>` into `degraded`, which made
+    `?probe=readiness` answer **503 for the whole instance** because somebody's key expired
+    or their window was spent. An orchestrator then drained traffic from an instance that
+    was serving everyone else perfectly well. Those two entries are removed. **(a)** The
+    readings are NOT lost: they stay in the health response body under `quota`, and they are
+    already rendered per person on **Insights** (the account label, the refusing run, the
+    provider's own words) and on **Profile**, which is where a fact about somebody's account
+    belongs. **(b)** The only instance-level backend fact remains
+    `backends.<b>.connectedUsers` — a count, never a verdict, and zero is not degraded
+    (R17-5). **(c)** This SUPERSEDES the F32-4/F32-9 decision to treat a refusal as degraded;
+    that decision was correct when a credential was deployment-wide and is wrong now. It does
+    not touch the watcher, lock or disk entries, which are genuine instance facts.
+    (`server/ops/health-snapshot.server.ts`; the contract in `routes/resources.health.ts`.)
+
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates
 that pass and remains unnumbered.)*
