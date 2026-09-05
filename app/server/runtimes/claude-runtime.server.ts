@@ -19,7 +19,7 @@ import { redactProviderText } from "~/server/secrets/git-output-redact.server";
 
 /**
  * Claude Code adapter — the OFFICIAL Claude Agent SDK
- * (`@anthropic-ai/claude-agent-sdk`, verified v0.3.x). `query()` returns a
+ * (`@anthropic-ai/claude-agent-sdk`, verified v0.3.261). `query()` returns a
  * `Query` (async generator of `SDKMessage`) whose yielded objects are the
  * SAME envelopes documented in runtime-adapters.md §1.3 (system·init with
  * session_id/model/tools, assistant/user with tool_use/tool_result blocks,
@@ -49,6 +49,16 @@ export interface ClaudeQueryOptions {
   effort?: string;
   maxTurns?: number;
   permissionMode?: string;
+  /** Who answers a permission prompt (SDK ≥ 0.3.259). `"none"` declares what
+   *  is true of every Viberr run: it is server-spawned with no human at the
+   *  CLI and no `canUseTool` callback, so anything the permission mode would
+   *  otherwise ASK about is denied at once, and the model is told the session
+   *  has no approval surface instead of being left to retry. Under
+   *  `bypassPermissions` nothing prompts, so this only binds on the
+   *  `permissionMode: "default"` seam (a non-autonomous spec), where the SDK
+   *  used to fall back to the same denial without stating it. The mode, the
+   *  deny rules and hooks still decide; this never widens a run. */
+  permissionPrompts?: "host" | "none";
   resume?: string;
   includePartialMessages?: boolean;
   env?: Record<string, string>;
@@ -326,6 +336,14 @@ const BASE_DENIED_BUILTINS = [
   // are closed: the synchronous `Task` AND the async task family (verified
   // present in the production docker init — `TaskCreate`/`TaskGet`/… leaked past
   // the singular `Task` deny). Orchestration is the operator's job.
+  //
+  // SDK 0.3.233 took the task-tracking tools (`TaskCreate`/`TaskGet`/
+  // `TaskUpdate`/`TaskList`, `TodoWrite`) OUT of the default tool surface on
+  // Opus 4.8, Sonnet 5, Fable 5 and newer models; they are still exposed on
+  // older models and whenever a run names them, and `TaskOutput`/`TaskStop`
+  // (the background-task pair) were never part of that change. The entries
+  // stay: a deny for a tool that is absent costs nothing, and the fence must
+  // not depend on which model a profile picked.
   "Task",
   "TaskCreate",
   "TaskGet",
@@ -357,6 +375,11 @@ const BASE_DENIED_BUILTINS = [
  * folder was called `my skill (v2)`. Re-checking at the adapter boundary means
  * no caller — present or future — can turn a bad name into a failed run. An
  * empty result puts the run back on the fully-isolated defaults.
+ *
+ * SDK 0.3.221 made that throw explicit: delimiters, control characters and the
+ * wildcard form are rejected by name, and `skills: 'all'` is the only way to
+ * enable every skill — a form this adapter must never send, since "all" would
+ * include the SDK's bundled set the filter exists to hide.
  */
 export function nativeSkillNames(skills?: readonly string[]): string[] {
   if (!skills?.length) return [];
@@ -603,6 +626,13 @@ function assistantUsage(envelope: ClaudeEnvelope): StepUsage | null {
 type ClaudeFailureKind =
   | "quota"
   | "auth"
+  /** The provider could not serve the run (see `RunFailureKind`): the SDK
+   *  gave up after repeated 529s (`api_error_status: 529`, SDK ≥ 0.3.223) or
+   *  a 5xx, or the assistant banner carried `overloaded` / `server_error`.
+   *  Its own class because the remedy is a plain retry — the account, the
+   *  window and the task are all fine — which is what neither `quota` nor
+   *  `unknown` ("review the runtime configuration") says. */
+  | "overloaded"
   /** P13-D-2: `--resume <id>` against a transcript Claude Code has swept
    *  ("No conversation found with session ID …"). `resumeRun`'s pre-flight
    *  probe normally re-anchors before we get here; this covers the SDK finding
@@ -653,7 +683,17 @@ const NO_EVIDENCE: FailureEvidence = {
 };
 
 const QUOTA_API_ERRORS = new Set(["rate_limit", "billing_error"]);
-const AUTH_API_ERRORS = new Set(["authentication_failed", "oauth_org_not_allowed"]);
+/** `account_on_hold` joined the SDK's assistant-error union in the 0.3.221–261
+ *  range: the provider refuses the account itself (a billing hold), so the
+ *  remedy is the auth one — a different account or an API key — never a retry. */
+const AUTH_API_ERRORS = new Set(["authentication_failed", "oauth_org_not_allowed", "account_on_hold"]);
+/** The provider's own capacity/side failures; classified `overloaded`. */
+const OVERLOAD_API_ERRORS = new Set(["overloaded", "server_error"]);
+/** A result the SDK ended on a provider-side status: 529 (overloaded) or any
+ *  other 5xx it stopped retrying. 4xx statuses are the account's (quota/auth). */
+function isProviderSideStatus(status: number | null): boolean {
+  return status !== null && status >= 500 && status <= 599;
+}
 
 /** The facts record for a classified kind: the window and reset ride ONLY on
  *  a REJECTED reading, so a transient 429 names no instant. */
@@ -734,9 +774,14 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
     };
   }
   const rejectedWindow = evidence.rateLimit?.status === "rejected";
+  // A run the SDK ended on a PROVIDER-side status (529/5xx) ended there, so an
+  // earlier assistant banner (`rate_limit` retried through, say) does not
+  // re-route it to the account's window — except a REJECTED reading, which is
+  // the provider's explicit statement that the window is spent and wins.
+  const providerSide = isProviderSideStatus(evidence.apiErrorStatus);
   const quotaByEvidence =
     rejectedWindow ||
-    (evidence.apiError !== null && QUOTA_API_ERRORS.has(evidence.apiError)) ||
+    (!providerSide && evidence.apiError !== null && QUOTA_API_ERRORS.has(evidence.apiError)) ||
     evidence.apiErrorStatus === 429;
   if (
     quotaByEvidence ||
@@ -759,7 +804,7 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
     };
   }
   const authByEvidence =
-    (evidence.apiError !== null && AUTH_API_ERRORS.has(evidence.apiError)) ||
+    (!providerSide && evidence.apiError !== null && AUTH_API_ERRORS.has(evidence.apiError)) ||
     evidence.apiErrorStatus === 401 ||
     evidence.apiErrorStatus === 403;
   if (
@@ -770,11 +815,44 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
   ) {
     const facts = failureFacts("auth", evidence);
     const orgRestricted = evidence.apiError === "oauth_org_not_allowed";
+    const onHold = evidence.apiError === "account_on_hold";
     return {
       kind: "auth",
       message: orgRestricted
         ? `The Claude account was refused by the provider (${evidence.apiErrorStatus ?? 403} oauth_org_not_allowed): the organization this account belongs to does not allow it here. Connect a different Claude account or an API key on Profile → Agent accounts.`
-        : `The Claude credential was rejected${evidence.apiErrorStatus ? ` (${evidence.apiErrorStatus}${evidence.apiError ? ` ${evidence.apiError}` : ""})` : ""}. Connect a different Claude account or an API key on Profile → Agent accounts.`,
+        : onHold
+          ? `The Claude account was refused by the provider (${evidence.apiErrorStatus ? `${evidence.apiErrorStatus} ` : ""}account_on_hold): the account itself is on hold, so no run can bill it until the hold is lifted. Connect a different Claude account or an API key on Profile → Agent accounts.`
+          : `The Claude credential was rejected${evidence.apiErrorStatus ? ` (${evidence.apiErrorStatus}${evidence.apiError ? ` ${evidence.apiError}` : ""})` : ""}. Connect a different Claude account or an API key on Profile → Agent accounts.`,
+      providerText,
+      facts,
+    };
+  }
+  // The provider's side, not the account's: the SDK gave up after repeated
+  // 529s (`api_error_status: 529`, structural since SDK 0.3.223) or another
+  // 5xx, or the banner said `overloaded` / `server_error`. Prose covers the
+  // thrown-stream case with the same signatures the run projection has always
+  // read as "the backend was unavailable" (`BACKEND_UNAVAILABLE_SIGNATURES`).
+  const overloadByEvidence =
+    providerSide ||
+    (evidence.apiError !== null && OVERLOAD_API_ERRORS.has(evidence.apiError));
+  if (
+    overloadByEvidence ||
+    /overloaded|\b5(?:0[023]|29)\b|temporarily unavailable|service unavailable|server error/i.test(
+      raw,
+    )
+  ) {
+    const facts = failureFacts("overloaded", evidence);
+    const status = evidence.apiErrorStatus;
+    const overloaded =
+      status === 529 || evidence.apiError === "overloaded" || /overloaded|\b529\b/i.test(raw);
+    return {
+      kind: "overloaded",
+      // Role-neutral, like the quota arm. Names the fact (the provider, not
+      // the account) and the one honest remedy: a retry. The packet builder
+      // adds "on the other backend now" only when the owner has it connected.
+      message: overloaded
+        ? `Claude could not serve this run: the provider was overloaded${status ? ` (HTTP ${status})` : ""}. Nothing about the account or the task is wrong; retry in a few minutes.`
+        : `Claude could not serve this run: the provider failed on its own side${status ? ` (HTTP ${status})` : ""}. Nothing about the account or the task is wrong; retry in a few minutes.`,
       providerText,
       facts,
     };
@@ -972,6 +1050,13 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // human at the CLI). acceptEdits still gated non-edit tools like
           // Bash; bypassPermissions runs unattended end-to-end.
           permissionMode: spec.autonomous ? "bypassPermissions" : "default",
+          // Nobody answers a prompt here, on ANY run: the process that would
+          // is this server, and it passes no `canUseTool`. Stated to the SDK
+          // (≥ 0.3.259) so a tool the mode would ask about is denied at once
+          // with a reason the model can act on, instead of the unstated
+          // headless fallback. Binds only on the `default` seam; bypass never
+          // prompts. Deny rules and `disallowedTools` are unaffected.
+          permissionPrompts: "none",
           // A runaway guard, NOT a work budget: 50 cut off real dev runs
           // mid-delivery (a finished implementation died at turn 51). Default
           // generous; override per deployment with VIBERR_CLAUDE_MAX_TURNS.
@@ -1244,10 +1329,16 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // this way lost its `retry_other_backend` recovery option and got the
           // generic "run ended in an error" copy. Classify it the same way a
           // thrown error is classified; the raw text never leaves this scope.
-          const failure = classifyClaudeError(
-            new Error(resultErrorText ?? resultSubtype ?? ""),
-            evidence,
-          );
+          //
+          // The prose is the result's own text, else its subtype when that
+          // names a failure. An API-refused run ends `is_error: true` under
+          // `subtype: "success"` (U34-1), and with no prose that word used to
+          // become the cause — and so the "provider's own sentence" appended to
+          // the human line ("The provider reported: success"). No prose is no
+          // prose: the structured evidence classifies, and nothing is quoted.
+          const resultProse =
+            resultErrorText ?? (resultSubtype && resultSubtype !== "success" ? resultSubtype : "");
+          const failure = classifyClaudeError(new Error(resultProse), evidence);
           const now = new Date().toISOString();
           cb.onLine({
             raw: "",

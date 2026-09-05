@@ -616,6 +616,10 @@ export function AgentLogsPanel({
                 ? `${cur!.backend === "codex" ? "Codex" : "Claude"} refused this run: the account's usage window is spent (the error line names the reset and the account remedy)${retryClause}`
                 : cur!.failureKind === "auth"
                   ? `${cur!.backend === "codex" ? "Codex" : "Claude"} refused this run: the account was rejected by the provider (an organization restriction or a rejected credential; the error line names the remedy)${retryClause}`
+                  : cur!.failureKind === "overloaded"
+                  ? // The provider's side, not the account's: the sentence
+                    // must not send the reader to a quota or account remedy.
+                    `${cur!.backend === "codex" ? "Codex" : "Claude"} could not serve this run: the provider was overloaded or failed on its side; nothing about the account is wrong, retry in a few minutes${retryClause}`
                   : backendUnavailable
                 ? // Ruling 127: the same `run·unavailable` classification now
                   // also covers "the account this run bills has not connected

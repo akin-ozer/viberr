@@ -201,7 +201,13 @@ function projectRow(
       : (terminal?.failure?.kind ??
         TAGGED_FAILURE_KINDS.find((k) => (terminal?.tag ?? "").endsWith(`·${k}`)));
   const classifiedUnavailable =
-    failureKind === "quota" || failureKind === "auth" || failureKind === "unavailable";
+    failureKind === "quota" ||
+    failureKind === "auth" ||
+    failureKind === "unavailable" ||
+    // The provider's own overload/5xx: the backend was not available for this
+    // run, so the retry-on-the-other-backend offer applies exactly as the raw
+    // "overloaded" signature below has always made it.
+    failureKind === "overloaded";
   const taggedUnavailable = lines.some(
     (l) => l.ev === "err" && l.tag === "run·unavailable",
   );

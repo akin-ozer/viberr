@@ -932,4 +932,19 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
     const unknownNote = unknown.find((t) => t.startsWith("I could not finish this turn"))!;
     expect(unknownNote).toContain("Say it again to retry");
   });
+
+  it("a provider-overloaded turn (Agent SDK 0.3.261 upgrade) says so, clears the account, and asks for a retry in a few minutes", async () => {
+    // Canary: route `overloaded` through the generic arm and the note reads
+    // "the run did not complete … Say it again to retry" — true, but it hides
+    // that nothing the person can change was involved.
+    const texts = await settleErrored("run_overloaded", {
+      t: "1", ev: "err", tag: "run·error·overloaded", text: "Claude could not serve this run: the provider was overloaded (HTTP 529).",
+      failure: { kind: "overloaded", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: 529, terminalReason: "api_error" },
+    });
+    const note = texts.find((t) => t.startsWith("I could not finish this turn"))!;
+    expect(note).toBe(
+      "I could not finish this turn: Claude was overloaded or failed on its side (HTTP 529). Nothing about your account is wrong. Say it again in a few minutes.",
+    );
+    expect(note).not.toContain("Profile → Agent accounts");
+  });
 });

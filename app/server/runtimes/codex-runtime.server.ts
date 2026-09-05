@@ -492,6 +492,13 @@ function safeCodexError(cause: unknown): Error {
 export type CodexFailureKind =
   | "quota"
   | "auth"
+  /** Parity with the Claude adapter's class of the same name: the PROVIDER
+   *  could not serve the run (overloaded, 5xx, "service unavailable"). Codex
+   *  streams no structured status, so this leg is prose-only, on the same
+   *  signatures the run projection has always read as backend unavailability
+   *  (`BACKEND_UNAVAILABLE_SIGNATURES`). The remedy is a retry, so it must not
+   *  fall to `unknown` and its "review its authentication" advice. */
+  | "overloaded"
   | "idle_timeout"
   /** P13-D-2: the rollout behind the resumed session id is gone from
    *  `$CODEX_HOME/sessions`. `resumeRun`'s pre-flight probe normally catches
@@ -572,6 +579,18 @@ function classifyCodexFailure(
       kind: "auth",
       message:
         "Codex authentication failed. Review the configured subscription credential.",
+      providerText,
+    };
+  }
+  if (
+    /overloaded|\b5(?:0[023]|29)\b|temporarily unavailable|service unavailable|server error/i.test(
+      raw,
+    )
+  ) {
+    return {
+      kind: "overloaded",
+      message:
+        "Codex could not serve this run: the provider was overloaded or failed on its own side. Nothing about the account or the task is wrong; retry in a few minutes.",
       providerText,
     };
   }

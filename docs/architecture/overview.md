@@ -31,7 +31,7 @@ is vertical; run one instance per data root.
 | Validation | Zod 4 for env, files, SSE, DB row decoding |
 | Files | `yaml` frontmatter, chokidar 5 watchers (250 ms debounce) |
 | Auth | better-auth 1.6.25 behind `app/lib/auth.server.ts`; no plugins |
-| Agents | `@anthropic-ai/claude-agent-sdk`, `@openai/codex-sdk` 0.146.0, `@playwright/mcp` 0.0.79 with Debian chromium; `uv`/`uvx` in the image for Python stdio MCP servers |
+| Agents | `@anthropic-ai/claude-agent-sdk` 0.3.261, `@openai/codex-sdk` 0.146.0, `@playwright/mcp` 0.0.79 with Debian chromium; `uv`/`uvx` in the image for Python stdio MCP servers |
 | UI | one stylesheet `app/app.css` (ported `viberr.css`, no Tailwind), Manrope / Noto Sans / JetBrains Mono, lexical (comment composer), dnd-kit (board), react-markdown + remark-gfm |
 | Logging | dependency-free JSON lines on stdout with `AsyncLocalStorage` request correlation |
 

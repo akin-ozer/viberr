@@ -260,6 +260,48 @@ describe("projectRunsForTask grouping", () => {
     ).toBeUndefined();
   });
 
+  it("a CLASSIFIED provider overload (Agent SDK 0.3.261 upgrade) counts as the backend being unavailable, so the other-backend retry is offered", () => {
+    // The SDK now ends a run it gave up on after repeated 529s with
+    // `api_error_status: 529`, and the adapter classifies that `overloaded`.
+    // Because a classified run is decided by its class alone (the test above),
+    // the class has to carry the retry offer itself: before it existed the same
+    // run classified `unknown` and LOST the offer the raw "overloaded" scan gave
+    // an unclassified run. Canary: drop `overloaded` from `classifiedUnavailable`.
+    insert({
+      id: "run_o",
+      threadId: "primary",
+      kind: "primary",
+      backend: "claude",
+      state: "error",
+      credentialUserId: "u_owner",
+    });
+    insertRunLine(db, {
+      runId: "run_o",
+      seq: 0,
+      occurredAt: "2026-09-06T00:00:00.000Z",
+      raw: "",
+      display: {
+        t: "00:00:00",
+        ev: "err",
+        tag: "run·error·overloaded",
+        text: "Claude could not serve this run: the provider was overloaded (HTTP 529). Nothing about the account or the task is wrong; retry in a few minutes.",
+        failure: {
+          kind: "overloaded",
+          resetsAt: null,
+          window: null,
+          windowRejected: false,
+          apiError: null,
+          apiErrorStatus: 529,
+          terminalReason: "api_error",
+        },
+      },
+    });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.failureKind).toBe("overloaded");
+    expect(view!.failedBackendUnavailable).toBe(true);
+    expect(view!.altBackend).toBe("codex");
+  });
+
   it("does NOT flag a genuine task failure as backend-unavailable", () => {
     insert({ id: "run_f", threadId: "primary", kind: "primary", backend: "codex", state: "error" });
     insertRunLine(db, {

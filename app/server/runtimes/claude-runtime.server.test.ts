@@ -956,6 +956,29 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
     }
   });
 
+  it("declares `permissionPrompts: 'none'` on EVERY run — there is never anyone at the CLI to answer one", async () => {
+    // Agent SDK 0.3.259: who answers a permission prompt. Viberr passes no
+    // `canUseTool`, so the honest answer is "nobody", stated so that a tool the
+    // permission mode would ASK about is denied at once with a reason the
+    // model can act on. It binds only on the `default` seam (a non-autonomous
+    // spec); `bypassPermissions` never prompts, and deny rules are untouched.
+    // Canary: drop the option from `start` and every spec below reads undefined.
+    for (const spec of [
+      { ...SPEC, kind: "primary" as const },
+      { ...SPEC, kind: "operator" as const },
+      { ...SPEC, kind: "controller" as const },
+      { ...SPEC, autonomous: false },
+      { ...SPEC, resumeSessionId: "sess-9" },
+    ]) {
+      const options = await optionsFor(spec);
+      expect(
+        options.permissionPrompts,
+        `permissionPrompts for ${JSON.stringify({ kind: spec.kind, autonomous: spec.autonomous })}`,
+      ).toBe("none");
+      expect(options.permissionMode).toBe(spec.autonomous ? "bypassPermissions" : "default");
+    }
+  });
+
   it("hands the SDK the granted servers verbatim — credentials and the in-process toolkit included", async () => {
     // The exact shapes `resolveSpecialistMcpServers` builds: an HTTP server with
     // the decrypted org credential as an Authorization header, a stdio server
@@ -1156,5 +1179,89 @@ describe("ruling 130(a): structured classification", () => {
     const terminal = lines.find((l) => (l.display?.tag ?? "").startsWith("run·error·"));
     expect(terminal?.display?.tag).toBe("run·error·quota");
     expect(terminal?.display?.failure).toMatchObject({ kind: "quota", windowRejected: false, apiError: null });
+  });
+
+  /**
+   * Agent SDK 0.3.261 upgrade. Since 0.3.223 a run the SDK gives up on after
+   * repeated 529s ends with `api_error_status: 529`, so an overload is read
+   * from that fact, not from prose. It used to land on `unknown` and tell the
+   * human to "review the runtime configuration" for a failure that was the
+   * provider's — and, being classified, it lost the retry-on-the-other-backend
+   * offer the raw "overloaded" scan would have given an unclassified run.
+   *
+   * Canary: remove the `overloadByEvidence` arm and every case below falls to
+   * `run·error·unknown`.
+   */
+  it("a 529 result classifies `run·error·overloaded` structurally, names the provider (not the account) and a retry", async () => {
+    const { terminal } = await run([
+      { type: "result", subtype: "success", is_error: true, num_turns: 3, usage: {}, api_error_status: 529, terminal_reason: "api_error", result: "" },
+    ]);
+    expect(terminal?.display?.tag).toBe("run·error·overloaded");
+    expect(terminal?.display?.text).toBe(
+      "Claude could not serve this run: the provider was overloaded (HTTP 529). Nothing about the account or the task is wrong; retry in a few minutes.",
+    );
+    expect(terminal?.display?.text).not.toContain("Profile → Agent accounts");
+    expect(terminal?.display?.failure).toEqual({
+      kind: "overloaded", resetsAt: null, window: null, windowRejected: false,
+      apiError: null, apiErrorStatus: 529, terminalReason: "api_error",
+    });
+  });
+
+  it("the assistant banner's `overloaded` / `server_error` codes classify the same class; a plain 5xx reads as the provider's own failure", async () => {
+    const banner = await run([
+      { type: "assistant", error: "overloaded", message: { content: [{ type: "text" , text: "Overloaded" }], usage: {} } },
+      { type: "result", subtype: "error_during_execution", is_error: true, num_turns: 1, usage: {}, result: "" },
+    ]);
+    expect(banner.terminal?.display?.tag).toBe("run·error·overloaded");
+    expect(banner.terminal?.display?.text).toContain("the provider was overloaded.");
+    expect(banner.terminal?.display?.failure).toMatchObject({ kind: "overloaded", apiError: "overloaded", apiErrorStatus: null });
+
+    const serverError = await run([
+      { type: "assistant", error: "server_error", message: { content: [{ type: "text", text: "Internal server error" }], usage: {} } },
+      { type: "result", subtype: "success", is_error: true, num_turns: 1, usage: {}, api_error_status: 500, terminal_reason: "api_error", result: "" },
+    ]);
+    expect(serverError.terminal?.display?.tag).toBe("run·error·overloaded");
+    expect(serverError.terminal?.display?.text).toContain("the provider failed on its own side (HTTP 500).");
+    expect(serverError.terminal?.display?.failure).toMatchObject({ kind: "overloaded", apiError: "server_error", apiErrorStatus: 500 });
+  });
+
+  it("a provider-side status is where the run ENDED: an earlier `rate_limit` banner the SDK retried through does not re-route it to quota — a REJECTED reading still does", async () => {
+    const retriedThrough = await run([
+      { type: "assistant", error: "rate_limit", message: { content: [{ type: "text", text: "Rate limited, retrying" }], usage: {} } },
+      { type: "result", subtype: "success", is_error: true, num_turns: 2, usage: {}, api_error_status: 529, terminal_reason: "api_error", result: "" },
+    ]);
+    expect(retriedThrough.terminal?.display?.tag).toBe("run·error·overloaded");
+    expect(retriedThrough.terminal?.display?.failure).toMatchObject({ kind: "overloaded", apiError: "rate_limit", apiErrorStatus: 529 });
+
+    const rejected = await run([
+      { type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "five_hour", utilization: null, resetsAt: 1_788_781_800, isUsingOverage: false } },
+      { type: "result", subtype: "success", is_error: true, num_turns: 2, usage: {}, api_error_status: 529, terminal_reason: "api_error", result: "" },
+    ]);
+    expect(rejected.terminal?.display?.tag).toBe("run·error·quota");
+    expect(rejected.terminal?.display?.failure).toMatchObject({ kind: "quota", windowRejected: true, window: "five_hour" });
+  });
+
+  it("a thrown stream error naming a 529 / overload classifies `overloaded` by prose, never quota or unknown", async () => {
+    for (const text of ["API Error: 529 Overloaded", "The upstream service is temporarily unavailable", "503 Service Unavailable"]) {
+      const { q } = fakeQuery([], { rejectWith: new Error(text) });
+      const adapter = createClaudeAdapter({ queryFn: () => q });
+      const lines: EmittedLine[] = [];
+      adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
+      await drain();
+      const terminal = lines.find((l) => (l.display?.tag ?? "").startsWith("run·error·"));
+      expect(terminal?.display?.tag, text).toBe("run·error·overloaded");
+      expect(terminal?.display?.failure).toMatchObject({ kind: "overloaded", apiErrorStatus: null });
+    }
+  });
+
+  it("`account_on_hold` (new in the SDK's error union) is an account refusal: `run·error·auth`, naming the hold and Profile → Agent accounts", async () => {
+    const { terminal } = await run([
+      { type: "assistant", error: "account_on_hold", message: { content: [{ type: "text", text: "Your account is on hold." }], usage: {} } },
+      { type: "result", subtype: "success", is_error: true, num_turns: 1, usage: {}, api_error_status: 403, terminal_reason: "api_error", result: "" },
+    ]);
+    expect(terminal?.display?.tag).toBe("run·error·auth");
+    expect(terminal?.display?.text).toContain("(403 account_on_hold): the account itself is on hold");
+    expect(terminal?.display?.text).toContain("Profile → Agent accounts");
+    expect(terminal?.display?.failure).toMatchObject({ kind: "auth", apiError: "account_on_hold", apiErrorStatus: 403 });
   });
 });

@@ -125,6 +125,76 @@ describe("describeRunFailure", () => {
     expect(withOther.options[0]).toMatchObject({ backend: "codex" });
   });
 
+  /**
+   * Agent SDK 0.3.261 upgrade: a run the SDK ended on the provider's side
+   * (`api_error_status: 529`, structural since 0.3.223) is `overloaded`, its
+   * own class. Its words name the provider, not the account, and its remedy is
+   * a retry — never Profile → Agent accounts, never "review the runtime
+   * configuration".
+   *
+   * Canary: drop the `case "overloaded"` arm and the reason falls to the
+   * default "did not complete" sentence; drop the kind from `backendFailure`
+   * and the specialist options lose `retry_other_backend`.
+   */
+  it("overloaded (operator): names the provider's overload and the status, says nothing is wrong with the account, and recommends a plain re-run", () => {
+    const store = setupTestStore(ctx);
+    const d = describe_(store, {
+      failure: failure("overloaded", { apiErrorStatus: 529, terminalReason: "api_error" }),
+    });
+    expect(d.reason).toBe("Claude could not serve the operator run: the provider was overloaded (HTTP 529).");
+    expect(d.remedy).toContain(`Nothing about ${store.users.arda.name}'s account or the task is wrong`);
+    expect(d.remedy).toContain("Retry in a few minutes");
+    expect(d.remedy).not.toContain("Profile → Agent accounts");
+    expect(d.resetLabel).toBeNull();
+    const rec = d.options.find((o) => o.recommended)!;
+    expect(rec.kind).toBe("block_on_policy");
+    expect(rec.title).toBe("Re-run the operator now");
+    expect(rec.ev).toContain("No policy or credential was changed");
+
+    // A 5xx that is not an overload reads as the provider's own failure, with
+    // the banner code when the SDK sent one.
+    const serverError = describe_(store, {
+      failure: failure("overloaded", { apiErrorStatus: 500, apiError: "server_error" }),
+    });
+    expect(serverError.reason).toBe(
+      "Claude could not serve the operator run: the provider failed on its own side (HTTP 500, server_error).",
+    );
+  });
+
+  it("specialist overloaded: retry on the other backend first WHEN the owner has it; the same-backend retry asserts that nothing was changed", async () => {
+    const store = setupTestStore(ctx);
+    const without = describe_(store, {
+      role: "specialist",
+      agentHandle: "jc-developer",
+      failure: failure("overloaded", { apiErrorStatus: 529 }),
+    });
+    expect(without.options.map((o) => [o.kind, o.recommended ?? false])).toEqual([
+      ["request_edit", true],
+      ["redirect", false],
+    ]);
+    expect(without.options[0]!.title).toBe(
+      "Retry @jc-developer on Claude now: the provider was overloaded, nothing was changed",
+    );
+    expect(without.options[0]!.ev).toContain("Claude was overloaded; the agent is retried as it was");
+    expect(without.remedy).toBe(
+      `Nothing about ${store.users.arda.name}'s account or the task is wrong. Retry in a few minutes.`,
+    );
+
+    await connectFakeBackend(store.db, store.users.arda.id, "codex");
+    const withOther = describe_(store, {
+      role: "specialist",
+      agentHandle: "jc-developer",
+      failure: failure("overloaded", { apiErrorStatus: 529 }),
+    });
+    expect(withOther.options.map((o) => [o.kind, o.recommended ?? false])).toEqual([
+      ["retry_other_backend", true],
+      ["request_edit", false],
+      ["redirect", false],
+    ]);
+    expect(withOther.options[0]).toMatchObject({ backend: "codex" });
+    expect(withOther.remedy).toContain("or run it on Codex now");
+  });
+
   it("an unowned task yields no owner sentence and no retry option", () => {
     const store = setupTestStore(ctx);
     const d = describe_(store, {
