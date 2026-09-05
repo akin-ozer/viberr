@@ -86,7 +86,7 @@ Tests are co-located (`foo.server.test.ts`). There are no `utils.ts` dumping gro
 
 | Directory | Surface |
 |---|---|
-| `shell/` | Workspace rail (`nav.ts` order: Board, Review queue, Controller, Agents, Policy, GitHub, Activity, Settings), topbar, ⌘K palette and its server query, bell popover, user menu, theme preference, route pending bar, CSRF result helper. |
+| `shell/` | Workspace rail (`nav.ts` order: Board, Review queue, Controller, Agents, Policy, GitHub, Activity, Settings), topbar, the standalone-page header (`page-topbar.tsx`, ruling 145 — mounted by the `palette-shell` layout for the routes `standalonePageLabel` names), the shared palette trigger both headers render, ⌘K palette and its server query, bell popover, user menu, theme preference, route pending bar, CSRF result helper. |
 | `home/` | `/`: project cards, pinned/all/archived groups, new-project modal (name, key, connection, repo, workflow, policy preset), project creation server logic, org tiles, admin store strip (re-scan, rebuild). |
 | `board/` | Board columns, filters (URL params), dnd-kit drag with server-authoritative drop resolution, list view, new-task dialog, board-drop acceptance ceremony. |
 | `task-detail/` | Hero, diagnostics, recommendations, execution profile with run controls and scheduling, decision packet, live run strip, agent logs, timeline (Lexical composer with @mention autocomplete), attachments panel and lightbox, side panels (GitHub trace, current state, permissions), accept/release/archive confirms, continuity recovery panel, plus the per-person run principal every run control answers from (`run-principal-view.ts`, ruling 127). |

@@ -71,3 +71,33 @@ export function boardHref(
 export function workspaceViewLabel(view: WorkspaceNavItem["id"]): string {
   return WORKSPACE_NAV.find((n) => n.id === view)?.label ?? "Board";
 }
+
+/**
+ * The standalone pages — the instance-level surfaces that render outside the
+ * workspace layout and carry the shared app header (ruling 145). Path → the
+ * name the header's current crumb shows.
+ *
+ * A route is on this list when it is a PAGE. `/profile` and `/notifications`
+ * are deliberately absent: both render their whole surface inside a
+ * `showModal()` overlay that covers the viewport, so a header behind one would
+ * be a dimmed sliver, not a header. `/controller` is absent too — it carries
+ * its own identity header (the controller's name, its model and its scope) and
+ * a full-height layout that scrolls inside itself.
+ */
+export const STANDALONE_PAGES: readonly { path: string; label: string }[] = [
+  { path: "/org/settings", label: "Instance settings" },
+  { path: "/insights", label: "Insights" },
+];
+
+/**
+ * The header's crumb for a standalone page, or null when the route is not one
+ * (the layout then renders no header at all).
+ *
+ * Matched on the path ALONE: `/org/settings?tab=users` is one page with a tab
+ * rail, not four, and the tab is already named by the rail's `aria-current`.
+ */
+export function standalonePageLabel(pathname: string): string | null {
+  const path =
+    pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  return STANDALONE_PAGES.find((p) => p.path === path)?.label ?? null;
+}

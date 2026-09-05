@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Icon } from "~/ui/icon";
-import { useModifierHint } from "~/ui/use-shortcut-hint";
 import type { NotificationView } from "~/features/notifications/notification-item";
 import { CommandPalette } from "./command-palette";
+import { PaletteTrigger } from "./palette-trigger";
 import { useCommandPaletteShortcut } from "./use-command-palette";
 import { TopBell } from "./top-bell";
 import { UserMenu, type MenuUser } from "./user-menu";
@@ -55,7 +55,6 @@ export function Topbar({
 }) {
   const location = useLocation();
 
-  const modifierHint = useModifierHint();
   const view = workspaceViewFromPathname(location.pathname);
   // P13-D-35: the crumbs' board links kept the filter/search only if the URL
   // carried it — they were bare paths, so clicking the project crumb from a
@@ -177,22 +176,9 @@ export function Topbar({
         </button>
       )}
       {/* R15-5: a BUTTON, not an input — everything typed here is answered by
-          the palette, across every project the viewer can open. */}
-      <button
-        type="button"
-        className="top-search"
-        aria-haspopup="dialog"
-        aria-label="Search tasks, branches, agents, projects"
-        onClick={() => setPalette(true)}
-      >
-        <Icon name="search" />
-        <span className="top-search-label">Search…</span>
-        {/* UI-55: the handler accepts Ctrl as well; show what the viewer's
-            keyboard actually has. */}
-        <span className="kbd" suppressHydrationWarning>
-          {modifierHint}
-        </span>
-      </button>
+          the palette, across every project the viewer can open. Shared with the
+          standalone-page header so the two cannot drift (`palette-trigger.tsx`). */}
+      <PaletteTrigger onOpen={() => setPalette(true)} />
       <TopBell notifications={notifications} unread={unread} />
       <UserMenu user={user} theme={theme} showSwitchProject />
       {palette && <CommandPalette onClose={() => setPalette(false)} />}

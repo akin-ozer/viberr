@@ -1,4 +1,3 @@
-import { Link } from "react-router";
 import type {
   CountRow,
   OversightSummary,
@@ -62,12 +61,6 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
             <LocalDayDotTime iso={summary.generatedAt} />.
           </p>
         </div>
-        {/* Back-navigation points BACK — same idiom as org settings'
-            "← Projects" (a forward arrow on a back link reads reversed). */}
-        <Link to="/" className="btn sm">
-          <Icon name="arrow" className="r180" />
-          Home
-        </Link>
       </div>
 
       {empty ? (

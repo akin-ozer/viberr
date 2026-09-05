@@ -3418,8 +3418,15 @@ dialog[data-closing]::backdrop {
      (`button.kbd` is the only control that opens the palette there) and the
      command palette's own "esc" hint — the palette renders INSIDE this topbar,
      so `.topbar .kbd` would still have caught it. Only the trigger's own chip
-     is competing with the crumbs for room. */
-  .topbar > .top-search .kbd { display: none; }
+     is competing with the crumbs for room.
+
+     Ruling 145 scoped it to the TRIGGER instead of to the topbar: the same
+     trigger now renders in the standalone-page header too (one component,
+     `palette-trigger.tsx`), and the distinction that matters was never "which
+     header" — it is that a `.kbd` INSIDE a button-trigger is a hint, while
+     Home's `button.kbd` inside `div.top-search` IS the control. `button.` is
+     what says so, and it resolves in the trigger's own file. */
+  button.top-search .kbd { display: none; }
   .crumbs .crumb-root, .crumbs .sep-root { display: none; }
   .top-search { flex-basis: 260px; min-width: 130px; }
 }
@@ -4068,7 +4075,6 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 
 /* ---------- Viberr settings (instance level) ---------- */
 .set-head { display: flex; align-items: flex-start; gap: 1rem; padding-top: .375rem; flex-wrap: wrap; }
-.set-head .btn { margin-top: .375rem; }
 .set-head h1 { font-size: 1.5rem; letter-spacing: -.015em; }
 .set-head .sub { color: var(--muted); font-size: .92rem; margin: .375rem 0 0; max-width: 66ch; line-height: 1.5; }
 .r180 { transform: rotate(180deg); }
@@ -4229,6 +4235,12 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   }
   .home-top .top-search > .ico { position: absolute; inset: 0; margin: auto; pointer-events: none; }
   .home-top .top-search input { display: none; }
+  /* Ruling 145: the standalone-page header (org settings, insights) puts the
+     palette BUTTON in this box instead of Home's finder, so its label has to
+     go when the box collapses to the 36px square — the input rule above only
+     covers Home's own input. Without this the label overflowed the square and
+     painted under the bell between 720 and 900px. */
+  .home-top .top-search-label { display: none; }
   .home-top .top-search .kbd {
     display: block;
     position: absolute; inset: 0;
@@ -4584,10 +4596,14 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .audit-s3-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
 
 /* Insights — instance analytics dashboard. */
-.insights { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.5rem 3rem; }
+/* `width: 100%` is load-bearing, not tidiness (ruling 145): the page is a FLEX
+   ITEM inside `.home` now, and an auto cross-axis margin turns off the default
+   stretch — so without a declared width the whole surface shrinks to its
+   content and the three-up stat grid collapses with it. `.home-shell` carries
+   the same pair for the same reason. */
+.insights { width: 100%; max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.5rem 3rem; }
 .insights-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
 .insights-head h1 { font-size: 1.5rem; font-weight: 800; }
-.insights-head .btn { text-decoration: none; flex: none; }
 .stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; margin-bottom: 1.5rem; }
 .stat-card { display: flex; flex-direction: column; gap: .125rem; padding: 1rem 1rem; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-card); box-shadow: var(--shadow-card); }
 .stat-ico { color: var(--blue-pressed); }
