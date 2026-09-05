@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -362,16 +363,23 @@ export function createStoreFolder(
   actor: AuditActor,
 ): MkdirResult {
   const base = sanitizeDirPath(dirPath);
-  const segs = name
-    .split("/")
-    .flatMap((s) => {
-      const cleaned = s.trim().replace(/\\/g, "-");
-      return cleaned ? [cleaned] : [];
-    })
-    .map((s) => {
-      if (s.includes("..")) throw AppError.validation("Invalid folder name.");
-      return s.slice(0, 200);
-    });
+  // Through `cleanSegment`, the module's own rule, instead of a hand-rolled
+  // near-copy of it: the copy did not drop DOT-PREFIXED names, so a folder
+  // called ".drafts" was created on disk and then skipped by the scanner
+  // (`!e.name.startsWith(".")`) forever — invisible in the browser, never
+  // injected into a run, and impossible to delete in-app, while the toast said
+  // it worked. Refuse by name instead of creating something unreachable.
+  const segs = name.split("/").flatMap((raw) => {
+    if (raw.includes("..")) throw AppError.validation("Invalid folder name.");
+    if (!raw.trim()) return [];
+    const s = cleanSegment(raw);
+    if (!s) {
+      throw AppError.validation(
+        `A folder name cannot start with a dot — “${raw.trim()}” would be hidden from the browser and from every agent run.`,
+      );
+    }
+    return [s];
+  });
   if (segs.length === 0) return { createdPath: base };
 
   let cursor = path.join(target.rootAbs, ...base);
@@ -458,6 +466,14 @@ export function writeStoreDoc(
   const cleaned = name.trim().replace(/[\\/]/g, "-");
   if (!cleaned || cleaned.includes("..")) {
     throw AppError.validation("Give the document a file name.");
+  }
+  // Same rule as every other write into the store (`cleanSegment`): a
+  // dot-prefixed document is skipped by the scanner, so it would be written,
+  // reported as saved, and then be invisible, un-injectable and undeletable.
+  if (!cleanSegment(cleaned)) {
+    throw AppError.validation(
+      `A document name cannot start with a dot — “${cleaned}” would be hidden from the browser and from every agent run.`,
+    );
   }
   const withExt = path.extname(cleaned) ? cleaned : `${cleaned}.md`;
   if (!STORE_TEXT_EXTENSIONS.has(path.extname(withExt).toLowerCase())) {
@@ -851,7 +867,11 @@ export async function importGithubSnapshot(
   while (existsSync(path.join(baseAbs, folder))) {
     if (importSourceOf(baseAbs, folder) === sourceKey) {
       refreshed = true;
-      rmSync(path.join(baseAbs, folder), { recursive: true, force: true });
+      // The delete used to happen HERE, before a single blob was fetched, so a
+      // re-import that GitHub then refused (rate limit, revoked token, network)
+      // destroyed the folder's whole contents and reported "nothing was
+      // imported". The fetch now stages below and only swaps once it has
+      // content, so a failed refresh leaves the existing snapshot untouched.
       break;
     }
     if (++attempts > COLLISION_CAP) {
@@ -869,6 +889,13 @@ export async function importGithubSnapshot(
   // between "GitHub refused these files" and "you ran out of anonymous quota
   // partway through", which is repaired by a connection, not by retrying.
   let anonQuotaHit = false;
+  // Staging root for this import. Dot-prefixed so the scanner and the injector
+  // skip it (same reason the provenance marker is a dotfile) if anything ever
+  // leaves one behind; every exit below removes it.
+  const finalAbs = path.join(baseAbs, folder);
+  const stageAbs = path.join(baseAbs, `.importing-${folder}`);
+  assertInsideRoot(target.rootAbs, stageAbs);
+  rmSync(stageAbs, { recursive: true, force: true });
   const writeResults = await Promise.all(
     selected.map(async (blob) => {
       const rel = subPath ? blob.path.slice(prefix.length) : blob.path;
@@ -888,7 +915,7 @@ export async function importGithubSnapshot(
         blobRes.data.encoding === "base64"
           ? Buffer.from(content.replace(/\n/g, ""), "base64")
           : Buffer.from(content, "utf8");
-      const abs = path.join(baseAbs, folder, ...parts);
+      const abs = path.join(stageAbs, ...parts);
       assertInsideRoot(target.rootAbs, abs);
       mkdirSync(path.dirname(abs), { recursive: true });
       writeFileSync(abs, data);
@@ -897,12 +924,18 @@ export async function importGithubSnapshot(
   );
   const written = writeResults.reduce((sum: number, n) => sum + n, 0);
   if (written === 0) {
+    // Nothing arrived: drop the staging tree and leave any existing snapshot
+    // exactly as it was — "nothing was imported" is now literally true.
+    rmSync(stageAbs, { recursive: true, force: true });
     if (anonQuotaHit) return noConnectionState(RATE_HINT);
     return {
       status: "failed",
       message: "GitHub refused the file contents, so nothing was imported.",
     };
   }
+  // Content in hand — now, and only now, replace the previous snapshot.
+  rmSync(finalAbs, { recursive: true, force: true });
+  renameSync(stageAbs, finalAbs);
   // E5: per-blob failures (refused blob fetch, unwritable path) used to sum
   // silently into the success toast — count and surface them instead.
   const skipped = selected.length - written;

@@ -319,6 +319,68 @@ describe("edit / role / reset / remove", () => {
       db.prepare(`SELECT id FROM "session" WHERE userId = ?`).get(user.id),
     ).toBeUndefined();
   });
+
+  it("names the GitHub connections and project bindings the delete takes with it", async () => {
+    // users → github_pats → github_connections AND project_github_credentials,
+    // all ON DELETE CASCADE. So removing one person can disconnect the org's
+    // DEFAULT connection and unbind projects they never touched — the very
+    // thing `removeConnection` refuses ("Set another connection as default
+    // first"). The delete still proceeds (offboarding must not be blockable by
+    // whose PAT happened to be bound), but it no longer does it silently.
+    // Canary: drop connectionsLost/projectsUnbound from the audit + toast and
+    // both assertions below fail.
+    const db = makeDb();
+    const { user } = await createLocalAccount(
+      db,
+      { name: "Leaver", email: "leaver@test.dev", role: "member" },
+      ACTOR,
+    );
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO github_pats
+         (id, user_id, label, encrypted_token, token_suffix, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("pat_1", user.id, "work", "box", "abcd", now);
+    db.prepare(
+      `INSERT INTO github_connections
+         (id, owner, pat_id, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, ?)`,
+    ).run("acme", "acme", "pat_1", now, now);
+    db.prepare(
+      `INSERT INTO project_github_credentials
+         (project_slug, pat_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?)`,
+    ).run("viberr-core", "pat_1", now, now);
+
+    const result = await deleteOrgUser(db, user.id, ACTOR);
+
+    // The cascade really did fire — this is not a hypothetical.
+    expect(
+      db.prepare(`SELECT id FROM github_connections WHERE id = ?`).get("acme"),
+    ).toBeUndefined();
+
+    // …and the operator is told, by name, including that it was the default.
+    expect(result.toast).toContain("acme");
+    expect(result.toast).toContain("DEFAULT");
+    const row = auditDetailSchema.parse(
+      db
+        .prepare(
+          `SELECT details_json FROM audit_events
+            WHERE action = 'org.user.removed' ORDER BY id DESC LIMIT 1`,
+        )
+        .get(),
+    );
+    // SAFETY: the three keys are written unconditionally by deleteOrgUser's
+    // own audit call a few lines above the delete, on every removal.
+    const details = JSON.parse(row.details_json) as {
+      connectionsLost: string[];
+      defaultConnectionLost: string | null;
+      projectsUnbound: string[];
+    };
+    expect(details.connectionsLost).toEqual(["acme"]);
+    expect(details.defaultConnectionLost).toBe("acme");
+    expect(details.projectsUnbound).toEqual(["viberr-core"]);
+  });
 });
 
 describe("google domain allowlist", () => {

@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { RealBackend } from "./runtime-registry.server";
+import { createLineRedactor } from "./run-sink.server";
 import { userBackendHome } from "./user-homes.server";
 
 /**
@@ -390,7 +391,17 @@ export function buildResumeScript(
   located: LocatedTranscript,
   opts: { taskKey: string; taskTitle?: string },
 ): ResumeBundle {
-  const b64 = readFileSync(located.filePath)
+  // The transcript is the VENDOR's own file, so nothing has scrubbed it: the
+  // run sink's P13-U-1 redaction covers Viberr's `.jsonl` and the console, and
+  // this is the sibling channel that bypassed it. One `env`-printing tool call
+  // puts the run's credential into the provider transcript verbatim — and
+  // since ruling 127 that is somebody's PERSONAL key, while this bundle is
+  // downloadable by any member of the run's project. Scrub before embedding,
+  // with the same redactor and the same token patterns ("secrets wherever they
+  // came from"). The marker carries no quote or backslash, so the JSONL stays
+  // parseable and `claude --resume` still reads it.
+  const redact = createLineRedactor();
+  const b64 = Buffer.from(redact(readFileSync(located.filePath, "utf8")), "utf8")
     .toString("base64")
     .replace(/(.{76})/g, "$1\n");
   const origName = path.basename(located.filePath);

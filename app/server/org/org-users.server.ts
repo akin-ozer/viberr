@@ -436,6 +436,41 @@ export async function deleteOrgUser(
   // server forever, unrevokable by them and copied into every backup that
   // includes the runtime volume. Transcripts are the run record and stay.
   const backendsRetired = await retireUserBackends(db, userId, ctx);
+  // The user delete cascades WIDER than this function used to admit:
+  // `users` → `github_pats` (ON DELETE CASCADE) → `github_connections` AND
+  // `project_github_credentials` (both ON DELETE CASCADE on `pat_id`). A
+  // connection is an INSTANCE-level resource keyed by owner, so removing one
+  // person can disconnect the org's DEFAULT GitHub connection and unbind
+  // projects that person had nothing to do with — and `removeConnection`
+  // refuses exactly that ("Set another connection as default first"), a
+  // refusal this path walked straight past. Read what is about to go while the
+  // rows still exist, so the audit and the toast name it instead of leaving an
+  // admin to discover it when the next delivery fails.
+  // SAFETY: both SELECTs name exactly the columns destructured below; `owner`
+  // and `project_slug` are TEXT NOT NULL and `is_default` INTEGER NOT NULL.
+  const connectionsRemoved = db
+    .prepare(
+      `SELECT c.owner AS owner, c.is_default AS isDefault
+         FROM github_connections c
+         JOIN github_pats p ON p.id = c.pat_id
+        WHERE p.user_id = ?
+        ORDER BY c.owner ASC`,
+    )
+    .all(userId) as { owner: string; isDefault: number }[];
+  // SAFETY: as above — one TEXT NOT NULL column.
+  const projectsUnbound = db
+    .prepare(
+      `SELECT g.project_slug AS slug
+         FROM project_github_credentials g
+         JOIN github_pats p ON p.id = g.pat_id
+        WHERE p.user_id = ?
+        ORDER BY g.project_slug ASC`,
+    )
+    .all(userId) as { slug: string }[];
+  const connectionsLost = connectionsRemoved.map((c) => c.owner);
+  const defaultConnectionLost =
+    connectionsRemoved.find((c) => c.isDefault === 1)?.owner ?? null;
+  const projectsUnboundSlugs = projectsUnbound.map((r) => r.slug);
   // Remove the better-auth identity too — otherwise the orphaned `user` row
   // (email is UNIQUE NOT NULL) makes re-creating the same email throw a raw
   // constraint mid-flow (pass-4 WI-3). Deleting the `user` row cascades its
@@ -455,13 +490,36 @@ export async function deleteOrgUser(
       // Ruling 127: which agent accounts were retired with this one, so the
       // revocation is auditable rather than silent.
       backendsRetired,
+      // …and the GitHub side of the same cascade, on the same principle.
+      connectionsLost,
+      defaultConnectionLost,
+      projectsUnbound: projectsUnboundSlugs,
     },
   });
+  const extras = [
+    ...(projectsPruned.length > 0
+      ? [
+          `dropped from ${projectsPruned.length} project${projectsPruned.length === 1 ? "" : "s"}`,
+        ]
+      : []),
+    // Named, not counted: which GitHub owner stopped working matters more than
+    // how many did, and the default one is the org-wide outage.
+    ...(connectionsLost.length > 0
+      ? [
+          `disconnected ${connectionsLost.join(", ")}${defaultConnectionLost ? ` (the DEFAULT connection)` : ""}`,
+        ]
+      : []),
+    ...(projectsUnboundSlugs.length > 0
+      ? [
+          `unbound the repo credential on ${projectsUnboundSlugs.length} project${projectsUnboundSlugs.length === 1 ? "" : "s"}`,
+        ]
+      : []),
+  ];
   return {
     user: toOrgUserView(existing),
     toast:
-      projectsPruned.length > 0
-        ? `${existing.name} removed — also dropped from ${projectsPruned.length} project${projectsPruned.length === 1 ? "" : "s"}`
+      extras.length > 0
+        ? `${existing.name} removed — also ${extras.join("; ")}`
         : `${existing.name} removed`,
     projectsPruned,
   };

@@ -850,6 +850,12 @@ export function TaskDetailPage({
           runPrincipal={runPrincipal}
           onAgentLog={onAgentLog}
           taskClosed={taskClosed}
+          // U33-1 was inert: the Timeline accepted `runLive` and no production
+          // caller ever passed it, so a task whose loop HAS started but has not
+          // reported yet still read "this task hasn't started its operator
+          // loop" — directly under the Live-run strip saying otherwise. Same
+          // condition that renders that strip, so the two cannot disagree.
+          runLive={runtime.length > 0}
           {...(attachmentsBase
             ? {
                 attachmentNames: attachments.map((a) => a.name),

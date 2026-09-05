@@ -55,7 +55,7 @@ app-owned config homes; the rest are `architecture/decisions.md`,
 | [architecture/data-model.md](architecture/data-model.md) | Data-root layout including the per-person runtime homes, every SQLite table (primary vs derived vs config), indexes, retention, ids |
 | [architecture/file-formats.md](architecture/file-formats.md) | The canonical `project.md`, `task.md`, goal and agent-profile formats; timeline grammar; packet YAML (the `## Packet` section is pinned by a test) |
 | [architecture/projections-and-events.md](architecture/projections-and-events.md) | Writers, watcher, tolerant parsing and diagnostics, rebuilder, rescan/rebuild, SSE broker and client |
-| [architecture/decisions.md](architecture/decisions.md) | Conventions, 144 numbered owner rulings (1–144; 117 records a number that was never used), the unrecorded decisions since 2026-08-20, the route map |
+| [architecture/decisions.md](architecture/decisions.md) | Conventions, 146 numbered owner rulings (1–146; 117 records a number that was never used), the unrecorded decisions since 2026-08-20, the route map |
 
 ### Domain
 

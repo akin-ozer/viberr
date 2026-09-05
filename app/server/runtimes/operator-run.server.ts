@@ -2207,6 +2207,17 @@ async function startCodexOperatorRun(
     // Provider output is only executable after a clean terminal completion.
     // A failed/interrupted turn may have persisted a syntactically valid
     // partial agent_message before it stopped; never treat that as a plan.
+    // R20-3 (F20-4) / ruling 19, the half the Codex path never got: a run that
+    // reached completion PROVES its model is usable on this account, and
+    // clearing on a real success is the re-probe (there is no synthetic
+    // check). The Claude operator's completion handler does this; this one did
+    // not, so a `model_availability` row written by an earlier Codex failure
+    // outlived the account change that fixed it and kept the model struck
+    // through in the catalog until something else happened to clear it.
+    if (finished.state === "finished") {
+      const ranModel = getRun(db, finished.id)?.model ?? null;
+      if (ranModel) clearModelMark(db, input.backend ?? "codex", ranModel);
+    }
     const completion =
       finished.state === "finished"
         ? executeCodexPlan(db, ctx, input, authority, finished.id)

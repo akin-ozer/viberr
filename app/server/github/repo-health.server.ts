@@ -95,6 +95,16 @@ export function recordRepoAccess(
 }
 
 /** The remembered probe for one project, or null when none was ever taken. */
+/** Drop a project's cached probe. This table is app-owned OBSERVATION keyed by
+ *  slug, so a rebuild deliberately does not clear it — which meant a deleted
+ *  project's last verdict outlived it and a NEW project reusing the slug was
+ *  born wearing the old one's "repository unreachable" badge. */
+export function deleteRepoHealth(db: DatabaseSync, projectSlug: string): void {
+  db.prepare(`DELETE FROM project_github_health WHERE project_slug = ?`).run(
+    projectSlug,
+  );
+}
+
 export function readRepoHealth(
   db: DatabaseSync,
   projectSlug: string,

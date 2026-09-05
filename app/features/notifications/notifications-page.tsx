@@ -14,6 +14,7 @@ import {
 import { ntfMeta, ntfPill, plainText } from "./notification-meta";
 import {
   needsYouTime,
+  needsYouTimeUTC,
   splitNotifications,
   type NotificationFilter,
   type NotificationPageItem,
@@ -60,6 +61,10 @@ function NtfNeedsYou({
   onRead: (id: string) => void;
   onOpen: (n: NotificationPageItem) => void;
 }) {
+  // Same *UTC-first-pass gate the stream panel below uses (UXA-5): render the
+  // absolute stamp on the server and the first client pass, swap to the
+  // viewer's own zone once hydrated.
+  const local = useHydrated();
   const hiddenByFilter = total - items.length;
   const onTaskPages = Math.max(0, decisionCount - total);
   const subParts = [
@@ -116,7 +121,9 @@ function NtfNeedsYou({
                 <Pill kind={p.kind} sm>
                   {p.label}
                 </Pill>
-                <span className="pev-t">{needsYouTime(n.occurredAt)}</span>
+                <span className="pev-t">
+                  {local ? needsYouTime(n.occurredAt) : needsYouTimeUTC(n.occurredAt)}
+                </span>
               </span>
             </button>
           );

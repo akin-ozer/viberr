@@ -14,6 +14,7 @@ import {
   defaultExec,
   findWorkspaceRepoDir,
   isNonFastForwardStderr,
+  isWorkflowScopeRejection,
   type Exec,
 } from "./push-workspace.server";
 
@@ -535,6 +536,27 @@ export async function updateWorkspaceBranchFromBase(
           };
         }
         const detail = redactGitOutput(pushRes.stderr, { token });
+        // Ruling 144(c), the sibling this was never threaded through: GitHub's
+        // refusal of a workflow-file push for a token without the `workflow`
+        // scope is a SCOPE fact, not a generic push failure. The delivery push
+        // classifies it and names the remedy; this one dropped it in the
+        // catch-all bucket, so an operator base-refresh on a branch that
+        // touches `.github/workflows/` failed with "pushing the updated branch
+        // returned non-zero" — every time, forever, with nothing saying the
+        // token simply lacks a scope.
+        if (isWorkflowScopeRejection(pushRes.stderr)) {
+          logger.info("branch update push refused by GitHub: workflow scope", {
+            taskKey,
+            branch,
+          });
+          return updateFailed(
+            "GitHub refused the push because it changes a file under " +
+              "`.github/workflows/` and the token has no `workflow` scope, so the " +
+              "update was rolled back. Re-authorize the connection with that scope, " +
+              "or take the workflow change out of this branch",
+            detail,
+          );
+        }
         const fields: GitLogFields = { taskKey, branch };
         if (pushRes.timedOut) fields.timedOut = true;
         if (detail) fields.detail = detail;

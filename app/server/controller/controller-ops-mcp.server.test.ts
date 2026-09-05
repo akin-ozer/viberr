@@ -416,7 +416,7 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     }
   });
 
-  it("carries a refused credential and a spent quota window, and names both as degraded (F32-4/F32-9)", async () => {
+  it("ruling 146: carries a refused credential and a spent quota window, and neither is an INSTANCE fault", async () => {
     const {
       clearBackendCredentialRefusal,
       clearBackendQuotaExhaustion,
@@ -444,14 +444,26 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
         HEALTH_REPLY,
         await call(ids.nonMember, "instance_health"),
       );
-      expect(body.degraded).toEqual(
-        expect.arrayContaining(["credential:codex", "quota:claude"]),
-      );
-      expect(body.status).toBe("degraded");
+      // The READINGS are the point of this tool and are unchanged: the asker
+      // still learns exactly which account was refused and which window is
+      // spent, with the refusing run named.
       const codex = body.quota.find((q) => q.backend === "codex")!;
       expect(codex.credentialRefused?.runId).toBe("run_auth_probe");
       const claude = body.quota.find((q) => q.backend === "claude")!;
       expect(claude.exhausted?.runId).toBe("run_quota_probe");
+
+      // What ruling 146 (owner, 2026-09-06) changed: since ruling 127 an
+      // agent-backend credential belongs to a PERSON, so one member's refused
+      // key or spent window is not a statement about this deployment. It used
+      // to push `credential:<backend>` / `quota:<backend>` into `degraded`,
+      // which made `/resources/health?probe=readiness` answer 503 for the whole
+      // instance and drained traffic from a deployment serving everyone else.
+      // Canary: restore those two pushes in health-snapshot.server.ts.
+      // (This harness may be degraded for unrelated reasons — a stopped
+      // watcher from a neighbouring case — so assert the SPECIFIC entries,
+      // not the aggregate verdict.)
+      expect(body.degraded).not.toContain("credential:codex");
+      expect(body.degraded).not.toContain("quota:claude");
     } finally {
       clearBackendCredentialRefusal(app.db, "codex");
       clearBackendQuotaExhaustion(app.db, "claude");

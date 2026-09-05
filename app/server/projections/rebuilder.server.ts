@@ -760,15 +760,23 @@ export function rebuildGoalFile(
       )
       .get(slug, goalId);
     if (!existed) return { action: "ignored", kind: "goal" };
-    db.prepare(
-      `DELETE FROM goal_projections WHERE project_slug = ? AND goal_id = ?`,
-    ).run(slug, goalId);
+    // The third removal branch, which never got what the other two have: the
+    // project and task branches both drop `diagnostics` for the source path
+    // before the projection row (F28-D3 — dependents first, the probe's own
+    // target last, so an interrupted removal finishes on the next rebuild).
+    // Without it a deleted BROKEN goal file left its hard-stop rows behind and
+    // the store kept reporting a goal that no longer exists as untrusted, with
+    // no file left to fix and no later rebuild that would revisit it.
+    db.prepare(`DELETE FROM diagnostics WHERE source_path = ?`).run(sourcePath);
     recordProvenance(db, {
       sourcePath,
       contentHash: null,
       action: "removed",
       details: { kind: "goal", projectSlug: slug, goalId },
     });
+    db.prepare(
+      `DELETE FROM goal_projections WHERE project_slug = ? AND goal_id = ?`,
+    ).run(slug, goalId);
     emitProjectionEvent({
       type: "goal.updated",
       projectSlug: slug,

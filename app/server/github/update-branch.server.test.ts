@@ -265,6 +265,39 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
     expect(filesAt).toBeLessThan(abortAt);
   });
 
+  it("ruling 144(c): a workflow-scope refusal is named, not dropped in the generic bucket", async () => {
+    // The DELIVERY push classifies this and names the remedy; the operator's
+    // base-refresh push — the sibling — never did, so a branch that touches
+    // `.github/workflows/` failed with "pushing the updated branch returned
+    // non-zero" every single time, with nothing saying the token merely lacks
+    // a scope. The operator retried forever on an unactionable message.
+    // Canary: drop the isWorkflowScopeRejection branch and the reason below
+    // goes back to the generic one.
+    bindPat();
+    const git = fakeGit({
+      behind: 2,
+      pushOk: false,
+      pushStderr:
+        "! [remote rejected] vib-1 -> vib-1 (refusing to allow a Personal Access Token to " +
+        "create or update workflow `.github/workflows/ci.yml` without `workflow` scope)",
+    });
+    const res = await run(git.exec);
+    expect(res.status).toBe("update_failed");
+    if (res.status === "update_failed") {
+      expect(res.reason).toContain("`workflow` scope");
+      expect(res.reason).toContain(".github/workflows/");
+      // It says what to DO, which the generic bucket never could.
+      expect(res.reason).toMatch(/re-authorize/i);
+      expect(res.reason).not.toContain("returned non-zero");
+    }
+    // Still all-or-nothing: the local merge is rolled back, never forced.
+    expect(
+      git.calls.some(
+        (c) => c.includes("reset") && c.includes("--hard") && c.includes("abc1234def"),
+      ),
+    ).toBe(true);
+  });
+
   it("a NON-FAST-FORWARD push rolls the local merge back instead of forcing it", async () => {
     bindPat();
     const git = fakeGit({

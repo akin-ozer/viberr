@@ -1,5 +1,4 @@
 import type { DatabaseSync } from "node:sqlite";
-import { storeRelativePath } from "../files/file-store-root.server";
 
 /**
  * Provenance WRITE layer (P13-D-16; `architecture.md` server/provenance).
@@ -60,21 +59,4 @@ export function recordProvenance(
     input.action,
     input.details ? JSON.stringify(input.details) : null,
   );
-}
-
-/** {@link recordProvenance} for callers holding an ABSOLUTE store path (the
- *  GitHub reconciler): converts to the store-relative key every reader uses, so
- *  a row written from an absolute path is still findable by the query layer. */
-export function recordProvenanceForFile(
-  db: DatabaseSync,
-  input: Omit<ProvenanceRecord, "sourcePath"> & {
-    absPath: string;
-    dataRoot?: string;
-  },
-): void {
-  const { absPath, dataRoot, ...rest } = input;
-  recordProvenance(db, {
-    ...rest,
-    sourcePath: storeRelativePath(absPath, dataRoot),
-  });
 }

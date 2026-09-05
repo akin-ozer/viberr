@@ -957,3 +957,47 @@ describe("importGithubSnapshot re-import", () => {
     ).toEqual(["docs"]);
   });
 });
+
+describe("in-app writes obey the same dotfile rule as every other store write", () => {
+  it("refuses a dot-prefixed document instead of writing an unreachable one", async () => {
+    // The scanner skips anything starting with "." and `cleanSegment` calls
+    // that rule "server-enforced" — but writeStoreDoc sanitized the NAME with
+    // its own near-copy that only checked for "..". So ".secret.md" was really
+    // written, reported as saved, and then invisible in the browser, never
+    // injected into a run, and impossible to delete in-app.
+    // Canary: drop the cleanSegment guard in writeStoreDoc and this resolves.
+    const { db, target } = await setupKb();
+    expect(() =>
+      writeStoreDoc(db, target, [], ".secret.md", "hidden", ACTOR),
+    ).toThrowError(/cannot start with a dot/);
+    expect(scanStoreTree(target.rootAbs)).toEqual([]);
+  });
+
+  it("refuses a dot-prefixed folder for the same reason", async () => {
+    const { db, target } = await setupKb();
+    expect(() =>
+      createStoreFolder(db, target, [], ".drafts", ACTOR),
+    ).toThrowError(/cannot start with a dot/);
+    // …including as a nested segment of a multi-part name.
+    expect(() =>
+      createStoreFolder(db, target, [], "docs/.drafts", ACTOR),
+    ).toThrowError(/cannot start with a dot/);
+    expect(scanStoreTree(target.rootAbs)).toEqual([]);
+  });
+
+  it("still accepts ordinary names, and a leading dot is not confused with an extension", async () => {
+    const { db, target } = await setupKb();
+    createStoreFolder(db, target, [], "docs", ACTOR);
+    writeStoreDoc(db, target, ["docs"], "notes", "body", ACTOR);
+    const tree = scanStoreTree(target.rootAbs);
+    expect(tree).toEqual([
+      {
+        type: "dir",
+        name: "docs",
+        children: [
+          expect.objectContaining({ type: "file", name: "notes.md" }),
+        ],
+      },
+    ]);
+  });
+});

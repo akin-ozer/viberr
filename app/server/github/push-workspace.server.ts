@@ -978,6 +978,11 @@ export async function discardLocalTaskBranch(input: {
   taskKey: string;
   branch: string;
   defaultBranch: string;
+  /** The project's PAT is resolved from here so the ruling-17 remote check can
+   *  actually answer on a PRIVATE repo. Optional only so the existing exec-fake
+   *  tests keep working; a caller without one gets the anonymous check, which
+   *  still refuses when it cannot reach a verdict. */
+  db?: DatabaseSync;
   dataRoot?: string;
   workdir?: string | null;
   exec?: Exec;
@@ -1005,12 +1010,66 @@ export async function discardLocalTaskBranch(input: {
     // Ruling 17: only a never-pushed branch may be discarded here. `ls-remote
     // --exit-code` exits 0 when origin carries the ref — that is the remote's
     // branch, and only the archive packet may delete it.
-    const remote = await exec(
+    //
+    // This ran with NO credential, so on a private repo it always failed to
+    // authenticate — and the code below read every failure as "not on the
+    // remote" and deleted the branch anyway, destroying commits while
+    // recording that it had verified something it could never ask. Two fixes:
+    // carry the project's PAT the way every other remote read in this module
+    // does, and treat "could not ask" as a refusal rather than a green light.
+    // No `origin` at all is a definite answer, not a failed question: a branch
+    // cannot exist on a remote the clone does not have. Ask this first so the
+    // refusal below is reserved for a remote that EXISTS and would not answer.
+    const originRes = await exec(
       "git",
-      ["-C", repoDir, "ls-remote", "--exit-code", "--heads", "origin", branch],
-      { cwd: repoDir, timeoutMs: 30_000 },
+      ["-C", repoDir, "remote", "get-url", "origin"],
+      { cwd: repoDir, timeoutMs: 5_000 },
     );
-    if (remote.ok) return { status: "on_remote", branch };
+    const hasOrigin = originRes.ok && originRes.stdout.trim() !== "";
+
+    const credential = input.db ? getProjectCredential(input.db, projectSlug) : null;
+    const token =
+      (input.db && credential ? getPatToken(input.db, credential.id) : null) ?? "";
+    const askpassInput: Parameters<typeof createGitHubAskpassEnv>[0] = {};
+    if (token) askpassInput.token = token;
+    const askpass = createGitHubAskpassEnv(askpassInput);
+    // Without `--exit-code` the command SUCCEEDS whether or not it matched, so
+    // the three cases separate cleanly on `ok` + stdout — the same read the
+    // delivery push above performs. `--exit-code` conflated "origin does not
+    // carry it" with every kind of failure into one non-zero exit.
+    // Only ask when there is a remote to ask. `--exit-code` used to conflate
+    // "origin does not carry it" with every kind of failure into one non-zero
+    // exit; without it the command succeeds whether or not it matched, so the
+    // cases separate cleanly on `ok` + stdout — the same read the delivery
+    // push above performs.
+    if (hasOrigin) {
+      let remote;
+      try {
+        remote = await exec(
+          "git",
+          ["-C", repoDir, "ls-remote", "--heads", "origin", branch],
+          { cwd: repoDir, timeoutMs: 30_000, env: askpass.env },
+        );
+      } finally {
+        askpass.dispose();
+      }
+      if (!remote.ok) {
+        // The question went unanswered (auth refused, network, DNS, timeout).
+        // A destructive operation must not proceed on an unanswered safety
+        // question — which is exactly what deleting here used to do.
+        const why = redactGitOutput(remote.stderr) || "git ls-remote failed";
+        return {
+          status: "failed",
+          branch,
+          reason: oneLine(
+            `could not confirm whether ${branch} exists on origin, so it was not discarded: ${why}`,
+          ),
+        };
+      }
+      if (remote.stdout.trim() !== "") return { status: "on_remote", branch };
+    } else {
+      askpass.dispose();
+    }
 
     // git refuses to delete the branch HEAD is on, so step onto the default
     // branch first when we are standing on the one being discarded.

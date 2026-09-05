@@ -135,7 +135,11 @@ export async function postAgentComment(
   // S5-G3: an @handle that matches several people notifies nobody. A mid-run
   // agent comment is machine-authored — nothing else would ever say the tag
   // reached no one — so the disclosure rides the comment itself.
-  const text = withAmbiguityDisclosure(db, input.text);
+  // F33-9: `projectSlug` is what lets the disclosure also name a handle that
+  // resolves to a real person who is NOT a member of this project — the
+  // fan-out drops those, and without the slug this call could only ever
+  // disclose the AMBIGUOUS half, so a non-member tag went silently nowhere.
+  const text = withAmbiguityDisclosure(db, input.text, input.projectSlug);
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),

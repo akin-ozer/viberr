@@ -1093,6 +1093,30 @@ describe("assignReviewer / removeReviewer", () => {
       );
       expect(readFm().validation).toBe("healthy");
     });
+
+    it("and the ADD side refuses on an archived task too, so no seat lands that cannot be released", async () => {
+      // The freeze was only ever on the removal side: `dispatchAgentRun`
+      // checked nothing, so a run could be started on an abandoned task and
+      // AUTO-ENGAGE a brand-new seat — which `removeReviewer` then refused to
+      // release, with no admin escape. Add and remove now answer the same way.
+      // Deliberately archived-only: ruling 133 licenses engaging an eligible
+      // profile at any STAGE, so a closed-but-open task is not tested here.
+      // Canary: drop the archived gate in dispatchAgentRun and this resolves.
+      writeAcceptedTask({ stage: "review", archived: true });
+      await expect(
+        startAgentRun(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", profileId: "helper" },
+          actor(store.users.arda),
+          { dataRoot: store.dataRoot },
+        ),
+      ).rejects.toThrow(/VIB-1 is archived — restore it before running an agent/);
+
+      // Nothing was engaged, and the accepted record is untouched.
+      const fm = readFm();
+      expect(supportingEngagements(fm).map((e) => e.profileId)).toEqual(["critic"]);
+      expect(fm.validation).toBe("healthy");
+    });
   });
 
   /**

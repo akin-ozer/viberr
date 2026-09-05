@@ -1,4 +1,9 @@
-import { formatClock, formatDayBucket } from "~/shared/dates/format";
+import {
+  formatClock,
+  formatClockUTC,
+  formatDayBucket,
+  formatDayBucketUTC,
+} from "~/shared/dates/format";
 import type { NotificationView } from "./notification-item";
 
 /** Page rows additionally render the producing actor (stream lines). */
@@ -66,5 +71,17 @@ export function splitNotifications(
 export function needsYouTime(iso: string, now: Date = new Date()): string {
   const bucket = formatDayBucket(iso, now);
   const clock = formatClock(iso);
+  return bucket === "Today" ? clock : bucket.toLowerCase() + " " + clock;
+}
+
+/** The SSR/first-pass form of {@link needsYouTime}: absolute UTC, so the
+ *  server and the client's first render agree whatever timezone the viewer is
+ *  in. The stream panel beside this one has rendered *UTC first and swapped to
+ *  local on `useHydrated` since UXA-5; the "Waiting on you" card was the last
+ *  site in the file still printing viewer-local time straight from SSR, which
+ *  mismatched on hydration for every viewer outside the server's zone. */
+export function needsYouTimeUTC(iso: string): string {
+  const bucket = formatDayBucketUTC(iso);
+  const clock = formatClockUTC(iso);
   return bucket === "Today" ? clock : bucket.toLowerCase() + " " + clock;
 }

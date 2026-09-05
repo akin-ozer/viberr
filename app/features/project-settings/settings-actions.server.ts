@@ -4,7 +4,14 @@ import {
   isReservedTaskPrefix,
   RESERVED_TASK_PREFIX_REFUSAL,
 } from "~/shared/dependencies";
-import { deleteProjectNotifications } from "~/server/projections/notifications.server";
+import {
+  deleteMemberProjectNotifications,
+  deleteProjectNotifications,
+} from "~/server/projections/notifications.server";
+import { deleteRepoHealth } from "~/server/github/repo-health.server";
+import { logger } from "~/server/logging/logger.server";
+import { interruptRun } from "~/server/runtimes/run-service.server";
+import { clearProjectCredential } from "~/server/secrets/pat-store.server";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
@@ -939,13 +946,24 @@ export async function removeMember(
     actor,
     { dataRoot: ctx.dataRoot },
   );
+  // The sibling teardown (deleteProject) already clears a project's
+  // notifications because orphans dead-end on a 404 (F2). A removed member is
+  // the same harm through the other door — and the harder one, because the
+  // project still exists, so `countUnreadNotifications`' deleted-project
+  // discount does not cover it: their bell kept counting rows they could no
+  // longer open.
+  const notificationsDropped = deleteMemberProjectNotifications(
+    db,
+    input.projectSlug,
+    input.targetUserId,
+  );
   recordAudit(db, {
     action: "project.member.removed",
     actor: { userId: actor.userId, label: actor.label },
     subjectKind: "user",
     subjectId: input.targetUserId,
     projectSlug: input.projectSlug,
-    details: { tasksReleased: released },
+    details: { tasksReleased: released, notificationsDropped },
   });
   return {
     toast:
@@ -1034,6 +1052,40 @@ export async function deleteProject(
     throw AppError.validation("Type the project name to confirm deletion.");
   }
 
+  // Stop this project's agents BEFORE the files go. Nothing did, so a delete
+  // left every in-flight run running against a workspace that no longer
+  // exists — still burning the owner's provider quota — and afterwards it was
+  // unstoppable: the only interrupt door is the task route, which 404s once
+  // the project is gone. Interrupt is per run and best-effort; one that has
+  // already finished (or refuses) must not block the delete.
+  // SAFETY: `id` and `task_key` are NOT NULL TEXT on `agent_runs`.
+  const liveRuns = db
+    .prepare(
+      `SELECT id, task_key FROM agent_runs
+        WHERE project_slug = ? AND state IN ('running', 'queued')`,
+    )
+    .all(input.projectSlug) as { id: string; task_key: string }[];
+  for (const run of liveRuns) {
+    try {
+      const interruptInput: Parameters<typeof interruptRun>[1] = {
+        projectSlug: input.projectSlug,
+        taskKey: run.task_key,
+        runId: run.id,
+      };
+      if (ctx.dataRoot !== undefined) interruptInput.dataRoot = ctx.dataRoot;
+      await interruptRun(db, interruptInput, {
+        userId: actor.userId,
+        label: actor.label,
+      });
+    } catch (error) {
+      logger.warn("could not interrupt a run while deleting its project", {
+        projectSlug: input.projectSlug,
+        runId: run.id,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+
   const dir = projectDir(input.projectSlug, ctx.dataRoot);
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   rebuildAll(db, {
@@ -1044,6 +1096,18 @@ export async function deleteProject(
   // 404 when opened (F2). Clean them up with the project — through the store
   // module that owns the table (C01-A12).
   deleteProjectNotifications(db, input.projectSlug);
+  // Same shape, two more app-owned tables that no FK cascades and no rebuild
+  // clears. The credential binding is the one with visible fallout: the
+  // connections panel counts `project_github_credentials` rows per PAT to say
+  // how many projects a connection is bound to, so orphans inflated that count
+  // and the removal disclosure stated a number that was simply false. The
+  // health row is keyed by slug, so a new project reusing the slug inherited
+  // the dead one's probe verdict.
+  clearProjectCredential(db, input.projectSlug, {
+    userId: actor.userId,
+    label: actor.label,
+  });
+  deleteRepoHealth(db, input.projectSlug);
 
   recordAudit(db, {
     action: "project.deleted",

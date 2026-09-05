@@ -79,16 +79,6 @@ function toView(row: DbRow): OAuthProviderRow {
   };
 }
 
-/** Every configured provider row — never the secret. */
-export function listOAuthProviderRows(db: DatabaseSync): OAuthProviderRow[] {
-  // SAFETY: the migration cited on DbRow pins every column it names, and this
-  // is a `SELECT *` of that same table.
-  const rows = db
-    .prepare(`SELECT * FROM oauth_providers ORDER BY provider`)
-    .all() as DbRow[];
-  return rows.map(toView);
-}
-
 export function getOAuthProviderRow(
   db: DatabaseSync,
   provider: OAuthProvider,

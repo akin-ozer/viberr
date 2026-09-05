@@ -550,10 +550,18 @@ export async function noteDeadDependency(
   const noted: string[] = [];
   for (const held of listHeldTasks(db, projectSlug)) {
     const entries = resolveDependencies(db, projectSlug, held.blockedBy);
-    const dead = deadDependencies(entries).filter(
-      (e) => archivedKey === null || e.taskKey === archivedKey,
-    );
+    // `archivedKey` decides whether THIS door acts, not what the note says.
+    // Filtering the list itself made the two doors spell the same state
+    // differently — the archive hook wrote "VIB-5 can never complete" and the
+    // convergent sweep wrote "VIB-5, VIB-9 can never complete" — so the
+    // idempotence check below (an exact text match, by design: see the comment
+    // on `text`) never matched and the sweep re-stated facts the hook had
+    // already recorded, as a fresh note AND a fresh notification.
+    const dead = deadDependencies(entries);
     if (dead.length === 0) continue;
+    if (archivedKey !== null && !dead.some((e) => e.taskKey === archivedKey)) {
+      continue;
+    }
     const ref = taskRef(ctx, projectSlug, held.taskKey);
     const existing = readTaskFile(ref);
     if (!existing || existing.parsed.frontmatter.archived) continue;

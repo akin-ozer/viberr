@@ -141,6 +141,41 @@ describe("publishRunLogAppended", () => {
     expect(inbox.names()).not.toContain("run.log-appended");
   });
 
+  it("stays OFF the all-projects firehose — Home does not revalidate per console line", () => {
+    // `routeMatchesConnection` returns true for `projects` on ANY defined
+    // slug, and `run.log-appended` is one reference per LINE of run output, so
+    // Home (which subscribes the firehose for its cross-project view) re-ran
+    // its loaders once per line of every agent run on the instance.
+    // Project- and task-scoped delivery is deliberate and stays (above); only
+    // the firehose is excluded.
+    // Canary: drop `skipFirehose: true` from publishRunLogAppended and the
+    // firehose below receives it again.
+    const firehose = connect([{ kind: "projects" }]);
+    const own = connect([{ kind: "task", slug: "viberr-core", key: "VIB-42" }]);
+
+    publishRunLogAppended({
+      projectSlug: "viberr-core",
+      taskKey: "VIB-42",
+      runId: "run_10",
+      threadId: "thr_4",
+      seq: 2,
+    });
+
+    expect(firehose.names()).not.toContain("run.log-appended");
+    expect(own.names()).toContain("run.log-appended");
+
+    // …while the lifecycle event, which fires a handful of times per run and
+    // IS a project fact, still reaches Home.
+    publishRunStateChanged({
+      projectSlug: "viberr-core",
+      taskKey: "VIB-42",
+      runId: "run_10",
+      threadId: "thr_4",
+      state: "finished",
+    });
+    expect(firehose.names()).toContain("run.state-changed");
+  });
+
   it("publishes at seq 0 — the first line of a run is not 'no line'", () => {
     const page = connect([{ kind: "task", slug: "viberr-core", key: "VIB-42" }]);
 

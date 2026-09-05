@@ -8,8 +8,10 @@ import {
 import { deleteIdentity, provisionIdentity } from "./identity.server";
 import {
   findUserByEmail,
+  findUserById,
   insertUser,
   normalizeEmail,
+  recordUserLogin,
   updateUserFields,
 } from "./user-store.server";
 
@@ -150,6 +152,57 @@ export function applyOAuthUser(db: DatabaseSync, user: OAuthUser): void {
     subjectKind: "user",
     subjectId: user.id,
     details: { provider, email, role },
+  });
+}
+
+/**
+ * `session.create.after` — the seam that fires on EVERY sign-in.
+ *
+ * Only two hooks were wired before this: `user.create.after` (a brand-new
+ * user) and `account.create.after` (the FIRST time a provider is linked).
+ * Neither runs when an existing person simply signs in again, so:
+ *
+ *  - `users.last_login_at` was never stamped for an OAuth user, and the org
+ *    Users list reads that column to decide "whitelisted" vs "active" — so
+ *    every GitHub/Google member showed as never-signed-in forever;
+ *  - a repeat sign-in left no audit row at all, on the one surface whose job
+ *    is the record.
+ *
+ * It also mirrors better-auth's own `user.githubHandle` onto the legacy
+ * `users.github_handle`. Doing it HERE rather than in `linkOAuth` is
+ * deliberate: a session is created after both the account link and
+ * `updateUserInfoOnLink`'s profile copy have run, so the value is settled by
+ * the time this reads it, whatever order those take internally.
+ */
+export function recordSignIn(db: DatabaseSync, userId: string): void {
+  const existing = findUserById(db, userId);
+  if (!existing) return; // a session for a row this app does not own
+  recordUserLogin(db, userId);
+
+  // SAFETY: `githubHandle` is declared on better-auth's `user` table by
+  // `user.additionalFields` (0001_baseline names the column), and the schema
+  // types it TEXT — so the row either carries a string or NULL.
+  const identity = db
+    .prepare(`SELECT "githubHandle" FROM "user" WHERE id = ?`)
+    .get(userId) as { githubHandle: string | null } | undefined;
+  const handle = normalizeHandle(identity?.githubHandle);
+  if (handle && handle !== existing.githubHandle) {
+    updateUserFields(db, userId, { githubHandle: handle });
+    recordAudit(db, {
+      action: "auth.github_handle.recorded",
+      actor: { userId, label: existing.email },
+      subjectKind: "user",
+      subjectId: userId,
+      details: { handle },
+    });
+  }
+
+  recordAudit(db, {
+    action: "auth.sign_in",
+    actor: { userId, label: existing.email },
+    subjectKind: "user",
+    subjectId: userId,
+    details: { idp: existing.idp },
   });
 }
 
