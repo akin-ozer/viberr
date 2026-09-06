@@ -1795,7 +1795,13 @@ the quieter packet or the bare owner cell as drift.)*
     `--add-dir` at all. The SDK's `additionalDirectories` maps 1:1 to `--add-dir`. A
     live `codex exec` probe was impossible (provider quota blocked until Sep 18 2026),
     so the verification is source-level on the exact pinned version and is recorded as
-    such rather than as a runtime proof.
+    such rather than as a runtime proof. *Re-verified 2026-09-06 on the 0.153.4 pin
+    (Codex SDK upgrade): `SandboxPolicy::ReadOnly { .. } => Vec::new()` in
+    `protocol.rs`'s `get_writable_roots_with_cwd`, `--add-dir` help text unchanged, the
+    SDK's `ThreadOptions` still expose only `sandboxMode` and `additionalDirectories`. The
+    CLI has since grown a per-path permission-profile layer (`permissions.rs`) that the
+    SDK does not surface; whether a config-level profile could express "read-only plus
+    `attachments/`" is a question for a future ruling, not a change this note makes.*
     The ruling's stated fallback therefore shipped. The carve-out stays in
     `resolveCodexSandboxMode`, and `codexRepoWriteAdvisory(grants)`
     (`app/server/tasks/specialist-tool-policy.ts`) names exactly its shape — the

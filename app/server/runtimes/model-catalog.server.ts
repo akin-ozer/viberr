@@ -114,14 +114,21 @@ const CLAUDE_CURATED: ModelCatalog = {
 };
 
 /** Codex has no account-scoped list endpoint in the TypeScript SDK, so this is
- *  a hand-maintained snapshot of the current ChatGPT-plan model catalog. Keep
- *  effort values inside the SDK's ModelReasoningEffort union; the product's
- *  newer Max/Ultra UI modes are still not ThreadOptions values in the verified
- *  SDK (`CODEX_SDK_VERIFIED_VERSION`, codex-runtime.server.ts — the union did
- *  not move between 0.144.1 and 0.146.0). The union's `minimal` is deliberately
- *  not OFFERED here; `resolveCodexReasoningEffort` still accepts it so a profile
- *  that already stored it keeps running on the tier it was configured with. */
-const CODEX_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+ *  a hand-maintained snapshot of the model catalog the PINNED CLI bundles
+ *  (`CODEX_SDK_VERIFIED_VERSION`, codex-runtime.server.ts; the catalog JSON is
+ *  embedded in the `codex` binary and was read off 0.153.4). Effort values
+ *  stay inside the SDK's `ModelReasoningEffort` union, which gained `max`,
+ *  `ultra` and `persistent` in 0.149–0.153. `max` is offered per model exactly
+ *  where the catalog lists it. `ultra` is NOT offered: the catalog describes it
+ *  as "maximum reasoning with automatic task delegation", i.e. the model
+ *  spawning its own sub-agents, the orchestration Viberr reserves for the
+ *  operator (Claude denies the whole Task family for the same reason).
+ *  `persistent` is supported by no bundled model. The union's `minimal` is
+ *  deliberately not OFFERED either; `resolveCodexReasoningEffort` still accepts
+ *  it so a profile that already stored it keeps running on its tier. */
+const CODEX_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+/** GPT-5.5's catalog entry stops at `xhigh`. */
+const CODEX_EFFORTS_TO_XHIGH = ["low", "medium", "high", "xhigh"] as const;
 
 // F20-33: Terra is listed FIRST, so it is the fallback default
 // (`defaultModelFor("codex")` = `CODEX_MODELS[0]` — the "default is the first
@@ -138,6 +145,19 @@ const CODEX_MODELS: CatalogModel[] = [
     displayName: "GPT-5.6 Terra",
     description:
       "Balanced everyday workhorse with strong reasoning and tool use.",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
+  // Codex CLI 0.153 (the SDK 0.153.4 upgrade, 2026-09-06): the catalog's new
+  // headline model — listed first in the CLI's own picker and its bundled
+  // default when no model is configured (0.153.4 hotfix). Offered, NOT the
+  // default: Terra keeps F20-33's reason (a ChatGPT-plan account 400s on
+  // Sol, and Astra's plan availability is unverified here), and F20-4 marks
+  // it unavailable from a real failure exactly as it does Sol.
+  {
+    value: "gpt-6-astra",
+    displayName: "GPT-6 Astra",
+    description: "Most capable model for complex, demanding work.",
     supportsEffort: true,
     efforts: [...CODEX_EFFORTS],
   },
@@ -161,7 +181,7 @@ const CODEX_MODELS: CatalogModel[] = [
     displayName: "GPT-5.5",
     description: "Previous-generation model retained for existing profiles.",
     supportsEffort: true,
-    efforts: [...CODEX_EFFORTS],
+    efforts: [...CODEX_EFFORTS_TO_XHIGH],
   },
 ];
 
@@ -349,15 +369,18 @@ const EFFORT_RANK = new Map<string, number>([
   ["high", 3],
   ["xhigh", 4],
   ["max", 5],
+  // Codex-only and unoffered (see CODEX_EFFORTS); ranked so a stored value
+  // lands on the nearest offered tier instead of the default.
+  ["ultra", 6],
 ]);
 
 /**
- * Resolve a reasoning-effort tier to a VALID one for `backend`. Backends have
- * different tiers (Claude: low…max; Codex: low…xhigh), so a "retry on the
- * other backend" (D4) must translate — for example, passing Claude-only `max`
- * to Codex would be rejected. An unknown/empty value,
- * or one that doesn't exist on the target, falls back to that backend's default
- * effort. Same-backend valid values pass through unchanged.
+ * Resolve a reasoning-effort tier to a VALID one for `backend`. The two tier
+ * scales differ at the edges (Codex accepts `minimal` and ranks `ultra` above
+ * `max`; both offer low…max since Codex CLI 0.153), so a "retry on the other
+ * backend" (D4) must translate rather than pass a value raw. An unknown/empty
+ * value, or one that doesn't exist on the target, falls back to that
+ * backend's default effort. Same-backend valid values pass through unchanged.
  */
 export function resolveRunEffort(
   backend: RealBackend,

@@ -1390,14 +1390,16 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
     await settle();
     expect(specs[0]?.effort).toBe("low");
 
-    // "max" is a Claude-only tier; a Codex run gets the nearest Codex tier.
+    // "ultra" is a Codex-only SDK tier Viberr does not offer (automatic delegation);
+    // a run stored with it gets the nearest offered Codex tier. (`max` itself is
+    // offered on both backends since Codex CLI 0.153, so it no longer translates.)
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", threadId: "t-codex", role: "R", kind: "primary",
-      backend: "codex", model: "gpt-5.6-sol", effort: "max", prompt: "go",
+      backend: "codex", model: "gpt-5.6-sol", effort: "ultra", prompt: "go",
       dataRoot: store.dataRoot,
     });
     await settle();
-    expect(specs[1]?.effort).toBe("xhigh");
+    expect(specs[1]?.effort).toBe("max");
 
     // A valid same-backend tier is untouched; an unset one stays unset.
     await startTestRun(store.db, {
