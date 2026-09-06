@@ -18,8 +18,15 @@ import {
  * here in `NewProjectModal`, which owns all of the dialog's state.
  */
 
+/** The footer's blocker line; the field a refused submit flags points at it. */
+const BLOCK_REASON_ID = "np-block-reason";
+/** Which field the FIRST unmet requirement belongs to (`conn` has no input). */
+type BlockedField = "name" | "key" | "conn" | "repo";
+
 function NewProjectNameFields({
   nameRef,
+  keyRef,
+  invalidField,
   name,
   setName,
   effKey,
@@ -32,6 +39,9 @@ function NewProjectNameFields({
   submit,
 }: {
   nameRef: RefObject<HTMLInputElement | null>;
+  keyRef: RefObject<HTMLInputElement | null>;
+  /** Set only after a refused submit: the dialog must not open red. */
+  invalidField: BlockedField | null;
   name: string;
   setName: (v: string) => void;
   effKey: string;
@@ -56,6 +66,8 @@ function NewProjectNameFields({
           ref={nameRef}
           value={name}
           placeholder="e.g. Payments Gateway"
+          aria-invalid={invalidField === "name" || undefined}
+          aria-describedby={invalidField === "name" ? BLOCK_REASON_ID : undefined}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") submit();
@@ -78,9 +90,14 @@ function NewProjectNameFields({
           id="np-key"
           type="text"
           className="mono"
+          ref={keyRef}
           value={effKey}
           placeholder="PAY"
-          aria-describedby="np-key-note"
+          aria-invalid={invalidField === "key" || undefined}
+          // The strip note stays described; a refused submit APPENDS the reason.
+          aria-describedby={
+            invalidField === "key" ? "np-key-note " + BLOCK_REASON_ID : "np-key-note"
+          }
           // Same derived-value trap as the repo field (F14): "VIB" is real text,
           // and appending to it silently truncated at the 4-letter cap.
           onFocus={selectDerivedOnFocus(!keyTouched)}
@@ -233,12 +250,16 @@ export function selectDerivedOnFocus(derived: boolean) {
 }
 
 function NewProjectRepoField({
+  repoRef,
+  invalidField,
   repo,
   setRepo,
   derived,
   effOwner,
   effRepo,
 }: {
+  repoRef: RefObject<HTMLInputElement | null>;
+  invalidField: BlockedField | null;
   repo: string;
   setRepo: (v: string) => void;
   /** The value on screen came from the project name, not from the typist. */
@@ -265,9 +286,12 @@ function NewProjectRepoField({
         <input
           id="np-repo"
           type="text"
+          ref={repoRef}
           value={repo}
           placeholder={effRepo || "repo-name"}
           disabled={!effOwner}
+          aria-invalid={invalidField === "repo" || undefined}
+          aria-describedby={invalidField === "repo" ? BLOCK_REASON_ID : undefined}
           onFocus={selectDerivedOnFocus(derived)}
           onChange={(e) => setRepo(e.target.value)}
         />
@@ -366,8 +390,8 @@ function NewProjectPolicyField({
 function NewProjectFooter({
   storeRoot,
   slug,
-  ok,
   blockedReason,
+  attempted,
   busy,
   onClose,
   submit,
@@ -376,9 +400,12 @@ function NewProjectFooter({
    *  back to the store-relative form. */
   storeRoot: string | null;
   slug: string;
-  ok: boolean;
-  /** LV-07: why Create is disabled — never a dead button with no explanation. */
+  /** LV-07: why Create will refuse — never a dead button with no explanation. */
   blockedReason: string | null;
+  /** How many submits were refused: 0 keeps the blocker a status line; each
+   *  refusal remounts it as a fresh alert, because readers announce an alert's
+   *  insertion, not a role flip on a node whose text did not change. */
+  attempted: number;
   busy: boolean;
   onClose: () => void;
   submit: () => void;
@@ -389,20 +416,26 @@ function NewProjectFooter({
         creates {storeRoot ? storeRoot + "/" : ""}projects/{slug || "…"}/
       </span>
       <span className="foot-actions">
-        {!ok && blockedReason && (
-          <span className="foot-hint" role="status">
+        {blockedReason && (
+          <span
+            key={attempted ? "alert-" + attempted : "status"}
+            className={"foot-hint" + (attempted ? " err" : "")}
+            role={attempted ? "alert" : "status"}
+            id={BLOCK_REASON_ID}
+          >
             {blockedReason}
           </span>
         )}
         <button type="button" className="btn ghost" onClick={onClose}>
           Cancel
         </button>
+        {/* Enabled until the request starts: an invalid submit is refused
+            with the blocker beside it, the field marked and focused
+            (submit()). Only `busy` disables; the aria-busy sheet rule paints it. */}
         <button
           type="button"
           className="btn primary"
-          disabled={!ok || busy}
-          {...(!ok && blockedReason ? { title: blockedReason } : {})}
-          style={!ok ? { opacity: 0.55, pointerEvents: "none" } : undefined}
+          disabled={busy}
           onClick={submit}
           aria-busy={busy}
         >
@@ -455,7 +488,13 @@ export function NewProjectModal({
     "balanced",
   );
   const [connOwner, setConnOwner] = useState(() => connections[0] ?? "");
+  // Which field is flagged: only after a submit was refused (the dialog must
+  // not open with a red field, the same rule as the new-task title). Counted,
+  // so every refusal re-inserts the alert (see NewProjectFooter).
+  const [attempted, setAttempted] = useState(0);
   const nameRef = useRef<HTMLInputElement>(null);
+  const keyRef = useRef<HTMLInputElement>(null);
+  const repoRef = useRef<HTMLInputElement>(null);
   const fetcher = useFetcher<{
     ok: boolean;
     key?: string;
@@ -513,18 +552,31 @@ export function NewProjectModal({
     effKey.length >= 2 &&
     effOwner.length > 0 &&
     effRepo.length > 0;
-  // LV-07: name the FIRST unmet requirement so a disabled Create is never
-  // unexplained (the previous modal offered no message anywhere).
-  const blockedReason =
+  // LV-07: name the FIRST unmet requirement so a refused Create is never
+  // unexplained (the previous modal offered no message anywhere). The field
+  // is derived once and the copy from it, so the flagged input and the
+  // visible reason can never disagree.
+  const blocked: BlockedField | null =
     name.trim().length <= 1
-      ? "Enter a project name (2+ characters)."
+      ? "name"
       : effKey.length < 2
-        ? "Task key needs at least 2 letters."
+        ? "key"
         : effOwner.length === 0
-          ? "Pick a GitHub connection."
+          ? "conn"
           : effRepo.length === 0
+            ? "repo"
+            : null;
+  const blockedReason =
+    blocked === "name"
+      ? "Enter a project name (2+ characters)."
+      : blocked === "key"
+        ? "Task key needs at least 2 letters."
+        : blocked === "conn"
+          ? "Pick a GitHub connection."
+          : blocked === "repo"
             ? "Enter a repository name."
             : null;
+  const invalidField = attempted ? blocked : null;
   const serverError =
     fetcher.data && fetcher.data.ok === false ? fetcher.data.error : null;
 
@@ -547,7 +599,18 @@ export function NewProjectModal({
   }, [fetcher.data, onClose, push, navigate]);
 
   const submit = () => {
-    if (!ok || busy) return;
+    if (busy) return;
+    if (!ok) {
+      // The primary is no longer hard-disabled while the form is invalid, so
+      // the click reaches this guard: the blocker becomes an alert, the field
+      // it names is marked, and focus moves to it ("conn" has no input; the
+      // alert beside the button is what a reader hears then).
+      setAttempted((n) => n + 1);
+      const target =
+        blocked === "name" ? nameRef : blocked === "key" ? keyRef : blocked === "repo" ? repoRef : null;
+      target?.current?.focus();
+      return;
+    }
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "create-project");
@@ -590,6 +653,8 @@ export function NewProjectModal({
       <div className="modal-body">
         <NewProjectNameFields
           nameRef={nameRef}
+          keyRef={keyRef}
+          invalidField={invalidField}
           name={name}
           setName={editName}
           effKey={effKey}
@@ -609,6 +674,8 @@ export function NewProjectModal({
           isAdmin={admin}
         />
         <NewProjectRepoField
+          repoRef={repoRef}
+          invalidField={invalidField}
           repo={repo}
           setRepo={editRepo}
           derived={!repoTouched}
@@ -636,8 +703,8 @@ export function NewProjectModal({
       <NewProjectFooter
         storeRoot={storeRoot}
         slug={slug}
-        ok={ok}
         blockedReason={blockedReason}
+        attempted={attempted}
         busy={busy}
         onClose={close}
         submit={submit}

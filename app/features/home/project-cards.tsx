@@ -210,8 +210,18 @@ function RepoLine({
 }
 
 export function MemberStack({ members }: { members: HomeMember[] }) {
+  // An image with an empty name is an axe violation, and there is nothing to
+  // show: a project can lose every member only by hand-editing.
+  if (members.length === 0) return null;
   return (
-    <span className="stack" aria-label={members.map((m) => m.name).join(", ")}>
+    // role="img": the avatars are initials only, and ARIA prohibits a label on
+    // a role-less span (readers drop it), so the names were never announced.
+    // Same idiom as StageMeter above.
+    <span
+      className="stack"
+      role="img"
+      aria-label={members.map((m) => m.name).join(", ")}
+    >
       {members.map((m) => (
         <Avatar key={m.name} person={m} />
       ))}

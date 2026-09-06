@@ -51,12 +51,12 @@ function ConnectionModal({
   });
   const checking = action.busy;
   const canSave =
-    !checking &&
     (!!initial || owner.trim().length > 1) &&
     token.trim().length > 0;
 
   const apply = () => {
-    if (!canSave) return;
+    // Enter in a field reaches this directly, so the busy guard lives here too.
+    if (!canSave || checking) return;
     const o = owner.trim();
     if (!initial && existing.some((c) => c.id === slugify(o))) {
       setErr("That connection already exists.");
@@ -77,6 +77,7 @@ function ConnectionModal({
     <MiniModal
       icon={<Icon name="github" />}
       title={initial ? "Update token for " + initial.owner : "New GitHub connection"}
+      busy={checking}
       sub={
         initial
           ? "The current token is never shown. Paste a replacement"

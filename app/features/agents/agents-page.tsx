@@ -134,7 +134,7 @@ function BackendChip({
   const missing = health ? !health.viewerConnected : false;
   return (
     <span className="be-chip">
-      <AgentGlyph backend={b} />
+      <AgentGlyph backend={b} decorative />
       {b === "claude" ? "Claude" : "Codex"}
       {missing && (
         <span className="model-sub" title={notConnectedNote(b)}>

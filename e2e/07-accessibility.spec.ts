@@ -242,6 +242,13 @@ test.describe("mobile rail overlay", () => {
     await expect(toggle).toBeVisible();
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // Interface review 2026-09-06: the drawer takes focus and the page behind
+    // it is inert (Chromium enforces inert; jsdom does not, so this is the
+    // one place the after-close focus ordering is really proven).
+    await expect(page.locator("nav.rail")).toBeFocused();
+    await expect(page.locator("main.main")).toHaveAttribute("inert", "");
+    const openResults = await audit(page).analyze();
+    expect(report(openResults), "mobile rail overlay (open)").toBe("");
 
     const scrim = page.locator(".rail-scrim");
     await expect(scrim).toBeVisible();
@@ -257,6 +264,7 @@ test.describe("mobile rail overlay", () => {
     await expect(toggle).not.toBeFocused();
     await page.keyboard.press("Escape");
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("main.main")).not.toHaveAttribute("inert", "");
     await expect(toggle).toBeFocused();
 
     const results = await audit(page).analyze();

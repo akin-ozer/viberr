@@ -1178,9 +1178,26 @@ function RepairRepoDialog({
   const [repo, setRepo] = useState("");
   const [ack, setAck] = useState(false);
   const [sent, setSent] = useState(false);
-  const canSave =
-    !busy && repo.trim().length > 2 && (footprintTasks === 0 || ack);
+  const repoRef = useRef<HTMLInputElement>(null);
+  const ackRef = useRef<HTMLInputElement>(null);
+  // Ruling 147: the primary stays enabled; a refused submit names what is
+  // missing, marks it and moves focus there. Counted so each refusal
+  // re-inserts the alert.
+  const [refused, setRefused] = useState(0);
+  const missing: "repo" | "ack" | null =
+    repo.trim().length <= 2 ? "repo" : footprintTasks > 0 && !ack ? "ack" : null;
   const error = sent && !busy && result && !result.ok ? result.error : null;
+  const submit = () => {
+    if (busy) return;
+    if (missing) {
+      setRefused((n) => n + 1);
+      (missing === "repo" ? repoRef : ackRef).current?.focus();
+      return;
+    }
+    setSent(true);
+    onSubmit(repo, ack);
+  };
+  const flagged = refused > 0 ? missing : null;
   return (
     <dialog ref={ref} className="confirm-card" aria-label="Repair repository">
       <div className="confirm-icon">
@@ -1194,10 +1211,14 @@ function RepairRepoDialog({
       </p>
       <div className="field">
         <input
+          ref={repoRef}
           type="text"
           className="mono"
           value={repo}
           placeholder="owner/name"
+          aria-label="Corrected repository, owner/name"
+          aria-invalid={flagged === "repo" || undefined}
+          aria-describedby={flagged === "repo" ? "repair-unmet" : undefined}
           onChange={(e) => setRepo(e.target.value)}
           data-autofocus=""
         />
@@ -1212,8 +1233,11 @@ function RepairRepoDialog({
           className="cred-warn ack"
         >
           <input
+            ref={ackRef}
             type="checkbox"
             checked={ack}
+            aria-invalid={flagged === "ack" || undefined}
+            aria-describedby={flagged === "ack" ? "repair-unmet" : undefined}
             onChange={(e) => setAck(e.target.checked)}
           />
           <span>
@@ -1235,6 +1259,15 @@ function RepairRepoDialog({
           {error}
         </div>
       )}
+      {/* The client-side refusal has no toast, so this one IS the announcer. */}
+      {flagged && (
+        <div className="cred-warn" role="alert" id="repair-unmet" key={"refused-" + refused}>
+          <Icon name="alert" />
+          {flagged === "repo"
+            ? "Enter the repository as owner/name."
+            : "Confirm the note about the existing branch records first."}
+        </div>
+      )}
       <div className="confirm-actions">
         <button type="button" className="btn ghost" onClick={close}>
           Cancel
@@ -1242,13 +1275,9 @@ function RepairRepoDialog({
         <button
           type="button"
           className="btn primary"
-          disabled={!canSave}
+          disabled={busy}
           aria-busy={busy}
-          onClick={() => {
-            if (!canSave) return;
-            setSent(true);
-            onSubmit(repo, ack);
-          }}
+          onClick={submit}
         >
           Repair repository
         </button>

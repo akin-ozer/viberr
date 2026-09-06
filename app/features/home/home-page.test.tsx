@@ -128,6 +128,26 @@ describe("UI-02: project card recency", () => {
   });
 });
 
+describe("interface review 2026-09-06: the member stack is a named image", () => {
+  it("carries its names on role=img, where a label is allowed", () => {
+    const { container } = renderHome(
+      baseData([
+        card({
+          members: [
+            { name: "Arda Kaya", initials: "AK", tone: "" },
+            { name: "Selin Aksoy", initials: "SA", tone: "teal" },
+          ],
+        }),
+      ]),
+    );
+    const stack = container.querySelector(".stack")!;
+    // ARIA prohibits aria-label on a role-less span and readers drop it, so the
+    // names were never announced; the avatars are initials only.
+    expect(stack.getAttribute("role")).toBe("img");
+    expect(stack.getAttribute("aria-label")).toBe("Arda Kaya, Selin Aksoy");
+  });
+});
+
 describe("UI-10: the hero must not assert activity at zero", () => {
   it("reads as quiet with no runs and nothing waiting", () => {
     const { getByText, container } = renderHome(baseData([card()]));
@@ -233,7 +253,7 @@ describe("UI-03: a dropped live-update stream is surfaced", () => {
 });
 
 describe("LV-07: the New-project modal explains itself", () => {
-  it("names what is stripped from the task key and why Create is disabled", () => {
+  it("names what is stripped from the task key and why Create will refuse", () => {
     const { getByText, getAllByText, getByLabelText, container } = renderHome(
       baseData([card()]),
     );
@@ -248,7 +268,7 @@ describe("LV-07: the New-project modal explains itself", () => {
       getByText(/Only letters are kept/),
     ).toBeTruthy();
 
-    // …and Create says WHY it is disabled instead of being a dead button.
+    // …and the footer says why Create will refuse.
     const foot = container.querySelector<HTMLElement>(".modal-foot")!;
     expect(within(foot).getByText(/Enter a project name/)).toBeTruthy();
   });

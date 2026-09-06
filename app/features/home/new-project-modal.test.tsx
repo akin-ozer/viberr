@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { NewProjectModal } from "./new-project-modal";
@@ -147,5 +147,97 @@ describe("#20: the server's refusal is announced, not just drawn", () => {
     });
     expect(err.textContent).toContain("projects/payments already exists.");
     expect(err.getAttribute("role")).toBe("alert");
+  });
+});
+
+/**
+ * Interface review 2026-09-06: the primary used to be hard-disabled (with an
+ * inline `pointer-events: none`) until the form was valid, so a click on Create
+ * gave no feedback and the button was missing from the tab order. It stays
+ * enabled now; a refused submit turns the blocker into an alert, marks the
+ * field it names and moves focus there.
+ */
+describe("Create project stays enabled and refuses with the field named", () => {
+  const withConnection = {
+    connections: ["akin-ozer"],
+    connectionHealth: { "akin-ozer": "valid" as const },
+  };
+  const createButton = (container: HTMLElement) =>
+    [...container.querySelectorAll("button")].find(
+      (b) => b.textContent!.trim() === "Create project",
+    )!;
+
+  it("opens with an enabled primary and no field accused", () => {
+    const { container } = renderModal(withConnection);
+    const create = createButton(container);
+    expect(create.disabled).toBe(false);
+    expect(create.getAttribute("style")).toBeNull();
+    expect(create.getAttribute("title")).toBeNull();
+    expect(container.querySelector('[aria-invalid="true"]')).toBeNull();
+    // The blocker explains itself before any attempt, as a status line.
+    const blocker = container.querySelector("#np-block-reason")!;
+    expect(blocker.getAttribute("role")).toBe("status");
+    expect(blocker.className).not.toContain("err");
+  });
+
+  it("refuses an empty form: the name is marked, described and focused", async () => {
+    let posted = 0;
+    const { container } = renderModal(withConnection, async () => {
+      posted += 1;
+      return { ok: true };
+    });
+    fireEvent.click(createButton(container));
+    const name = container.querySelector<HTMLInputElement>("#np-name")!;
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+    expect(name.getAttribute("aria-describedby")).toBe("np-block-reason");
+    expect(document.activeElement).toBe(name);
+    const blocker = container.querySelector("#np-block-reason")!;
+    expect(blocker.textContent).toBe("Enter a project name (2+ characters).");
+    expect(blocker.getAttribute("role")).toBe("alert");
+    expect(blocker.className).toContain("err");
+    await act(async () => {});
+    expect(posted).toBe(0);
+  });
+
+  it("re-inserts the blocker as a fresh alert on every refusal", () => {
+    const { container } = renderModal(withConnection);
+    const before = container.querySelector("#np-block-reason")!;
+    fireEvent.click(createButton(container));
+    const first = container.querySelector("#np-block-reason")!;
+    // Readers announce an alert's insertion, not a role flip on the same
+    // node with the same text, so the refusal has to mount a new element.
+    expect(first).not.toBe(before);
+    expect(first.getAttribute("role")).toBe("alert");
+    fireEvent.click(createButton(container));
+    expect(container.querySelector("#np-block-reason")).not.toBe(first);
+  });
+
+  it("moves the flag to the key when the name yields no letters, keeping the strip note described", () => {
+    const { container } = renderModal(withConnection);
+    fireEvent.change(container.querySelector("#np-name")!, {
+      target: { value: "1234" },
+    });
+    fireEvent.click(createButton(container));
+    const name = container.querySelector<HTMLInputElement>("#np-name")!;
+    const key = container.querySelector<HTMLInputElement>("#np-key")!;
+    expect(name.getAttribute("aria-invalid")).toBeNull();
+    expect(key.getAttribute("aria-invalid")).toBe("true");
+    expect(key.getAttribute("aria-describedby")).toBe("np-key-note np-block-reason");
+    expect(document.activeElement).toBe(key);
+  });
+
+  it("submits a valid form from the same click path", async () => {
+    let posted = 0;
+    const { container } = renderModal(withConnection, async () => {
+      posted += 1;
+      return { ok: false, error: "refused for the test" };
+    });
+    fireEvent.change(container.querySelector("#np-name")!, {
+      target: { value: "Payments" },
+    });
+    expect(container.querySelector("#np-block-reason")).toBeNull();
+    expect(container.querySelector('[aria-invalid="true"]')).toBeNull();
+    fireEvent.click(createButton(container));
+    await waitFor(() => expect(posted).toBe(1));
   });
 });

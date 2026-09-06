@@ -2694,8 +2694,11 @@ describe("app.css spacing scale (pass 30)", () => {
     "0", ".125rem", ".25rem", ".375rem", ".5rem", ".75rem", "1rem", "1.5rem",
     "2rem",
   ];
-  /** Not a length — `margin: 0 auto` centres, it does not space. */
-  const STRUCTURAL = ["auto"];
+  /** Not a length — `margin: 0 auto` centres, it does not space. And not a
+   *  step — `var(--dock-clear)` is the dock trigger's reach (interface review
+   *  2026-09-06), a chrome measure every scroll container ending under the
+   *  trigger reserves; it will pass ten sites without becoming a step. */
+  const STRUCTURAL = ["auto", "var(--dock-clear)"];
   const DE_FACTO_STEP_AT = 10;
 
   const SPACING_PROP =
@@ -2722,8 +2725,10 @@ describe("app.css spacing scale (pass 30)", () => {
 
   it("keeps every declared step in real use", () => {
     // The other direction of the same gate: a step nothing uses is not a scale,
-    // it is a comment. `2rem` is the thin one (11 sites) — if a pass retires it,
-    // that is a decision made here, not a silent narrowing.
+    // it is a comment. `2rem` is the thin one (10 sites, exactly the floor since
+    // the task page's bottom padding became the dock reserve, interface review
+    // 2026-09-06) — if a pass retires it, that is a decision made here, not a
+    // silent narrowing.
     const counts = spacingValueCounts();
     const unused = SPACING_SCALE.filter(
       (step) => (counts.get(step) ?? 0) < DE_FACTO_STEP_AT,
@@ -2761,5 +2766,85 @@ describe("D32-5 (pass 32): a SELECTED segment keeps its text color under hover",
         expect(restored[1]).toContain(`color: ${selectedColor}`);
       }
     }
+  });
+});
+
+/**
+ * Interface review 2026-09-06 — the sheet-side half of the entry-flow fixes.
+ * The markup half is pinned by the board, home, login and shell suites; these
+ * are the rules whose removal no other test would notice.
+ */
+describe("interface review 2026-09-06: the rules the fixes rest on", () => {
+  const decls = (selector: string): string => {
+    const re = new RegExp(
+      selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}",
+    );
+    const m = CODE.match(re);
+    expect(m, selector).not.toBeNull();
+    return m![1];
+  };
+
+  it("declares the dock reserve once and every scroll container under the trigger takes it", () => {
+    expect(CODE.match(/--dock-clear:/g)).toHaveLength(1);
+    expect(decls(":root")).toMatch(
+      /--dock-clear:\s*calc\(max\(20px, env\(safe-area-inset-bottom\)\) \+ 44px \+ 1rem\)/,
+    );
+    for (const selector of [
+      ".home-shell",
+      ".insights",
+      ".policy-wrap",
+      ".detail",
+      ".col-body",
+      ".live-wrap",
+      ".profile-list",
+      ".ag-detail",
+    ]) {
+      expect(decls(selector), selector).toMatch(/padding:[^;]*var\(--dock-clear\)/);
+    }
+    expect(decls(".board.list")).toMatch(/padding-block:\s*0 var\(--dock-clear\)/);
+  });
+
+  it("lets the list layout scroll (it inherited the lane grid's hidden overflow)", () => {
+    expect(decls(".board.list")).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("keeps the card's top-right corner free for the stage-move control", () => {
+    expect(decls(".card-top")).toMatch(/flex-wrap:\s*wrap/);
+    expect(decls(".card-wrap:has(.card-move) .card-top")).toMatch(/padding-right:/);
+    expect(CODE).not.toMatch(/\.card-top \.spacer\s*\{/);
+    expect(decls(".card-move .stage-menu-btn")).toMatch(/min-height:\s*24px/);
+    expect(decls(".col-head .add")).toMatch(/width:\s*24px;\s*height:\s*24px/);
+  });
+
+  it("wraps the store strip's button group and the list rows", () => {
+    expect(decls(".store-strip .inline-row")).toMatch(/flex-wrap:\s*wrap/);
+    expect(decls(".card.list-row")).toMatch(/flex-wrap:\s*wrap/);
+    expect(decls(".card.list-row h3")).toMatch(/flex:\s*1 1 14rem/);
+    expect(decls(".pj-grid")).toMatch(/minmax\(min\(320px, 100%\), 1fr\)/);
+  });
+
+  it("sizes every .field input at a 16px+ step under the mobile breakpoint", () => {
+    const block = CODE.match(/@media \(max-width: 720px\)\s*\{([\s\S]*?)\n\}/)![1];
+    const base = CODE.match(/\.field input\[type="text"\][^{]*\{/)![0];
+    for (const type of base.match(/type="([a-z]+)"/g) ?? []) {
+      expect(block, type).toContain(`.field input[${type}]`);
+    }
+    for (const type of ["text", "email", "password"]) {
+      expect(block).toContain(`.field input[type="${type}"].mono`);
+    }
+    expect(block).toMatch(/\.cmdk-input[^{]*\{\s*font-size:\s*1\.05rem/);
+  });
+
+  it("marks an invalid field on the control itself, frame included", () => {
+    expect(decls('.field input[aria-invalid="true"], .field textarea[aria-invalid="true"]')).toMatch(
+      /border-color:\s*var\(--coral-dark\)/,
+    );
+    expect(decls('.repo-input:has(input[aria-invalid="true"])')).toMatch(/border-color:/);
+  });
+
+  it("keeps the drawer quiet: no UA ring on the focused rail, no reachable dock", () => {
+    expect(decls(".rail:focus,\n.rail:focus-visible")).toMatch(/outline:\s*none/);
+    expect(decls('body[data-rail-open="true"] .dock')).toMatch(/visibility:\s*hidden/);
+    expect(CODE).not.toMatch(/\.app\[data-rail-open="true"\] \.dock\b/);
   });
 });

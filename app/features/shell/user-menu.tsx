@@ -125,10 +125,15 @@ export function UserMenu({
             of buttons and links, and plain Tab order is a contract the code
             actually honours. Focus moves into the panel on open and returns to
             the avatar on close (the popover is rendered before its trigger).
+            The PANEL keeps one role: `dialog`, the thing the trigger's
+            `aria-haspopup` already promises, so the element that receives
+            focus on open is not a nameless generic (ARIA prohibits a label
+            on one, and readers drop it).
           */}
           <div
             className="user-menu from-top"
             ref={menuRef}
+            role="dialog"
             tabIndex={-1}
             aria-label="Account menu"
           >
@@ -168,7 +173,7 @@ export function UserMenu({
               onClick={cycleTheme}
             >
               <Icon name="sparkle" />
-              Theme ·{" "}
+              Switch theme ·{" "}
               <span className="faint">{themeLabel(theme)}</span>
             </button>
             {user.role === "admin" && (

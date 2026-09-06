@@ -409,12 +409,15 @@ function IdentityFields({
   setName,
   role,
   setRole,
+  flagged,
 }: {
   uid: string;
   name: string;
   setName: (v: string) => void;
   role: string;
   setRole: (v: string) => void;
+  /** Which of the two a refused save named (ruling 147); null on a pristine form. */
+  flagged: "name" | "role" | null;
 }) {
   return (
     <div className="field-row">
@@ -426,6 +429,8 @@ function IdentityFields({
           id={`${uid}-name`}
           type="text"
           value={name}
+          aria-invalid={flagged === "name" || undefined}
+          aria-describedby={flagged === "name" ? `${uid}-hint` : undefined}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Migrations"
           data-autofocus=""
@@ -439,6 +444,8 @@ function IdentityFields({
           id={`${uid}-role`}
           type="text"
           value={role}
+          aria-invalid={flagged === "role" || undefined}
+          aria-describedby={flagged === "role" ? `${uid}-hint` : undefined}
           onChange={(e) => setRole(e.target.value)}
           placeholder="e.g. Schema changes"
         />
@@ -488,7 +495,7 @@ function BackendField({
   // role="group" + aria-labelledby gives screen readers the same caption.
   const capId = useId();
   return (
-    <div className="field" role="group" aria-labelledby={capId}>
+    <div className="field" role="group" aria-labelledby={capId} data-field="backend">
       <span className="flabel" id={capId}>
         Execution backend<span className="req">*</span>
         <span className="fhint">pick exactly one</span>
@@ -502,7 +509,7 @@ function BackendField({
             aria-pressed={backend === b.id}
             onClick={() => setBackend(b.id)}
           >
-            <AgentGlyph backend={b.id} />
+            <AgentGlyph backend={b.id} decorative />
             {b.label}
           </button>
         ))}
@@ -734,7 +741,7 @@ function StagesField({
 }) {
   const capId = useId();
   return (
-    <div className="field" role="group" aria-labelledby={capId}>
+    <div className="field" role="group" aria-labelledby={capId} data-field="stages">
       <span className="flabel" id={capId}>
         Eligible stages<span className="req">*</span>
         <span className="fhint">stages where this profile may be newly engaged</span>
@@ -1222,15 +1229,16 @@ function ResourcePicker({
 
 function ModalFooter({
   hint,
-  valid,
+  hintId,
   busy,
   editing,
   onClose,
   onSubmitClick,
   showError,
+  attempts,
 }: {
   hint: string;
-  valid: boolean;
+  hintId: string;
   busy: boolean;
   editing: boolean;
   onClose: () => void;
@@ -1238,10 +1246,15 @@ function ModalFooter({
   /* The requirements line turns red only after a save was actually attempted
      (or the server errored) — never on a pristine form. */
   showError: boolean;
+  /** Refused saves so far: each one re-inserts the alert (readers announce
+   *  an insertion, not a role flip on unchanged text). */
+  attempts: number;
 }) {
   return (
     <div className="modal-foot">
       <span
+        key={showError ? "alert-" + attempts : "hint"}
+        id={hintId}
         className={"foot-hint" + (showError ? " err" : "")}
         role={showError ? "alert" : undefined}
       >
@@ -1253,18 +1266,17 @@ function ModalFooter({
         </button>
         {/* P13-UI-58 residual: the submit had no busy state for assistive tech —
             a save in flight looked idle to a screen reader. */}
-        {/* Invalid is DIMMED but still clickable: the click reaches submit()'s
-            refusal guard, which flips the requirements line red (the attempted
-            gate) — a hard-disabled button made that state unreachable and the
-            refusal silent. Busy stays a real disable. */}
+        {/* Ruling 147: enabled until the request starts. An invalid save is
+            refused by submit(), which names the requirement, marks the field
+            and moves focus to it; the old dimmed-but-clickable aria-disabled
+            state told readers the button did nothing. Busy stays a real
+            disable. */}
         <button
           type="button"
           className="btn primary"
           onClick={onSubmitClick}
           disabled={busy}
-          aria-disabled={!valid || busy || undefined}
           aria-busy={busy}
-          style={!valid ? { opacity: 0.5 } : undefined}
         >
           <Icon name="check" />
           {busy ? "Saving…" : editing ? "Save changes" : "Create profile"}
@@ -1422,14 +1434,37 @@ export function CreateProfileModal({
   const valid = fieldsValid && !modelPending;
   // The requirements line is neutral guidance until the person actually tries
   // to save an invalid form — a modal that opens with red error text is
-  // scolding them for something they haven't had a chance to do yet.
-  const [attempted, setAttempted] = useState(false);
+  // scolding them for something they haven't had a chance to do yet. Counted:
+  // every refusal re-inserts the alert (ModalFooter).
+  const [attempted, setAttempted] = useState(0);
+  const missing: "name" | "role" | "backend" | "stages" | "model" | null = !name.trim()
+    ? "name"
+    : !role.trim()
+      ? "role"
+      : !backend
+        ? "backend"
+        : stg.length === 0
+          ? "stages"
+          : modelPending
+            ? "model"
+            : null;
+  const flaggedField = attempted && (missing === "name" || missing === "role") ? missing : null;
 
   const submit = () => {
+    if (busy) return;
     // `valid` already requires a picked backend; naming it in the guard is what
     // rules out the picker's initial "" for the payload below.
-    if (!valid || busy || !backend) {
-      setAttempted(true);
+    if (!valid || !backend) {
+      setAttempted((n) => n + 1);
+      // Ruling 147: the refusal puts the person on the first unmet requirement.
+      const dlg = dialogRef.current;
+      const target =
+        missing === "name" || missing === "role"
+          ? document.getElementById(`${uid}-${missing}`)
+          : missing === "backend" || missing === "stages"
+            ? dlg?.querySelector<HTMLElement>(`[data-field="${missing}"] .pick-chip`)
+            : document.getElementById(`${uid}-model`);
+      target?.focus();
       return;
     }
     const payload: ProfileFormPayload = {
@@ -1507,6 +1542,7 @@ export function CreateProfileModal({
           setName={setName}
           role={role}
           setRole={setRole}
+          flagged={flaggedField}
         />
 
         <BackendField
@@ -1569,12 +1605,13 @@ export function CreateProfileModal({
 
       <ModalFooter
         hint={hint}
-        valid={valid}
+        hintId={`${uid}-hint`}
         busy={busy}
         editing={editing}
         onClose={close}
         onSubmitClick={submit}
-        showError={Boolean(error) || (attempted && !valid)}
+        showError={Boolean(error) || (attempted > 0 && !valid)}
+        attempts={attempted}
       />
     </dialog>
   );

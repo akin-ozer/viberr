@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router";
 import { Icon } from "~/ui/icon";
 import { boardHref, WORKSPACE_NAV, workspaceViewFromPathname } from "./nav";
@@ -17,6 +18,7 @@ export function Rail({
   boardCount,
   reviewCount,
   violations,
+  open = false,
 }: {
   projectSlug: string;
   projectName: string;
@@ -25,11 +27,22 @@ export function Rail({
   boardCount: number;
   reviewCount: number;
   violations: number;
+  /** Under the mobile breakpoint the rail is an overlay the layout opens;
+   *  focus has to move INTO it, or Tab keeps walking the page behind the
+   *  scrim. Above the breakpoint the layout never sets this. */
+  open?: boolean;
 }) {
   const location = useLocation();
   const activeView = workspaceViewFromPathname(location.pathname);
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (open) navRef.current?.focus();
+  }, [open]);
   return (
-    <nav className="rail" aria-label="Primary">
+    // tabIndex -1: focusable by script only. The sheet suppresses the UA
+    // outline on it (`.rail:focus-visible`, the `.detail` precedent): a region
+    // gets no ring; the first Tab lands on the project switch, which does.
+    <nav className="rail" aria-label="Primary" ref={navRef} tabIndex={-1}>
       <Link className="project-switch" to="/" title="All projects">
         <span>
           <div className="pj-name">{projectName}</div>

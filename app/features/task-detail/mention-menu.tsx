@@ -19,8 +19,12 @@ import {
 
 function RowGlyph({ s }: { s: MentionSuggestion }) {
   if (s.kind === "user") return <Avatar person={{ initials: s.initials }} />;
-  if (s.operator) return <AgentGlyph op />;
-  return <AgentGlyph backend={s.backend} />;
+  // Reserved rows print their identity in the sub-line ("Operator",
+  // "Delivering agent", "Claude specialist…"); agent rows print the role only,
+  // so their glyph stays the row's one backend carrier.
+  const decorative = s.kind === "reserved";
+  if (s.operator) return <AgentGlyph op decorative={decorative} />;
+  return <AgentGlyph backend={s.backend} decorative={decorative} />;
 }
 
 /**

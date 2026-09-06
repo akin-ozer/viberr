@@ -458,7 +458,7 @@ export function AgentPanel({
             .join(" · ");
           return (
             <div className="rsrc-row" key={a.id}>
-              <AgentGlyph backend={a.backend} />
+              <AgentGlyph backend={a.backend} decorative />
               <span className="rsrc-main">
                 <b>{a.name}</b>
                 {/* P13-AP-09: the row subtitle is the SHORT blurb. It used to

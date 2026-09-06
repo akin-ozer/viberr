@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import type { NotificationView } from "~/features/notifications/notification-item";
@@ -95,6 +95,17 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
     expect(container.querySelector('[role="menu"]')).toBeNull();
     expect(container.querySelector('[role="menuitem"]')).toBeNull();
     expect(document.activeElement).toBe(container.querySelector(".user-menu"));
+    // Interface review 2026-09-06: the focused panel is the dialog the trigger's
+    // aria-haspopup promises — a role-less div drops its label in readers.
+    expect(container.querySelector(".user-menu")!.getAttribute("role")).toBe("dialog");
+    expect(container.querySelector(".user-menu")!.getAttribute("aria-label")).toBe(
+      "Account menu",
+    );
+    // The theme item names its action, not just the current value.
+    const theme = [...container.querySelectorAll(".menu-item")].find((b) =>
+      b.textContent!.includes("Switch theme"),
+    );
+    expect(theme).toBeTruthy();
   });
 });
 
@@ -386,33 +397,72 @@ describe("Topbar: palette trigger + rail toggle", () => {
  * from, which is what a scrim could never do.
  */
 describe("F15-18/UI-C: the mobile rail overlay has a keyboard way out", () => {
-  function railOverlayAt(railOpen: boolean) {
+  // The layout's shape, not a bare Topbar: the rail before the page, the page
+  // inert while the drawer is open, and the toggle inside the page. The
+  // restore-to-toggle is an effect keyed on the close, so the harness has to
+  // let `railOpen` actually change.
+  function RailShell({
+    initialOpen,
+    onToggle,
+  }: {
+    initialOpen: boolean;
+    onToggle: () => void;
+  }) {
+    const [open, setOpen] = useState(initialOpen);
+    return (
+      <>
+        <Rail
+          open={open}
+          projectSlug="viberr-core"
+          projectName="Viberr Core"
+          projectRepo={null}
+          membersCount={1}
+          boardCount={0}
+          reviewCount={0}
+          violations={0}
+        />
+        <main inert={open}>
+          <Topbar
+            projectSlug="viberr-core"
+            projectName="Viberr Core"
+            openTask={null}
+            user={USER}
+            theme="system"
+            notifications={[]}
+            unread={0}
+            railOpen={open}
+            onToggleRail={() => {
+              onToggle();
+              setOpen((o) => !o);
+            }}
+          />
+        </main>
+      </>
+    );
+  }
+  function railOverlayAt(initialOpen: boolean) {
     let toggled = 0;
     const utils = renderAt(
-      <Topbar
-        projectSlug="viberr-core"
-        projectName="Viberr Core"
-        openTask={null}
-        user={USER}
-        theme="system"
-        notifications={[]}
-        unread={0}
-        railOpen={railOpen}
-        onToggleRail={() => (toggled += 1)}
-      />,
+      <RailShell initialOpen={initialOpen} onToggle={() => (toggled += 1)} />,
       "/projects/viberr-core/board",
     );
     return { ...utils, toggles: () => toggled };
   }
 
   it("closes the open rail on Escape and returns focus to the toggle", () => {
-    const { getByLabelText, toggles } = railOverlayAt(true);
+    const { container, getByLabelText, toggles } = railOverlayAt(true);
     const toggle = getByLabelText("Project navigation");
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    // Interface review 2026-09-06: the drawer takes focus. (The `inert` on
+    // <main> is the HARNESS's own; routes/project.tsx is pinned by e2e/07.)
+    expect(document.activeElement).toBe(container.querySelector("nav.rail"));
 
     fireEvent.keyDown(window, { key: "Escape" });
 
     expect(toggles()).toBe(1);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    // jsdom does not enforce `inert`, so a synchronous focus() would also pass
+    // here; e2e/07 (Chromium) is the canary for the after-inert ordering.
     expect(document.activeElement).toBe(toggle);
   });
 

@@ -161,6 +161,12 @@
 
   --rail-w: 232px;
   --topbar-h: 60px;
+  /* Ruling 121: the controller dock is a fixed 44px trigger inset
+     max(20px, safe-area) from the bottom-right corner (see `.dock`). Every
+     scroll container that ends under it reserves this much below its last
+     block, so the last control on a surface can always be scrolled clear of
+     the trigger instead of sitting under it (interface review 2026-09-06). */
+  --dock-clear: calc(max(20px, env(safe-area-inset-bottom)) + 44px + 1rem);
 }
 
 * { box-sizing: border-box; }
@@ -940,13 +946,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: .08rem .375rem; border-radius: var(--radius-chip);
 }
 .col-stage-dot { width: .56rem; height: .56rem; border-radius: 50%; flex: none; }
-.col-head .add { margin-left: auto; color: var(--placeholder); display: grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-small); background: none; border: 0; }
+.col-head .add { margin-left: auto; color: var(--placeholder); display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-small); background: none; border: 0; }
 .col-head .add:hover { background: var(--tint-press); color: var(--fg); }
 
 .col-body {
   display: flex; flex-direction: column; gap: .75rem;
   overflow-y: auto;
-  padding: .25rem .25rem 1rem;
+  padding: .25rem .25rem var(--dock-clear);
   flex: 1;
   min-height: 0;
 }
@@ -992,7 +998,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 @media (hover: none) {
   .card-move { opacity: 1; }
 }
-.card-move .stage-menu-btn { font-size: .68rem; padding: .125rem .375rem; }
+.card-move .stage-menu-btn { font-size: .68rem; padding: .125rem .375rem; min-height: 24px; }
 .card-move .sm-name { display: none; }
 .card-wrap.draggable { cursor: grab; }
 .card-wrap.draggable:active { cursor: grabbing; }
@@ -1044,6 +1050,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   background: var(--tint-hover);
   border-radius: var(--radius-button); padding: .25rem .5rem;
   color: var(--fg); font: inherit; font-size: .8rem; font-weight: 600;
+  /* One line, bounded: a stage name has no length cap, so the name ellipsizes
+     inside the trigger instead of pushing the task page's side column past
+     the viewport (the 390px audit's `overflow-wrap: anywhere` cannot reach a
+     nowrap value). */
+  white-space: nowrap; max-width: 100%; min-width: 0;
   cursor: pointer;
   transition: border-color .14s ease, background .14s ease, transform .1s var(--ease-out);
 }
@@ -1051,7 +1062,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .stage-menu-btn.open { border-color: var(--blue); }
 .stage-menu-btn:disabled { opacity: .6; cursor: default; }
 .stage-menu-btn .col-stage-dot { width: .5rem; height: .5rem; border-radius: 50%; flex: none; }
-.stage-menu-btn .sm-current { display: inline-flex; align-items: center; gap: .375rem; transform-origin: left center; }
+.stage-menu-btn .sm-current { display: inline-flex; align-items: center; gap: .375rem; transform-origin: left center; min-width: 0; }
+.stage-menu-btn .sm-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.stage-menu-btn .sm-caret { flex: none; }
 .stage-menu-btn .sm-current.changed { animation: stagePulse .45s ease; }
 @keyframes stagePulse {
   0%   { transform: scale(1); }
@@ -1102,13 +1115,23 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   .card-wrap.just-arrived .card { animation: none; }
 }
 
-.card-top { display: flex; align-items: center; gap: .5rem; }
+.card-top { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+/* The stage-move control (`.card-move`, absolute in the card's top-right
+   corner, painted unconditionally where hover cannot happen) used to sit on top
+   of the readiness pill: at 320px it hid the last 41px of "input required" on
+   every held card. The pill now follows the key at the leading edge (the
+   spacer that pushed it under the control is gone) and the row keeps the
+   control's footprint free: 47px from the card edge minus the card's 12px
+   padding. Measured 0px overlap at 200/218/260px lanes for the three longest
+   labels. The price: in the 200px (viewports up to 1400px) and 218px lanes a
+   held card's pill wraps under the key, so those cards run one line taller;
+   from ~260px lanes the pill sits beside the key. */
+.card-wrap:has(.card-move) .card-top { padding-right: 2.25rem; }
 /* F21-18: `white-space: nowrap` — at 390px the readiness pill sharing this row
    squeezed the key until it broke mid-token ("VIB-\n8"), which reads as two
    values and is not a key any more. A task key is one identifier, so it never
    wraps; the pill beside it is prose and takes the squeeze instead. */
 .card-top .key { font-family: var(--font-mono); font-size: .74rem; color: var(--faint); white-space: nowrap; }
-.card-top .spacer { flex: 1; }
 .card h3 { font-size: .98rem; line-height: 1.18; font-weight: 800; }
 
 .card-owner {
@@ -1171,7 +1194,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
   gap: 1rem;
-  padding: 1rem 1.5rem 2rem;
+  padding: 1rem 1.5rem var(--dock-clear);
   overflow-y: auto;
   flex: 1;
   min-height: 0;
@@ -1180,6 +1203,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    works; it isn't an interactive control, so suppress the focus ring. */
 .detail:focus,
 .detail:focus-visible { outline: none; }
+/* Same rule for the mobile drawer: `nav.rail` is focused by script when it
+   opens (a region, not a control), and a keyboard-activated toggle would
+   otherwise leave the UA outline around the whole drawer. */
+.rail:focus,
+.rail:focus-visible { outline: none; }
 /* U7 (D2, second half): `.detail-side` comes FIRST in the markup — current
    state, the acceptance button and Permissions ahead of the timeline — because
    the UX spec's stacking rule is a READING order ("preserving reading order:
@@ -1789,7 +1817,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .kv-row:last-child { border-bottom: 0; }
 .kv-row .k { color: var(--faint); font-size: .8rem; }
-.kv-row .v { font-weight: 700; font-family: var(--font-display); display: inline-flex; align-items: center; gap: .375rem; }
+.kv-row .v { font-weight: 700; font-family: var(--font-display); display: inline-flex; align-items: center; gap: .375rem; min-width: 0; }
 .kv-row .v .mono { font-weight: 400; }
 /* P14-LV-06 / R14-3: the dispositions a human decides in Current state —
    accepting the completion, archiving/restoring the task. Separated from the
@@ -1904,7 +1932,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: .125rem 1.5rem 1.5rem;
   flex: 1; min-height: 0;
 }
-.profile-list { display: flex; flex-direction: column; gap: .375rem; overflow-y: auto; padding: .125rem .25rem 1rem 0; }
+.profile-list { display: flex; flex-direction: column; gap: .375rem; overflow-y: auto; padding: .125rem .25rem var(--dock-clear) 0; }
 .ag-group-label {
   font-size: .68rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
   color: var(--placeholder); padding: 1rem .25rem .375rem;
@@ -1932,7 +1960,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .ag-idle { font-size: .74rem; font-weight: 700; color: var(--placeholder); }
 
 /* detail column */
-.ag-detail { display: flex; flex-direction: column; gap: 1rem; overflow-y: auto; padding: .125rem .375rem 1rem 0; min-width: 0; }
+.ag-detail { display: flex; flex-direction: column; gap: 1rem; overflow-y: auto; padding: .125rem .375rem var(--dock-clear) 0; min-width: 0; }
 
 .ag-hero { display: flex; align-items: flex-start; gap: 1rem; }
 .ag-hero-main { flex: 1; min-width: 0; }
@@ -2051,7 +2079,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .deploy-task .key { color: var(--faint); margin-right: .375rem; }
 
 /* live roster */
-.live-wrap { padding: .125rem 1.5rem 1.5rem; overflow-y: auto; flex: 1; min-height: 0; }
+.live-wrap { padding: .125rem 1.5rem var(--dock-clear); overflow-y: auto; flex: 1; min-height: 0; }
 .live-table {
   width: 100%; border: 1px solid var(--hairline); border-radius: var(--radius-card);
   overflow: hidden; background: var(--surface); box-shadow: var(--shadow-card);
@@ -2255,6 +2283,10 @@ dialog[data-closing]::backdrop {
 }
 .field textarea { resize: vertical; min-height: 56px; line-height: 1.5; }
 .field input:focus, .field textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); outline: 0; }
+/* A field a refused submit names (`aria-invalid`, described by the error box
+   beside it) shows it on the field itself; the focus wash still paints, so an
+   invalid field that has focus reads as both. */
+.field input[aria-invalid="true"], .field textarea[aria-invalid="true"] { border-color: var(--coral-dark); }
 /* Ruling 108: a read-only field (the deployment-locked controller doctrine)
    must READ read-only — muted fill, resting border on focus, no blue ring, no
    resize grip. The only read-only field in the app, so this rule is its. */
@@ -2430,7 +2462,7 @@ dialog[data-closing]::backdrop {
 .policy-wrap {
   flex: 1; min-height: 0;
   overflow-y: auto;
-  padding: .125rem 1.5rem 1.5rem;
+  padding: .125rem 1.5rem var(--dock-clear);
   display: flex; flex-direction: column; gap: 1rem;
 }
 .policy-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
@@ -3484,6 +3516,25 @@ dialog[data-closing]::backdrop {
      hold real controls — stack them one-per-row on a phone so every action stays
      in the viewport instead of being clipped off the right edge. */
   .profile-grid { grid-template-columns: 1fr; }
+  /* iOS Safari zooms the whole page when a focused input is under 16px, and
+     every input in the app sits at .8-.98rem. 1.05rem (16.8px) is the first
+     scale step past the threshold. The `.mono` faces need their own line: the
+     mono override lives in an appended section after this block, so at equal
+     specificity it would win; one attribute more settles it. */
+  .field input[type="text"], .field input[type="password"], .field input[type="email"],
+  .field input[type="search"], .field input[type="date"], .field input[type="number"],
+  .field textarea, select,
+  .top-search input, .board-filter-input input, .cmdk-input,
+  .composer-box .composer-ce, .composer-box .composer-placeholder, .goal-textarea,
+  .label-input-field, .invite-row input, .stg-input, .op-steer,
+  .meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { font-size: 1.05rem; }
+  .field input[type="text"].mono, .field input[type="email"].mono,
+  .field input[type="password"].mono { font-size: 1.05rem; }
+  /* The rest are declared in appended sections at equal specificity, so each
+     needs one selector more to be reached from here. */
+  .field .repo-input input, .field .repo-input .pre, input.fm-newinp, .fm-gh input[type="text"],
+  .fm-toolbar select[aria-label], .conc-edit input[type="number"],
+  .ctl-composer textarea[rows], .dock-composer .ctl-composer textarea[rows] { font-size: 1.05rem; }
   /* Ruling 121: the controller dock becomes a bottom sheet — full width,
      entering and leaving along the bottom edge. The trigger stays on screen
      (R19-12: no control disappears under a width query); it rides just above
@@ -3786,7 +3837,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   width: 100%;
   max-width: 1120px;
   margin: 0 auto;
-  padding: 2rem 2rem 3rem;
+  padding: 2rem 2rem var(--dock-clear);
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
@@ -3823,7 +3874,10 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 /* ---------- Project grid ---------- */
 .pj-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  /* `min(320px, 100%)`: a 320px floor is wider than the shell's content box
+     at the 320px viewport (256px), where a bare minmax(320px) pushed every
+     card 32px past the edge and the page scrolled sideways. */
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 1rem;
 }
 
@@ -3987,7 +4041,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .home[data-density="compact"] .pj-desc { display: none; }
 .home[data-density="compact"] .pj-link { gap: .5rem; padding: .75rem .75rem .75rem; }
 .home[data-density="compact"] .pj-foot { display: none; }
-.home[data-density="compact"] .pj-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: .75rem; }
+.home[data-density="compact"] .pj-grid { grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: .75rem; }
 .home[data-density="compact"] .pj-new { min-height: 118px; }
 
 /* ---------- Organization panel ---------- */
@@ -4037,6 +4091,12 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
    between them. The auto margin belongs to the group at the end of the strip,
    not to each button in it. */
 .store-strip > :last-child { margin-left: auto; }
+/* At 320px the two maintenance buttons (`.btn` never wraps) are wider than the
+   shell's 256px content box and `.inline-row` never wraps, so the group ran
+   16px past the viewport and the page scrolled sideways. This strip is the one
+   place the utility holds two full buttons; the utility's one-line contract
+   stays for its other consumer. */
+.store-strip .inline-row { flex-wrap: wrap; justify-content: flex-end; }
 .store-strip .spin { animation: spin 1s linear infinite; }
 /* ---------- Empty state ---------- */
 .empty-hero {
@@ -4069,6 +4129,8 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .key-row { display: grid; grid-template-columns: 1fr 130px; gap: 1rem; }
 .repo-input { display: flex; align-items: center; border: 1px solid var(--border-control); border-radius: var(--radius-button); background: var(--surface); transition: border-color .14s ease, box-shadow .14s ease; }
 .repo-input:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
+/* The inner input has no border of its own, so the invalid mark lands on the frame. */
+.repo-input:has(input[aria-invalid="true"]) { border-color: var(--coral-dark); }
 .repo-input .pre { font-family: var(--font-mono); font-size: .8rem; color: var(--faint); padding: .5rem 0 .5rem .75rem; white-space: nowrap; }
 .repo-input input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--fg); font-family: var(--font-mono); font-size: .8rem; padding: .5rem .75rem .5rem .125rem; }
 .repo-input input[disabled] { color: var(--faint); cursor: not-allowed; }
@@ -4515,9 +4577,16 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* --- board --- */
 /* The list view. `grid-auto-flow`/`grid-auto-columns` used to be set here too;
    they are inert under `display: block` and are not carried over. */
-.board.list { display: block; padding: 0 1.5rem 1.5rem; }
+/* Block axis only: the inline padding comes from `.board` and its 720px
+   override, so the list rows line up with the filter bar at every width. */
+.board.list { display: block; padding-block: 0 var(--dock-clear); overflow-y: auto; }
 .board-list { display: flex; flex-direction: column; gap: .5rem; max-width: 920px; }
-.card.list-row { flex-direction: row; align-items: center; gap: 1rem; }
+/* One non-wrapping line gave the title whatever the chips left over (h3 at
+   79px, five lines deep, at 1280px) while the stage trigger broke its own name.
+   The trailing chips drop to a second line before the title shrinks below a
+   readable measure; the row-gap is the tighter step so a wrapped row still
+   reads as one row. */
+.card.list-row { flex-direction: row; align-items: center; gap: .5rem 1rem; flex-wrap: wrap; }
 /* The list row's key is the SAME thing the grid card's `.card-top .key` is —
    a task key — and it was the only one in the app rendered in the body face,
    because every other `.key` rule is scoped to a container this row is not in
@@ -4534,7 +4603,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   color: var(--faint);
   white-space: nowrap;
 }
-.card.list-row h3 { flex: 1; }
+.card.list-row h3 { flex: 1 1 14rem; min-width: 0; }
 .avatar.ghost { opacity: .5; }
 /* The board filter chips' counts sit a shade stronger than `.tally`'s default —
    they are the only number on the chip. */
@@ -4601,7 +4670,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    stretch — so without a declared width the whole surface shrinks to its
    content and the three-up stat grid collapses with it. `.home-shell` carries
    the same pair for the same reason. */
-.insights { width: 100%; max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.5rem 3rem; }
+.insights { width: 100%; max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.5rem var(--dock-clear); }
 .insights-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
 .insights-head h1 { font-size: 1.5rem; font-weight: 800; }
 .stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; margin-bottom: 1.5rem; }
@@ -5363,7 +5432,16 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* Review G6: at ≤720px the rail is an overlay (45) behind a scrim (44). The
    dock is not removed there — R19-12 — it simply drops below the scrim, so a
    tap in that corner dismisses the drawer like every other tap outside it. */
-.app[data-rail-open="true"] .dock { z-index: 43; }
+/* The dock is mounted by root.tsx as a sibling of `.app`, so the layout
+   mirrors the drawer state onto <body> (routes/project.tsx). Hidden, not
+   re-stacked: the trigger also leaves the tab order, which `inert` on the
+   page cannot do for it, and a tap in that corner reaches the scrim. A state
+   selector, not a width query, so R19-12 is untouched. */
+body[data-rail-open="true"] .dock { visibility: hidden; }
+/* The topbar is a 60 so its popovers beat the dock, which also put it above
+   the mobile drawer's scrim (44). The page behind an open drawer is inert, so
+   the topbar has no business painting over the drawer's head either. */
+.app[data-rail-open="true"] .topbar { z-index: 43; }
 .dock-fab {
   position: relative;
   display: grid; place-items: center;

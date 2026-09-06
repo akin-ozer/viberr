@@ -227,13 +227,37 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
   // Following a rail link IS the reason the overlay was opened; leaving it up
   // over the view it just navigated to would hide the answer.
   useEffect(() => setRailOpen(false), [location.pathname]);
+  // `railOpen` is only ever set under the mobile breakpoint, but nothing
+  // un-sets it when the viewport grows past it — and with <main inert> that
+  // would be a page nobody can click, with no scrim or toggle on screen. A
+  // resize (rotation is the real one; the drawer has no inputs, so the soft
+  // keyboard cannot cause it) closes it. Not a viewport READ (R19-12).
+  useEffect(() => {
+    if (!railOpen) return;
+    const close = () => setRailOpen(false);
+    window.addEventListener("resize", close);
+    return () => window.removeEventListener("resize", close);
+  }, [railOpen]);
+  // The controller dock is mounted by root.tsx as a SIBLING of this layout, so
+  // no selector under `.app` can reach it and `inert` on <main> does not cover
+  // it. The body carries the drawer state for the dock's sake (app.css
+  // `body[data-rail-open]`), so the trigger leaves the tab order and the scrim
+  // wins the tap while the drawer is up.
+  useEffect(() => {
+    if (!railOpen) return;
+    document.body.dataset.railOpen = "true";
+    return () => {
+      delete document.body.dataset.railOpen;
+    };
+  }, [railOpen]);
 
   return (
     <div className="app" data-rail-open={railOpen ? "true" : "false"}>
       {/* UI-12: bypass block — the rail + topbar sit ahead of the content on
           every workspace navigation and there was no way past them. */}
-      <SkipLink />
+      <SkipLink inert={railOpen} />
       <Rail
+        open={railOpen}
         projectSlug={board.project.slug}
         projectName={board.project.name}
         projectRepo={board.project.repo}
@@ -267,7 +291,12 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
           the topbar's own 6+ tab stops still ahead of the content, so the
           "skip" only skipped the rail — Home's identical link skips its whole
           header. */}
-      <main className="main">
+      {/* F8 (interface review 2026-09-06): while the drawer is open the page
+          behind it is inert, so Tab stays inside the rail; the scrim, Escape
+          and a rail link are the ways out. The toggle lives in here too, which
+          is why topbar.tsx restores focus to it in an effect, after this
+          attribute is gone. */}
+      <main className="main" inert={railOpen}>
         <Topbar
           projectSlug={board.project.slug}
           projectName={board.project.name}

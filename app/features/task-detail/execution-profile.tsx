@@ -734,7 +734,7 @@ function EngagedAgents({
             : undefined;
         return (
           <div className="rev-agent" key={agent.profileId}>
-            <AgentGlyph backend={agent.backend} />
+            <AgentGlyph backend={agent.backend} decorative />
             <span>
               <div className="nm">{deployed ? deployed.name : GHOST_NAME}</div>
               <div className="sub">

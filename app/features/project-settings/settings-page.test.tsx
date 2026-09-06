@@ -1366,3 +1366,70 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     }
   });
 });
+
+/**
+ * Ruling 147: the repair dialog's primary stays enabled; a refused submit
+ * names what is missing, marks it and moves focus there.
+ */
+describe("RepairRepoDialog refuses instead of disabling", () => {
+  const openDialog = (footprintTasks: number) => {
+    const onRepair = vi.fn();
+    const utils = render(
+      <RepoPanel
+        canRepair
+        branchCleanup
+        onSetBranchCleanup={() => {}}
+        footprintTasks={footprintTasks}
+        repairBusy={false}
+        repairResult={undefined}
+        onRepair={onRepair}
+        repo="akin-ozer/viberr"
+        credential={CREDENTIAL}
+        canGrant
+        busy={false}
+        credBusy={false}
+        onGrantScope={() => {}}
+        onSetCredential={() => {}}
+        onClearCredential={() => {}}
+        onOpenTask={() => {}}
+      />,
+    );
+    fireEvent.click(utils.getByText("Repair…"));
+    const primary = [...document.querySelectorAll("button")].find(
+      (b) => b.textContent!.trim() === "Repair repository",
+    )!;
+    return { ...utils, onRepair, primary };
+  };
+
+  it("an empty repository field is refused, marked and focused", () => {
+    const { onRepair, primary } = openDialog(0);
+    expect(primary.disabled).toBe(false);
+    fireEvent.click(primary);
+    const repo = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Corrected repository, owner/name"]',
+    )!;
+    expect(repo.getAttribute("aria-invalid")).toBe("true");
+    expect(repo.getAttribute("aria-describedby")).toBe("repair-unmet");
+    expect(document.getElementById("repair-unmet")!.getAttribute("role")).toBe("alert");
+    expect(document.activeElement).toBe(repo);
+    expect(onRepair).not.toHaveBeenCalled();
+  });
+
+  it("an unconfirmed footprint note is the next refusal, on the checkbox", () => {
+    const { onRepair, primary } = openDialog(3);
+    const repo = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Corrected repository, owner/name"]',
+    )!;
+    fireEvent.change(repo, { target: { value: "akin-ozer/other" } });
+    fireEvent.click(primary);
+    const ack = document.querySelector<HTMLInputElement>(
+      'dialog[aria-label="Repair repository"] input[type="checkbox"]',
+    )!;
+    expect(ack.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(ack);
+    expect(onRepair).not.toHaveBeenCalled();
+    fireEvent.click(ack);
+    fireEvent.click(primary);
+    expect(onRepair).toHaveBeenCalledWith("akin-ozer/other", true);
+  });
+});

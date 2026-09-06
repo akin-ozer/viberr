@@ -26,6 +26,7 @@ import {
 
 import type { Route } from "./+types/root";
 import { RoutePendingBar } from "./features/shell/route-pending-bar";
+import { setDocumentTheme } from "./features/shell/theme-preference";
 import { ControllerDock } from "./features/controller/controller-dock";
 import { ToastProvider } from "./ui/toast";
 import { getCsrfToken } from "./server/auth/csrf.server";
@@ -107,9 +108,12 @@ function themeBootScript(preference: ThemePreference): string {
     `var c=(document.cookie.match(/(?:^|; )viberr_theme=([^;]+)/)||[])[1];` +
     `if(c==="dark"||c==="light"||c==="system")p=c;` +
     `var d=document.documentElement;` +
-    `if(p==="system"){var m=window.matchMedia("(prefers-color-scheme: dark)");` +
-    `var a=function(){d.dataset.theme=m.matches?"dark":"light";};a();` +
-    `if(m.addEventListener)m.addEventListener("change",a);}` +
+    // First paint only: the App effect below takes over the OS "change"
+    // listener on hydration. A second, permanent listener here wrote the
+    // attribute directly, ahead of the effect, so an OS flip bypassed the
+    // one writer (`setDocumentTheme`) and kept following the OS even after
+    // an explicit in-session pick.
+    `if(p==="system"){d.dataset.theme=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}` +
     `else{d.dataset.theme=p;}}catch(e){}})();`
   );
 }
@@ -156,10 +160,10 @@ export default function App() {
   // revalidates the root loader) and live-follows the OS on "system".
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => {
-      const dark = theme === "dark" || (theme === "system" && media.matches);
-      document.documentElement.dataset.theme = dark ? "dark" : "light";
-    };
+    // One writer for <html data-theme> (`theme-preference.ts`), so the
+    // OS-follow path swaps without the crossfade smear the menu path avoids.
+    const apply = () =>
+      setDocumentTheme(theme === "dark" || (theme === "system" && media.matches));
     apply();
     if (theme === "system") {
       media.addEventListener("change", apply);

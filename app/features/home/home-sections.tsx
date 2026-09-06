@@ -524,9 +524,11 @@ export function SettingsPanel({
             Agent resources
           </span>
           <span className="val">
+            {/* A pictogram of the two backends, not data: the tile's own text
+                names what it counts. */}
             <span className="glyphs">
-              <AgentGlyph backend="codex" />
-              <AgentGlyph backend="claude" />
+              <AgentGlyph backend="codex" decorative />
+              <AgentGlyph backend="claude" decorative />
             </span>
             <span>
               <span className="nm">
