@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { useSearchParams } from "react-router";
@@ -341,8 +341,47 @@ function AuditExportCard({
   // instance still opens on the form, since there is nothing to summarise.
   const [editing, setEditing] = useState(false);
   const formOpen = !configured || editing;
-  const canSave = bucket.trim() && region.trim() && accessKeyId.trim() &&
-    (configured || secret.trim());
+  // Ruling 147: the save stays enabled; a refused save names the first field
+  // still missing, marks it and moves focus there (counted, so each refusal
+  // re-inserts the alert).
+  const missing: "bucket" | "region" | "accessKeyId" | "secret" | null = !bucket.trim()
+    ? "bucket"
+    : !region.trim()
+      ? "region"
+      : !accessKeyId.trim()
+        ? "accessKeyId"
+        : !configured && !secret.trim()
+          ? "secret"
+          : null;
+  const [refused, setRefused] = useState(0);
+  const flagged = refused > 0 ? missing : null;
+  const fieldRefs = {
+    bucket: useRef<HTMLInputElement>(null),
+    region: useRef<HTMLInputElement>(null),
+    accessKeyId: useRef<HTMLInputElement>(null),
+    secret: useRef<HTMLInputElement>(null),
+  };
+  const saveTarget = () => {
+    if (busy) return;
+    if (missing) {
+      setRefused((n) => n + 1);
+      fieldRefs[missing].current?.focus();
+      return;
+    }
+    submit({
+      intent: "s3-config-save",
+      bucket,
+      region,
+      prefix,
+      endpoint,
+      accessKeyId,
+      secretAccessKey: secret,
+    });
+  };
+  const unmet = (field: typeof missing) => ({
+    "aria-invalid": flagged === field || undefined,
+    "aria-describedby": flagged === field ? "s3-unmet" : undefined,
+  });
   return (
     <section className="panel audit-export">
       <div className="panel-head">
@@ -407,8 +446,10 @@ function AuditExportCard({
           <label className="field">
             <span className="flabel">Bucket</span>
             <input
+              ref={fieldRefs.bucket}
               type="text"
               value={bucket}
+              {...unmet("bucket")}
               onChange={(e) => setBucket(e.currentTarget.value)}
               placeholder="my-audit-bucket"
             />
@@ -416,8 +457,10 @@ function AuditExportCard({
           <label className="field">
             <span className="flabel">Region</span>
             <input
+              ref={fieldRefs.region}
               type="text"
               value={region}
+              {...unmet("region")}
               onChange={(e) => setRegion(e.currentTarget.value)}
               placeholder="eu-central-1"
             />
@@ -443,8 +486,10 @@ function AuditExportCard({
           <label className="field">
             <span className="flabel">Access key ID</span>
             <input
+              ref={fieldRefs.accessKeyId}
               type="text"
               value={accessKeyId}
+              {...unmet("accessKeyId")}
               onChange={(e) => setAccessKeyId(e.currentTarget.value)}
               placeholder="AKIA…"
             />
@@ -452,8 +497,10 @@ function AuditExportCard({
           <label className="field">
             <span className="flabel">Secret access key</span>
             <input
+              ref={fieldRefs.secret}
               type="password"
               value={secret}
+              {...unmet("secret")}
               onChange={(e) => setSecret(e.currentTarget.value)}
               placeholder={configured ? "leave blank to keep" : "required"}
               aria-label="S3 secret access key"
@@ -461,24 +508,29 @@ function AuditExportCard({
           </label>
         </div>
         )}
+        {formOpen && flagged && (
+          <div className="form-err" role="alert" id="s3-unmet" key={"refused-" + refused}>
+            <Icon name="alert" />
+            <span>
+              {flagged === "bucket"
+                ? "Enter the bucket name."
+                : flagged === "region"
+                  ? "Enter the bucket's region."
+                  : flagged === "accessKeyId"
+                    ? "Enter the access key ID."
+                    : "Enter the secret access key."}
+            </span>
+          </div>
+        )}
         <div className="audit-s3-actions">
           {formOpen && (
           <button
             type="button"
             // D04-U7: secondary — the tab's own action keeps the one primary.
             className="btn sm"
-            disabled={busy || !canSave}
-            onClick={() =>
-              submit({
-                intent: "s3-config-save",
-                bucket,
-                region,
-                prefix,
-                endpoint,
-                accessKeyId,
-                secretAccessKey: secret,
-              })
-            }
+            disabled={busy}
+            aria-busy={busy || undefined}
+            onClick={saveTarget}
           >
             Save target
           </button>

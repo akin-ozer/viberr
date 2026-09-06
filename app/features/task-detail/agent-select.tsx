@@ -242,7 +242,10 @@ export function AgentSelect({
                   onMouseEnter={() => setActive(i)}
                   onClick={() => pick(o)}
                 >
-                  <AgentGlyph backend={o.backend === "codex" ? "codex" : "claude"} />
+                  <AgentGlyph
+                    backend={o.backend === "codex" ? "codex" : "claude"}
+                    decorative
+                  />
                   <span className="ri-txt">
                     <span className="ri-nm">
                       {parts.match ? (

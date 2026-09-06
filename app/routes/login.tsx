@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { pageTitle } from "~/shared/page-title";
 import { data, Form, redirect, useNavigation } from "react-router";
 import { z } from "zod";
@@ -44,6 +44,15 @@ const socialSignIn = z
   .object({ url: z.string().min(1).optional().catch(undefined) })
   .catch({});
 
+/** Which input a refusal belongs to, so the page can mark it invalid,
+ *  describe it with the error box and hand it focus. `null` is the whole
+ *  form (rate limit, disabled account, unknown intent). */
+type ErrorField = "email" | "password" | "npw" | "npw2" | null;
+/** Every refusal carries a field, so `actionData.field` is one type rather
+ *  than a union only some branches satisfy. */
+const refuse = (error: string, field: ErrorField) =>
+  data({ error, field }, { status: 400 });
+
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const returnTo = safeReturnTo(url.searchParams.get("returnTo"));
@@ -82,7 +91,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     const email = String(formData.get("email") ?? "").trim();
     const password = String(formData.get("password") ?? "");
-    if (!email) return data({ error: "Enter your email." }, { status: 400 });
+    if (!email) return refuse("Enter your email.", "email");
 
     const result = await loginWithCredentials(
       db,
@@ -105,7 +114,14 @@ export async function action({ request }: Route.ActionArgs) {
               : // unknown_email + no_password share the mock's copy: don't
                 // reveal whether an (OAuth-only) account exists.
                 "No local account for that email. Ask an admin to create one, or sign in with GitHub / Google if you're whitelisted.";
-      return data({ error }, { status: 400 });
+      const field: ErrorField =
+        result.reason === "wrong_password"
+          ? "password"
+          : result.reason === "rate_limited" || result.reason === "disabled"
+            ? null
+            : // unknown_email + no_password: the email is what they got wrong.
+              "email";
+      return refuse(error, field);
     }
 
     const headers = new Headers();
@@ -135,16 +151,12 @@ export async function action({ request }: Route.ActionArgs) {
     const npw = String(formData.get("npw") ?? "");
     const npw2 = String(formData.get("npw2") ?? "");
     if (npw.length < MIN_PASSWORD_LENGTH) {
-      return data(
-        {
-          error: `New password needs at least ${MIN_PASSWORD_LENGTH} characters.`,
-        },
-        { status: 400 },
+      return refuse(
+        `New password needs at least ${MIN_PASSWORD_LENGTH} characters.`,
+        "npw",
       );
     }
-    if (npw !== npw2) {
-      return data({ error: "Passwords don't match." }, { status: 400 });
-    }
+    if (npw !== npw2) return refuse("Passwords don't match.", "npw2");
 
     await completeForcedPasswordReset(db, {
       user: { id: auth.user.id, email: auth.user.email },
@@ -154,28 +166,42 @@ export async function action({ request }: Route.ActionArgs) {
     return redirect(returnTo ?? "/");
   }
 
-  return data({ error: "Unknown action." }, { status: 400 });
+  return refuse("Unknown action.", null);
 }
 
 /** The forced set-new-password step (mock's `reset` screen). */
+/** The error the card shows, with the input it belongs to. */
+type ShownError = { text: string; field: ErrorField };
+
 function SetNewPassword({
   returnTo,
-  actionError,
+  actionData,
 }: {
   returnTo: string | null;
-  actionError: string | null;
+  actionData: Route.ComponentProps["actionData"];
 }) {
   const [npw, setNpw] = useState("");
   const [npw2, setNpw2] = useState("");
-  const [clientErr, setClientErr] = useState<string | null>(null);
-  // Store which server error the user dismissed (by typing); a new
-  // actionError no longer matches, so it un-hides itself — no effect needed.
-  const [dismissedServerErr, setDismissedServerErr] = useState<
-    string | null | undefined
-  >(undefined);
-  const serverErrHidden =
-    dismissedServerErr !== undefined && dismissedServerErr === actionError;
-  const err = clientErr ?? (serverErrHidden ? null : actionError);
+  const npwRef = useRef<HTMLInputElement>(null);
+  const npw2Ref = useRef<HTMLInputElement>(null);
+  const [clientErr, setClientErr] = useState<ShownError | null>(null);
+  // Store WHICH result the user dismissed (by typing): the actionData object,
+  // not its text. A second submit that fails the same way is a new object, so
+  // it un-hides itself — comparing the text kept a repeated refusal hidden.
+  // No effect needed for the hiding.
+  const [dismissed, setDismissed] =
+    useState<Route.ComponentProps["actionData"]>(undefined);
+  const serverErrHidden = actionData !== undefined && dismissed === actionData;
+  const err: ShownError | null =
+    clientErr ??
+    (actionData && !serverErrHidden
+      ? { text: actionData.error, field: actionData.field }
+      : null);
+  // A server refusal names its field; put the person on it once it arrives.
+  useEffect(() => {
+    if (actionData?.field === "npw") npwRef.current?.focus();
+    else if (actionData?.field === "npw2") npw2Ref.current?.focus();
+  }, [actionData]);
 
   return (
     <div className="login-wrap" data-screen-label="Login · set new password">
@@ -201,14 +227,17 @@ function SetNewPassword({
           onSubmit={(e) => {
             if (npw.length < MIN_PASSWORD_LENGTH) {
               e.preventDefault();
-              setClientErr(
-                `New password needs at least ${MIN_PASSWORD_LENGTH} characters.`,
-              );
+              setClientErr({
+                text: `New password needs at least ${MIN_PASSWORD_LENGTH} characters.`,
+                field: "npw",
+              });
+              npwRef.current?.focus();
               return;
             }
             if (npw !== npw2) {
               e.preventDefault();
-              setClientErr("Passwords don't match.");
+              setClientErr({ text: "Passwords don't match.", field: "npw2" });
+              npw2Ref.current?.focus();
             }
           }}
         >
@@ -223,14 +252,17 @@ function SetNewPassword({
             </label>
             <input
               id="npw"
+              ref={npwRef}
               name="npw"
               type="password"
               autoComplete="new-password"
               value={npw}
+              aria-invalid={err?.field === "npw" || undefined}
+              aria-describedby={err?.field === "npw" ? "npw-err" : undefined}
               onChange={(e) => {
                 setNpw(e.target.value);
                 setClientErr(null);
-                setDismissedServerErr(actionError);
+                setDismissed(actionData);
               }}
             />
           </div>
@@ -240,21 +272,24 @@ function SetNewPassword({
             </label>
             <input
               id="npw2"
+              ref={npw2Ref}
               name="npw2"
               type="password"
               autoComplete="new-password"
               value={npw2}
+              aria-invalid={err?.field === "npw2" || undefined}
+              aria-describedby={err?.field === "npw2" ? "npw-err" : undefined}
               onChange={(e) => {
                 setNpw2(e.target.value);
                 setClientErr(null);
-                setDismissedServerErr(actionError);
+                setDismissed(actionData);
               }}
             />
           </div>
           {err && (
-            <div className="login-err" role="alert">
+            <div className="login-err" role="alert" id="npw-err">
               <Icon name="alert" />
-              {err}
+              {err.text}
             </div>
           )}
           <button className="btn primary provider" type="submit">
@@ -335,37 +370,45 @@ export default function Login({
 }: Route.ComponentProps) {
   const { mode, returnTo, providers } = loaderData;
   const navigation = useNavigation();
-  const actionError = actionData?.error ?? null;
 
+  const emailRef = useRef<HTMLInputElement>(null);
+  const pwRef = useRef<HTMLInputElement>(null);
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
-  const [clientErr, setClientErr] = useState<string | null>(null);
-  // Store which server error the user dismissed (by typing); a new
-  // actionError no longer matches, so it un-hides itself — no effect needed.
-  const [dismissedServerErr, setDismissedServerErr] = useState<
-    string | null | undefined
-  >(undefined);
-  const serverErrHidden =
-    dismissedServerErr !== undefined && dismissedServerErr === actionError;
+  const [clientErr, setClientErr] = useState<ShownError | null>(null);
+  // Same identity-keyed dismissal as SetNewPassword (see the comment there).
+  const [dismissed, setDismissed] =
+    useState<Route.ComponentProps["actionData"]>(undefined);
+  const serverErrHidden = actionData !== undefined && dismissed === actionData;
   const [info, setInfo] = useState<string | null>(null);
   const [providerBusy, setProviderBusy] = useState<"github" | "google" | null>(
     null,
   );
+  // A server refusal names its field; put the person on it once it arrives.
+  // (Hooks stay above the mode fork below.)
+  useEffect(() => {
+    if (actionData?.field === "email") emailRef.current?.focus();
+    else if (actionData?.field === "password") pwRef.current?.focus();
+  }, [actionData]);
 
   if (mode === "reset") {
-    return <SetNewPassword returnTo={returnTo} actionError={actionError} />;
+    return <SetNewPassword returnTo={returnTo} actionData={actionData} />;
   }
 
   const submitting =
     navigation.state !== "idle" &&
     navigation.formData?.get("intent") === "login";
   const busy = providerBusy ?? (submitting ? "local" : null);
-  const err = clientErr ?? (serverErrHidden ? null : actionError);
+  const err: ShownError | null =
+    clientErr ??
+    (actionData && !serverErrHidden
+      ? { text: actionData.error, field: actionData.field }
+      : null);
 
   const provider = (which: "github" | "google") => {
     if (busy) return;
     setClientErr(null);
-    setDismissedServerErr(actionError);
+    setDismissed(actionData);
     if (!providers[which]) {
       setInfo(
         (which === "github" ? "GitHub" : "Google") +
@@ -488,7 +531,8 @@ export default function Login({
             setInfo(null);
             if (!email.trim()) {
               e.preventDefault();
-              setClientErr("Enter your email.");
+              setClientErr({ text: "Enter your email.", field: "email" });
+              emailRef.current?.focus();
             }
           }}
         >
@@ -502,16 +546,19 @@ export default function Login({
             </label>
             <input
               id="lg-email"
+              ref={emailRef}
               name="email"
               type="email"
               className="mono"
               autoComplete="username"
               value={email}
               placeholder="you@company.dev"
+              aria-invalid={err?.field === "email" || undefined}
+              aria-describedby={err?.field === "email" ? "lg-err" : undefined}
               onChange={(e) => {
                 setEmail(e.target.value);
                 setClientErr(null);
-                setDismissedServerErr(actionError);
+                setDismissed(actionData);
               }}
             />
           </div>
@@ -521,21 +568,24 @@ export default function Login({
             </label>
             <input
               id="lg-pw"
+              ref={pwRef}
               name="password"
               type="password"
               autoComplete="current-password"
               value={pw}
+              aria-invalid={err?.field === "password" || undefined}
+              aria-describedby={err?.field === "password" ? "lg-err" : undefined}
               onChange={(e) => {
                 setPw(e.target.value);
                 setClientErr(null);
-                setDismissedServerErr(actionError);
+                setDismissed(actionData);
               }}
             />
           </div>
           {err && (
-            <div className="login-err" role="alert">
+            <div className="login-err" role="alert" id="lg-err">
               <Icon name="alert" />
-              {err}
+              {err.text}
             </div>
           )}
           <button
@@ -551,7 +601,7 @@ export default function Login({
               className="linkish fine sm"
               onClick={() => {
                 setClientErr(null);
-                setDismissedServerErr(actionError);
+                setDismissed(actionData);
                 setInfo(
                   "Ask an admin to reset your password. You'll be prompted to set a new one at your next sign-in.",
                 );

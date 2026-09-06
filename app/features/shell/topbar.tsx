@@ -70,7 +70,8 @@ export function Topbar({
   // F15-18/UI-C: the mobile rail is an overlay; Escape has to be able to get
   // out of it, and focus has to land back on the control that opened it. The
   // scrim is pointer-only by construction (`routes/project.tsx`), so this is
-  // the keyboard half of that dismissal — not a duplicate of it.
+  // the keyboard half of that dismissal — not a duplicate of it. The restore
+  // is deferred past the close (see the second effect below).
   const railToggleRef = useRef<HTMLButtonElement>(null);
   const toggleRailRef = useRef(onToggleRail);
   // Kept current in an effect, not during render (render must stay pure); read
@@ -82,11 +83,24 @@ export function Topbar({
     if (!railOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      // A modal dialog (the palette opens over the drawer; showModal escapes
+      // the inert page) owns its own Escape: one press closes one layer, and
+      // the dialog's focus restore lands on the still-open drawer.
+      if (document.querySelector("dialog[open]")) return;
       toggleRailRef.current?.();
-      railToggleRef.current?.focus();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [railOpen]);
+  // Focus goes back to the toggle on EVERY close (Escape, the scrim, a rail
+  // link), and only after the close has committed: the toggle sits inside
+  // <main>, which the layout keeps `inert` while the rail is open, and
+  // focus() into an inert subtree is a no-op, so the keydown handler cannot
+  // do this itself (it ran before the commit and used to).
+  const railWasOpen = useRef(false);
+  useEffect(() => {
+    if (!railOpen && railWasOpen.current) railToggleRef.current?.focus();
+    railWasOpen.current = railOpen;
   }, [railOpen]);
 
   return (

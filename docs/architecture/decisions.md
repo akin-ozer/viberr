@@ -2823,6 +2823,27 @@ by rewriting those paragraphs:*
     not touch the watcher, lock or disk entries, which are genuine instance facts.
     (`server/ops/health-snapshot.server.ts`; the contract in `routes/resources.health.ts`.)
 
+147. **A primary that creates or saves stays enabled until the request starts (owner,
+    2026-09-06, interface review).** A submit button that was `disabled` while the form was
+    incomplete gave a click no feedback at all, dropped out of the tab order, and could not
+    explain itself through a `title` no browser opens on a disabled control; the
+    dimmed-but-clickable `aria-disabled` variant told readers the button did nothing. Every
+    create/save primary now follows one contract. **(a)** Only a request in flight disables
+    it (`busy`, painted by the sheet's `aria-busy` rule). **(b)** A submit on an incomplete
+    form is REFUSED on the client: the message the surface already carried is inserted as a
+    fresh `role="alert"` (a new element each time — readers announce an insertion, not a
+    role flip on unchanged text), the first unmet field is marked `aria-invalid` and
+    described by that message, and focus moves to it (or to the first empty control where
+    the surface has no per-field map). **(c)** A pristine form is never accused: the marks
+    appear only after a refused attempt, and a refused attempt never turns into a request.
+    **(d)** Two gates are NOT this rule and keep `disabled`: a save with nothing changed
+    (`dirty`), and a typed-name confirmation on a destructive action, which is a safety
+    interlock, not validation. Applies to the New task and New project modals, `/login`
+    (whose action returns `{ error, field }`), every org-settings `MiniModal`, the
+    repository-repair dialog, the S3 audit target and the agent profile editor.
+    (`ui/`-adjacent idiom in `features/org-settings/mini-modal.tsx`; the field rule in
+    `app.css` `.field input[aria-invalid="true"]`.)
+
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates
 that pass and remains unnumbered.)*

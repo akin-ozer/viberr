@@ -175,7 +175,7 @@ export function AgentModal({
 
   const stageOpts = stages.filter((s) => s.id !== "done");
   const canSave =
-    !action.busy && name.trim().length > 1 && role.trim().length > 0 && selStages.length > 0;
+    name.trim().length > 1 && role.trim().length > 0 && selStages.length > 0;
   const selStageSet = new Set(selStages);
   const selSkillSet = new Set(selSkills);
   const selMcpSet = new Set(selMcps);
@@ -188,6 +188,7 @@ export function AgentModal({
       sub="Global base definition. Projects grant eligibility & capabilities"
       onClose={onClose}
       canSave={canSave}
+      busy={action.busy}
       saveLabel={initial ? "Save changes" : "Create profile"}
       footHint={
         initial && initial.used > 0
@@ -267,7 +268,7 @@ export function AgentModal({
             onClick={() => setBackend("codex")}
             aria-pressed={backend === "codex"}
           >
-            <AgentGlyph backend="codex" />
+            <AgentGlyph backend="codex" decorative />
             <span>
               <span className="bnm">Codex</span>
             </span>
@@ -281,7 +282,7 @@ export function AgentModal({
             onClick={() => setBackend("claude")}
             aria-pressed={backend === "claude"}
           >
-            <AgentGlyph backend="claude" />
+            <AgentGlyph backend="claude" decorative />
             <span>
               <span className="bnm">Claude</span>
             </span>

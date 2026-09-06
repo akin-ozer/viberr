@@ -156,7 +156,11 @@ export function StageMenu({
       <button
         ref={btnRef}
         type="button"
-        className={`stage-menu-btn panel${open ? " open" : ""}`}
+        // `panel` used to ride along here, a leftover of a removed variant: the
+        // generic `.panel` surface rule is later in the sheet at equal
+        // specificity, so it overrode this trigger's own padding, radius and
+        // shadow on every board card, list row and task page.
+        className={`stage-menu-btn${open ? " open" : ""}`}
         onClick={toggle}
         disabled={busy}
         aria-haspopup="menu"

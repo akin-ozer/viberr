@@ -486,7 +486,8 @@ function OwnerLine({ task }: { task: TaskSummary }) {
   if (sp) {
     return (
       <div className="card-owner">
-        <AgentGlyph backend={sp.backend} />
+        {/* `sp.name` IS the backend label, so the glyph is a pictogram here. */}
+        <AgentGlyph backend={sp.backend} decorative />
         <span className="nm">{sp.name}</span>
         <span className="lbl">· {sp.role}</span>
       </div>
@@ -521,7 +522,10 @@ function ReviewerStack({ task, label }: { task: TaskSummary; label?: boolean }) 
       title={"Owner · human reviewer & acceptance: " + o.name}
       // The Avatar renders initials only; expose the real name to keyboard/
       // touch/SR users too (title alone is a weak accessible name), matching
-      // MemberStack's aria-label convention.
+      // MemberStack's convention. `role="img"` is what makes the label count:
+      // ARIA prohibits `aria-label` on a role-less span and readers drop it,
+      // so without the role the owner read as bare initials.
+      role="img"
       aria-label={"Owner: " + o.name}
     >
       {label && <span className="rs-lbl">owner</span>}
@@ -612,7 +616,8 @@ function TaskCard({
       >
         <div className="card-top">
           <span className="key">{task.key}</span>
-          <span className="spacer" />
+          {/* No spacer: the pill sits beside the key so the card's top-right
+              corner stays free for `.card-move` (app.css `.card-top`). */}
           {/* R21-8 (supersedes C3's both-pills arrangement): "input required"
               claims a human is needed RIGHT NOW — false while an agent is
               actively carrying the work (`waiting === "agent"`), so the pill
@@ -770,7 +775,7 @@ function Column({
     >
       <header className="col-head">
         <span className="col-stage-dot" style={{ background: stage.color }} />
-        <span className="nm">{stage.name}</span>
+        <h2 className="nm">{stage.name}</h2>
         <span className="ct">{count}</span>
         {/* R19-14: new tasks are created at the entry stage only, so only the
             entry lane offers the affordance (isDone guards the degenerate
@@ -978,6 +983,10 @@ function ListView({
 }) {
   return (
     <div className="board list">
+      {/* The lanes give the stage layout its h2s; the list has one lane, so
+          this is its level between the page h1 and the row h3s. Spoken only:
+          the layout toggle already says "List" on screen. */}
+      <h2 style={SR_ONLY}>All tasks</h2>
       <div
         className="board-list"
         role={tasks.length > 0 ? "list" : undefined}
@@ -1173,6 +1182,7 @@ function NewTaskModal({
   const { ref: panelRef, close } = useDialog(onClose);
   const busy = fetcher.state !== "idle";
   const closedRef = useRef(false);
+  const titleRef = useRef<HTMLInputElement>(null);
 
   const valid = title.trim().length >= 3;
   // The dialog opened on an empty title, so `!valid` was true from first paint
@@ -1180,6 +1190,9 @@ function NewTaskModal({
   // for something the person had not had a chance to do yet. The requirement is
   // only *unmet* once they have left the field or tried to submit.
   const [titleTouched, setTitleTouched] = useState(false);
+  // One condition for the red hint, the alert role, the field's aria-invalid
+  // and its describedby, so the four can never disagree.
+  const titleError = titleTouched && !valid;
   const serverError = fetcher.data && fetcher.data.ok === false
     ? fetcher.data.error
     : null;
@@ -1199,7 +1212,15 @@ function NewTaskModal({
 
   const submit = () => {
     setTitleTouched(true);
-    if (!valid || busy) return;
+    if (busy) return;
+    if (!valid) {
+      // The primary is no longer hard-disabled while the form is invalid (a
+      // disabled submit gave a click no feedback and dropped out of the tab
+      // order), so the click reaches this guard: name the requirement, mark
+      // the field, and put the person on it.
+      titleRef.current?.focus();
+      return;
+    }
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "create-task");
@@ -1245,9 +1266,12 @@ function NewTaskModal({
           </label>
           <input
             id="new-task-title"
+            ref={titleRef}
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            aria-invalid={titleError || undefined}
+            aria-describedby={titleError ? "new-task-hint" : undefined}
             // Empty-blur stays quiet: dialog.showModal() steals focus right
             // after autoFocus, so an unconditional blur handler marked the
             // field touched on FIRST PAINT and the footer opened red (the
@@ -1330,34 +1354,36 @@ function NewTaskModal({
       </div>
       <div className="modal-foot">
         <span
-          className={
-            "foot-hint" + (serverError || (titleTouched && !valid) ? " err" : "")
-          }
+          id="new-task-hint"
+          className={"foot-hint" + (serverError || titleError ? " err" : "")}
           // UX-coherence: announce the server/validation error to screen
           // readers — the same role=alert idiom the Home "New project" modal
           // got in the Pass-19 audit; this modal (same fetcher/serverError
           // shape) was missed. Condition mirrors the className ternary above so
-          // the announce state can never desync from the visible error.
-          role={serverError || (titleTouched && !valid) ? "alert" : undefined}
+          // the announce state can never desync from the visible error. The
+          // title requirement outranks a stale server refusal: the field's
+          // describedby points here, so the text must be about the title
+          // whenever the title is what is wrong.
+          role={serverError || titleError ? "alert" : undefined}
         >
-          {serverError
-            ? serverError
-            : titleTouched && !valid
-              ? "A title is required."
+          {titleError
+            ? "A title is required."
+            : serverError
+              ? serverError
               : "The task key is assigned automatically."}
         </span>
         <div className="foot-actions">
           <button type="button" className="btn ghost" onClick={close}>
             Cancel
           </button>
+          {/* Enabled until the request starts: an invalid submit is refused
+              with the hint above, the field marked and focused (submit()).
+              Only `busy` disables, and the aria-busy sheet rule paints it. */}
           <button
             type="button"
             className="btn primary"
             onClick={submit}
-            disabled={!valid || busy}
-            style={
-              !valid ? { opacity: 0.5, pointerEvents: "none" } : undefined
-            }
+            disabled={busy}
             aria-busy={busy}
           >
             <Icon name="plus" />
@@ -1455,8 +1481,14 @@ function BoardHeader({
             human" — the trailing "decision" was one of five near-duplicate
             phrasings this pass collapsed to one-per-scope (the viewer-scope card
             tag reads "waiting on you"). "in this project" keeps the scope. */}
+        {/* role="status" on the count alone: it changes as the filter is
+            typed, and a screen reader otherwise hears nothing change; the
+            project-wide waiting figure does not follow the filter, so it stays
+            outside the (atomic) region. No explicit aria-live: the board's own
+            announcer is found by that attribute. */}
         <div className="sub">
-          {countLine} · {waitingHuman} waiting on a human in this project
+          <span role="status">{countLine}</span> · {waitingHuman} waiting on a
+          human in this project
         </div>
       </div>
       <div className="board-tools">

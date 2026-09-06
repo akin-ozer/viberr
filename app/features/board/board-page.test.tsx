@@ -197,6 +197,87 @@ describe("LV-20 family: the board subtitle counts what the projection says", () 
       "2 tasks · 1 waiting on a human in this project",
     );
   });
+
+  // Interface review 2026-09-06: the count changes as the filter is typed;
+  // a polite live region is what lets a screen reader hear it change.
+  it("announces the task count as a polite status, and only the count", () => {
+    const { container } = renderBoard([task({ key: "VIB-1", stage: "impl" })]);
+    const status = container.querySelector('.board-head .sub [role="status"]')!;
+    expect(status.textContent).toBe("1 task");
+    // The project-wide waiting figure does not follow the filter, so it stays
+    // outside the atomic region; and the board's own announcer is still found
+    // by its aria-live attribute, so the status carries none of its own.
+    expect(status.getAttribute("aria-live")).toBeNull();
+    expect(container.querySelector(".board-head .sub")!.getAttribute("role")).toBeNull();
+  });
+});
+
+describe("interface review 2026-09-06: the lane outline and the card corner", () => {
+  it("names each lane with an h2 between the page h1 and the card h3s", () => {
+    const { container } = renderBoard([task({ key: "VIB-1", stage: "impl" })]);
+    const levels = [...container.querySelectorAll("h1, h2, h3")].map((h) =>
+      h.tagName,
+    );
+    expect(levels[0]).toBe("H1");
+    expect(container.querySelector(".col-head h2.nm")).toBeTruthy();
+    // No h3 before the first h2: the outline never skips a level.
+    expect(levels.indexOf("H3")).toBeGreaterThan(levels.indexOf("H2"));
+  });
+
+  it("gives the list layout its own h2 so the outline holds one toggle away", () => {
+    const { container } = renderBoard([task({ key: "VIB-1", stage: "impl" })], {
+      view: "list",
+    });
+    const levels = [...container.querySelectorAll("h1, h2, h3")].map((h) =>
+      h.tagName,
+    );
+    expect(levels[0]).toBe("H1");
+    expect(levels.indexOf("H2")).toBeGreaterThan(-1);
+    expect(levels.indexOf("H3")).toBeGreaterThan(levels.indexOf("H2"));
+  });
+
+  it("names the owner seat as an image, where its label counts", () => {
+    const { container } = renderBoard([
+      task({
+        key: "VIB-1",
+        stage: "impl",
+        owner: {
+          kind: "human",
+          userId: "u-selin",
+          name: "Selin Aksoy",
+          initials: "SA",
+          tone: "",
+        },
+        specialist: {
+          kind: "agent",
+          backend: "codex",
+          name: "Codex",
+          role: "Implementation",
+          profileId: "codex-dev",
+        },
+      }),
+    ]);
+    const seat = container.querySelector(".rev-stack")!;
+    expect(seat.getAttribute("role")).toBe("img");
+    expect(seat.getAttribute("aria-label")).toBe("Owner: Selin Aksoy");
+  });
+
+  it("puts the readiness pill beside the key, leaving the corner to the stage control", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "impl", waiting: "human" }),
+    ]);
+    const top = container.querySelector('[data-board-card="VIB-1"] .card-top')!;
+    const kids = [...top.children].map((c) => c.className);
+    expect(kids[0]).toBe("key");
+    expect(kids).not.toContain("spacer");
+    expect(top.querySelector(".pill")).toBeTruthy();
+  });
+
+  it("does not ride the stage trigger on the generic panel surface", () => {
+    const { container } = renderBoard([task({ key: "VIB-1", stage: "impl" })]);
+    const trigger = container.querySelector("button.stage-menu-btn")!;
+    expect(trigger.className.split(" ")).not.toContain("panel");
+  });
 });
 
 describe("P13-D-6: the card and the list row draw validation status (FR24)", () => {
@@ -720,6 +801,48 @@ describe("the new-task dialog does not accuse an untouched form", () => {
     const hint = container.querySelector(".foot-hint")!;
     expect(hint.textContent).toBe("A title is required.");
     expect(hint.className).toContain("err");
+  });
+
+  // Interface review 2026-09-06: the primary used to be hard-disabled (and
+  // pointer-events: none) while the title was empty, so a click gave no
+  // feedback at all and the only way to the message was Enter in the field.
+  it("a click on Create with no title refuses, marks the field and moves focus", () => {
+    let posted = 0;
+    const r = renderBoard([task()], {
+      action: () => {
+        posted += 1;
+        return { ok: true };
+      },
+    });
+    const open = [...r.container.querySelectorAll("button")].find((b) =>
+      b.textContent!.includes("New task"),
+    )!;
+    fireEvent.click(open);
+    const { container } = r;
+    const create = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent!.trim() === "Create task",
+    )!;
+    const input = container.querySelector<HTMLInputElement>("#new-task-title")!;
+    // Pristine: enabled, and nothing accuses the field yet.
+    expect(create.disabled).toBe(false);
+    expect(create.getAttribute("style")).toBeNull();
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+    expect(input.getAttribute("aria-describedby")).toBeNull();
+
+    fireEvent.click(create);
+
+    const hint = container.querySelector("#new-task-hint")!;
+    expect(hint.textContent).toBe("A title is required.");
+    expect(hint.className).toContain("err");
+    expect(hint.getAttribute("role")).toBe("alert");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")).toBe("new-task-hint");
+    expect(document.activeElement).toBe(input);
+    expect(posted).toBe(0);
+
+    fireEvent.change(input, { target: { value: "A real title" } });
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+    expect(input.getAttribute("aria-describedby")).toBeNull();
   });
 
   it("clears the error once a valid title is typed", () => {

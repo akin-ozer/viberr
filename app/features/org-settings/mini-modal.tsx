@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
@@ -7,9 +7,26 @@ import { useDialog } from "~/ui/use-dialog";
  * Shared dialog chrome for every org-settings create/edit modal
  * (org-settings spec §4.5) + the destructive confirm, on a native <dialog>.
  * Ruling 16 / spec §7.6 behaviors — Escape, focus trap, focus restore,
- * backdrop-click close — come from showModal() + useDialog; the save button
- * is REALLY disabled (visuals kept: 0.55 opacity).
+ * backdrop-click close — come from showModal() + useDialog.
+ *
+ * Ruling 147: the save button stays enabled until the request starts. A save
+ * attempted on an incomplete form is REFUSED here: the unmet-requirements
+ * line is re-inserted as an alert and focus moves to the first empty control
+ * (or wherever the caller's `focusUnmet` says). A hard-disabled primary gave
+ * the click no feedback and dropped out of the tab order; `busy` alone
+ * disables, painted by the sheet's aria-busy rule.
  */
+
+/** The first empty text-like control inside the dialog, else its first control. */
+function firstUnmetControl(dialog: HTMLDialogElement | null): HTMLElement | null {
+  if (!dialog) return null;
+  const controls = [
+    ...dialog.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+      ".modal-body input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([disabled]), .modal-body textarea:not([disabled]), .modal-body select:not([disabled])",
+    ),
+  ];
+  return controls.find((c) => c.value.trim() === "") ?? controls[0] ?? null;
+}
 
 export function MiniModal({
   icon,
@@ -17,10 +34,12 @@ export function MiniModal({
   sub,
   onClose,
   canSave,
+  busy = false,
   saveLabel,
   onSave,
   footHint,
   unmetHint,
+  focusUnmet,
   children,
   screen,
 }: {
@@ -28,16 +47,34 @@ export function MiniModal({
   title: string;
   sub?: string;
   onClose: () => void;
+  /** The form is complete. Validity only: `busy` is its own prop. */
   canSave: boolean;
+  /** A save is in flight: the one state that disables the primary. */
+  busy?: boolean;
   saveLabel: string;
   onSave: () => void;
   footHint?: string;
   /** UXA-9: what is still missing while `canSave` is false. */
   unmetHint?: string;
+  /** Where a refused save puts focus; defaults to the first empty control. */
+  focusUnmet?: () => void;
   children: ReactNode;
   screen?: string;
 }) {
   const { ref, close } = useDialog(onClose);
+  // Counted, not boolean: each refusal re-inserts the alert, because readers
+  // announce an alert's insertion, not a role flip on unchanged text.
+  const [refused, setRefused] = useState(0);
+  const save = () => {
+    if (busy) return;
+    if (!canSave) {
+      setRefused((n) => n + 1);
+      if (focusUnmet) focusUnmet();
+      else firstUnmetControl(ref.current)?.focus();
+      return;
+    }
+    onSave();
+  };
   return (
     <dialog
       ref={ref}
@@ -66,7 +103,11 @@ export function MiniModal({
             marks its required inputs with `*`, so this names the rule they all
             share; `unmetHint` lets a caller be more specific. */}
         {!canSave && (
-          <span className="fine xs dim">
+          <span
+            key={refused ? "alert-" + refused : "hint"}
+            className={refused ? "foot-hint err" : "fine xs dim"}
+            role={refused ? "alert" : undefined}
+          >
             {unmetHint ?? "Fill the required fields (*) to continue."}
           </span>
         )}
@@ -77,10 +118,9 @@ export function MiniModal({
           <button
             type="button"
             className="btn primary"
-            onClick={onSave}
-            disabled={!canSave}
-            aria-disabled={!canSave}
-            style={!canSave ? { opacity: 0.55 } : undefined}
+            onClick={save}
+            disabled={busy}
+            aria-busy={busy || undefined}
           >
             {saveLabel}
           </button>

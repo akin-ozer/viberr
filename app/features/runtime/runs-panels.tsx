@@ -48,9 +48,9 @@ import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
 
 // --------------------------------------------------------------- RunGlyph
 
-function RunGlyph({ run }: { run: RunView }) {
-  if (run.op) return <AgentGlyph op />;
-  return <AgentGlyph backend={run.backend} />;
+function RunGlyph({ run, decorative }: { run: RunView; decorative?: boolean }) {
+  if (run.op) return <AgentGlyph op decorative={decorative} />;
+  return <AgentGlyph backend={run.backend} decorative={decorative} />;
 }
 
 // ------------------------------------------------------------ AgentPicker
@@ -129,7 +129,8 @@ function AgentPicker({
                 setOpen(false);
               }}
             >
-              <RunGlyph run={r} />
+              {/* The row prints the SDK name and "Operator" itself. */}
+              <RunGlyph run={r} decorative />
               <span className="ri-txt">
                 <span className="ri-nm">{runLabel(r)}</span>
                 <span className="ri-sub">
@@ -200,7 +201,16 @@ export function LiveRunPanel({
             <AgentPicker items={running} value={run.id} onChange={setSelId} label="Select running agent" />
           ) : (
             <span className="who-chip">
-              <RunGlyph run={run} />
+              {/* The glyph is decorative exactly when the printed name already
+                  says what it shows: an operator deployment still named
+                  "Operator", or an agent whose name fell back to the backend
+                  label. Otherwise it is the chip's one carrier of that fact. */}
+              <RunGlyph
+                run={run}
+                decorative={
+                  run.who.name === (run.op ? "Operator" : run.backend === "claude" ? "Claude" : "Codex")
+                }
+              />
               <span className="nm">{runLabel(run)}</span>
             </span>
           )}

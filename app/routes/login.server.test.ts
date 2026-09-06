@@ -140,6 +140,9 @@ describe("/login action — credentials", () => {
     const result = refused(await loginAction({ intent: "login", email: "" }));
     expect(result.init?.status).toBe(400);
     expect(result.data.error).toBe("Enter your email.");
+    // Interface review 2026-09-06: every refusal names the field it belongs
+    // to, so the page can mark, describe and focus it.
+    expect(result.data.field).toBe("email");
   });
 
   it("a wrong password says so; an unknown email never reveals existence", async () => {
@@ -152,6 +155,7 @@ describe("/login action — credentials", () => {
     );
     expect(wrong.init?.status).toBe(400);
     expect(wrong.data.error).toContain("Wrong password");
+    expect(wrong.data.field).toBe("password");
 
     const unknown = refused(
       await loginAction({
@@ -164,6 +168,7 @@ describe("/login action — credentials", () => {
     // Same copy as "account exists but has no local password" — the page must
     // not become an account-enumeration oracle.
     expect(unknown.data.error).toContain("No local account for that email");
+    expect(unknown.data.field).toBe("email");
   });
 
   it("a correct password issues a session cookie and honors returnTo", async () => {
@@ -186,6 +191,8 @@ describe("/login action — credentials", () => {
     const result = refused(await loginAction({ intent: "teleport" }));
     expect(result.init?.status).toBe(400);
     expect(result.data.error).toBe("Unknown action.");
+    // A form-level refusal names no field.
+    expect(result.data.field).toBe(null);
   });
 });
 

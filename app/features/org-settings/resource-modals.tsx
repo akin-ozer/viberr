@@ -36,11 +36,12 @@ export function KBModal({
     onClose();
     if (filesMode) onFilesCreated(slugify(name));
   });
-  const canSave = !action.busy && name.trim().length > 1;
+  const canSave = name.trim().length > 1;
   return (
     <MiniModal
       icon={<Icon name="memory" />}
       title={initial ? "Edit knowledge base" : "New knowledge base"}
+      busy={action.busy}
       sub="A folder in the store. Drop docs in, or let agents append"
       onClose={onClose}
       canSave={canSave}
@@ -174,11 +175,12 @@ export function McpModal({
   // explicit intent — without it a repointed server kept sending the old token.
   const [clearCred, setClearCred] = useState(false);
   const { action, err, setErr } = useModalAction(() => onClose());
-  const canSave = !action.busy && slugify(name).length > 1 && target.trim().length > 3;
+  const canSave = slugify(name).length > 1 && target.trim().length > 3;
   return (
     <MiniModal
       icon={<Icon name="cpu" />}
       title={initial ? "Edit MCP server" : "Add MCP server"}
+      busy={action.busy}
       sub="Tools become loadable context for agent profiles"
       onClose={onClose}
       canSave={canSave}
@@ -376,13 +378,12 @@ export function SkillModal({
     if (filesMode) onFilesCreated(slugify(name));
   });
   const canSave =
-    !action.busy &&
-    slugify(name).length > 1 &&
-    (filesMode || summary.trim().length > 3);
+    slugify(name).length > 1 && (filesMode || summary.trim().length > 3);
   return (
     <MiniModal
       icon={<Icon name="bolt" />}
       title={initial ? "Edit skill" : "New skill"}
+      busy={action.busy}
       sub="Reusable instructions an agent loads on demand"
       onClose={onClose}
       canSave={canSave}

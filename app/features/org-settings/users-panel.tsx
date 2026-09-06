@@ -103,7 +103,6 @@ function InviteModal({
   const isDomain =
     idp === "google" && (g.startsWith("@") || (g.includes("@") && !g.split("@")[0]));
   const canSave =
-    !action.busy &&
     (idp === "github"
       ? handle.trim().replace(/^@/, "").length > 1
       : idp === "google"
@@ -111,7 +110,8 @@ function InviteModal({
         : name.trim().length > 1 && email.includes("@"));
 
   const submit = () => {
-    if (!canSave) return;
+    // Enter in a field reaches this directly, so the busy guard lives here too.
+    if (!canSave || action.busy) return;
     setErr(null);
     if (idp === "github") {
       action.submit({
@@ -142,6 +142,7 @@ function InviteModal({
     <MiniModal
       icon={<Icon name="user" />}
       title="Allow access"
+      busy={action.busy}
       sub="Whitelist who can sign in: no invite emails, access on first login"
       onClose={onClose}
       canSave={canSave}
@@ -365,8 +366,7 @@ function EditUserModal({
     },
   });
 
-  const canSave =
-    !saveAction.busy && (!isLocal || (name.trim().length > 1 && email.includes("@")));
+  const canSave = !isLocal || (name.trim().length > 1 && email.includes("@"));
   const save = () => {
     if (!canSave) return;
     if (isYou && role !== "admin") {
@@ -390,6 +390,7 @@ function EditUserModal({
     <MiniModal
       icon={<Icon name="user" />}
       title={"Edit " + user.name}
+      busy={saveAction.busy}
       sub={
         isLocal
           ? "Local account"

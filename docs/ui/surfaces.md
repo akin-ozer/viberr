@@ -83,7 +83,9 @@ Intents behind `project.task.tsx` are explained in
   `/profile` and `/notifications`, so the shortcut works app-wide without
   double-registering.
 - **Topbar**: project crumb, notifications bell (popover), user menu ("Instance
-  settings" for org admins, "<name> · settings" for project settings).
+  settings" for org admins, "<name> · settings" for project settings). The user
+  menu's panel is a named `dialog` (what the trigger's `aria-haspopup` promises)
+  and its theme item reads "Switch theme · <value>".
 - **The standalone-page header** (ruling 145) is the same header on the instance
   pages that render outside the workspace: brand → Home, a `Home › <page>` crumb,
   the ⌘K trigger, the bell and the account menu. `palette-shell` mounts it, and
@@ -106,9 +108,46 @@ Intents behind `project.task.tsx` are explained in
   when the VIEWER has not connected Claude (ruling 127). Details in
   [../domain/controller-and-goals.md §2.1](../domain/controller-and-goals.md#21-the-dock-ruling-121).
 - **Theme**: light / dark / system, per user plus the `viberr_theme` cookie for
-  first paint. Motion preference is a user pref.
+  first paint. Motion preference is a user pref. After first paint,
+  `setDocumentTheme` (`shell/theme-preference.ts`) is the one writer of
+  `<html data-theme>`: it swaps under a `transition: none` override that lives
+  for one forced style recalc, so the ~50 colour transitions in the sheet
+  cannot smear the flip. The menu, the profile page and the root effect's
+  OS-follow listener all go through it; the boot script paints once and
+  registers no listener of its own.
 - **Responsive**: same surface, reflowed; the rail collapses at ≤ 720 px, the topbar
-  trims at ≤ 760 px. There is no review-first mobile mode.
+  trims at ≤ 760 px. There is no review-first mobile mode. Under the breakpoint
+  the rail is a drawer: opening it moves focus to the `nav`, sets `inert` on
+  `main` and on the skip link, drops the topbar under the scrim and hides the
+  controller dock (which root mounts beside the layout, so `<body
+  data-rail-open>` carries the state for it); closing it by Escape, the scrim,
+  a rail link or a resize returns focus to the toggle after the close has
+  committed, and an open modal dialog keeps its own Escape. Under the same
+  breakpoint the typing surfaces render at the 1.05rem scale step (16.8px) so
+  iOS Safari does not zoom on focus: every `.field` input and textarea,
+  `select`, the search, board-filter and palette inputs, the comment and
+  controller composers, the goal editor, the label, invite, stage and steer
+  inputs, the store browser's inputs and the concurrency field (the 720px block
+  in `app.css` is the list).
+- **Dock clearance**: `--dock-clear` (`:root`) is the fixed dock trigger's reach,
+  `44px + max(20px, safe-area-inset-bottom) + 1rem`; the scroll containers that
+  end under the trigger (`.home-shell`, `.insights`, `.policy-wrap`, `.detail`,
+  `.col-body`, `.live-wrap`, `.board.list`, `.profile-list`, `.ag-detail`)
+  reserve it below their last block, so the last control on a surface can
+  always be scrolled clear of the trigger. The set is pinned in
+  `app.css.test.ts`; a new scroller under the dock joins it there.
+- **Form refusals** (ruling 147): every create/save primary stays enabled until
+  the request starts (`busy` alone disables it, painted by the `aria-busy`
+  rule). A submit that fails validation is refused with the message the surface
+  already carried, re-inserted as an alert, the failing field marked
+  `aria-invalid` and described by that message, and focus moved to it: the New
+  project and New task modals, `/login` (whose action returns `{ error, field }`,
+  `field` naming the input or `null` for a form-level refusal such as a rate
+  limit), every org-settings `MiniModal` (its unmet line becomes the alert and
+  focus lands on the first empty control unless the caller passes `focusUnmet`),
+  the repository-repair dialog, the S3 audit target and the agent profile editor.
+  A save with nothing changed and a typed-name destructive confirmation keep
+  `disabled` on purpose (147(d)).
 
 ## 3. Org settings intents
 

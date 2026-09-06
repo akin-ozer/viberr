@@ -71,7 +71,6 @@ function ProviderModal({
   // On a NEW provider both values are required; on an existing one the secret
   // may be left blank to keep the stored value (it can never be read back).
   const canSave =
-    !action.busy &&
     clientId.trim().length > 0 &&
     (existing.configuredInApp || secret.trim().length > 0);
 
@@ -90,6 +89,7 @@ function ProviderModal({
     <MiniModal
       icon={<Icon name={meta.icon} />}
       title={`${meta.label} sign-in`}
+      busy={action.busy}
       sub={`Create an OAuth app under ${meta.where}, then paste its credentials`}
       onClose={onClose}
       canSave={canSave}

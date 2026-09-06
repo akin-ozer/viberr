@@ -184,7 +184,14 @@ describe("ConnectionsPanel", () => {
     fireEvent.click(getByText("Add connection"));
     expect(getByText("New GitHub connection")).toBeTruthy();
     const save = getByText("Validate & connect").closest("button")!;
-    expect(save.disabled).toBe(true);
+    // Ruling 147: enabled while incomplete; a click is refused with the
+    // unmet-requirements line as an alert and focus on the first empty field.
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    expect(
+      getByText(/Fill the required fields/).closest("span")!.getAttribute("role"),
+    ).toBe("alert");
+    expect(document.activeElement).toBe(getByPlaceholderText("owner"));
 
     fireEvent.change(getByPlaceholderText("owner"), { target: { value: "hepapi" } });
     fireEvent.change(getByPlaceholderText("ghp_…"), { target: { value: "ghp_x_1234" } });
@@ -375,7 +382,10 @@ describe("UsersPanel", () => {
     fireEvent.click(getByText("Allow access"));
     expect(getByPlaceholderText("username")).toBeTruthy();
     const whitelistBtn = getByText("Whitelist user").closest("button")!;
-    expect(whitelistBtn.disabled).toBe(true);
+    // Ruling 147: never disabled for an incomplete form; the click refuses.
+    expect(whitelistBtn.disabled).toBe(false);
+    fireEvent.click(whitelistBtn);
+    expect(document.activeElement).toBe(getByPlaceholderText("username"));
 
     // A11Y-1 (pass 32): every sign-in method button carries its accessible
     // name from its visible label — the live tree tool under-reported the
@@ -385,7 +395,7 @@ describe("UsersPanel", () => {
     fireEvent.click(getByText("Local", { selector: ".bnm" }).closest("button")!);
     expect(getByPlaceholderText("Full name")).toBeTruthy();
     const createBtn = getByText("Create account").closest("button")!;
-    expect(createBtn.disabled).toBe(true);
+    expect(createBtn.disabled).toBe(false);
     fireEvent.change(getByPlaceholderText("Full name"), { target: { value: "Yeni Kişi" } });
     fireEvent.change(getByPlaceholderText("name@company.dev"), {
       target: { value: "yeni@viberr.dev" },
@@ -699,10 +709,16 @@ describe("ResourcesPanel", () => {
     );
     fireEvent.click(getByLabelText("Edit Spare"));
     const save = getByText("Save changes").closest("button")!;
-    expect(save.disabled).toBe(true);
+    // Ruling 147: the explanation is shown up front and Save stays enabled; a
+    // click refuses (the modal's unmet line becomes an alert) and lands on the
+    // empty role field.
+    expect(save.disabled).toBe(false);
     expect(
       getByText(/This template's stored role repeated its name; give it a real role to save\./),
     ).toBeTruthy();
+    fireEvent.click(save);
+    expect(getByText(/Fill the required fields/).getAttribute("role")).toBe("alert");
+    expect(document.activeElement).toBe(document.getElementById("ga-role"));
     fireEvent.change(document.getElementById("ga-role")!, { target: { value: "Spare hands" } });
     expect(save.disabled).toBe(false);
   });
@@ -1078,7 +1094,11 @@ describe("SkillModal — one entry point, two content modes", () => {
     const { nameInput, getByText } = openNewSkill();
     fireEvent.change(nameInput, { target: { value: "tf-review" } });
     const save = getByText("Create skill").closest("button")!;
-    expect(save.hasAttribute("disabled")).toBe(true); // no summary yet
+    // No summary yet: Save is enabled (ruling 147) but a click refuses and
+    // lands on the summary field.
+    expect(save.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(save);
+    expect(document.activeElement).toBe(document.querySelector("#sk-sum"));
     fireEvent.change(document.querySelector("#sk-sum")!, {
       target: { value: "Module review checklist." },
     });
@@ -1483,6 +1503,23 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
     expect(save.className).toContain("btn");
     expect(save.className).not.toContain("primary");
     expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
+  });
+
+  it("ruling 147: an incomplete target is refused on click, field by field", () => {
+    const { getByText, getByPlaceholderText } = renderPanel(page(null));
+    const save = getByText("Save target").closest("button")!;
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    const bucket = getByPlaceholderText("my-audit-bucket");
+    expect(bucket.getAttribute("aria-invalid")).toBe("true");
+    expect(bucket.getAttribute("aria-describedby")).toBe("s3-unmet");
+    expect(document.getElementById("s3-unmet")!.textContent).toContain("bucket name");
+    expect(document.getElementById("s3-unmet")!.getAttribute("role")).toBe("alert");
+    expect(document.activeElement).toBe(bucket);
+    fireEvent.change(bucket, { target: { value: "audit" } });
+    fireEvent.click(save);
+    expect(bucket.getAttribute("aria-invalid")).toBeNull();
+    expect(document.activeElement).toBe(getByPlaceholderText("eu-central-1"));
   });
 
   it("review F7: a saved target folds the form again (state follows the stored target)", () => {

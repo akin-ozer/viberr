@@ -1182,15 +1182,21 @@ describe("CreateProfileModal", () => {
     fireEvent.click(getByText("Claude"));
     // The Codex id is gone on the click — not "still shown but about to change".
     expect(modelSel().value).toBe("");
-    // Pass 30: the hold is announced (aria-disabled) and ENFORCED by submit's
-    // refusal guard rather than a hard `disabled` — a hard-disabled button
-    // (pointer-events none) made the explain-on-click state unreachable.
+    // Ruling 147: the hold is ENFORCED by submit's refusal guard, never by a
+    // disabled (or aria-disabled) button, so the explain-on-click state stays
+    // reachable and the click puts focus on the empty model picker.
     expect(save().disabled).toBe(false);
-    expect(save().getAttribute("aria-disabled")).toBe("true");
+    expect(save().getAttribute("aria-disabled")).toBeNull();
     expect(getByText(/Loading the models available on Claude/)).toBeTruthy();
     // The exact race: a save inside the window submits nothing at all.
     fireEvent.click(save());
     expect(onSubmit).not.toHaveBeenCalled();
+    expect(getByText(/Loading the models available on Claude/).getAttribute("role")).toBe(
+      "alert",
+    );
+    // The picker is disabled while the catalog loads, so there is nothing to
+    // focus yet; the alert is the whole announcement.
+    expect(modelSel().disabled).toBe(true);
 
     // The claude catalog answers → its default model + effort, Save released.
     await waitFor(() => expect(modelSel().value).toBe("sonnet"));
