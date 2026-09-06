@@ -185,14 +185,47 @@ describe("Topbar: UI-03 paused chip + UI-55 shortcut hint", () => {
     expect(queryByText(/live updates paused/)).toBeNull();
   });
 
-  it("surfaces a dropped stream with a retry affordance", () => {
+  it("surfaces a dropped stream as a status, with the retry as a real control", () => {
     let retried = 0;
-    const { getByText } = renderIn(
+    const { getByText, getByRole } = renderIn(
       topbar({ livePaused: true, onReconnect: () => (retried += 1) }),
     );
-    const chip = getByText(/live updates paused/);
-    fireEvent.click(chip);
+    // The sentence is a status; the retry is an action. One `.pill` (no cursor,
+    // no hover) with role="status" over a click handler was neither, and
+    // role="status" hid the button role, so "retry" was unreachable by name.
+    const chip = getByText("live updates paused");
+    expect(chip.tagName).toBe("SPAN");
+    // The chip is not itself the live region, and it keeps its own words as its
+    // accessible name (an `aria-label` here only replaced them with a longer
+    // duplicate of the `title`).
+    expect(chip.getAttribute("role")).toBeNull();
+    expect(chip.getAttribute("aria-label")).toBeNull();
+    fireEvent.click(getByRole("button", { name: "Retry" }));
     expect(retried).toBe(1);
+  });
+
+  it("renders no retry control when there is nothing to reconnect", () => {
+    const { getByText, queryByRole } = renderIn(topbar({ livePaused: true }));
+    expect(getByText("live updates paused")).toBeTruthy();
+    expect(queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("ruling 149: the announcer is mounted before the stream drops", () => {
+    // A live region inserted together with its text is the one case screen
+    // readers skip, so the region has to exist (and be empty) while the stream
+    // is healthy, and only its TEXT may change.
+    // Canary: wrap the announcer in `livePaused && …` and this goes red.
+    const { container, rerender } = renderIn(topbar());
+    const live = container.querySelector('span.vh[role="status"]');
+    expect(live).not.toBeNull();
+    expect(live!.getAttribute("aria-live")).toBe("polite");
+    expect(live!.textContent).toBe("");
+
+    rerender(<div />);
+    const paused = renderIn(topbar({ livePaused: true }));
+    expect(
+      paused.container.querySelector('span.vh[role="status"]')!.textContent,
+    ).toMatch(/^Live updates paused\./);
   });
 
   it("renders a shortcut hint (⌘K on mac, Ctrl K elsewhere)", () => {

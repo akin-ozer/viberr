@@ -761,10 +761,17 @@ export function ActivityPage({
                       <Icon name={actIcon(r.type)} />
                     </span>
                     <span className="pev-main">
-                      <strong className="act-actor">
-                        {r.actor ? r.actor.name : "−"}
-                      </strong>
-                      <span className="act-sep">·</span>
+                      {/* Ruling 148: a row with no actor says nothing about
+                          one. The "−" claimed a fact in a glyph, and it sat in
+                          the slot every other row fills with a name, so it read
+                          as a remove control. Same treatment as the sibling
+                          feed in `notifications-page.tsx`. */}
+                      {r.actor && (
+                        <>
+                          <strong className="act-actor">{r.actor.name}</strong>
+                          <span className="act-sep">·</span>
+                        </>
+                      )}
                       <ActivityText text={r.text} />{" "}
                       <button
                         type="button"

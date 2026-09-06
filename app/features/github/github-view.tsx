@@ -93,7 +93,11 @@ export function RepositoryPanel({
             {data.project.repo ? (
               <span className="mono">{data.project.repo}</span>
             ) : (
-              <span className="fine md dim">−</span>
+              // Ruling 148: the absent fact in words. Same row on the settings
+              // page already says "not set" (ruling 14: one declaration, one
+              // wording), and the Connection row below already carries the
+              // "no repository" pill, so this slot must not repeat it.
+              <span className="fine md dim">not set</span>
             )}
           </span>
         </div>
@@ -361,7 +365,10 @@ export function BranchesPanel({
                       )}
                     </>
                   ) : (
-                    <span className="fine md dim">−</span>
+                    // Ruling 148: inside the row BUTTON a bare "−" reads as a
+                    // per-row remove control. Same words as the task page's
+                    // neutral "no PR" pill.
+                    <span className="fine md dim">no PR</span>
                   )}
                 </span>
                 <span>

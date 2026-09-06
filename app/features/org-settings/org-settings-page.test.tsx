@@ -1453,6 +1453,73 @@ describe("run concurrency control", () => {
       expect(lastForm?.maxConcurrentRuns).toBe("3");
     });
   });
+
+  // Ruling 147(d): "nothing changed" is the only gate that keeps Save disabled.
+  // Validity used to be folded into that gate, so a typed "-1" was a changed
+  // value that left Save dead with nothing said.
+  it("ruling 147: an unusable cap is refused on the click, not by a dead Save", async () => {
+    const { getByLabelText, getByRole, queryByRole } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 2, live: 0, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    const input = getByLabelText(/Maximum concurrent agent runs/);
+    const save = getByRole("button", { name: "Save" });
+    // The pristine field equals the stored cap: the dirty gate still disables.
+    expect(save.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(input, { target: { value: "-1" } });
+    expect(save.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(save);
+    expect(lastForm).toBeNull();
+    const first = queryByRole("alert")!;
+    expect(first.textContent).toContain("Enter a whole number (0 = unlimited).");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")).toBe(
+      "max-concurrent-runs-err",
+    );
+    expect(first.id).toBe("max-concurrent-runs-err");
+    expect(document.activeElement).toBe(input);
+
+    // Each refusal is a fresh element.
+    fireEvent.click(save);
+    expect(queryByRole("alert")).not.toBe(first);
+
+    // A corrected value clears the mark and submits.
+    fireEvent.change(input, { target: { value: "4" } });
+    expect(queryByRole("alert")).toBeNull();
+    fireEvent.click(save);
+    await waitFor(() => expect(lastForm?.maxConcurrentRuns).toBe("4"));
+  });
+
+  // `Number("")` is 0, so an emptied box used to look like a valid, changed
+  // value and silently set the cap to unlimited.
+  it("ruling 147: an emptied cap field is refused, never submitted as unlimited", () => {
+    const { getByLabelText, getByRole, queryByRole } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 2, live: 0, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    const input = getByLabelText(/Maximum concurrent agent runs/);
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.click(getByRole("button", { name: "Save" }));
+    expect(lastForm).toBeNull();
+    expect(queryByRole("alert")).toBeTruthy();
+  });
 });
 
 /**

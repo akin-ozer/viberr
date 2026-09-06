@@ -380,12 +380,23 @@ describe("CredentialManageActions (finding #13)", () => {
     );
     fireEvent.click(bound.getByText("Rotate credential"));
     expect(onSet).toHaveBeenCalledTimes(2);
+    // Ruling 149: the destructive half of this row wears the danger label, the
+    // rotate/attach half stays neutral. Canary: drop `danger` from the Remove
+    // className in `credential-card.tsx`.
+    expect(
+      Array.from(bound.getByText("Remove credential").closest("button")!.classList),
+    ).toContain("danger");
+    expect(
+      Array.from(bound.getByText("Rotate credential").closest("button")!.classList),
+    ).not.toContain("danger");
     // Remove is gated by the confirm dialog.
     fireEvent.click(bound.getByText("Remove credential"));
     expect(onClear).not.toHaveBeenCalled();
     expect(bound.container.querySelector('[role="alertdialog"]')).not.toBeNull();
     fireEvent.click(
-      bound.getByText("Remove credential", { selector: "button.btn.danger" }),
+      bound.getByText("Remove credential", {
+        selector: ".confirm-actions button.btn.danger",
+      }),
     );
     expect(onClear).toHaveBeenCalled();
   });
@@ -435,6 +446,34 @@ describe("RepositoryPanel", () => {
     // nothing implemented, asserted regardless of the (now deleted) toggle.
     expect(rows[2]!.textContent).toContain("every task uses this repository");
     expect(container.textContent).not.toContain("override");
+  });
+
+  it("says an unset repository in words, not a dash (ruling 148)", () => {
+    const { container } = render(
+      <RepositoryPanel
+        data={{
+          project: {
+            slug: "viberr-core",
+            name: "Viberr Core",
+            repo: null,
+            defaultBranch: "main",
+          },
+          connection: { status: "no_repo_configured" },
+          credential: noneCredential,
+        }}
+        onOpenTask={() => {}}
+        canSeeCredential
+      />,
+    );
+    const rows = container.querySelectorAll(".kv-row");
+    // The same word the identical row on the settings page uses, and NOT the
+    // Connection pill's "no repository" one line below (ruling 14: one fact,
+    // one wording, said once).
+    expect(rows[0]!.textContent).toContain("not set");
+    expect(rows[0]!.textContent).not.toContain("−");
+    expect(rows[1]!.querySelector(".pill")!.textContent).toContain(
+      "no repository",
+    );
   });
 
   it("claims connected only for a connected result", () => {
@@ -670,8 +709,10 @@ describe("BranchesPanel", () => {
     // A merged branch row shows no conflict pill.
     expect(rows[2]!.textContent).not.toContain("conflicts");
 
-    // VIB-151: no PR → minus-sign placeholder; behind main risk pill.
-    expect(rows[1]!.textContent).toContain("−");
+    // VIB-151: no PR → the fact in words, not a "−" that reads as a control
+    // inside the row button; behind main risk pill.
+    expect(rows[1]!.textContent).toContain("no PR");
+    expect(rows[1]!.textContent).not.toContain("−");
     expect(rows[1]!.querySelector(".pill.risk")!.textContent).toContain(
       "behind main",
     );

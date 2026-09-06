@@ -582,14 +582,34 @@ function RunConcurrencyControl({
 }) {
   const { submit, busy } = useOrgAction();
   const [value, setValue] = useState(String(runConcurrency.cap));
+  const [refused, setRefused] = useState(0);
+  const capRef = useRef<HTMLInputElement>(null);
   // Re-seed the field when the server value changes (a save round-trips a fresh
-  // loader value through this prop).
+  // loader value through this prop), and drop any standing refusal with it.
   useEffect(() => {
     setValue(String(runConcurrency.cap));
+    setRefused(0);
   }, [runConcurrency.cap]);
-  const parsed = Number(value);
-  const valid = Number.isInteger(parsed) && parsed >= 0;
-  const dirty = valid && parsed !== runConcurrency.cap;
+  // Ruling 147(d): nothing-changed is the ONLY gate that keeps Save disabled.
+  // Validity used to be folded into `dirty`, so a typed "-1", "1.5" or an
+  // emptied box was a changed value that left Save dead with no explanation.
+  // An empty field is invalid, not zero: `Number("")` is 0, so clearing the box
+  // used to submit "" and silently set the cap to unlimited.
+  const trimmed = value.trim();
+  const parsed = Number(trimmed);
+  const valid = trimmed !== "" && Number.isInteger(parsed) && parsed >= 0;
+  const changed = trimmed !== String(runConcurrency.cap);
+  const invalid = refused > 0 && !valid;
+  const errId = "max-concurrent-runs-err";
+  const save = () => {
+    if (busy || !changed) return;
+    if (!valid) {
+      setRefused((n) => n + 1);
+      capRef.current?.focus();
+      return;
+    }
+    submit({ intent: "set-concurrency", maxConcurrentRuns: trimmed });
+  };
   return (
     <div className="pol-note after conc">
       <Icon name="cpu" />
@@ -608,26 +628,39 @@ function RunConcurrencyControl({
             Max at once
           </label>
           <input
+            ref={capRef}
             id="max-concurrent-runs"
             type="number"
             min={0}
             step={1}
             value={value}
             onChange={(e) => setValue(e.currentTarget.value)}
+            aria-invalid={invalid || undefined}
+            aria-describedby={invalid ? errId : undefined}
             aria-label="Maximum concurrent agent runs (0 means unlimited)"
           />
           <button
             type="button"
             className="btn sm"
-            disabled={busy || !dirty}
-            onClick={() =>
-              submit({ intent: "set-concurrency", maxConcurrentRuns: value })
-            }
+            disabled={busy || !changed}
+            aria-busy={busy}
+            onClick={save}
           >
             Save
           </button>
           <span className="conc-hint fine sm">0 = unlimited</span>
         </span>
+        {invalid && (
+          <span
+            className="form-err"
+            role="alert"
+            id={errId}
+            key={`refused-${refused}`}
+          >
+            <Icon name="alert" />
+            <span>Enter a whole number (0 = unlimited).</span>
+          </span>
+        )}
       </span>
     </div>
   );

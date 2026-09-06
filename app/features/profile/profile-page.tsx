@@ -466,12 +466,17 @@ function ProfileAccess({
               <span className="k strong">
                 {r.action}
               </span>
+              {/* Ruling 148: the fact in words. The check is aria-hidden, so a
+                  glyph-only pair left the whole list silent to a reader, and a
+                  lone "−" in a value slot reads as a collapse control (the same
+                  swap the GitHub card below already made). */}
               {r.grant[role] ? (
                 <span className="rbac-yes">
                   <Icon name="check" />
+                  <span className="vh">yes</span>
                 </span>
               ) : (
-                <span className="rbac-no">−</span>
+                <span className="rbac-no">no</span>
               )}
             </div>
           ))}
@@ -644,7 +649,8 @@ function ProfileGithub({
             </span>
             <button
               type="button"
-              className="btn ghost sm push"
+              // Ruling 149: disconnecting an identity is destructive.
+              className="btn ghost sm push danger"
               onClick={() => submit({ intent: "github-disconnect" })}
             >
               Disconnect

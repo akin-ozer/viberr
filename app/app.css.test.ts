@@ -2857,6 +2857,10 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
     expect(CODE).toMatch(/\.profile-cols\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
     expect(CODE).not.toMatch(/\.profile-cols\s*\{[^}]*align-items:\s*start/);
     expect(CODE).not.toMatch(/\.policy-cols\s*\{[^}]*align-items:\s*start/);
+    // Ruling 149 re-application: Settings > Agent resources pairs four peer
+    // panels two to a row, so its grid stretches for the same reason.
+    expect(CODE).toMatch(/\.rsrc-grid\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
+    expect(CODE).not.toMatch(/\.rsrc-grid\s*\{[^}]*align-items:\s*start/);
     expect(CODE).toMatch(/\.profile-col > :last-child\s*\{[^}]*flex:\s*1 0 auto/);
     // A feed beside a short panel is the exemption: stretching the panel to the
     // feed's height would only produce a tall empty box.
@@ -2881,6 +2885,24 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
     );
   });
 
+  it("ruling 149: the two release ✕ controls hover on the danger pair, not the error pair", () => {
+    // `.rev-x` (release an engagement) and `.own-x` (release the owner) are
+    // remove controls whose ceremonies commit in red, but they still hovered
+    // on --coral-dark / --rose-light: the ERROR vocabulary, which reads brown
+    // beside the destructive row-remove hovers.
+    //
+    // Canary: put either rule back on the coral pair and this goes red.
+    expect(CODE).toMatch(
+      /\.rev-x:hover:not\(:disabled\)\s*\{[^}]*color:\s*var\(--danger\)/,
+    );
+    expect(CODE).toMatch(/\.own-x:hover\s*\{[^}]*color:\s*var\(--danger\)/);
+    for (const rule of [/\.rev-x:hover[^{]*\{([^}]*)\}/, /\.own-x:hover\s*\{([^}]*)\}/]) {
+      const body = CODE.match(rule)![1];
+      expect(body).not.toMatch(/--coral-/);
+      expect(body).not.toMatch(/--rose-/);
+    }
+  });
+
   it("one close control on every modal head and the page overlay", () => {
     const rule = CODE.match(/\.icon-btn\.modal-close, \.overlay-x\s*\{([^}]*)\}/);
     expect(rule, "the shared close rule must exist").toBeTruthy();
@@ -2891,5 +2913,121 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
     // rule removes (it would win by source order for nothing).
     const overlay = CODE.match(/\.overlay-x\s*\{([^}]*)\}/);
     expect(overlay![1]).not.toMatch(/box-shadow:\s*var/);
+  });
+});
+
+/* -------------------------- ruling 149: the fields that had no chrome ---- */
+
+describe("app.css ruling 149: every typing control wears the sheet's chrome", () => {
+  const decls = (selector: string): string => {
+    const re = new RegExp(
+      selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}",
+    );
+    const m = CODE.match(re);
+    expect(m, selector).not.toBeNull();
+    return m![1];
+  };
+  const mobile = CODE.match(/@media \(max-width: 720px\)\s*\{([\s\S]*?)\n\}/)![1];
+
+  it("the guardrail threshold field is boxed like its twin in org settings", () => {
+    // It was the app's only text-like input outside `.field`: UA border, UA
+    // fill, UA radius, no focus wash, beside an `Apply` wearing `.btn`.
+    // Canary: cut the rule back to `width: 5.5rem` and this goes red.
+    const box = decls('.guard-ctl input[type="number"]');
+    expect(box).toMatch(/border:\s*1px solid var\(--border-control\)/);
+    expect(box).toMatch(/border-radius:\s*var\(--radius-button\)/);
+    expect(box).toMatch(/background:\s*var\(--surface\)/);
+    expect(box).toMatch(/color:\s*var\(--fg\)/);
+    expect(box).toMatch(/padding:\s*\.25rem \.5rem/);
+    // Same pair of declarations the sibling number field already carries.
+    const twin = decls(".conc-edit input");
+    for (const decl of ["border:", "border-radius:", "background:", "color:"]) {
+      expect(twin, decl).toContain(decl);
+    }
+    expect(decls('.guard-ctl input[type="number"]:focus')).toMatch(
+      /box-shadow:\s*0 0 0 3px var\(--focus-wash\)/,
+    );
+    expect(decls('.guard-ctl input[type="number"]:disabled')).toMatch(/opacity:/);
+    // 16px+ on a phone, or iOS Safari zooms the page on focus.
+    expect(mobile).toContain('.guard-ctl input[type="number"]');
+  });
+
+  it("a mono textarea keeps its face inside a .field, at both widths", () => {
+    // `.field textarea` sets the body face at (0,1,1) and outranks bare
+    // `.mono`, so the store document editor needed the textarea twin of
+    // `.field input.mono` — which the P21 gate pins by its exact selector and
+    // therefore cannot absorb a second one.
+    expect(decls(".field textarea.mono")).toMatch(/font-family:\s*var\(--font-mono\)/);
+    // Declared after the mobile block, so the mobile rule needs one selector
+    // more to be reached from there.
+    expect(mobile).toContain(".field textarea[rows].mono");
+  });
+});
+
+/* ------------------- ruling 149: GitHub's danger button, pinned by value --- */
+
+describe("app.css ruling 149: the destructive control is GitHub's danger button", () => {
+  const decls = (selector: string): string => {
+    const re = new RegExp(
+      selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}",
+    );
+    const m = CODE.match(re);
+    expect(m, selector).not.toBeNull();
+    return m![1];
+  };
+
+  it("the pair is defined in both palettes at the owner's values", () => {
+    // Nothing pinned the headline of the pass: reverting `.btn.danger` to the
+    // tinted-pink face it replaced (`--coral-dark` on a `--coral-light` wash)
+    // left the whole suite green, because the contrast sweep clears both faces
+    // and the TSX tests only assert that the `danger` CLASS is applied.
+    //
+    // Canary: change either hex and this goes red.
+    const light = themeTokens(false);
+    const dark = themeTokens(true);
+    expect(light.get("--danger")).toBe("#cf222e");
+    expect(light.get("--danger-fill")).toBe("#a40e26");
+    expect(dark.get("--danger")).toBe("#f85149");
+    expect(dark.get("--danger-fill")).toBe("#da3633");
+    // One label colour for the filled state, inherited by dark from `:root`.
+    for (const table of [light, dark]) {
+      expect(table.get("--on-danger")).toBe("#ffffff");
+    }
+  });
+
+  it("a neutral face with a red label, filling red on hover", () => {
+    const rest = decls(".btn.danger");
+    expect(rest).toMatch(/color:\s*var\(--danger\)/);
+    // The rest fill is DECLARED, not inherited: the sweep pairs a selector's
+    // label with the FIRST background declared for it, which would otherwise be
+    // the hover's red.
+    expect(rest).toMatch(/background:\s*var\(--surface\)/);
+    expect(rest).toMatch(/border-color:\s*var\(--border\)/);
+
+    const hover = decls(".btn.danger:hover:not(:disabled)");
+    expect(hover).toMatch(/background:\s*var\(--danger-fill\)/);
+    expect(hover).toMatch(/border-color:\s*var\(--danger-fill\)/);
+    expect(hover).toMatch(/color:\s*var\(--on-danger\)/);
+
+    // The ghost variant keeps the ghost's transparent face and hairline.
+    expect(decls(".btn.ghost.danger")).toMatch(/background:\s*transparent/);
+    expect(decls(".btn.ghost.danger")).toMatch(/border-color:\s*var\(--hairline\)/);
+  });
+
+  it("no destructive surface still paints itself from the error pair", () => {
+    // `--coral-*` is ERROR TEXT now, not a control colour.
+    for (const selector of [
+      ".menu-item.danger",
+      ".danger-panel",
+      ".fm-act.del",
+      ".flabel.danger",
+    ]) {
+      const body = decls(selector);
+      expect(body, selector).not.toMatch(/--coral-/);
+      expect(body, selector).toMatch(/var\(--danger\)/);
+    }
+    // The row-remove hovers the same sweep re-pointed keep the danger pair too.
+    expect(decls(".fm-act.del:hover")).not.toMatch(/--coral-/);
+    expect(decls(".menu-item.danger:hover")).not.toMatch(/--coral-/);
   });
 });

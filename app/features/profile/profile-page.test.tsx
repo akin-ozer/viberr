@@ -238,6 +238,12 @@ describe("ProfilePage", () => {
     // the 14.
     expect(container.querySelectorAll(".rbac-yes")).toHaveLength(14);
     expect(container.querySelectorAll(".rbac-no")).toHaveLength(5);
+    // Ruling 148: each cell says the fact. The check is aria-hidden, so a
+    // glyph-only pair announced nothing at all, and the denied "−" read as a
+    // collapse control in the value slot.
+    expect(container.querySelector(".rbac-yes")!.textContent).toContain("yes");
+    expect(container.querySelector(".rbac-no")!.textContent).toBe("no");
+    expect(container.textContent).not.toContain("−");
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Policy → Human access")).toBeTruthy();
   });
@@ -298,6 +304,11 @@ describe("ProfilePage", () => {
     });
     expect(container.querySelector(".cred-ok")).toBeTruthy();
     expect(container.querySelectorAll(".scope-chip.miss")).toHaveLength(0);
+    // Ruling 149: disconnecting an identity is destructive, so the control
+    // carries the danger label. Canary: drop `danger` in `profile-page.tsx`.
+    expect(
+      Array.from(container.querySelector(".cred-ok button")!.classList),
+    ).toContain("danger");
     fireEvent.click(container.querySelector(".cred-ok button")!);
     expect(lastSubmit).toEqual({ intent: "github-disconnect" });
   });

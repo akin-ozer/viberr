@@ -181,7 +181,9 @@ export function GithubTrace({
             whose button already names what it does. */}
         <button
           type="button"
-          className="btn ghost sm full"
+          // Ruling 149: force-accept is destructive, and the confirmation it
+          // opens already commits in red.
+          className="btn ghost sm full danger"
           disabled={merging}
           onClick={onForceAccept}
           title={
@@ -903,7 +905,9 @@ export function CurrentStatePanel({
                   className="col-stage-dot sm"
                   style={{ background: stage?.color }}
                 />
-                {stage?.name ?? ""}
+                {/* Ruling 148: the empty string left a bare coloured dot with
+                    no words at all. Same phrase as the stage menu. */}
+                {stage?.name ?? "unknown stage"}
               </span>
             )}
           </span>
@@ -1120,7 +1124,10 @@ export function CurrentStatePanel({
         <div className="state-acts">
           <button
             type="button"
-            className="btn ghost sm full"
+            // Ruling 149: archiving is destructive and its own confirmation
+            // commits in red, so the trigger carries the danger label too.
+            // Restoring is a recovery action and stays neutral.
+            className={"btn ghost sm full" + (archived ? "" : " danger")}
             disabled={dispositionBusy}
             onClick={onArchive}
           >

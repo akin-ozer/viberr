@@ -280,6 +280,10 @@ const CLAUDE_META = "@anthropic-ai/claude-agent-sdk · stream-json · session ";
  * The provider session/thread id. Trimmed by default (long uuids), but
  * click-to-expand shows it in full and click again (or the copy affordance)
  * copies the whole id — so it can actually be pasted into `--resume`.
+ *
+ * Ruling 148: when there is no id the slot says so in words. A "−" sat exactly
+ * where every other run shows a click-to-expand control, so it read as a
+ * collapsed or emptied one rather than as the fact.
  */
 function SessionIdChip({
   sid,
@@ -294,7 +298,7 @@ function SessionIdChip({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
-  if (!sid) return <span className="mono faint">−</span>;
+  if (!sid) return <span className="mono faint">none</span>;
   const short = sid.length > 10 ? sid.slice(0, 8) + "…" : sid;
   const copy = async () => {
     try {
@@ -365,11 +369,22 @@ function SessionIdChip({
  * alone — WCAG 1.4.1: a reader who cannot separate the green from the red must
  * still be able to tell an added file from a deleted one. The `title` carries
  * the word itself for anyone who needs it spelled out.
+ *
+ * Ruling 148: that promise went unkept for a pass — the chip set no `title` and
+ * no text, so the mark was the whole signal: a leading "−" read as a remove
+ * control and a reader heard "minus app/b.ts". The glyph is now aria-hidden and
+ * the word beside it is what gets announced.
  */
 const FILE_KIND_MARK = {
   add: "+",
   update: "~",
   delete: "−",
+} satisfies Record<"add" | "update" | "delete", string>;
+
+const FILE_KIND_WORD = {
+  add: "added",
+  update: "updated",
+  delete: "deleted",
 } satisfies Record<"add" | "update" | "delete", string>;
 
 /**
@@ -616,9 +631,16 @@ export function AgentLogsPanel({
         : cur!.lifecycle === "interrupted"
           ? `interrupted${cur!.interruptedBy ? " by " + cur!.interruptedBy.label.split(" ")[0] : ""}; the thread stays resumable`
           : cur!.state === "done"
-            ? "run finished at " +
-              (cur!.finished ? finishedClock(cur!.finished, hydrated) : "−") +
-              "; thread can be re-engaged"
+            ? // Ruling 148: a missing timestamp is said by leaving the clause
+              // out, not by a "−" mid-sentence — "run finished at −;" read as a
+              // broken template rather than as the fact. Same treatment as
+              // `SessionIdChip` above, and worse here because the glyph landed
+              // inside a sentence instead of in a value slot.
+              cur!.finished
+              ? "run finished at " +
+                finishedClock(cur!.finished, hydrated) +
+                "; thread can be re-engaged"
+              : "run finished; thread can be re-engaged"
             : cur!.state === "error"
               ? // Ruling 130(a): the SENTENCE follows the classified failure
                 // for every run kind; the retry clause follows the OFFER.
@@ -915,8 +937,15 @@ export function AgentLogsPanel({
                     {files ? (
                       <span className="log-files">
                         {files.map((f, n) => (
-                          <span className={"log-file lf-" + f.kind} key={n}>
-                            <span className="lf-kind">{FILE_KIND_MARK[f.kind]}</span>
+                          <span
+                            className={"log-file lf-" + f.kind}
+                            key={n}
+                            title={FILE_KIND_WORD[f.kind]}
+                          >
+                            <span className="lf-kind" aria-hidden="true">
+                              {FILE_KIND_MARK[f.kind]}
+                            </span>
+                            <span className="vh">{FILE_KIND_WORD[f.kind]} </span>
                             {f.path}
                           </span>
                         ))}

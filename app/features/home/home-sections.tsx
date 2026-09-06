@@ -65,15 +65,39 @@ export function HomeTopBar({
           <span className="mark">V</span>
           <b>Viberr</b>
         </button>
+        {/* Ruling 149: `role="status"` replaced the button's own role, so the
+            one control that can restart the stream was announced as a status
+            sentence and never as something to press — and a status region is
+            atomic, so it re-read the whole label. The sentence moves to an
+            always-mounted announcer (the idiom at controller-dock.tsx and
+            ui/label-input.tsx): a live region inserted together with its text
+            is the one case screen readers skip.
+
+            The sentence and the retry are then split the way the workspace
+            header splits them (`shell/topbar.tsx`): a `.pill` has no cursor and
+            no hover, so one element that was both read as neither, and with no
+            `onReconnect` it was a button that did nothing. The chip states the
+            fact; the Retry beside it exists only when there is something to
+            reconnect. */}
+        <span className="vh" role="status" aria-live="polite">
+          {livePaused ? "Live updates paused. Cards may be out of date." : ""}
+        </span>
         {livePaused && (
+          <span
+            className="pill risk sm push"
+            title="The live update stream dropped (often an expired session). These cards may be out of date."
+          >
+            live updates paused
+          </span>
+        )}
+        {livePaused && onReconnect && (
           <button
             type="button"
-            className="pill risk sm push"
-            role="status"
-            title="The live update stream dropped (often an expired session). These cards may be out of date."
-            onClick={() => onReconnect?.()}
+            className="btn ghost sm"
+            title="Reconnect the live update stream"
+            onClick={onReconnect}
           >
-            live updates paused · retry
+            Retry
           </button>
         )}
         <div

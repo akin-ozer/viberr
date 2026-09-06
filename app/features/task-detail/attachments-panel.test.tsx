@@ -323,6 +323,21 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     expect(baseElement.querySelector(DIALOG)).toBeNull();
   });
 
+  it("the Close control is on the shared close design (ruling 148)", () => {
+    const { container, baseElement } = render(
+      <AttachmentLightboxProvider>
+        <TimelineItem ev={ev()} attachmentsBase={BASE} />
+      </AttachmentLightboxProvider>,
+    );
+    fireEvent.click(container.querySelector(".tl-attach-thumb")!);
+    const close = baseElement.querySelector(
+      `${DIALOG} .lightbox-foot button[aria-label="Close"]`,
+    )!;
+    // The borderless circle every modal head and the page overlay carry, not
+    // the bordered `.icon-btn` square this popup used to show.
+    expect(close.className).toContain("modal-close");
+  });
+
   it("an inline markdown embed of a task attachment opens the same lightbox", () => {
     const { container, baseElement } = render(
       <AttachmentLightboxProvider>

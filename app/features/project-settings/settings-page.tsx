@@ -280,6 +280,11 @@ export function ProjectPanel({
 function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
+  // Ruling 147: the commit stays enabled and an empty name is refused here.
+  // Counted, not boolean: each refusal re-inserts the alert, because readers
+  // announce an insertion, not a role flip on unchanged text.
+  const [refused, setRefused] = useState(0);
+  const errId = "stg-add-err";
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (naming) inputRef.current?.focus();
@@ -288,10 +293,17 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
   const cancel = () => {
     setNaming(false);
     setName("");
+    setRefused(0);
   };
   const commit = () => {
     const v = name.trim();
-    if (!v) return;
+    // Ruling 147: the create primary stays enabled; an empty name is REFUSED
+    // on the client with a sentence, not pre-empted by a dead button.
+    if (!v) {
+      setRefused((n) => n + 1);
+      inputRef.current?.focus();
+      return;
+    }
     onAdd(v);
     cancel();
   };
@@ -316,7 +328,12 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
         value={name}
         placeholder="Stage name"
         aria-label="New stage name"
-        onChange={(e) => setName(e.target.value)}
+        aria-invalid={refused > 0 || undefined}
+        aria-describedby={refused > 0 ? errId : undefined}
+        onChange={(e) => {
+          setName(e.target.value);
+          setRefused(0);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
@@ -330,15 +347,19 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
       <button type="button" className="btn ghost sm" onClick={cancel}>
         Cancel
       </button>
-      <button
-        type="button"
-        className="btn primary sm"
-        disabled={name.trim().length === 0}
-        aria-disabled={name.trim().length === 0}
-        onClick={commit}
-      >
+      <button type="button" className="btn primary sm" onClick={commit}>
         Add stage
       </button>
+      {refused > 0 && (
+        <span
+          key={`stg-refused-${refused}`}
+          id={errId}
+          role="alert"
+          className="stg-err"
+        >
+          Give the stage a name.
+        </span>
+      )}
     </div>
   );
 }
@@ -1601,7 +1622,10 @@ export function DangerZone({
         </span>
         <button
           type="button"
-          className="btn ghost sm"
+          // Ruling 149: archiving is destructive, so it carries the danger
+          // label beside "Delete project" instead of reading as a plain
+          // secondary. Restore is a recovery action and stays neutral.
+          className={"btn ghost sm" + (archived ? "" : " danger")}
           // F10-34: destructive project actions are project-admin only. A
           // viewer/maintainer must not see an actionable control; the server
           // still enforces edit-policy.

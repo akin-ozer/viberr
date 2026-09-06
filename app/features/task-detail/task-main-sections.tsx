@@ -109,6 +109,18 @@ export function TaskHero({
   const csrf = useCsrfToken();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.goal);
+  // Ruling 147: Save goal stays enabled until the request starts, and a draft
+  // under the floor is REFUSED here instead of leaving the button dead. The
+  // counter (not a boolean) re-inserts the sentence on every refused attempt,
+  // because readers announce an insertion, not a role flip on unchanged text.
+  // It is reset wherever the editor opens or closes, so a re-opened editor is
+  // pristine and never accused.
+  const [refused, setRefused] = useState(0);
+  const goalRef = useRef<HTMLTextAreaElement>(null);
+  const goalErrId = "goal-err";
+  const short = draft.trim().length < 3;
+  const goalInvalid = refused > 0 && short;
+  const goalBusy = goalFetcher.state !== "idle";
   // Surface a failed save as a toast instead of silently leaving the editor
   // open with no explanation (WI-11); on success the effect below closes it.
   useActionFeedback(goalFetcher);
@@ -120,6 +132,7 @@ export function TaskHero({
     if (goalFetcher.state !== "idle" || !goalFetcher.data?.ok) return;
     if (goalSaveHandled.current === goalFetcher.data) return;
     goalSaveHandled.current = goalFetcher.data;
+    setRefused(0);
     setEditing(false);
   }, [goalFetcher.state, goalFetcher.data]);
   // A confirmed edit_goal packet decision drops the human straight into the
@@ -137,6 +150,7 @@ export function TaskHero({
         // F17-L3: a scoping decision prefills with the chosen option's
         // deliverable so the human edits from what they picked, not the old goal.
         setDraft(editGoalDraft ?? task.goal);
+        setRefused(0);
         setEditing(true);
       }
     }
@@ -229,18 +243,37 @@ export function TaskHero({
         </span>
       </div>
       {editing ? (
-        <goalFetcher.Form method="post" className="goal-edit">
+        <goalFetcher.Form
+          method="post"
+          className="goal-edit"
+          // Ruling 147: the click AND a keyboard submit both route through the
+          // refusal, so a short draft can never become a request.
+          onSubmit={(e) => {
+            if (goalBusy) {
+              e.preventDefault();
+              return;
+            }
+            if (short) {
+              e.preventDefault();
+              setRefused((n) => n + 1);
+              goalRef.current?.focus();
+            }
+          }}
+        >
           {/* P11-47: the editor is already open (`editing` is true here); the
               old onSubmit re-set it to true, a no-op leftover — removed. */}
           <input type="hidden" name="intent" value="update-goal" />
           <input type="hidden" name="_csrf" value={csrf} />
           <textarea
+            ref={goalRef}
             name="goal"
             className="goal-textarea"
             defaultValue={draft}
             onChange={(e) => setDraft(e.currentTarget.value)}
             rows={4}
             aria-label="Task goal and acceptance criteria"
+            aria-invalid={goalInvalid || undefined}
+            aria-describedby={goalInvalid ? goalErrId : undefined}
             // Focus lands here whether the editor opened via the Edit button
             // or an edit_goal packet decision — the browser scrolls it into view.
             autoFocus
@@ -252,16 +285,24 @@ export function TaskHero({
             <button
               type="submit"
               className="btn primary"
-              disabled={goalFetcher.state !== "idle" || draft.trim().length < 3}
+              disabled={goalBusy}
+              aria-busy={goalBusy}
             >
               Save goal
             </button>
             {/* UXA-14: the 3-character floor left a dead button and no reason —
                 and a disabled control cannot explain itself via `title`. The
                 board's New-task modal already states its own requirement; say
-                this one too, and only while it is actually unmet. */}
-            {draft.trim().length < 3 && (
-              <span className="fine xs dim">
+                this one too, and only while it is actually unmet.
+                Ruling 147: after a refused submit the same sentence becomes the
+                alert, a fresh element per attempt. */}
+            {short && (
+              <span
+                key={refused ? `alert-${refused}` : "hint"}
+                id={goalErrId}
+                className={refused ? "composer-err" : "fine xs dim"}
+                role={refused ? "alert" : undefined}
+              >
                 A goal needs at least 3 characters.
               </span>
             )}
@@ -270,6 +311,7 @@ export function TaskHero({
               className="btn"
               onClick={() => {
                 setDraft(task.goal);
+                setRefused(0);
                 setEditing(false);
               }}
             >
@@ -289,6 +331,7 @@ export function TaskHero({
               className="goal-edit-btn"
               onClick={() => {
                 setDraft(task.goal);
+                setRefused(0);
                 setEditing(true);
               }}
               title="Edit the goal / acceptance criteria"

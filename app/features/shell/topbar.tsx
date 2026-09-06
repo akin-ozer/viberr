@@ -177,16 +177,40 @@ export function Topbar({
       {/* UI-03: an SSE stream that failed never reconnects on its own, so the
           board, rail counts, bell badge and review queue silently froze. Say so
           instead of presenting a stale snapshot as live governance state. */}
+      {/* The sentence is a status, the retry is an action: one element wearing
+          `.pill` (no cursor, no hover) with role="status" over a click handler
+          was neither honestly. role="status" also replaced the button role, so
+          "retry" was not reachable as a control by name, and with no
+          `onReconnect` it was a button that did nothing.
+
+          The announcer is mounted unconditionally (the idiom at
+          `home-sections.tsx`, `controller-dock.tsx` and `ui/label-input.tsx`):
+          a live region inserted together with its text is the one case screen
+          readers skip, so a region that appears only while paused announces
+          nothing. The visible chip is then a plain span — its text IS the
+          headline and the `title` carries the detail, so an `aria-label` here
+          would only replace the chip's own words with a longer duplicate. */}
+      <span className="vh" role="status" aria-live="polite">
+        {livePaused
+          ? "Live updates paused. Counts and board state may be out of date."
+          : ""}
+      </span>
       {livePaused && (
+        <span
+          className="pill risk sm"
+          title="The live update stream dropped (often an expired session). Counts and board state on this page may be out of date."
+        >
+          live updates paused
+        </span>
+      )}
+      {livePaused && onReconnect && (
         <button
           type="button"
-          className="pill risk sm"
-          role="status"
-          style={{ cursor: onReconnect ? "pointer" : "default" }}
-          title="The live update stream dropped (often an expired session). Counts and board state on this page may be out of date."
-          onClick={() => onReconnect?.()}
+          className="btn ghost sm"
+          title="Reconnect the live update stream"
+          onClick={onReconnect}
         >
-          live updates paused · retry
+          Retry
         </button>
       )}
       {/* R15-5: a BUTTON, not an input — everything typed here is answered by

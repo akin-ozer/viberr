@@ -138,8 +138,30 @@ function PasteForm({
   submit: (fields: Record<string, string>) => void;
 }) {
   const [secret, setSecret] = useState("");
+  const [refused, setRefused] = useState(0);
+  const field = useRef<HTMLInputElement | null>(null);
   const noun = kind === "access_token" ? "workspace access token" : "API key";
+  // The refusal says what `validatePastedSecret` says, and the server calls a
+  // workspace access token an "access token", so the two agree word for word.
+  const serverNoun = kind === "access_token" ? "access token" : "API key";
   const fieldId = `agentacc-${backend}-${kind}`;
+  const errId = `${fieldId}-err`;
+  const empty = secret.trim() === "";
+  const invalid = refused > 0 && empty;
+
+  // Ruling 147: Save stays enabled until the request starts; an empty field is
+  // refused here, with the sentence the server would have thrown, and never
+  // becomes a request. A pristine form is never marked.
+  const save = () => {
+    if (busy) return;
+    if (empty) {
+      setRefused((n) => n + 1);
+      field.current?.focus();
+      return;
+    }
+    submit({ intent: "backend-set-key", backend, kind, secret });
+  };
+
   return (
     <div className="field spaced">
       <label className="flabel" htmlFor={fieldId}>
@@ -155,6 +177,7 @@ function PasteForm({
           spell-check opt-outs the GitHub PAT form settled on, which keep a
           pasted credential out of every password manager and dictionary. */}
       <input
+        ref={field}
         id={fieldId}
         type="password"
         className="mono"
@@ -163,18 +186,29 @@ function PasteForm({
         spellCheck={false}
         data-1p-ignore
         data-lpignore="true"
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? errId : undefined}
         placeholder={backend === "claude" ? "sk-ant-…" : "sk-…"}
         onChange={(e) => setSecret(e.target.value)}
       />
+      {invalid ? (
+        <div
+          key={`refused-${refused}`}
+          id={errId}
+          className="login-err"
+          role="alert"
+        >
+          <Icon name="alert" />
+          Paste the {serverNoun} first.
+        </div>
+      ) : null}
       <div className="cred-manage">
         <button
           type="button"
           className="btn sm"
-          disabled={busy || secret.trim() === ""}
+          disabled={busy}
           aria-busy={busy}
-          onClick={() =>
-            submit({ intent: "backend-set-key", backend, kind, secret })
-          }
+          onClick={save}
         >
           Save {noun}
         </button>
@@ -655,7 +689,8 @@ function AgentAccountCard({
               ))}
             <button
               type="button"
-              className="btn ghost sm"
+              // Ruling 149: dropping the stored credential is destructive.
+              className="btn ghost sm danger"
               disabled={busy}
               onClick={() => {
                 // Close any paste form the card was showing before this

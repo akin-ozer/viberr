@@ -2,7 +2,7 @@
 import { useState, type ComponentProps, type ReactNode } from "react";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type {
@@ -3082,6 +3082,83 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     expect(save.className).not.toBe(cancel.className);
   });
 
+  // Ruling 147: the 3-character floor stops disabling Save goal. The primary
+  // stays enabled, a short draft is refused in place with the sentence the
+  // surface already carried, and the refusal never becomes a request.
+  it("ruling 147: Save goal stays enabled and refuses a draft under the floor", async () => {
+    let saves = 0;
+    const { container, getByText, queryByRole } = renderWithRouter(
+      <TaskHero task={heroTask()} stage={undefined} canEditGoal />,
+      () => {
+        saves += 1;
+        return { ok: true };
+      },
+    );
+    fireEvent.click(getByText("Edit"));
+    const ta = container.querySelector<HTMLTextAreaElement>(
+      "textarea.goal-textarea",
+    )!;
+    const save = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Save goal",
+    )!;
+
+    // A pristine open editor is never accused: the sentence is a hint, not an
+    // alert, and the field carries no mark.
+    fireEvent.change(ta, { target: { value: "" } });
+    expect(queryByRole("alert")).toBeNull();
+    expect(ta.getAttribute("aria-invalid")).toBeNull();
+    expect(save.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(save);
+    await act(async () => {});
+    expect(saves).toBe(0);
+    const first = queryByRole("alert")!;
+    expect(first.textContent).toContain("A goal needs at least 3 characters.");
+    expect(ta.getAttribute("aria-invalid")).toBe("true");
+    expect(ta.getAttribute("aria-describedby")).toBe("goal-err");
+    expect(first.id).toBe("goal-err");
+    expect(document.activeElement).toBe(ta);
+
+    // A second refusal inserts a NEW element, not a role flip on the same one.
+    fireEvent.click(save);
+    await act(async () => {});
+    expect(saves).toBe(0);
+    expect(queryByRole("alert")).not.toBe(first);
+
+    // Typing past the floor clears the mark and the save goes through.
+    fireEvent.change(ta, { target: { value: "Bound the payload" } });
+    expect(queryByRole("alert")).toBeNull();
+    expect(ta.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.click(save);
+    await act(async () => {});
+    expect(saves).toBe(1);
+  });
+
+  it("ruling 147: a re-opened editor is pristine, never still marked", async () => {
+    const { container, getByText, queryByRole } = renderWithRouter(
+      <TaskHero task={heroTask()} stage={undefined} canEditGoal />,
+    );
+    fireEvent.click(getByText("Edit"));
+    const ta = container.querySelector<HTMLTextAreaElement>(
+      "textarea.goal-textarea",
+    )!;
+    fireEvent.change(ta, { target: { value: "" } });
+    fireEvent.click(
+      [...container.querySelectorAll("button")].find(
+        (b) => b.textContent === "Save goal",
+      )!,
+    );
+    await act(async () => {});
+    expect(queryByRole("alert")).toBeTruthy();
+
+    fireEvent.click(getByText("Cancel"));
+    fireEvent.click(getByText("Edit"));
+    expect(queryByRole("alert")).toBeNull();
+    expect(
+      container.querySelector("textarea.goal-textarea")!.getAttribute("aria-invalid"),
+    ).toBeNull();
+  });
+
   // UXO-1 (live-caught, pass 18): a task archived MID-REVIEW kept rendering its
   // readiness + validation pills, so the hero read "archived · ready · awaiting
   // verdict" — asserting that someone still owes a verdict when the task is out
@@ -3326,21 +3403,136 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
     const input = document.querySelector<HTMLTextAreaElement>("#pkt-custom")!;
     expect(input).not.toBeNull();
 
-    // Confirm stays disabled until a directive exists.
+    // Ruling 147: Confirm stays ENABLED with the directive still empty, and the
+    // click is refused in place instead of going dead.
     // SAFETY: the aria-label belongs to the packet's Confirm <button>
     // (decision-packet.tsx); the bound query cannot state the element type.
     const confirm = getByLabelText(
       "Confirm decision: your custom directive",
     ) as HTMLButtonElement;
-    expect(confirm.disabled).toBe(true);
+    expect(confirm.disabled).toBe(false);
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    fireEvent.click(confirm);
+    expect(onResolveCustom).not.toHaveBeenCalled();
+    const first = document.querySelector('[role="alert"]')!;
+    expect(first.textContent).toContain("Write the directive first.");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")).toBe("pkt-custom-err");
+    expect(first.id).toBe("pkt-custom-err");
+    expect(document.activeElement).toBe(input);
+
+    // A second refusal inserts a NEW element.
+    fireEvent.click(confirm);
+    expect(document.querySelector('[role="alert"]')).not.toBe(first);
+
     fireEvent.change(input, {
       target: { value: "Rebase onto main, then re-run the reviewer." },
     });
-    expect(confirm.disabled).toBe(false);
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    expect(input.getAttribute("aria-invalid")).toBeNull();
     fireEvent.click(confirm);
     expect(onResolveCustom).toHaveBeenCalledWith(
       "Rebase onto main, then re-run the reviewer.",
     );
+  });
+
+  // Ruling 147: a pristine form is never accused — leaving the directive and
+  // coming back drops the standing refusal.
+  it("ruling 147: changing choice clears a standing directive refusal", () => {
+    const { getByText, getByLabelText } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve={true}
+        canResolveCompletion={true}
+        canEditGoal={true}
+        canArchive={true}
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const custom = getByText("Write your own directive").closest("button")!;
+    fireEvent.click(custom);
+    // SAFETY: the aria-label belongs to the packet's Confirm <button>.
+    const confirm = getByLabelText(
+      "Confirm decision: your custom directive",
+    ) as HTMLButtonElement;
+    fireEvent.click(confirm);
+    expect(document.querySelector('[role="alert"]')).toBeTruthy();
+
+    // Pick an authored option, then come back: the directive is pristine again.
+    fireEvent.click(
+      document.querySelectorAll<HTMLButtonElement>('[role="radio"]')[0]!,
+    );
+    fireEvent.click(custom);
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    expect(
+      document.querySelector("#pkt-custom")!.getAttribute("aria-invalid"),
+    ).toBeNull();
+  });
+
+  // Ruling 147 dropped `choiceCount === 0` from Confirm's `disabled`, which
+  // raises the question of what an options-less packet does now. Nothing bad:
+  // the composed directive IS a choice, and it is offered to exactly the
+  // viewers who get the Confirm button (`customOffered = canResolve`), so the
+  // count is never zero while the button renders. With no authored option to
+  // select, `sel` lands on the directive, and an empty one is REFUSED — the
+  // button never reaches `onResolve` with an index that has no option.
+  //
+  // Canary: hand the custom choice a different condition from the button's and
+  // the click resolves option 0 of an empty list — this goes red.
+  it("a packet with no options refuses; it never resolves a missing index", () => {
+    const onResolve = vi.fn();
+    const onResolveCustom = vi.fn();
+    const { getByLabelText, queryByText } = render(
+      <DecisionPacket
+        packet={{ ...packet142, options: [] }}
+        busy={false}
+        canResolve={true}
+        canResolveCompletion={true}
+        canEditGoal={true}
+        canArchive={true}
+        onResolveCustom={onResolveCustom}
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+    // SAFETY: the aria-label belongs to the packet's Confirm <button>.
+    const confirm = getByLabelText(
+      "Confirm decision: your custom directive",
+    ) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    expect(onResolve).not.toHaveBeenCalled();
+    expect(onResolveCustom).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="alert"]')!.textContent).toContain(
+      "Write the directive first.",
+    );
+    // And the directive really is the only choice on offer.
+    expect(document.querySelectorAll('[role="radio"]')).toHaveLength(1);
+    expect(queryByText("Accept completion")).toBeNull();
+  });
+
+  it("a viewer who cannot resolve gets no Confirm on an options-less packet", () => {
+    // The other half of the same guarantee: without `canResolve` there is no
+    // custom choice AND no Confirm, so nothing can be clicked into a resolve.
+    const onResolve = vi.fn();
+    const { queryByText } = render(
+      <DecisionPacket
+        packet={{ ...packet142, options: [] }}
+        busy={false}
+        canResolve={false}
+        canResolveCompletion={false}
+        canEditGoal={false}
+        canArchive={false}
+        onResolveCustom={() => {}}
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+    expect(queryByText("Confirm decision")).toBeNull();
+    expect(document.querySelectorAll('[role="radio"]')).toHaveLength(0);
   });
 
   it("digit shortcuts select choices, and the chips advertise them", () => {

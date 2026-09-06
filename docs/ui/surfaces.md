@@ -97,8 +97,13 @@ Intents behind `project.task.tsx` are explained in
   overlay that covers the viewport, and `/controller` has its own identity
   header and a layout that scrolls inside itself.
 - **Live updates** are mounted by the workspace layout, Home, Notifications and the
-  controller page; every governed change arrives by loader revalidation. The rail
-  shows "live updates paused" while the stream reconnects.
+  controller page; every governed change arrives by loader revalidation. While the
+  stream is down, the workspace header and Home both show a "live updates paused"
+  chip (a plain span: a pill has no cursor and no hover, so it is the sentence, not
+  a control) beside a `Retry` button, rendered only when the surface really has a
+  reconnect to offer. The sentence is also announced through a visually hidden
+  `role="status"` region that is mounted at all times and only changes its text: a
+  live region inserted together with its text is the one case screen readers skip.
 - **The controller dock** (ruling 121) is mounted once by `root.tsx` on every signed-in
   surface except the two controller pages, `/login`, and `/profile` and `/notifications`
   (both render their whole page inside a `showModal()` overlay, which would leave the

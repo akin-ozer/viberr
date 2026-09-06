@@ -120,6 +120,13 @@ describe("HumanAccess", () => {
       (r) => r.querySelector(".act")!.textContent === "View board, tasks & timelines",
     )!;
     expect(viewRow.querySelectorAll(".rbac-yes")).toHaveLength(4);
+    // Ruling 148: the same words as the profile page's "Your access" list —
+    // the check is aria-hidden, so a glyph-only cell was silent.
+    expect(container.querySelector(".rbac-yes")!.textContent).toContain("yes");
+    expect(container.querySelector(".rbac-no")!.textContent).toBe("no");
+    expect(
+      container.querySelector(".rbac-table")!.textContent,
+    ).not.toContain("−");
     // The claim that made display contradict enforcement must not survive
     // anywhere on the surface — cell copy or footnote.
     expect(container.textContent).not.toContain("membership not required");
@@ -702,7 +709,8 @@ describe("Guardrails card (E32-6, pass 32)", () => {
     // SAFETY: the unit-carrying row renders an <input type="number"> with this label.
     const value = getByLabelText("Compression threshold value (events)") as HTMLInputElement;
     expect(value.value).toBe("40");
-    // Apply is inert until the draft differs and is a positive whole number.
+    // Ruling 147(d): Apply is inert only until the draft DIFFERS. Validity is
+    // refused on the click (below), never folded into this gate.
     const apply = getByText("Apply").closest("button")!;
     expect(apply.disabled).toBe(true);
     fireEvent.change(value, { target: { value: "60" } });
@@ -719,6 +727,59 @@ describe("Guardrails card (E32-6, pass 32)", () => {
     fireEvent.click(getByText("Remove").closest("button")!);
     expect(onSet).toHaveBeenCalledWith("operator-brevity", "remove");
     expect(container.querySelectorAll(".guard-row.inert")).toHaveLength(2);
+  });
+
+  // Ruling 147: a changed-but-unusable threshold ("0", "-3", "2.5", or an
+  // emptied box) used to leave Apply dead with no explanation. Apply now stays
+  // enabled and the click is refused with the sentence the server throws.
+  it("ruling 147: an unusable guardrail draft is refused on the click, not by a dead Apply", () => {
+    const onSet = vi.fn();
+    const { container, getByText, getByLabelText } = render(
+      <Guardrails guardrails={rows} canManage busy={false} onSet={onSet} />,
+    );
+    // SAFETY: the unit-carrying row renders an <input type="number"> with this label.
+    const value = getByLabelText("Compression threshold value (events)") as HTMLInputElement;
+    const apply = getByText("Apply").closest("button")!;
+
+    fireEvent.change(value, { target: { value: "0" } });
+    expect(apply.disabled).toBe(false);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+
+    fireEvent.click(apply);
+    expect(onSet).not.toHaveBeenCalled();
+    const first = container.querySelector('[role="alert"]')!;
+    expect(first.textContent).toBe(
+      "Compression threshold needs a whole number above zero.",
+    );
+    expect(value.getAttribute("aria-invalid")).toBe("true");
+    expect(value.getAttribute("aria-describedby")).toBe(first.id);
+    expect(first.id).toBe("guard-compression-threshold-err");
+    expect(document.activeElement).toBe(value);
+
+    // Each refusal is a fresh element, so a repeat press is announced again.
+    fireEvent.click(apply);
+    expect(onSet).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')).not.toBe(first);
+
+    // A usable draft clears the mark and applies.
+    fireEvent.change(value, { target: { value: "60" } });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(value.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.click(apply);
+    expect(onSet).toHaveBeenCalledWith("compression-threshold", "value", 60);
+  });
+
+  it("ruling 147: an emptied threshold is refused, never written as a change", () => {
+    const onSet = vi.fn();
+    const { container, getByText, getByLabelText } = render(
+      <Guardrails guardrails={rows} canManage busy={false} onSet={onSet} />,
+    );
+    // SAFETY: the unit-carrying row renders an <input type="number"> with this label.
+    const value = getByLabelText("Compression threshold value (events)") as HTMLInputElement;
+    fireEvent.change(value, { target: { value: "" } });
+    fireEvent.click(getByText("Apply").closest("button")!);
+    expect(onSet).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')).toBeTruthy();
   });
 
   /* U33-4 (owner, 2026-09-03): the predecessor of this test walked

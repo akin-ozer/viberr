@@ -204,10 +204,15 @@ function NtfStream({
                   <Icon name={m.icon} />
                 </span>
                 <span className="pev-main">
-                  <strong className="act-actor">
-                    {n.from ? n.from.name : "−"}
-                  </strong>
-                  <span className="act-sep">·</span>
+                  {/* Ruling 148: a row with no sender says nothing about one.
+                      The "−" claimed a fact in a glyph, and the bell popover
+                      row for the same notification names no sender at all. */}
+                  {n.from && (
+                    <>
+                      <strong className="act-actor">{n.from.name}</strong>
+                      <span className="act-sep">·</span>
+                    </>
+                  )}
                   <RichText text={n.text} mentions={false} />{" "}
                   {/* B-FD6: the keybtn NAVIGATES, so it renders only when the row
                       has a destination. An org-wide row has none (nothing shown).

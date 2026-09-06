@@ -414,10 +414,23 @@ describe("AgentLogsPanel", () => {
     expect(container.querySelector(".log-chip .lc-name")!.textContent).toBe("Bash");
     expect(getByText("npm run build")).toBeTruthy();
     const files = [...container.querySelectorAll(".log-file")];
-    expect(files.map((f) => f.textContent)).toEqual(["+app/a.ts", "−app/b.ts"]);
+    expect(files.map((f) => f.textContent)).toEqual([
+      "+added app/a.ts",
+      "−deleted app/b.ts",
+    ]);
     // WCAG 1.4.1: the kind is a glyph as well as a colour class.
     expect(files[0]!.className).toContain("lf-add");
     expect(files[1]!.className).toContain("lf-delete");
+    // ...and the glyph is not the only carrier: the word is what a reader
+    // hears, the mark is hidden from them, and the title is finally set.
+    expect(files.map((f) => f.getAttribute("title"))).toEqual([
+      "added",
+      "deleted",
+    ]);
+    expect(
+      files[1]!.querySelector(".lf-kind")!.getAttribute("aria-hidden"),
+    ).toBe("true");
+    expect(files[1]!.querySelector(".vh")!.textContent).toBe("deleted ");
 
     fireEvent.click(getByText("{ } raw"));
     expect(container.querySelector(".log-chip")).toBeNull();
@@ -584,6 +597,32 @@ describe("AgentLogsPanel", () => {
     expect(idBtn.textContent).toBe("51d8f0e2-3a7b-4c1b-9e0a-6f4d2b8c7151");
     // A copy control is present.
     expect(getByRole("button", { name: /Copy full session id/ })).toBeTruthy();
+  });
+
+  it("ruling 148: a run with no session id says so in words", () => {
+    const run = mkRun({ backend: "claude", sid: null, state: "idle", lifecycle: "finished" });
+    const { container, queryByRole } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    const meta = container.querySelector(".logs-meta")!;
+    // The label word precedes it, so the line reads "session none" — a "−" sat
+    // where every other run shows a click-to-expand control.
+    expect(meta.textContent).toContain("session none");
+    expect(meta.textContent).not.toContain("−");
+    // And nothing in that slot pretends to be a control.
+    expect(queryByRole("button", { name: /Copy full session id/ })).toBeNull();
+  });
+
+  it("ruling 148: a finished run with no timestamp drops the clause", () => {
+    // The same class inside a SENTENCE: "run finished at −; thread can be
+    // re-engaged" read as a broken template.
+    // Canary: put the `: "−"` fallback back and this goes red.
+    const run = mkRun({ state: "done", lifecycle: "finished", finished: null });
+    const { getByText, container } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(getByText("run finished; thread can be re-engaged")).toBeTruthy();
+    expect(container.querySelector(".logs-foot")!.textContent).not.toContain("−");
   });
 
   it("P11-43: the Export link renders only when the run is exportable", () => {

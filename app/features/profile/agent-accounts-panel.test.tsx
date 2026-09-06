@@ -148,7 +148,8 @@ describe("AgentAccountsPanel", () => {
   });
 
   it("reveals a password-type paste field that promises the value is never shown again", () => {
-    const { getByText, getAllByText, container } = renderPanel(BOTH_UNCONNECTED);
+    const { getByText, getAllByText, getByRole, queryByRole, container } =
+      renderPanel(BOTH_UNCONNECTED);
     fireEvent.click(getAllByText("Use an API key")[0]!);
     const field = container.querySelector<HTMLInputElement>(
       "#agentacc-claude-api_key",
@@ -160,16 +161,59 @@ describe("AgentAccountsPanel", () => {
     expect(field.autocomplete).toBe("new-password");
     expect(getByText(/stored sealed, never shown again/)).toBeTruthy();
 
-    // Nothing is submitted until there is something to submit.
+    // Ruling 147: Save stays enabled on an empty field and REFUSES the click
+    // with the sentence the server would have thrown, the field marked and
+    // focused, and nothing submitted.
     const save = getByText("Save API key").closest("button")!;
-    expect(save.disabled).toBe(true);
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    expect(lastSubmit).toBeNull();
+    const first = getByRole("alert");
+    expect(first.textContent).toContain("Paste the API key first.");
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(field.getAttribute("aria-describedby")).toBe(first.id);
+    expect(document.activeElement).toBe(field);
+
+    // A second refusal inserts a NEW element, because readers announce an
+    // insertion, not a role flip on unchanged text.
+    fireEvent.click(save);
+    expect(getByRole("alert")).not.toBe(first);
+
+    // Typing clears the mark.
     fireEvent.change(field, { target: { value: "sk-ant-api03-abc" } });
+    expect(queryByRole("alert")).toBeNull();
+    expect(field.getAttribute("aria-invalid")).toBeNull();
     fireEvent.click(save);
     expect(lastSubmit).toEqual({
       intent: "backend-set-key",
       backend: "claude",
       kind: "api_key",
       secret: "sk-ant-api03-abc",
+    });
+  });
+
+  it("refuses an empty workspace access token in the server's own words (ruling 147)", () => {
+    const { getByText, getByRole, container } = renderPanel(BOTH_UNCONNECTED);
+    fireEvent.click(getByText("Use a workspace access token"));
+    const field = container.querySelector<HTMLInputElement>(
+      "#agentacc-codex-access_token",
+    )!;
+    const save = getByText("Save workspace access token").closest("button")!;
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    expect(lastSubmit).toBeNull();
+    const alert = getByRole("alert");
+    expect(alert.textContent).toContain("Paste the access token first.");
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(field.getAttribute("aria-describedby")).toBe(alert.id);
+    expect(document.activeElement).toBe(field);
+    fireEvent.change(field, { target: { value: "sk-tok" } });
+    fireEvent.click(save);
+    expect(lastSubmit).toEqual({
+      intent: "backend-set-key",
+      backend: "codex",
+      kind: "access_token",
+      secret: "sk-tok",
     });
   });
 
@@ -346,7 +390,13 @@ describe("AgentAccountsPanel", () => {
     expect(getByText("unverified")).toBeTruthy();
     expect(getByText(/verified /)).toBeTruthy();
 
-    fireEvent.click(container.querySelectorAll(".cred-manage button")[0]!);
+    // Ruling 149: dropping the stored credential is destructive, so the
+    // control carries the danger label. Canary: drop `danger` from the
+    // Disconnect className in `agent-accounts-panel.tsx`.
+    const disconnect = container.querySelectorAll(".cred-manage button")[0]!;
+    expect(disconnect.textContent).toContain("Disconnect");
+    expect(Array.from(disconnect.classList)).toContain("danger");
+    fireEvent.click(disconnect);
     expect(lastSubmit).toEqual({
       intent: "backend-disconnect",
       backend: "claude",

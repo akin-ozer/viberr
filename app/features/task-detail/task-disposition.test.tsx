@@ -412,6 +412,9 @@ describe("P14-LV-06: the acceptance affordance", () => {
       Array.from(force.classList),
       "the wrapping override only applies to `.btn.full`; a content-sized force button overflows its panel",
     ).toContain("full");
+    // Ruling 149: force-accept is destructive, and the confirm it opens
+    // already commits in red — the trigger says so too.
+    expect(Array.from(force.classList)).toContain("danger");
   });
 
   it("F15-11: an ARCHIVED task renders no Accept control and closed/disabled run controls", () => {
@@ -1192,6 +1195,25 @@ describe("R14-3: the task archive", () => {
     // …and the raw token reaches the dialog nowhere, with or without the
     // separator the fix introduced.
     expect(dialog.textContent).not.toMatch(/PR #147\s*(·\s*)?accepted/);
+  });
+
+  it("ruling 149: Archive wears the danger label; Restore, a recovery, does not", () => {
+    // The archive ceremony already commits in red (`ArchiveConfirm`). jsdom
+    // computes no colour, so the class IS the assertion: it is the only thing
+    // that decides whether `.btn.ghost.danger` ever reaches this trigger.
+    //
+    // Canary: drop the ternary in `task-side-panels.tsx` and one arm goes red.
+    const live = renderPage({ myRole: "maintainer" });
+    expect(
+      Array.from(findButton(live.container, "Archive task")!.classList),
+    ).toContain("danger");
+    cleanup();
+
+    const restored = renderPage({ archived: true, myRole: "maintainer" });
+    expect(
+      Array.from(findButton(restored.container, "Restore from archive")!.classList),
+      "restoring is a recovery, not a destruction",
+    ).not.toContain("danger");
   });
 
   it("a contributor never sees the control (archive is board-management authority)", () => {

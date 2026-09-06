@@ -4,6 +4,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
+import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import {
   keyFromName,
   projectNameFromRepo,
@@ -320,16 +321,16 @@ function NewProjectRepoField({
 function NewProjectWorkflowField() {
   return (
     <div className="field">
-      <span className="flabel">
-        Workflow
-        <span className="fhint">customize the stages in project settings</span>
+      <span className="flabel">Workflow</span>
+      {/* The statement, at last: `.pick-chip` is the option BUTTON class in
+          every other field of this dialog and `.on` is its selected fill, so a
+          one-option picker whose only chip was pre-selected read as a control
+          nobody could change (and `aria-disabled` on a role-less span told
+          assistive tech nothing). */}
+      <span className="fhint flush">
+        Starts on the {GOVERNED_TEMPLATE.label} board · customize the stages in
+        project settings
       </span>
-      <div className="pick-chips">
-        <span className="pick-chip on" aria-disabled="true">
-          <span className="sdot brand"></span>
-          Standard · 5 stages
-        </span>
-      </div>
     </div>
   );
 }

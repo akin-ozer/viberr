@@ -2869,6 +2869,24 @@ by rewriting those paragraphs:*
     control. (`app.css` ruling-148 section, pinned in `app.css.test.ts`;
     `features/profile/profile-page.tsx`.)
 
+149. **Destructive controls take GitHub's danger button (owner, 2026-09-06).** A destructive
+    control (delete, remove, revoke, archive, disconnect, sign out, discard, force-accept) is
+    a NEUTRAL button whose label is red, and that fills red on hover with a white label: at
+    rest the surface fill and `--border`, the label in `--danger` (`#cf222e` light /
+    `#f85149` dark, GitHub's danger foreground); on hover `--danger-fill` (`#a40e26` /
+    `#da3633`) under `--on-danger`. The tinted pink face it replaces read as a disabled or
+    decorative control. The same red carries the ghost danger button, the account menu's
+    Sign out, the danger-zone panel border and icon, the KB browser's delete action, the
+    danger label and the opt-in destructive row-remove hovers. `--coral-dark` /
+    `--coral-light` stay the ERROR pair for text, pills and error boxes: `#cf222e` fails AA on
+    the pink error fill and `#600000` reads as brown on a button, so a control colour and an
+    error colour are two tokens on purpose. The sweep that applied it across the app also
+    re-applied ruling 148's classes repo-wide (equal columns, glyph badges, warning boxes,
+    close controls, bare inputs and atomic live regions, ruling 147 primaries) and reported
+    the inline-form candidates for a decision. (`app.css` `--danger*` tokens, `.btn.danger`,
+    `.btn.ghost.danger`, `.menu-item.danger`, `.danger-panel`, `.fm-act.del`,
+    `.flabel.danger`.)
+
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates
 that pass and remains unnumbered.)*
