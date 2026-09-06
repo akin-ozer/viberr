@@ -2844,6 +2844,31 @@ by rewriting those paragraphs:*
     (`ui/`-adjacent idiom in `features/org-settings/mini-modal.tsx`; the field rule in
     `app.css` `.field input[aria-invalid="true"]`.)
 
+148. **Profile pass: four owner findings (owner, 2026-09-06).** **(a)** Side-by-side panels end
+    on one line. A 2-up settings grid (`.profile-cols`, `.policy-cols`) stretches its rows,
+    and the last panel of a stacked column (`.profile-col`) fills to the column's bottom, so
+    the two columns of Profile never end at different heights. A feed beside a short panel
+    (`.activity-cols`) is exempt: stretching the panel to the feed's height only produces a
+    tall empty box. **(b)** Change password is a button that opens a modal, never a form
+    served inline: a "Password" row on the Profile card, under the sign-in facts, opening the
+    org-settings `MiniModal` under the ruling 147 contract (length and match are refused with
+    the field named and focused; a server refusal lands in the same alert). **(c)** The
+    in-app "Reduce motion" preference is REMOVED with its `set-motion` intent, the
+    `user_prefs.motion` key, `<html data-motion>` and the `[data-motion="reduce"]` kill
+    switch. The OS `prefers-reduced-motion` setting is the one reduced-motion signal,
+    honoured by the sheet's targeted rules (entrances fade, the live pulse stills). This
+    narrows ruling 13's Appearance panel. **(d)** Warning surfaces take GitHub's treatment.
+    Light: `--amber-light #fff8c5` (its attention fill; mixed into the surface it is the
+    classic pale-yellow flash) with `--amber-dark #735c0f`, the dark olive it prints that
+    flash in. Dark: `--amber-light #3a3019`, `--amber-dark #d29922` (its attention
+    foreground), and the warning boxes (`.cred-warn`, `.archived-banner`) print their
+    sentence in `--fg` with amber only on the icon, border and fill; yellow text on brown is
+    gone everywhere the pair is used. Also from the pass: the close × on every modal head and
+    the page overlay is one borderless circular control, and the unconnected badge on the
+    agent and GitHub cards says "not connected" instead of a "−" that read as a collapse
+    control. (`app.css` ruling-148 section, pinned in `app.css.test.ts`;
+    `features/profile/profile-page.tsx`.)
+
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates
 that pass and remains unnumbered.)*

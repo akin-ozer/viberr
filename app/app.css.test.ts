@@ -314,12 +314,10 @@ describe("app.css dead-and-drifted rules (P16-UI-04)", () => {
     expect(fade).toBeTruthy();
     expect(fade![1], "the base state must be hidden").toMatch(/opacity:\s*0\s*;/);
     expect(fade![1]).toMatch(/animation-timeline:\s*--board-scroll-x/);
-    // The [data-motion="reduce"] kill switch clamps every animation-duration to
-    // .01ms !important, which on a progress-based timeline hides the fade for
-    // good. It is an indicator, not decoration.
-    expect(CODE).toMatch(
-      /\[data-motion="reduce"\]\s*\.board-wrap::after\s*\{[^}]*animation-duration:\s*auto\s*!important/,
-    );
+    // Ruling 148(c): the in-app `[data-motion="reduce"]` kill switch is gone
+    // (with the setting that drove it), so the fade needs no restoring rule.
+    // The OS `prefers-reduced-motion` query is the one reduced-motion signal.
+    expect(CODE).not.toMatch(/\[data-motion/);
   });
 
   it("lets each `.live-table` own its own column template", () => {
@@ -2846,5 +2844,52 @@ describe("interface review 2026-09-06: the rules the fixes rest on", () => {
     expect(decls(".rail:focus,\n.rail:focus-visible")).toMatch(/outline:\s*none/);
     expect(decls('body[data-rail-open="true"] .dock')).toMatch(/visibility:\s*hidden/);
     expect(CODE).not.toMatch(/\.app\[data-rail-open="true"\] \.dock\b/);
+  });
+});
+
+/* ------------------------------------------------- ruling 148: profile pass */
+
+describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
+  it("(a) the 2-up settings grids stretch their rows; the feed page does not", () => {
+    // `align-items: start` was what let the two profile columns end at
+    // different heights. Grid items stretch by default, and the stacked
+    // column hands its slack to its last panel.
+    expect(CODE).toMatch(/\.profile-cols\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
+    expect(CODE).not.toMatch(/\.profile-cols\s*\{[^}]*align-items:\s*start/);
+    expect(CODE).not.toMatch(/\.policy-cols\s*\{[^}]*align-items:\s*start/);
+    expect(CODE).toMatch(/\.profile-col > :last-child\s*\{[^}]*flex:\s*1 0 auto/);
+    // A feed beside a short panel is the exemption: stretching the panel to the
+    // feed's height would only produce a tall empty box.
+    expect(CODE).toMatch(/\.activity-cols\s*\{[^}]*align-items:\s*start/);
+  });
+
+  it("(d) the warning pair is GitHub's, and dark boxes print their sentence in --fg", () => {
+    const light = themeTokens(false);
+    const dark = themeTokens(true);
+    expect(light.get("--amber-light")).toBe("#fff8c5");
+    expect(light.get("--amber-dark")).toBe("#735c0f");
+    expect(dark.get("--amber-light")).toBe("#3a3019");
+    expect(dark.get("--amber-dark")).toBe("#d29922");
+    // The box text: olive on pale yellow in light (the base rule), the default
+    // foreground on dark (the scoped override), amber only on the icon.
+    expect(CODE).toMatch(/\.cred-warn\s*\{[^}]*color:\s*var\(--amber-dark\)/);
+    expect(CODE).toMatch(
+      /:root\[data-theme="dark"\] \.cred-warn,\s*:root\[data-theme="dark"\] \.archived-banner\s*\{\s*color:\s*var\(--fg\)/,
+    );
+    expect(CODE).toMatch(
+      /:root\[data-theme="dark"\] \.cred-warn \.ico,\s*:root\[data-theme="dark"\] \.archived-banner \.ico\s*\{\s*color:\s*var\(--amber-dark\)/,
+    );
+  });
+
+  it("one close control on every modal head and the page overlay", () => {
+    const rule = CODE.match(/\.icon-btn\.modal-close, \.overlay-x\s*\{([^}]*)\}/);
+    expect(rule, "the shared close rule must exist").toBeTruthy();
+    expect(rule![1]).toMatch(/border-radius:\s*50%/);
+    expect(rule![1]).toMatch(/background:\s*transparent/);
+    expect(rule![1]).toMatch(/box-shadow:\s*none/);
+    // The overlay's own rule no longer paints the shadowed box the shared
+    // rule removes (it would win by source order for nothing).
+    const overlay = CODE.match(/\.overlay-x\s*\{([^}]*)\}/);
+    expect(overlay![1]).not.toMatch(/box-shadow:\s*var/);
   });
 });

@@ -500,12 +500,12 @@ function AgentAccountCard({
 
   const busy = fetcher.state !== "idle";
   /** The badge says where this account STANDS, in the person's vocabulary. The
-   *  stored `kind` (`api_key`, `access_token`) is our schema, not their word,
-   *  and an unconnected card gets the sibling GitHub card's minus rather than a
-   *  third copy of the sentence the card itself already states. A sign-in under
-   *  way wins over "connected": it is what the card is showing, and it is what
-   *  the person is waiting on. */
-  const badge = running ? "signing in" : connected ? "connected" : "−";
+   *  stored `kind` (`api_key`, `access_token`) is our schema, not their word.
+   *  An unconnected card says so in words: the "−" this slot used to show read
+   *  as a collapse control that did nothing. A sign-in under way wins over
+   *  "connected": it is what the card is showing, and it is what the person is
+   *  waiting on. */
+  const badge = running ? "signing in" : connected ? "connected" : "not connected";
   // A timestamp the card cannot read is omitted together with its " on " /
   // "verified " lead-in, never rendered as the word "null". The date itself
   // renders through the hydration-safe primitive: UTC day first, the viewer's

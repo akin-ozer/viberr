@@ -92,7 +92,7 @@ function renderPage(v: ControllerSurfaceView, search = "", action?: ActionFuncti
     {
       id: "root",
       path: "/",
-      loader: () => ({ csrf: "tok", theme: "system", motion: "full" }),
+      loader: () => ({ csrf: "tok", theme: "system" }),
       children: [page],
     },
   ]);
@@ -105,7 +105,7 @@ function renderInstancePage(v: ControllerSurfaceView) {
     {
       id: "root",
       path: "/",
-      loader: () => ({ csrf: "tok", theme: "system", motion: "full" }),
+      loader: () => ({ csrf: "tok", theme: "system" }),
       children: [
         {
           path: "controller",

@@ -268,11 +268,13 @@ read and the person's own Profile card, and never the unauthenticated health bod
 Identity (name, title; audit `profile.updated`), notification routing (eight in-app
 opt-out toggles: packets, approvals, mentions, policy, quality, controller,
 dependencies (ruling 131) and ownership; enforced inside `createNotification`), appearance (theme `light | dark | system` persisted to
-`users.theme` and the `viberr_theme` cookie; reduce motion; default timeline filter),
+`users.theme` and the `viberr_theme` cookie; default timeline filter — the in-app reduce-motion
+setting was removed by ruling 148(c), the OS preference is the one signal),
 a read-only "Your access" table rendered from the same RBAC rows, **Agent accounts**
 (below), GitHub identity (disconnect flips `idp` back to `local`, refused without a
-password), and a self-service password change that keeps the current session and
-revokes every other one (audit `auth.password.changed`). Preferences other than theme
+password), and a self-service password change (ruling 148(b): a "Password" row on the Profile card whose
+button opens a modal) that keeps the current session and revokes every other one (audit
+`auth.password.changed`). Preferences other than theme
 live in `user_prefs`.
 
 ### Agent accounts (ruling 127)

@@ -69,7 +69,7 @@ function mount(opts: MountOptions) {
     {
       id: "root",
       path: "/",
-      loader: () => ({ csrf: "tok", theme: "system", motion: "full" }),
+      loader: () => ({ csrf: "tok", theme: "system" }),
       Component: () => (
         <ToastProvider>
           <Outlet />

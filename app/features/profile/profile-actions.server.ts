@@ -34,12 +34,12 @@ import {
   type NotifPrefs,
 } from "./notification-prefs";
 import {
-  getMotionPref,
+
   listUserMemberships,
-  MOTION_PREF_KEY,
+
   NOTIFS_PREF_KEY,
   TL_DEFAULT_PREF_KEY,
-  type MotionPreference,
+
   type TimelineDefault,
 } from "./profile-query.server";
 
@@ -105,18 +105,6 @@ export function setNotifRoutingPref(
   };
   setPref(db, userId, NOTIFS_PREF_KEY, next);
   return next;
-}
-
-export function setMotionPref(
-  db: DatabaseSync,
-  userId: string,
-  motion: string,
-): MotionPreference {
-  if (motion !== "full" && motion !== "reduce") {
-    throw AppError.validation("Invalid motion preference.");
-  }
-  setPref(db, userId, MOTION_PREF_KEY, motion);
-  return getMotionPref(db, userId);
 }
 
 export function setTimelineDefaultPref(

@@ -42,15 +42,13 @@ import {
  * signs in through the GitHub OAuth whitelist flow.
  */
 
-export type MotionPreference = "full" | "reduce";
 export type TimelineDefault = "all" | "typed" | "comment";
 
-/** Decoders for the two scalar pref keys — a stored value outside the
- *  vocabulary reads as null from `getPref`, i.e. as the default. */
-const motionPrefSchema = z.enum(["full", "reduce"]);
+/** Decoder for the scalar pref key — a stored value outside the vocabulary
+ *  reads as null from `getPref`, i.e. as the default. (Ruling 148(c): the
+ *  `motion` key and its decoder are gone with the in-app setting.) */
 const timelineDefaultSchema = z.enum(["all", "typed", "comment"]);
 
-export const MOTION_PREF_KEY = "motion";
 /** Phase-5 contract: routes/project.task.tsx reads this same key. */
 export const TL_DEFAULT_PREF_KEY = "tlDefault";
 export const NOTIFS_PREF_KEY = "notifs";
@@ -201,7 +199,6 @@ export interface ProfileView {
   backends: ProfileBackend[];
   prefs: {
     notifs: NotifPrefs;
-    motion: MotionPreference;
     tlDefault: TimelineDefault;
   };
 }
@@ -265,13 +262,6 @@ export function isNotifKindEnabled(
   return getNotifPrefs(db, userId)[notifCategoryForKind(kind)].app;
 }
 
-export function getMotionPref(
-  db: DatabaseSync,
-  userId: string,
-): MotionPreference {
-  return getPref(db, userId, MOTION_PREF_KEY, motionPrefSchema) ?? "full";
-}
-
 export function getTimelineDefaultPref(
   db: DatabaseSync,
   userId: string,
@@ -318,7 +308,6 @@ export function getProfileView(
     backends: getProfileBackends(db, userId),
     prefs: {
       notifs: getNotifPrefs(db, userId),
-      motion: getMotionPref(db, userId),
       tlDefault: getTimelineDefaultPref(db, userId),
     },
   };

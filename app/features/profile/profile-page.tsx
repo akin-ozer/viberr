@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { z } from "zod";
 import { useNavigate, type FetcherWithComponents } from "react-router";
 import { Avatar } from "~/ui/avatar";
@@ -14,13 +14,15 @@ import { RBAC_ROWS } from "~/features/policy/policy-data";
 import type { ProjectRole } from "~/shared/rbac";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { PROFILE_NTF, type NotifPrefs } from "./notification-prefs";
+import { MiniModal } from "~/features/org-settings/mini-modal";
 import { AgentAccountsPanel } from "./agent-accounts-panel";
 import type { ProfileBackend } from "./profile-query.server";
 
 /**
  * Profile and preferences overlay, including appearance and a self-serve
- * change-password panel for
- * accounts with a local password (phase-2 machinery, login-flow copy).
+ * password change for accounts with a local password (ruling 148(b): a row
+ * on the Profile card whose button opens a modal; phase-2 machinery,
+ * login-flow copy).
  *
  * Identity is the session user widened by the loader (ruling 6 — id is
  * authoritative, names render-only). "Your access" reads the shared
@@ -52,7 +54,6 @@ export interface ProfileData {
   backends: ProfileBackend[];
   prefs: {
     notifs: NotifPrefs;
-    motion: "full" | "reduce";
     tlDefault: "all" | "typed" | "comment";
   };
 }
@@ -105,10 +106,14 @@ function ProfileIdentity({
   data,
   fetcher,
   submit,
+  passwordRow,
 }: {
   data: ProfileData;
   fetcher: ProfileFetcher;
   submit: (fields: Record<string, string>) => void;
+  /** Ruling 148(b): the "Password · Change password" row, when the account
+   *  has a local password. Rendered under the sign-in facts it belongs to. */
+  passwordRow?: ReactNode;
 }) {
   const { user, memberships } = data;
   const [name, setName] = useState(user.name);
@@ -224,6 +229,7 @@ function ProfileIdentity({
             <LocalCalendarDate iso={user.createdAt} />
           </span>
         </div>
+        {passwordRow}
       </div>
     </div>
   );
@@ -319,33 +325,29 @@ const TLS: ["all" | "typed" | "comment", string][] = [
 function ProfileAppearance({
   theme,
   onTheme,
-  motion,
   tlDefault,
   fetcher,
   submit,
 }: {
   theme: ThemePreference;
   onTheme: (value: ThemePreference, label: string) => void;
-  motion: "full" | "reduce";
   tlDefault: "all" | "typed" | "comment";
   /** UI-56: Appearance's OWN fetcher. It used to share the notification-routing
-   *  fetcher, so a notif flip immediately followed by a motion flip stranded the
+   *  fetcher, so a notif flip immediately followed by an appearance flip stranded the
    *  notif panel's pending rollback snapshot forever. */
   fetcher: ProfileFetcher;
   submit: (fields: Record<string, string>) => void;
 }) {
   const push = useToast();
-  const [mo, setMo] = useState(motion);
   const [tl, setTl] = useState(tlDefault);
 
   // UI-31: settle on the RESULT with rollback, exactly as ProfileNotifications
-  // does. Both controls used to set local state, mutate
-  // `document.documentElement.dataset.motion`, submit, and toast success
+  // does. The control used to set local state, submit, and toast success
   // immediately — and the shared result handler early-returned unless the intent
-  // was `set-notif`, so `set-motion`/`set-tl-default` failures were consumed by
-  // NOBODY: no error, no rollback of the toggle, no rollback of `data-motion`.
-  // The next root revalidation then re-rendered `<html data-motion>` from the
-  // unchanged server pref, so the DOM snapped back while the control read "on".
+  // was `set-notif`, so a `set-tl-default` failure was consumed by NOBODY: no
+  // error and no rollback of the control.
+  // Ruling 148(c): the "Reduce motion" toggle that sat here is gone; the OS
+  // `prefers-reduced-motion` setting is the one reduced-motion signal.
   const pending = useRef<{
     toast: string;
     rollback: () => void;
@@ -361,24 +363,6 @@ function ProfileAppearance({
       push(data.error ?? "That preference could not be saved. Change not applied", "error");
     }
   });
-
-  const flipMotion = () => {
-    const next = mo === "reduce" ? "full" : "reduce";
-    const previous = mo;
-    setMo(next);
-    document.documentElement.dataset.motion = next;
-    pending.current = {
-      toast:
-        next === "reduce"
-          ? "Motion reduced. Pulses and animation paused"
-          : "Motion restored",
-      rollback: () => {
-        setMo(previous);
-        document.documentElement.dataset.motion = previous;
-      },
-    };
-    submit({ intent: "set-motion", motion: next });
-  };
 
   const pickTl = (v: "all" | "typed" | "comment", l: string) => {
     // RU-1: re-picking the active default is a no-op — don't re-submit or toast.
@@ -423,13 +407,6 @@ function ProfileAppearance({
               </button>
             ))}
           </span>
-        </div>
-        <div className="pref-row">
-          <span className="pref-main">
-            <div className="pn">Reduce motion</div>
-            <div className="pd">Pauses live pulses and interface animation.</div>
-          </span>
-          <TglP on={mo === "reduce"} onChange={flipMotion} label="Reduce motion" />
         </div>
         <div className="pref-row">
           <span className="pref-main">
@@ -638,8 +615,10 @@ function ProfileGithub({
         <div className="cred-top">
           <Icon name="github" />
           <span className="cred-name">Personal OAuth identity</span>
+          {/* "not connected" in words: the "−" this slot used to show read as a
+              collapse control that did nothing. */}
           <span className="mono push faint">
-            {gh ? "oauth" : "−"}
+            {gh ? "oauth" : "not connected"}
           </span>
         </div>
         <div className="scope-chips">
@@ -723,36 +702,146 @@ function ProfileGithub({
 
 // -------------------------------------------------------- Change password
 
-type PwFormState = {
-  current: string;
-  next: string;
-  confirm: string;
-  clientErr: string | null;
-};
+type PwField = "current" | "next" | "confirm";
 
-const PW_FORM_INITIAL: PwFormState = {
-  current: "",
-  next: "",
-  confirm: "",
-  clientErr: null,
-};
+/**
+ * Ruling 148(b): the password change is a row on the Profile card whose
+ * button opens a modal, not a three-field form served inline on the page.
+ * The modal is the org-settings `MiniModal`, which carries the ruling 147
+ * contract (the primary stays enabled; an incomplete submit is refused with
+ * the hint re-inserted as an alert and the first empty field focused). The two
+ * checks the server would also make, length and match, are refused here with
+ * the offending field marked and focused, and a server refusal (a wrong
+ * current password) lands in the same alert slot.
+ */
+function ChangePasswordModal({
+  fetcher,
+  submit,
+  onClose,
+}: {
+  fetcher: ProfileFetcher;
+  submit: (fields: Record<string, string>) => void;
+  onClose: () => void;
+}) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  /** The field a refused submit named; null on a pristine form. */
+  const [flagged, setFlagged] = useState<PwField | null>(null);
+  const [clientErr, setClientErr] = useState<string | null>(null);
+  const refs = {
+    current: useRef<HTMLInputElement>(null),
+    next: useRef<HTMLInputElement>(null),
+    confirm: useRef<HTMLInputElement>(null),
+  };
+  const busy = fetcher.state !== "idle";
+  const err = clientErr ?? actionError(fetcher);
+  const canSave = current !== "" && next !== "" && confirm !== "";
 
-type PwFormAction =
-  | { type: "edit"; field: "current" | "next" | "confirm"; value: string }
-  | { type: "client-err"; error: string | null }
-  | { type: "reset" };
+  const refuse = (field: PwField, message: string) => {
+    setFlagged(field);
+    setClientErr(message);
+    refs[field].current?.focus();
+  };
+  const save = () => {
+    if (next.length < MIN_PASSWORD_LENGTH) {
+      refuse("next", `New password needs at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+    if (next !== confirm) {
+      refuse("confirm", "Passwords don't match.");
+      return;
+    }
+    setFlagged(null);
+    setClientErr(null);
+    submit({ intent: "change-password", current, next, confirm });
+  };
+  const edit = (field: PwField, set: (v: string) => void) => (value: string) => {
+    set(value);
+    setClientErr(null);
+    setFlagged((f) => (f === field ? null : f));
+  };
+  const mark = (field: PwField) => ({
+    "aria-invalid": flagged === field || undefined,
+    "aria-describedby": flagged === field && err ? "profile-pw-err" : undefined,
+  });
 
-function pwFormReducer(state: PwFormState, action: PwFormAction): PwFormState {
-  switch (action.type) {
-    case "edit":
-      return { ...state, [action.field]: action.value, clientErr: null };
-    case "client-err":
-      return { ...state, clientErr: action.error };
-    case "reset":
-      return PW_FORM_INITIAL;
-  }
+  return (
+    <MiniModal
+      icon={<Icon name="lock" />}
+      title="Change password"
+      sub="Keeps you signed in here; every other session is signed out"
+      onClose={onClose}
+      canSave={canSave}
+      busy={busy}
+      saveLabel="Change password"
+      unmetHint="Fill in all three fields to continue."
+      focusUnmet={() => {
+        const first: PwField =
+          current === "" ? "current" : next === "" ? "next" : "confirm";
+        setFlagged(first);
+        refs[first].current?.focus();
+      }}
+      onSave={save}
+      screen="Change password dialog"
+    >
+      <div className="field">
+        <label className="flabel" htmlFor="profile-pw-current">
+          Current password
+        </label>
+        <input
+          ref={refs.current}
+          id="profile-pw-current"
+          type="password"
+          autoComplete="current-password"
+          value={current}
+          data-autofocus
+          onChange={(e) => edit("current", setCurrent)(e.target.value)}
+          {...mark("current")}
+        />
+      </div>
+      <div className="field-row">
+        <div className="field">
+          <label className="flabel" htmlFor="profile-pw-next">
+            New password{" "}
+            <span className="fhint">at least {MIN_PASSWORD_LENGTH} characters</span>
+          </label>
+          <input
+            ref={refs.next}
+            id="profile-pw-next"
+            type="password"
+            autoComplete="new-password"
+            value={next}
+            onChange={(e) => edit("next", setNext)(e.target.value)}
+            {...mark("next")}
+          />
+        </div>
+        <div className="field">
+          <label className="flabel" htmlFor="profile-pw-confirm">
+            Confirm new password
+          </label>
+          <input
+            ref={refs.confirm}
+            id="profile-pw-confirm"
+            type="password"
+            autoComplete="new-password"
+            value={confirm}
+            onChange={(e) => edit("confirm", setConfirm)(e.target.value)}
+            {...mark("confirm")}
+          />
+        </div>
+      </div>
+      {err && (
+        <div id="profile-pw-err" className="login-err" role="alert">
+          <Icon name="alert" />
+          {err}
+        </div>
+      )}
+    </MiniModal>
+  );
 }
 
+/** The "Password" row on the Profile card and the modal its button opens. */
 function ProfilePassword({
   fetcher,
   submit,
@@ -760,124 +849,42 @@ function ProfilePassword({
   fetcher: ProfileFetcher;
   submit: (fields: Record<string, string>) => void;
 }) {
-  const [{ current, next, confirm, clientErr }, dispatch] = useReducer(
-    pwFormReducer,
-    PW_FORM_INITIAL,
-  );
+  const [open, setOpen] = useState(false);
   useServerToast(fetcher);
 
-  // Clear the fields after a successful change.
+  // Close on the server's success result: the toast says what happened, and a
+  // modal that stayed open over "Password changed" would read as unfinished.
   const doneRef = useRef<ProfileActionData | null>(null);
   useEffect(() => {
     if (fetcher.state !== "idle" || !fetcher.data) return;
     if (doneRef.current === fetcher.data) return;
     doneRef.current = fetcher.data;
-    if (fetcher.data.ok) {
-      dispatch({ type: "reset" });
-    }
+    if (fetcher.data.ok) setOpen(false);
   }, [fetcher.state, fetcher.data]);
 
-  const err = clientErr ?? actionError(fetcher);
-  const busy = fetcher.state !== "idle";
-
-  const onSubmit = () => {
-    if (next.length < MIN_PASSWORD_LENGTH) {
-      dispatch({
-        type: "client-err",
-        error: `New password needs at least ${MIN_PASSWORD_LENGTH} characters.`,
-      });
-      return;
-    }
-    if (next !== confirm) {
-      dispatch({ type: "client-err", error: "Passwords don't match." });
-      return;
-    }
-    dispatch({ type: "client-err", error: null });
-    submit({
-      intent: "change-password",
-      current,
-      next,
-      confirm,
-    });
-  };
-
   return (
-    <div className="panel">
-      <div className="panel-head">
-        <Icon name="lock" />
-        <h2>Change password</h2>
-      </div>
-      <div className="profile-fields">
-        <div className="field">
-          <label className="flabel" htmlFor="profile-pw-current">
-            Current password
-          </label>
-          <input
-            id="profile-pw-current"
-            type="password"
-            autoComplete="current-password"
-            value={current}
-            onChange={(e) =>
-              dispatch({ type: "edit", field: "current", value: e.target.value })
-            }
-          />
-        </div>
-        <div className="field-row">
-          <div className="field">
-            <label className="flabel" htmlFor="profile-pw-next">
-              New password{" "}
-              <span className="fhint">
-                at least {MIN_PASSWORD_LENGTH} characters
-              </span>
-            </label>
-            <input
-              id="profile-pw-next"
-              type="password"
-              autoComplete="new-password"
-              value={next}
-              onChange={(e) =>
-                dispatch({ type: "edit", field: "next", value: e.target.value })
-              }
-            />
-          </div>
-          <div className="field">
-            <label className="flabel" htmlFor="profile-pw-confirm">
-              Confirm new password
-            </label>
-            <input
-              id="profile-pw-confirm"
-              type="password"
-              autoComplete="new-password"
-              value={confirm}
-              onChange={(e) =>
-                dispatch({
-                  type: "edit",
-                  field: "confirm",
-                  value: e.target.value,
-                })
-              }
-            />
-          </div>
-        </div>
-        {err && (
-          <div className="login-err" role="alert">
-            <Icon name="alert" />
-            {err}
-          </div>
-        )}
-        <div>
+    <>
+      <div className="kv-row">
+        <span className="k">Password</span>
+        <span className="v">
           <button
-            className="btn sm"
             type="button"
-            disabled={busy}
-            aria-busy={busy}
-            onClick={onSubmit}
+            className="btn ghost sm"
+            onClick={() => setOpen(true)}
           >
+            <Icon name="lock" />
             Change password
           </button>
-        </div>
+        </span>
       </div>
-    </div>
+      {open && (
+        <ChangePasswordModal
+          fetcher={fetcher}
+          submit={submit}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -930,6 +937,14 @@ export function ProfilePage({
               data={data}
               fetcher={fetchers.identity}
               submit={submitWith(fetchers.identity)}
+              passwordRow={
+                data.user.hasPassword ? (
+                  <ProfilePassword
+                    fetcher={fetchers.password}
+                    submit={submitWith(fetchers.password)}
+                  />
+                ) : null
+              }
             />
             <ProfileNotifications
               notifs={data.prefs.notifs}
@@ -939,7 +954,6 @@ export function ProfilePage({
             <ProfileAppearance
               theme={theme}
               onTheme={onTheme}
-              motion={data.prefs.motion}
               tlDefault={data.prefs.tlDefault}
               fetcher={fetchers.appearance}
               submit={submitWith(fetchers.appearance)}
@@ -966,12 +980,6 @@ export function ProfilePage({
               fetcher={fetchers.github}
               submit={submitWith(fetchers.github)}
             />
-            {data.user.hasPassword && (
-              <ProfilePassword
-                fetcher={fetchers.password}
-                submit={submitWith(fetchers.password)}
-              />
-            )}
           </div>
         </div>
       </div>

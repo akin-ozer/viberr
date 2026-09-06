@@ -285,8 +285,8 @@ function DockShell({ context }: { context: DockContext }) {
     const onEnd = (event: TransitionEvent) => {
       if (event.target === panel) finish();
     };
-    // 0/NaN in jsdom (no stylesheet) and ~0 under [data-motion="reduce"]:
-    // both mean close now.
+    // 0/NaN in jsdom (no stylesheet), or ~0 where the sheet's reduced-motion
+    // rules apply: both mean close now.
     const seconds = parseFloat(getComputedStyle(panel).transitionDuration);
     if (!(seconds > 0.02)) {
       finish();

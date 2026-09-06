@@ -36,8 +36,8 @@ export function useDialog(
     if (!dialog || dialog.dataset.closing !== undefined) return;
     dialog.dataset.closing = "";
     // dialog[data-closing]'s transition-duration, read after the attribute
-    // lands: 0/NaN in jsdom (no stylesheet) and ~0 under [data-motion=
-    // "reduce"] — both mean close synchronously.
+    // lands: 0/NaN in jsdom (no stylesheet), or ~0 where the sheet's
+    // reduced-motion rules apply — both mean close synchronously.
     const seconds = parseFloat(getComputedStyle(dialog).transitionDuration);
     if (!(seconds > 0.02)) {
       onCloseRef.current();

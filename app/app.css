@@ -79,8 +79,12 @@
      across two hue families that invited a wrong partner). Note: --red-light
      and --coral-light both pair with --coral-dark and converge in dark —
      documented as the pastel-pairs-invert-together convention, not a bug. */
-  --amber-light: #ffe6cd;
-  --amber-dark: #746019;
+  /* Ruling 148(d): GitHub's warning pair. The light fill is GitHub's attention
+     background (#fff8c5), which mixed 45% into the surface gives its classic
+     pale-yellow flash; the text is the dark olive it prints that flash in. The
+     old peach (#ffe6cd) under olive text read as a generated palette. */
+  --amber-light: #fff8c5;
+  --amber-dark: #735c0f;
   --red-light: #fbd4d4;
 
   /* agent identity tint — violet, distinct from human blue */
@@ -904,13 +908,6 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   0%, 88% { opacity: .9; }
   100%    { opacity: 0; }
 }
-/* The [data-motion="reduce"] kill switch clamps every animation-duration to
-   .01ms !important. On a progress-based timeline that collapses the whole scroll
-   range into nothing and the fade would never show. This is an INDICATOR, not
-   decoration — same reasoning as `.route-pending .rp-fill` below — so restore
-   the timeline-length duration. Nothing here moves or repeats. */
-[data-motion="reduce"] .board-wrap::after { animation-duration: auto !important; }
-
 .board-orphans {
   display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
   margin: 0 1.5rem .5rem;
@@ -2198,7 +2195,7 @@ dialog[data-closing]::backdrop {
    frequency rule keyboard-initiated UI should appear instantly (Raycast has no
    open/close animation either). [data-closing] sets transition:none so
    useDialog.close() takes its synchronous-unmount path (the same branch already
-   used under jsdom and [data-motion="reduce"]). */
+   used under jsdom). */
 .cmdk-card {
   position: fixed; z-index: 61;
   top: 12vh; left: 50%; transform: translate(-50%, 0);
@@ -2465,7 +2462,10 @@ dialog[data-closing]::backdrop {
   padding: .125rem 1.5rem var(--dock-clear);
   display: flex; flex-direction: column; gap: 1rem;
 }
-.policy-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+/* Ruling 148(a): a row's two panels end on one line (grid items stretch by
+   default). `.activity-cols` keeps `align-items: start` on purpose: a feed
+   beside a short panel would only stretch the panel into a tall empty box. */
+.policy-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 
 .pol-note {
   display: flex; gap: .5rem; align-items: flex-start;
@@ -2971,7 +2971,10 @@ dialog[data-closing]::backdrop {
    ============================================================ */
 .avatar.xl { width: 56px; height: 56px; font-size: 1.3rem; }
 
-.profile-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+/* Ruling 148(a): both columns are the row's height, and the last panel of the
+   shorter column fills to the bottom (the appended rule), so the two columns
+   end on one line instead of wherever each stack happened to stop. */
+.profile-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .profile-col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
 
 .profile-id { display: flex; gap: 1rem; align-items: flex-start; }
@@ -3055,8 +3058,12 @@ dialog[data-closing]::backdrop {
   --rose-light: #4a2140;
   --teal-light: #123f3d;
   --teal-dark: #6ce4dc;
-  --amber-light: #45311a;
-  --amber-dark: #eccd72;
+  /* Ruling 148(d): GitHub's dark attention pair — an amber-tinted fill and
+     GitHub's attention foreground for icons, borders and pills. The warning
+     BOXES themselves print their sentence in --fg on dark (appended rule):
+     yellow text on brown was the "AI slop" the owner named. */
+  --amber-light: #3a3019;
+  --amber-dark: #d29922;
   --red-light: #47211f;
 
   --agent: #957fff;
@@ -3080,14 +3087,6 @@ dialog[data-closing]::backdrop {
    while the documented pair — --cta-fg on --blue-pressed — is 10.42:1 and
    test-locked. */
 :root[data-theme="dark"] dialog::backdrop { background: rgba(5, 6, 10, .65); }
-
-/* reduced motion preference */
-[data-motion="reduce"] *, [data-motion="reduce"] *::before, [data-motion="reduce"] *::after {
-  animation-duration: .01ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: .01ms !important;
-  scroll-behavior: auto !important;
-}
 
 /* ---------- Global header pieces (shared by Home + workspace) ---------- */
 .home-brand {
@@ -3166,8 +3165,6 @@ dialog[data-closing]::backdrop {
 }
 .overlay-x {
   position: absolute; top: .85rem; right: .85rem; z-index: 5;
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
 }
 .page-overlay-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 /* N20-13 (pass-20): `.overlay-x` is pinned to the overlay's top-right corner
@@ -3175,9 +3172,11 @@ dialog[data-closing]::backdrop {
    scrolls underneath it, so on a scrolled overlay (e.g. /profile scrolled to the
    bottom) arbitrary content slid under the button and read as a clipped row. The
    overlay's own header already reserves the button's gutter (`padding-right`);
-   pinning it with an opaque background turns it into an always-present strip that
-   scrolled content passes BEHIND — the close button now stays legible over its
-   reserved header at every scroll position instead of floating over live content.
+   making the header STICKY with an opaque background turns it into an
+   always-present strip that scrolled content passes BEHIND — the close button
+   stays legible over its reserved header at every scroll position instead of
+   floating over live content, which is also why the button itself needs no
+   fill of its own (the shared close-control rule at the end of the sheet).
    z-index sits below `.overlay-x` (5) and above the scrolled body (auto). */
 .page-overlay .board-head {
   padding-right: 4.4rem;
@@ -4357,8 +4356,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .pj-row .pj-star:active { transform: translateY(-50%) scale(.9); }
 
 /* OS-level reduced motion: entrances collapse to a quick fade (movement is
-   what nauseates; opacity still aids comprehension). The in-app pref
-   [data-motion="reduce"] above remains the global kill-switch. */
+   what nauseates; opacity still aids comprehension). Ruling 148(c): this OS
+   preference is the ONE reduced-motion signal; the in-app kill switch is gone. */
 @media (prefers-reduced-motion: reduce) {
   .user-menu, .ntf-pop, .rsel-menu, .own-menu, .stage-menu-pop, .datepick-pop,
   .confirm-card, .modal-card, .page-overlay, .toast, .login-card,
@@ -4438,10 +4437,6 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   from { transform: translateX(-100%); }
   to   { transform: translateX(320%); }
 }
-/* The global [data-motion="reduce"] kill-switch clamps animations to ~0 ms,
-   which would leave a static 34% stub — give reduced motion a full-width bar
-   so the indicator still reads. */
-[data-motion="reduce"] .route-pending .rp-fill { width: 100%; }
 @media (prefers-reduced-motion: reduce) {
   /* Neutralize the sweep too, not just the width — otherwise the transform
      slide keeps looping, now full-width, which is worse than a static stub. */
@@ -5620,6 +5615,47 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
   flex: 1 1 200px; min-width: 0; margin: 0;
   font-size: .8rem; color: var(--muted); line-height: 1.4;
 }
+
+/* ============================= Ruling 148 profile pass =============================
+   Four owner findings on Profile → preferences, applied app-wide where the
+   idiom is shared. Existing tokens and scales only. */
+
+/* 148(a): the last panel of a stacked column fills to the column's bottom, so
+   the two columns of `.profile-cols` end on one line. The grid row is already
+   the taller column's height (items stretch by default now); this is what
+   hands the shorter column's slack to its last card instead of leaving a gap. */
+.profile-col > :last-child { flex: 1 0 auto; }
+
+/* 148(d): on dark the warning boxes print their sentence in the default
+   foreground; only the icon, the border and the fill carry amber. Light keeps
+   GitHub's dark-olive text, which is the pair the tokens now hold. */
+:root[data-theme="dark"] .cred-warn,
+:root[data-theme="dark"] .archived-banner { color: var(--fg); }
+:root[data-theme="dark"] .cred-warn .ico,
+:root[data-theme="dark"] .archived-banner .ico { color: var(--amber-dark); }
+
+/* The close control, one design on every modal head and the page overlay: a
+   borderless circle that takes a soft fill on hover and the app's press scale.
+   The bordered, shadowed square it replaces read as a card of its own in the
+   corner of every dialog. */
+.icon-btn.modal-close, .overlay-x {
+  width: 34px; height: 34px;
+  border-color: transparent;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  color: var(--faint);
+  transition: background .15s ease, color .15s ease, transform .1s var(--ease-out);
+}
+.icon-btn.modal-close:hover:not(:disabled), .overlay-x:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--tint-well);
+  color: var(--fg);
+}
+.icon-btn.modal-close .ico, .overlay-x .ico { width: 16px; height: 16px; }
+
+/* 148(c): with the in-app kill switch gone, the OS preference also stills the
+   live pulse (the removed setting's copy promised "pauses live pulses"). */
 @media (prefers-reduced-motion: reduce) {
-  .signin-status .live-dot::after { animation: none; }
+  .live-dot::after { animation: none; }
 }
