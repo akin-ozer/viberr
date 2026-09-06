@@ -72,9 +72,13 @@ describe("resolveRunModel — the SDK-safety sanitizer", () => {
     // Same-backend valid values pass through.
     expect(resolveRunEffort("claude", "high")).toBe("high");
     expect(resolveRunEffort("codex", "low")).toBe("low");
-    // Claude-only "max" retried on Codex maps to Codex's nearest (xhigh), never
-    // passed raw (Codex would reject it).
-    expect(resolveRunEffort("codex", "max")).toBe("xhigh");
+    // `max` is offered on both backends since Codex CLI 0.153 (the SDK 0.153.4
+    // upgrade), so a Claude `max` retried on Codex keeps its tier.
+    expect(resolveRunEffort("codex", "max")).toBe("max");
+    // A Codex-only tier Viberr does not offer (`ultra`, automatic delegation)
+    // maps to the nearest offered one on either backend, never passed raw.
+    expect(resolveRunEffort("codex", "ultra")).toBe("max");
+    expect(resolveRunEffort("claude", "ultra")).toBe("max");
     // A legacy "minimal" setting maps to the nearest supported tier.
     expect(resolveRunEffort("codex", "minimal")).toBe("low");
     expect(resolveRunEffort("claude", "minimal")).toBe("low");
@@ -121,18 +125,31 @@ describe("curated catalog", () => {
     expect(claudeModelRunsVerbatim("gpt-5-codex")).toBe(false);
   });
 
-  it("codex curated: current subscription models + low…xhigh efforts", () => {
+  it("codex curated: the pinned CLI's bundled models + low…max efforts, per model", () => {
     const cat = curatedCatalog("codex");
     // F20-33: Terra is listed FIRST (so it is the fallback default) — Sol 400s
     // on a ChatGPT-plan Codex account and must not be what a model-less operator
-    // falls back to. Sol stays offered, just no longer first/default.
+    // falls back to. Sol stays offered, just no longer first/default. Codex CLI
+    // 0.153 (SDK 0.153.4) added GPT-6 Astra as its own default; here it is
+    // offered second, never the default, for the same reason.
     expect(cat.models.map((m) => m.value)).toEqual([
       "gpt-5.6-terra",
+      "gpt-6-astra",
       "gpt-5.6-sol",
       "gpt-5.6-luna",
       "gpt-5.5",
     ]);
-    expect(cat.efforts).toEqual(["low", "medium", "high", "xhigh"]);
+    // `max` joined the offer with 0.153; `ultra` (automatic delegation) and
+    // `persistent` (no bundled model) did not. Canary: put `ultra` in
+    // CODEX_EFFORTS.
+    expect(cat.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    // Per model, exactly as the bundled catalog lists them: GPT-5.5 stops at
+    // `xhigh`, the rest reach `max`.
+    const effortsOf = (id: string) => cat.models.find((m) => m.value === id)?.efforts;
+    expect(effortsOf("gpt-5.5")).toEqual(["low", "medium", "high", "xhigh"]);
+    for (const id of ["gpt-5.6-terra", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"]) {
+      expect(effortsOf(id), id).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    }
     expect(cat.defaultModel).toBe("gpt-5.6-terra");
     expect(cat.defaultEffort).toBe("medium");
   });
@@ -556,9 +573,10 @@ describe("assertEffortForBackend / assertModelForBackend (ruling 139)", () => {
         expect(() => assertEffortForBackend(backend, tier)).not.toThrow();
       }
     }
-    expect(() => assertEffortForBackend("codex", "max")).toThrow(
-      /"max" is not an effort tier Codex offers\. Codex takes: low, medium, high, xhigh\./,
+    expect(() => assertEffortForBackend("codex", "ultra")).toThrow(
+      /"ultra" is not an effort tier Codex offers\. Codex takes: low, medium, high, xhigh, max\./,
     );
+    expect(() => assertEffortForBackend("codex", "persistent")).toThrow(/Codex takes:/);
     expect(() => assertEffortForBackend("claude", "ultra")).toThrow(/Claude takes: low, medium, high, xhigh, max/);
     expect(() => assertEffortForBackend("claude", "")).toThrow(/"\(empty\)" is not an effort tier/);
     // Codex `minimal` is accepted at run time but NOT offered: the write

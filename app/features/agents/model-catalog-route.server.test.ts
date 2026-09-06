@@ -99,7 +99,9 @@ describe("resources/model-catalog", () => {
     // ChatGPT-plan Codex account, so a model-less operator must not fall back to it).
     expect(body.data.models.map((m) => m.value)).toContain("gpt-5.6-sol");
     expect(body.data.defaultModel).toBe("gpt-5.6-terra");
-    expect(body.data.efforts).toEqual(["low", "medium", "high", "xhigh"]);
+    // Codex CLI 0.153 (SDK 0.153.4): `max` is offered; GPT-6 Astra is listed, not default.
+    expect(body.data.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(body.data.models.map((m) => m.value)).toContain("gpt-6-astra");
   });
 
   it("defaults an unknown/missing backend to claude", async () => {

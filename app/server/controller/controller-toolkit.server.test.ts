@@ -1267,8 +1267,10 @@ describe("effort and model at deploy are settable and refused by name (ruling 13
     const current = before.backends[0] === "codex" ? "codex" : "claude";
     const other = current === "claude" ? "codex" : "claude";
     const label = { claude: "Claude", codex: "Codex" } as const;
-    const tiers = { claude: "low, medium, high, xhigh, max", codex: "low, medium, high, xhigh" } as const;
-    const top = current === "claude" ? "max" : "xhigh";
+    // Both backends offer `max` since Codex CLI 0.153 (SDK 0.153.4); `ultra` is
+    // Codex-only in the SDK union and deliberately unoffered on either.
+    const tiers = { claude: "low, medium, high, xhigh, max", codex: "low, medium, high, xhigh, max" } as const;
+    const top = "max";
     const set = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", effort: top });
     expect(set).toContain("[done]");
     expect(set).toContain(`Effort is now ${top}`);
@@ -1279,7 +1281,8 @@ describe("effort and model at deploy are settable and refused by name (ruling 13
     expect((await developer()).effort).toBe(top); // nothing written
 
     // A tier the OTHER backend does not list, sent with the switch: refused, nothing written.
-    const foreignTier = other === "codex" ? "max" : "minimal";
+    // (Codex accepts `minimal` at run time but never offers it; Claude has no such tier.)
+    const foreignTier = "minimal";
     const wrongBackend = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", backend: other, effort: foreignTier });
     expect(wrongBackend).toContain(`[error] "${foreignTier}" is not an effort tier ${label[other]} offers`);
     expect((await developer()).backends).toEqual(before.backends);

@@ -132,10 +132,17 @@ async function drain(): Promise<void> {
 }
 
 describe("resolveCodexReasoningEffort", () => {
-  it("accepts only values supported by the installed SDK", () => {
+  it("accepts only values supported by the installed SDK that Viberr offers", () => {
     expect(resolveCodexReasoningEffort("minimal")).toBe("minimal");
     expect(resolveCodexReasoningEffort("xhigh")).toBe("xhigh");
-    expect(resolveCodexReasoningEffort("max")).toBeUndefined();
+    // SDK 0.153.4: `max` joined the union and the bundled catalog lists it on
+    // every current model, so it is forwarded.
+    expect(resolveCodexReasoningEffort("max")).toBe("max");
+    // In the union too, deliberately NOT forwarded: `ultra` is automatic task
+    // delegation (sub-agents, the operator's job); `persistent` is supported by
+    // no bundled model. Canary: add either case to the switch.
+    expect(resolveCodexReasoningEffort("ultra")).toBeUndefined();
+    expect(resolveCodexReasoningEffort("persistent")).toBeUndefined();
     expect(resolveCodexReasoningEffort("")).toBeUndefined();
   });
 });
@@ -201,9 +208,21 @@ describe("codex adapter (SDK, injected fake client)", () => {
     await drain();
     expect(noEffort.startOptions()?.modelReasoningEffort).toBeUndefined();
 
+    // `max` is a tier the pinned SDK accepts and the catalog offers (0.153.4).
+    const max = fakeCodex(events);
+    createCodexAdapter({ codexFactory: max.factory }).start(
+      { ...SPEC, effort: "max" },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(max.startOptions()?.modelReasoningEffort).toBe("max");
+
+    // A tier Viberr does not forward (`ultra`: automatic delegation) is omitted,
+    // so the CLI applies its own default instead of running a mode the
+    // deployment never chose.
     const unsupported = fakeCodex(events);
     createCodexAdapter({ codexFactory: unsupported.factory }).start(
-      { ...SPEC, effort: "max" },
+      { ...SPEC, effort: "ultra" },
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();

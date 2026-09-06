@@ -11,7 +11,9 @@
 > paragraph no longer claims the credentials are environment variables. Updated 2026-09-06 for
 > the Claude Agent SDK upgrade 0.3.220 → 0.3.261: §2.4 (the `permissionPrompts` option, the
 > `permission_denied` console line, the task-tool denylist note) and §§2.4/2.5/3.5 (the new
-> `overloaded` failure class, read from the SDK's `api_error_status: 529`). The operator's own behaviour is in
+> `overloaded` failure class, read from the SDK's `api_error_status: 529`). Updated the same day
+> for the Codex SDK upgrade 0.146.0 → 0.153.4: §2.3 (GPT-6 Astra offered, `max` effort per model,
+> `ultra`/`persistent` deliberately not) and the §2.5 re-check of the sandbox carve-out. The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -29,7 +31,7 @@
   `delivers: true|false`, `verdictCapable`, `backend`, optional `pinnedBackend`. At most
   one entry delivers; it owns the workspace, branch and PR. Engagements are written by
   the dispatch itself (ruling 98).
-- **Backend**: `claude` (Claude Agent SDK) or `codex` (Codex SDK 0.146.0). A profile lists
+- **Backend**: `claude` (Claude Agent SDK 0.3.261) or `codex` (Codex SDK 0.153.4). A profile lists
   the backends it may run on; the first `codex` else `claude` is the deployment's
   "primary run backend".
 
@@ -106,7 +108,7 @@ alike. There is no fallback engine and no other account to fall back to.
 | Backend | Models (default first) | Efforts (default) | Rules |
 |---|---|---|---|
 | claude | `sonnet`, `opus`, `haiku` (aliases), plus a family alias carrying a bracketed context-window variant (`opus[1m]`, what the live catalog offers as "Opus (1M context)"), plus any dated `claude-*` id containing a digit, plus the live `supportedModels()` list of the VIEWER's OWN connected Claude account (10 min cache keyed by that person's home, 15 s timeout; ruling 127) | `low medium high xhigh max` (`high`) | Alias or dated id runs verbatim; a string containing opus/haiku/sonnet maps to the alias; the bracketed variant is split off FIRST, the base resolved, and the variant re-appended verbatim (`claude-opus[1m]` → `opus[1m]`, `claude-sonnet-4-5[1m]` unchanged), so it reaches the SDK and is known on a cold process (pass 34, F34-7); anything else falls back to the SDK default. Display: the live catalog row's name when cached, else "Claude Opus [1m]" |
-| codex | `gpt-5.6-terra`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5` (closed list) | `low medium high xhigh` (`medium`); `minimal` accepted at run time, never offered | A model persisted for the other backend is **substituted silently** at start with only a `run·model_substituted` log line |
+| codex | `gpt-5.6-terra`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5` (closed list, read off the pinned CLI's bundled catalog; Astra is the CLI's own default since 0.153.4 but Terra stays Viberr's, F20-33) | `low medium high xhigh max` (`medium`), per model as the bundled catalog lists them (GPT-5.5 stops at `xhigh`); `minimal` accepted at run time, never offered; `ultra` (automatic task delegation, i.e. sub-agents — the operator's job) and `persistent` (no bundled model) are in the SDK union but neither offered nor forwarded | A model persisted for the other backend is **substituted silently** at start with only a `run·model_substituted` log line |
 
 `/resources/model-catalog?backend=` serves `{ models, efforts, defaultModel,
 defaultEffort }` to the profile editor (unknown backend → claude; `requireUser` only).
@@ -225,7 +227,9 @@ stated as the last refusal Viberr observed, retired by any completed run.
   The second arm is ruling 101(c)'s carve-out and it is **not** a gap in the docs: the
   pinned Codex 0.146 cannot express "read-only except `attachments/`" (`ReadOnly` admits
   no writable root; `--add-dir` widens `workspace-write` only), so ruling 109 kept it and
-  made it visible instead — see §4.3.
+  made it visible instead — see §4.3. Re-checked on the 0.153.4 pin (2026-09-06):
+  `--add-dir` still reads "writable alongside the primary workspace" and the sandbox
+  modes are unchanged, so the carve-out stands.
   `approvalPolicy: "never"`, `skipGitRepoCheck: true`; operator threads have network
   off; withheld egress sets `webSearchMode: "disabled"`.
 - MCP servers are passed **without credentials** (argv exposure), and in-process SDK

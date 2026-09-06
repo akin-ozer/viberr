@@ -28,11 +28,10 @@ import { redactProviderText } from "~/server/secrets/git-output-redact.server";
 
 /**
  * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified
- * v0.146.0 — {@link CODEX_SDK_VERIFIED_VERSION}, which a test pins to the
- * DECLARED dependency so this line cannot go stale again; 0.144.1 → 0.146.0 moved
- * exactly one documented thing, an additive `usage.cache_write_input_tokens` on
- * `turn.completed` that the SDK back-fills with 0 and Viberr does not project —
- * the wire normalizer reads `cached_input_tokens`, which is unchanged).
+ * v0.153.4 — {@link CODEX_SDK_VERIFIED_VERSION}, which a test pins to the
+ * DECLARED dependency so this line cannot go stale again; 0.146.0 → 0.153.4
+ * moved the SDK's surface in three additive places, listed on that constant,
+ * and none of the event shapes this adapter or the wire normalizer reads).
  * `new Codex()`, `codex.startThread({ workingDirectory,
  * skipGitRepoCheck, sandboxMode, model })` (or `resumeThread(threadId, …)`),
  * then `thread.runStreamed(prompt, { signal })` → `{ events }`, an async
@@ -66,8 +65,22 @@ import { redactProviderText } from "~/server/secrets/git-output-redact.server";
  * It lives here as a constant so `codex-runtime.server.test.ts` can assert it
  * against package.json: bumping the dependency without re-reading this adapter
  * now fails a test instead of quietly rotting a docstring.
+ *
+ * 0.153.4 (2026-09-06, from 0.146.0): the SDK's own surface moved in three
+ * places only — `CodexOptions.configOverrides` (raw `--config key=value`
+ * strings; Viberr keeps the structured `config`), `ThreadOptions.threadSource`
+ * (a rollout source label; not sent, its accepted values are the CLI's) and
+ * the `ModelReasoningEffort` union, which gained `max`, `ultra` and
+ * `persistent` (see `resolveCodexReasoningEffort`). Every flag the SDK emits
+ * (`exec --experimental-json` as the hidden alias of `--json`, `--sandbox`,
+ * `--cd`, `--add-dir`, `--skip-git-repo-check`, `--output-schema`) and every
+ * config key `codexConfigForRun` writes were re-checked against the bundled
+ * 0.153.4 binary, as were the `login --device-auth` prompt (byte-identical
+ * source) and `login status` markers `backend-login` parses. `--add-dir` still
+ * reads "writable alongside the primary workspace", so the ruling-109 carve-out
+ * (`resolveCodexSandboxMode`) stands.
  */
-export const CODEX_SDK_VERIFIED_VERSION = "0.146.0";
+export const CODEX_SDK_VERIFIED_VERSION = "0.153.4";
 
 /** Narrow injectable seam, derived from the installed SDK's public types. */
 export type CodexThread = Pick<Thread, "id" | "runStreamed">;
@@ -197,7 +210,20 @@ function codexMcpServers(servers: RunSpec["mcpServers"]): CodexConfig {
   return translated;
 }
 
-/** Do not cast arbitrary profile strings into the SDK's closed effort union. */
+/**
+ * Do not cast arbitrary profile strings into the SDK's closed effort union.
+ *
+ * The union (SDK 0.153.4) is `minimal | low | medium | high | xhigh | max |
+ * ultra | persistent`. Two members are deliberately NOT forwarded even though
+ * the type would allow them: `ultra` is "maximum reasoning with automatic task
+ * delegation" in the bundled catalog — the model spawning its own sub-agents,
+ * which is the orchestration Viberr reserves for the operator and denies on
+ * Claude through the whole Task family (`BASE_DENIED_BUILTINS`) — and
+ * `persistent` is supported by no bundled model at all. Neither is offered by
+ * the catalog (`CODEX_EFFORTS`), so a value that reaches here is a stored one
+ * from before this fence; it falls back to the CLI default rather than run a
+ * tier the deployment never chose.
+ */
 export function resolveCodexReasoningEffort(
   effort?: string,
 ): ModelReasoningEffort | undefined {
@@ -207,6 +233,7 @@ export function resolveCodexReasoningEffort(
     case "medium":
     case "high":
     case "xhigh":
+    case "max":
       return effort;
     default:
       return undefined;
