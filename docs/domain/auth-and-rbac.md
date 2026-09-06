@@ -299,9 +299,16 @@ Two routes in, both the vendor's own:
   the driver asks the SAME binary (`claude auth status`, `codex login status`) whether it
   is really signed in, and only that answer writes the row. The session is polled from the
   browser through `/resources/backend-login` every 2 s while it is live; the success toast
-  settles on that result, never on the submit. The step list is a polite live region and
-  takes focus when it replaces the button that started the flow, because every value in it
-  (the link, the code, the status line) arrives from a later poll.
+  settles on that result, never on the submit. The card renders the flow as two numbered steps
+  (2026-09-06): the vendor's link is an "Open sign-in page" button that names its host
+  and is never printed in full, Codex's code sits beside a Copy button, and Claude's code
+  field is a real labelled input whose Submit follows ruling 147 (enabled, an empty submit
+  refused with the field marked and focused). A step marker is pending until its input
+  arrives, current while actionable, done once the code is on its way; step 1 is never
+  marked done on its own, because nothing server-side can see the link being opened. The
+  status line is the ONE polite live region; the step group takes focus when it replaces
+  the button that started the flow, because every value in it (the link, the code, the
+  status line) arrives from a later poll.
 - **A pasted credential.** `backend-set-key` verifies an Anthropic Console or OpenAI
   Platform API key with a FREE `GET /v1/models` probe before sealing it; a ChatGPT
   workspace access token has no free probe and is stored `verified_at = null` with the

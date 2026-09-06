@@ -5559,3 +5559,67 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
   .dock .live-dot::after { animation: none; }
   .dock[data-open="true"] .dock-fab { transition: none; }
 }
+
+/* ============================= Ruling 127 hosted sign-in steps =============================
+   Profile → Agent accounts while a vendor sign-in is running
+   (agent-accounts-panel.tsx, `SignInSteps`). It used to be three `.kv-row`s,
+   a read-out idiom for FACTS, holding a procedure: the vendor's full OAuth
+   URL printed inline (a few hundred unbreakable characters) crushed the row
+   labels to one word per line and ran off the card, and a bare `<input>`
+   outside `.field` rendered in browser chrome. Now two numbered steps, each
+   with its one control, and a footer carrying the live status beside Cancel.
+   Existing tokens and scales only; the code field rides `.field`'s chrome. */
+.signin { margin-top: .75rem; }
+.signin-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .75rem; }
+.signin-step { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .75rem; align-items: start; }
+/* The marker: a faint number while the step's input has not arrived, a blue
+   one while it is actionable, a teal check once the flow is past it. Colour
+   never carries the state alone: a pending step's control is disabled and a
+   done step is preceded by a visually-hidden "done". */
+.signin-mark {
+  display: inline-grid; place-items: center;
+  width: 22px; height: 22px; margin-top: .125rem;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  background: var(--surface); color: var(--faint);
+  font-family: var(--font-mono); font-size: .74rem; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.signin-step[data-state="current"] .signin-mark { border-color: var(--blue); background: var(--blue-soft); color: var(--blue-pressed); }
+.signin-step[data-state="done"] .signin-mark { border-color: var(--teal-dark); background: var(--teal-light); color: var(--teal-dark); }
+.signin-mark .ico { width: 13px; height: 13px; }
+.signin-body { display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
+.signin-title { font-size: .86rem; font-weight: 600; color: var(--fg); line-height: 1.4; }
+.signin-step[data-state="pending"] .signin-title { color: var(--muted); }
+.signin-act { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; min-width: 0; }
+/* The code field shares its row with Submit and shrinks before wrapping;
+   `.field input[type="text"]` sets `width: 100%`, hence the attribute in the
+   selector. 32px is what `.btn.sm` (min-height 30) actually renders at its
+   .8rem display face, so the two sit flush. */
+.signin-act input[type="text"] { width: auto; flex: 1 1 14rem; min-width: 0; min-height: 32px; padding-top: .25rem; padding-bottom: .25rem; }
+.signin-host { min-width: 0; overflow-wrap: anywhere; }
+/* Codex's one-time code: legible enough to type from another screen, and a
+   click selects the whole thing. */
+.signin-code {
+  display: inline-flex; align-items: center;
+  padding: .375rem .75rem;
+  border: 1px solid var(--hairline); border-radius: var(--radius-button);
+  background: var(--surface); color: var(--fg);
+  font-family: var(--font-mono); font-size: 1.05rem; font-weight: 600;
+  letter-spacing: .06em; font-variant-numeric: tabular-nums;
+  user-select: all; -webkit-user-select: all;
+}
+.signin-foot {
+  display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  margin-top: .75rem; padding-top: .75rem;
+  border-top: 1px solid var(--hairline);
+}
+.signin-status {
+  display: inline-flex; align-items: center; gap: .5rem;
+  flex: 1 1 200px; min-width: 0; margin: 0;
+  font-size: .8rem; color: var(--muted); line-height: 1.4;
+}
+@media (prefers-reduced-motion: reduce) {
+  .signin-status .live-dot::after { animation: none; }
+}
