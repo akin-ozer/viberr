@@ -150,7 +150,7 @@ function ProviderModal({
         )}
       </div>
       {err && (
-        <div className="cred-warn">
+        <div className="form-err">
           <Icon name="alert" />
           <span>{err}</span>
         </div>

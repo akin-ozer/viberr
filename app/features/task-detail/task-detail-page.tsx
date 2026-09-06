@@ -966,7 +966,10 @@ export function TaskDetailPage({
         />
       )}
 
-      {/* D6: interrupt a live run — discards uncommitted in-flight work. */}
+      {/* D6: interrupt a live run — discards uncommitted in-flight work. That
+          discard is ruling 149's destructive class, so the commit keeps the
+          shared `danger` default and, under ruling 150, the `LiveRunPanel`
+          trigger that opens this dialog carries the same red label. */}
       {confirmInterrupt && (
         <ConfirmDialog
           screenLabel="Interrupt run dialog"
@@ -982,7 +985,12 @@ export function TaskDetailPage({
         />
       )}
 
-      {/* D6: dismiss an operator recommendation — a governed, audited decision. */}
+      {/* D6: dismiss an operator recommendation — an audited decision, and one
+          that takes nothing away: the dismissal is recorded on the timeline and
+          the operator may raise the recommendation again on its next run. Under
+          rulings 149 and 150 the danger treatment belongs to the controls that
+          take something away, so this one commits `primary`, like the neutral
+          `btn ghost sm` trigger that opens it. */}
       {confirmDismiss && (
         <ConfirmDialog
           screenLabel="Dismiss recommendation dialog"
@@ -995,6 +1003,7 @@ export function TaskDetailPage({
             </>
           }
           confirmLabel="Dismiss recommendation"
+          tone="primary"
           busy={recBusy}
           onCancel={() => setConfirmDismiss(null)}
           onConfirm={() => {

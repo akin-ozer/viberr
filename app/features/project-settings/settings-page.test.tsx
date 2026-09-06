@@ -676,28 +676,92 @@ describe("MembersPanel", () => {
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
 
-  it("invite validates name+email then submits and clears the form", () => {
+  /**
+   * Ruling 148(b): the invite form is no longer served under the member list —
+   * "Add member" in the panel head opens the shared `MiniModal`. Ruling 147
+   * lives in that modal: the primary stays ENABLED on an incomplete form and a
+   * click refuses in a fresh alert with the first unmet field marked and
+   * focused, where the row could only raise a toast.
+   */
+  it("invite is a head button that opens a modal; an empty submit is refused, not dead", () => {
     const onInvite = vi.fn();
-    const { getByPlaceholderText, getByText } = render(
+    const { container, getByText, getByLabelText } = render(
       <MembersPanel {...base} onInvite={onInvite} onRemove={() => {}} />,
     );
-    fireEvent.click(getByText("Invite"));
-    expect(onInvite).not.toHaveBeenCalled(); // empty form → client toast only
+    // Nothing is served inline any more.
+    expect(container.querySelector("dialog.modal-card")).toBeNull();
+    expect(container.querySelector("#pm-invite-name")).toBeNull();
 
-    // SAFETY: both placeholders belong to the invite row's two `<input>`s —
-    // MembersPanel renders no other node carrying them — so the `value` reads
-    // after the submit are sound on RTL's `HTMLElement`-typed hits.
-    const nameInput = getByPlaceholderText("Full name") as HTMLInputElement;
-    // SAFETY: the invite row's second `<input>`, per the same contract.
-    const emailInput = getByPlaceholderText(
-      "email@company.dev",
-    ) as HTMLInputElement;
+    fireEvent.click(getByText("Add member"));
+    const modal = container.querySelector("dialog.modal-card")!;
+    expect(modal).not.toBeNull();
+    // SAFETY: the modal's own primary — `MiniModal` renders exactly one
+    // `.btn.primary` in its foot, so this is the Add member commit.
+    const save = modal.querySelector("button.btn.primary") as HTMLButtonElement;
+    // Ruling 147(a): only a request in flight disables it.
+    expect(save.disabled).toBe(false);
+    // Ruling 147(c): a pristine form is never accused.
+    expect(modal.querySelector("[aria-invalid]")).toBeNull();
+
+    fireEvent.click(save);
+    expect(onInvite).not.toHaveBeenCalled();
+    const alert = modal.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain("Enter a name and a valid email");
+    // SAFETY: the two labelled `<input>`s inside the modal, bound by `htmlFor`.
+    const nameInput = getByLabelText(/Full name/) as HTMLInputElement;
+    // SAFETY: the modal's email `<input>`, per the same label binding.
+    const emailInput = getByLabelText(/Email/) as HTMLInputElement;
+    expect(nameInput.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(nameInput);
+
     fireEvent.change(nameInput, { target: { value: "Deniz Şahin" } });
+    // The mark clears as the field is answered; the email is still unmet.
+    expect(nameInput.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.click(save);
+    expect(onInvite).not.toHaveBeenCalled();
+    expect(emailInput.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(emailInput);
+
     fireEvent.change(emailInput, { target: { value: "Deniz@viberr.dev" } });
-    fireEvent.keyDown(emailInput, { key: "Enter" }); // email field submits
+    fireEvent.click(save);
     expect(onInvite).toHaveBeenCalledWith("Deniz Şahin", "deniz@viberr.dev");
-    expect(nameInput.value).toBe("");
-    expect(emailInput.value).toBe("");
+  });
+
+  it("refuses an address that already belongs to a member, without dispatching", () => {
+    const onInvite = vi.fn();
+    const { container, getByText, getByLabelText } = render(
+      <MembersPanel {...base} onInvite={onInvite} onRemove={() => {}} />,
+    );
+    fireEvent.click(getByText("Add member"));
+    fireEvent.change(getByLabelText(/Full name/), {
+      target: { value: "Arda Kaya" },
+    });
+    fireEvent.change(getByLabelText(/Email/), {
+      target: { value: "ARDA@viberr.dev" },
+    });
+    // SAFETY: `MiniModal`'s single foot primary, as above.
+    const save = container.querySelector(
+      "dialog.modal-card button.btn.primary",
+    ) as HTMLButtonElement;
+    fireEvent.click(save);
+    expect(onInvite).not.toHaveBeenCalled();
+    // The modal stays open on a refusal, so the address can be corrected.
+    const dialog = container.querySelector("dialog.modal-card")!;
+    // …and the refusal is answered INSIDE it. A toast would paint under the
+    // backdrop and its live region is inert while the dialog is open, so the
+    // sentence, the mark and the focus all live in the modal. Canary: push the
+    // sentence to the toast host again and nothing here is reachable.
+    const alert = dialog.querySelector('.form-err[role="alert"]')!;
+    expect(alert.textContent).toContain("arda@viberr.dev is already a member");
+    // SAFETY: the modal's email `<input>`, bound by `htmlFor`.
+    const emailInput = getByLabelText(/Email/) as HTMLInputElement;
+    expect(emailInput.getAttribute("aria-invalid")).toBe("true");
+    expect(emailInput.getAttribute("aria-describedby")).toBe(alert.id);
+    expect(document.activeElement).toBe(emailInput);
+    // Editing the address clears the refusal, so the next one is announced as a
+    // fresh insertion rather than a role flip on unchanged text (ruling 147(b)).
+    fireEvent.change(emailInput, { target: { value: "arda@viberr.de" } });
+    expect(dialog.querySelector('.form-err[role="alert"]')).toBeNull();
   });
 
   /**
@@ -708,16 +772,18 @@ describe("MembersPanel", () => {
    * the screen on the first keystroke. The org-level twin of the very same
    * action (`org-settings/users-panel.tsx`) labels "Full name" and "Email" over
    * inputs carrying those identical placeholders, and this page's own identity
-   * fields use the same `.field` + `.flabel` idiom. It bites hardest under
-   * 1300px, where `.invite-row` collapses to one column and the two
-   * same-looking boxes stack.
+   * fields use the same `.field` + `.flabel` idiom. The form moved into a modal
+   * with ruling 148(b); the labels are what makes it readable there too.
    */
   it("#22: both invite fields keep a real label, not just a vanishing placeholder", () => {
-    const { container, getByLabelText } = render(
+    const { container, getByLabelText, getByText } = render(
       <MembersPanel {...base} onInvite={() => {}} onRemove={() => {}} />,
     );
+    fireEvent.click(getByText("Add member"));
     const inputs = [
-      ...container.querySelectorAll<HTMLInputElement>(".invite-row input"),
+      ...container.querySelectorAll<HTMLInputElement>(
+        "dialog.modal-card .field input",
+      ),
     ];
     expect(inputs).toHaveLength(2);
     for (const input of inputs) {
@@ -745,10 +811,12 @@ describe("MembersPanel", () => {
   });
 
   it("hides invite + remove for non-admins", () => {
-    const { container, queryByPlaceholderText } = render(
+    const { container, queryByText } = render(
       <MembersPanel {...base} canManage={false} onInvite={() => {}} onRemove={() => {}} />,
     );
-    expect(queryByPlaceholderText("Full name")).toBeNull();
+    // Ruling 148(b): the form is behind a head button now, so the assertion has
+    // to be that the BUTTON is gone — a placeholder query would pass for free.
+    expect(queryByText("Add member")).toBeNull();
     expect(container.querySelector(".stg-x")).toBeNull();
   });
 
@@ -1278,7 +1346,13 @@ describe("SettingsPage — each panel gates on the action its own server guard c
           (b) => b.textContent?.trim() === "Add stage",
         ),
       ),
-      members: container.querySelector('input[placeholder="Full name"]') !== null,
+      // Ruling 148(b): the invite form lives behind "Add member" in the panel
+      // head now, so the head button is the affordance to read.
+      members: Boolean(
+        Array.from(container.querySelectorAll("button")).find(
+          (b) => b.textContent?.trim() === "Add member",
+        ),
+      ),
       repoRepair: Boolean(
         Array.from(container.querySelectorAll("button")).find(
           (b) => b.textContent?.trim() === "Repair…",

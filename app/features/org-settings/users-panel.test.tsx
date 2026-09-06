@@ -193,7 +193,7 @@ describe("LV-F1: a pending reset never hides the re-issue action", () => {
  * it (`ui/toast.tsx` — role="status", "the app's ONE announcer"), and the
  * client-side "You can't demote yourself" on the modal's own Save button toasts
  * too. Only the SERVER saying no — the duplicate-email and last-admin guards in
- * org-users.server.ts — landed in a roleless `.cred-warn`, because the modals
+ * org-users.server.ts — landed in a roleless box, because the modals
  * pass an `onResult` that replaces the default toast. A screen-reader user
  * pressed Save changes and heard nothing at all while the dialog sat open.
  */
@@ -227,9 +227,12 @@ describe("#20: a server refusal inside these modals is announced", () => {
     return render(<Stub initialEntries={["/org/settings"]} />);
   }
 
+  // Interface review 2026-09-06: a server refusal is an ERROR, so it wears the
+  // app's one inline-error box (`.form-err`) rather than the amber warning box
+  // it shared with "not connected" and "scopes unverified".
   const warning = async (container: HTMLElement, text: string) =>
     await waitFor(() => {
-      const node = container.querySelector(".cred-warn");
+      const node = container.querySelector(".form-err");
       expect(node?.textContent).toContain(text);
       return node!;
     });
@@ -258,5 +261,121 @@ describe("#20: a server refusal inside these modals is announced", () => {
     fireEvent.click(getByText("Create account"));
     const node = await warning(container, "Enter a valid email address.");
     expect(node.getAttribute("role")).toBe("alert");
+  });
+});
+
+/**
+ * Interface review 2026-09-06 (ruling 148): the temp-password notice's dismiss
+ * was the app's only `.stg-x` that closed something rather than acting on a
+ * list row — a 24px square with a different hover from every other ✕ the user
+ * meets. It takes the shared close control now, at notice scale.
+ */
+describe("the temp-password notice dismisses on the shared close control", () => {
+  function renderCreating() {
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <UsersPanel
+              users={[ME]}
+              domains={DOMAINS}
+              meId="u_arda"
+              providers={{ github: false, google: false }}
+            />
+          </ToastProvider>
+        ),
+        action: async () => ({
+          ok: true,
+          toast: "Account created",
+          email: "yeni@viberr.dev",
+          tempPassword: "T3mp-pass-9",
+        }),
+      },
+    ]);
+    return render(<Stub initialEntries={["/org/settings"]} />);
+  }
+
+  it("shows the once-only password and closes on the shared ✕", async () => {
+    const { container, getByText, getByPlaceholderText, getByLabelText } =
+      renderCreating();
+    fireEvent.click(getByText("Allow access"));
+    fireEvent.change(getByPlaceholderText("Full name"), {
+      target: { value: "Yeni Kişi" },
+    });
+    fireEvent.change(getByPlaceholderText("name@company.dev"), {
+      target: { value: "yeni@viberr.dev" },
+    });
+    fireEvent.click(getByText("Create account"));
+
+    const notice = await waitFor(() => {
+      const node = container.querySelector(".cred-ok");
+      expect(node?.textContent).toContain("T3mp-pass-9");
+      return node!;
+    });
+    const dismiss = getByLabelText("Dismiss");
+    expect(notice.contains(dismiss)).toBe(true);
+    expect(dismiss.className).toBe("icon-btn modal-close");
+
+    fireEvent.click(dismiss);
+    await waitFor(() =>
+      expect(container.querySelector(".cred-ok")).toBeNull(),
+    );
+  });
+});
+
+/**
+ * Ruling 149 (2026-09-06): the destructive row treatment is opt-in by NAME
+ * where position cannot identify it.
+ *
+ * `.stg-x`'s destructive hover is positional for this list
+ * (`.member-row .stg-x:last-child`) and the user row ends on Remove, so Disable
+ * — which signs the person out at once and locks the account until someone
+ * re-enables it, and whose confirm commits on a `btn danger` — hovered exactly
+ * like Edit. It carries `.destructive` now; the self-guarded copy keeps `.off`
+ * so it reads as unavailable rather than as a threat.
+ */
+describe("ruling 149: Disable takes the destructive row treatment", () => {
+  const OTHER: OrgUserView = {
+    ...ME,
+    id: "u_deniz",
+    name: "Deniz Yildiz",
+    email: "deniz@viberr.dev",
+    initials: "DY",
+    role: "member",
+  };
+
+  function renderTwo() {
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <UsersPanel
+              users={[ME, OTHER]}
+              domains={DOMAINS}
+              meId="u_arda"
+              providers={{ github: false, google: false }}
+            />
+          </ToastProvider>
+        ),
+        action: async () => ({ ok: true, toast: "stub done" }),
+      },
+    ]);
+    return render(<Stub initialEntries={["/org/settings"]} />);
+  }
+
+  it("names Disable destructive, leaves Remove on its position, and keeps the self copy off", () => {
+    const { getByLabelText } = renderTwo();
+    // Canary: drop `destructive` and this control hovers like Edit does.
+    expect(getByLabelText("Disable Deniz Yildiz").className).toBe(
+      "stg-x destructive",
+    );
+    // Remove is the row's last child, so it needs no second name.
+    expect(getByLabelText("Remove Deniz Yildiz").className).toBe("stg-x");
+    // Your own row: refused, so it stays dimmed rather than turning red.
+    expect(getByLabelText("Disable Arda Kaya").className).toBe(
+      "stg-x destructive off",
+    );
   });
 });

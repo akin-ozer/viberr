@@ -98,11 +98,18 @@ describe("LiveRunPanel", () => {
 
   it("hides Interrupt when the viewer cannot interrupt; fires onInterrupt otherwise", () => {
     const onInterrupt = vi.fn();
-    const { queryByText, rerender, getByText } = render(
+    const { container, queryByText, rerender, getByText } = render(
       <LiveRunPanel runtime={[mkRun({})]} onViewLogs={() => {}} onInterrupt={onInterrupt} canInterrupt={false} interrupting={false} />,
     );
     expect(queryByText("Interrupt")).toBeNull();
     rerender(<LiveRunPanel runtime={[mkRun({})]} onViewLogs={() => {}} onInterrupt={onInterrupt} canInterrupt interrupting={false} />);
+    // Ruling 150: a stop discards the work in flight, so this trigger wears
+    // ruling 149's red label like the confirm it opens — and its sibling
+    // "View logs", which takes nothing away, stays neutral. Canary: drop
+    // `danger` from the class and the row holds no danger control at all.
+    const reds = container.querySelectorAll(".run-actions .btn.danger");
+    expect(reds).toHaveLength(1);
+    expect(reds[0]!.textContent).toContain("Interrupt");
     fireEvent.click(getByText("Interrupt"));
     expect(onInterrupt).toHaveBeenCalledWith("primary");
   });

@@ -143,7 +143,7 @@ export function KBModal({
         </div>
       </div>
       {err && (
-        <div className="cred-warn">
+        <div className="form-err">
           <Icon name="alert" />
           {err}
         </div>
@@ -344,7 +344,7 @@ export function McpModal({
         </div>
       </div>
       {err && (
-        <div className="cred-warn">
+        <div className="form-err">
           <Icon name="alert" />
           {err}
         </div>
@@ -507,7 +507,7 @@ export function SkillModal({
         </>
       )}
       {err && (
-        <div className="cred-warn">
+        <div className="form-err">
           <Icon name="alert" />
           {err}
         </div>

@@ -8,7 +8,9 @@ import type { AuditBrowseRow } from "~/server/audit/audit-browse.server";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { countLabel } from "~/shared/text/plural";
 import { Icon, type IconName } from "~/ui/icon";
+import { useToast } from "~/ui/toast";
 import { ConnectionsPanel } from "./connections-panel";
+import { MiniModal } from "./mini-modal";
 import { ResourcesPanel } from "./resources-panel";
 import { SsoPanel } from "./sso-panel";
 import { useOrgAction } from "./use-org-action";
@@ -209,10 +211,11 @@ export function OrgSettingsPage({
         </div>
       </div>
       <RunConcurrencyControl runConcurrency={runConcurrency} />
-      {/* Review F7 (pass 32): the card's `editing` and field state are seeded
-          from the target once; keying it on the stored target resets both when a
-          save or clear lands, so the form folds after a save and never shows a
-          cleared target's values. */}
+      {/* Review F7 (pass 32): the card's open state is seeded from the target
+          once; keying it on the stored target resets it when a save or clear
+          lands from elsewhere, so an open target modal never outlives the target
+          its fields were seeded from. (A save of its own closes on the server's
+          result, which a secret-only rotation leaves this key blind to.) */}
       <AuditExportCard
         key={s3Audit ? `${s3Audit.bucket}|${s3Audit.region}|${s3Audit.prefix}|${s3Audit.endpoint}|${s3Audit.accessKeyId}` : "none"}
         s3Audit={s3Audit}
@@ -320,31 +323,64 @@ function AuditBrowse({ events }: { events: AuditBrowseRow[] }) {
   );
 }
 
-function AuditExportCard({
+/** The S3 target fields a save requires — the ones a refusal can name. */
+type S3Field = "bucket" | "region" | "accessKeyId" | "secret";
+
+/** Ruling 147: what is still missing, named field by field. */
+const S3_UNMET = {
+  bucket: "Enter the bucket name.",
+  region: "Enter the bucket's region.",
+  accessKeyId: "Enter the access key ID.",
+  secret: "Enter the secret access key.",
+} satisfies Record<S3Field, string>;
+
+/**
+ * Ruling 148(b): the S3 target is a button that opens a modal, never a form
+ * served inline. Six fields (one of them a secret) for a target set once per
+ * instance and rotated rarely sat open at the foot of EVERY Instance-settings
+ * tab until someone configured one — an unconfigured instance had no control
+ * that could fold it.
+ *
+ * The refusal contract is MiniModal's (ruling 147) and is not re-implemented
+ * here: it counts the refusals, keys its own foot alert and disables the
+ * primary only while busy. This caller supplies the named sentence
+ * (`unmetHint`), where focus lands (`focusUnmet`) and the per-field
+ * `aria-invalid` mark, the way profile's ChangePasswordModal does.
+ */
+function S3TargetModal({
   s3Audit,
-  events,
+  onClose,
 }: {
   s3Audit: S3AuditConfigView | null;
-  events: AuditBrowseRow[];
+  onClose: () => void;
 }) {
-  const { submit, busy } = useOrgAction();
+  const configured = s3Audit !== null;
   const [bucket, setBucket] = useState(s3Audit?.bucket ?? "");
   const [region, setRegion] = useState(s3Audit?.region ?? "");
   const [prefix, setPrefix] = useState(s3Audit?.prefix ?? "");
   const [endpoint, setEndpoint] = useState(s3Audit?.endpoint ?? "");
   const [accessKeyId, setAccessKeyId] = useState(s3Audit?.accessKeyId ?? "");
   const [secret, setSecret] = useState("");
-  const configured = s3Audit !== null;
-  // D04-U7 (pass 32): with a target on file the five-field form stays folded
-  // behind a summary line — the page then shows ONE solid primary (the active
-  // tab's own), not this card's "Save target" beside it. An unconfigured
-  // instance still opens on the form, since there is nothing to summarise.
-  const [editing, setEditing] = useState(false);
-  const formOpen = !configured || editing;
-  // Ruling 147: the save stays enabled; a refused save names the first field
-  // still missing, marks it and moves focus there (counted, so each refusal
-  // re-inserts the alert).
-  const missing: "bucket" | "region" | "accessKeyId" | "secret" | null = !bucket.trim()
+  /** The field a refused save named; null on a pristine form (147(c)). */
+  const [flagged, setFlagged] = useState<S3Field | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const push = useToast();
+  // `useOrgAction` returns EARLY once `onResult` is supplied, so the server's
+  // success and failure toasts are pushed HERE or they are lost. Closing on the
+  // result is what folds the form: a secret-only rotation changes no summary
+  // field, so the card's remount key cannot see it.
+  const { submit, busy } = useOrgAction({
+    onResult: (d) => {
+      if (d.ok) {
+        // The toast host lives in the root provider — safe to push, then unmount.
+        if (d.toast) push(d.toast);
+        onClose();
+        return;
+      }
+      setErr(d.error);
+    },
+  });
+  const missing: S3Field | null = !bucket.trim()
     ? "bucket"
     : !region.trim()
       ? "region"
@@ -353,35 +389,150 @@ function AuditExportCard({
         : !configured && !secret.trim()
           ? "secret"
           : null;
-  const [refused, setRefused] = useState(0);
-  const flagged = refused > 0 ? missing : null;
-  const fieldRefs = {
+  const refs = {
     bucket: useRef<HTMLInputElement>(null),
     region: useRef<HTMLInputElement>(null),
     accessKeyId: useRef<HTMLInputElement>(null),
     secret: useRef<HTMLInputElement>(null),
   };
-  const saveTarget = () => {
-    if (busy) return;
-    if (missing) {
-      setRefused((n) => n + 1);
-      fieldRefs[missing].current?.focus();
-      return;
-    }
-    submit({
-      intent: "s3-config-save",
-      bucket,
-      region,
-      prefix,
-      endpoint,
-      accessKeyId,
-      secretAccessKey: secret,
-    });
-  };
-  const unmet = (field: typeof missing) => ({
+  // No `aria-describedby`: MiniModal's foot alert carries no id, and the
+  // sentence it prints is the disclosure (one alert per refusal, not two).
+  const mark = (field: S3Field) => ({
     "aria-invalid": flagged === field || undefined,
-    "aria-describedby": flagged === field ? "s3-unmet" : undefined,
   });
+  const edit = (field: S3Field, set: (v: string) => void) => (value: string) => {
+    set(value);
+    setErr(null);
+    setFlagged((f) => (f === field ? null : f));
+  };
+  return (
+    <MiniModal
+      icon={<Icon name="file" />}
+      title={configured ? "Edit S3 export target" : "Set up S3 export target"}
+      sub="Where an audit export is pushed. The secret key is stored sealed and never shown"
+      onClose={onClose}
+      canSave={!missing}
+      busy={busy}
+      saveLabel="Save target"
+      unmetHint={missing ? S3_UNMET[missing] : undefined}
+      focusUnmet={() => {
+        if (!missing) return;
+        setFlagged(missing);
+        refs[missing].current?.focus();
+      }}
+      onSave={() => {
+        setFlagged(null);
+        setErr(null);
+        submit({
+          intent: "s3-config-save",
+          bucket,
+          region,
+          prefix,
+          endpoint,
+          accessKeyId,
+          secretAccessKey: secret,
+        });
+      }}
+      screen="S3 export target dialog"
+    >
+      <div className="audit-s3-grid">
+        <label className="field">
+          <span className="flabel">Bucket</span>
+          <input
+            ref={refs.bucket}
+            type="text"
+            value={bucket}
+            data-autofocus
+            {...mark("bucket")}
+            onChange={(e) => edit("bucket", setBucket)(e.currentTarget.value)}
+            placeholder="my-audit-bucket"
+          />
+        </label>
+        <label className="field">
+          <span className="flabel">Region</span>
+          <input
+            ref={refs.region}
+            type="text"
+            value={region}
+            {...mark("region")}
+            onChange={(e) => edit("region", setRegion)(e.currentTarget.value)}
+            placeholder="eu-central-1"
+          />
+        </label>
+        <label className="field">
+          <span className="flabel">Key prefix</span>
+          <input
+            type="text"
+            value={prefix}
+            onChange={(e) => {
+              setPrefix(e.currentTarget.value);
+              setErr(null);
+            }}
+            placeholder="audit/ (optional)"
+          />
+        </label>
+        <label className="field">
+          <span className="flabel">Endpoint</span>
+          <input
+            type="text"
+            value={endpoint}
+            onChange={(e) => {
+              setEndpoint(e.currentTarget.value);
+              setErr(null);
+            }}
+            placeholder="optional, for S3-compatible stores"
+          />
+        </label>
+        <label className="field">
+          <span className="flabel">Access key ID</span>
+          <input
+            ref={refs.accessKeyId}
+            type="text"
+            value={accessKeyId}
+            {...mark("accessKeyId")}
+            onChange={(e) =>
+              edit("accessKeyId", setAccessKeyId)(e.currentTarget.value)
+            }
+            placeholder="AKIA…"
+          />
+        </label>
+        <label className="field">
+          <span className="flabel">Secret access key</span>
+          <input
+            ref={refs.secret}
+            type="password"
+            value={secret}
+            {...mark("secret")}
+            onChange={(e) => edit("secret", setSecret)(e.currentTarget.value)}
+            placeholder={configured ? "leave blank to keep" : "required"}
+            aria-label="S3 secret access key"
+          />
+        </label>
+      </div>
+      {err && (
+        <div className="form-err" role="alert">
+          <Icon name="alert" />
+          <span>{err}</span>
+        </div>
+      )}
+    </MiniModal>
+  );
+}
+
+function AuditExportCard({
+  s3Audit,
+  events,
+}: {
+  s3Audit: S3AuditConfigView | null;
+  events: AuditBrowseRow[];
+}) {
+  const { submit, busy } = useOrgAction();
+  const configured = s3Audit !== null;
+  // D04-U7 (pass 32) + ruling 148(b): the target is ONE fact row in both states
+  // — the summary with "Edit target", or "No S3 target" with "Set up S3 target"
+  // — and the fields it opens live in the modal. The page then shows one solid
+  // primary (the active tab's own), and the card's own actions stay put.
+  const [open, setOpen] = useState(false);
   return (
     <section className="panel audit-export">
       <div className="panel-head">
@@ -423,123 +574,40 @@ function AuditExportCard({
       </div>
       <div className="audit-s3">
         <h3>S3 export target</h3>
-        {configured && !editing && (
-          <div className="kv-row">
-            <span className="k">Target</span>
-            <span className="v mono">
-              s3://{s3Audit.bucket}/{s3Audit.prefix}
-              {s3Audit.region ? ` · ${s3Audit.region}` : ""}
-              {s3Audit.endpoint ? ` · ${s3Audit.endpoint}` : ""} · key {s3Audit.accessKeyId}
-            </span>
-            <button
-              type="button"
-              className="btn ghost sm"
-              onClick={() => setEditing(true)}
-            >
-              <Icon name="sliders" />
-              Edit target
-            </button>
-          </div>
-        )}
-        {formOpen && (
-        <div className="audit-s3-grid">
-          <label className="field">
-            <span className="flabel">Bucket</span>
-            <input
-              ref={fieldRefs.bucket}
-              type="text"
-              value={bucket}
-              {...unmet("bucket")}
-              onChange={(e) => setBucket(e.currentTarget.value)}
-              placeholder="my-audit-bucket"
-            />
-          </label>
-          <label className="field">
-            <span className="flabel">Region</span>
-            <input
-              ref={fieldRefs.region}
-              type="text"
-              value={region}
-              {...unmet("region")}
-              onChange={(e) => setRegion(e.currentTarget.value)}
-              placeholder="eu-central-1"
-            />
-          </label>
-          <label className="field">
-            <span className="flabel">Key prefix</span>
-            <input
-              type="text"
-              value={prefix}
-              onChange={(e) => setPrefix(e.currentTarget.value)}
-              placeholder="audit/ (optional)"
-            />
-          </label>
-          <label className="field">
-            <span className="flabel">Endpoint</span>
-            <input
-              type="text"
-              value={endpoint}
-              onChange={(e) => setEndpoint(e.currentTarget.value)}
-              placeholder="optional, for S3-compatible stores"
-            />
-          </label>
-          <label className="field">
-            <span className="flabel">Access key ID</span>
-            <input
-              ref={fieldRefs.accessKeyId}
-              type="text"
-              value={accessKeyId}
-              {...unmet("accessKeyId")}
-              onChange={(e) => setAccessKeyId(e.currentTarget.value)}
-              placeholder="AKIA…"
-            />
-          </label>
-          <label className="field">
-            <span className="flabel">Secret access key</span>
-            <input
-              ref={fieldRefs.secret}
-              type="password"
-              value={secret}
-              {...unmet("secret")}
-              onChange={(e) => setSecret(e.currentTarget.value)}
-              placeholder={configured ? "leave blank to keep" : "required"}
-              aria-label="S3 secret access key"
-            />
-          </label>
+        <div className="kv-row">
+          <span className="k">Target</span>
+          {configured ? (
+            <>
+              <span className="v mono">
+                s3://{s3Audit.bucket}/{s3Audit.prefix}
+                {s3Audit.region ? ` · ${s3Audit.region}` : ""}
+                {s3Audit.endpoint ? ` · ${s3Audit.endpoint}` : ""} · key{" "}
+                {s3Audit.accessKeyId}
+              </span>
+              <button
+                type="button"
+                className="btn ghost sm"
+                onClick={() => setOpen(true)}
+              >
+                <Icon name="sliders" />
+                Edit target
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="v light">No S3 target</span>
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() => setOpen(true)}
+              >
+                <Icon name="sliders" />
+                Set up S3 target
+              </button>
+            </>
+          )}
         </div>
-        )}
-        {formOpen && flagged && (
-          <div className="form-err" role="alert" id="s3-unmet" key={"refused-" + refused}>
-            <Icon name="alert" />
-            <span>
-              {flagged === "bucket"
-                ? "Enter the bucket name."
-                : flagged === "region"
-                  ? "Enter the bucket's region."
-                  : flagged === "accessKeyId"
-                    ? "Enter the access key ID."
-                    : "Enter the secret access key."}
-            </span>
-          </div>
-        )}
         <div className="audit-s3-actions">
-          {formOpen && (
-          <button
-            type="button"
-            // D04-U7: secondary — the tab's own action keeps the one primary.
-            className="btn sm"
-            disabled={busy}
-            aria-busy={busy || undefined}
-            onClick={saveTarget}
-          >
-            Save target
-          </button>
-          )}
-          {configured && editing && (
-            <button type="button" className="btn ghost sm" onClick={() => setEditing(false)}>
-              Cancel
-            </button>
-          )}
           <button
             type="button"
             className="btn sm"
@@ -564,6 +632,9 @@ function AuditExportCard({
             </button>
           )}
         </div>
+        {open && (
+          <S3TargetModal s3Audit={s3Audit} onClose={() => setOpen(false)} />
+        )}
       </div>
     </section>
   );

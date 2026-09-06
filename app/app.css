@@ -2867,16 +2867,21 @@ dialog[data-closing]::backdrop {
 .stg-count { margin-left: auto; font-family: var(--font-mono); font-size: .74rem; color: var(--faint); flex: none; }
 /* P16-UI-04: `.stg-x` is named for its first site — the stage-remove ✕ in
    project settings — but it is now the app's generic 24px row-action icon
-   button: browse, re-scan, test, edit, enable, disable, dismiss AND remove,
-   across org settings, project settings and connections. Its hover was
+   button: browse, re-scan, test, edit, enable, disable AND remove,
+   across org settings, project settings and connections. (Its one dismiss —
+   the temp-password notice — took the shared close control in the ruling-148
+   pass, so every site left is a list-row action.) Its hover was
    destructive coral for all of them, and two per-site rules
    (`.rsrc-row .stg-x:hover { color: var(--fg) }` /
    `.rsrc-row .stg-x:last-child:hover { color: var(--coral-dark) }`) patched the
    semantics back — leaving "Edit" and "Re-scan" hovering on a coral tint with
    neutral text, which is neither.
    Consolidated the other way round: NEUTRAL is the base, destructive is opt-in
-   and named. Every list that uses this control puts its remove/delete LAST, so
-   the destructive selector says exactly that instead of relying on the icon. */
+   and named. Most lists that use this control put their remove/delete LAST, so
+   the destructive selector says exactly that instead of relying on the icon;
+   where position does not identify the destructive action (org settings' user
+   row ends on Remove and carries Disable before it), the control opts in by
+   name with `.destructive`. */
 .stg-x {
   display: grid; place-items: center;
   width: 24px; height: 24px; flex: none;
@@ -2888,10 +2893,14 @@ dialog[data-closing]::backdrop {
 .stg-x.off { opacity: .35; }
 .stg-x.off:hover { background: none; color: var(--placeholder); }
 .stg-x .ico { width: 13px; height: 13px; }
-/* Destructive row actions. `:not(.off)` keeps the self-guarded controls
-   (remove/disable yourself) reading as unavailable rather than as a threat. */
+/* Destructive row actions — the row's last control where that IS the remove,
+   plus anything that names itself `.destructive` (ruling 149: Disable signs the
+   person out and locks the account, and its confirm commits on `btn danger`).
+   `:not(.off)` keeps the self-guarded controls (remove/disable yourself)
+   reading as unavailable rather than as a threat. */
 .stg-row .stg-x:not(.off):hover,
 .conn-row .stg-x:not(.off):hover,
+.stg-x.destructive:not(.off):hover,
 .member-row .stg-x:last-child:not(.off):hover,
 .rsrc-acts .stg-x:last-child:not(.off):hover {
   background: color-mix(in srgb, var(--danger), transparent 92%);
@@ -2959,26 +2968,6 @@ dialog[data-closing]::backdrop {
   border-radius: var(--radius-small); padding: .08rem .25rem; margin-left: .375rem;
   vertical-align: 1px;
 }
-.invite-row {
-  /* Two-value gap: on one desktop row only the .5rem column gap paints; when
-     the <=1300px rule stacks the fields, 1rem between fields keeps each label
-     visibly closer to its own input (.5rem) than to the field above. */
-  display: grid; grid-template-columns: 1fr 1.2fr auto; gap: 1rem .5rem;
-  margin-top: .75rem; padding-top: 1rem; border-top: 1px solid var(--hairline);
-}
-.invite-row input {
-  width: 100%; min-width: 0;
-  border: 1px solid var(--border-control); border-radius: var(--radius-button);
-  padding: .5rem .75rem; background: var(--surface); color: var(--fg);
-  font-family: var(--font-body); font-size: .92rem;
-  transition: border-color .14s ease, box-shadow .14s ease;
-}
-.invite-row input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
-.invite-row input::placeholder { color: var(--placeholder); }
-@media (max-width: 1300px) {
-  .invite-row { grid-template-columns: 1fr; }
-}
-
 .danger-panel { border-color: color-mix(in srgb, var(--danger), transparent 55%); }
 .danger-panel .panel-head .ico { color: var(--danger); }
 .dz-row {
@@ -3555,7 +3544,7 @@ dialog[data-closing]::backdrop {
   .field textarea, select,
   .top-search input, .board-filter-input input, .cmdk-input,
   .composer-box .composer-ce, .composer-box .composer-placeholder, .goal-textarea,
-  .label-input-field, .invite-row input, .stg-input, .op-steer,
+  .label-input-field, .stg-input, .op-steer,
   .guard-ctl input[type="number"],
   .meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { font-size: 1.05rem; }
   .field input[type="text"].mono, .field input[type="email"].mono,
@@ -4790,7 +4779,10 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* --- shell / home / login --- */
 .count.violations { color: var(--coral-dark); font-weight: 700; }
 .kv.spaced { margin-top: 1rem; }
-.login-err.spaced { margin-top: .75rem; }
+/* `.form-err` carries the same nudge: inside a `.confirm-card` (a plain block,
+   no flex gap) the repo-repair dialog's error sits directly under the note it
+   follows. */
+.login-err.spaced, .form-err.spaced { margin-top: .75rem; }
 .login-tag.providers { margin-top: .25rem; }
 .sub.sec-lede { margin: 0 0 .75rem; }
 .pj-mark.draft { box-shadow: inset 0 -8px 0 color-mix(in srgb, var(--blue), transparent 55%); }
@@ -5759,3 +5751,65 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
    `.field input`. */
 .guard-ctl.err { flex-basis: 100%; color: var(--coral-dark); font-weight: 600; }
 .guard-ctl input[type="number"][aria-invalid="true"] { border-color: var(--coral-dark); }
+
+/* ---------- appended: ruling 150(a), the error box's sentence on dark ---------- */
+/* Ruling 149 keeps `--coral-*` as the ERROR pair, and ruling 148(d) says how a
+   tinted box reads on dark: the sentence in the default foreground, the tone
+   carried by the icon, the border and the fill. The two were decided in the
+   same pass, so the error boxes take the same split — a whole paragraph of
+   salmon prose on a red wash was the other half of the problem 148(d) named.
+   Light is untouched: `--coral-dark` there is GitHub's near-black red, which is
+   already body-weight ink. `.rsrc-err` (the MCP probe's own output) has no
+   icon; its border and fill stay coral. Ruling 150(a), owner, 2026-09-06. */
+:root[data-theme="dark"] .login-err,
+:root[data-theme="dark"] .form-err,
+:root[data-theme="dark"] .rsrc-main .rsrc-err { color: var(--fg); }
+:root[data-theme="dark"] .login-err .ico,
+:root[data-theme="dark"] .form-err .ico { color: var(--coral-dark); }
+
+/* ---------- appended: ruling 150(a), the consequence row on dark ---------- */
+/* The acceptance/packet consequence row (R17-1) carries no icon, so the
+   uppercase kicker is its tone carrier the way the glyph is on `.cred-warn`:
+   the VALUE goes to the default foreground on dark, `.obs.warn .k` stays
+   `--coral-dark`. Ruling 150(a), owner, 2026-09-06. */
+:root[data-theme="dark"] .obs.warn > span:last-child { color: var(--fg); }
+
+/* ---------- appended: ruling 150(b), the board notice that is not a fault ---------- */
+/* Ruling 150(b) extends 148(d)'s amber pair to a box that reports attention
+   rather than a fault. `.board-orphans` is one box carrying four tones: the
+   archived-filter caption and the "no stages yet" empty state are not faults —
+   they are attention, which is GitHub's amber pair — while the unstaged-task
+   and repository boxes stay on the error pair. The sentence is `--fg` in both
+   themes already (`.board-orphans-label`); amber lands on the icon, the border
+   and the fill.
+   `color` is declared so the sweep measures the modifier against its own fill,
+   and `notice` is a token the sheet does not already read as coral. */
+.board-orphans.notice {
+  border-color: color-mix(in srgb, var(--amber-dark), transparent 72%);
+  background: color-mix(in srgb, var(--amber-light), var(--surface) 40%);
+  color: var(--amber-dark);
+}
+.board-orphans.notice > .ico { color: var(--amber-dark); }
+
+/* ---------- appended: ruling 148, the notice dismiss on the shared close ---------- */
+/* The temp-password notice's ✕ joins the one close design (borderless circle,
+   soft hover fill) at notice scale: 28px keeps the row's height byte-identical
+   (the negative margin gives back exactly what the taller control takes), and
+   14px holds the shared 34/16 glyph ratio. `flex: none` is what `.stg-x`
+   carried before it: `.cred-ok` is a flex row whose long sentence would
+   otherwise shrink the circle below its own target size. */
+.cred-ok .modal-close {
+  width: 28px; height: 28px; flex: none;
+  margin: -.125rem -.125rem -.125rem auto;
+}
+.cred-ok .modal-close .ico { width: 14px; height: 14px; }
+
+/* ---------- appended: ruling 147, the agent run starter's empty pick ---------- */
+/* The run/schedule start no longer disables because nothing is picked: it
+   refuses the click in words on its own line of the wrapping `.op-run` row, the
+   same slot the ruling-127 refusal and the posture line already use. Colour is
+   the error TEXT pair (`--coral-dark`, as `.modal-foot .foot-hint.err` prints a
+   refusal), and the combobox needs its own `aria-invalid` border because the
+   shared one is scoped to `.field input`. */
+.op-run .sub.err { color: var(--coral-dark); font-weight: 600; }
+.agent-select-input[aria-invalid="true"] { border-color: var(--coral-dark); }

@@ -255,9 +255,14 @@ export function LiveRunPanel({
             View logs
           </button>
           {canInterrupt && (
+            /* Ruling 150: a stop discards the work in flight, so the trigger
+               wears ruling 149's danger label like the confirm it opens
+               (`btn danger`) — the neutral/red pair inside `.run-actions` is
+               what separates it from the sibling `View logs`. `disabled` here
+               is the request in flight (ruling 147(a)), not a validity gate. */
             <button
               type="button"
-              className="btn ghost sm"
+              className="btn ghost sm danger"
               disabled={interrupting}
               onClick={() => onInterrupt(run.id)}
             >

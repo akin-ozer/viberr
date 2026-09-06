@@ -1836,7 +1836,7 @@ function StageBoard({
     // otherwise render a blank board with no explanation. Disclose it, the
     // same way the OrphanBanner / archived-filter notices in this file do.
     return (
-      <div className="board-orphans" role="status">
+      <div className="board-orphans notice" role="status">
         <Icon name="alert" />
         <span className="board-orphans-label">
           This project has no workflow stages yet. Add a stage in project
@@ -2482,7 +2482,7 @@ export function BoardPage({
       )}
 
       {filter === "archived" && (
-        <div className="board-orphans" role="status">
+        <div className="board-orphans notice" role="status">
           <Icon name="lock" />
           <span className="board-orphans-label">
             Archived tasks: abandoned work kept for the record. Their timelines

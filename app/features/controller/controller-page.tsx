@@ -299,6 +299,10 @@ function ConversationRuntime({
           onLoadOlder={loadOlder}
         />
       )}
+      {/* D6: stopping a turn discards what it was about to apply, which is
+          ruling 149's destructive class, so the commit keeps the shared
+          `danger` default. Ruling 150 puts the same red on the trigger: the
+          shared `btn ghost sm danger` in `LiveRunPanel`. */}
       {confirmInterrupt && (
         <ConfirmDialog
           screenLabel="Interrupt turn dialog"

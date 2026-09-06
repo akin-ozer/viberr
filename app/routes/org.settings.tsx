@@ -99,7 +99,7 @@ import {
  * agent resources incl. real disk-scanned kb/skill trees). Every mutation
  * is a CSRF-checked POST intent; toast copy is computed server-side
  * (phase-5 pattern) and errors come back as `{ ok:false, error }` for the
- * open dialog's `.cred-warn` / a toast. StoreBrowser uploads arrive as
+ * open dialog's `.form-err` / a toast. StoreBrowser uploads arrive as
  * multipart with per-file relative paths (structure-preserving).
  */
 

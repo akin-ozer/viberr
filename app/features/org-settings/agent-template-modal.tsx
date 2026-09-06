@@ -436,7 +436,7 @@ export function AgentModal({
         </div>
       </div>
       {err && (
-        <div className="cred-warn">
+        <div className="form-err">
           <Icon name="alert" />
           {err}
         </div>

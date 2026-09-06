@@ -762,13 +762,17 @@ describe("ExecutionProfile — the AgentSelect combobox", () => {
     // active, so tabbing THROUGH the control silently selected the
     // first-deployed agent — typically the repo-write deliverer — and the next
     // Enter in the prompt input dispatched a billable run nobody chose.
-    const { container } = renderExec(execTask());
+    // Ruling 147 moved the proof off `disabled`: the start stays clickable with
+    // nothing picked, so what must hold is that no pick was made and a click
+    // dispatches nothing.
+    const { container, onRunAgent } = renderExec(execTask());
     const input = agentInput(container)!;
     fireEvent.focus(input);
     fireEvent.keyDown(input, { key: "Tab" });
     fireEvent.blur(input);
     expect(input.value).toBe("");
-    expect(agentRunBtn(container).disabled).toBe(true);
+    fireEvent.click(agentRunBtn(container));
+    expect(onRunAgent).not.toHaveBeenCalled();
     // Enter on the fresh focus-open likewise picks nothing — it just closes.
     fireEvent.focus(input);
     fireEvent.keyDown(input, { key: "Enter" });
@@ -809,12 +813,14 @@ describe("ExecutionProfile — the AgentSelect combobox", () => {
   });
 
   it("typing invalidates a settled pick — the id is what submits, never free text", () => {
-    const { container } = renderExec(execTask());
+    const { container, onRunAgent } = renderExec(execTask());
     pickAgent(container, "Developer");
     expect(agentInput(container)!.value).toBe("Developer");
     fireEvent.change(agentInput(container)!, { target: { value: "Rev" } });
-    // Selection cleared until a row is picked again → Run disarms.
-    expect(agentRunBtn(container).disabled).toBe(true);
+    // The selection is cleared until a row is picked again, so the start has
+    // nothing to submit: ruling 147 keeps it enabled, and it dispatches nothing.
+    fireEvent.click(agentRunBtn(container));
+    expect(onRunAgent).not.toHaveBeenCalled();
   });
 });
 
@@ -838,13 +844,42 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
     expect(onRunAgent).toHaveBeenCalledWith("developer", "fix it", null);
   });
 
-  it("Run is disabled until an agent is picked", () => {
+  /**
+   * Ruling 147: an empty picker is validation, not availability, so the start
+   * stays ENABLED and refuses the click — a dead button explained only by a
+   * `title` no browser opens on a disabled control was the defect.
+   */
+  it("Run stays enabled with no pick and REFUSES the click, naming and focusing the picker", () => {
     const { container, onRunAgent } = renderExec(execTask());
     const btn = agentRunBtn(container);
-    expect(btn.disabled).toBe(true);
+    expect(btn.disabled).toBe(false);
     expect(btn.title).toContain("Choose an agent first");
+    // 147(c): a pristine control is never accused.
+    expect(agentInput(container)!.getAttribute("aria-invalid")).toBeNull();
+    expect(container.querySelector('.agent-run [role="alert"]')).toBeNull();
+
     fireEvent.click(btn);
     expect(onRunAgent).not.toHaveBeenCalled();
+    const alert = container.querySelector('.agent-run [role="alert"]')!;
+    expect(alert.textContent).toContain("Choose an agent first");
+    const input = agentInput(container)!;
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")).toBe(alert.id);
+    expect(document.activeElement).toBe(input);
+
+    // A second refusal re-INSERTS the alert (a new element, not a role flip on
+    // unchanged text) so a reader announces it again.
+    const first = alert;
+    fireEvent.click(btn);
+    expect(container.querySelector('.agent-run [role="alert"]')).not.toBe(first);
+    expect(onRunAgent).not.toHaveBeenCalled();
+
+    // Picking retires the accusation and arms the real dispatch.
+    pickAgent(container, "Developer");
+    expect(container.querySelector('.agent-run [role="alert"]')).toBeNull();
+    expect(agentInput(container)!.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.click(agentRunBtn(container));
+    expect(onRunAgent).toHaveBeenCalledWith("developer", "", null);
   });
 
   it("a live run on the SELECTED profile disables Run-now, but scheduling stays open", () => {
@@ -1421,7 +1456,7 @@ describe("ExecutionProfile — owner cell (owner request 2026-08-21)", () => {
  */
 describe("ExecutionProfile — the agent listbox dismisses cleanly", () => {
   it("Escape closes the menu; a still-settled selection's name comes back", () => {
-    const { container } = renderExec(execTask());
+    const { container, onRunAgent } = renderExec(execTask());
     pickAgent(container, "Developer");
     const input = agentInput(container)!;
     // Reopen from the settled pick: the query starts empty (full roster).
@@ -1437,7 +1472,9 @@ describe("ExecutionProfile — the agent listbox dismisses cleanly", () => {
     fireEvent.keyDown(input, { key: "Escape" });
     expect(agentMenu(container)).toBeNull();
     expect(input.value).toBe("");
-    expect(agentRunBtn(container).disabled).toBe(true);
+    // Nothing is picked, so the start (enabled since ruling 147) submits nothing.
+    fireEvent.click(agentRunBtn(container));
+    expect(onRunAgent).not.toHaveBeenCalled();
   });
 
   it("blur closes the menu; a row's mousedown is prevented so blur can't beat the pick", () => {
@@ -3042,6 +3079,9 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     expect(run.classList.contains("primary")).toBe(false);
     const cancel = container.querySelector<HTMLButtonElement>(".sched-cancel")!;
     expect(cancel.classList.contains("ghost")).toBe(true);
+    // Ruling 149: the trigger takes the danger label its own confirm commits
+    // with, so the row does not read neutral up to the last click.
+    expect(cancel.classList.contains("danger")).toBe(true);
   });
 
   it("ruling 131: the hero links each wait entry (task page, or the Controller page for a goal link) with its state when not open", () => {

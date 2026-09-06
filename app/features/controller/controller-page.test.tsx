@@ -379,8 +379,14 @@ describe("the open conversation's execution", () => {
     const dialog = await screen.findByRole("alertdialog", { name: "Interrupt this turn?" });
     expect(dialog.getAttribute("data-screen-label")).toBe("Interrupt turn dialog");
     expect(dialog.textContent).toContain("the transcript records that the turn was stopped");
+    const commit = screen.getByRole("button", { name: "Interrupt turn" });
+    // Rulings 149 and 150: stopping a turn discards what it was about to apply,
+    // so the commit keeps the confirm's shared `danger` default and the trigger
+    // that opened it carries the same red (`btn ghost sm danger`, pinned in
+    // `runs-panels.test.tsx`). Canary: pass `tone="primary"` and this fails.
+    expect(commit.className).toBe("btn danger");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Interrupt turn" }));
+      fireEvent.click(commit);
     });
     await screen.findByText("Turn interrupted. The transcript records that it was stopped.");
     expect(posted).toEqual([

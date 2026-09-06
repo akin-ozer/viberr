@@ -35,10 +35,10 @@ POST.
 | `/projects/:slug/policy` | `project.policy.tsx` | member, form | role matrix (rendered from `rbac.ts`), member roles, transition boundaries, guardrails (ruling 112) | `set-role`, `set-boundary`, `set-guardrail` |
 | `/projects/:slug/github` | `project.github.tsx` | member, form | credential card (with the workflow-scope advisory, ruling 144), repo state, branched tasks, scope violations, update status | `set-credential`, `clear-credential`, `grant-scope`, `reconcile` |
 | `/projects/:slug/activity` | `project.activity.tsx` | member | activity feed with day groups; audit column (compacted, ruling 61) | |
-| `/projects/:slug/settings` | `project.settings.tsx` | member, form (admin for writes) | project profile, stages, members, repository, branch cleanup, archive/delete | `save-project`, `add-stage`, `rename-stage`, `remove-stage`, `reorder-stages`, `invite`, `remove-member`, `set-credential`, `clear-credential`, `grant-scope`, `repair-repo`, `set-branch-cleanup`, `archive-project`, `delete-project` |
+| `/projects/:slug/settings` | `project.settings.tsx` | member, form (admin for writes) | project profile, stages, members (the invite form is a head button opening the `Add member` modal, ruling 148(b)), repository, branch cleanup, archive/delete | `save-project`, `add-stage`, `rename-stage`, `remove-stage`, `reorder-stages`, `invite`, `remove-member`, `set-credential`, `clear-credential`, `grant-scope`, `repair-repo`, `set-branch-cleanup`, `archive-project`, `delete-project` |
 | `/projects/:slug/tasks/:key` | `project.task.tsx` | member, form | task detail: state (the "Waiting on" row reads "Other work: …" for a held task), the hero's wait chips (one neutral link per `blockedBy` entry with its state, ruling 131), execution profile (the operator run control carries a hold note with Run left enabled), packet, recommendations, Details (a "Blocked by" row and its own "Edit what it waits on" form), timeline, runs, GitHub trace (with the "Unpushed" row and the "Push `<sha>` to PR #N" control when the open PR lacks the delivered revision, ruling 134(c); disabled with the refusal named for a diverged remote), diagnostics | `comment`, `transition`, `update-goal`, `set-task-metadata`, `set-task-dependencies` (ruling 131: the full `blockedBy` list, empty clears and releases), `owner-take`, `owner-release`, `owner-assign`, `run-agent`, `run-operator`, `run-interrupt`, `release-agent`, `resolve-packet`, `apply-recommendation`, `dismiss-recommendation`, `deliver-review`, `accept-completion`, `force-accept`, `complete-merge`, `request-maintainer-decision`, `schedule-action`, `cancel-schedule`, `archive-task`, `restore-task` |
 | `/projects/:slug/tasks/:key/attachments/:file` | `task-attachment.ts` | member | raw bytes, whitelist renders inline, `?download=1` forces the save dialog (ruling 105) | |
-| `/org/settings` | `org.settings.tsx` | org admin | tabs: Users & access, GitHub connections, Sign-in & SSO, Agent resources, Controller settings; audit export card; concurrency; under the standalone-page header (ruling 145) | see §3 |
+| `/org/settings` | `org.settings.tsx` | org admin | tabs: Users & access, GitHub connections, Sign-in & SSO, Agent resources, Controller settings; audit export card (the S3 target is one fact row plus a button that opens the target modal, ruling 148(b) — "Export to S3 now" and "Remove" stay on the card); concurrency; under the standalone-page header (ruling 145) | see §3 |
 | `/org/settings/audit-export` | `org.settings.audit-export.ts` | org admin | CSV/JSON download, 100 000-row cap | |
 | `/controller` | `controller.tsx` | user (CSRF checked as a result, not a throw) | instance controller conversation (per user); with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send`, `interrupt` (`conversationId`, `runId`) |
 | `/insights` | `insights.tsx` | org admin | run analytics: counts, cost, tokens, outcomes, backend quota readings (a refused or exhausted row names whose account, a reading names the hour of its reset, ruling 130(d)); under the standalone-page header (ruling 145) | |
@@ -131,7 +131,7 @@ Intents behind `project.task.tsx` are explained in
   breakpoint the typing surfaces render at the 1.05rem scale step (16.8px) so
   iOS Safari does not zoom on focus: every `.field` input and textarea,
   `select`, the search, board-filter and palette inputs, the comment and
-  controller composers, the goal editor, the label, invite, stage and steer
+  controller composers, the goal editor, the label, stage and steer
   inputs, the store browser's inputs and the concurrency field (the 720px block
   in `app.css` is the list).
 - **Dock clearance**: `--dock-clear` (`:root`) is the fixed dock trigger's reach,
@@ -150,7 +150,15 @@ Intents behind `project.task.tsx` are explained in
   `field` naming the input or `null` for a form-level refusal such as a rate
   limit), every org-settings `MiniModal` (its unmet line becomes the alert and
   focus lands on the first empty control unless the caller passes `focusUnmet`),
-  the repository-repair dialog, the S3 audit target and the agent profile editor.
+  the repository-repair dialog, the S3 audit target (a `MiniModal` since ruling
+  148(b): its unmet line names the missing field and focus lands there), the
+  task page's agent run starter (an empty picker is refused with "Choose an
+  agent first", the combobox marked and focused; a live run on that profile and
+  the owner-credential refusal are availability and keep `disabled`), the
+  project's **Add member** modal (a `MiniModal` since ruling 148(b) too: the
+  invite form left the member list for a head button, and the toast that used to
+  say "Enter a name and a valid email" is that modal's alert) and the
+  agent profile editor.
   A save with nothing changed and a typed-name destructive confirmation keep
   `disabled` on purpose (147(d)).
 
@@ -192,8 +200,8 @@ discard dialog`, `Packet collision dialog`, `Attachment lightbox`, `Command pale
 `Notifications`, `Notifications popover`, `Profile & preferences`, `Instance settings`,
 `Settings · Users & access`, `Settings · GitHub connections`, `Settings · Sign-in &
 SSO`, `Settings · Agent resources`, `Controller settings`, `Controller dock` (the
-panel, ruling 121), `Insights`, `Capability matrix modal`, `Agent profile modal`, and
-the six confirms the shared `ConfirmDialog` now names: `Resource removal dialog`,
+panel, ruling 121), `Insights`, `Capability matrix modal`, `Agent profile modal`, `S3 export
+target dialog` and `Add member dialog` (both ruling 148(b)), and the six confirms the shared `ConfirmDialog` now names: `Resource removal dialog`,
 `Stage removal dialog`, `Member removal dialog`, `Schedule cancel dialog`,
 `Interrupt run dialog`, `Dismiss recommendation dialog`. The task page's own label comes
 from the shell model. Three labels are composed at render time rather than listed here:

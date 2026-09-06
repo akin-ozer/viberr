@@ -38,7 +38,7 @@ import {
  *   org has no connection — a public repo needs no credential — and uses the
  *   default connection when there is one (private repos, higher rate limit).
  *   A refusal that having no credential explains, and any other failure,
- *   render in the `.cred-warn` under the import bar;
+ *   render in the `.form-err` under the import bar;
  * - SKILL.md capture happens server-side (the skill body is re-read from
  *   disk) — the capture toast rides the action response;
  * - both layers are native <dialog>s (showModal via useDialog): Escape's
@@ -223,7 +223,7 @@ function BrowserToolbar({
         </div>
       )}
       {gh.err && (
-        <div className="cred-warn">
+        <div className="form-err">
           <Icon name="alert" />
           {gh.err}
         </div>
@@ -1160,7 +1160,7 @@ export function StoreBrowser({
                 <div
                   key={`refused-${refusedDoc}`}
                   id="fm-doc-err"
-                  className="cred-warn"
+                  className="form-err"
                   role="alert"
                 >
                   <Icon name="alert" />
@@ -1168,7 +1168,7 @@ export function StoreBrowser({
                 </div>
               ) : (
                 doc.err && (
-                  <div className="cred-warn">
+                  <div className="form-err">
                     <Icon name="alert" />
                     {doc.err}
                   </div>

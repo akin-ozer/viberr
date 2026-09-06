@@ -2136,7 +2136,7 @@ describe("the AgentSelect combobox keeps the keyboard promises it makes", () => 
   });
 
   it("typing filters with match highlighting; typing over a settled pick clears the selection", () => {
-    const { container, input } = open();
+    const { container, input, calls } = open();
     fireEvent.change(input, { target: { value: "sen" } });
     const options = Array.from(container.querySelectorAll('[role="option"]'));
     expect(options).toHaveLength(1);
@@ -2144,11 +2144,13 @@ describe("the AgentSelect combobox keeps the keyboard promises it makes", () => 
     fireEvent.click(options[0]!);
     expect(input.value).toBe("Senior reviewer");
     // Editing the text invalidates the pick — the selection is a row pick,
-    // never free text, so Run disarms until a row is chosen again.
+    // never free text. Ruling 147 keeps the start enabled, so the proof is that
+    // it now submits NOTHING until a row is chosen again.
     fireEvent.change(input, { target: { value: "Senior review" } });
-    expect(
-      container.querySelector<HTMLButtonElement>(".agent-run button.btn")!.disabled,
-    ).toBe(true);
+    fireEvent.click(
+      container.querySelector<HTMLButtonElement>(".agent-run button.btn")!,
+    );
+    expect(calls.runAgent).toEqual([]);
   });
 
   it("Escape closes the menu without picking; blur closes it too", () => {
@@ -2259,7 +2261,14 @@ describe("D6: consequential actions confirm before they act", () => {
     // Confirms first — the harmless-looking dismiss withdraws a governed decision.
     expect(getByText("Dismiss this recommendation?")).toBeTruthy();
     expect(submitted).toHaveLength(0);
-    fireEvent.click(findButton(container, "Dismiss recommendation")!);
+    const dismissCommit = findButton(container, "Dismiss recommendation")!;
+    // Rulings 149 and 150: the red commit belongs to the controls that take
+    // something away. A dismissal is recorded on the timeline and the operator
+    // may raise it again, so this one commits primary — like the neutral
+    // trigger that opened it. Canary: drop `tone="primary"` and the shared
+    // default is red.
+    expect(dismissCommit.className).toBe("btn primary");
+    fireEvent.click(dismissCommit);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("dismiss-recommendation");
     expect(submitted[0]!.recId).toBe("rec-d");
@@ -2270,11 +2279,20 @@ describe("D6: consequential actions confirm before they act", () => {
       myRole: "admin",
       runtime: [runningRun()],
     });
-    fireEvent.click(findButton(container, "Interrupt")!);
+    const trigger = findButton(container, "Interrupt")!;
+    // Ruling 150: the stop discards the work in flight, so BOTH ends of the
+    // action wear ruling 149's red — the shared `LiveRunPanel` trigger and the
+    // commit below, which keeps the confirm's `danger` default. Canary: drop
+    // `danger` from the trigger's class, or pass `tone="primary"` to the
+    // dialog, and one of the two assertions fails.
+    expect(trigger.className).toBe("btn ghost sm danger");
+    fireEvent.click(trigger);
     // The button opens a confirm; the run keeps going until it is confirmed.
     expect(getByText("Interrupt this run?")).toBeTruthy();
     expect(submitted).toHaveLength(0);
-    fireEvent.click(findButton(container, "Interrupt run")!);
+    const interruptCommit = findButton(container, "Interrupt run")!;
+    expect(interruptCommit.className).toBe("btn danger");
+    fireEvent.click(interruptCommit);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("run-interrupt");
     expect(submitted[0]!.runId).toBe("run_1");
