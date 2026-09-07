@@ -3174,13 +3174,23 @@ available. It reads nobody else's session.)*
     named); `performDelivery` reports it on the task as a delivery refusal in the scope
     refusal's shape (`store_layout`, no PR opened) and the operator's reply names the
     remedy (re-prompt the agent to remove the folder). A branch that published the
-    layout under an older prompt is refused too, until a person removes it. **(c)** The
+    layout under an older prompt is refused too, until a person removes it. The tree is
+    read NUL-delimited (`git ls-tree -r -z`): git quotes any path holding a non-ASCII
+    byte, and a quoted line matches no prefix, so an accented screenshot inside the
+    stray folder read as an EMPTY tree and the push went through. Both push doors run
+    the read: `updateWorkspaceBranchFromBase` (the acceptance-time base refresh and the
+    operator's `update_branch_from_base`) pushes the whole workspace head, so the folder
+    a refused delivery left committed on the local branch would have reached origin on
+    the next refresh; it answers `store_layout` before it fetches or merges, and the
+    branch is untouched. **(c)** The
     completion pipeline scans the run's workspace for a stray
     `projects/<slug>/tasks/<key>/attachments` folder and posts a `policy` line naming
     it, the files it holds and the real folder, so a person learns why an attachment is
     missing. (`attachmentsDropSection` / `browserPersonaSection` in
     `app/server/tasks/specialist-browser-mcp.server.ts`; `storeLayoutFilesInTree` in
-    `app/server/github/push-workspace.server.ts`; `warnStrayAttachmentsFolder` and the
+    `app/server/github/push-workspace.server.ts`, called from both push doors; the
+    `store_layout` refusal of `updateWorkspaceBranchFromBase` in
+    `app/server/github/update-branch.server.ts`; `warnStrayAttachmentsFolder` and the
     `store_layout` arm of `performDelivery` in `app/server/tasks/task-actions.server.ts`;
     `findStrayAttachmentsFolder` in `app/server/files/task-attachments.server.ts`.)
 

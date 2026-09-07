@@ -103,6 +103,8 @@ function fakeGit(
     ahead?: number;
     /** Ruling 133(b): the push is refused non-fast-forward (a `push_conflict`). */
     pushRefused?: boolean;
+    /** Ruling 159(b): the store-layout paths HEAD's tree carries. */
+    storeLayoutFiles?: string[];
   } = {},
 ) {
   const calls: string[][] = [];
@@ -112,6 +114,13 @@ function fakeGit(
     calls.push(args);
     if (args.includes("--abbrev-ref")) return { ok: true, stdout: "vib-1", stderr: "" };
     if (args.includes("--is-shallow-repository")) return { ok: true, stdout: "false", stderr: "" };
+    if (args.includes("ls-tree")) {
+      return {
+        ok: true,
+        stdout: (opts.storeLayoutFiles ?? []).map((f) => `${f}\0`).join(""),
+        stderr: "",
+      };
+    }
     if (args.includes("--porcelain")) return { ok: true, stdout: "", stderr: "" };
     if (args.includes("fetch") && args.some((a) => a.includes("refs/heads/vib-1:"))) {
       return remote === "absent"
@@ -325,6 +334,18 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(packet.options.map((o) => [o.kind, o.rec])).toEqual([["custom", true], ["archive_task", false]]);
     expect(packet.options[0]!.d).toContain("Reconcile the branch with origin's copy by hand");
     expect(packet.body).toContain("this task has no delivering agent");
+  });
+
+  it("ruling 159(b): refuses a branch carrying the store layout, names the paths and pushes nothing", async () => {
+    const stray = `projects/${store.slug}/tasks/VIB-1/attachments/knc-9.txt`;
+    const git = fakeGit({ behind: 2, storeLayoutFiles: [stray] });
+    const res = await act(git.exec);
+    expect(res.outcome).toBe("noop");
+    expect(res.message).toContain(stray);
+    expect(res.message).toContain("store layout");
+    expect(res.message).toContain("Remove those paths");
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+    expect(git.calls.some((c) => c.includes("merge") && !c.includes("merge-base"))).toBe(false);
   });
 
   it("says so honestly when the branch is already current", async () => {

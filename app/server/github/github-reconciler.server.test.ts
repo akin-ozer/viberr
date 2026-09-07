@@ -3388,7 +3388,8 @@ describe("pass 35 S15: ruling 162 in the reconciler", () => {
 
 /**
  * Ruling 160 (pass 35, F35-11): a PR that went `closed` without merging was
- * closed by a person. The reconciler, the one writer of that state, stamps the
+ * closed by a person. The reconciler, the one writer of the closure RECORD (the
+ * workspace reconcile writes the closed state too, knowing neither), stamps the
  * closure with the closer GitHub names, carries it while the PR stays closed
  * and drops it the moment the PR is live again. Canaries: drop the `closure`
  * assignment in the owned-PR assembly (first test), or copy it unconditionally

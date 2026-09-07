@@ -6824,7 +6824,11 @@ async function refreshBranchForAcceptance(
     details.commits = result.commits;
     details.mergeSha = result.mergeSha;
   }
-  if (result.status === "conflict") details.files = result.files;
+  // Ruling 159(b): a refusal that names paths puts them on the record, whether
+  // it was a merge conflict or the store layout the refresh will not publish.
+  if (result.status === "conflict" || result.status === "store_layout") {
+    details.files = result.files;
+  }
   recordAudit(db, {
     action: "github.branch_update.acceptance",
     actor: { userId: actor.userId, label: actor.label },

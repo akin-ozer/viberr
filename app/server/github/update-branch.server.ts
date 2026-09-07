@@ -15,6 +15,8 @@ import {
   findWorkspaceRepoDir,
   isNonFastForwardStderr,
   isWorkflowScopeRejection,
+  storeLayoutFilesInTree,
+  storeLayoutPrefix,
   type Exec,
 } from "./push-workspace.server";
 
@@ -128,6 +130,16 @@ export type UpdateBranchResult =
    * local merge is rolled back and nothing is force-pushed (R18-4).
    */
   | { status: "push_conflict"; branch: string; base: string; reason: string }
+  /**
+   * Ruling 159(b), pass 35 review: the workspace tree carries Viberr's own
+   * store layout, so this door refuses too. The delivery push is not the only
+   * one that publishes the branch — this one pushes the whole workspace HEAD,
+   * so every commit made since the last delivery rides along, the delivery
+   * refusal's own commit included (`pushWorkspaceBranch` auto-commits a dirty
+   * tree BEFORE it reads it). Nothing is merged and nothing is pushed: the
+   * branch is exactly as it was, and the paths say what to remove.
+   */
+  | { status: "store_layout"; branch: string; files: string[]; reason: string }
   /**
    * The residual failure bucket. `reason` is Viberr's own sentence; `detail` is
    * git's text, scrubbed (`redactGitOutput`). A git failure whose reason is
@@ -315,6 +327,35 @@ export async function updateWorkspaceBranchFromBase(
         status: "dirty_workspace",
         reason:
           "the workspace has uncommitted changes (deliver or discard them before updating the branch)",
+      };
+    }
+
+    // Ruling 159(b): "viberr must never publish its own store layout into a
+    // customer repository, whatever an agent did" — and this is the second
+    // door that publishes the branch. It pushes the whole workspace HEAD, so a
+    // stray folder the delivery refusal left committed on the local branch
+    // would reach origin here. Read BEFORE the fetch and the merge: a refusal
+    // costs no network and leaves nothing to roll back.
+    const storeLayoutFiles = await storeLayoutFilesInTree(exec, repoDir, projectSlug);
+    if (storeLayoutFiles === null) {
+      logger.info("could not read the workspace tree for the store-layout check", {
+        taskKey,
+        branch,
+      });
+    } else if (storeLayoutFiles.length > 0) {
+      logger.info("branch update refused: the tree carries the store layout", {
+        taskKey,
+        branch,
+        files: storeLayoutFiles,
+      });
+      return {
+        status: "store_layout",
+        branch,
+        files: storeLayoutFiles,
+        reason:
+          `the branch carries ${storeLayoutFiles.map((f) => `\`${f}\``).join(", ")}, ` +
+          `which is Viberr's own store layout (\`${storeLayoutPrefix(projectSlug)}\`), not part of ` +
+          `the repository, so the branch was not moved and nothing was pushed`,
       };
     }
 

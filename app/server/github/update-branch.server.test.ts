@@ -89,6 +89,9 @@ function fakeGit(opts: {
   remote?: FakeRemote;
   /** Ruling 132: `rev-parse HEAD` after the merge answers nothing. */
   mergeShaUnreadable?: boolean;
+  /** Ruling 159(b): the store-layout paths HEAD's tree carries, as
+   *  `git ls-tree -r -z` reports them (NUL-terminated, unquoted). */
+  storeLayoutFiles?: string[];
 } = {}) {
   const calls: string[][] = [];
   const branch = opts.branch ?? "vib-1";
@@ -98,6 +101,13 @@ function fakeGit(opts: {
     calls.push(args);
     if (args.includes("--abbrev-ref")) {
       return { ok: true, stdout: branch, stderr: "" };
+    }
+    if (args.includes("ls-tree")) {
+      return {
+        ok: true,
+        stdout: (opts.storeLayoutFiles ?? []).map((f) => `${f}\0`).join(""),
+        stderr: "",
+      };
     }
     if (args.includes("--is-shallow-repository")) {
       return { ok: true, stdout: opts.shallow ? "true" : "false", stderr: "" };
@@ -436,5 +446,38 @@ describe("ruling 132: the refresh is recorded before it is published", () => {
     expect(res).toMatchObject({ status: "update_failed", reason: expect.stringContaining("rolled back") });
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
     expect(git.calls.some((c) => c.includes("reset") && c.includes(PRE_SHA))).toBe(true);
+  });
+});
+
+/**
+ * Ruling 159(b), pass 35 review: the delivery push is not the only door that
+ * publishes the branch. This one pushes the whole workspace HEAD, so the stray
+ * store-layout folder a refused delivery left committed on the local branch
+ * would reach origin the moment an acceptance (or the operator's
+ * `update_branch_from_base`) refreshed it. Canary: drop the tree read and the
+ * push runs.
+ */
+describe("ruling 159: the base refresh will not publish the store layout either", () => {
+  const STRAY = (slug: string) => `projects/${slug}/tasks/VIB-1/attachments/résumé.png`;
+
+  it("refuses a branch whose tree carries the store layout, merging and pushing nothing", async () => {
+    bindPat();
+    const stray = STRAY(store.slug);
+    const git = fakeGit({ behind: 2, storeLayoutFiles: [stray] });
+    const res = await run(git.exec);
+    expect(res).toMatchObject({ status: "store_layout", branch: "vib-1", files: [stray] });
+    expect(res.status === "store_layout" ? res.reason : "").toContain(`\`${stray}\``);
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+    expect(git.calls.some((c) => c.includes("merge") && !c.includes("merge-base"))).toBe(false);
+    // Read from HEAD's tree, NUL-delimited so a quoted path cannot hide.
+    const lsTree = git.calls.find((c) => c.includes("ls-tree"));
+    expect(lsTree).toEqual(["-C", expect.any(String), "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", `projects/${store.slug}/tasks/`]);
+  });
+
+  it("a clean tree still updates the branch", async () => {
+    bindPat();
+    const git = fakeGit({ behind: 2, storeLayoutFiles: [] });
+    expect(await run(git.exec)).toMatchObject({ status: "updated" });
+    expect(git.calls.some((c) => c.includes("push"))).toBe(true);
   });
 });

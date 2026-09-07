@@ -164,15 +164,17 @@ no credential, no repository and an unknown task are standing states and only lo
    credential error); other failures surface git's redacted words in a fenced "What
    the push reported" block. An unreadable `ls-remote` never blocks the push. Ruling
    159 (pass 35, F35-10): after the auto-commit and before anything else, the tree at
-   HEAD is read under the store's own prefix (`git ls-tree -r --name-only HEAD --
-   projects/<slug>/tasks/`); a branch that carries any such path is refused
+   HEAD is read under the store's own prefix (`git ls-tree -r -z --name-only HEAD --
+   projects/<slug>/tasks/`, NUL-delimited so a path git would quote for its non-ASCII
+   bytes cannot read as an empty tree); a branch that carries any such path is refused
    (`push_refused_store_layout`, the paths named), because Viberr never publishes its
    store layout into a customer repository, whatever an agent did. `performDelivery`
    reports it on the task as "Delivery push refused: store layout in the branch"
    (`store_layout`, the same shape as the scope refusal: no PR, a `github` timeline
    line, a policy notification), and the operator's `deliver_for_review` reply says to
    re-prompt the delivering agent to remove the folder. An unreadable tree is not a
-   measurement and the push answers for itself. Ruling
+   measurement and the push answers for itself. The base refresh reads the same tree
+   (below): it is the other door that publishes the branch. Ruling
    144(b): before pushing, delivery lists the files under `.github/workflows/` the push
    changes as GitHub measures them (`git log --format= --name-only <origin head>..HEAD`,
    falling back to the base only on a first push, so a workflow file already on origin
@@ -194,9 +196,10 @@ no credential, no repository and an unknown task are standing states and only lo
    `closed_by_human` before GitHub is asked (a `closed` cache carrying NO closure
    record is one the workspace reconcile wrote, so it goes through `reconcileTask`
    first and the refusal reads off what that pass recorded), and a cached live PR that GitHub now
-   reports closed and unmerged is handed to `reconcileTask` (the one writer of
-   `pr.state: closed`, the closure record and the R8-6 note, inbox alert and
-   `pr-diverged` wake) and then refused the same way; no fresh PR is opened for the
+   reports closed and unmerged is handed to `reconcileTask` (the one writer of the
+   closure record and of the R8-6 note, inbox alert and `pr-diverged` wake; the
+   workspace reconcile writes the closed STATE too, which is why the record, not the
+   state, is what those three key on) and then refused the same way; no fresh PR is opened for the
    branch until a person answers the recovery packet (rework, archive) or reopens the
    PR on GitHub. Only a MERGED pull request, cached or discovered live, clears the way
    for a fresh review PR (DG-1: a reworked branch never resurrects a merged PR). Else
@@ -318,7 +321,12 @@ and the note itself, used to assert the reused-key origin alone.)*
   `github.branch_update.acceptance`), refuses on a conflict with the gate's sentence
   after recording `mergeable: conflicting` and the conflicting paths, and proceeds to
   the merge when the branch cannot be refreshed from here. Operators stop refreshing at
-  the acceptance boundary.
+  the acceptance boundary. Ruling 159(b): the refresh pushes the whole workspace head,
+  so it reads HEAD's tree under `projects/<slug>/tasks/` first and answers
+  `store_layout` (the paths named, nothing fetched, merged or pushed) rather than
+  publishing the store layout a refused delivery left committed on the local branch;
+  the audit row carries the paths, and the operator's tool prints them with the
+  remedy.
 - **The unpushed delivered revision** (ruling 135, pass 34): `pr.headSha` is the PR
   head as GitHub last reported it, and `pr.unpushedRevision {revisionSha, prHeadSha,
   relation}` says the delivered revision is not on the pull request: `behind` (origin's

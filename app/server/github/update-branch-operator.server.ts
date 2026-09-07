@@ -61,7 +61,8 @@ type BranchUpdateAuditDetails = {
   status: UpdateBranchResult["status"];
   /** Base commits the branch was missing — `updated` only. */
   commits?: number;
-  /** Conflicting paths — `conflict` only. */
+  /** Conflicting paths (`conflict`), or the store-layout paths that refused the
+   *  update (`store_layout`, ruling 159(b)). */
   files?: string[];
   /** Ruling 134(c): origin's copy of the branch as it stood BEFORE the call. */
   remote?: RemoteBranchState["kind"];
@@ -284,6 +285,10 @@ function outcomeSentence(r: UpdateBranchResult, lead = "Brought"): string {
       );
     case "push_conflict":
       return `The update could not be published: ${r.reason}.`;
+    case "store_layout":
+      // Ruling 159(b): the same refusal the delivery push reports, through the
+      // door that pushes the workspace head. Naming the paths is the remedy.
+      return `\`${r.branch}\` was NOT updated: ${r.reason}. Remove those paths from the branch, then update it again.`;
     case "update_failed":
       return `The branch was not updated: ${r.reason}${r.detail ? ` (${r.detail})` : ""}`;
     default:
@@ -475,7 +480,9 @@ export async function operatorUpdateBranchFromBase(
     details.remote = result.remote.kind;
     details.remoteHeadSha = remoteHeadOf(result.remote);
   }
-  if (result.status === "conflict") details.files = result.files;
+  if (result.status === "conflict" || result.status === "store_layout") {
+    details.files = result.files;
+  }
   // Ruling 133(b): who the conflict packet will offer as the resolver, decided
   // once here so the audit row and the packet cannot disagree.
   const resolver: ConflictResolver | null =
