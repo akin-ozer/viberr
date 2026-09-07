@@ -39,7 +39,11 @@ import { describe, expect, it } from "vitest";
  *      the artefact out with `docker compose cp`;
  *   6. a host-side `npm run backup` in a recipe that also stops the container
  *      comes AFTER the `docker compose down` (with the app down the CLI reads
- *      the file itself; there is nothing to copy first).
+ *      the file itself; there is nothing to copy first);
+ *   7. `docs/development/scripts.md` — the page a developer reads when they add
+ *      the NEXT read-only CLI — describes the backup's own read the way it
+ *      ships: a copy under `state/tmp/`, not the retired "read-only connection"
+ *      to the live root, which is the shape that produced both SIGBUSes.
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -210,3 +214,27 @@ describe("ruling 158: the operations docs never open a live projection database,
   );
 });
 
+describe("ruling 158: the scripts page describes the reader that shipped", () => {
+  const SCRIPTS = page("docs/development/scripts.md");
+
+  /** The `### npm run backup` section, up to the next heading of any level. */
+  function backupSection(text: string): string {
+    return /### `npm run backup`[\s\S]*?(?=\n#{2,3} )/.exec(text)?.[0] ?? "";
+  }
+
+  it("scripts.md's backup detail names the copy, never a read-only connection to the live root", () => {
+    const section = backupSection(SCRIPTS.text);
+    expect(section, `${SCRIPTS.rel} must keep a "### \`npm run backup\`" section`).not.toBe("");
+    expect(
+      section,
+      `${SCRIPTS.rel} still describes the VACUUM INTO as running "from a read-only connection", ` +
+        `which is the pre-158 shape: readOnly: true on a live root is what produced exit 135 twice. ` +
+        `The live-lock path opens a COPY, read-write, so SQLite recovers the copied WAL into it.`,
+    ).not.toMatch(/read-only\s+connection/i);
+    expect(
+      section,
+      `${SCRIPTS.rel}'s backup section must say where the copy lives (state/tmp/), ` +
+        `so the next read-only CLI is written to the shape that shipped`,
+    ).toContain("state/tmp/");
+  });
+});

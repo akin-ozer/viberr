@@ -92,8 +92,14 @@ for Arda; one open scope violation on VIB-142; audit `seed.demo_dataset`; then
 ### `npm run backup`
 
 Writes `<--out ?? ./backups>/viberr-backup-<timestamp>/` (refuses an existing dir and
-any path inside the data root): `projection.sqlite` via `VACUUM INTO` from a read-only
-connection (WAL folded in, no sidecars), `projects/`, `agents/`, `kb/`, `skills/`,
+any path inside the data root): `projection.sqlite` via `VACUUM INTO` on whatever
+`openDatabaseReadOnly` handed it (WAL folded in, no sidecars) — the live file, opened
+read-only, ONLY on a root with no `state/writer.lock`; with a lock file there at all, a
+copy of `projection.sqlite` and its `-wal` under `state/tmp/reader-<pid>/`, opened
+read-write so SQLite recovers the WAL into it, and removed on close (ruling 158: no
+process but the server opens a live root's database, and a reader cannot judge a
+holder's liveness from another pid namespace, so presence is the whole question) —
+`projects/`, `agents/`, `kb/`, `skills/`,
 `audit-exports/` (`BACKED_UP_STORE_DIRS`; a directory that does not exist yet is
 skipped) — and `runtimes/` only with `--include-runtimes`, which since ruling 127 means
 every person's live vendor sign-in under `runtimes/users/`; treat that artefact as a
