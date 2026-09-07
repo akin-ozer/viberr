@@ -25,3 +25,14 @@
 - Q35-17 (F35-12) Should the operator be refused the transition INTO the Merge stage while the PR conflicts with the base (the task stays at the work stage where the conflict packet lives), or only the recommendation? Recommendation: both; Merge means "mergeable".
 - Q35-18 (G35-5 addendum) Move the base refresh from every operator turn to acceptance time (one refresh + gate + merge in the accept ceremony) and stop operators refreshing at Merge? Recommendation: yes; the conflict cascade above is the cost of refreshing early.
 - Q35-19 (F35-13) When a rework changes the revision at or past the review stage, return the task to the review stage automatically (ruling 163), or keep the human stage move as the only path and just name it? Recommendation: automatic; the packet the operator wrote today shows what "just name it" costs.
+
+## Plan-gate answers (owner, 2026-09-06 22:05Z–22:12Z)
+- Q35-17 + Q35-18 + Q35-19 (Merge-stage integrity): ALL THREE. A revision that changes after a verdict returns the task to the review stage automatically; the operator may not move into Merge or recommend acceptance while the PR conflicts (one gate function read everywhere); the base refresh happens once at acceptance time. Rulings 162, 163, G35-5 addendum (d)(e).
+- Q35-15 (coordination cost): LANE + FOLD. Reserved operator lane outside the run cap, and the transition turn writes the acceptance recommendation itself.
+- Q35-12 + Q35-13 (branches): BOTH RULES. Ruling 160 (no new PR after a human closure until the packet is answered) and ruling 161 (a never-pushed revision may be discarded; the discard retires it).
+- Q35-7 + Q35-8 (F35-7): REPLACE the copy's grants; ORG ADMINS ONLY may propagate; project admins see the divergence marker.
+- Q35-9 + Q35-10 (F35-8): a SCHEDULED operator run lifts a later hold; refused collision ceremonies keep the SAME packet-less blocked shape (a later Run operator lifts it; the operator reopens a packet if needed).
+- Q35-14 (F35-9): COPY THE FILE FIRST. `keys status` and `backup` copy projection.sqlite plus its WAL and open the copy whenever a live writer holds the root; the runbook says never open the live database from another program, copy it first. Ruling 158.
+- Q35-16 (U35-7): INTERRUPTED STATE, HONEST COUNTS.
+- Q35-11 (em dash in the org modal toast): rewrite under the copy rule (no question needed).
+- Scope: EVERYTHING, ONE PR on akin-ozer/viberr, based on the observation branch.
