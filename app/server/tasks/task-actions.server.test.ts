@@ -55,9 +55,13 @@ import {
   transitionStage,
   acceptanceDisclosureOf,
   applyRecommendation,
+  commentToAgent,
   forceAcceptCompletion,
+  liftHoldForRun,
+  OPERATOR_TASK_ACTOR,
   reorderTask,
   resolvePacket,
+  updateTaskGoal,
 } from "./task-actions.server";
 import type { TaskActionDeps } from "./task-actions.server";
 import { postAgentComment } from "./agent-toolkit.server";
@@ -4254,5 +4258,446 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
     expect(
       listAuditEvents(store.db, { action: "task.created" })[0]!.details,
     ).toMatchObject({ notified: { userId: store.users.murat.id } });
+  });
+});
+
+/**
+ * Pass 35 (the k9s-clone observation): the operator-and-task-actions slice.
+ * Every case here goes red when its fix is removed; the canary is named on
+ * each.
+ */
+describe("pass 35: operator and task actions", () => {
+  /** An operator deployment with the standard supervised policy, so the
+   *  transition re-trigger and the acceptance fold have an authority to read. */
+  function deployOperator(store: TestStore): void {
+    const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...projectFile.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "dispatch-agents", mode: "direct" as const },
+            { capabilityId: "stage-transitions", mode: "recommend" as const },
+            { capabilityId: "completion-for-acceptance", mode: "recommend" as const },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator" as const,
+            name: "Operator",
+            role: "Coordination",
+            icon: "shield",
+            backends: ["claude" as const],
+            model: "sonnet",
+            autonomy: "supervised" as const,
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  function seed(store: TestStore, patch: Partial<TaskFrontmatter> = {}, packet: TaskPacket | null = null): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        readiness: "ready",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        ...patch,
+      }),
+      goal: "Ship the parser.",
+      packet,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  const file = (store: TestStore) =>
+    readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+
+  /** A recording `runOperator` seam that settles a promise on its first call. */
+  function operatorSeam() {
+    let settle: (() => void) | null = null;
+    const observed = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const runOperator = vi.fn((_db: DatabaseSync, _input: RunOperatorInput) => {
+      settle?.();
+      return Promise.resolve({
+        runId: "run_seam",
+        queued: false,
+        backend: "claude" as const,
+        autonomy: "supervised" as const,
+      });
+    });
+    return { runOperator, observed };
+  }
+
+  const tick = () => new Promise((r) => setTimeout(r, 120));
+
+  describe("ruling 151 (F35-2): the boundary always wins in transitionStage", () => {
+    it("an operator-authorized move across an approval boundary is refused, whatever the caller", async () => {
+      // Canary: delete the ruling-151 throw in the `ctx.operatorAuthorized` arm.
+      const store = prepared();
+      seed(store, { stage: "impl" });
+      await expect(
+        transitionStage(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+          OPERATOR_TASK_ACTOR,
+          { dataRoot: store.dataRoot, operatorAuthorized: true },
+        ),
+      ).rejects.toThrow(/approved by a human on this board/);
+      expect(file(store).frontmatter.stage).toBe("impl");
+      expect(
+        listAuditEvents(store.db, { action: "task.transition" }).filter(
+          (row) => row.details?.by === "operator",
+        ),
+      ).toHaveLength(0);
+      // An applied recommendation carries the human's authorization and is
+      // not the operator's move: `recommendationAuthorized` still passes.
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(file(store).frontmatter.stage).toBe("review");
+    });
+  });
+
+  describe("ruling 152(a) (G35-5): a live operator run's move queues no fresh operator turn", () => {
+    it("with ctx.operatorRun set the runOperator seam is never called; without it, once", async () => {
+      // Canary: remove the `ctx.operatorRun` arm before the re-trigger.
+      const store = prepared();
+      deployOperator(store);
+      seed(store, { stage: "ready" });
+      const live = operatorSeam();
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        OPERATOR_TASK_ACTOR,
+        {
+          dataRoot: store.dataRoot,
+          operatorAuthorized: true,
+          operatorRun: { backend: "claude", autonomy: "supervised", reactDepth: 0, transitionDepth: 0 },
+          deps: { runOperator: live.runOperator },
+        },
+      );
+      expect(file(store).frontmatter.stage).toBe("impl");
+      await tick();
+      expect(live.runOperator).not.toHaveBeenCalled();
+
+      seed(store, { stage: "ready" });
+      const direct = operatorSeam();
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        OPERATOR_TASK_ACTOR,
+        { dataRoot: store.dataRoot, operatorAuthorized: true, deps: { runOperator: direct.runOperator } },
+      );
+      await Promise.race([
+        direct.observed,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("the transition trigger never fired")), 5_000)),
+      ]);
+      expect(direct.runOperator).toHaveBeenCalledTimes(1);
+      expect(direct.runOperator.mock.calls[0]![1].trigger).toBe("transition");
+    });
+  });
+
+  describe("Q35-15 (the fold): a person's move onto the acceptance boundary files the acceptance card", () => {
+    it("the applied move writes the accept_completion card and the operator is not re-invoked", async () => {
+      // Canary: delete the fold from transitionStage's re-trigger branch (the
+      // card is missing and the seam fires).
+      const store = prepared();
+      deployOperator(store);
+      seed(store, { stage: "impl" });
+      const seam = operatorSeam();
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
+      );
+      expect(file(store).frontmatter.stage).toBe("review");
+      await tick();
+      expect(file(store).frontmatter.recommendations.map((r) => r.kind)).toEqual(["accept_completion"]);
+      expect(seam.runOperator).not.toHaveBeenCalled();
+      expect(
+        listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
+      ).toHaveLength(1);
+    });
+
+    it("a refused acceptance gate files no card and re-invokes the operator as before", async () => {
+      const store = prepared();
+      deployOperator(store);
+      // A closed, unmerged PR refuses acceptance by a terminal fact.
+      seed(store, { stage: "impl", pr: { number: 8, state: "closed", title: "[VIB-1] work" } });
+      const seam = operatorSeam();
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
+      );
+      await Promise.race([
+        seam.observed,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("the transition trigger never fired")), 5_000)),
+      ]);
+      expect(file(store).frontmatter.recommendations).toHaveLength(0);
+      expect(seam.runOperator).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("U35-3: the force-accept record names every bypassed gate", () => {
+    it("the audit row and the completion event list the stage skip, the failing verdict and the withdrawn packet", async () => {
+      // Canary: return `[reasons[0]]` from acceptanceRefusalReasons (one gate).
+      const store = prepared();
+      const blocked: TaskPacket = {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Pick a recovery path",
+        body: "",
+        observations: [],
+        options: [{ kind: "block_on_policy", t: "Unblock", d: "", rec: true }],
+      };
+      seed(
+        store,
+        {
+          stage: "impl",
+          readiness: "blocked",
+          engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+          branch: "vib-1-work",
+          workRevision: workRev("rev_1"),
+          verdicts: [
+            {
+              profileId: "reviewer",
+              revisionId: "rev_1",
+              headSha: "a".repeat(40),
+              result: "request_changes",
+              reason: "needs tests",
+              at: "2026-09-06T09:30:00.000Z",
+            },
+          ],
+          validation: "failing",
+          pr: { number: 7, state: "review", title: "[VIB-1] work" },
+        },
+        blocked,
+      );
+      const ack = acceptanceDisclosureOf(file(store).frontmatter);
+      await forceAcceptCompletion(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", ack },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(file(store).frontmatter.stage).toBe("done");
+      const row = listAuditEvents(store.db, { action: "task.acceptance.forced" })[0]!;
+      const gates = z.array(z.string()).parse(row.details?.bypassedGates);
+      expect(gates.length).toBeGreaterThanOrEqual(2);
+      expect(gates.some((g) => /VIB-1 is at In Progress, not Review/.test(g))).toBe(true);
+      expect(gates.some((g) => /requests changes|request_changes|changes requested/i.test(g))).toBe(true);
+      expect(gates.some((g) => /open blocked decision/.test(g))).toBe(true);
+      expect(row.details?.skippedStages).toEqual(["review"]);
+      expect(row.details?.withdrawnPacket).toBe("Pick a recovery path");
+      expect(row.details?.validation).toBe("failing");
+      // The string every existing reader keeps carries the same list.
+      expect(String(row.details?.bypassed)).toContain(" | ");
+      const completion = file(store).timeline.find((e) => e.type === "completion")!;
+      expect(completion.text).toMatch(/Bypassed: Review skipped; the review gate; /);
+      expect(completion.text).toContain("Pick a recovery path");
+    });
+  });
+
+  describe("F35-5: an @mention whose run did not start leaves a note and an audit row", () => {
+    it("a stage-ineligible mention writes 'Mention not started' naming the stage, and task.comment.unrouted", async () => {
+      // Canary: remove the `noteMentionNotStarted` call from the catch.
+      const store = prepared();
+      const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...projectFile.parsed.frontmatter,
+        repo: null,
+        agents: [
+          {
+            profileId: "reviewer",
+            capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" as const }],
+            extras: [],
+            definition: {
+              kind: "specialist" as const,
+              name: "Rev",
+              role: "Code review",
+              backends: ["claude" as const],
+              model: "sonnet",
+              stages: ["review"],
+            },
+          },
+        ],
+      });
+      seed(store, { stage: "triage" });
+      const result = await commentToAgent(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", text: "@Rev please look" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(result.triggered).toBeNull();
+      expect(result.runNotStarted).toMatch(/Rev is not eligible for the Triage stage/);
+      const note = file(store).timeline.find((e) => e.type === "note" && e.title === "Mention not started")!;
+      expect(note).toBeDefined();
+      expect(note.text).toMatch(/^\*\*Not started:\*\* @Rev was mentioned, but its run did not start: Rev is not eligible for the Triage stage/);
+      expect(note.text).toContain("Review");
+      expect(note.text).not.toContain('"triage"');
+      const rows = listAuditEvents(store.db, { action: "task.comment.unrouted" });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.details).toMatchObject({ profileId: "reviewer", reason: "run-not-started" });
+      // The comment itself still stands.
+      expect(file(store).timeline.some((e) => e.type === "comment" && e.actor.kind === "human")).toBe(true);
+    });
+  });
+
+  describe("F35-6: updateTaskGoal is honest about an unchanged save", () => {
+    const editGoal: TaskPacket = {
+      type: "input",
+      kind: "Scope decision",
+      from: "operator",
+      title: "Narrow the goal?",
+      body: "",
+      observations: [],
+      options: [
+        {
+          kind: "edit_goal",
+          t: "Ship the parser with tests",
+          d: "Narrow to the parser and its tests.",
+          rec: true,
+          goalDraft: "Ship the parser with tests.",
+        },
+      ],
+    };
+
+    it("with a decided edit_goal packet open, the unchanged goal is refused and the packet stays; the draft clears it", async () => {
+      // Canary: restore the silent early return on unchanged text.
+      const store = prepared();
+      seed(store, { stage: "triage" }, editGoal);
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(file(store).packet?.awaiting).toBe("goal_edit");
+      await expect(
+        updateTaskGoal(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", goal: "Ship the parser." },
+          actor(store.users.arda),
+          { dataRoot: store.dataRoot },
+        ),
+      ).rejects.toThrow(/reads exactly as before, so the requested edit has not landed/);
+      expect(file(store).packet?.awaiting).toBe("goal_edit");
+      const saved = await updateTaskGoal(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", goal: "Ship the parser with tests." },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(saved.changed).toBe(true);
+      expect(file(store).packet).toBeNull();
+      expect(file(store).timeline.some((e) => e.text.includes("**Packet resolved:** the requested goal edit landed"))).toBe(true);
+    });
+
+    it("without a packet an unchanged save reports changed: false and writes nothing", async () => {
+      const store = prepared();
+      seed(store, { stage: "impl" });
+      const before = file(store).timeline.length;
+      const result = await updateTaskGoal(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", goal: "Ship the parser." },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(result.changed).toBe(false);
+      expect(file(store).timeline).toHaveLength(before);
+    });
+  });
+
+  describe("ruling 157 (F35-8): liftHoldForRun", () => {
+    const hold: TaskPacket = {
+      type: "blocked",
+      kind: "Work stalled",
+      from: "operator",
+      title: "The Developer's run failed",
+      body: "",
+      observations: [],
+      options: [{ kind: "hold_runtime_debug", t: "Hold for runtime debug", d: "", rec: false }],
+    };
+
+    async function held(store: TestStore, patch: Partial<TaskFrontmatter> = {}): Promise<void> {
+      seed(store, { stage: "review", readiness: "blocked", ...patch }, hold);
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, ack: null },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(file(store).packet).toBeNull();
+      expect(file(store).frontmatter.readiness).toBe("blocked");
+    }
+
+    it("lifts a packet-less, list-less hold once: readiness ready, a 'Hold lifted' note, task.hold.lifted", async () => {
+      // Canary: return true from liftHoldForRun without the write.
+      const store = prepared();
+      await held(store);
+      const lifted = await liftHoldForRun(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
+        kind: "dispatch",
+        profileId: "developer",
+        name: "Developer",
+        by: null,
+      });
+      expect(lifted).toBe(true);
+      expect(file(store).frontmatter.readiness).toBe("ready");
+      const note = file(store).timeline[0]!;
+      expect(note).toMatchObject({ type: "note", title: "Hold lifted" });
+      expect(note.text).toBe(
+        "**Hold lifted:** Developer was dispatched, so VIB-1 is no longer held. The run's outcome decides what happens next.",
+      );
+      const rows = listAuditEvents(store.db, { action: "task.hold.lifted" });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.details).toMatchObject({ cause: "dispatch", profileId: "developer", previous: "blocked" });
+      // A second call finds no hold and writes no second note.
+      const again = await liftHoldForRun(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
+        kind: "dispatch",
+        profileId: "developer",
+        name: "Developer",
+        by: null,
+      });
+      expect(again).toBe(false);
+      expect(file(store).timeline.filter((e) => e.title === "Hold lifted")).toHaveLength(1);
+    });
+
+    it("an open blocked packet and a dependency list are not holds", async () => {
+      const store = prepared();
+      seed(store, { stage: "review", readiness: "blocked" }, hold);
+      expect(
+        await liftHoldForRun(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
+          kind: "operator-run",
+          trigger: "manual",
+          byName: "Arda",
+          by: actor(store.users.arda),
+        }),
+      ).toBe(false);
+      expect(file(store).frontmatter.readiness).toBe("blocked");
+      await held(store, { blockedBy: ["VIB-2"] });
+      expect(
+        await liftHoldForRun(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
+          kind: "operator-run",
+          trigger: "scheduled",
+          byName: null,
+          by: null,
+        }),
+      ).toBe(false);
+      expect(file(store).frontmatter.readiness).toBe("blocked");
+      expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(0);
+    });
   });
 });

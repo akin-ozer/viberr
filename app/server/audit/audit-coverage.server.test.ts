@@ -314,6 +314,31 @@ describe("governed actions record audit rows (table-driven)", () => {
           ),
       },
       {
+        // Ruling 157 (pass 35, F35-8): the one lift of a packet-less hold.
+        // VIB-1 carries no packet and no dependency list in this store, so a
+        // stored `blocked` is the hold shape a dispatch lifts.
+        name: "liftHoldForRun (a dispatch lifts a hold)",
+        action: "task.hold.lifted",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { liftHoldForRun } = await import("~/server/tasks/task-actions.server");
+          const { updateTaskFile } = await import("~/server/files/task-writer.server");
+          await updateTaskFile(
+            { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+            (parsed) => {
+              parsed.frontmatter.readiness = "blocked";
+              parsed.frontmatter.blockedBy = [];
+            },
+          );
+          await liftHoldForRun(store.db, fileCtx, store.slug, "VIB-1", {
+            kind: "dispatch",
+            profileId: "developer",
+            name: "Developer",
+            by: null,
+          });
+        },
+      },
+      {
         name: "resolvePacket (request_edit)",
         action: "task.packet.resolved",
         taskKey: "VIB-2",

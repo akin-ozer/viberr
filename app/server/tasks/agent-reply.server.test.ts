@@ -988,7 +988,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     );
     expect(result.agent?.profileId).toBe("rev");
     expect(result.triggered).toBeNull();
-    expect(result.runNotStarted).toMatch(/rev is not eligible for the "impl" stage/);
+    expect(result.runNotStarted).toMatch(/rev is not eligible for the In Progress stage/);
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     expect(file.parsed.timeline.some((e) => e.type === "comment" && e.actor.kind === "human")).toBe(true);
   });
@@ -1034,7 +1034,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBeNull();
-    expect(result.runNotStarted).toMatch(/rev is not eligible for the "impl" stage/);
+    expect(result.runNotStarted).toMatch(/rev is not eligible for the In Progress stage/);
   });
 });
 

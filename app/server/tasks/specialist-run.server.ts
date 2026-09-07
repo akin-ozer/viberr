@@ -2174,12 +2174,22 @@ async function dispatchAgentRun(
       : runStartedDetails,
   });
 
-  const { registerAgentCompletion, markWaitingAgent } = await import(
+  const { liftHoldForRun, markWaitingAgent, registerAgentCompletion } = await import(
     "./task-actions.server"
   );
   // Dynamic, like the import above: agent-reply already imports THIS module for
   // the deployed-specialist list, so a static import here would close a cycle.
   const { agentMentionHandle } = await import("./agent-reply.server");
+  // Ruling 157 (pass 35, F35-8): a dispatch that starts a run lifts a
+  // packet-less hold on the record, whichever door it came through (the Run
+  // control, an @mention, the operator's `run_agent`, a schedule,
+  // `retry_other_backend`, an applied recommendation).
+  await liftHoldForRun(db, ctx, input.projectSlug, input.taskKey, {
+    kind: "dispatch",
+    profileId: engagement.profileId,
+    name: agentName,
+    by: ctx.operatorAuthorized ? null : auditActor,
+  });
   // The board reads "agent working" while the run is in flight.
   await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
 
@@ -2846,10 +2856,7 @@ function projectRepo(ctx: TaskMutationContext, projectSlug: string): string | nu
 export function projectBoard(
   ctx: TaskMutationContext,
   projectSlug: string,
-): {
-  stages: readonly { id: string }[];
-  workflow: readonly { from: string; to: string }[];
-} | null {
+): EligibilityBoard | null {
   const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
   if (!file) return null;
   return {
@@ -3675,20 +3682,22 @@ export function specialistEligibleForStage(
 }
 
 type EligibilityBoard = {
-  stages: readonly { id: string }[];
+  stages: readonly { id: string; name: string }[];
   workflow: readonly { from: string; to: string }[];
 };
 
-/** The dispatcher's own refusal sentence, shared by every door (ruling 133). */
+/** The dispatcher's own refusal sentence, shared by every door (ruling 133).
+ *  F35-5 (pass 35, drift D97): stage NAMES through the board, never raw ids. */
 function stageRefusalSentence(
   spec: { name: string; stages: string[]; spanAll: boolean },
   stageId: string,
   board?: EligibilityBoard | null,
 ): string {
+  const nameOf = (id: string): string => (board ? stageName(board.stages, id) : id);
   const scopedTo = board
-    ? resolveDeclaredStages(spec.stages, board.stages, board.workflow).join(", ")
+    ? resolveDeclaredStages(spec.stages, board.stages, board.workflow).map(nameOf).join(", ")
     : spec.stages.join(", ");
-  return `${spec.name} is not eligible for the "${stageId}" stage — its profile is scoped to ${
+  return `${spec.name} is not eligible for the ${nameOf(stageId)} stage; its profile is scoped to ${
     scopedTo || spec.stages.join(", ") || "no stages"
   }. Change the task's stage or the profile's eligible stages.`;
 }

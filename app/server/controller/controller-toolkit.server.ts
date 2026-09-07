@@ -1301,14 +1301,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           let firstError: AppError | null = null;
           if (args.goal !== undefined) {
             try {
-              await updateTaskGoal(
+              const { changed } = await updateTaskGoal(
                 db,
                 { projectSlug: slug, taskKey: key, goal: prose(args.goal) },
                 actor,
                 { dataRoot },
               );
-              if (before && before.goal === prose(args.goal).trim()) unchanged.push("goal");
-              else applied.push("goal");
+              if (changed) applied.push("goal");
+              else unchanged.push("goal");
             } catch (error) {
               if (!(error instanceof AppError)) throw error;
               firstError ??= error;

@@ -211,6 +211,15 @@ the session rows and `backend_credential` for the stored ones. The `reason` is t
 same already-redacted sentence the person sees; a key, a token, a one-time code and a
 raw vendor line never reach an audit row.
 
+**Pass-35 rows.** `task.acceptance.forced` carries `bypassed` (the gate sentences
+joined with " | "), `bypassedGates` (the same list), `skippedStages`, `validation` and
+`withdrawnPacket` (U35-3). `task.hold.lifted {cause: "operator-run" | "dispatch",
+trigger?, profileId?, byUserId?, previous: "blocked"}` is written by `liftHoldForRun`,
+actor the person who started the operator or the operator actor for a dispatch
+(ruling 157). `task.comment.unrouted` gains the `reason: "run-not-started"` shape
+beside the ambiguous-handle one (F35-5). A `task.transition` row with `by: operator`
+and `boundary: approval` can no longer be written (ruling 151).
+
 Where it is read:
 
 - **Org settings → Audit log**: an in-app browse of the newest 150 rows (max 500) with

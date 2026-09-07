@@ -565,9 +565,9 @@ function AutonomyField({
               acts directly under either setting (live: a supervised operator
               with stage-transitions:direct moved approval boundaries itself).
               The old sentence read as a guarantee this control cannot make. */}
-          supervised recommends at approval boundaries · full performs them and
-          may accept completion to Done · capability rows may override this per
-          action
+          supervised recommends most actions · full performs them, except that
+          an approval boundary always waits for a person and a human boundary is
+          never the operator's · capability rows may override this per action
         </span>
       </span>
       <div className="pick-chips">

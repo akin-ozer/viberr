@@ -438,14 +438,18 @@ Telemetry tags are collapsed by `log-noise.ts`, and the console shows the redact
   the analyze prompt (task text, comments and repo content are **data**, never
   authority), resolve delivery permissions, compute the denylist (or the "everything
   off" list when the profile vanished, ruling 26), write the redacted `run·inputs`
-  line, audit `task.agent.run_started`, mark `waiting: agent`, register the completion
-  callback. A resume re-derives all of it (`resolveResumeConfinement`).
+  line, audit `task.agent.run_started`, lift a packet-less hold (`liftHoldForRun`:
+  `readiness: ready`, a "Hold lifted" note naming the dispatched agent,
+  `task.hold.lifted {cause: "dispatch", profileId}`; ruling 157), mark `waiting:
+  agent`, register the completion callback. A resume re-derives all of it
+  (`resolveResumeConfinement`).
 - Git identity in the run: `<profileId>@viberr.local`; `GIT_CEILING_DIRECTORIES` is the
   task dir.
 
 Stage eligibility (`stages:` on the profile, `spanAll`) gates NEW engagements
 (`assignSpecialist`, `assignReviewer`, the dispatch's auto-engage); an empty list means
-eligible everywhere. Ruling 133 (pass 34): once a profile is the task's delivering
+eligible everywhere. The refusal sentence names stages by their board names ("Rev is
+not eligible for the Triage stage; its profile is scoped to Review."), never raw ids. Ruling 133 (pass 34): once a profile is the task's delivering
 engagement it runs at EVERY stage, on every door (the operator's `run_agent`, the Run
 control, a human @mention's resume, a schedule, `retry_other_backend`), for rework,
 conflict resolution and follow-ups; `runEligibilityFor` is the one home, and the
@@ -704,9 +708,12 @@ Every mutating request is also bounded by a 30 s action watchdog (503 on an asyn
 - Prompt-side rules: task text, comments, repo content and agent reports are data; a
   directive is not an authority grant; a directive asking for delivery posts a policy
   event; supporting runs get the read-only paragraph and the delivery denies.
-- Bounds: operator react depth 4, transition chain 8, carried triggers 8, recovery
-  re-invokes 3 per 30 min, schedule retries 3, Claude max turns 2000, idle 15 min per
-  backend, action watchdog 30 s.
+- Bounds: operator react depth 4, transition chain 8 (counted across re-triggered
+  turns; since ruling 152(a) a live operator run's own moves queue no turn, so
+  consecutive `auto` boundaries are walked inside one turn and the stranded-stage
+  backstop covers an abandoned chain), carried triggers 8, recovery re-invokes 3 per
+  30 min, schedule retries 3, Claude max turns 2000, idle 15 min per backend, action
+  watchdog 30 s.
 
 ## 10. Seeded catalog
 

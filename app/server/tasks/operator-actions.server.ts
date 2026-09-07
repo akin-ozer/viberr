@@ -2804,16 +2804,14 @@ export async function operatorTransitionStage(
   // + failing before honoring the off-graph move.
   const isRework = isReworkMove(ctx, input.projectSlug, input.taskKey, input.toStageId);
   const boundary = operatorBoundaryFor(ctx, input.projectSlug, input.taskKey, input.toStageId);
+  const terminalId = resolveTerminalStageId(ctx, input.projectSlug);
   // F19-26: a transition whose TARGET is the terminal stage is an ACCEPTANCE,
   // whatever the tool it arrived through. A supervised operator calling
   // transition_stage(<terminal>) used to file a plain "Move the task to Done"
   // card whose Apply runs the full acceptance contract — a real, irreversible PR
   // merge — under a label that never says "accept" or "merge". Route it to the
   // acceptance path instead, which files a truthful `accept_completion` card
-  // (and refuses out loud when the acceptance gates are not met). The DIRECT
-  // branch already refuses (task-actions.server.ts: "The operator reaches Done
-  // only by accepting completion, not a bare transition"), which is why the
-  // guard is scoped to the recommend gate.
+  // (and refuses out loud when the acceptance gates are not met).
   //
   // R19-6: rerouting also means this path must answer to the ACCEPTANCE
   // capability, not just `stage-transitions` — `stage-transitions: recommend`
@@ -2821,7 +2819,12 @@ export async function operatorTransitionStage(
   // acceptance card + audit row through exactly this delegation. The gate is
   // the first thing `operatorAcceptCompletion` does, so the refusal is
   // inherited here rather than duplicated (one gate read, one sentence).
-  if (g === "recommend" && input.toStageId === resolveTerminalStageId(ctx, input.projectSlug)) {
+  //
+  // Ruling 151 (pass 35, F35-2): the reroute now covers BOTH gates. Under
+  // `direct` the bare move used to fall through to transitionStage's own
+  // refusal ("reaches Done only by accepting completion"); acceptance has its
+  // own capability, so the acceptance path answers here too.
+  if (terminalId !== null && input.toStageId === terminalId) {
     return operatorAcceptCompletion(
       db,
       ctx,
@@ -2829,8 +2832,46 @@ export async function operatorTransitionStage(
       authority,
     );
   }
+  const name = stageNameOf(ctx, input.projectSlug, input.toStageId);
+  // Ruling 151 (owner, Q35-1): the boundary the project author declared is the
+  // contract every human reads on the Policy page and in project.md, and a
+  // grant cannot void it. `direct` crosses `auto` boundaries only; a declared
+  // `approval` boundary ALWAYS files a recommendation a human applies, under
+  // either autonomy and either grant mode; a declared `human` boundary is
+  // refused with a sentence. Live (KNC-1): `stage-transitions: direct` under
+  // supervised autonomy moved Review to Merge with `boundary: approval, by:
+  // operator` while every surface said a human approves it. Rework moves on a
+  // failing task (R7-4) are unchanged.
+  if (!isRework && boundary === "human") {
+    return {
+      outcome: "denied",
+      message:
+        `Moving ${input.taskKey} to ${name} is a human decision on this board; the operator ` +
+        `cannot cross that boundary. A human moves the task or accepts the completion.`,
+    };
+  }
+  if (!isRework && boundary === "approval") {
+    const fromName = stageNameOf(ctx, input.projectSlug, currentStageOf(ctx, input));
+    await addRecommendation(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      {
+        kind: "transition",
+        toStageId: input.toStageId,
+        label: `Move the task to ${name}`,
+      },
+      input.reason ?? `The work is ready to advance to ${name}.`,
+    );
+    return {
+      outcome: "recommended",
+      message:
+        `Recommended moving the task to ${name}; the ${fromName} to ${name} boundary is ` +
+        `approved by a human.`,
+    };
+  }
   if (g === "recommend" && boundary !== "auto" && !isRework) {
-    const name = stageNameOf(ctx, input.projectSlug, input.toStageId);
     await addRecommendation(
       db,
       ctx,
@@ -2849,8 +2890,118 @@ export async function operatorTransitionStage(
   // `rework` is an off-graph escape hatch transitionStage re-validates; it must
   // reach it only on a genuine rework move.
   if (isRework) move.rework = true;
-  const task = await transitionStage(db, move, OPERATOR_TASK_ACTOR, opCtx(ctx));
-  return { outcome: "done", message: `Moved ${input.taskKey} to ${task.stage}.` };
+  await transitionStage(db, move, OPERATOR_TASK_ACTOR, opCtx(ctx));
+  // Ruling 152(a) (pass 35, G35-5): the reply names the NEXT boundary so one
+  // turn can walk consecutive `auto` boundaries instead of paying a fresh
+  // operator turn per stage (KNC-1 took eight operator runs for a one-file
+  // ADR). When the move lands on the acceptance boundary, the same turn files
+  // the acceptance recommendation (owner, Q35-15: the fold), so an approval
+  // costs one operator turn, not two.
+  const folded = await foldAcceptanceRecommendation(
+    db,
+    ctx,
+    { projectSlug: input.projectSlug, taskKey: input.taskKey },
+    authority,
+  );
+  const next = folded
+    ? folded.message
+    : nextBoundarySentence(ctx, input.projectSlug, input.toStageId, name, authority);
+  return {
+    outcome: "done",
+    message: `Moved ${input.taskKey} to ${name}.${next ? ` ${next}` : ""}`,
+  };
+}
+
+/** The task's current stage id (the `from` of the move being judged). */
+function currentStageOf(
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string },
+): string {
+  const task = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  return task?.parsed.frontmatter.stage ?? "";
+}
+
+/**
+ * Ruling 152(a): what the operator should do about the boundary AFTER the one
+ * it just crossed, so a turn continues instead of ending at a stage whose only
+ * work is another transition. Empty when the stage has no outbound edge.
+ */
+function nextBoundarySentence(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  stageId: string,
+  stageDisplayName: string,
+  authority: OperatorAuthority,
+): string {
+  const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  if (!project) return "";
+  const edge = project.parsed.frontmatter.workflow.find((w) => w.from === stageId);
+  if (!edge) return "";
+  const toName = stageName(project.parsed.frontmatter.stages, edge.to);
+  const label = `The next boundary, ${stageDisplayName} to ${toName},`;
+  if (edge.boundary === "auto") {
+    return `${label} is auto: continue in this turn when nothing at ${stageDisplayName} needs an agent.`;
+  }
+  if (edge.boundary === "approval") {
+    return `${label} is approved by a human: recommend it when the work is ready.`;
+  }
+  // A `human` boundary is the acceptance boundary: the fold above already
+  // tried the recommendation; reaching here means the recommend branch does
+  // not apply (full autonomy with a direct acceptance grant, or acceptance
+  // withheld), so the reply names the tool that answers for it.
+  return gate(authority, "completion-for-acceptance") === "deny"
+    ? `${label} is a human decision: a human accepts the completion.`
+    : `${label} is acceptance: call accept_completion when the review is clean.`;
+}
+
+/**
+ * Owner decision Q35-15 (pass 35, G35-5, the FOLD): when a task lands on the
+ * acceptance boundary (the review stage, or any stage with a declared edge into
+ * the terminal one), the acceptance recommendation is written NOW, by whoever
+ * made the move, instead of by a second paid operator turn whose only work was
+ * that card (KNC-30: Review to Merge at 19:21Z, the acceptance card at 19:30Z,
+ * two turns). Recommendation ONLY: a full-autonomy operator holding a direct
+ * acceptance grant is never folded into an actual acceptance, and a withheld
+ * capability files nothing (`completionCapabilityRefusal`). The shared
+ * acceptance gate stack inside `operatorAcceptCompletion` decides whether the
+ * card can be filed; its refusal sentence comes back as the message so the
+ * caller can say why no card exists yet.
+ *
+ * Returns `null` when the fold does not apply (not at the boundary, direct
+ * acceptance, capability withheld, no operator deployed); otherwise whether a
+ * card was filed and the sentence to report.
+ */
+export async function foldAcceptanceRecommendation(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string },
+  authority: OperatorAuthority,
+): Promise<{ recommended: boolean; message: string } | null> {
+  if (!authority.deployed) return null;
+  if (completionCapabilityRefusal(authority, input.taskKey)) return null;
+  if (authority.autonomy === "full" && gate(authority, "completion-for-acceptance") === "direct") {
+    return null;
+  }
+  const project = readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot });
+  const task = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!project || !task) return null;
+  const stages = project.parsed.frontmatter.stages;
+  const workflow = project.parsed.frontmatter.workflow;
+  const roles = resolveStageRoles(stages, workflow);
+  const stage = task.parsed.frontmatter.stage;
+  const terminalId = roles.terminalId;
+  if (terminalId === null || stage === terminalId) return null;
+  const atBoundary =
+    stage === roles.reviewId || workflow.some((w) => w.from === stage && w.to === terminalId);
+  if (!atBoundary) return null;
+  const result = await operatorAcceptCompletion(db, ctx, input, authority);
+  if (result.outcome === "recommended") {
+    return { recommended: true, message: result.message };
+  }
+  return {
+    recommended: false,
+    message: `Acceptance is not recommended yet: ${result.message}`,
+  };
 }
 
 /** The project's terminal (Done-equivalent) stage id (B-WF4). `resolveStageRoles`

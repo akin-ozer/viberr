@@ -1480,7 +1480,11 @@ describe("operatorTransitionStage", () => {
     expect(task().frontmatter.waiting).toBe("human");
   });
 
-  it("full autonomy moves the task across an approval boundary as the operator", async () => {
+  it("ruling 151: full autonomy RECOMMENDS an approval boundary instead of crossing it", async () => {
+    // Pass 35, F35-2 (owner Q35-1): the boundary always wins. This case used to
+    // assert the opposite ("full autonomy moves the task across an approval
+    // boundary as the operator"). Canary: delete the `boundary === "approval"`
+    // branch in operatorTransitionStage and the task moves.
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     const r = await operatorTransitionStage(
@@ -1489,10 +1493,185 @@ describe("operatorTransitionStage", () => {
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
       authority("full"),
     );
+    expect(r.outcome).toBe("recommended");
+    expect(r.message).toContain("approved by a human");
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(task().frontmatter.recommendations.map((x) => x.kind)).toEqual(["transition"]);
+    expect(
+      listAuditEvents(store.db, { action: "task.transition" }).filter(
+        (row) => row.details?.by === "operator",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("ruling 151: an EXPLICIT `stage-transitions: direct` grant under supervised autonomy still recommends an approval boundary", async () => {
+    // The live KNC-1 shape: the controller set the grant to `direct` and the
+    // operator crossed Review to Merge alone (audit `boundary: approval, by:
+    // operator`) while every surface said a human approves it.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "stage-transitions"),
+      { capabilityId: "stage-transitions", mode: "direct" },
+    ]);
+    seedTask("impl");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("recommended");
+    expect(task().frontmatter.stage).toBe("impl");
+    // …and the same grant still crosses an `auto` boundary directly.
+    seedTask("ready");
+    const auto = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+      authority("supervised"),
+    );
+    expect(auto.outcome).toBe("done");
+    expect(task().frontmatter.stage).toBe("impl");
+  });
+
+  it("ruling 151: a declared `human` boundary before the terminal stage is refused with a sentence", async () => {
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "stage-transitions"),
+      { capabilityId: "stage-transitions", mode: "direct" },
+    ]);
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      stages: [
+        { id: "triage", name: "Triage", color: "#a5a8b5" },
+        { id: "impl", name: "Build", color: "#7b61ff" },
+        { id: "signoff", name: "Sign-off", color: "#5b76fe" },
+        { id: "done", name: "Done", color: "#00b473" },
+      ],
+      workflow: [
+        { from: "triage", to: "impl", boundary: "auto", by: "Operator", locked: false },
+        { from: "impl", to: "signoff", boundary: "human", by: "A person", locked: false },
+        { from: "signoff", to: "done", boundary: "human", by: "Human acceptance", locked: true },
+      ],
+    });
+    seedTask("impl");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "signoff" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("denied");
+    expect(r.message).toBe(
+      "Moving VIB-1 to Sign-off is a human decision on this board; the operator cannot cross that boundary. A human moves the task or accepts the completion.",
+    );
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+  });
+
+  it("ruling 152(a): the done reply names the NEXT boundary so one turn walks consecutive auto stages", async () => {
+    // Canary: return the bare "Moved …" sentence again.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("triage");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      authority("supervised"),
+    );
     expect(r.outcome).toBe("done");
-    expect(task().frontmatter.stage).toBe("review");
-    // The transition event is attributed to the operator, not a human.
-    expect(task().timeline.some((e) => e.type === "transition" && e.actor.kind === "operator")).toBe(true);
+    expect(r.message).toMatch(/^Moved VIB-1 to Ready\. The next boundary, Ready to In Progress, is auto: continue in this turn/);
+    const next = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+      authority("supervised"),
+    );
+    expect(next.message).toMatch(/next boundary, In Progress to Review, is approved by a human: recommend it/);
+  });
+
+  describe("Q35-15: the transition turn writes the acceptance recommendation itself (the fold)", () => {
+    // A board whose edge INTO the acceptance boundary is `auto`, so the
+    // operator's own move lands there directly (KNC-30 took two operator
+    // turns: one for Review to Merge, a second only to write the card).
+    const foldBoard = (): void => {
+      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...file.parsed.frontmatter,
+        workflow: [
+          { from: "triage", to: "ready", boundary: "auto", by: "Operator", locked: false },
+          { from: "ready", to: "impl", boundary: "auto", by: "Operator", locked: false },
+          { from: "impl", to: "review", boundary: "auto", by: "Operator", locked: false },
+          { from: "review", to: "done", boundary: "human", by: "Human acceptance", locked: true },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    };
+
+    it("a direct move onto the acceptance boundary files the accept_completion card in the same call", async () => {
+      // Canary: delete the `foldAcceptanceRecommendation` call from the done
+      // branch of operatorTransitionStage.
+      deployRoster(DEFAULT_POLICY);
+      foldBoard();
+      seedTask("impl");
+      const r = await operatorTransitionStage(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+        authority("supervised"),
+      );
+      expect(r.outcome).toBe("done");
+      expect(task().frontmatter.stage).toBe("review");
+      expect(r.message).toMatch(/^Moved VIB-1 to Review\. Recommended accepting completion: move VIB-1 to Done\./);
+      expect(task().frontmatter.recommendations.map((x) => x.kind)).toEqual(["accept_completion"]);
+      expect(
+        listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
+      ).toHaveLength(1);
+    });
+
+    it("a refused acceptance gate is reported in the reply and no card is filed", async () => {
+      deployRoster(DEFAULT_POLICY);
+      foldBoard();
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          ownerUserId: store.users.arda.id,
+          operator: { assignedAtStageId: "triage" },
+          // A closed, unmerged PR: acceptance is refused by a terminal fact.
+          pr: { number: 8, state: "closed", title: "[VIB-1] work" },
+        }),
+        goal: "Prove the fold reports a refusal.",
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const r = await operatorTransitionStage(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+        authority("supervised"),
+      );
+      expect(r.outcome).toBe("done");
+      expect(task().frontmatter.stage).toBe("review");
+      expect(r.message).toMatch(/Acceptance is not recommended yet: /);
+      expect(task().frontmatter.recommendations).toHaveLength(0);
+    });
+
+    it("full autonomy with a DIRECT acceptance grant is never folded into an acceptance", async () => {
+      deployRoster([
+        ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+        { capabilityId: "completion-for-acceptance", mode: "direct" },
+      ]);
+      foldBoard();
+      seedTask("impl");
+      const r = await operatorTransitionStage(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+        authority("full"),
+      );
+      expect(r.outcome).toBe("done");
+      expect(task().frontmatter.stage).toBe("review");
+      expect(r.message).toMatch(/is acceptance: call accept_completion/);
+      expect(task().frontmatter.recommendations).toHaveLength(0);
+    });
   });
 
   it("supervised operator CROSSES the triage → ready `auto` boundary directly", async () => {

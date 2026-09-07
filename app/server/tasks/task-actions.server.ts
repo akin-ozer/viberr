@@ -28,6 +28,7 @@ import {
   type TaskFrontmatter,
   type TaskPacket,
   type TaskPriority,
+  type Validation,
   type WorkRevision,
   PRIORITY_VALUES,
   isValidDueDate,
@@ -76,6 +77,7 @@ import {
 import {
   OPERATOR_AUDIT_ACTOR,
   recordAudit,
+  type AuditActor,
   type AuditEventInput,
   SYSTEM_ACTOR,
 } from "~/server/audit/audit-recorder.server";
@@ -756,7 +758,7 @@ export async function updateTaskGoal(
   input: { projectSlug: string; taskKey: string; goal: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
-): Promise<{ task: TaskSummary }> {
+): Promise<{ task: TaskSummary; changed: boolean }> {
   const project = loadProjectContext(ctx, input.projectSlug);
   requireAction(db, project, actor, "update-goal", "edit the task goal");
   const goal = input.goal.trim();
@@ -766,7 +768,16 @@ export async function updateTaskGoal(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   if (existing.parsed.goal.trim() === goal) {
-    return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
+    // F35-6 (pass 35): an unchanged save is not an edit. While a decided
+    // `edit_goal` packet waits for the edited goal, saving the original text
+    // used to answer 200 + "Goal updated" and leave the packet open (KNC-4);
+    // say so instead. Without a packet the caller is told nothing changed.
+    if (existing.parsed.packet?.awaiting === "goal_edit") {
+      throw AppError.validation(
+        "The goal reads exactly as before, so the requested edit has not landed. Open the requested goal from the decision card, or write the edit.",
+      );
+    }
+    return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: false };
   }
 
   let clearedPacket = false;
@@ -825,7 +836,7 @@ export async function updateTaskGoal(
   // (resolve_decision_packet) instead of treating this as a generic poke.
   void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "goal-updated");
 
-  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
+  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: true };
 }
 
 /** A partial metadata edit — the axes a caller chose to touch (an omitted axis
@@ -1027,7 +1038,7 @@ async function answerAskingAgent(
 
     const result = await commentToAgent(
       db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, text },
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, text, relayed: true },
       // Attributed to the human who resolved it — this IS their decision being
       // relayed, and the runtime-role check inside commentToAgent must run
       // against a real person rather than a system actor that bypasses it.
@@ -1482,9 +1493,65 @@ export function specialistReplyDirective(input: {
 }
 
 /** Append a comment and, when authorized, resume or start its mentioned agent. */
+/**
+ * F35-5 (pass 35): the durable trace of an @mention whose run did not start.
+ * Best-effort, like the ambiguous-handle note beside it: the comment is
+ * already on the record, and a failure to annotate it must not fail the post.
+ */
+async function noteMentionNotStarted(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string },
+  actor: TaskActor,
+  agentName: string,
+  profileId: string,
+  reason: string,
+): Promise<void> {
+  try {
+    const detail = reason.trim().replace(/\.?$/, ".");
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: "Mention not started",
+        text:
+          `**Not started:** @${agentName} was mentioned, but its run did not start: ${detail} ` +
+          `The comment stays on the record.`,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    recordAudit(db, {
+      action: "task.comment.unrouted",
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: { profileId, reason: "run-not-started", detail },
+    });
+  } catch (noteError) {
+    logger.warn("could not record the mention-not-started note", {
+      taskKey: input.taskKey,
+      err: noteError instanceof Error ? noteError : new Error(String(noteError)),
+    });
+  }
+}
+
 export async function commentToAgent(
   db: DatabaseSync,
-  input: { projectSlug: string; taskKey: string; text: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    text: string;
+    /** F35-5: set by the server when it relays a packet decision to the asking
+     *  agent through this door. A refusal is then the resolver's to handle
+     *  (it falls back to the operator), so no "Mention not started" note is
+     *  written for it. Never set by a route. */
+    relayed?: boolean;
+  },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<CommentToAgentResult> {
@@ -1893,6 +1960,18 @@ export async function commentToAgent(
       profileId: target.profileId,
       err: error instanceof Error ? error : new Error(String(error)),
     });
+    const reason =
+      error instanceof AppError ? error.userMessage : "the run could not be started";
+    // F35-5 (pass 35): the refusal used to live in this log line only. The
+    // comment answered 200 with a `mention` event addressed to the agent, and
+    // the person believed the agent was asked (KNC-24: an @mention of a
+    // reviewer scoped to later stages, at Triage, left no trace). The record
+    // now carries the same note + audit shape the ambiguous-handle branch
+    // writes. A packet decision the server RELAYS through this door reports
+    // to its resolver instead (`relayed`), which owns the follow-up.
+    if (!input.relayed) {
+      await noteMentionNotStarted(db, ctx, input, actor, target.name, target.profileId, reason);
+    }
     return {
       ...base,
       agent: agentIdentity,
@@ -1900,10 +1979,7 @@ export async function commentToAgent(
       logThreadId: null,
       runtimeDenied: false,
       operatorRefused: null,
-      runNotStarted:
-        error instanceof AppError
-          ? error.userMessage
-          : "the run could not be started",
+      runNotStarted: reason,
     };
   }
 
@@ -4258,6 +4334,110 @@ export async function markWaitingAgent(
   }
 }
 
+/** Ruling 157 (pass 35, F35-8): who or what started the work that lifts a hold. */
+export type HoldLiftCause =
+  | {
+      kind: "operator-run";
+      trigger: "manual" | "scheduled";
+      /** The person's display name for a manual run; null for a schedule. */
+      byName: string | null;
+      /** The person who pressed Run operator, for the audit row; null otherwise. */
+      by: AuditActor | null;
+    }
+  | { kind: "dispatch"; profileId: string; name: string; by: AuditActor | null };
+
+/** The hold shape (ruling 157): a stored `blocked` with no open packet and no
+ *  dependency list. An open `blocked` packet keeps the withdrawal paths as the
+ *  only lift; a dependency list is ruling 131's own floor. */
+function isPacketlessHold(parsed: ParsedTaskFile): boolean {
+  return (
+    parsed.frontmatter.readiness === "blocked" &&
+    parsed.packet === null &&
+    parsed.frontmatter.blockedBy.length === 0
+  );
+}
+
+/**
+ * Ruling 157 (pass 35, F35-8): a hold ends when someone starts work.
+ *
+ * `hold_runtime_debug` (and the refused arm of a collision ceremony) stores
+ * `readiness: blocked` with no packet, and nothing paired with that write: a
+ * person's Run operator, an `@operator` comment, the controller, a schedule and
+ * every dispatch passed the fire-time refusals (which read the packet and the
+ * `blockedBy` list, both empty) and left `readiness: blocked` beside
+ * `waiting: agent`, so the card read "blocked" and "agent working" on one line
+ * (KNC-25). This is the ONE lift: on the hold shape it writes `readiness:
+ * ready`, a "Hold lifted" note naming who or what started the work, and
+ * `task.hold.lifted`; on any other shape it writes nothing and returns false.
+ * The lift is not a claim that the cause is fixed: the operator re-checks and
+ * opens a new packet when the block stands (`block_on_policy` doctrine).
+ * Best-effort like `markWaitingAgent`: a throw is logged and never blocks the
+ * run.
+ */
+export async function liftHoldForRun(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  cause: HoldLiftCause,
+): Promise<boolean> {
+  try {
+    const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    if (!existing || !isPacketlessHold(existing.parsed)) return false;
+    const text =
+      cause.kind === "dispatch"
+        ? `**Hold lifted:** ${cause.name} was dispatched, so ${taskKey} is no longer held. The run's outcome decides what happens next.`
+        : cause.trigger === "scheduled"
+          ? `**Hold lifted:** a scheduled operator run started, so ${taskKey} is no longer held. The operator re-checks the task and opens a new decision packet if it is still blocked.`
+          : `**Hold lifted:** ${cause.byName ?? "A person"} started an operator run, so ${taskKey} is no longer held. The operator re-checks the task and opens a new decision packet if it is still blocked.`;
+    let lifted = false;
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      // Re-checked under the lock: a packet opened or a wait written since the
+      // read above keeps its own floor.
+      if (!isPacketlessHold(parsed)) return;
+      parsed.frontmatter.readiness = "ready";
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: "Hold lifted",
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+      lifted = true;
+    });
+    if (!lifted) return false;
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    const details: NonNullable<AuditEventInput["details"]> = {
+      cause: cause.kind,
+      previous: "blocked",
+    };
+    if (cause.kind === "operator-run") {
+      details.trigger = cause.trigger;
+      details.byUserId = cause.by?.userId ?? null;
+    } else {
+      details.profileId = cause.profileId;
+    }
+    recordAudit(db, {
+      action: "task.hold.lifted",
+      actor: cause.by ?? OPERATOR_AUDIT_ACTOR,
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details,
+    });
+    return true;
+  } catch (error) {
+    logger.warn("liftHoldForRun failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return false;
+  }
+}
+
 export async function operatorPromptAgent(
   db: DatabaseSync,
   input: {
@@ -4858,6 +5038,23 @@ export async function transitionStage(
         "The operator reaches Done only by accepting completion, not a bare transition.",
       );
     }
+    // Ruling 151 (pass 35, F35-2): the boundary always wins. Whatever the
+    // operator's `stage-transitions` grant says, a declared `approval` or
+    // `human` boundary is a human's to cross; the operator may recommend it
+    // (`operatorTransitionStage` files the card) and an applied card arrives
+    // here with `recommendationAuthorized`, never with operator authority. ONE
+    // home for every operator-authorized caller, so a `task.transition` row
+    // with `by: operator` and `boundary: approval` can never be written again.
+    if (
+      !input.recommendationAuthorized &&
+      !isReworkMove &&
+      boundary &&
+      boundary.boundary !== "auto"
+    ) {
+      throw AppError.forbidden(
+        `The ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)} boundary is approved by a human on this board: the operator may recommend it, not cross it.`,
+      );
+    }
   } else if (input.manual) {
     // Manual stage override (board/task dropdown) — a maintainer-level action,
     // regardless of the boundary crossed (forward, backward, or off-graph).
@@ -5093,26 +5290,67 @@ export async function transitionStage(
           `The operator made ${OPERATOR_TRANSITION_CHAIN_CAP} consecutive stage ` +
           `transitions with no agent run or human action in between, which is a coordination loop.`,
       });
+    } else if (ctx.operatorRun) {
+      // Ruling 152(a) (pass 35, G35-5): this move was made by a LIVE operator
+      // run (`opCtx` carries the run onto the ctx), whose turn continues on
+      // its own: the tool reply names the next boundary and the prompt says to
+      // walk consecutive `auto` boundaries in one turn. Queuing a fresh
+      // operator turn here paid ~$0.30 per stage for nothing but the next
+      // transition (KNC-1: eight operator runs for a one-file ADR). A chain the
+      // model abandons is the stranded-stage backstop's job. Human and system
+      // moves still re-trigger below. The stamp lets the settle-time backstop
+      // judge the stage this drive left the task at (`maybeResumeStrandedOperator`).
+      ctx.operatorRun.movedToStageId = input.toStageId;
     } else {
-      void autoInvokeOperator(
-        db,
-        ctx,
-        input.projectSlug,
-        input.taskKey,
-        "transition",
-        {
-          transitionDepth: chainDepth,
-          transition: {
-            fromName: stageName(project, fromStageId),
-            toName: stageName(project, input.toStageId),
-            // Operator-authored moves need no explanation; a HUMAN's move tells
-            // the operator who to honor — or to ask — by name (NEW-4 tags).
-            byHuman: ctx.operatorAuthorized
-              ? null
-              : (humanActorRef(db, actor).nameHint ?? actor.label),
-          },
-        },
-      );
+      const byHuman = ctx.operatorAuthorized
+        ? null
+        : (humanActorRef(db, actor).nameHint ?? actor.label);
+      const transition = {
+        fromName: stageName(project, fromStageId),
+        toName: stageName(project, input.toStageId),
+        // Operator-authored moves need no explanation; a HUMAN's move tells
+        // the operator who to honor — or to ask — by name (NEW-4 tags).
+        byHuman,
+      };
+      void (async () => {
+        // Owner decision Q35-15 (pass 35, the FOLD): a person's move onto the
+        // acceptance boundary (an applied "Move the task to Merge" card, a
+        // board drop) files the acceptance recommendation NOW, under the
+        // deployed operator's own policy, instead of paying an operator turn
+        // whose only work was that card. When the card was filed the turn is
+        // not needed; when the gates refuse it (no verdict yet), the operator
+        // is re-invoked as before and reads the refusal in its snapshot. An
+        // operator-authorized move without a live run (a direct call) folds in
+        // `operatorTransitionStage` itself, never here.
+        if (!ctx.operatorAuthorized) {
+          try {
+            const { foldAcceptanceRecommendation, resolveOperatorAuthority } = await import(
+              "./operator-actions.server"
+            );
+            const authority = resolveOperatorAuthority(ctx, input.projectSlug);
+            const folded = await foldAcceptanceRecommendation(
+              db,
+              ctx,
+              { projectSlug: input.projectSlug, taskKey: input.taskKey },
+              authority,
+            );
+            if (folded?.recommended) return;
+          } catch (error) {
+            logger.warn("acceptance fold after a transition failed; re-invoking the operator", {
+              taskKey: input.taskKey,
+              err: error instanceof Error ? error : new Error(String(error)),
+            });
+          }
+        }
+        await autoInvokeOperator(
+          db,
+          ctx,
+          input.projectSlug,
+          input.taskKey,
+          "transition",
+          { transitionDepth: chainDepth, transition },
+        );
+      })();
     }
   }
 
@@ -8008,13 +8246,47 @@ function acceptanceRefusalReason(
   project: ProjectContext,
   fm: TaskFrontmatter,
   taskKey: string,
-  opts: { blockedPacket: boolean; noChange?: AcceptanceNoChangeCheck },
+  opts: AcceptanceRefusalOptions,
 ): string | null {
+  return acceptanceRefusalReasons(project, fm, taskKey, opts)[0] ?? null;
+}
+
+/** The caller-owned facts the acceptance gate stack cannot read from the file:
+ *  whether the open blocked packet is the very one being resolved, and the
+ *  live no-change probe when the caller already ran it. */
+interface AcceptanceRefusalOptions {
+  blockedPacket: boolean;
+  noChange?: AcceptanceNoChangeCheck;
+}
+
+/**
+ * U35-3 (pass 35): EVERY gate that stands, in the order the single-reason
+ * helper above consults them. The force-accept dialog enumerates the skipped
+ * stages, the review gate and the standing refusal from client state, while
+ * the audit row recorded only the FIRST refusal sentence (KNC-10: the record
+ * said a stage boundary was skipped and never that a failing verdict was
+ * overridden). The force record now carries the same list the screen showed.
+ */
+function acceptanceRefusalReasons(
+  project: ProjectContext,
+  fm: TaskFrontmatter,
+  taskKey: string,
+  opts: AcceptanceRefusalOptions,
+): string[] {
   const noChangeWorkRefusal: string | null =
     opts.noChange?.probe === "has_work" ? opts.noChange.probeRefusal ?? null : null;
-  return (
+  // Ruling 135: an unpushed revision OUTRANKS the conflict, whose `mergeable`
+  // describes the head GitHub has, not the one that was reviewed; while it
+  // stands, the conflict sentence ("rebase") is not a gate a person should be
+  // told about, on the force record or anywhere else.
+  const unpushed = unpushedRevisionBlockedReason(
+    fm.pr,
+    fm.workRevision?.headSha ?? null,
+    taskKey,
+  );
+  const gates: (string | null)[] = [
     // R14-3: an archived task is out of the flow entirely.
-    archivedTaskBlockedReason(fm, taskKey) ??
+    archivedTaskBlockedReason(fm, taskKey),
     // R16-3 (owner ruling 2026-08-04): a TERMINAL GitHub fact outranks every
     // process gate below it. Live (H10): a task whose PR had been closed
     // unmerged carried a correct "PR #124 closed — choose a recovery path"
@@ -8023,16 +8295,16 @@ function acceptanceRefusalReason(
     // came from this function; the verdict gate simply matched first. Running a
     // review is not the path when the PR is gone, and neither is force-accept —
     // so the closed PR is named first and nothing below it can speak over it.
-    closedPrBlockedReason(fm, taskKey) ??
-    acceptanceStageBlockedReason(project, fm.stage, taskKey) ??
+    closedPrBlockedReason(fm, taskKey),
+    acceptanceStageBlockedReason(project, fm.stage, taskKey),
     // F10-15: every required reviewer must have approved the CURRENT revision.
-    acceptanceBlockedReason(fm) ??
+    acceptanceBlockedReason(fm),
     // R20-2 / F20-6: when the live probe already looked at the branch and found
     // WORK, its sentence wins — it names the branch and the commit count.
     // `verdictGateReason`'s "deliver the branch & open the PR" is right for a
     // branch with work and was catastrophically wrong for an EMPTY one (it
     // advised opening an empty PR); the has-work case now says how many commits.
-    noChangeWorkRefusal ??
+    noChangeWorkRefusal,
     // R15-1: delivered work needs a healthy verdict on the delivered revision.
     // F28-L1: the R20-2 AUTO-DETECT — a probe that REALLY checked the branch and
     // found nothing to deliver (`branch_empty` or `no_branch`) — clears the "no
@@ -8048,19 +8320,86 @@ function acceptanceRefusalReason(
       opts.noChange?.applies === true &&
         opts.noChange.refusal == null &&
         opts.noChange.verification?.basis !== "no_repo",
-    ) ??
+    ),
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Resolving the packet clears readiness.
-    (opts.blockedPacket
+    opts.blockedPacket
       ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
-      : null) ??
+      : null,
     // Ruling 135 (pass 34, F34-11): the delivered revision is not on the PR.
     // Named ABOVE the conflict, which describes the head GitHub has, not the
     // one that was reviewed; the remedy is to deliver, never to rebase.
-    unpushedRevisionBlockedReason(fm.pr, fm.workRevision?.headSha ?? null, taskKey) ??
+    unpushed,
     // P14-LV-07: a conflicting PR cannot be merged, so it cannot be accepted.
-    conflictingPrBlockedReason(fm, taskKey)
-  );
+    unpushed ? null : conflictingPrBlockedReason(fm, taskKey),
+  ];
+  return gates.filter((gate): gate is string => gate !== null);
+}
+
+/** What a force-accept bypasses, as the dialog enumerated it (U35-3). */
+export interface ForceAcceptDisclosure {
+  /** Every standing refusal sentence, in gate order; empty when acceptable. */
+  gates: string[];
+  /** Stage ids strictly between the task's stage and the terminal one, when
+   *  the task is not at the acceptance boundary (R19-5: force may skip them). */
+  skippedStageIds: string[];
+  validation: Validation;
+  /** The open decision packet the acceptance withdraws unanswered, by title. */
+  withdrawnPacket: string | null;
+}
+
+/**
+ * U35-3 (pass 35): ONE builder for the force record, read by the audit row and
+ * by the forced `completion` event, so the timeline, the audit log and the
+ * confirm dialog list the same bypasses. `gates` keeps every sentence the
+ * single-reason gate would have picked first; `skippedStageIds` mirrors the
+ * dialog's "Skips <stages>" row; `withdrawnPacket` its "Withdraws" row.
+ */
+export function forceAcceptDisclosure(
+  project: ProjectContext,
+  parsed: { frontmatter: TaskFrontmatter; packet: TaskPacket | null },
+  taskKey: string,
+  opts: { noChange?: AcceptanceNoChangeCheck } = {},
+): ForceAcceptDisclosure {
+  const fm = parsed.frontmatter;
+  const refusalOpts: AcceptanceRefusalOptions = {
+    blockedPacket: fm.readiness === "blocked" && parsed.packet?.type === "blocked",
+  };
+  if (opts.noChange) refusalOpts.noChange = opts.noChange;
+  const gates = acceptanceRefusalReasons(project, fm, taskKey, refusalOpts);
+  const terminalId = terminalStageIdOf(project);
+  const stageIndex = project.stages.findIndex((s) => s.id === fm.stage);
+  const atBoundary = acceptanceStageBlockedReason(project, fm.stage, taskKey) === null;
+  const skippedStageIds =
+    !atBoundary && stageIndex >= 0 && terminalId !== null
+      ? project.stages
+          .slice(stageIndex + 1)
+          .map((s) => s.id)
+          .filter((id) => id !== terminalId)
+      : [];
+  return {
+    gates,
+    skippedStageIds,
+    validation: deriveValidation(fm),
+    withdrawnPacket: parsed.packet?.title ?? null,
+  };
+}
+
+/** The clause the forced `completion` event appends (U35-3). Empty when the
+ *  force bypassed nothing. */
+function forceBypassClause(project: ProjectContext, disclosure: ForceAcceptDisclosure): string {
+  const parts: string[] = [];
+  if (disclosure.skippedStageIds.length > 0) {
+    parts.push(
+      `${disclosure.skippedStageIds.map((id) => stageName(project, id)).join(" to ")} skipped`,
+    );
+    parts.push("the review gate");
+  }
+  parts.push(...disclosure.gates);
+  if (disclosure.withdrawnPacket) {
+    parts.push(`the open decision "${disclosure.withdrawnPacket}" withdrawn unanswered`);
+  }
+  return parts.length > 0 ? ` Bypassed: ${parts.join("; ")}` : "";
 }
 
 /**
@@ -9145,6 +9484,14 @@ async function acceptCompletion(
   if (noChange.applies) {
     event.text += emptyBranchNote(branchDisposition, input.taskKey);
   }
+  // U35-3 (pass 35): a forced acceptance says on the record what it jumped,
+  // the same list the confirm dialog showed and the audit row carries.
+  if (input.force) {
+    event.text += forceBypassClause(
+      project,
+      forceAcceptDisclosure(project, existing.parsed, input.taskKey, { noChange }),
+    );
+  }
   const acceptance: Parameters<typeof applyAcceptanceWrite>[2] = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -9344,15 +9691,17 @@ export async function forceAcceptCompletion(
   // including the graph gate and the conflicting-PR gate, both of which a forced
   // accept can now bypass. Same shared helper the gate itself uses, so the audit
   // can never name a stale reason.
+  // U35-3 (pass 35): the row names EVERY gate the dialog listed, not the first
+  // one the single-reason helper happened to pick (KNC-10: the record said a
+  // stage boundary was skipped and never that a failing verdict was
+  // overridden). `bypassed` stays a string for its existing readers.
+  const disclosure = forceAcceptDisclosure(project, existing.parsed, input.taskKey);
   const bypassed =
-    acceptanceRefusalReason(project, existing.parsed.frontmatter, input.taskKey, {
-      blockedPacket:
-        existing.parsed.frontmatter.readiness === "blocked" &&
-        existing.parsed.packet?.type === "blocked",
-    }) ??
-    (existing.parsed.frontmatter.readiness === "blocked"
-      ? "an open blocked decision packet"
-      : "no gate (already acceptable)");
+    disclosure.gates.length > 0
+      ? disclosure.gates.join(" | ")
+      : existing.parsed.frontmatter.readiness === "blocked"
+        ? "an open blocked decision packet"
+        : "no gate (already acceptable)";
   const forced: Parameters<typeof acceptCompletion>[1] = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -9374,7 +9723,13 @@ export async function forceAcceptCompletion(
       subjectId: input.taskKey,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
-      details: { bypassed },
+      details: {
+        bypassed,
+        bypassedGates: disclosure.gates,
+        skippedStages: disclosure.skippedStageIds,
+        validation: disclosure.validation,
+        withdrawnPacket: disclosure.withdrawnPacket,
+      },
     });
   }
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };

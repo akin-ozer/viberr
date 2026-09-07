@@ -144,17 +144,24 @@ profile's stages.
 4. Authority: `manual` (board menu, any stage) → `approve-transition`; an `auto`
    boundary → any member; `approval` → `approve-transition`; `human` →
    `requireAcceptCompletion`. Operator authority skips human RBAC but is forbidden a
-   bare move to terminal; a supervised operator recommends instead of moving, except
-   across `auto` boundaries and on a backward rework move while validation is
-   `failing`.
+   bare move to terminal, and (ruling 151, pass 35) is forbidden every declared
+   `approval` or `human` boundary whatever its grant says: "The Review to Merge
+   boundary is approved by a human on this board: the operator may recommend it, not
+   cross it." The operator crosses `auto` boundaries and backward rework moves while
+   validation is `failing`; an applied recommendation arrives with the human's
+   `recommendationAuthorized`, never with operator authority.
 5. Inside the file lock the stage is re-read: already there → write nothing; moved
    elsewhere → 409, because every guard above judged `fromStageId`.
 6. On success: `previousStageId = fromStageId` (the durable "came back from Review"
    fact the operator weighs, ruling 98); terminal → `waiting = none`; leaving the
    entry stage attaches the operator and clears the triage gate; `task.transitioned`
    audit and a `transition` timeline event; the operator is re-triggered
-   (`transition`); goal chains reconcile; held dependents are swept
-   (`maybeReleaseDependents`, ruling 131(e)).
+   (`transition`) unless the move was made by a live operator run, whose own turn
+   continues (ruling 152(a)); a human or system move onto the acceptance boundary
+   first files the acceptance recommendation under the deployed operator's gate and
+   skips the re-trigger when the card was filed (the fold, owner decision Q35-15);
+   goal chains reconcile; held dependents are swept (`maybeReleaseDependents`,
+   ruling 131(e)).
 
 ## 6. The three signals on a card
 
@@ -162,7 +169,11 @@ profile's stages.
   inconsistency_risk_detected | blocked`. The projection stores the derived value:
   diagnostics floor it (warning → `input_required`, error →
   `inconsistency_risk_detected`, hard stop → `blocked`); a `blocked` packet sets it to
-  `blocked`; recovery options lift it back to `ready`. Surfaces render the derived
+  `blocked`; recovery options lift it back to `ready`, and a person's operator run,
+  a scheduled operator run or any dispatch lifts a packet-less, list-less hold with a
+  "Hold lifted" note and `task.hold.lifted` (ruling 157; the display side, an agent
+  carrying such a hold reading `agent_working`, is in `deriveDisplayReadiness`).
+  Surfaces render the derived
   display value `agent_working` instead of readiness while `waiting === "agent"`
   (`deriveDisplayReadiness`, ruling 91), `goal_edit_pending` while a decided `edit_goal`
   packet waits for the edited goal (ruling 138: below `agent_working`, above
@@ -270,7 +281,16 @@ note, no operator turn.
   composer and the server (`app/ui/mention-spans.ts`). The resume door is stage-gated
   like every other door (ruling 133): the engaged deliverer resumes at any stage; a
   supporting or released agent at a stage its profile does not declare gets the comment
-  posted and the run refused with the dispatcher's sentence.
+  posted and the run refused with the dispatcher's sentence, which names stages by
+  their board names. **A refused mention leaves a trace** (F35-5, pass 35): whenever
+  the mentioned agent's run does not start (stage ineligibility, a run already in
+  flight, an owner without the backend), the comment stays on the record and the
+  server writes a `note` titled "Mention not started" ("**Not started:** @Architecture
+  Reviewer was mentioned, but its run did not start: Architecture Reviewer is not
+  eligible for the Triage stage; its profile is scoped to Design, Review. ... The
+  comment stays on the record.") plus `task.comment.unrouted {profileId, reason:
+  "run-not-started", detail}`; the toast carries the same reason. A packet decision
+  the server relays through the same door reports to its resolver instead.
 - Comment bodies are escaped so that a line that would read as file structure
   (`## `, `### `, `title:`, `to:`, `evidence:`) cannot forge a section or an event.
 
@@ -309,6 +329,12 @@ anything ambiguous fails closed with the reason recorded.
   `awaiting`, so the card, the hero, the queue and the rail all read the packet as decided
   after a reload, and the editor prefill is `goalDraftForOption` (the option's `goalDraft`,
   else its title and detail) on both the confirm and the reload path (ruling 138).
+  Saving the goal UNCHANGED while the packet awaits the edit is refused (F35-6, pass 35:
+  "The goal reads exactly as before, so the requested edit has not landed. Open the
+  requested goal from the decision card, or write the edit."); an unchanged save with
+  no packet writes nothing and the route toasts "Goal unchanged". A resolved
+  `hold_runtime_debug` leaves a packet-less hold that the next person-started operator
+  run or any dispatch lifts (ruling 157).
 - **Recommendations** are the supervised operator's pending cards (`transition`,
   `run_agent`, `accept_completion`, `delivery`). `applyRecommendation` passes
   `recommendationAuthorized` into the inner mutation, whose own capability gate still
@@ -387,8 +413,13 @@ Every writer to the terminal stage goes through one contract:
    not the one that was reviewed; a conflicting PR refuses after it.
 4. **Verdict gate**: every required reviewer must have approved the current revision
    and none may request changes (ruling 20). Force-accept bypasses this and is
-   audited `task.acceptance.forced` with what it bypassed, records `acceptance: forced`
-   and enumerates the stages it skips. Force never bypasses two facts: a closed unmerged
+   audited `task.acceptance.forced` with EVERY gate it bypassed (U35-3, pass 35:
+   `bypassedGates` is the full refusal list in gate order, `skippedStages` the stage
+   ids jumped, `validation`, `withdrawnPacket`; `bypassed` keeps the sentences joined
+   with " | " for older readers), records `acceptance: forced`, and the forced
+   `completion` event appends the same list ("Bypassed: Review skipped; the review
+   gate; VIB-1 is at In Progress, not Review ...; the latest review requests changes
+   ...; the open decision "..." withdrawn unanswered"). Force never bypasses two facts: a closed unmerged
    PR (ruling 37) and, since ruling 123, an **archived** task — restore it first. Both are
    `forceIrreducibleRefusal`, and on an archived task the affordance is withdrawn rather
    than disabled. The offer itself appears only once the task has something to accept — a

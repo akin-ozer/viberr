@@ -38,6 +38,7 @@ import {
   KB_PRECEDENCE_NOTE,
 } from "~/server/files/kb-injection.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { resetWriteCacheForTests } from "~/server/files/write-cache.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
@@ -657,12 +658,101 @@ describe("startSpecialistRun", () => {
     // The supporting engagement is refused with the dispatcher's own sentence.
     await expect(
       startAgentRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "helper" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
-    ).rejects.toThrow(/helper is not eligible for the "impl" stage/);
+    ).rejects.toThrow(/helper is not eligible for the In Progress stage/);
     // A NEW delivering engagement is gated at `assignSpecialist`.
     await expect(
       startAgentRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
-    ).rejects.toThrow(/dev is not eligible for the "impl" stage/);
+    ).rejects.toThrow(/dev is not eligible for the In Progress stage/);
     expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter.engagements.map((e) => e.profileId)).toEqual(["helper"]);
+  });
+
+  it("ruling 157: a dispatch on a held task lifts the hold on the record", async () => {
+    // Pass 35, F35-8 (KNC-25): `hold_runtime_debug` stored `readiness: blocked`
+    // with no packet and nothing lifted it, so the card read "blocked" and
+    // "agent working" on one line. Canary: remove the `liftHoldForRun` call
+    // from dispatchAgentRun.
+    const seedHeld = (patch: Partial<Parameters<typeof baseTaskFrontmatter>[1]> = {}, packet: TaskPacket | null = null) => {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          ownerUserId: store.users.arda.id,
+          readiness: "blocked",
+          waiting: "human",
+          ...patch,
+        }),
+        packet,
+      });
+      // The re-seed lands within the write cache's slack of the previous
+      // dispatch's own write, which the locked read would otherwise "repair"
+      // back to the old content.
+      resetWriteCacheForTests();
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    };
+    const fm = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    const stop = (runId: string) =>
+      interruptRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId, dataRoot: store.dataRoot },
+        actor(store.users.arda),
+      );
+    seedHeld();
+    const first = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(fm().frontmatter.readiness).toBe("ready");
+    expect(fm().frontmatter.waiting).toBe("agent");
+    const note = fm().timeline.find((e) => e.title === "Hold lifted")!;
+    expect(note).toBeDefined();
+    expect(note.text).toContain("dev was dispatched");
+    const rows = listAuditEvents(store.db, { action: "task.hold.lifted" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({ cause: "dispatch", profileId: "dev" });
+    await stop(first.runId);
+
+    // An open `blocked` packet keeps the success-time withdrawal as the lift.
+    seedHeld(
+      { engagements: [] },
+      {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Pick a recovery path",
+        body: "",
+        observations: [],
+        options: [{ kind: "block_on_policy", t: "Unblock", d: "", rec: true }],
+      },
+    );
+    const second = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // The packet's own withdrawal path may lift the readiness (the
+    // superseded-stuck-packet rule); the HOLD lift wrote nothing for it (the
+    // re-seed emptied the timeline, so any note here would be a new one).
+    expect(fm().timeline.filter((e) => e.title === "Hold lifted")).toHaveLength(0);
+    expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
+    await stop(second.runId);
+
+    // A dependency list is ruling 131's own floor.
+    seedHeld({ engagements: [], blockedBy: ["VIB-2"] });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const third = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(fm().frontmatter.readiness).toBe("blocked");
+    expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
+    await stop(third.runId);
   });
 
   it("creates a run row with the specialist backend and streams output", async () => {

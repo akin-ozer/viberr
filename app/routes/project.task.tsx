@@ -512,12 +512,14 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "update-goal": {
-        await updateTaskGoal(
+        // F35-6 (pass 35): an unchanged save is reported as unchanged; while a
+        // requested goal edit is pending the server refuses it out loud.
+        const { changed } = await updateTaskGoal(
           db,
           { projectSlug, taskKey, goal: String(formData.get("goal") ?? "") },
           actor,
         );
-        return { ok: true as const, intent, toast: "Goal updated" };
+        return { ok: true as const, intent, toast: changed ? "Goal updated" : "Goal unchanged" };
       }
       case "set-task-metadata": {
         // The detail editor submits all three axes at once, so it is a full

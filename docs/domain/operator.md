@@ -55,6 +55,16 @@ resources, persona, whether the operator is deployed, and `humanGatedBeforeWork`
   promotable), `deliver-review-pr`, `update-task-branch`, `use-web-search-fetch`.
 - `off` is a hard refusal on every route to the action, checked before any read,
   card or audit row (ruling 60). The operator refuses out loud and narrates it.
+- **The boundary always wins** (ruling 151, pass 35). A `stage-transitions` grant of
+  `direct` (or full autonomy promoting `recommend`) crosses `auto` boundaries only. A
+  declared `approval` boundary always files a transition recommendation a human
+  applies, whatever the autonomy or the grant mode; a declared `human` boundary is
+  refused with a sentence; the terminal stage is reachable only through acceptance.
+  `transitionStage` enforces the same rule for every operator-authorized caller, so a
+  `task.transition` row with `by: operator` and `boundary: approval` cannot be written.
+  Rework moves on a failing task (R7-4) are unchanged. Before the ruling a supervised
+  operator with the grant set to `direct` crossed Review to Merge alone while the
+  Policy page said a human approves it.
 
 ## 3. Triggers
 
@@ -71,11 +81,41 @@ resources, persona, whether the operator is deployed, and `humanGatedBeforeWork`
 | `packet-resolved` | proceed | `resolvePacket`, when no asking agent absorbed the answer. The payload carries the option (kind, title), the person's own note, and, for a ceremony that performs work of its own (`resolve_remote_collision`), Viberr's record of what it did in a separate `serverOutcome` field rendered as Viberr's sentence, never inside the quoted note (ruling 136(a)) |
 | `dependencies-released` | proceed after a hold | the release engine (ruling 131(e)): the payload names what was waited on and who cleared it; the doctrine says the base branch has changed since the hold and that a hold packet the operator opened itself is now moot |
 | `scheduled` | re-check | the schedule runner |
-| `manual` | coordinate | the Run-operator control, an `@operator` comment, boot recovery, the controller's `run_agent_on_task` |
+| `manual` | coordinate | the Run-operator control, an `@operator` comment, boot recovery, the controller's `run_agent_on_task`. A person's manual run (one carrying `actor`) or a `scheduled` run on a held task lifts the hold on the record (`task.hold.lifted`, ruling 157) |
 
 `autoInvokeOperator` is the shared fire-and-forget seam; it is a no-op when no
 operator is deployed and writes an honest timeline note if the hand-off throws before
 a run row exists.
+
+**The transition re-trigger** (ruling 152(a), pass 35). Every stage move used to queue
+a fresh operator turn, the operator's own moves included, so a task walking three
+`auto` stages paid three turns. Now a transition made by a LIVE operator run (the ctx
+carries `operatorRun`) queues nothing: the `transition_stage` reply names the next
+boundary ("The next boundary, Impl to Validation, is auto: continue in this turn when
+nothing at Impl needs an agent"; "... is approved by a human: recommend it when the
+work is ready") and the prompt says to walk consecutive `auto` boundaries in one
+turn. Human and system moves still re-trigger. A chain the model abandons is the
+stranded-stage backstop's job. The fold (owner decision Q35-15): when a move lands on
+the acceptance boundary (the review stage, or any stage with a declared edge into the
+terminal one), the acceptance recommendation is filed in the same act, under the
+deployed operator's own acceptance gate, instead of by a second turn: the operator's
+own move folds it into its reply, and a person's move (an applied "Move the task to
+Merge" card, a board drop) folds it before the re-trigger and skips the turn when the
+card was filed. A full-autonomy operator holding a direct acceptance grant is never
+folded into an acceptance; a refused gate leaves no card and the reply (or the
+re-invoked turn) says why.
+
+**Holds** (ruling 157, pass 35). A stored `blocked` with no open packet and no
+`blockedBy` list is a hold (the `hold_runtime_debug` decision, the refused arm of a
+collision ceremony). Before `markWaitingAgent`, `runOperator` calls `liftHoldForRun`
+for a person's `manual` run (`actor` set: Run operator, an `@operator` comment, the
+controller) and for a `scheduled` run: `readiness: ready`, a "Hold lifted" note naming
+who started the work, and `task.hold.lifted {cause: "operator-run", trigger,
+byUserId}`. A bare `manual` with no actor (boot recovery) and every machine trigger
+lift nothing; an open packet keeps the withdrawal paths as the only lift; a dependency
+list keeps ruling 131's floor. Every dispatch lifts the same way (§4.1 of
+agents-and-runtime). The lift is not a claim that the cause is fixed: the operator
+re-checks and opens a new packet when the block stands.
 
 Fire-time refusals from `runOperator`: `terminal-stage` (a scheduled re-run never
 fires on a terminal task), `open-packet` (a **human-pressed** Run operator, or the same turn a person
@@ -105,7 +145,11 @@ resets the chain), and a boot recovery re-invoke cap of 3 per task per 30 minute
 Hitting a cap opens a stuck-loop packet instead of looping. A stranded drive (no
 packet, no recommendation, an outbound `auto` boundary) gets one resume nudge; a
 drive that strands again records a deliberate hold (`heldAtStage`) rather than
-nudging forever.
+nudging forever. Since ruling 152(a) the backstop judges the stage the drive's own
+last transition landed on (`ctx.operatorRun.movedToStageId`, shared with the lease):
+a nudged drive that moved the task and stopped at the next `auto` stage made
+progress and gets a fresh nudge, bounded by the chain cap; only a nudge that ends
+where it started is the deliberate hold.
 
 ## 4. The turn
 
@@ -114,6 +158,9 @@ appends the capability-gap remedy clause (ruling 85: a packet must name the gran
 capability and where a human grants it, not only workarounds), and the backend prompt
 builders wrap it. The default arm states that `liveRuns` is the only proof a run is in
 flight: `waiting` is a display flag and a directive comment is not a running agent.
+The pre-work rule says to call `transition_stage` again in the same turn when the new
+stage's outbound boundary is `auto` and nothing there needs an agent (ruling 152(a)):
+the operator is re-invoked only when its turn ends at a stage that still needs work.
 While the snapshot's `blockedBy` is non-empty (ruling 131(d)) the held doctrine
 REPLACES the stage-rule tail rather than following it, so the prompt never carries
 two contradictory orders: it names every entry with its live state and the one tool
@@ -184,10 +231,14 @@ Details that matter:
   contradictory hints are refused as `noop`. Every selection writes
   `task.operator.agent_selected` listing each candidate with eligibility and the
   choice.
-- **Transitions.** An `auto` boundary is crossed directly even when supervised; a
-  backward move on a `failing` task is a rework move performed directly; a supervised
-  move into the terminal stage is rerouted to `operatorAcceptCompletion` so the
-  acceptance capability, not `stage-transitions`, answers for it.
+- **Transitions.** An `auto` boundary is crossed directly even when supervised; an
+  `approval` boundary always files a recommendation card for a human, whatever the
+  autonomy or the grant (ruling 151); a `human` boundary is refused; a backward move
+  on a `failing` task is a rework move performed directly; a move into the terminal
+  stage is rerouted to `operatorAcceptCompletion` under either gate so the acceptance
+  capability, not `stage-transitions`, answers for it. The done reply names the next
+  boundary, and a move onto the acceptance boundary files the acceptance
+  recommendation in the same call (ruling 152(a) and the fold, §3).
 - **Acceptance.** `completionCapabilityRefusal` runs first (`off` and `human` refuse
   with different wording), then the no-change check, then the shared acceptance
   refusal stack. Full autonomy plus `completion-for-acceptance: direct` writes
@@ -275,7 +326,7 @@ Resolution effects by option kind (`resolvePacket`):
 | `accept_completion` | Runs the full acceptance contract (authority, disclosure echo, live no-change probe, refusal stack, PR head check, merge). Not re-queued. |
 | `request_edit`, `redirect`, `custom` | Task back to `waiting: agent`, `readiness: ready`, packet cleared, operator re-queued; an agent question routes to the asker's resumed session first. |
 | `block_on_policy` | The re-run kind: `readiness: ready`, `waiting: agent`, re-queued (ruling 76). Its label states what the human asserts ("The usage window has reset (…), or I switched the Claude account: re-run", "I connected a different Claude account or an API key on Profile → Agent accounts: re-run", or the stock "Re-run the operator now"); the recorded decision is the option's pre-authored `ev` or its own title, never a fixed "policy / credential updated" (ruling 130(c)). The toast says "Unblocked · the operator re-runs to re-check", and the re-run's instruction tells the operator to assume nothing about credentials or policy beyond the decision's own words. Since ruling 127 the credential half of that is a person connecting their own backend on Profile → Agent accounts, usually the task owner. |
-| `hold_runtime_debug` | `readiness: blocked`, `waiting: human`, packet cleared, not re-queued. |
+| `hold_runtime_debug` | `readiness: blocked`, `waiting: human`, packet cleared, not re-queued; lifted by the next person-started operator run, a scheduled operator run, or any dispatch (ruling 157: `readiness: ready`, a "Hold lifted" note, `task.hold.lifted`). |
 | `retry_other_backend` | Re-runs the failed agent on the named backend under operator authority; the switch sticks on the engagement's `pinnedBackend`. Offered only when the TASK OWNER has that backend connected (ruling 127). |
 | `edit_goal` | The only kind that keeps its packet open (`awaiting: goal_edit`, plus `decided` recording the chosen option); cleared when the edited goal is saved. The card then reads decided (chosen option locked, no Confirm, one "Edit the goal" control), the readiness shows `goal_edit_pending`, the review queue row says a goal edit is owed, and `get_task` sees `packet.awaiting` (ruling 138). |
 | `archive_task` | The archive contract; with `deleteBranch: true` also deletes the remote branch (the product's only remote-branch deletion besides collision resolution). Requires `approve-transition`. |
