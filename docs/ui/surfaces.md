@@ -29,7 +29,7 @@ POST.
 | `/projects` | `projects.tsx` | user | redirects to `/` | |
 | `/projects/:slug` | `project.tsx` + `project._index.tsx` | user → member (404 parity) | workspace shell (rail, topbar, palette, live updates); index redirects to the board | |
 | `/projects/:slug/board` | `project.board.tsx` | member, form | board by stage, filters in the URL (`filter`, `view`, `q`), drag-and-drop, accept-from-board confirm | `create-task`, `reorder`, `rescan` (admin/maintainer) |
-| `/projects/:slug/review` | `project.review.tsx` | member | review queue split into "Waiting on your acceptance" and "Still in review" | |
+| `/projects/:slug/review` | `project.review.tsx` | member | review queue split into "Waiting on your acceptance" (tasks at the resolved review stage whose acceptance nothing blocks, for a viewer who can accept) and "Still in review" (every other review-work row: at the review stage, an open review PR at any stage, or a required reviewer's verdict outstanding on the current revision; a row before the boundary reads "Review in progress at Validation · PR #8 · awaiting verdict"; U35-5). Header: "N in review · M waiting on your acceptance" | |
 | `/projects/:slug/controller` | `project.controller.tsx` | member (CSRF checked as a result, not a throw) | the instance controller addressed inside this project; goal chain controls; with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send`, `goal-op` (`pause`, `resume`, `cancel`, `skip_link`, `retry_link`), `interrupt` (`conversationId`, `runId`) |
 | `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail (a copy whose grants differ from its template says so on the scope line and under each list, ruling 156), capability matrix modal | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile`, `sync-profile-resources` (org admin only, carries the record's fingerprint) |
 | `/projects/:slug/policy` | `project.policy.tsx` | member, form | role matrix (rendered from `rbac.ts`), member roles, transition boundaries, guardrails (ruling 112) | `set-role`, `set-boundary`, `set-guardrail` |
@@ -74,8 +74,10 @@ Intents behind `project.task.tsx` are explained in
 
 - **Rail** order and copy are exact: Board · Review queue · Controller · Agents ·
   Policy · GitHub · Activity · Settings (`WORKSPACE_NAV`). The task route counts as
-  "Board" for crumb and rail purposes. The rail count includes Done; the policy
-  violation badge is the open-violation count.
+  "Board" for crumb and rail purposes. The rail count includes Done; the Review
+  queue count is the queue's own `total` (`getReviewQueue`, so the badge and the
+  list it opens are one number, U35-5); the policy violation badge is the
+  open-violation count.
 - **Board URL state** lives only in the query string (`filter`, `view`, `q`); `boardHref`
   keeps it when navigating from the board itself and drops it from anywhere else.
 - **⌘K palette** is mounted by Home, the workspace layout and the pathless

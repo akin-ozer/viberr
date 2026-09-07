@@ -202,9 +202,12 @@ export function ReviewQueuePage({
       <div className="board-head">
         <div>
           <h1>Review queue</h1>
+          {/* U35-5: "at the review boundary" named the one stage every row
+              used to share. The rows are review work now, wherever it sits
+              (an open review PR at Validation counts), so the count says what
+              it counts and nothing about a stage. */}
           <div className="sub">
-            {total} task{total === 1 ? "" : "s"} at the review boundary ·{" "}
-            {ready.length} waiting on your acceptance
+            {total} in review · {ready.length} waiting on your acceptance
           </div>
         </div>
         <div className="board-tools">

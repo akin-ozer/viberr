@@ -108,6 +108,15 @@ export interface AgentRender {
    *  overlay the live profile backend — the run follows the pin, so the card
    *  must too. */
   pinnedBackend?: "codex" | "claude" | null;
+  /** U35-5 (pass 35): true when this engagement is a REQUIRED reviewer (an
+   *  explicit `report-validation-verdict: direct` grant snapshotted at engage
+   *  time, F10-15). The review queue's "Still in review" membership reads it:
+   *  a task whose required reviewer has not approved the current revision is
+   *  review work wherever its stage is. Optional like `pinnedBackend`:
+   *  `mapAgentRef` always sets it, and a render built by hand without it
+   *  reads as not verdict-capable, which fails CLOSED (the row is not
+   *  claimed as review work on the strength of a missing key). */
+  verdictCapable?: boolean;
 }
 
 /** Operator cell render (ruling 16: stage id stored). */
@@ -416,6 +425,10 @@ export function mapAgentRef(ref: AgentRef | null): AgentRender | null {
     name: agentBackendName(ref.backend),
     role: ref.role,
     pinnedBackend: ref.pinnedBackend ?? null,
+    // U35-5: the projection stores the whole engagement (rebuilder
+    // `supportingEngagements`), whose parser defaults the flag to false; an
+    // absent key here is a hand-built ref and reads as not verdict-capable.
+    verdictCapable: ref.verdictCapable === true,
   };
 }
 

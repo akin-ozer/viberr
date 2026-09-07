@@ -447,6 +447,22 @@ Post-acceptance: the task workspace is reclaimed once no run is live, goal chain
 reconcile, held dependents are swept (ruling 131(e): a task whose every `blockedBy`
 entry is now done is released), and the board renders "accepted".
 
+**The review queue's membership** (`review-queue.server.ts`, U35-5, pass 35) has two
+halves with two rules. "Waiting on your acceptance" is about the boundary: a
+non-archived task at the resolved review stage (the stage with the edge into the
+terminal stage) that waits on a human, whose acceptance nothing in the stack above
+refuses, for a viewer who may accept it (maintainer+, or the owner). "Still in review"
+is about review work, which the board defines by engagements and verdicts rather than
+by one stage id: every other non-archived, non-terminal task that sits at the review
+stage, or carries a pull request open for review (`pr.state: review`), or has a
+required reviewer (`verdictCapable`) whose verdict on the current revision is missing
+(`validation: changed`) or is request_changes (`failing`). On the default board the two
+rules coincide at Review; on a board whose reviews happen at Validation and Review while
+the edge into Done leaves Merge, the second rule is what lists the work. The row names
+its stage ("Review in progress at Validation · PR #8 · awaiting verdict"), the header
+reads "N in review · M waiting on your acceptance", and the workspace rail badge is the
+queue's `total`. Nothing before the boundary is ever offered for acceptance.
+
 ## 12. Archive and restore
 
 `archive-task` (`approve-transition`) is a terminal disposition, not a delete: the

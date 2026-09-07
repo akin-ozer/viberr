@@ -5,6 +5,8 @@ import { reviewRowSub, type ReviewRowView } from "./review-helpers";
 const base: ReviewRowView = {
   key: "VIB-1",
   title: "t",
+  stageName: "Review",
+  atReviewStage: true,
   priority: "normal",
   labels: [],
   dueDate: null,
@@ -217,6 +219,8 @@ describe("ruling 138: reviewRowSub on a decided edit_goal packet", () => {
     const base = {
       key: "VIB-9",
       title: "t",
+      stageName: "Review",
+      atReviewStage: true,
       priority: "normal" as const,
       labels: [],
       dueDate: null,
@@ -233,5 +237,63 @@ describe("ruling 138: reviewRowSub on a decided edit_goal packet", () => {
     };
     expect(reviewRowSub(base)).toBe("Goal edit pending: save the edited goal to clear the decision packet.");
     expect(reviewRowSub({ ...base, goalEditPending: false })).toBe("Blocked decision: Scope needed");
+  });
+});
+
+/**
+ * U35-5 (pass 35): a row listed from BEFORE the acceptance boundary (an open
+ * review PR, or a required reviewer's verdict outstanding on the current
+ * revision) describes where it is and what the verdict state is, instead of
+ * the boundary sentences that assume the task sits at the review stage.
+ * Canary: drop the `!t.atReviewStage` arm in `reviewRowSub` and every case
+ * below falls through to the block reason / PR / placeholder sentences.
+ */
+describe("U35-5: reviewRowSub for review work before the boundary", () => {
+  const atValidation: ReviewRowView = {
+    ...base,
+    stageName: "Validation",
+    atReviewStage: false,
+    pr: { number: 8, state: "review" },
+    validation: "changed",
+    blockReason: "Waiting on 1 required reviewer approval of the current revision.",
+  };
+
+  it("names the stage, the PR and the pending verdict, outranking the boundary block reason", () => {
+    expect(reviewRowSub(atValidation)).toBe(
+      "Review in progress at Validation · PR #8 · awaiting verdict",
+    );
+  });
+
+  it("says changes requested for a failing revision", () => {
+    expect(reviewRowSub({ ...atValidation, validation: "failing" })).toBe(
+      "Review in progress at Validation · PR #8 · changes requested",
+    );
+  });
+
+  it("says approved when the verdict landed and the PR is still open", () => {
+    expect(reviewRowSub({ ...atValidation, validation: "healthy" })).toBe(
+      "Review in progress at Validation · PR #8 · approved",
+    );
+  });
+
+  it("drops the PR segment without a PR and the verdict segment without a review subject", () => {
+    expect(
+      reviewRowSub({ ...atValidation, stageName: "In Progress", pr: null, validation: "failing" }),
+    ).toBe("Review in progress at In Progress · changes requested");
+    expect(
+      reviewRowSub({ ...atValidation, stageName: "Design", validation: "none", blockReason: null }),
+    ).toBe("Review in progress at Design · PR #8");
+  });
+
+  it("a closed PR is still the terminal fact, before the boundary too (R16-3)", () => {
+    expect(reviewRowSub({ ...atValidation, pr: { number: 8, state: "closed" } })).toBe(
+      "PR #8 was closed on GitHub without merging. Rework and reopen it, or archive the task.",
+    );
+  });
+
+  it("a row AT the boundary keeps the boundary sentences", () => {
+    expect(reviewRowSub({ ...atValidation, stageName: "Review", atReviewStage: true })).toBe(
+      "Waiting on 1 required reviewer approval of the current revision.",
+    );
   });
 });

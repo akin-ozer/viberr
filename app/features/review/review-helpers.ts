@@ -9,6 +9,13 @@ import { plainText } from "~/features/notifications/notification-meta";
 export interface ReviewRowView {
   key: string;
   title: string;
+  /** U35-5: the display name of the stage the task sits at; the subline names
+   *  it for a row that is not at the review boundary. */
+  stageName: string;
+  /** U35-5: at the project's resolved review stage (the acceptance boundary).
+   *  False for review work listed from an earlier stage: an open review PR, or
+   *  a required reviewer's verdict outstanding on the current revision. */
+  atReviewStage: boolean;
   /** F26-14: the same lightweight triage metadata the board card shows, carried
    *  to the acceptance boundary (where a forgotten high/overdue task costs most).
    *  Rendered via the shared `task-meta.tsx` pills. */
@@ -102,6 +109,26 @@ function prStateSub(pr: NonNullable<ReviewRowView["pr"]>): string {
   return `PR #${pr.number} is open for review on GitHub.`;
 }
 
+/**
+ * U35-5 (pass 35): the subline for review work that is NOT at the acceptance
+ * boundary. Such a row is listed because its PR is open for review or a
+ * required reviewer has not approved the current revision, so the sentence
+ * says where the task is, which PR, and what the verdict state is:
+ * "Review in progress at Validation · PR #8 · awaiting verdict". The verdict
+ * words are the validation pill's own (`awaiting verdict` for `changed`,
+ * `changes requested` for `failing`); an approved revision with the PR still
+ * open reads "approved", and a row with no verdict subject carries no verdict
+ * segment at all rather than a word for a state it does not have.
+ */
+function reviewInProgressSub(t: ReviewRowView): string {
+  const parts = [`Review in progress at ${t.stageName}`];
+  if (t.pr) parts.push(`PR #${t.pr.number}`);
+  if (t.validation === "failing") parts.push("changes requested");
+  else if (t.validation === "changed") parts.push("awaiting verdict");
+  else if (t.validation === "healthy") parts.push("approved");
+  return parts.join(" · ");
+}
+
 /** The subline stripper is the shared `plainText` helper (same regexes as
  * the mock's `rqStripMd` — ruling 14, one stripper app-wide). */
 export function reviewRowSub(t: ReviewRowView): string {
@@ -119,6 +146,12 @@ export function reviewRowSub(t: ReviewRowView): string {
   // holding that acceptance, so a merged row keeps naming the gate, exactly as
   // the task page does.
   if (t.pr?.state === "closed") return prStateSub(t.pr);
+  // U35-5: a row listed from BEFORE the boundary is review work in progress,
+  // not a task awaiting acceptance. Every sentence below this line describes
+  // the boundary (the acceptance gate, the packet the operator opened there,
+  // the live PR facts of a delivered task), so an off-boundary row says where
+  // it actually is instead. Only the closed-PR terminal fact above outranks it.
+  if (!t.atReviewStage) return reviewInProgressSub(t);
   // F10-11: a not-yet-acceptable task states WHY (failing / awaiting a reviewer /
   // no delivered revision) instead of a generic "needs a human decision".
   if (t.blockReason) return t.blockReason;

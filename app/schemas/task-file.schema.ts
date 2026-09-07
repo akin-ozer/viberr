@@ -181,6 +181,14 @@ const agentRefSchema = z
      *  exec-profile display shows what a run will ACTUALLY use — the pinned
      *  backend, not the live profile primary the display otherwise overlays. */
     pinnedBackend: z.enum(["codex", "claude"]).nullable().optional(),
+    /** U35-5 (pass 35): the engagement's verdict snapshot, carried from the
+     *  engagement the projection stringified (`supportingEngagements`, which
+     *  keeps the whole engagement) so the review queue can tell a REQUIRED
+     *  reviewer from a supporting agent without re-reading the task file.
+     *  Optional at the type level because a hand-built ref (the engage paths
+     *  in specialist-run.server.ts) writes the flag on the engagement, not on
+     *  the ref; a reader treats absence as "not verdict-capable". */
+    verdictCapable: z.boolean().optional(),
   })
   .loose();
 export type AgentRef = z.infer<typeof agentRefSchema>;
