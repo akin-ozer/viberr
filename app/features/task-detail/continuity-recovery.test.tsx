@@ -534,7 +534,7 @@ function renderPage(task: Partial<TaskDetail> = {}, runtime: RunView[] = [broken
 }
 
 describe("task detail wiring", () => {
-  it("puts the panel above the decision packet and above the timeline", () => {
+  it("puts the panel in the main column, under the decision packet the head carries, and above the timeline", () => {
     const { container } = renderPage();
     const panel = container.querySelector(".continuity-panel")!;
     const packet = container.querySelector(".packet")!;
@@ -543,10 +543,16 @@ describe("task detail wiring", () => {
     expect(panel).not.toBeNull();
     expect(packet).not.toBeNull();
     expect(firstEventRow).not.toBeNull();
-    // Execution TRUTH before the decision it may well explain, and both before
-    // history — "status before history / decisions before discussion".
+    // U35-2 (pass 35): the open packet is the page's most important object and
+    // lives in `.detail-head` with the title, above every column, so a phone
+    // reads the question before the metadata. D18 kept execution TRUTH ahead
+    // of the decision it may explain; that is now the head-then-main order the
+    // whole page follows, and the panel still precedes every steering action
+    // and history — "status before history / decisions before discussion".
+    expect(packet.closest(".detail-head")).not.toBeNull();
+    expect(panel.closest(".detail-main")).not.toBeNull();
     expect(
-      panel.compareDocumentPosition(packet) & Node.DOCUMENT_POSITION_FOLLOWING,
+      packet.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
       panel.compareDocumentPosition(firstEventRow) & Node.DOCUMENT_POSITION_FOLLOWING,

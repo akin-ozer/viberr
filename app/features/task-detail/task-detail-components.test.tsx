@@ -2109,15 +2109,19 @@ describe("UI-42/UI-44: the decision packet", () => {
     ],
   };
 
-  it("ruling 138: a DECIDED edit_goal packet renders the chosen option locked, no Confirm, and one 'Edit the goal' control that opens the shared draft", () => {
+  it("ruling 138 / F35-6: a DECIDED edit_goal packet renders the chosen option locked, no Confirm, the requested goal itself, and one 'Edit the goal' control that opens that same draft", () => {
     // Canary: ignore `p.awaiting`/`p.decided` in the card and the radiogroup +
-    // Confirm come back.
+    // Confirm come back. F35-6 canary: drop the `.goal-draft` figure and the
+    // draft assert is red; hand the button `goalDraftForOption(chosen)` again
+    // instead of `p.goalDraft` and the call assert is red (the mapping's
+    // draft, not the card's own composition, is what the editor opens with).
     const onEditGoal = vi.fn();
     const onResolve = vi.fn();
     const decidedPacket: PacketRender = {
       ...goalPacket,
       awaiting: "goal_edit",
       decided: { optionIndex: 0, at: "2026-09-04T10:00:00.000Z", byUserId: "u-arda" },
+      goalDraft: "Deliverable: the search page.\n\nAcceptance: results render.",
     };
     const { container, queryByRole, getByRole } = render(
       <DecisionPacket
@@ -2143,8 +2147,19 @@ describe("UI-42/UI-44: the decision packet", () => {
     expect(container.querySelector("[data-decided-note]")?.textContent).toContain(
       "Decision made · save the edited goal to clear this packet",
     );
+    // F35-6: the requested goal is ON the page after a reload, not only inside
+    // the editor's prefill, so a person sees what "save the edited goal" means.
+    const figure = container.querySelector(".goal-draft")!;
+    expect(figure.querySelector("figcaption")?.textContent).toBe(
+      "Requested goal (opens in the editor)",
+    );
+    expect(figure.querySelector("pre.goal-draft-text")?.textContent).toBe(
+      "Deliverable: the search page.\n\nAcceptance: results render.",
+    );
     fireEvent.click(getByRole("button", { name: "Edit the goal" }));
-    expect(onEditGoal).toHaveBeenCalledWith("A human refines the goal\n\nRewrite it.");
+    expect(onEditGoal).toHaveBeenCalledWith(
+      "Deliverable: the search page.\n\nAcceptance: results render.",
+    );
     expect(onResolve).not.toHaveBeenCalled();
   });
 
@@ -3275,6 +3290,35 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     const ta = container.querySelector<HTMLTextAreaElement>(
       "textarea.goal-textarea",
     )!;
+    expect(ta.value).toContain("Bound the timeline payload");
+  });
+
+  // F35-6 (live, KNC-4 14:56Z): after a reload the hero's Edit under the goal
+  // is the door a person takes, and it seeded the ORIGINAL goal while a decided
+  // edit_goal packet waited for the draft; saving that unchanged text answered
+  // "Goal updated" over a packet that still said "save the edited goal".
+  // Canary: seed `task.goal` in the Edit click again and the first assert is red.
+  it("F35-6: while a decided edit_goal packet waits, the hero's own Edit opens with the pending draft", () => {
+    const { container, getByRole } = renderWithRouter(
+      <TaskHero
+        task={heroTask()}
+        stage={undefined}
+        canEditGoal
+        pendingGoalDraft={"Deliverable: the search page.\n\nAcceptance: results render."}
+      />,
+    );
+    fireEvent.click(getByRole("button", { name: "Edit" }));
+    const ta = container.querySelector<HTMLTextAreaElement>("textarea.goal-textarea")!;
+    expect(ta.value).toBe("Deliverable: the search page.\n\nAcceptance: results render.");
+    expect(ta.value).not.toContain("Bound the timeline payload");
+  });
+
+  it("F35-6: with no pending draft the hero's Edit opens with the current goal", () => {
+    const { container, getByRole } = renderWithRouter(
+      <TaskHero task={heroTask()} stage={undefined} canEditGoal pendingGoalDraft={null} />,
+    );
+    fireEvent.click(getByRole("button", { name: "Edit" }));
+    const ta = container.querySelector<HTMLTextAreaElement>("textarea.goal-textarea")!;
     expect(ta.value).toContain("Bound the timeline payload");
   });
 });

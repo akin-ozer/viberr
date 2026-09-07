@@ -90,6 +90,7 @@ export function TaskHero({
   archived = false,
   editGoalSignal = 0,
   editGoalDraft = null,
+  pendingGoalDraft = null,
 }: {
   task: TaskDetail;
   stage: TaskDetail["stages"][number] | undefined;
@@ -104,6 +105,13 @@ export function TaskHero({
    *  THIS (not the old vague goal) so the human doesn't retype what they picked.
    *  Null when the decision carried no draft (falls back to the current goal). */
   editGoalDraft?: string | null;
+  /** F35-6: the goal a decided `edit_goal` packet asks for, the mapping's one
+   *  `packet.goalDraft`. While it is pending the hero's own Edit opens with it
+   *  (the decided card's "Edit the goal" opens the same text), so a person who
+   *  reloads and takes the nearest door does not save the old goal back and
+   *  read "Goal updated" over a packet that still waits. Null when no goal
+   *  edit is pending (the editor opens with the current goal). */
+  pendingGoalDraft?: string | null;
 }) {
   const goalFetcher = useFetcher<ActionResult>();
   const csrf = useCsrfToken();
@@ -330,7 +338,8 @@ export function TaskHero({
               type="button"
               className="goal-edit-btn"
               onClick={() => {
-                setDraft(task.goal);
+                // F35-6: the pending draft, when a decided packet owes one.
+                setDraft(pendingGoalDraft ?? task.goal);
                 setRefused(0);
                 setEditing(true);
               }}

@@ -1,7 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
-import { goalDraftForOption } from "~/shared/packet-goal-draft";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -914,6 +913,11 @@ export function DecisionPacket({
   const decided = p.awaiting === "goal_edit" ? p.decided : undefined;
   if (decided) {
     const chosen = p.options[decided.optionIndex];
+    // F35-6: the draft is the mapping's one `goalDraft` (composed by
+    // `goalDraftForOption` on the chosen option, `mapPacket`), rendered here
+    // so a person who reloads SEES the requested goal, and handed to the
+    // editor unchanged so both doors open the same text.
+    const draft = p.goalDraft;
     return (
       <div className={"packet " + (isBlocked ? "blocked" : "input")} data-decided="">
         <div className="packet-top">
@@ -957,6 +961,14 @@ export function DecisionPacket({
             <Icon name="check" />
             Decision made · save the edited goal to clear this packet
           </p>
+          {draft && (
+            <figure className="goal-draft">
+              <figcaption className="fine xs dim">
+                Requested goal (opens in the editor)
+              </figcaption>
+              <pre className="goal-draft-text">{draft}</pre>
+            </figure>
+          )}
           <div className="packet-actions">
             <button
               type="button"
@@ -967,12 +979,12 @@ export function DecisionPacket({
               <Icon name="message" />
               Ask operator
             </button>
-            {canEditGoal && chosen && onEditGoal && (
+            {canEditGoal && chosen && draft && onEditGoal && (
               <button
                 type="button"
                 className="btn primary"
                 disabled={busy}
-                onClick={() => onEditGoal(goalDraftForOption(chosen))}
+                onClick={() => onEditGoal(draft)}
               >
                 Edit the goal
               </button>

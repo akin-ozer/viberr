@@ -360,6 +360,14 @@ decided:                          # ruling 138: WHICH option, so a reload render
   byUserId: u_abc123              # same draft; both clear with the packet
 ```
 
+*(Added 2026-09-07, pass 35, F35-6. `decided` and `goalDraft` stay as above on disk; the
+projection's packet render derives one more field from them, `goalDraft` on the render
+itself (`mapPacket`, `app/shared/mapping/task.server.ts`): `goalDraftForOption` of the
+option `decided.optionIndex` names, present exactly while `awaiting: goal_edit` and a
+decision is recorded. It is never written to the file. Every door into the goal editor
+reads that one field: the decided card prints it and its "Edit the goal" opens it, and the
+hero's own Edit seeds it while the packet waits.)*
+
 ## Timeline
 
 ### 2026-07-04T06:58:00.000Z · comment · user:u_abc123 (Arda Kaya)

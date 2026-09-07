@@ -133,7 +133,13 @@ Intents behind `project.task.tsx` are explained in
   `select`, the search, board-filter and palette inputs, the comment and
   controller composers, the goal editor, the label, stage and steer
   inputs, the store browser's inputs and the concurrency field (the 720px block
-  in `app.css` is the list).
+  in `app.css` is the list). Under the 1100px collapse the task page stacks
+  title and goal, the open decision, current state and next action, then the
+  rest (GitHub, Details, Permissions, runs, the timeline): the page is three
+  regions in source order (`.detail-head`, `.detail-side`, `.detail-main`) and
+  the stack is that order, so the screen reader, the Tab key and the phone
+  read the task's name and the question it asks before its metadata (pass 35,
+  U35-2; on desktop the head spans both columns).
 - **Dock clearance**: `--dock-clear` (`:root`) is the fixed dock trigger's reach,
   `44px + max(20px, safe-area-inset-bottom) + 1rem`; the scroll containers that
   end under the trigger (`.home-shell`, `.insights`, `.policy-wrap`, `.detail`,

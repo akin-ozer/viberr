@@ -2608,6 +2608,15 @@ by rewriting those paragraphs:*
     kind; an option without one prefills the option's title and detail verbatim, and the prompts say
     so, so an operator never phrases them as an instruction to the human. Extends R20-1 (a made
     decision is un-re-confirmable) and F17-L3 (the editor prefills with the chosen deliverable).
+    *(Completed 2026-09-07, pass 35, F35-6, not a reversal: the draft was rendered nowhere and
+    only the decided card's own control seeded it, so after a reload the hero's Edit under the
+    goal, the door a person takes, opened with the ORIGINAL goal and an unchanged save read
+    "Goal updated" over a packet still waiting (KNC-4, 14:56Z). The projection's packet render
+    now carries `goalDraft`, composed once in `mapPacket`; the decided card prints it as
+    "Requested goal (opens in the editor)", its "Edit the goal" opens it, and the hero's Edit
+    seeds it while the packet waits. The writer's half, refusing an unchanged save while a
+    `goal_edit` packet is open and reporting "Goal unchanged" without one, lands with the task
+    actions of the same pass.)*
 
 139. **The controller's catalogued writes read first and refuse by name (owner, 2026-09-04, pass 34
     F34-2 / G34-1).** Every `viberr_controller` write that takes a catalogued identifier (a capability
@@ -2998,7 +3007,10 @@ by rewriting those paragraphs:*
     nothing; an open packet keeps the withdrawal paths as the only lift; a dependency
     list keeps ruling 131's floor. The display never says blocked and agent working
     together: a packet-less, list-less stored block carried by an agent renders "agent
-    working". (Implemented by the operator and task actions of the same pass.)
+    working". (The record half is implemented by the operator and task actions of the same
+    pass; the display half is `deriveDisplayReadiness`'s fourth argument, `carriedHold`, read
+    from the STORED readiness and the dependency list, so a diagnostics floor and a dependency
+    hold keep reading blocked.)
 
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates
