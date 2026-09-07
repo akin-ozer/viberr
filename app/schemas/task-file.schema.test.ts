@@ -1201,4 +1201,23 @@ describe("ruling 161 (pass 35, G35-6): a discarded revision is retired, not unde
       }),
     ).toBeNull();
   });
+
+  it("the acceptance gate refuses a discarded revision by naming delivery, not an approval nobody can give", () => {
+    // Ruling 161(b) lists "the acceptance gates" among the readers that go
+    // through `activeWorkRevision`. Canary: read `fm.workRevision` raw at the
+    // first arm of `acceptanceBlockedReason` — the retired record takes the
+    // required-reviewer arm, so this task is told to wait for an approval of a
+    // revision the verdict binding can no longer pin one to, on the same
+    // frontmatter whose validation pill reads "no validation".
+    const fm = { engagements: [reviewer], workRevision: discarded, verdicts: [approve] };
+    expect(deriveValidation(fm)).toBe("none");
+    const reason = acceptanceBlockedReason(fm)!;
+    expect(reason).toContain("No reviewed revision yet");
+    expect(reason).toContain("run delivery once to verify and record that");
+    expect(reason).not.toContain("current revision");
+    // The live record still walks the required-reviewer path, approved here.
+    expect(
+      acceptanceBlockedReason({ ...fm, workRevision: delivered }),
+    ).toBeNull();
+  });
 });

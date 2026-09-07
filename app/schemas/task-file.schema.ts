@@ -1108,7 +1108,14 @@ export function deriveValidation(
  *  required reviewer who has not approved still holds it, which is intended. */
 export function acceptanceBlockedReason(fm: ReviewState): string | null {
   const required = requiredReviewers(fm);
-  if (!fm.workRevision) {
+  // Ruling 161(b) names the acceptance gates among the readers that mean "the
+  // revision under review": a DISCARDED record is retired, its verdicts are
+  // history, and `currentVerdicts` already answers [] for it. Reading
+  // `fm.workRevision` raw here sent the discarded task down the arm below and
+  // told a person to wait for an approval of a revision no reviewer can be
+  // given (the verdict binding refuses to pin one to a retired head) — the
+  // F19-21 dead end, re-created by the new kind.
+  if (!activeWorkRevision(fm.workRevision)) {
     // F19-21 (spec change 3) — the refusal used to stop at the first sentence,
     // and on a VERIFICATION-only task that reads as a dead end: nothing this
     // task will ever do produces a revision, so "nothing to approve" looks
