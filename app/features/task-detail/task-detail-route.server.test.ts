@@ -1063,7 +1063,7 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
 
       const after = await runLoader("VIB-166", ids.arda);
       expect(after.runtime.length).toBe(runsBefore);
-      expect(after.activeAgentProfileIds).toEqual([]);
+      expect(after.liveAgentRuns).toEqual([]);
       const held = after.task.timeline.find((e) => e.title === "Dispatch held");
       expect(held?.text).toContain("**Held:** Codex is out of quota until");
       expect(held?.text).toContain("Developer's run starts when the window reopens");

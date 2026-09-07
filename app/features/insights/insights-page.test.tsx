@@ -478,8 +478,9 @@ describe("ruling 130(d): whose account, and the hour", () => {
     });
     expect(getByText(/from a refused run on Arda Kaya's account/)).toBeTruthy();
     // The reading row names the HOUR (local once hydrated, UTC on the first
-    // paint), never a bare calendar date.
-    expect(getByText(/resets .+ · \d{1,2}:\d{2}/)).toBeTruthy();
+    // paint), never a bare calendar date. The day bucket is optional: on the
+    // fixture's own calendar day `formatDayDotTime` prints the bare clock.
+    expect(getByText(/resets (.+ · )?\d{1,2}:\d{2}/)).toBeTruthy();
   });
 
   it("a refused credential row names the account", () => {

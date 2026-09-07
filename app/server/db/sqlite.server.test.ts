@@ -58,7 +58,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
       ]);
       // Second boot: nothing to add, nothing thrown.
       ensureBaselineColumns(db);
-      expect(columns()).toHaveLength(6);
+      expect(columns()).toHaveLength(7);
       db.prepare(`UPDATE agent_runs SET dispatched_by_name = ? WHERE id = ?`).run("x", "none");
       db.close();
     } finally {
