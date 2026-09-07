@@ -339,6 +339,67 @@ describe("StagesPanel", () => {
     expect(onRemove).toHaveBeenCalledWith("ready");
   });
 
+  // Ruling 147: the inline commit stays enabled and refuses an empty name in
+  // rendered copy, instead of going dead and dropping out of the tab order.
+  it("ruling 147: the inline Add stage refuses an empty name instead of disabling", () => {
+    const onAdd = vi.fn();
+    const { container, getByText } = render(
+      <StagesPanel
+        {...base}
+        onAdd={onAdd}
+        onRename={() => {}}
+        onRemove={() => {}}
+      />,
+    );
+    fireEvent.click(getByText("Add stage"));
+    const input = container.querySelector<HTMLInputElement>(".stg-input")!;
+    // Once the field is open, "Add stage" names the inner commit button.
+    const commit = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".stg-add button"),
+    ).find((b) => b.textContent?.trim() === "Add stage")!;
+
+    // A pristine field is never accused, and the commit is NOT disabled.
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(commit.disabled).toBe(false);
+    expect(commit.getAttribute("aria-disabled")).toBeNull();
+
+    fireEvent.click(commit);
+    expect(onAdd).not.toHaveBeenCalled();
+    const first = container.querySelector('[role="alert"]')!;
+    expect(first.textContent).toBe("Give the stage a name.");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")).toBe("stg-add-err");
+    expect(first.id).toBe("stg-add-err");
+    expect(document.activeElement).toBe(input);
+
+    // Enter refuses the same way, and each refusal inserts a NEW element.
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')).not.toBe(first);
+
+    // Typing clears the mark; a named stage still commits and closes the row.
+    fireEvent.change(input, { target: { value: " QA " } });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.click(commit);
+    expect(onAdd).toHaveBeenCalledWith("QA");
+    expect(container.querySelector(".stg-add")).toBeNull();
+  });
+
+  it("ruling 147: Escape after a refusal leaves no alert behind", () => {
+    const { container, getByText } = render(
+      <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
+    );
+    fireEvent.click(getByText("Add stage"));
+    const input = container.querySelector<HTMLInputElement>(".stg-input")!;
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(container.querySelector('[role="alert"]')).toBeTruthy();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    fireEvent.click(getByText("Add stage"));
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
   it("rename commits on Enter via blur and cancels on Escape", () => {
     const onRename = vi.fn();
     const setEditingId = vi.fn();
@@ -615,28 +676,92 @@ describe("MembersPanel", () => {
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
 
-  it("invite validates name+email then submits and clears the form", () => {
+  /**
+   * Ruling 148(b): the invite form is no longer served under the member list —
+   * "Add member" in the panel head opens the shared `MiniModal`. Ruling 147
+   * lives in that modal: the primary stays ENABLED on an incomplete form and a
+   * click refuses in a fresh alert with the first unmet field marked and
+   * focused, where the row could only raise a toast.
+   */
+  it("invite is a head button that opens a modal; an empty submit is refused, not dead", () => {
     const onInvite = vi.fn();
-    const { getByPlaceholderText, getByText } = render(
+    const { container, getByText, getByLabelText } = render(
       <MembersPanel {...base} onInvite={onInvite} onRemove={() => {}} />,
     );
-    fireEvent.click(getByText("Invite"));
-    expect(onInvite).not.toHaveBeenCalled(); // empty form → client toast only
+    // Nothing is served inline any more.
+    expect(container.querySelector("dialog.modal-card")).toBeNull();
+    expect(container.querySelector("#pm-invite-name")).toBeNull();
 
-    // SAFETY: both placeholders belong to the invite row's two `<input>`s —
-    // MembersPanel renders no other node carrying them — so the `value` reads
-    // after the submit are sound on RTL's `HTMLElement`-typed hits.
-    const nameInput = getByPlaceholderText("Full name") as HTMLInputElement;
-    // SAFETY: the invite row's second `<input>`, per the same contract.
-    const emailInput = getByPlaceholderText(
-      "email@company.dev",
-    ) as HTMLInputElement;
+    fireEvent.click(getByText("Add member"));
+    const modal = container.querySelector("dialog.modal-card")!;
+    expect(modal).not.toBeNull();
+    // SAFETY: the modal's own primary — `MiniModal` renders exactly one
+    // `.btn.primary` in its foot, so this is the Add member commit.
+    const save = modal.querySelector("button.btn.primary") as HTMLButtonElement;
+    // Ruling 147(a): only a request in flight disables it.
+    expect(save.disabled).toBe(false);
+    // Ruling 147(c): a pristine form is never accused.
+    expect(modal.querySelector("[aria-invalid]")).toBeNull();
+
+    fireEvent.click(save);
+    expect(onInvite).not.toHaveBeenCalled();
+    const alert = modal.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain("Enter a name and a valid email");
+    // SAFETY: the two labelled `<input>`s inside the modal, bound by `htmlFor`.
+    const nameInput = getByLabelText(/Full name/) as HTMLInputElement;
+    // SAFETY: the modal's email `<input>`, per the same label binding.
+    const emailInput = getByLabelText(/Email/) as HTMLInputElement;
+    expect(nameInput.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(nameInput);
+
     fireEvent.change(nameInput, { target: { value: "Deniz Şahin" } });
+    // The mark clears as the field is answered; the email is still unmet.
+    expect(nameInput.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.click(save);
+    expect(onInvite).not.toHaveBeenCalled();
+    expect(emailInput.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(emailInput);
+
     fireEvent.change(emailInput, { target: { value: "Deniz@viberr.dev" } });
-    fireEvent.keyDown(emailInput, { key: "Enter" }); // email field submits
+    fireEvent.click(save);
     expect(onInvite).toHaveBeenCalledWith("Deniz Şahin", "deniz@viberr.dev");
-    expect(nameInput.value).toBe("");
-    expect(emailInput.value).toBe("");
+  });
+
+  it("refuses an address that already belongs to a member, without dispatching", () => {
+    const onInvite = vi.fn();
+    const { container, getByText, getByLabelText } = render(
+      <MembersPanel {...base} onInvite={onInvite} onRemove={() => {}} />,
+    );
+    fireEvent.click(getByText("Add member"));
+    fireEvent.change(getByLabelText(/Full name/), {
+      target: { value: "Arda Kaya" },
+    });
+    fireEvent.change(getByLabelText(/Email/), {
+      target: { value: "ARDA@viberr.dev" },
+    });
+    // SAFETY: `MiniModal`'s single foot primary, as above.
+    const save = container.querySelector(
+      "dialog.modal-card button.btn.primary",
+    ) as HTMLButtonElement;
+    fireEvent.click(save);
+    expect(onInvite).not.toHaveBeenCalled();
+    // The modal stays open on a refusal, so the address can be corrected.
+    const dialog = container.querySelector("dialog.modal-card")!;
+    // …and the refusal is answered INSIDE it. A toast would paint under the
+    // backdrop and its live region is inert while the dialog is open, so the
+    // sentence, the mark and the focus all live in the modal. Canary: push the
+    // sentence to the toast host again and nothing here is reachable.
+    const alert = dialog.querySelector('.form-err[role="alert"]')!;
+    expect(alert.textContent).toContain("arda@viberr.dev is already a member");
+    // SAFETY: the modal's email `<input>`, bound by `htmlFor`.
+    const emailInput = getByLabelText(/Email/) as HTMLInputElement;
+    expect(emailInput.getAttribute("aria-invalid")).toBe("true");
+    expect(emailInput.getAttribute("aria-describedby")).toBe(alert.id);
+    expect(document.activeElement).toBe(emailInput);
+    // Editing the address clears the refusal, so the next one is announced as a
+    // fresh insertion rather than a role flip on unchanged text (ruling 147(b)).
+    fireEvent.change(emailInput, { target: { value: "arda@viberr.de" } });
+    expect(dialog.querySelector('.form-err[role="alert"]')).toBeNull();
   });
 
   /**
@@ -647,16 +772,18 @@ describe("MembersPanel", () => {
    * the screen on the first keystroke. The org-level twin of the very same
    * action (`org-settings/users-panel.tsx`) labels "Full name" and "Email" over
    * inputs carrying those identical placeholders, and this page's own identity
-   * fields use the same `.field` + `.flabel` idiom. It bites hardest under
-   * 1300px, where `.invite-row` collapses to one column and the two
-   * same-looking boxes stack.
+   * fields use the same `.field` + `.flabel` idiom. The form moved into a modal
+   * with ruling 148(b); the labels are what makes it readable there too.
    */
   it("#22: both invite fields keep a real label, not just a vanishing placeholder", () => {
-    const { container, getByLabelText } = render(
+    const { container, getByLabelText, getByText } = render(
       <MembersPanel {...base} onInvite={() => {}} onRemove={() => {}} />,
     );
+    fireEvent.click(getByText("Add member"));
     const inputs = [
-      ...container.querySelectorAll<HTMLInputElement>(".invite-row input"),
+      ...container.querySelectorAll<HTMLInputElement>(
+        "dialog.modal-card .field input",
+      ),
     ];
     expect(inputs).toHaveLength(2);
     for (const input of inputs) {
@@ -684,10 +811,12 @@ describe("MembersPanel", () => {
   });
 
   it("hides invite + remove for non-admins", () => {
-    const { container, queryByPlaceholderText } = render(
+    const { container, queryByText } = render(
       <MembersPanel {...base} canManage={false} onInvite={() => {}} onRemove={() => {}} />,
     );
-    expect(queryByPlaceholderText("Full name")).toBeNull();
+    // Ruling 148(b): the form is behind a head button now, so the assertion has
+    // to be that the BUTTON is gone — a placeholder query would pass for free.
+    expect(queryByText("Add member")).toBeNull();
     expect(container.querySelector(".stg-x")).toBeNull();
   });
 
@@ -942,7 +1071,11 @@ describe("RepoPanel", () => {
     fireEvent.click(getByText("Remove credential"));
     expect(onClear).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
-    fireEvent.click(getByText("Remove credential", { selector: "button.btn.danger" }));
+    fireEvent.click(
+      getByText("Remove credential", {
+        selector: ".confirm-actions button.btn.danger",
+      }),
+    );
     expect(onClear).toHaveBeenCalled();
   });
 
@@ -1018,7 +1151,7 @@ describe("DangerZone", () => {
         onDelete={onDelete}
       />,
     );
-    fireEvent.click(container.querySelector(".dz-row .btn.danger")!);
+    fireEvent.click(container.querySelector(".dz-row .btn.danger:not(.ghost)")!);
     expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
 
     const confirmButton = Array.from(
@@ -1034,6 +1167,51 @@ describe("DangerZone", () => {
     expect(onDelete).toHaveBeenCalledWith("Viberr Core");
   });
 
+  it("ruling 149: Archive wears the danger label beside Delete; Restore does not", () => {
+    // Both lifecycle triggers in this panel are destructive, so both read as
+    // one kind of control. jsdom computes no colour, so the class is the
+    // assertion — canary: drop the ternary in `settings-page.tsx`.
+    const live = render(
+      <DangerZone
+        projectName="Viberr Core"
+        myRole="admin"
+        archived={false}
+        busy={false}
+        onArchive={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+    const archive = live.container.querySelector<HTMLButtonElement>(
+      ".dz-row .btn.ghost",
+    )!;
+    expect(archive.textContent).toContain("Archive");
+    expect(Array.from(archive.classList)).toContain("danger");
+    // …and the solid danger button is still the delete trigger.
+    expect(
+      live.container.querySelector(".dz-row .btn.danger:not(.ghost)")!.textContent,
+    ).toContain("Delete project");
+    cleanup();
+
+    const archivedPanel = render(
+      <DangerZone
+        projectName="Viberr Core"
+        myRole="admin"
+        archived
+        busy={false}
+        onArchive={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+    const restore = archivedPanel.container.querySelector<HTMLButtonElement>(
+      ".dz-row .btn.ghost",
+    )!;
+    expect(restore.textContent).toContain("Restore");
+    expect(
+      Array.from(restore.classList),
+      "restoring is a recovery, not a destruction",
+    ).not.toContain("danger");
+  });
+
   it("non-admins only get the deny toast path (no dialog)", () => {
     const { container } = render(
       <DangerZone
@@ -1045,7 +1223,7 @@ describe("DangerZone", () => {
         onDelete={() => {}}
       />,
     );
-    fireEvent.click(container.querySelector(".dz-row .btn.danger")!);
+    fireEvent.click(container.querySelector(".dz-row .btn.danger:not(.ghost)")!);
     expect(container.querySelector('[role="alertdialog"]')).toBeNull();
   });
 
@@ -1071,7 +1249,7 @@ describe("DangerZone", () => {
       ".dz-row .btn.ghost",
     )!;
     const viewerDelete = viewer.querySelector<HTMLButtonElement>(
-      ".dz-row .btn.danger",
+      ".dz-row .btn.danger:not(.ghost)",
     )!;
     expect(viewerArchive.disabled).toBe(true);
     expect(viewerDelete.disabled).toBe(true);
@@ -1086,7 +1264,7 @@ describe("DangerZone", () => {
       admin.querySelector<HTMLButtonElement>(".dz-row .btn.ghost")!.disabled,
     ).toBe(false);
     expect(
-      admin.querySelector<HTMLButtonElement>(".dz-row .btn.danger")!.disabled,
+      admin.querySelector<HTMLButtonElement>(".dz-row .btn.danger:not(.ghost)")!.disabled,
     ).toBe(false);
   });
 
@@ -1113,7 +1291,7 @@ describe("DangerZone", () => {
         ".dz-row .btn.ghost",
       )!;
       const del = container.querySelector<HTMLButtonElement>(
-        ".dz-row .btn.danger",
+        ".dz-row .btn.danger:not(.ghost)",
       )!;
       expect(archive.disabled).toBe(!expectedEnabled);
       expect(del.disabled).toBe(!expectedEnabled);
@@ -1168,7 +1346,13 @@ describe("SettingsPage — each panel gates on the action its own server guard c
           (b) => b.textContent?.trim() === "Add stage",
         ),
       ),
-      members: container.querySelector('input[placeholder="Full name"]') !== null,
+      // Ruling 148(b): the invite form lives behind "Add member" in the panel
+      // head now, so the head button is the affordance to read.
+      members: Boolean(
+        Array.from(container.querySelectorAll("button")).find(
+          (b) => b.textContent?.trim() === "Add member",
+        ),
+      ),
       repoRepair: Boolean(
         Array.from(container.querySelectorAll("button")).find(
           (b) => b.textContent?.trim() === "Repair…",
@@ -1345,7 +1529,7 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
       ".dz-row .btn.ghost",
     )!;
     const del = container.querySelector<HTMLButtonElement>(
-      ".dz-row .btn.danger",
+      ".dz-row .btn.danger:not(.ghost)",
     )!;
     expect(archive.disabled).toBe(false);
     expect(del.disabled).toBe(false);

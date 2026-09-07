@@ -147,6 +147,21 @@ describe("StoreBrowser", () => {
     ).toBeTruthy();
   });
 
+  it("the new-folder row offers no activation it does not have", () => {
+    const { getByText, getByLabelText } = renderBrowser();
+    fireEvent.click(getByText("New folder"));
+    // SAFETY: `.fm-row` is only ever a <div> in store-browser.tsx, and the
+    // input is rendered inside one; the bound query cannot state that.
+    const row = getByLabelText("New folder name").closest(".fm-row") as HTMLElement;
+    // A real directory row earns its hand cursor and hover fill by carrying
+    // role="button", tabIndex and an activate handler. This one is a text
+    // field in a row shell: clicking it only blurs the input, which DISMISSES
+    // the half-typed name.
+    expect(row.className).toContain("editing");
+    expect(row.getAttribute("role")).toBeNull();
+    expect(row.getAttribute("tabindex")).toBeNull();
+  });
+
   it("new-folder input commits on Enter with mkdir -p semantics", async () => {
     const { getByText, getByLabelText } = renderBrowser();
     fireEvent.click(getByText("New folder"));
@@ -285,6 +300,21 @@ describe("StoreBrowser document editor", () => {
     expect(lastForm?.overwrite).toBeUndefined();
   });
 
+  it("ruling 149: both typing controls ride the shared .field chrome", () => {
+    // Canary: unwrap either control and it paints in UA chrome inside a card
+    // whose every other control wears the sheet's — the class this closes.
+    const { getByText, getByLabelText, getByPlaceholderText } = renderBrowser();
+    fireEvent.click(getByText("New document"));
+    const name = getByPlaceholderText("file-name.md");
+    expect(name.closest(".field")).not.toBeNull();
+    expect(getByText("File name").tagName).toBe("LABEL");
+    const body = getByLabelText("Document contents");
+    expect(body.closest(".field")).not.toBeNull();
+    // The visible label IS the accessible name: no aria-label overriding it.
+    expect(name.getAttribute("aria-label")).toBeNull();
+    expect(body.getAttribute("aria-label")).toBeNull();
+  });
+
   it("the GitHub import lands in the selected folder too", async () => {
     const { getByText, getByLabelText, getByPlaceholderText } = renderBrowser();
     fireEvent.change(getByLabelText("Destination folder"), {
@@ -406,6 +436,62 @@ describe("StoreBrowser document editor", () => {
     expect(
       control(getByLabelText("Document contents"), HTMLTextAreaElement).value,
     ).toBe("THE ONLY COPY");
+  });
+
+  // Ruling 147: an empty file name no longer kills the primary. Save stays
+  // enabled, the click is refused with the sentence `writeStoreDoc` throws, and
+  // nothing is submitted.
+  it("ruling 147: a nameless draft is refused, not blocked", async () => {
+    const { getByText, getByLabelText, getByPlaceholderText, queryByRole } =
+      renderBrowser();
+    fireEvent.click(getByText("New document"));
+    fireEvent.change(getByLabelText("Document contents"), {
+      target: { value: "# no name yet" },
+    });
+    const name = control(getByPlaceholderText("file-name.md"), HTMLInputElement);
+    const save = getByText("Save document").closest("button")!;
+
+    // Pristine: enabled, unmarked, nothing said.
+    expect(save.disabled).toBe(false);
+    expect(queryByRole("alert")).toBeNull();
+    expect(name.getAttribute("aria-invalid")).toBeNull();
+
+    fireEvent.click(save);
+    expect(lastForm).toBeNull();
+    const first = queryByRole("alert")!;
+    expect(first.textContent).toContain("Give the document a file name.");
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+    expect(name.getAttribute("aria-describedby")).toBe(first.id);
+    expect(document.activeElement).toBe(name);
+
+    // Each refusal is a NEW element, so a repeat press is announced again.
+    fireEvent.click(save);
+    expect(lastForm).toBeNull();
+    expect(queryByRole("alert")).not.toBe(first);
+
+    // Naming it clears the mark and the save goes through.
+    fireEvent.change(name, { target: { value: "facts.md" } });
+    expect(queryByRole("alert")).toBeNull();
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "store-write-doc",
+        name: "facts.md",
+      }),
+    );
+  });
+
+  it("ruling 147: a re-opened draft is pristine, never still accused", () => {
+    const { getByText, queryByRole, getByPlaceholderText } = renderBrowser();
+    fireEvent.click(getByText("New document"));
+    fireEvent.click(getByText("Save document").closest("button")!);
+    expect(queryByRole("alert")).toBeTruthy();
+    fireEvent.click(getByText("Cancel"));
+    fireEvent.click(getByText("New document"));
+    expect(queryByRole("alert")).toBeNull();
+    expect(
+      getByPlaceholderText("file-name.md").getAttribute("aria-invalid"),
+    ).toBeNull();
   });
 
   it("a doc too large to load cannot be saved back over the original", async () => {

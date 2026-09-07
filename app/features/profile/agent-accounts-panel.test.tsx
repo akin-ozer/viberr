@@ -148,7 +148,8 @@ describe("AgentAccountsPanel", () => {
   });
 
   it("reveals a password-type paste field that promises the value is never shown again", () => {
-    const { getByText, getAllByText, container } = renderPanel(BOTH_UNCONNECTED);
+    const { getByText, getAllByText, getByRole, queryByRole, container } =
+      renderPanel(BOTH_UNCONNECTED);
     fireEvent.click(getAllByText("Use an API key")[0]!);
     const field = container.querySelector<HTMLInputElement>(
       "#agentacc-claude-api_key",
@@ -160,16 +161,59 @@ describe("AgentAccountsPanel", () => {
     expect(field.autocomplete).toBe("new-password");
     expect(getByText(/stored sealed, never shown again/)).toBeTruthy();
 
-    // Nothing is submitted until there is something to submit.
+    // Ruling 147: Save stays enabled on an empty field and REFUSES the click
+    // with the sentence the server would have thrown, the field marked and
+    // focused, and nothing submitted.
     const save = getByText("Save API key").closest("button")!;
-    expect(save.disabled).toBe(true);
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    expect(lastSubmit).toBeNull();
+    const first = getByRole("alert");
+    expect(first.textContent).toContain("Paste the API key first.");
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(field.getAttribute("aria-describedby")).toBe(first.id);
+    expect(document.activeElement).toBe(field);
+
+    // A second refusal inserts a NEW element, because readers announce an
+    // insertion, not a role flip on unchanged text.
+    fireEvent.click(save);
+    expect(getByRole("alert")).not.toBe(first);
+
+    // Typing clears the mark.
     fireEvent.change(field, { target: { value: "sk-ant-api03-abc" } });
+    expect(queryByRole("alert")).toBeNull();
+    expect(field.getAttribute("aria-invalid")).toBeNull();
     fireEvent.click(save);
     expect(lastSubmit).toEqual({
       intent: "backend-set-key",
       backend: "claude",
       kind: "api_key",
       secret: "sk-ant-api03-abc",
+    });
+  });
+
+  it("refuses an empty workspace access token in the server's own words (ruling 147)", () => {
+    const { getByText, getByRole, container } = renderPanel(BOTH_UNCONNECTED);
+    fireEvent.click(getByText("Use a workspace access token"));
+    const field = container.querySelector<HTMLInputElement>(
+      "#agentacc-codex-access_token",
+    )!;
+    const save = getByText("Save workspace access token").closest("button")!;
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    expect(lastSubmit).toBeNull();
+    const alert = getByRole("alert");
+    expect(alert.textContent).toContain("Paste the access token first.");
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(field.getAttribute("aria-describedby")).toBe(alert.id);
+    expect(document.activeElement).toBe(field);
+    fireEvent.change(field, { target: { value: "sk-tok" } });
+    fireEvent.click(save);
+    expect(lastSubmit).toEqual({
+      intent: "backend-set-key",
+      backend: "codex",
+      kind: "access_token",
+      secret: "sk-tok",
     });
   });
 
@@ -188,17 +232,26 @@ describe("AgentAccountsPanel", () => {
       backend("claude"),
       backend("codex", { login: runningLogin("codex") }),
     ]);
-    expect(getByText("1. Open this link and sign in")).toBeTruthy();
+    expect(getByText("Sign in on OpenAI's page")).toBeTruthy();
     const link = container.querySelector<HTMLAnchorElement>(
       "a[href='https://auth.openai.com/codex/device']",
     )!;
     expect(link.target).toBe("_blank");
     expect(link.rel).toBe("noreferrer");
-    expect(getByText("2. Enter this code")).toBeTruthy();
+    // The link is a button that names its host, never the printed URL: a few
+    // hundred characters of OAuth parameters crushed the labels beside them.
+    expect(link.textContent).toContain("Open sign-in page");
+    expect(getByText("auth.openai.com")).toBeTruthy();
+    expect(container.textContent).not.toContain("https://auth.openai.com");
+    expect(getByText("Enter this code on that page")).toBeTruthy();
     expect(getByText("WDJB-MJHT")).toBeTruthy();
     expect(getByText("Waiting for you to finish in the browser")).toBeTruthy();
     // Codex has no paste step: the person types the code on OpenAI's page.
     expect(container.querySelector("input[type='text']")).toBeNull();
+    // Both steps are actionable at once: the URL and the code arrive together.
+    const marks = container.querySelectorAll(".signin-step");
+    expect(marks[0]!.getAttribute("data-state")).toBe("current");
+    expect(marks[1]!.getAttribute("data-state")).toBe("current");
 
     fireEvent.click(getByText("Cancel"));
     expect(lastSubmit).toEqual({
@@ -212,13 +265,21 @@ describe("AgentAccountsPanel", () => {
       backend("claude", { login: runningLogin("claude") }),
       backend("codex"),
     ]);
+    // The step title is the field's real label, not an aria-label.
     const before = waiting.container.querySelector<HTMLInputElement>(
-      "input[aria-label='Code from Anthropic']",
+      "#agentacc-claude-code",
     )!;
+    expect(waiting.getByLabelText("Paste the code Anthropic shows you")).toBe(before);
     expect(before.disabled).toBe(true);
+    // Availability, not validation: the step is pending until the code prompt
+    // arrives, and its Submit is disabled with it.
+    const pendingSteps = waiting.container.querySelectorAll(".signin-step");
+    expect(pendingSteps[0]!.getAttribute("data-state")).toBe("current");
+    expect(pendingSteps[1]!.getAttribute("data-state")).toBe("pending");
+    expect(waiting.getByText("Submit code").closest("button")!.disabled).toBe(true);
     cleanup();
 
-    const { container, getByText } = renderPanel([
+    const { container, getByText, queryByRole } = renderPanel([
       backend("claude", {
         login: runningLogin("claude", {
           state: "awaiting-code",
@@ -227,18 +288,67 @@ describe("AgentAccountsPanel", () => {
       }),
       backend("codex"),
     ]);
-    const field = container.querySelector<HTMLInputElement>(
-      "input[aria-label='Code from Anthropic']",
-    )!;
+    const field = container.querySelector<HTMLInputElement>("#agentacc-claude-code")!;
     expect(field.disabled).toBe(false);
-    expect(getByText("Waiting for the code Anthropic showed you")).toBeTruthy();
+    expect(getByText("Waiting for you to sign in and paste the code")).toBeTruthy();
+    const steps = container.querySelectorAll(".signin-step");
+    expect(steps[0]!.getAttribute("data-state")).toBe("current");
+    expect(steps[1]!.getAttribute("data-state")).toBe("current");
+
+    // Ruling 147: Submit is enabled on the empty field and REFUSES the click
+    // with the server's own sentence, the field marked and focused, and no
+    // request made.
+    const submitBtn = getByText("Submit code").closest("button")!;
+    expect(submitBtn.disabled).toBe(false);
+    expect(queryByRole("alert")).toBeNull();
+    fireEvent.click(submitBtn);
+    expect(lastSubmit).toBeNull();
+    const alert = queryByRole("alert")!;
+    expect(alert.textContent).toContain("Paste the code Anthropic showed you.");
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(field.getAttribute("aria-describedby")).toBe(alert.id);
+    expect(document.activeElement).toBe(field);
+
+    // Typing clears the accusation; the next click is a request.
     fireEvent.change(field, { target: { value: "paste-me" } });
-    fireEvent.click(getByText("Submit"));
+    expect(field.getAttribute("aria-invalid")).toBeNull();
+    expect(queryByRole("alert")).toBeNull();
+    fireEvent.click(submitBtn);
     expect(lastSubmit).toEqual({
       intent: "backend-login-code",
       backend: "claude",
       code: "paste-me",
     });
+  });
+
+  it("marks both steps done once the code is on its way, and step 1 never on its own", () => {
+    // Nothing on the server can tell whether the person opened the link, so
+    // the only evidence that step 1 happened is a submitted code.
+    const { container } = renderPanel([
+      backend("claude", {
+        login: runningLogin("claude", { state: "finishing", needsCode: false }),
+      }),
+      backend("codex"),
+    ]);
+    const steps = container.querySelectorAll(".signin-step");
+    expect(steps[0]!.getAttribute("data-state")).toBe("done");
+    expect(steps[1]!.getAttribute("data-state")).toBe("done");
+    // Both carry the hidden word a reader needs, since the check is a glyph.
+    expect(container.querySelectorAll(".signin-step .vh")).toHaveLength(2);
+  });
+
+  it("before the vendor has printed its link, Open is a disabled button and the host is absent", () => {
+    const { container, getByText } = renderPanel([
+      backend("claude", {
+        login: runningLogin("claude", { state: "starting", url: null }),
+      }),
+      backend("codex"),
+    ]);
+    const open = getByText("Open sign-in page").closest("button")!;
+    expect(open.disabled).toBe(true);
+    expect(container.querySelector(".signin-host")).toBeNull();
+    expect(container.querySelector("a[target='_blank']")).toBeNull();
+    expect(getByText("Starting the Claude sign-in on this server")).toBeTruthy();
   });
 
   it("connected: names the method, dates the connection and offers Disconnect", () => {
@@ -280,7 +390,13 @@ describe("AgentAccountsPanel", () => {
     expect(getByText("unverified")).toBeTruthy();
     expect(getByText(/verified /)).toBeTruthy();
 
-    fireEvent.click(container.querySelectorAll(".cred-manage button")[0]!);
+    // Ruling 149: dropping the stored credential is destructive, so the
+    // control carries the danger label. Canary: drop `danger` from the
+    // Disconnect className in `agent-accounts-panel.tsx`.
+    const disconnect = container.querySelectorAll(".cred-manage button")[0]!;
+    expect(disconnect.textContent).toContain("Disconnect");
+    expect(Array.from(disconnect.classList)).toContain("danger");
+    fireEvent.click(disconnect);
     expect(lastSubmit).toEqual({
       intent: "backend-disconnect",
       backend: "claude",
@@ -435,25 +551,36 @@ describe("AgentAccountsPanel", () => {
     expect(
       container.querySelector("a[href='https://claude.ai/oauth']"),
     ).toBeTruthy();
-    expect(getByText("1. Open this link and sign in")).toBeTruthy();
+    expect(getByText("Sign in on Anthropic's page")).toBeTruthy();
+    expect(getByText("claude.ai")).toBeTruthy();
     expect(getByText("Waiting for you to finish in the browser")).toBeTruthy();
     expect(getByText("Cancel")).toBeTruthy();
     // The badge says what is happening now, not what was true before it started.
     expect(getByText("signing in")).toBeTruthy();
   });
 
-  it("announces the step list politely and moves focus into it", () => {
+  it("moves focus into the labelled step group, and keeps the live region to the status line", () => {
     // The card replaces the button the person just pressed, and every value in
     // it (the URL, the code, the status) arrives seconds later from the poll.
     const { container } = renderPanel([
       backend("claude"),
       backend("codex", { login: runningLogin("codex") }),
     ]);
-    const steps = container.querySelector<HTMLDivElement>("div[role='status']")!;
-    expect(steps).toBeTruthy();
-    expect(steps.getAttribute("aria-live")).toBe("polite");
-    expect(steps.getAttribute("aria-label")).toBe("Codex sign-in");
-    expect(document.activeElement).toBe(steps);
+    const group = container.querySelector<HTMLDivElement>("[role='group']")!;
+    expect(group.getAttribute("aria-label")).toBe("Codex sign-in");
+    expect(document.activeElement).toBe(group);
+    // ONE live region, and it is the sentence, not the list: a status role is
+    // implicitly atomic, so a region wrapping the link would re-read the whole
+    // URL on every poll that changed anything.
+    // Scoped to the card: the toast host outside it has its own live region.
+    const regions = group.closest(".cred-card")!.querySelectorAll("[aria-live]");
+    expect(regions).toHaveLength(1);
+    const status = regions[0]!;
+    expect(status.getAttribute("role")).toBe("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.textContent).toBe("Waiting for you to finish in the browser");
+    expect(status.querySelector("a, button, input")).toBeNull();
+    expect(status.contains(container.querySelector("a[target='_blank']"))).toBe(false);
   });
 
   it("offers the sign-in it tells the person to use when the credential file is gone", () => {

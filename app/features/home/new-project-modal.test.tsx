@@ -241,3 +241,19 @@ describe("Create project stays enabled and refuses with the field named", () => 
     await waitFor(() => expect(posted).toBe(1));
   });
 });
+
+describe("the Workflow field states the starting board, it does not pretend to pick it", () => {
+  it("renders a statement, not a selected option nobody can change", () => {
+    const { container, getByText } = renderModal();
+    // `.pick-chip` is the option BUTTON class in every other field of this
+    // dialog and `.on` is its selected fill, so a one-option picker read as a
+    // control you cannot use, and `aria-disabled` on a role-less span told
+    // assistive tech nothing.
+    expect(getByText("Workflow")).toBeTruthy();
+    expect(
+      container.textContent,
+    ).toContain("Starts on the Standard · 5 stages board");
+    expect(container.querySelector(".pick-chip:not(button)")).toBeNull();
+    expect(container.querySelector("span[aria-disabled]")).toBeNull();
+  });
+});

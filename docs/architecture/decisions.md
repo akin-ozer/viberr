@@ -2838,11 +2838,95 @@ by rewriting those paragraphs:*
     appear only after a refused attempt, and a refused attempt never turns into a request.
     **(d)** Two gates are NOT this rule and keep `disabled`: a save with nothing changed
     (`dirty`), and a typed-name confirmation on a destructive action, which is a safety
-    interlock, not validation. Applies to the New task and New project modals, `/login`
-    (whose action returns `{ error, field }`), every org-settings `MiniModal`, the
-    repository-repair dialog, the S3 audit target and the agent profile editor.
+    interlock, not validation. Ruling 150(e) says where a refusal about a COMPLETE form goes.
+    Applies to the
+    New task and New project modals, `/login` (whose action returns `{ error, field }`), every
+    org-settings `MiniModal`, the repository-repair dialog, the S3 audit target, the task
+    page's agent run starter (an empty picker is refused with the combobox marked and
+    focused), the project's Add member modal (a `MiniModal` since ruling 148(b)) and the agent
+    profile editor.
     (`ui/`-adjacent idiom in `features/org-settings/mini-modal.tsx`; the field rule in
     `app.css` `.field input[aria-invalid="true"]`.)
+
+148. **Profile pass: four owner findings (owner, 2026-09-06).** **(a)** Side-by-side panels end
+    on one line. A 2-up settings grid (`.profile-cols`, `.policy-cols`) stretches its rows,
+    and the last panel of a stacked column (`.profile-col`) fills to the column's bottom, so
+    the two columns of Profile never end at different heights. A feed beside a short panel
+    (`.activity-cols`) is exempt: stretching the panel to the feed's height only produces a
+    tall empty box. **(b)** Change password is a button that opens a modal, never a form
+    served inline: a "Password" row on the Profile card, under the sign-in facts, opening the
+    org-settings `MiniModal` under the ruling 147 contract (length and match are refused with
+    the field named and focused; a server refusal lands in the same alert). **(c)** The
+    in-app "Reduce motion" preference is REMOVED with its `set-motion` intent, the
+    `user_prefs.motion` key, `<html data-motion>` and the `[data-motion="reduce"]` kill
+    switch. The OS `prefers-reduced-motion` setting is the one reduced-motion signal,
+    honoured by the sheet's targeted rules (entrances fade, the live pulse stills). This
+    narrows ruling 13's Appearance panel. **(d)** Warning surfaces take GitHub's treatment.
+    Light: `--amber-light #fff8c5` (its attention fill; mixed into the surface it is the
+    classic pale-yellow flash) with `--amber-dark #735c0f`, the dark olive it prints that
+    flash in. Dark: `--amber-light #3a3019`, `--amber-dark #d29922` (its attention
+    foreground), and the warning boxes (`.cred-warn`, `.archived-banner`, plus the board's
+    attention notices under ruling 150(b)) print their sentence in `--fg` with amber only on
+    the icon, border and fill; yellow text on brown is gone everywhere the pair is used.
+    Ruling 150(a) puts the error boxes on the same split. Also from the pass: the close × on every modal head and
+    the page overlay is one borderless circular control, and the unconnected badge on the
+    agent and GitHub cards says "not connected" instead of a "−" that read as a collapse
+    control. (`app.css` ruling-148 section, pinned in `app.css.test.ts`;
+    `features/profile/profile-page.tsx`.)
+
+149. **Destructive controls take GitHub's danger button (owner, 2026-09-06).** A destructive
+    control (delete, remove, revoke, archive, disconnect, sign out, discard, force-accept) is
+    a NEUTRAL button whose label is red, and that fills red on hover with a white label: at
+    rest the surface fill and `--border`, the label in `--danger` (`#cf222e` light /
+    `#f85149` dark, GitHub's danger foreground); on hover `--danger-fill` (`#a40e26` /
+    `#da3633`) under `--on-danger`. The tinted pink face it replaces read as a disabled or
+    decorative control. The same red carries the ghost danger button, the account menu's
+    Sign out, the danger-zone panel border and icon, the KB browser's delete action, the
+    danger label and the opt-in destructive row-remove hovers. `--coral-dark` /
+    `--coral-light` stay the ERROR pair for text, pills and error boxes: `#cf222e` fails AA on
+    the pink error fill and `#600000` reads as brown on a button, so a control colour and an
+    error colour are two tokens on purpose. **Ruling 150(a) narrows that last sentence on
+    dark**: inside an error BOX the pair carries the icon, border and fill while the sentence
+    itself prints in `--fg`. The sweep that applied it across the app also
+    re-applied ruling 148's classes repo-wide (equal columns, glyph badges, warning boxes,
+    close controls, bare inputs and atomic live regions, ruling 147 primaries) and reported
+    the inline-form candidates for a decision. (`app.css` `--danger*` tokens, `.btn.danger`,
+    `.btn.ghost.danger`, `.menu-item.danger`, `.danger-panel`, `.fm-act.del`,
+    `.flabel.danger`.)
+
+150. **Where each tone lands: error prose on dark, attention on the board, and both ends of a
+    stop (owner, 2026-09-06).** Five calls the ruling 148/149 sweep put to the owner, recorded
+    together because two of them narrow the rulings above rather than extend them. **(a)** An
+    error BOX prints its sentence in `--fg` on dark and keeps `--coral-dark` on the icon, the
+    border and the fill: `.login-err`, `.form-err`, the MCP probe's `.rsrc-err`, and the
+    acceptance/packet consequence row (`.obs.warn`, whose uppercase kicker is the tone carrier
+    because it has no glyph). This NARROWS ruling 149's "`--coral-*` … stay the ERROR pair for
+    text, pills and error boxes": a whole paragraph of salmon prose on a red wash was the
+    other half of the problem 148(d) named for amber, and the two were decided in the same
+    pass. Light is untouched — `#600000` there is already body-weight ink — and error TEXT
+    outside a box (`.foot-hint.err`, the refusal lines, the violation counts) keeps the pair
+    in both themes. **(b)** 148(d)'s amber treatment is not limited to `.cred-warn` and
+    `.archived-banner`: a box that reports ATTENTION rather than a fault takes the amber pair
+    too. The board's archived-filter caption and its "no stages yet" empty state
+    (`.board-orphans.notice`) are attention; the unstaged-task and repository boxes rendered
+    by the same component are faults and stay on the error pair. **(c)** The destructive
+    row-action hover (`.stg-x`) is opt-in by NAME where position cannot identify the
+    destructive control: org settings' user row ends on Remove, which takes it by
+    `:last-child`, but Disable sits before it and signs the person out, so that one says
+    `.destructive`. **(d)** A stop is destructive at BOTH ends. Interrupting a run or a
+    controller turn discards work in flight, so the shared `LiveRunPanel` trigger wears ruling
+    149's red label (`btn ghost sm danger`) and the confirm it opens keeps `ConfirmDialog`'s
+    `danger` default. The inverse holds for a confirm that takes nothing away: dismissing an
+    operator recommendation is recorded on the timeline and the operator may raise it again,
+    so it is the one call site that passes `tone="primary"`. **(e)** A refusal about a
+    COMPLETE form is answered inside the surface that refused it, never by a toast:
+    `.toast-wrap` is an ordinary fixed element, so over an open `<dialog>` it paints under the
+    backdrop and its live region is inert behind the modal. The project's Add member modal
+    prints its already-a-member sentence as a `.form-err` alert in the dialog body, with the
+    address field marked and described by it (ruling 147(b)'s shape, one fresh element per
+    refusal). (`app.css`'s appended ruling-148(d)/149 blocks, pinned in `app.css.test.ts`;
+    `features/runtime/runs-panels.tsx`; `features/org-settings/users-panel.tsx`;
+    `features/project-settings/settings-page.tsx`.)
 
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates

@@ -879,8 +879,10 @@ function ListRow({
 }) {
   const archived = isArchived(task);
   const rowRef = useRovingStageMenu(roving);
+  // Ruling 148: one fact, one wording — the stage menu and the task page say
+  // "unknown stage" too, and the raw internal id is not rendered copy.
   const stageName =
-    stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+    stages.find((s) => s.id === task.stage)?.name ?? "unknown stage";
   const to = `/projects/${task.projectSlug}/tasks/${task.key}`;
   return (
     <div className="card list-row" role="listitem" ref={rowRef}>
@@ -1834,7 +1836,7 @@ function StageBoard({
     // otherwise render a blank board with no explanation. Disclose it, the
     // same way the OrphanBanner / archived-filter notices in this file do.
     return (
-      <div className="board-orphans" role="status">
+      <div className="board-orphans notice" role="status">
         <Icon name="alert" />
         <span className="board-orphans-label">
           This project has no workflow stages yet. Add a stage in project
@@ -2480,7 +2482,7 @@ export function BoardPage({
       )}
 
       {filter === "archived" && (
-        <div className="board-orphans" role="status">
+        <div className="board-orphans notice" role="status">
           <Icon name="lock" />
           <span className="board-orphans-label">
             Archived tasks: abandoned work kept for the record. Their timelines

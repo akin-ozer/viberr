@@ -1453,6 +1453,73 @@ describe("run concurrency control", () => {
       expect(lastForm?.maxConcurrentRuns).toBe("3");
     });
   });
+
+  // Ruling 147(d): "nothing changed" is the only gate that keeps Save disabled.
+  // Validity used to be folded into that gate, so a typed "-1" was a changed
+  // value that left Save dead with nothing said.
+  it("ruling 147: an unusable cap is refused on the click, not by a dead Save", async () => {
+    const { getByLabelText, getByRole, queryByRole } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 2, live: 0, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    const input = getByLabelText(/Maximum concurrent agent runs/);
+    const save = getByRole("button", { name: "Save" });
+    // The pristine field equals the stored cap: the dirty gate still disables.
+    expect(save.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(input, { target: { value: "-1" } });
+    expect(save.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(save);
+    expect(lastForm).toBeNull();
+    const first = queryByRole("alert")!;
+    expect(first.textContent).toContain("Enter a whole number (0 = unlimited).");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")).toBe(
+      "max-concurrent-runs-err",
+    );
+    expect(first.id).toBe("max-concurrent-runs-err");
+    expect(document.activeElement).toBe(input);
+
+    // Each refusal is a fresh element.
+    fireEvent.click(save);
+    expect(queryByRole("alert")).not.toBe(first);
+
+    // A corrected value clears the mark and submits.
+    fireEvent.change(input, { target: { value: "4" } });
+    expect(queryByRole("alert")).toBeNull();
+    fireEvent.click(save);
+    await waitFor(() => expect(lastForm?.maxConcurrentRuns).toBe("4"));
+  });
+
+  // `Number("")` is 0, so an emptied box used to look like a valid, changed
+  // value and silently set the cap to unlimited.
+  it("ruling 147: an emptied cap field is refused, never submitted as unlimited", () => {
+    const { getByLabelText, getByRole, queryByRole } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 2, live: 0, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    const input = getByLabelText(/Maximum concurrent agent runs/);
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.click(getByRole("button", { name: "Save" }));
+    expect(lastForm).toBeNull();
+    expect(queryByRole("alert")).toBeTruthy();
+  });
 });
 
 /**
@@ -1497,32 +1564,70 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
     />
   );
 
-  it("unconfigured: the form is open and Save target is a SECONDARY button", () => {
-    const { getByText } = renderPanel(page(null));
-    const save = getByText("Save target").closest("button")!;
-    expect(save.className).toContain("btn");
-    expect(save.className).not.toContain("primary");
+  it("ruling 148(b): unconfigured, the six fields sit behind a Set up button", () => {
+    const { getByText, container } = renderPanel(page(null));
+    // The card used to serve the whole credential form open, on every tab.
+    expect(document.querySelector(".audit-s3-grid")).toBeNull();
+    expect(getByText("No S3 target")).toBeTruthy();
+    // D04-U7: the card still adds no primary to the page.
+    expect(container.querySelector(".audit-export .btn.primary")).toBeNull();
+    fireEvent.click(getByText("Set up S3 target").closest("button")!);
     expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
+    expect(getByText("Save target")).toBeTruthy();
+    // "Export to S3 now" stays on the card, unavailable until a target exists.
+    const push = getByText("Export to S3 now").closest("button")!;
+    expect(push.disabled).toBe(true);
   });
 
-  it("ruling 147: an incomplete target is refused on click, field by field", () => {
+  it("ruling 147: an incomplete target is refused in the modal, field by field", () => {
     const { getByText, getByPlaceholderText } = renderPanel(page(null));
+    fireEvent.click(getByText("Set up S3 target").closest("button")!);
     const save = getByText("Save target").closest("button")!;
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
     const bucket = getByPlaceholderText("my-audit-bucket");
     expect(bucket.getAttribute("aria-invalid")).toBe("true");
-    expect(bucket.getAttribute("aria-describedby")).toBe("s3-unmet");
-    expect(document.getElementById("s3-unmet")!.textContent).toContain("bucket name");
-    expect(document.getElementById("s3-unmet")!.getAttribute("role")).toBe("alert");
+    // MiniModal owns the refusal: ONE alert, in its foot, per refused save.
+    const alerts = document.querySelectorAll('[role="alert"]');
+    expect(alerts).toHaveLength(1);
+    expect(document.querySelector('.modal-foot [role="alert"]')!.textContent).toContain(
+      "bucket name",
+    );
     expect(document.activeElement).toBe(bucket);
     fireEvent.change(bucket, { target: { value: "audit" } });
     fireEvent.click(save);
     expect(bucket.getAttribute("aria-invalid")).toBeNull();
     expect(document.activeElement).toBe(getByPlaceholderText("eu-central-1"));
+    expect(document.querySelector('.modal-foot [role="alert"]')!.textContent).toContain(
+      "region",
+    );
   });
 
-  it("review F7: a saved target folds the form again (state follows the stored target)", () => {
+  it("a saved target keeps the server toast and closes the modal on the result", async () => {
+    const { getByText, getByLabelText, getByPlaceholderText, findByText } =
+      renderPanel(page(null));
+    fireEvent.click(getByText("Set up S3 target").closest("button")!);
+    fireEvent.change(getByPlaceholderText("my-audit-bucket"), {
+      target: { value: "bkt" },
+    });
+    fireEvent.change(getByPlaceholderText("eu-central-1"), {
+      target: { value: "eu-west-1" },
+    });
+    fireEvent.change(getByPlaceholderText("AKIA…"), { target: { value: "AKIA1" } });
+    fireEvent.change(getByLabelText("S3 secret access key"), {
+      target: { value: "s3cret" },
+    });
+    fireEvent.click(getByText("Save target").closest("button")!);
+    await waitFor(() => expect(lastForm).toBeTruthy());
+    expect(lastForm!.intent).toBe("s3-config-save");
+    expect(lastForm!.secretAccessKey).toBe("s3cret");
+    // Canary: `useOrgAction` returns early once `onResult` is supplied — drop the
+    // push in it and the save goes silent.
+    expect(await findByText("stub done")).toBeTruthy();
+    await waitFor(() => expect(document.querySelector(".audit-s3-grid")).toBeNull());
+  });
+
+  it("review F7: a target change closes the modal (card state follows the stored target)", () => {
     // The page re-renders with a NEW stored target after a save (loader
     // revalidation); a harness stands in for the loader so the render stays
     // inside renderPanel's router.
@@ -1541,29 +1646,31 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
       );
     }
     const { getByText } = renderPanel(<Harness />);
-    fireEvent.click(getByText("Edit target"));
+    fireEvent.click(getByText("Edit target").closest("button")!);
     expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
-    // Canary: drop the `key` on <AuditExportCard> and the form stays open forever.
+    // Canary: drop the `key` on <AuditExportCard> and the modal stays open over
+    // a target its fields no longer describe.
     fireEvent.click(getByText("harness: saved"));
     expect(document.querySelector(".audit-s3-grid")).toBeNull();
     expect(getByText(/eu-west-2/)).toBeTruthy();
-    // Clearing the target opens the form on EMPTY fields, not the cleared values.
     fireEvent.click(getByText("harness: cleared"));
-    expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
+    expect(document.querySelector(".audit-s3-grid")).toBeNull();
+    // Reopening on a cleared target seeds EMPTY fields, not the cleared values.
+    fireEvent.click(getByText("Set up S3 target").closest("button")!);
     expect(
       [...document.querySelectorAll<HTMLInputElement>(".audit-s3-grid input")].every((i) => i.value === ""),
     ).toBe(true);
   });
 
-  it("configured: the form folds behind a summary line until Edit target", () => {
+  it("configured: the summary line is the only S3 fact until Edit target", () => {
     const { getByText, queryByText } = renderPanel(page(S3));
     expect(getByText(/s3:\/\/audit-bkt\/viberr\//)).toBeTruthy();
     expect(document.querySelector(".audit-s3-grid")).toBeNull();
     expect(queryByText("Save target")).toBeNull();
-    fireEvent.click(getByText("Edit target"));
+    fireEvent.click(getByText("Edit target").closest("button")!);
     expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
     expect(getByText("Save target")).toBeTruthy();
-    fireEvent.click(getByText("Cancel"));
+    fireEvent.click(getByText("Cancel").closest("button")!);
     expect(document.querySelector(".audit-s3-grid")).toBeNull();
   });
 });

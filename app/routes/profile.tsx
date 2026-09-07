@@ -22,7 +22,7 @@ import {
   connectBackendKey,
   disconnectBackendAccount,
   disconnectGithubIdentity,
-  setMotionPref,
+
   setNotifRoutingPref,
   setTimelineDefaultPref,
   startBackendSignIn,
@@ -46,8 +46,8 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
  * RBAC access view, GitHub identity, self-serve password change.
  *
  * Theme still goes through the existing /prefs/theme action (cookie +
- * users.theme); motion/tlDefault/notifs live in user_prefs via this
- * route's action.
+ * users.theme); tlDefault/notifs live in user_prefs via this route's
+ * action (ruling 148(c): there is no motion preference any more).
  */
 
 export function meta() {
@@ -116,10 +116,6 @@ export async function action({ request }: Route.ActionArgs) {
           String(formData.get("category") ?? ""),
           formData.get("on") === "1",
         );
-        return { ok: true as const, intent };
-      }
-      case "set-motion": {
-        setMotionPref(db, ctx.user.id, String(formData.get("motion") ?? ""));
         return { ok: true as const, intent };
       }
       case "set-tl-default": {
@@ -248,7 +244,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   const identityFetcher = useFetcher<ProfileActionData>();
   const prefsFetcher = useFetcher<ProfileActionData>();
   // UI-56: Appearance gets its own fetcher. Sharing `prefsFetcher` meant a
-  // notification flip immediately followed by a motion flip never delivered the
+  // notification flip immediately followed by an appearance flip never delivered the
   // `set-notif` result, stranding that panel's rollback snapshot so a LATER
   // failure rolled back to stale state.
   const appearanceFetcher = useFetcher<ProfileActionData>();

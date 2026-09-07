@@ -140,8 +140,9 @@ describe("/profile loader", () => {
 
     // Pref defaults (nothing stored yet).
     expect(profile.prefs.notifs).toEqual(DEFAULT_NOTIF_PREFS);
-    expect(profile.prefs.motion).toBe("full");
     expect(profile.prefs.tlDefault).toBe("all");
+    // Ruling 148(c): there is no motion preference any more.
+    expect("motion" in profile.prefs).toBe(false);
   });
 
   it("membership role comes from the projection, per user (never hardcoded)", async () => {
@@ -192,25 +193,14 @@ describe("/profile action", () => {
     expect(profile.prefs.notifs.approvals.app).toBe(true);
   });
 
-  it("set-motion persists to user_prefs and the root loader serves it", async () => {
+  it("ruling 148(c): set-motion is not an intent any more", async () => {
     const { data } = await postAction(ardaId, {
       intent: "set-motion",
       motion: "reduce",
     });
-    expect(data.ok).toBe(true);
+    expect(data.ok).toBe(false);
     const { getPref } = await import("~/server/prefs/user-prefs.server");
-    expect(getPref(app.db, ardaId, "motion")).toBe("reduce");
-
-    // Root loader (SSR <html data-motion>) reads the same pref.
-    const { cookie } = await app.cookieFor(ardaId);
-    const { loader: rootLoader } = await import("~/root");
-    const rootResult = await rootLoader(routeArgs(app.request("/", { cookie })));
-    // Root wraps its payload in `data()` only when better-auth renewed the
-    // session cookie on this request.
-    const payload = "data" in rootResult ? rootResult.data : rootResult;
-    expect(payload.motion).toBe("reduce");
-
-    await postAction(ardaId, { intent: "set-motion", motion: "full" });
+    expect(getPref(app.db, ardaId, "motion")).toBeNull();
   });
 
   it("set-tl-default writes the phase-5 tlDefault key", async () => {

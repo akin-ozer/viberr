@@ -250,6 +250,45 @@ describe("UI-03: a dropped live-update stream is surfaced", () => {
     const { getByText } = renderHome(baseData([card()]), { livePaused: true });
     expect(getByText(/live updates paused/)).toBeTruthy();
   });
+
+  it("ruling 149: the sentence is a chip, the retry a real control", () => {
+    // The same split the workspace header uses: a `.pill` has no cursor and no
+    // hover, so one element that was both sentence and control read as neither.
+    // Canary: merge them back into one `.pill` button and the SPAN assertion
+    // fails; put `role="status"` on the chip and it stops being reachable by
+    // its own words.
+    let retried = 0;
+    const { container, getByText, getByRole } = renderHome(baseData([card()]), {
+      livePaused: true,
+      onReconnect: () => (retried += 1),
+    });
+    const chip = getByText("live updates paused");
+    expect(chip.tagName).toBe("SPAN");
+    expect(chip.closest('[role="status"]')).toBeNull();
+    fireEvent.click(getByRole("button", { name: "Retry" }));
+    expect(retried).toBe(1);
+    const live = container.querySelector('span.vh[role="status"]');
+    expect(live?.textContent).toMatch(/Live updates paused/);
+  });
+
+  it("ruling 149: no Retry when there is nothing to reconnect", () => {
+    // The prop is optional, and a button that calls nothing is a control that
+    // does nothing — the chip still states the fact.
+    const { getByText, queryByRole } = renderHome(baseData([card()]), {
+      livePaused: true,
+    });
+    expect(getByText("live updates paused")).toBeTruthy();
+    expect(queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("ruling 149: the announcer is mounted before the stream drops", () => {
+    // A live region inserted together with its text is not announced, so the
+    // node has to exist (and be empty) while the stream is healthy.
+    const { container } = renderHome(baseData([card()]));
+    const live = container.querySelector('span.vh[role="status"]');
+    expect(live).not.toBeNull();
+    expect(live!.textContent).toBe("");
+  });
 });
 
 describe("LV-07: the New-project modal explains itself", () => {

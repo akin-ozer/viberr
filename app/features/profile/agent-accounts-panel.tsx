@@ -79,8 +79,12 @@ function statusLine(state: LoginState, label: string): string {
       return `Starting the ${label} sign-in on this server`;
     case "awaiting-browser":
       return "Waiting for you to finish in the browser";
+    // Anthropic's client prints its code prompt the instant the link exists,
+    // so this state does NOT mean a code has been shown yet: the person may
+    // still be on step 1. "Waiting for the code Anthropic showed you" claimed
+    // a code that usually did not exist.
     case "awaiting-code":
-      return "Waiting for the code Anthropic showed you";
+      return "Waiting for you to sign in and paste the code";
     case "finishing":
       return `Confirming the sign-in with ${label}`;
     case "succeeded":
@@ -134,8 +138,30 @@ function PasteForm({
   submit: (fields: Record<string, string>) => void;
 }) {
   const [secret, setSecret] = useState("");
+  const [refused, setRefused] = useState(0);
+  const field = useRef<HTMLInputElement | null>(null);
   const noun = kind === "access_token" ? "workspace access token" : "API key";
+  // The refusal says what `validatePastedSecret` says, and the server calls a
+  // workspace access token an "access token", so the two agree word for word.
+  const serverNoun = kind === "access_token" ? "access token" : "API key";
   const fieldId = `agentacc-${backend}-${kind}`;
+  const errId = `${fieldId}-err`;
+  const empty = secret.trim() === "";
+  const invalid = refused > 0 && empty;
+
+  // Ruling 147: Save stays enabled until the request starts; an empty field is
+  // refused here, with the sentence the server would have thrown, and never
+  // becomes a request. A pristine form is never marked.
+  const save = () => {
+    if (busy) return;
+    if (empty) {
+      setRefused((n) => n + 1);
+      field.current?.focus();
+      return;
+    }
+    submit({ intent: "backend-set-key", backend, kind, secret });
+  };
+
   return (
     <div className="field spaced">
       <label className="flabel" htmlFor={fieldId}>
@@ -151,6 +177,7 @@ function PasteForm({
           spell-check opt-outs the GitHub PAT form settled on, which keep a
           pasted credential out of every password manager and dictionary. */}
       <input
+        ref={field}
         id={fieldId}
         type="password"
         className="mono"
@@ -159,22 +186,269 @@ function PasteForm({
         spellCheck={false}
         data-1p-ignore
         data-lpignore="true"
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? errId : undefined}
         placeholder={backend === "claude" ? "sk-ant-…" : "sk-…"}
         onChange={(e) => setSecret(e.target.value)}
       />
+      {invalid ? (
+        <div
+          key={`refused-${refused}`}
+          id={errId}
+          className="login-err"
+          role="alert"
+        >
+          <Icon name="alert" />
+          Paste the {serverNoun} first.
+        </div>
+      ) : null}
       <div className="cred-manage">
         <button
           type="button"
           className="btn sm"
-          disabled={busy || secret.trim() === ""}
+          disabled={busy}
           aria-busy={busy}
-          onClick={() =>
-            submit({ intent: "backend-set-key", backend, kind, secret })
-          }
+          onClick={save}
         >
           Save {noun}
         </button>
         <button type="button" className="btn ghost sm" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ the sign-in
+
+/** The company whose page the person signs in on. The step titles name the
+ *  company; the badge, the buttons and every sentence keep the ruling-92
+ *  product names ("Claude", "Codex"). */
+const VENDOR = { claude: "Anthropic", codex: "OpenAI" } as const;
+
+type StepState = "pending" | "current" | "done";
+
+/** The host of the vendor's link, shown beside the Open button so the person
+ *  can see where a new tab is about to go. A line the vendor printed that
+ *  `URL` cannot parse gets no host, not a crash. */
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
+function StepMark({ n, state }: { n: number; state: StepState }) {
+  return (
+    <span className="signin-mark" aria-hidden="true">
+      {state === "done" ? <Icon name="check" /> : n}
+    </span>
+  );
+}
+
+/**
+ * A running sign-in as two numbered steps and a status line.
+ *
+ * Both vendors print their URL and, an instant later, what the person needs
+ * next (Claude: the prompt for the code Anthropic will show; Codex: the
+ * one-time code), so for most of the flow BOTH steps are actionable and both
+ * markers read as current. A step is `pending` only until its own input has
+ * arrived, and `done` once the code is on its way (`finishing`). Nothing here
+ * can know whether the person has opened the link, so step 1 is never marked
+ * done on its own.
+ *
+ * The URL is never printed. It is a few hundred characters of OAuth
+ * parameters, and printed inline it crushed the step labels to one word per
+ * line and ran off the card; the link is the Open button, and the host beside
+ * it says where the tab goes.
+ *
+ * Accessibility: the status line is the ONE polite live region. The old card
+ * made the whole step list `role="status"`, whose implicit `aria-atomic`
+ * re-read every character of the URL on each poll that changed anything. The
+ * list is a labelled group that takes focus once, when it replaces the button
+ * the person pressed (the card mounts it per session id, so a restarted
+ * sign-in moves focus again and the 2 s poll's re-renders never do).
+ *
+ * Ruling 147 for the code field: Submit stays enabled, an empty submit is
+ * refused with the server's own sentence as a fresh alert, the field marked
+ * and focused, and never becomes a request. The field itself is disabled only
+ * while Anthropic has not asked for a code yet, which is availability, not
+ * validation.
+ */
+function SignInSteps({
+  backend,
+  label,
+  login,
+  busy,
+  submit,
+}: {
+  backend: "claude" | "codex";
+  label: string;
+  login: NonNullable<ProfileBackend["login"]>;
+  busy: boolean;
+  submit: (fields: Record<string, string>) => void;
+}) {
+  const codeId = `agentacc-${backend}-code`;
+  const errId = `${codeId}-err`;
+  const [code, setCode] = useState("");
+  const [refused, setRefused] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const group = useRef<HTMLDivElement | null>(null);
+  const codeField = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    group.current?.focus();
+  }, []);
+
+  const past = login.state === "finishing";
+  const openStep: StepState = past ? "done" : "current";
+  const codeReady =
+    backend === "codex" ? login.userCode !== null : login.needsCode;
+  const codeStep: StepState = past ? "done" : codeReady ? "current" : "pending";
+  const host = login.url ? hostOf(login.url) : null;
+  const codeEmpty = code.trim() === "";
+  const codeInvalid = refused > 0 && codeEmpty;
+
+  const submitCode = () => {
+    if (codeEmpty) {
+      setRefused((n) => n + 1);
+      codeField.current?.focus();
+      return;
+    }
+    submit({ intent: "backend-login-code", backend, code });
+  };
+  const copyCode = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      // Clipboard denied (permissions, insecure origin). The code is on screen
+      // and a click selects it, which is the fallback that always works.
+    }
+  };
+
+  return (
+    <div
+      className="signin"
+      role="group"
+      aria-label={`${label} sign-in`}
+      tabIndex={-1}
+      ref={group}
+    >
+      <ol className="signin-steps">
+        <li className="signin-step" data-state={openStep}>
+          <StepMark n={1} state={openStep} />
+          {openStep === "done" ? <span className="vh">done: </span> : null}
+          <div className="signin-body">
+            <div className="signin-title">
+              Sign in on {VENDOR[backend]}&apos;s page
+            </div>
+            <div className="signin-act">
+              {login.url ? (
+                <a
+                  className="btn sm"
+                  href={login.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open sign-in page
+                  <Icon name="ext" />
+                </a>
+              ) : (
+                <button type="button" className="btn sm" disabled>
+                  Open sign-in page
+                  <Icon name="ext" />
+                </button>
+              )}
+              {host ? <span className="fine mono signin-host">{host}</span> : null}
+            </div>
+          </div>
+        </li>
+        <li className="signin-step" data-state={codeStep}>
+          <StepMark n={2} state={codeStep} />
+          {codeStep === "done" ? <span className="vh">done: </span> : null}
+          {backend === "codex" ? (
+            <div className="signin-body">
+              <div className="signin-title">Enter this code on that page</div>
+              <div className="signin-act">
+                {login.userCode ? (
+                  <>
+                    <span className="signin-code">{login.userCode}</span>
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      aria-label={`Copy the sign-in code ${login.userCode}`}
+                      onClick={() => void copyCode(login.userCode ?? "")}
+                    >
+                      <Icon name={copied ? "check" : "copy"} />
+                      {copied ? "Copied" : "Copy"}
+                    </button>
+                  </>
+                ) : (
+                  <span className="fine">waiting for the code</span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="signin-body field">
+              <label className="signin-title" htmlFor={codeId}>
+                Paste the code Anthropic shows you
+              </label>
+              <div className="signin-act">
+                <input
+                  ref={codeField}
+                  id={codeId}
+                  type="text"
+                  className="mono"
+                  value={code}
+                  disabled={!login.needsCode}
+                  aria-invalid={codeInvalid || undefined}
+                  aria-describedby={codeInvalid ? errId : undefined}
+                  autoComplete="off"
+                  spellCheck={false}
+                  data-1p-ignore
+                  data-lpignore="true"
+                  onChange={(e) => setCode(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={!login.needsCode || busy}
+                  aria-busy={busy}
+                  onClick={submitCode}
+                >
+                  Submit code
+                </button>
+              </div>
+              {codeInvalid ? (
+                <div
+                  key={`refused-${refused}`}
+                  id={errId}
+                  className="login-err"
+                  role="alert"
+                >
+                  <Icon name="alert" />
+                  Paste the code Anthropic showed you.
+                </div>
+              ) : null}
+            </div>
+          )}
+        </li>
+      </ol>
+      <div className="signin-foot">
+        <p className="signin-status" role="status" aria-live="polite">
+          <span className="live-dot" aria-hidden="true" />
+          {statusLine(login.state, label)}
+        </p>
+        <button
+          type="button"
+          className="btn ghost sm push"
+          disabled={busy}
+          onClick={() => submit({ intent: "backend-login-cancel", backend })}
+        >
           Cancel
         </button>
       </div>
@@ -202,8 +476,6 @@ function AgentAccountCard({
   const push = useToast();
   const revalidator = useRevalidator();
   const [paste, setPaste] = useState<"api_key" | "access_token" | null>(null);
-  const [code, setCode] = useState("");
-  const [copied, setCopied] = useState(false);
 
   // The poll fetcher is the card's OWN: `/resources/backend-login` answers for
   // the signed-in caller only, and loading it on the panel's action fetcher
@@ -242,19 +514,6 @@ function AgentAccountCard({
     return () => clearInterval(timer);
   }, [running, backend]);
 
-  // The step list REPLACES the button the person just pressed, so without this
-  // their focus falls back to the document body and a screen reader is told
-  // nothing at all. Focus moves once per session id (the poll re-renders this
-  // card every 2 s, and stealing focus back on each tick would trap them).
-  const steps = useRef<HTMLDivElement | null>(null);
-  const focusedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!running || !login) return;
-    if (focusedFor.current === login.id) return;
-    focusedFor.current = login.id;
-    steps.current?.focus();
-  }, [running, login]);
-
   // The success toast settles on the POLL RESULT, which is the first moment the
   // vendor's own binary has confirmed the sign-in. Toasting at submit time
   // would claim a connection while the browser step had not even started.
@@ -275,12 +534,12 @@ function AgentAccountCard({
 
   const busy = fetcher.state !== "idle";
   /** The badge says where this account STANDS, in the person's vocabulary. The
-   *  stored `kind` (`api_key`, `access_token`) is our schema, not their word,
-   *  and an unconnected card gets the sibling GitHub card's minus rather than a
-   *  third copy of the sentence the card itself already states. A sign-in under
-   *  way wins over "connected": it is what the card is showing, and it is what
-   *  the person is waiting on. */
-  const badge = running ? "signing in" : connected ? "connected" : "−";
+   *  stored `kind` (`api_key`, `access_token`) is our schema, not their word.
+   *  An unconnected card says so in words: the "−" this slot used to show read
+   *  as a collapse control that did nothing. A sign-in under way wins over
+   *  "connected": it is what the card is showing, and it is what the person is
+   *  waiting on. */
+  const badge = running ? "signing in" : connected ? "connected" : "not connected";
   // A timestamp the card cannot read is omitted together with its " on " /
   // "verified " lead-in, never rendered as the word "null". The date itself
   // renders through the hydration-safe primitive: UTC day first, the viewer's
@@ -289,17 +548,6 @@ function AgentAccountCard({
     health.connectedAt && utcDayKey(health.connectedAt) ? health.connectedAt : null;
   const verifiedOn =
     health.verifiedAt && utcDayKey(health.verifiedAt) ? health.verifiedAt : null;
-  const copyCode = async (value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
-    } catch {
-      // Clipboard denied (permissions, insecure origin). The code is on screen
-      // and selectable, which is the fallback that always works.
-    }
-  };
-
   return (
     <div className="cred-card">
       <div className="cred-top">
@@ -337,102 +585,14 @@ function AgentAccountCard({
       )}
 
       {running && login ? (
-        <>
-          {/* Everything in here is filled in ASYNCHRONOUSLY by the 2 s poll:
-              the vendor's URL, the one-time code and the status line all
-              appear seconds after the card does. A polite live region is what
-              announces them; `tabIndex` makes the region the focus target the
-              effect above moves to. */}
-          <div
-            className="kv spaced"
-            role="status"
-            aria-live="polite"
-            aria-label={`${label} sign-in`}
-            tabIndex={-1}
-            ref={steps}
-          >
-            <div className="kv-row">
-              <span className="k">1. Open this link and sign in</span>
-              <span className="v">
-                {login.url ? (
-                  <a
-                    className="mono"
-                    href={login.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {login.url}
-                  </a>
-                ) : (
-                  <span className="mono">waiting for the link</span>
-                )}
-              </span>
-            </div>
-            {backend === "codex" ? (
-              <div className="kv-row">
-                <span className="k">2. Enter this code</span>
-                <span className="v">
-                  <span className="scope-chip">
-                    {login.userCode ?? "waiting for the code"}
-                  </span>
-                  {login.userCode && (
-                    <button
-                      type="button"
-                      className="btn ghost sm"
-                      aria-label={`Copy the sign-in code ${login.userCode}`}
-                      onClick={() => void copyCode(login.userCode ?? "")}
-                    >
-                      <Icon name={copied ? "check" : "copy"} />
-                      {copied ? "Copied" : "Copy"}
-                    </button>
-                  )}
-                </span>
-              </div>
-            ) : (
-              <div className="kv-row">
-                <span className="k">2. Paste the code Anthropic shows you</span>
-                <span className="v">
-                  <input
-                    className="mono"
-                    type="text"
-                    value={code}
-                    disabled={!login.needsCode}
-                    aria-label="Code from Anthropic"
-                    autoComplete="off"
-                    spellCheck={false}
-                    data-1p-ignore
-                    data-lpignore="true"
-                    onChange={(e) => setCode(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="btn sm"
-                    disabled={!login.needsCode || busy || code.trim() === ""}
-                    onClick={() =>
-                      submit({ intent: "backend-login-code", backend, code })
-                    }
-                  >
-                    Submit
-                  </button>
-                </span>
-              </div>
-            )}
-            <div className="kv-row">
-              <span className="k">Status</span>
-              <span className="v plain">{statusLine(login.state, label)}</span>
-            </div>
-          </div>
-          <div className="cred-manage">
-            <button
-              type="button"
-              className="btn ghost sm"
-              disabled={busy}
-              onClick={() => submit({ intent: "backend-login-cancel", backend })}
-            >
-              Cancel
-            </button>
-          </div>
-        </>
+        <SignInSteps
+          key={login.id}
+          backend={backend}
+          label={label}
+          login={login}
+          busy={busy}
+          submit={submit}
+        />
       ) : health.kind !== null ? (
         <>
           <div className={health.available ? "cred-ok" : "cred-warn"}>
@@ -529,7 +689,8 @@ function AgentAccountCard({
               ))}
             <button
               type="button"
-              className="btn ghost sm"
+              // Ruling 149: dropping the stored credential is destructive.
+              className="btn ghost sm danger"
               disabled={busy}
               onClick={() => {
                 // Close any paste form the card was showing before this

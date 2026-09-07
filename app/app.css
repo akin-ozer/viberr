@@ -72,6 +72,13 @@
   --success-dark: #0a6a47;
   --coral-light: #ffc6c6;
   --coral-dark: #600000;
+  /* Owner, 2026-09-06: GitHub's danger reds for CONTROLS (buttons, menu items,
+     labels) — the label at rest, the fill on hover, and the label on that
+     fill. --coral-dark stays the error-box text: #cf222e fails AA on the pink
+     error fill, and #600000 reads as brown on a button. */
+  --danger: #cf222e;
+  --danger-fill: #a40e26;
+  --on-danger: #ffffff;
   --rose-light: #ffd8f4;
   --teal-light: #c3faf5;
   --teal-dark: #187574;
@@ -79,8 +86,12 @@
      across two hue families that invited a wrong partner). Note: --red-light
      and --coral-light both pair with --coral-dark and converge in dark —
      documented as the pastel-pairs-invert-together convention, not a bug. */
-  --amber-light: #ffe6cd;
-  --amber-dark: #746019;
+  /* Ruling 148(d): GitHub's warning pair. The light fill is GitHub's attention
+     background (#fff8c5), which mixed 45% into the surface gives its classic
+     pale-yellow flash; the text is the dark olive it prints that flash in. The
+     old peach (#ffe6cd) under olive text read as a generated palette. */
+  --amber-light: #fff8c5;
+  --amber-dark: #735c0f;
   --red-light: #fbd4d4;
 
   /* agent identity tint — violet, distinct from human blue */
@@ -326,7 +337,7 @@ div.top-search:focus-within,
 .muted { color: var(--muted); }
 /* P16-UI-02: same class of defect as P13-D-19 above — `--faint` the token
    existed, `.faint` the utility did not, so `<span className="mono faint">`
-   (the em-dash placeholder on a run with no session id) rendered at full
+   (the placeholder on a run with no session id) rendered at full
    --fg weight. Third rung of the secondary ladder, nothing else. */
 .faint { color: var(--faint); }
 .hint {
@@ -513,9 +524,9 @@ h1, h2, h3, h4 {
 }
 .menu-item:hover { background: var(--tint-hover); color: var(--fg); }
 .menu-item .ico { width: 16px; height: 16px; color: var(--faint); }
-.menu-item.danger { color: var(--coral-dark); }
-.menu-item.danger:hover { background: color-mix(in srgb, var(--coral-light), var(--surface) 55%); }
-.menu-item.danger .ico { color: var(--coral-dark); }
+.menu-item.danger { color: var(--danger); }
+.menu-item.danger:hover { background: color-mix(in srgb, var(--danger), transparent 92%); }
+.menu-item.danger .ico { color: var(--danger); }
 .menu-sep { height: 1px; background: var(--hairline); margin: .25rem .25rem; }
 
 /* ---------- Main column ---------- */
@@ -657,8 +668,15 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .btn.primary:hover:not(:disabled) { background: var(--blue-pressed); border-color: var(--blue-pressed); color: var(--cta-fg); }
 .btn.ghost { background: transparent; border-color: var(--hairline); color: var(--muted); }
 .btn.ghost:hover:not(:disabled) { color: var(--fg); border-color: var(--border); }
-.btn.danger { color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 78%); background: color-mix(in srgb, var(--coral-light), var(--surface) 55%); }
-.btn.danger:hover:not(:disabled) { border-color: var(--coral-dark); }
+/* GitHub's danger button (owner, 2026-09-06): a neutral button whose label is
+   red, and that fills red on hover. The tinted pink face it replaces read as a
+   disabled or decorative control. The face is declared here on purpose: the
+   contrast sweep pairs a selector's label with the FIRST fill declared for it,
+   which would otherwise be the hover's red. `.btn.ghost.danger` keeps the
+   ghost's transparent face with the same red label and hover. */
+.btn.danger { color: var(--danger); background: var(--surface); border-color: var(--border); }
+.btn.ghost.danger { background: transparent; border-color: var(--hairline); }
+.btn.danger:hover:not(:disabled) { background: var(--danger-fill); border-color: var(--danger-fill); color: var(--on-danger); }
 .btn.sm { min-height: 30px; padding: .375rem .5rem; font-size: .8rem; }
 .btn .ico { width: 15px; height: 15px; }
 /* P14-LV-08: `disabled` had NO visual expression anywhere in this sheet, so a
@@ -904,13 +922,6 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   0%, 88% { opacity: .9; }
   100%    { opacity: 0; }
 }
-/* The [data-motion="reduce"] kill switch clamps every animation-duration to
-   .01ms !important. On a progress-based timeline that collapses the whole scroll
-   range into nothing and the fade would never show. This is an INDICATOR, not
-   decoration — same reasoning as `.route-pending .rp-fill` below — so restore
-   the timeline-length duration. Nothing here moves or repeats. */
-[data-motion="reduce"] .board-wrap::after { animation-duration: auto !important; }
-
 .board-orphans {
   display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
   margin: 0 1.5rem .5rem;
@@ -1589,9 +1600,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   background: transparent; color: var(--placeholder); cursor: pointer;
 }
 /* P13-D-18: was var(--coral) — undefined, so the hover background never
-   rendered. Matched to .stg-x:hover, the same small remove-X control, which
-   inverts correctly in dark (--coral-light is the pastel in both themes). */
-.rev-x:hover { background: color-mix(in srgb, var(--coral-light), var(--surface) 40%); color: var(--coral-dark); }
+   rendered. Ruling 149: releasing an engagement is destructive, so this hover
+   now carries the danger pair the other row-remove controls use; the coral pair
+   it held is the ERROR vocabulary and read brown beside them. The rest fill is
+   declared above, so the sweep pairs the resting label with `transparent`. */
+.rev-x:hover:not(:disabled) { background: color-mix(in srgb, var(--danger), transparent 92%); color: var(--danger); }
 .rev-x:disabled { opacity: .5; cursor: default; }
 .rev-x svg { width: 14px; height: 14px; }
 
@@ -2198,7 +2211,7 @@ dialog[data-closing]::backdrop {
    frequency rule keyboard-initiated UI should appear instantly (Raycast has no
    open/close animation either). [data-closing] sets transition:none so
    useDialog.close() takes its synchronous-unmount path (the same branch already
-   used under jsdom and [data-motion="reduce"]). */
+   used under jsdom). */
 .cmdk-card {
   position: fixed; z-index: 61;
   top: 12vh; left: 50%; transform: translate(-50%, 0);
@@ -2465,7 +2478,10 @@ dialog[data-closing]::backdrop {
   padding: .125rem 1.5rem var(--dock-clear);
   display: flex; flex-direction: column; gap: 1rem;
 }
-.policy-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+/* Ruling 148(a): a row's two panels end on one line (grid items stretch by
+   default). `.activity-cols` keeps `align-items: start` on purpose: a feed
+   beside a short panel would only stretch the panel into a tall empty box. */
+.policy-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 
 .pol-note {
   display: flex; gap: .5rem; align-items: flex-start;
@@ -2494,7 +2510,17 @@ dialog[data-closing]::backdrop {
 .guard-name { font-family: var(--font-display); font-weight: 800; font-size: .86rem; display: inline-flex; align-items: center; gap: .5rem; }
 .guard-desc { font-size: .8rem; color: var(--faint); line-height: 1.4; }
 .guard-ctl { display: inline-flex; align-items: center; gap: .5rem; font-size: .8rem; color: var(--muted); }
-.guard-ctl input[type="number"] { width: 5.5rem; }
+/* Ruling 149: the guardrail threshold field was the only text-like input in
+   the app outside `.field`, so it painted in UA chrome (UA border, UA fill,
+   UA radius) next to an `Apply` wearing `.btn`. Same treatment as its twin in
+   org settings (`.conc-edit input`); the rest fill is declared here so the
+   sheet's contrast sweep pairs --fg with --surface. */
+.guard-ctl input[type="number"] {
+  width: 5.5rem; font: inherit; font-size: .86rem;
+  color: var(--fg); background: var(--surface);
+  border: 1px solid var(--border-control); border-radius: var(--radius-button);
+  padding: .25rem .5rem;
+}
 .guard-toggle { display: inline-flex; align-items: center; gap: .5rem; font-family: var(--font-body); font-size: .8rem; color: var(--muted); }
 .guard-row.inert .guard-name, .guard-row.inert .guard-desc { color: var(--placeholder); }
 .pol-note .ico { width: 14px; height: 14px; flex: none; margin-top: .125rem; color: var(--placeholder); }
@@ -2835,22 +2861,27 @@ dialog[data-closing]::backdrop {
 }
 /* Name-first "Add stage" row — the field replaces the button in place, so the
    panel does not jump when the control expands. */
-.stg-add { display: flex; align-items: center; gap: .5rem; }
+.stg-add { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .stg-add .stg-input { flex: 1; width: auto; margin: 0; }
 
 .stg-count { margin-left: auto; font-family: var(--font-mono); font-size: .74rem; color: var(--faint); flex: none; }
 /* P16-UI-04: `.stg-x` is named for its first site — the stage-remove ✕ in
    project settings — but it is now the app's generic 24px row-action icon
-   button: browse, re-scan, test, edit, enable, disable, dismiss AND remove,
-   across org settings, project settings and connections. Its hover was
+   button: browse, re-scan, test, edit, enable, disable AND remove,
+   across org settings, project settings and connections. (Its one dismiss —
+   the temp-password notice — took the shared close control in the ruling-148
+   pass, so every site left is a list-row action.) Its hover was
    destructive coral for all of them, and two per-site rules
    (`.rsrc-row .stg-x:hover { color: var(--fg) }` /
    `.rsrc-row .stg-x:last-child:hover { color: var(--coral-dark) }`) patched the
    semantics back — leaving "Edit" and "Re-scan" hovering on a coral tint with
    neutral text, which is neither.
    Consolidated the other way round: NEUTRAL is the base, destructive is opt-in
-   and named. Every list that uses this control puts its remove/delete LAST, so
-   the destructive selector says exactly that instead of relying on the icon. */
+   and named. Most lists that use this control put their remove/delete LAST, so
+   the destructive selector says exactly that instead of relying on the icon;
+   where position does not identify the destructive action (org settings' user
+   row ends on Remove and carries Disable before it), the control opts in by
+   name with `.destructive`. */
 .stg-x {
   display: grid; place-items: center;
   width: 24px; height: 24px; flex: none;
@@ -2862,14 +2893,18 @@ dialog[data-closing]::backdrop {
 .stg-x.off { opacity: .35; }
 .stg-x.off:hover { background: none; color: var(--placeholder); }
 .stg-x .ico { width: 13px; height: 13px; }
-/* Destructive row actions. `:not(.off)` keeps the self-guarded controls
-   (remove/disable yourself) reading as unavailable rather than as a threat. */
+/* Destructive row actions — the row's last control where that IS the remove,
+   plus anything that names itself `.destructive` (ruling 149: Disable signs the
+   person out and locks the account, and its confirm commits on `btn danger`).
+   `:not(.off)` keeps the self-guarded controls (remove/disable yourself)
+   reading as unavailable rather than as a threat. */
 .stg-row .stg-x:not(.off):hover,
 .conn-row .stg-x:not(.off):hover,
+.stg-x.destructive:not(.off):hover,
 .member-row .stg-x:last-child:not(.off):hover,
 .rsrc-acts .stg-x:last-child:not(.off):hover {
-  background: color-mix(in srgb, var(--coral-light), var(--surface) 40%);
-  color: var(--coral-dark);
+  background: color-mix(in srgb, var(--danger), transparent 92%);
+  color: var(--danger);
 }
 
 /* ============================================================
@@ -2933,28 +2968,8 @@ dialog[data-closing]::backdrop {
   border-radius: var(--radius-small); padding: .08rem .25rem; margin-left: .375rem;
   vertical-align: 1px;
 }
-.invite-row {
-  /* Two-value gap: on one desktop row only the .5rem column gap paints; when
-     the <=1300px rule stacks the fields, 1rem between fields keeps each label
-     visibly closer to its own input (.5rem) than to the field above. */
-  display: grid; grid-template-columns: 1fr 1.2fr auto; gap: 1rem .5rem;
-  margin-top: .75rem; padding-top: 1rem; border-top: 1px solid var(--hairline);
-}
-.invite-row input {
-  width: 100%; min-width: 0;
-  border: 1px solid var(--border-control); border-radius: var(--radius-button);
-  padding: .5rem .75rem; background: var(--surface); color: var(--fg);
-  font-family: var(--font-body); font-size: .92rem;
-  transition: border-color .14s ease, box-shadow .14s ease;
-}
-.invite-row input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
-.invite-row input::placeholder { color: var(--placeholder); }
-@media (max-width: 1300px) {
-  .invite-row { grid-template-columns: 1fr; }
-}
-
-.danger-panel { border-color: color-mix(in srgb, var(--coral-dark), transparent 78%); }
-.danger-panel .panel-head .ico { color: var(--coral-dark); }
+.danger-panel { border-color: color-mix(in srgb, var(--danger), transparent 55%); }
+.danger-panel .panel-head .ico { color: var(--danger); }
 .dz-row {
   display: flex; align-items: center; gap: 1rem;
   padding: .75rem 0;
@@ -2971,7 +2986,10 @@ dialog[data-closing]::backdrop {
    ============================================================ */
 .avatar.xl { width: 56px; height: 56px; font-size: 1.3rem; }
 
-.profile-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+/* Ruling 148(a): both columns are the row's height, and the last panel of the
+   shorter column fills to the bottom (the appended rule), so the two columns
+   end on one line instead of wherever each stack happened to stop. */
+.profile-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .profile-col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
 
 .profile-id { display: flex; gap: 1rem; align-items: flex-start; }
@@ -3052,11 +3070,17 @@ dialog[data-closing]::backdrop {
   --success-dark: #74e8b8;
   --coral-light: #4d2222;
   --coral-dark: #ff9e9e;
+  --danger: #f85149;
+  --danger-fill: #da3633;
   --rose-light: #4a2140;
   --teal-light: #123f3d;
   --teal-dark: #6ce4dc;
-  --amber-light: #45311a;
-  --amber-dark: #eccd72;
+  /* Ruling 148(d): GitHub's dark attention pair — an amber-tinted fill and
+     GitHub's attention foreground for icons, borders and pills. The warning
+     BOXES themselves print their sentence in --fg on dark (appended rule):
+     yellow text on brown was the "AI slop" the owner named. */
+  --amber-light: #3a3019;
+  --amber-dark: #d29922;
   --red-light: #47211f;
 
   --agent: #957fff;
@@ -3080,14 +3104,6 @@ dialog[data-closing]::backdrop {
    while the documented pair — --cta-fg on --blue-pressed — is 10.42:1 and
    test-locked. */
 :root[data-theme="dark"] dialog::backdrop { background: rgba(5, 6, 10, .65); }
-
-/* reduced motion preference */
-[data-motion="reduce"] *, [data-motion="reduce"] *::before, [data-motion="reduce"] *::after {
-  animation-duration: .01ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: .01ms !important;
-  scroll-behavior: auto !important;
-}
 
 /* ---------- Global header pieces (shared by Home + workspace) ---------- */
 .home-brand {
@@ -3166,8 +3182,6 @@ dialog[data-closing]::backdrop {
 }
 .overlay-x {
   position: absolute; top: .85rem; right: .85rem; z-index: 5;
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
 }
 .page-overlay-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 /* N20-13 (pass-20): `.overlay-x` is pinned to the overlay's top-right corner
@@ -3175,9 +3189,11 @@ dialog[data-closing]::backdrop {
    scrolls underneath it, so on a scrolled overlay (e.g. /profile scrolled to the
    bottom) arbitrary content slid under the button and read as a clipped row. The
    overlay's own header already reserves the button's gutter (`padding-right`);
-   pinning it with an opaque background turns it into an always-present strip that
-   scrolled content passes BEHIND — the close button now stays legible over its
-   reserved header at every scroll position instead of floating over live content.
+   making the header STICKY with an opaque background turns it into an
+   always-present strip that scrolled content passes BEHIND — the close button
+   stays legible over its reserved header at every scroll position instead of
+   floating over live content, which is also why the button itself needs no
+   fill of its own (the shared close-control rule at the end of the sheet).
    z-index sits below `.overlay-x` (5) and above the scrolled body (auto). */
 .page-overlay .board-head {
   padding-right: 4.4rem;
@@ -3418,7 +3434,9 @@ dialog[data-closing]::backdrop {
   border: 0; border-radius: 50%; background: none; color: var(--placeholder);
   transition: background .12s ease, color .12s ease;
 }
-.own-x:hover { background: var(--rose-light); color: var(--coral-dark); }
+/* Ruling 149: releasing the owner is destructive, so the hover takes the
+   danger pair rather than the rose/coral error vocabulary. */
+.own-x:hover { background: color-mix(in srgb, var(--danger), transparent 92%); color: var(--danger); }
 .own-x .ico { width: 11px; height: 11px; }
 
 /* release-ownership dialog */
@@ -3526,7 +3544,8 @@ dialog[data-closing]::backdrop {
   .field textarea, select,
   .top-search input, .board-filter-input input, .cmdk-input,
   .composer-box .composer-ce, .composer-box .composer-placeholder, .goal-textarea,
-  .label-input-field, .invite-row input, .stg-input, .op-steer,
+  .label-input-field, .stg-input, .op-steer,
+  .guard-ctl input[type="number"],
   .meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { font-size: 1.05rem; }
   .field input[type="text"].mono, .field input[type="email"].mono,
   .field input[type="password"].mono { font-size: 1.05rem; }
@@ -3534,7 +3553,8 @@ dialog[data-closing]::backdrop {
      needs one selector more to be reached from here. */
   .field .repo-input input, .field .repo-input .pre, input.fm-newinp, .fm-gh input[type="text"],
   .fm-toolbar select[aria-label], .conc-edit input[type="number"],
-  .ctl-composer textarea[rows], .dock-composer .ctl-composer textarea[rows] { font-size: 1.05rem; }
+  .ctl-composer textarea[rows], .dock-composer .ctl-composer textarea[rows],
+  .field textarea[rows].mono { font-size: 1.05rem; }
   /* Ruling 121: the controller dock becomes a bottom sheet — full width,
      entering and leaving along the bottom edge. The trigger stays on screen
      (R19-12: no control disappears under a width query); it rides just above
@@ -3799,7 +3819,10 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .gmark.lg { font-size: .98rem; }
 .idp-chip { display: inline-flex; align-items: center; gap: .375rem; padding: .125rem .5rem; border: 1px solid var(--hairline); border-radius: var(--radius-small); font-family: var(--font-mono); font-size: .68rem; color: var(--faint); flex: none; }
 .idp-chip .ico { width: 11px; height: 11px; }
-.linkish { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+/* The affordance used to live only in :hover, so at rest the sign-in page's one
+   recovery path (and the KB/skill row names) looked like plain text to keyboard
+   and touch users. A link reads as a link before it is pointed at. */
+.linkish { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: var(--blue-pressed); text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 3px; }
 .linkish:hover { color: var(--blue-pressed); text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -4165,7 +4188,9 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .conn-main .scope-chip { padding: .25rem .5rem; font-size: .68rem; }
 .conn-main .scope-chip .ico { width: 11px; height: 11px; }
 
-.rsrc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+/* Ruling 148(a): a row's two panels end on one line (grid items stretch by
+   default). */
+.rsrc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .rsrc-list { display: flex; flex-direction: column; }
 .rsrc-row { display: flex; align-items: center; gap: .5rem; padding: .5rem 0; border-bottom: 1px solid var(--hairline); }
 .rsrc-row:last-child { border-bottom: 0; }
@@ -4256,8 +4281,8 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 }
 .fm-act .ico { width: 13px; height: 13px; }
 .fm-act:hover { border-color: var(--blue); color: var(--blue-pressed); background: color-mix(in srgb, var(--blue-soft), transparent 40%); transform: translateY(-1px); }
-.fm-act.del { color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 78%); }
-.fm-act.del:hover { border-color: var(--coral-dark); background: color-mix(in srgb, var(--coral-light), var(--surface) 45%); color: var(--coral-dark); }
+.fm-act.del { color: var(--danger); border-color: color-mix(in srgb, var(--danger), transparent 70%); }
+.fm-act.del:hover { border-color: var(--danger); background: color-mix(in srgb, var(--danger), transparent 92%); color: var(--danger); }
 .fm-newinp { border: 1px solid var(--blue); border-radius: var(--radius-small); padding: .25rem .5rem; font-size: .8rem; background: var(--surface); color: var(--fg); outline: none; box-shadow: 0 0 0 3px var(--focus-wash); width: 200px; font-family: var(--font-mono); }
 .fm-empty { padding: 1.5rem 1rem; text-align: center; color: var(--placeholder); font-size: .8rem; }
 
@@ -4357,8 +4382,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .pj-row .pj-star:active { transform: translateY(-50%) scale(.9); }
 
 /* OS-level reduced motion: entrances collapse to a quick fade (movement is
-   what nauseates; opacity still aids comprehension). The in-app pref
-   [data-motion="reduce"] above remains the global kill-switch. */
+   what nauseates; opacity still aids comprehension). Ruling 148(c): this OS
+   preference is the ONE reduced-motion signal; the in-app kill switch is gone. */
 @media (prefers-reduced-motion: reduce) {
   .user-menu, .ntf-pop, .rsel-menu, .own-menu, .stage-menu-pop, .datepick-pop,
   .confirm-card, .modal-card, .page-overlay, .toast, .login-card,
@@ -4394,7 +4419,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .fm-doc .ta { min-height: 8rem; resize: vertical; }
 .fm-doc-acts { display: flex; justify-content: flex-end; gap: .5rem; }
 /* P14-UI-61: an OPENED document shows its real path — the name is the file's own
-   and is not retyped, so there is no name input to style here. */
+   and is not retyped, so this arm carries no name input. The new-document arm
+   does, and it rides the shared `.field` chrome (ruling 149). */
 .fm-doc-path { font-family: var(--font-mono); font-size: .8rem; color: var(--muted); }
 .fm-doc-acts .fm-hint { margin-left: 0; margin-right: auto; }
 
@@ -4438,10 +4464,6 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   from { transform: translateX(-100%); }
   to   { transform: translateX(320%); }
 }
-/* The global [data-motion="reduce"] kill-switch clamps animations to ~0 ms,
-   which would leave a static 34% stub — give reduced motion a full-width bar
-   so the indicator still reads. */
-[data-motion="reduce"] .route-pending .rp-fill { width: 100%; }
 @media (prefers-reduced-motion: reduce) {
   /* Neutralize the sweep too, not just the width — otherwise the transform
      slide keeps looping, now full-width, which is worse than a static stub. */
@@ -4707,7 +4729,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .daily-col:hover .daily-bar { background: var(--blue-pressed); }
 
 .deny-note.before { margin-bottom: .5rem; }
-.flabel.danger { color: var(--coral-dark); }
+.flabel.danger { color: var(--danger); }
 .probe-note {
   flex-basis: 100%;
   font-size: .74rem; font-weight: 400; line-height: 1.4;
@@ -4757,7 +4779,10 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* --- shell / home / login --- */
 .count.violations { color: var(--coral-dark); font-weight: 700; }
 .kv.spaced { margin-top: 1rem; }
-.login-err.spaced { margin-top: .75rem; }
+/* `.form-err` carries the same nudge: inside a `.confirm-card` (a plain block,
+   no flex gap) the repo-repair dialog's error sits directly under the note it
+   follows. */
+.login-err.spaced, .form-err.spaced { margin-top: .75rem; }
 .login-tag.providers { margin-top: .25rem; }
 .sub.sec-lede { margin: 0 0 .75rem; }
 .pj-mark.draft { box-shadow: inset 0 -8px 0 color-mix(in srgb, var(--blue), transparent 55%); }
@@ -5559,3 +5584,232 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
   .dock .live-dot::after { animation: none; }
   .dock[data-open="true"] .dock-fab { transition: none; }
 }
+
+/* ============================= Ruling 127 hosted sign-in steps =============================
+   Profile → Agent accounts while a vendor sign-in is running
+   (agent-accounts-panel.tsx, `SignInSteps`). It used to be three `.kv-row`s,
+   a read-out idiom for FACTS, holding a procedure: the vendor's full OAuth
+   URL printed inline (a few hundred unbreakable characters) crushed the row
+   labels to one word per line and ran off the card, and a bare `<input>`
+   outside `.field` rendered in browser chrome. Now two numbered steps, each
+   with its one control, and a footer carrying the live status beside Cancel.
+   Existing tokens and scales only; the code field rides `.field`'s chrome. */
+.signin { margin-top: .75rem; }
+.signin-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .75rem; }
+.signin-step { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .75rem; align-items: start; }
+/* The marker: a faint number while the step's input has not arrived, a blue
+   one while it is actionable, a teal check once the flow is past it. Colour
+   never carries the state alone: a pending step's control is disabled and a
+   done step is preceded by a visually-hidden "done". */
+.signin-mark {
+  display: inline-grid; place-items: center;
+  width: 22px; height: 22px; margin-top: .125rem;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  background: var(--surface); color: var(--faint);
+  font-family: var(--font-mono); font-size: .74rem; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.signin-step[data-state="current"] .signin-mark { border-color: var(--blue); background: var(--blue-soft); color: var(--blue-pressed); }
+.signin-step[data-state="done"] .signin-mark { border-color: var(--teal-dark); background: var(--teal-light); color: var(--teal-dark); }
+.signin-mark .ico { width: 13px; height: 13px; }
+.signin-body { display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
+.signin-title { font-size: .86rem; font-weight: 600; color: var(--fg); line-height: 1.4; }
+.signin-step[data-state="pending"] .signin-title { color: var(--muted); }
+.signin-act { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; min-width: 0; }
+/* The code field shares its row with Submit and shrinks before wrapping;
+   `.field input[type="text"]` sets `width: 100%`, hence the attribute in the
+   selector. 32px is what `.btn.sm` (min-height 30) actually renders at its
+   .8rem display face, so the two sit flush. */
+.signin-act input[type="text"] { width: auto; flex: 1 1 14rem; min-width: 0; min-height: 32px; padding-top: .25rem; padding-bottom: .25rem; }
+.signin-host { min-width: 0; overflow-wrap: anywhere; }
+/* Codex's one-time code: legible enough to type from another screen, and a
+   click selects the whole thing. */
+.signin-code {
+  display: inline-flex; align-items: center;
+  padding: .375rem .75rem;
+  border: 1px solid var(--hairline); border-radius: var(--radius-button);
+  background: var(--surface); color: var(--fg);
+  font-family: var(--font-mono); font-size: 1.05rem; font-weight: 600;
+  letter-spacing: .06em; font-variant-numeric: tabular-nums;
+  user-select: all; -webkit-user-select: all;
+}
+.signin-foot {
+  display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  margin-top: .75rem; padding-top: .75rem;
+  border-top: 1px solid var(--hairline);
+}
+.signin-status {
+  display: inline-flex; align-items: center; gap: .5rem;
+  flex: 1 1 200px; min-width: 0; margin: 0;
+  font-size: .8rem; color: var(--muted); line-height: 1.4;
+}
+
+/* ============================= Ruling 148 profile pass =============================
+   Four owner findings on Profile → preferences, applied app-wide where the
+   idiom is shared. Existing tokens and scales only. */
+
+/* 148(a): the last panel of a stacked column fills to the column's bottom, so
+   the two columns of `.profile-cols` end on one line. The grid row is already
+   the taller column's height (items stretch by default now); this is what
+   hands the shorter column's slack to its last card instead of leaving a gap. */
+.profile-col > :last-child { flex: 1 0 auto; }
+
+/* 148(d): on dark the warning boxes print their sentence in the default
+   foreground; only the icon, the border and the fill carry amber. Light keeps
+   GitHub's dark-olive text, which is the pair the tokens now hold. */
+:root[data-theme="dark"] .cred-warn,
+:root[data-theme="dark"] .archived-banner { color: var(--fg); }
+:root[data-theme="dark"] .cred-warn .ico,
+:root[data-theme="dark"] .archived-banner .ico { color: var(--amber-dark); }
+
+/* The close control, one design on every modal head and the page overlay: a
+   borderless circle that takes a soft fill on hover and the app's press scale.
+   The bordered, shadowed square it replaces read as a card of its own in the
+   corner of every dialog. */
+.icon-btn.modal-close, .overlay-x {
+  width: 34px; height: 34px;
+  border-color: transparent;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  color: var(--faint);
+  transition: background .15s ease, color .15s ease, transform .1s var(--ease-out);
+}
+.icon-btn.modal-close:hover:not(:disabled), .overlay-x:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--tint-well);
+  color: var(--fg);
+}
+.icon-btn.modal-close .ico, .overlay-x .ico { width: 16px; height: 16px; }
+
+/* 148(c): with the in-app kill switch gone, the OS preference also stills the
+   live pulse (the removed setting's copy promised "pauses live pulses"). */
+@media (prefers-reduced-motion: reduce) {
+  .live-dot::after { animation: none; }
+}
+
+/* ---------- appended: things that look like controls but are not ---------- */
+/* The KB browser's new-folder row borrowed `.dir` for its folder glyph and
+   inherited the directory rows' hand cursor and hover fill with it, so the
+   whole row advertised an activation it does not have: only the <input> inside
+   it is live, and clicking the row's padding blurs the field, which DISMISSES
+   the half-typed name. Ties with `.fm-row.dir` on specificity and wins on
+   source order; the hover rule outranks `.fm-row:hover`, where the fill
+   actually comes from. */
+.fm-row.editing { cursor: default; }
+.fm-row.editing:hover { background: transparent; }
+
+/* ---------- appended: the lightbox close on the shared design (ruling 148) ---------- */
+/* The attachment popup's dismiss now takes `.icon-btn.modal-close`, but it
+   lives in the action foot rather than a modal head, and the shared rule's
+   `.modal-close { margin-left: auto }` is unscoped: with `.lightbox-foot .nm`
+   already holding `margin-right: auto`, two auto margins would split the free
+   space and push Download / Open original into the middle of the row. */
+.lightbox-card .lightbox-foot .modal-close { margin-left: 0; }
+
+/* ---------- appended: ruling 149, the fields that painted in UA chrome ---------- */
+/* The guardrail threshold field's states; the resting box is declared with the
+   rule itself, above. `.45` is the step `select:disabled` already uses. */
+.guard-ctl input[type="number"]:focus {
+  outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash);
+}
+.guard-ctl input[type="number"]:disabled { opacity: .45; cursor: default; }
+
+/* The store document editor's body is authored in markdown, so it keeps the
+   mono face now that it sits in a `.field` — the textarea twin of
+   `.field input.mono`, which the P21 gate pins by its exact selector and so
+   cannot absorb a second one. `.field textarea` would otherwise win the face
+   at (0,1,1) over bare `.mono`. Under 720px the `[rows]` variant inside the
+   mobile block outranks this: one selector more, because this rule is declared
+   after that block. */
+.field textarea.mono { font-family: var(--font-mono); font-size: .8rem; }
+
+/* ---------- appended: ruling 147, the stage-add refusal ---------- */
+/* The inline "Add stage" commit stays enabled and refuses an empty name, so the
+   row needs somewhere to put the sentence: `.stg-add` wraps and the alert takes
+   a full line rather than squeezing `.stg-input`. `--coral-dark` is the error
+   TEXT pair (it is not a control colour), the same ink `.modal-foot
+   .foot-hint.err` prints a refusal in; the field needs its own `aria-invalid`
+   border because the shared one is scoped to `.field input`. */
+.stg-add .stg-err { flex-basis: 100%; font-size: .74rem; font-weight: 600; color: var(--coral-dark); }
+.stg-input[aria-invalid="true"] { border-color: var(--coral-dark); }
+
+/* ---------- appended: ruling 147, the run-concurrency refusal ---------- */
+/* Save is gated only by "nothing changed" now, so an unusable cap is refused in
+   the framed error treatment instead. `.conc-body` is a wrapping flex row whose
+   `.conc-edit` is pushed right by `margin-left: auto`; the sentence takes a full
+   line under both rather than squeezing them. Colour comes from `.form-err`. */
+.conc-body .form-err { flex-basis: 100%; }
+
+/* ---------- appended: ruling 147, the guardrail-value refusal ---------- */
+/* Apply keeps only the nothing-changed gate, so an unusable threshold is
+   refused in words on its own line of the wrapping `.guard-row` instead of
+   leaving a dead button. `--coral-dark` is the error TEXT pair, and the field
+   needs its own `aria-invalid` border because the shared one is scoped to
+   `.field input`. */
+.guard-ctl.err { flex-basis: 100%; color: var(--coral-dark); font-weight: 600; }
+.guard-ctl input[type="number"][aria-invalid="true"] { border-color: var(--coral-dark); }
+
+/* ---------- appended: ruling 150(a), the error box's sentence on dark ---------- */
+/* Ruling 149 keeps `--coral-*` as the ERROR pair, and ruling 148(d) says how a
+   tinted box reads on dark: the sentence in the default foreground, the tone
+   carried by the icon, the border and the fill. The two were decided in the
+   same pass, so the error boxes take the same split — a whole paragraph of
+   salmon prose on a red wash was the other half of the problem 148(d) named.
+   Light is untouched: `--coral-dark` there is GitHub's near-black red, which is
+   already body-weight ink. `.rsrc-err` (the MCP probe's own output) has no
+   icon; its border and fill stay coral. Ruling 150(a), owner, 2026-09-06. */
+:root[data-theme="dark"] .login-err,
+:root[data-theme="dark"] .form-err,
+:root[data-theme="dark"] .rsrc-main .rsrc-err { color: var(--fg); }
+:root[data-theme="dark"] .login-err .ico,
+:root[data-theme="dark"] .form-err .ico { color: var(--coral-dark); }
+
+/* ---------- appended: ruling 150(a), the consequence row on dark ---------- */
+/* The acceptance/packet consequence row (R17-1) carries no icon, so the
+   uppercase kicker is its tone carrier the way the glyph is on `.cred-warn`:
+   the VALUE goes to the default foreground on dark, `.obs.warn .k` stays
+   `--coral-dark`. Ruling 150(a), owner, 2026-09-06. */
+:root[data-theme="dark"] .obs.warn > span:last-child { color: var(--fg); }
+
+/* ---------- appended: ruling 150(b), the board notice that is not a fault ---------- */
+/* Ruling 150(b) extends 148(d)'s amber pair to a box that reports attention
+   rather than a fault. `.board-orphans` is one box carrying four tones: the
+   archived-filter caption and the "no stages yet" empty state are not faults —
+   they are attention, which is GitHub's amber pair — while the unstaged-task
+   and repository boxes stay on the error pair. The sentence is `--fg` in both
+   themes already (`.board-orphans-label`); amber lands on the icon, the border
+   and the fill.
+   `color` is declared so the sweep measures the modifier against its own fill,
+   and `notice` is a token the sheet does not already read as coral. */
+.board-orphans.notice {
+  border-color: color-mix(in srgb, var(--amber-dark), transparent 72%);
+  background: color-mix(in srgb, var(--amber-light), var(--surface) 40%);
+  color: var(--amber-dark);
+}
+.board-orphans.notice > .ico { color: var(--amber-dark); }
+
+/* ---------- appended: ruling 148, the notice dismiss on the shared close ---------- */
+/* The temp-password notice's ✕ joins the one close design (borderless circle,
+   soft hover fill) at notice scale: 28px keeps the row's height byte-identical
+   (the negative margin gives back exactly what the taller control takes), and
+   14px holds the shared 34/16 glyph ratio. `flex: none` is what `.stg-x`
+   carried before it: `.cred-ok` is a flex row whose long sentence would
+   otherwise shrink the circle below its own target size. */
+.cred-ok .modal-close {
+  width: 28px; height: 28px; flex: none;
+  margin: -.125rem -.125rem -.125rem auto;
+}
+.cred-ok .modal-close .ico { width: 14px; height: 14px; }
+
+/* ---------- appended: ruling 147, the agent run starter's empty pick ---------- */
+/* The run/schedule start no longer disables because nothing is picked: it
+   refuses the click in words on its own line of the wrapping `.op-run` row, the
+   same slot the ruling-127 refusal and the posture line already use. Colour is
+   the error TEXT pair (`--coral-dark`, as `.modal-foot .foot-hint.err` prints a
+   refusal), and the combobox needs its own `aria-invalid` border because the
+   shared one is scoped to `.field input`. */
+.op-run .sub.err { color: var(--coral-dark); font-weight: 600; }
+.agent-select-input[aria-invalid="true"] { border-color: var(--coral-dark); }

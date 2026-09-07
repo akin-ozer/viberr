@@ -2422,3 +2422,54 @@ describe("U33-2: an unreachable repository has a home on the board", () => {
     expect(banner(container)).toBeNull();
   });
 });
+
+/**
+ * Interface review 2026-09-06 (ruling 148(d)): `.board-orphans` is one box
+ * carrying four tones. The archived-filter caption and the "no stages yet"
+ * empty state are attention, not faults, so they take GitHub's amber pair via
+ * the `notice` modifier; the unstaged-task and repository boxes keep the error
+ * pair they earn.
+ */
+describe("the board's notices separate attention from fault", () => {
+  const box = (container: HTMLElement, text: string) =>
+    [...container.querySelectorAll(".board-orphans")].find((n) =>
+      n.textContent!.includes(text),
+    )!;
+
+  it("marks the archived-filter caption as a notice", () => {
+    const { container } = renderBoard([task({ archived: true })], {
+      search: "filter=archived",
+    });
+    const node = box(container, "kept for the record");
+    expect(node).toBeTruthy();
+    expect(node.classList.contains("notice")).toBe(true);
+  });
+
+  it("marks the no-stages empty state as a notice", () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/board",
+        Component: () => (
+          <ToastProvider>
+            <BoardPage columns={[]} orphanTasks={[]} canCreate canTransition canRescan />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container } = render(
+      <Stub initialEntries={["/projects/viberr-core/board"]} />,
+    );
+    const node = box(container, "no workflow stages yet");
+    expect(node).toBeTruthy();
+    expect(node.classList.contains("notice")).toBe(true);
+  });
+
+  it("leaves the unreachable-repository banner on the error pair", () => {
+    const { container } = renderBoard([task()], {
+      repoAccess: { status: "repo_not_found", repo: "akin-ozer/sandbox" },
+    });
+    const node = container.querySelector('.board-orphans[aria-label="Repository"]')!;
+    expect(node).toBeTruthy();
+    expect(node.classList.contains("notice")).toBe(false);
+  });
+});

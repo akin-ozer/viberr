@@ -213,7 +213,7 @@ rode into every agent shell and stdio MCP child, and broke a project's own `vite
 | S3 audit export target | `s3_audit_config` table (sealed secret key) | Org admin, Audit panel |
 | Controller model, effort, grants, instructions | `agents/profiles/controller.md` + `agents/definitions/controller.md` in the data root | Org admin, Controller tab; grant sections and instructions locked unless unlocked by env (§2) |
 | Per-project workflow, members, agent deployments, guardrails, credential policy | `projects/<slug>/project.md` | Project admins through Policy / Settings / Agents |
-| Per-user theme, motion, notification routing, timeline default, pins | `users.theme` + cookie `viberr_theme`; `user_prefs` table | The user, Profile overlay |
+| Per-user theme, notification routing, timeline default, pins | `users.theme` + cookie `viberr_theme`; `user_prefs` table | The user, Profile overlay |
 | Personal backend credentials (ruling 127) | `user_backend_credentials` (sealed `secret_box` for a pasted key or token; a `login` row holds no secret) + the vendor's own file in `runtimes/users/<id>/{claude-home,codex-home}` | The person, Profile → Agent accounts |
 | Which account a run bills (the credential principal) | derived per run and persisted as `agent_runs.credential_user_id` | Nobody sets it: task runs take the task owner, controller turns the asker (`run-principal.server.ts`) |
 

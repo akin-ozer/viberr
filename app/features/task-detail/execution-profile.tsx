@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import { type ProjectRole, roleCan } from "~/shared/rbac";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
@@ -235,9 +235,14 @@ function PendingSchedules({
             {s.createdByLabel ? ` · by ${s.createdByLabel}` : ""}
           </div>
           {canCancel ? (
+            /* Ruling 149: cancelling a pending run takes the run away, so the
+               trigger wears the danger label its confirm already commits with
+               (`.btn.ghost.danger` — red label, neutral face). The wording
+               stays "Cancel" so it does not collide with the dialog's own
+               "Cancel run". */
             <button
               type="button"
-              className="btn ghost sched-cancel"
+              className="btn ghost sched-cancel danger"
               disabled={busy}
               onClick={() => setConfirmCancel(s)}
             >
@@ -528,6 +533,17 @@ function AgentRunControl({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [delay, setDelay] = useState<RunDelay>("now");
+  // Ruling 147: counted, not boolean — each refused start re-inserts the alert,
+  // because readers announce an insertion, not a role flip on unchanged text.
+  const [refused, setRefused] = useState(0);
+  const pickRef = useRef<HTMLInputElement>(null);
+  const pickErrId = useId();
+  // Any pick (or a pick cleared by typing) retires the accusation: the mark
+  // belongs to a refused ATTEMPT, never to a form being filled in.
+  const selectAgent = (profileId: string | null) => {
+    setSelectedId(profileId);
+    setRefused(0);
+  };
   const agentNameOf = (profileId: string) =>
     agents.find((a) => a.id === profileId)?.name;
 
@@ -576,10 +592,22 @@ function AgentRunControl({
   const runRefusal = selected
     ? backendRunRefusal(runPrincipal, selected.backend, meId)
     : null;
-  const off =
-    busy || !selected || selectedRunning || (delay === "now" && !!runRefusal);
+  // Ruling 147(a): only AVAILABILITY disables the start — a run in flight, a
+  // live run on this very profile, or the owner-credential refusal (ruling 127),
+  // each of which renders its own reason. An empty pick is validation, so it is
+  // refused on the click instead (147(b)); `selectedRunning` and `runRefusal`
+  // are both false with nothing picked, so this collapses to `busy` there.
+  const off = busy || selectedRunning || (delay === "now" && !!runRefusal);
+  const pickRefused = refused > 0 && !selected;
   const run = () => {
-    if (off || !selected) return;
+    if (off) return;
+    if (!selected) {
+      // 147(b): the click is answered in words, the picker is marked and takes
+      // focus. This is also the PromptInput's Enter path.
+      setRefused((n) => n + 1);
+      pickRef.current?.focus();
+      return;
+    }
     onRun(selected.id, prompt.trim(), delayMinutes(delay));
     setPrompt("");
     setDelay("now");
@@ -611,7 +639,10 @@ function AgentRunControl({
         selectedId={selectedId}
         runPrincipal={runPrincipal}
         disabled={busy}
-        onSelect={setSelectedId}
+        invalid={pickRefused}
+        describedBy={pickRefused ? pickErrId : undefined}
+        inputRef={pickRef}
+        onSelect={selectAgent}
       />
       <PromptInput
         value={prompt}
@@ -646,6 +677,20 @@ function AgentRunControl({
         <Icon name={delay === "now" ? "bolt" : "clock"} />
         {delay === "now" ? "Run" : "Schedule"}
       </button>
+      {pickRefused && (
+        // Ruling 147: the start stays ENABLED with nothing picked and answers
+        // the click here. A new element per refusal (the key) so a second
+        // attempt is announced again; it shares the `.sub` slot the refusal and
+        // posture lines already use.
+        <span
+          key={"pick-refused-" + refused}
+          id={pickErrId}
+          className="sub err"
+          role="alert"
+        >
+          Choose an agent first.
+        </span>
+      )}
       {runRefusal && (
         // P14: a `title` never opens on a disabled control, so the reason a
         // dispatch is dead is rendered copy. Ruling 127 makes it the OWNER's

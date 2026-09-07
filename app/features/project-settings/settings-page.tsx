@@ -30,6 +30,10 @@ import {
   CredentialCard,
   CredentialManageActions,
 } from "~/features/github/credential-card";
+// Ruling 148(b): the invite form is a button that opens THIS shared modal —
+// the same chrome (and the same ruling 147 refusal) as every org-settings
+// create modal, including the org-level twin of this very action.
+import { MiniModal } from "~/features/org-settings/mini-modal";
 // The one shared "Escape or an outside press closes me" hook.
 import { useDismiss } from "~/ui/use-dismiss";
 import type { MembershipView } from "./membership.server";
@@ -93,12 +97,6 @@ export type ProjectActionGate = (
    Hoisting the objects out of the JSX also slipped them past app.css.test.ts's
    `style={{…}}` scan, which is why the drift went unnoticed. Ruling 14: shared
    single implementations, never fork per surface. */
-
-// Pass-19 UX audit #22: the invite inputs now carry visible labels, which makes
-// the two form columns taller than the button. `.invite-row` is a grid, so its
-// items stretch — bottom-align the button to the input line instead of letting
-// it grow to label height. (Style here, not in app.css: one row, one rule.)
-const INVITE_BTN_STYLE = { alignSelf: "end" } as const;
 
 // ------------------------------------------------------------------ project
 
@@ -280,6 +278,11 @@ export function ProjectPanel({
 function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
+  // Ruling 147: the commit stays enabled and an empty name is refused here.
+  // Counted, not boolean: each refusal re-inserts the alert, because readers
+  // announce an insertion, not a role flip on unchanged text.
+  const [refused, setRefused] = useState(0);
+  const errId = "stg-add-err";
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (naming) inputRef.current?.focus();
@@ -288,10 +291,17 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
   const cancel = () => {
     setNaming(false);
     setName("");
+    setRefused(0);
   };
   const commit = () => {
     const v = name.trim();
-    if (!v) return;
+    // Ruling 147: the create primary stays enabled; an empty name is REFUSED
+    // on the client with a sentence, not pre-empted by a dead button.
+    if (!v) {
+      setRefused((n) => n + 1);
+      inputRef.current?.focus();
+      return;
+    }
     onAdd(v);
     cancel();
   };
@@ -316,7 +326,12 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
         value={name}
         placeholder="Stage name"
         aria-label="New stage name"
-        onChange={(e) => setName(e.target.value)}
+        aria-invalid={refused > 0 || undefined}
+        aria-describedby={refused > 0 ? errId : undefined}
+        onChange={(e) => {
+          setName(e.target.value);
+          setRefused(0);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
@@ -330,15 +345,19 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
       <button type="button" className="btn ghost sm" onClick={cancel}>
         Cancel
       </button>
-      <button
-        type="button"
-        className="btn primary sm"
-        disabled={name.trim().length === 0}
-        aria-disabled={name.trim().length === 0}
-        onClick={commit}
-      >
+      <button type="button" className="btn primary sm" onClick={commit}>
         Add stage
       </button>
+      {refused > 0 && (
+        <span
+          key={`stg-refused-${refused}`}
+          id={errId}
+          role="alert"
+          className="stg-err"
+        >
+          Give the stage a name.
+        </span>
+      )}
     </div>
   );
 }
@@ -921,6 +940,146 @@ export function StagesPanel({
 
 // ------------------------------------------------------------------ members
 
+/** Which invite field a refused submit named. */
+type InviteField = "name" | "email";
+
+/**
+ * Ruling 148(b): adding a member is an occasional multi-field action (a few
+ * times in a project's life), so it is a button in the panel head that opens a
+ * modal, never a form served permanently under the member list. That is also
+ * what the org-level twin of this exact action does
+ * (`org-settings/users-panel.tsx`: "Allow access").
+ *
+ * Ruling 147 comes from `MiniModal`: the primary stays enabled until the
+ * request is in flight, and an incomplete submit is REFUSED here — the foot
+ * alert is re-inserted and the first unmet field is marked and focused. The
+ * refusal the toast used to carry ("Enter a name and a valid email") is that
+ * alert now.
+ *
+ * The already-a-member refusal is a fact about a COMPLETE form, so it is not
+ * the foot's unmet line — but it cannot be a toast either: `.toast-wrap` is an
+ * ordinary fixed element, so it paints UNDER this dialog's backdrop and the
+ * open modal makes its live region inert. It is answered INSIDE the dialog, the
+ * way `S3TargetModal` answers a server refusal: a `.form-err` alert in the body
+ * (re-keyed per refusal, so a repeat is announced as a fresh insertion) with
+ * the address field marked and described by it.
+ */
+function InviteMemberModal({
+  members,
+  busy,
+  onClose,
+  onInvite,
+}: {
+  members: MembershipView[];
+  busy: boolean;
+  onClose: () => void;
+  onInvite: (name: string, email: string) => void;
+}) {
+  const [nm, setNm] = useState("");
+  const [em, setEm] = useState("");
+  /** The field a refused submit named; null on a pristine form. */
+  const [flagged, setFlagged] = useState<InviteField | null>(null);
+  /** The already-a-member refusal, counted so each one re-inserts the alert. */
+  const [dupe, setDupe] = useState<{ n: number; email: string } | null>(null);
+  const refs = {
+    name: useRef<HTMLInputElement>(null),
+    email: useRef<HTMLInputElement>(null),
+  };
+  const name = nm.trim();
+  const email = em.trim().toLowerCase();
+  const canSave = name !== "" && email.includes("@");
+
+  const save = () => {
+    if (members.some((m) => m.email.toLowerCase() === email)) {
+      // D5: a refusal must not render the success tick — and it is answered in
+      // the dialog, because a toast behind the backdrop is not an answer.
+      setDupe((d) => ({ n: (d?.n ?? 0) + 1, email }));
+      setFlagged("email");
+      refs.email.current?.focus();
+      return;
+    }
+    onInvite(name, email);
+    onClose();
+  };
+  const edit =
+    (field: InviteField, set: (value: string) => void) => (value: string) => {
+      set(value);
+      setDupe(null);
+      setFlagged((f) => (f === field ? null : f));
+    };
+  const mark = (field: InviteField) => ({
+    "aria-invalid": flagged === field || undefined,
+  });
+
+  return (
+    <MiniModal
+      icon={<Icon name="user" />}
+      title="Add member"
+      sub="They join as Viewer; roles are set in Policy"
+      onClose={onClose}
+      canSave={canSave}
+      busy={busy}
+      saveLabel="Add member"
+      unmetHint="Enter a name and a valid email."
+      focusUnmet={() => {
+        const first: InviteField = name === "" ? "name" : "email";
+        setFlagged(first);
+        refs[first].current?.focus();
+      }}
+      onSave={save}
+      screen="Add member dialog"
+    >
+      {/* Pass-19 UX coherence audit, finding #22: both fields keep a visible
+          `.flabel`, not a placeholder that leaves the screen on the first
+          keystroke — the same `.field` idiom, and the same two-up row, as the
+          org-level twin's local-account branch. */}
+      <div className="key-row even">
+        <div className="field">
+          <label className="flabel" htmlFor="pm-invite-name">
+            Full name<span className="req">*</span>
+          </label>
+          <input
+            ref={refs.name}
+            id="pm-invite-name"
+            type="text"
+            placeholder="Full name"
+            value={nm}
+            data-autofocus
+            onChange={(e) => edit("name", setNm)(e.target.value)}
+            {...mark("name")}
+          />
+        </div>
+        <div className="field">
+          <label className="flabel" htmlFor="pm-invite-email">
+            Email<span className="req">*</span>
+          </label>
+          <input
+            ref={refs.email}
+            id="pm-invite-email"
+            type="text"
+            placeholder="email@company.dev"
+            value={em}
+            aria-describedby={dupe ? "pm-invite-dupe" : undefined}
+            onChange={(e) => edit("email", setEm)(e.target.value)}
+            {...mark("email")}
+          />
+        </div>
+      </div>
+      {dupe && (
+        <div
+          key={"dupe-" + dupe.n}
+          id="pm-invite-dupe"
+          className="form-err"
+          role="alert"
+        >
+          <Icon name="alert" />
+          <span>{dupe.email} is already a member of this project.</span>
+        </div>
+      )}
+    </MiniModal>
+  );
+}
+
 export function MembersPanel({
   members,
   meId,
@@ -941,28 +1100,10 @@ export function MembersPanel({
   onNavPolicy: () => void;
 }) {
   const push = useToast();
-  const [nm, setNm] = useState("");
-  const [em, setEm] = useState("");
+  const [inviting, setInviting] = useState(false);
   // D6: removing a person from a project writes a governance audit row and was a
   // single silent click. Confirm it, naming who leaves and what survives.
   const [confirmRemove, setConfirmRemove] = useState<MembershipView | null>(null);
-
-  const invite = () => {
-    const name = nm.trim();
-    const email = em.trim().toLowerCase();
-    if (!name || !email.includes("@")) {
-      // D5: a refusal must not render the success tick.
-      push("Enter a name and a valid email", "error");
-      return;
-    }
-    if (members.some((m) => m.email.toLowerCase() === email)) {
-      push(`${email} is already a member`, "error");
-      return;
-    }
-    onInvite(name, email);
-    setNm("");
-    setEm("");
-  };
 
   const remove = (m: MembershipView) => {
     if (m.userId === meId) {
@@ -1005,6 +1146,20 @@ export function MembersPanel({
             ? ` · ${stale.length} removed account${stale.length === 1 ? "" : "s"}`
             : ""}
         </span>
+        {/* Ruling 148(b): the panel's one create action sits in its head, the
+            same placement the instance-level Users panel gives "Allow access". */}
+        {canManage && (
+          <span className="right">
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => setInviting(true)}
+            >
+              <Icon name="plus" />
+              Add member
+            </button>
+          </span>
+        )}
       </div>
       {/* LV-F2: same silent-disabled class as the Project + Stages panels. */}
       {!canManage && (
@@ -1066,57 +1221,6 @@ export function MembersPanel({
           </div>
         ))}
       </div>
-      {/* Pass-19 UX coherence audit, finding #22: these two inputs were bare —
-          no `.flabel`, no `htmlFor`, their only name a placeholder that leaves
-          the screen on the first keystroke. The org-level twin of this exact
-          action labels every field (org-settings/users-panel.tsx: "Full name" /
-          "Email" over inputs whose placeholders are the same strings), as do
-          this page's own identity fields, so one invite form in the product
-          disagreed with the rest. It matters most below 1300px, where
-          `.invite-row` collapses to one column (app.css) and the two
-          same-looking boxes stack — a 1280px laptop is inside that. Same
-          in-house `.field` + `.flabel` idiom, no new visual language. */}
-      {canManage && (
-        <div className="invite-row">
-          <div className="field">
-            <label className="flabel" htmlFor="pm-invite-name">
-              Full name<span className="req">*</span>
-            </label>
-            <input
-              id="pm-invite-name"
-              type="text"
-              placeholder="Full name"
-              value={nm}
-              onChange={(e) => setNm(e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label className="flabel" htmlFor="pm-invite-email">
-              Email<span className="req">*</span>
-            </label>
-            <input
-              id="pm-invite-email"
-              type="text"
-              placeholder="email@company.dev"
-              value={em}
-              onChange={(e) => setEm(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") invite();
-              }}
-            />
-          </div>
-          <button
-            type="button"
-            className="btn sm"
-            style={INVITE_BTN_STYLE}
-            onClick={invite}
-            disabled={busy}
-          >
-            <Icon name="send" />
-            Invite
-          </button>
-        </div>
-      )}
       <div className="pol-note after last">
         <Icon name="shield" />
         <span>
@@ -1126,6 +1230,14 @@ export function MembersPanel({
           </button>
         </span>
       </div>
+      {inviting && (
+        <InviteMemberModal
+          members={members}
+          busy={busy}
+          onClose={() => setInviting(false)}
+          onInvite={onInvite}
+        />
+      )}
       {confirmRemove && (
         <ConfirmDialog
           screenLabel="Member removal dialog"
@@ -1254,14 +1366,19 @@ function RepairRepoDialog({
           with the error glyph. This div is the "also render it in place" half.
           Adding `role="alert"` here would announce the same refusal twice. */}
       {error && (
-        <div className="cred-warn">
+        <div className="form-err spaced">
           <Icon name="alert" />
           {error}
         </div>
       )}
       {/* The client-side refusal has no toast, so this one IS the announcer. */}
       {flagged && (
-        <div className="cred-warn" role="alert" id="repair-unmet" key={"refused-" + refused}>
+        <div
+          className="form-err spaced"
+          role="alert"
+          id="repair-unmet"
+          key={"refused-" + refused}
+        >
           <Icon name="alert" />
           {flagged === "repo"
             ? "Enter the repository as owner/name."
@@ -1601,7 +1718,10 @@ export function DangerZone({
         </span>
         <button
           type="button"
-          className="btn ghost sm"
+          // Ruling 149: archiving is destructive, so it carries the danger
+          // label beside "Delete project" instead of reading as a plain
+          // secondary. Restore is a recovery action and stays neutral.
+          className={"btn ghost sm" + (archived ? "" : " danger")}
           // F10-34: destructive project actions are project-admin only. A
           // viewer/maintainer must not see an actionable control; the server
           // still enforces edit-policy.

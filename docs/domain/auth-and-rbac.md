@@ -268,11 +268,13 @@ read and the person's own Profile card, and never the unauthenticated health bod
 Identity (name, title; audit `profile.updated`), notification routing (eight in-app
 opt-out toggles: packets, approvals, mentions, policy, quality, controller,
 dependencies (ruling 131) and ownership; enforced inside `createNotification`), appearance (theme `light | dark | system` persisted to
-`users.theme` and the `viberr_theme` cookie; reduce motion; default timeline filter),
+`users.theme` and the `viberr_theme` cookie; default timeline filter — the in-app reduce-motion
+setting was removed by ruling 148(c), the OS preference is the one signal),
 a read-only "Your access" table rendered from the same RBAC rows, **Agent accounts**
 (below), GitHub identity (disconnect flips `idp` back to `local`, refused without a
-password), and a self-service password change that keeps the current session and
-revokes every other one (audit `auth.password.changed`). Preferences other than theme
+password), and a self-service password change (ruling 148(b): a "Password" row on the Profile card whose
+button opens a modal) that keeps the current session and revokes every other one (audit
+`auth.password.changed`). Preferences other than theme
 live in `user_prefs`.
 
 ### Agent accounts (ruling 127)
@@ -299,9 +301,16 @@ Two routes in, both the vendor's own:
   the driver asks the SAME binary (`claude auth status`, `codex login status`) whether it
   is really signed in, and only that answer writes the row. The session is polled from the
   browser through `/resources/backend-login` every 2 s while it is live; the success toast
-  settles on that result, never on the submit. The step list is a polite live region and
-  takes focus when it replaces the button that started the flow, because every value in it
-  (the link, the code, the status line) arrives from a later poll.
+  settles on that result, never on the submit. The card renders the flow as two numbered steps
+  (2026-09-06): the vendor's link is an "Open sign-in page" button that names its host
+  and is never printed in full, Codex's code sits beside a Copy button, and Claude's code
+  field is a real labelled input whose Submit follows ruling 147 (enabled, an empty submit
+  refused with the field marked and focused). A step marker is pending until its input
+  arrives, current while actionable, done once the code is on its way; step 1 is never
+  marked done on its own, because nothing server-side can see the link being opened. The
+  status line is the ONE polite live region; the step group takes focus when it replaces
+  the button that started the flow, because every value in it (the link, the code, the
+  status line) arrives from a later poll.
 - **A pasted credential.** `backend-set-key` verifies an Anthropic Console or OpenAI
   Platform API key with a FREE `GET /v1/models` probe before sealing it; a ChatGPT
   workspace access token has no free probe and is stored `verified_at = null` with the

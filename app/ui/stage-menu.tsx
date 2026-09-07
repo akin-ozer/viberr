@@ -165,12 +165,16 @@ export function StageMenu({
         disabled={busy}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Change stage (currently ${current?.name ?? "unknown"})`}
+        // Ruling 148: a stage id the project no longer lists is stated in
+        // words, the same words everywhere. The visible label was a "−" that
+        // read as a cleared control while this name said "unknown", so the
+        // accessible name did not even contain the visible one.
+        aria-label={`Change stage (currently ${current?.name ?? "unknown stage"})`}
         title="Change stage"
       >
         <span key={currentStageId} className={`sm-current${changed ? " changed" : ""}`}>
           <span className="col-stage-dot" style={{ background: current?.color }} />
-          <span className="sm-name">{current?.name ?? "−"}</span>
+          <span className="sm-name">{current?.name ?? "unknown stage"}</span>
         </span>
         <Icon name="chevron" className="sm-caret" />
       </button>

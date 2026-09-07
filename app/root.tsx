@@ -32,8 +32,6 @@ import { ToastProvider } from "./ui/toast";
 import { getCsrfToken } from "./server/auth/csrf.server";
 import { requestContextMiddleware } from "./server/logging/request-context.server";
 import { authenticateWithHeaders } from "./server/auth/require-user.server";
-import { getDb } from "./server/db/sqlite.server";
-import { getPref } from "./server/prefs/user-prefs.server";
 import {
   getThemePreference,
   type ThemePreference,
@@ -63,16 +61,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   // shell + <CsrfInput />) AND captures better-auth's rolling-session renewal
   // cookie so the slide reaches the browser (F10-17).
   const { ctx: auth, renewalHeaders } = await authenticateWithHeaders(request);
-  // Reduce-motion preference (Phase 9C, ruling 13): user_prefs is the
-  // truth; SSR renders <html data-motion> directly so the [data-motion]
-  // CSS hook applies without a flash. Signed-out pages default to "full".
-  const motion: "full" | "reduce" =
-    auth && getPref(getDb(), auth.user.id, "motion") === "reduce"
-      ? "reduce"
-      : "full";
+  // Ruling 148(c): the in-app reduce-motion preference (and its
+  // <html data-motion> hook) is gone; the OS setting is the one signal.
   const payload = {
     theme,
-    motion,
     csrf: auth ? getCsrfToken(auth.sessionId) : null,
   };
   // Forward ONLY the renewal Set-Cookie(s) — never clobber other headers. Most
@@ -125,14 +117,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // SSR renders the explicit preference; "system" starts light and is
   // corrected pre-paint by the inline script (hence suppressHydrationWarning).
   const ssrTheme = theme === "dark" ? "dark" : "light";
-  const motion = data?.motion ?? "full";
   return (
-    <html
-      lang="en"
-      data-theme={ssrTheme}
-      data-motion={motion}
-      suppressHydrationWarning
-    >
+    <html lang="en" data-theme={ssrTheme} suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

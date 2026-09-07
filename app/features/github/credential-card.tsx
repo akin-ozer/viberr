@@ -249,7 +249,9 @@ export function CredentialManageActions({
       {configured && (
         <button
           type="button"
-          className="btn ghost sm"
+          // Ruling 149: unbinding the credential is destructive, and the
+          // dialog it opens already commits in red.
+          className="btn ghost sm danger"
           onClick={() => setConfirming(true)}
           disabled={busy}
           title="Unbind the credential from this project"

@@ -1,4 +1,10 @@
-import { useEffect, useId, useState, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useState,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 import {
   filterMentions,
   splitHighlight,
@@ -72,6 +78,9 @@ export function AgentSelect({
   selectedId,
   runPrincipal = null,
   disabled,
+  invalid = false,
+  describedBy,
+  inputRef,
   onSelect,
 }: {
   agents: readonly DeployedSpecialistView[];
@@ -85,6 +94,14 @@ export function AgentSelect({
    *  owns, and that is the honest reading. */
   runPrincipal?: TaskRunPrincipalView | null;
   disabled?: boolean;
+  /** Ruling 147: a run refused for an empty pick marks THIS control, because
+   *  the picker is the unmet field. Off until a submit is actually refused —
+   *  a pristine form is never accused. */
+  invalid?: boolean;
+  /** The id of the refusal alert that explains the mark. */
+  describedBy?: string;
+  /** So the refusing caller can move focus to the field it named. */
+  inputRef?: RefObject<HTMLInputElement | null>;
   onSelect: (profileId: string | null) => void;
 }) {
   const listId = useId();
@@ -180,9 +197,12 @@ export function AgentSelect({
   return (
     <div className="agent-select">
       <input
+        ref={inputRef}
         type="text"
         className="op-steer agent-select-input"
         role="combobox"
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
         aria-expanded={open}
         aria-controls={listId}
         aria-activedescendant={activeId}

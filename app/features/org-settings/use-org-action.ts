@@ -7,7 +7,7 @@ import { useToast } from "~/ui/toast";
  * Fetcher wrapper for org-settings actions: injects the CSRF token, posts
  * to the org-settings route, and (by default) toasts server-computed copy
  * — success `toast` or failure `error` (phase-5 pattern). Modals pass
- * `onResult` for custom handling (inline `.cred-warn`, close-on-success).
+ * `onResult` for custom handling (inline `.form-err`, close-on-success).
  */
 
 /**

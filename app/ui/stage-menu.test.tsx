@@ -165,6 +165,15 @@ describe("StageMenu keyboard contract (F10-25)", () => {
     const view = renderMenu({ currentStageId: "done" });
     expect(view.getByLabelText("Change stage (currently Done)")).toBeTruthy();
   });
+
+  it("ruling 148: a stage the project no longer lists is named, in one wording", () => {
+    const view = renderMenu({ currentStageId: "ghost" });
+    // The visible label was a "−" (a cleared control) while the accessible name
+    // said "unknown", so the name did not contain the label. Both now say the
+    // same words the board row, task page and archive dialog use.
+    const btn = view.getByLabelText("Change stage (currently unknown stage)");
+    expect(btn.querySelector(".sm-name")!.textContent).toBe("unknown stage");
+  });
 });
 
 /**

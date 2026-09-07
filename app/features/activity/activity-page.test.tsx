@@ -175,6 +175,28 @@ describe("ActivityPage", () => {
     expect(rows[1]!.querySelector(".keybtn")!.textContent).toBe("VIB-142");
   });
 
+  it("ruling 148: a row with no actor names none, rather than a '−'", () => {
+    // The sibling of the notifications case: a "−" in the slot every other row
+    // fills with a name claimed a fact in a glyph, and sat where a remove
+    // control would.
+    // Canary: put `{r.actor ? r.actor.name : "−"}` back and this goes red.
+    const actorless = STREAM.map((r) =>
+      r.id === 2 ? { ...r, actor: null } : r,
+    );
+    const { container } = renderActivity(actorless);
+    const rows = container.querySelectorAll(".panel:first-child .pol-ev");
+    expect(rows[1]!.querySelector(".act-actor")).toBeNull();
+    expect(rows[1]!.querySelector(".act-sep")).toBeNull();
+    expect(rows[1]!.textContent).not.toContain("−");
+    // The row still carries its message and its destination.
+    expect(rows[1]!.querySelector("strong")!.textContent).toBe(
+      "Completion report.",
+    );
+    expect(rows[1]!.querySelector(".keybtn")!.textContent).toBe("VIB-142");
+    // The rows that do have one are untouched.
+    expect(rows[0]!.querySelector(".act-actor")!.textContent).toBe("Arda Kaya");
+  });
+
   it("actor filter narrows the stream, drops empty day groups, leaves audit alone", () => {
     const { container, getByText } = renderActivity();
     fireEvent.click(getByText("System"));

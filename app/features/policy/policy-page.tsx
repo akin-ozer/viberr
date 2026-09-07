@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { useFetcher, useNavigate } from "react-router";
 import { countLabel } from "~/shared/text/plural";
 import { Avatar } from "~/ui/avatar";
@@ -237,12 +237,16 @@ export function HumanAccess({
                 <td className="act">{row.action}</td>
                 {ROLE_IDS.map((r) => (
                   <td key={r}>
+                    {/* Ruling 148: same words as the profile page's "Your
+                        access" list — the check is aria-hidden, so a glyph-only
+                        cell announced nothing at all. */}
                     {row.grant[r] ? (
                       <span className="rbac-yes">
                         <Icon name="check" />
+                        <span className="vh">yes</span>
                       </span>
                     ) : (
-                      <span className="rbac-no">−</span>
+                      <span className="rbac-no">no</span>
                     )}
                   </td>
                 ))}
@@ -694,6 +698,13 @@ export function Guardrails({
   onSet: (id: string, op: GuardrailOp, value?: number) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Ruling 147: Apply is kept disabled ONLY by the nothing-changed gate. The
+  // old `valueChanged` folded validity into it, so a typed "0", "-3", "2.5" or
+  // an emptied box was a changed draft that left Apply dead with no reason.
+  // Counted per row, so a repeated press re-announces; cleared as soon as the
+  // draft is edited, so a pristine row is never accused.
+  const [refusedFor, setRefusedFor] = useState<Record<string, number>>({});
+  const valueRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const enforced = guardrails.filter((g) => g.kind === "default");
   const on = enforced.filter((g) => g.on).length;
   return (
@@ -723,10 +734,28 @@ export function Guardrails({
       <div className="guard-list">
         {guardrails.map((g) => {
           const inert = g.kind !== "default";
-          const draft = drafts[g.id] ?? (g.value === null ? "" : String(g.value));
+          const current = g.value === null ? "" : String(g.value);
+          const draft = drafts[g.id] ?? current;
           const draftValue = Number(draft);
-          const valueChanged =
-            draft.trim() !== "" && Number.isInteger(draftValue) && draftValue > 0 && draftValue !== g.value;
+          const valid =
+            draft.trim() !== "" && Number.isInteger(draftValue) && draftValue > 0;
+          // A parseable draft still compares numerically, so a re-typed "040"
+          // is not a change; anything unusable falls back to the raw string.
+          const valueChanged = valid
+            ? draftValue !== g.value
+            : draft.trim() !== current;
+          const refusedCount = refusedFor[g.id] ?? 0;
+          const showRefusal = refusedCount > 0 && !valid;
+          const errId = `guard-${g.id}-err`;
+          const applyValue = () => {
+            if (busy || !valueChanged) return;
+            if (!valid) {
+              setRefusedFor((r) => ({ ...r, [g.id]: (r[g.id] ?? 0) + 1 }));
+              valueRefs.current[g.id]?.focus();
+              return;
+            }
+            onSet(g.id, "value", draftValue);
+          };
           return (
             <div className={"guard-row" + (inert ? " inert" : "")} key={g.id}>
               <div className="guard-main">
@@ -770,14 +799,21 @@ export function Guardrails({
               {g.kind === "default" &&
                 g.unit !== null &&
                 (canManage ? (
+                  <>
                   <span className="guard-ctl">
                     <input
+                      ref={(el) => {
+                        valueRefs.current[g.id] = el;
+                      }}
+                      id={`guard-${g.id}`}
                       type="number"
                       min={1}
                       step={1}
                       value={draft}
                       disabled={busy}
                       aria-label={`${g.label} value (${g.unit})`}
+                      aria-invalid={showRefusal || undefined}
+                      aria-describedby={showRefusal ? errId : undefined}
                       onChange={(e) => setDrafts((d) => ({ ...d, [g.id]: e.target.value }))}
                     />
                     {g.unit}
@@ -785,11 +821,23 @@ export function Guardrails({
                       type="button"
                       className="btn sm"
                       disabled={busy || !valueChanged}
-                      onClick={() => onSet(g.id, "value", draftValue)}
+                      aria-busy={busy}
+                      onClick={applyValue}
                     >
                       Apply
                     </button>
                   </span>
+                  {showRefusal && (
+                    <span
+                      key={`refused-${refusedCount}`}
+                      id={errId}
+                      role="alert"
+                      className="guard-ctl err"
+                    >
+                      {g.label} needs a whole number above zero.
+                    </span>
+                  )}
+                  </>
                 ) : (
                   <span className="guard-ctl">
                     {/* A hand-edited project.md can carry the unit without the

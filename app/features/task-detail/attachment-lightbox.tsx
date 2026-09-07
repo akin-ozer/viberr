@@ -301,10 +301,16 @@ function Lightbox({
         {/* F22-11: focus the Close control on open, not "Open original" (the
             first focusable) — that link navigates AWAY, so a reflex Enter on a
             freshly-opened lightbox would open the raw file in a new tab. A
-            dialog opened with showModal() honors `autofocus`. */}
+            dialog opened with showModal() honors `autofocus`.
+            Ruling 148: it takes the shared close design (borderless circle),
+            the same control as every modal head and the page overlay. It stays
+            the foot's trailing item — the foot sits on the card's own surface,
+            where the shared transparent rest and soft hover read correctly,
+            and an absolute corner control would sit over the ruling-105 text
+            viewer's scrolling first line. */}
         <button
           type="button"
-          className="icon-btn"
+          className="icon-btn modal-close"
           onClick={close}
           aria-label="Close"
           autoFocus

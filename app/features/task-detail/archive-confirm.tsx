@@ -30,8 +30,10 @@ export function ArchiveConfirm({
   onConfirm: () => void;
 }) {
   const { ref: panelRef, close } = useDialog(onCancel);
+  // Ruling 148: the same words as the stage menu and the board row, and never
+  // the raw internal id (the F19-36 defect below, second axis).
   const stageName =
-    task.stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+    task.stages.find((s) => s.id === task.stage)?.name ?? "unknown stage";
   // F19-36: this printed the raw internal state token — "PR #12 accepted" for a
   // PR that is really merge-pending, "PR #12 review" for one in review — while
   // every other surface renders the canonical label from the ONE PR-state map

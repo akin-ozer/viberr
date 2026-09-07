@@ -38,7 +38,7 @@ import {
  *   org has no connection — a public repo needs no credential — and uses the
  *   default connection when there is one (private repos, higher rate limit).
  *   A refusal that having no credential explains, and any other failure,
- *   render in the `.cred-warn` under the import bar;
+ *   render in the `.form-err` under the import bar;
  * - SKILL.md capture happens server-side (the skill body is re-read from
  *   disk) — the capture toast rides the action response;
  * - both layers are native <dialog>s (showModal via useDialog): Escape's
@@ -223,7 +223,7 @@ function BrowserToolbar({
         </div>
       )}
       {gh.err && (
-        <div className="cred-warn">
+        <div className="form-err">
           <Icon name="alert" />
           {gh.err}
         </div>
@@ -317,7 +317,14 @@ function StoreTree({
   const rows = flatten(nodes, [], 0, expanded, []);
 
   const newFolderRow = (path: string[], depth: number) => (
-    <div className="fm-row dir" style={{ paddingLeft: `${0.6 + depth * 1.3}rem` }}>
+    // The row is a text field in a row shell, not an activatable directory row:
+    // it carries no role, tabIndex or handler, so it must not offer a real
+    // row's hand cursor and hover fill (`.editing` drops both, `.dir` keeps the
+    // folder glyph's weight).
+    <div
+      className="fm-row dir editing"
+      style={{ paddingLeft: `${0.6 + depth * 1.3}rem` }}
+    >
       <span className="twist"></span>
       <FolderIco />
       <input
@@ -953,6 +960,12 @@ export function StoreBrowser({
     push(toast);
     expand(dest);
   });
+  // Ruling 147: Save document stays enabled on a nameless draft and refuses the
+  // click with the sentence `writeStoreDoc` would have thrown. Counted, so a
+  // repeated press inserts a fresh alert; cleared wherever a draft opens or
+  // closes, so a new document is never accused before it is submitted.
+  const [refusedDoc, setRefusedDoc] = useState(0);
+  const docNameRef = useRef<HTMLInputElement>(null);
 
   /** Pick the destination folder AND reveal it, so the two never disagree. */
   const target = (path: string[]) => {
@@ -1034,6 +1047,10 @@ export function StoreBrowser({
   const nDirs = countKbDirs(nodes);
   const folders = folderPaths(nodes);
   const { doc } = editor;
+  /** Ruling 147: set only after a refused save, and only while the draft is
+   *  still nameless, so typing clears the mark. */
+  const docNameInvalid =
+    refusedDoc > 0 && doc !== null && !doc.existing && !doc.name.trim();
   /** Does a file with the draft's name already sit in the destination folder? */
   const draftCollides = (draft: DocDraft): boolean => {
     const wanted = draft.name.trim().includes(".")
@@ -1076,7 +1093,10 @@ export function StoreBrowser({
             onUploadFiles={() => ops.startUpload(dest)}
             onUploadFolder={() => ops.startDirUpload(dest)}
             onNewFolder={() => setNewIn(dest)}
-            onNewDoc={() => editor.openNew(dest)}
+            onNewDoc={() => {
+              setRefusedDoc(0);
+              editor.openNew(dest);
+            }}
           />
 
           {doc && (
@@ -1087,27 +1107,45 @@ export function StoreBrowser({
                   {editor.loading ? " · loading…" : ""}
                 </div>
               ) : (
-                <input
-                  type="text"
-                  className="mono"
-                  value={doc.name}
-                  placeholder="file-name.md"
-                  aria-label="Document file name"
+                /* Ruling 149: both typing controls used to sit bare inside
+                   `.fm-doc`, so they painted in UA chrome inside a card whose
+                   every other control wears the sheet's. `.field` is the one
+                   place that chrome is declared, and it brings a visible label
+                   with it. */
+                <div className="field">
+                  <label className="flabel" htmlFor="fm-doc-name">
+                    File name
+                  </label>
+                  <input
+                    ref={docNameRef}
+                    id="fm-doc-name"
+                    type="text"
+                    className="mono"
+                    value={doc.name}
+                    placeholder="file-name.md"
+                    aria-invalid={docNameInvalid || undefined}
+                    aria-describedby={docNameInvalid ? "fm-doc-err" : undefined}
+                    onChange={(e) =>
+                      editor.setDoc({ ...doc, name: e.target.value, err: null })
+                    }
+                  />
+                </div>
+              )}
+              <div className="field">
+                <label className="flabel" htmlFor="fm-doc-body">
+                  Document contents
+                </label>
+                <textarea
+                  id="fm-doc-body"
+                  className="ta mono"
+                  rows={10}
+                  value={doc.body}
+                  placeholder={"# Title\n\nWhat your agents must know."}
                   onChange={(e) =>
-                    editor.setDoc({ ...doc, name: e.target.value, err: null })
+                    editor.setDoc({ ...doc, body: e.target.value, err: null })
                   }
                 />
-              )}
-              <textarea
-                className="ta mono"
-                rows={10}
-                value={doc.body}
-                placeholder={"# Title\n\nWhat your agents must know."}
-                aria-label="Document contents"
-                onChange={(e) =>
-                  editor.setDoc({ ...doc, body: e.target.value, err: null })
-                }
-              />
+              </div>
               {doc.truncated && (
                 <div className="cred-warn">
                   <Icon name="alert" />
@@ -1116,11 +1154,25 @@ export function StoreBrowser({
                   disk instead.
                 </div>
               )}
-              {doc.err && (
-                <div className="cred-warn">
+              {/* One box, never two: a refused save speaks in the same slot the
+                  server's own sentence uses (ruling 147). */}
+              {docNameInvalid ? (
+                <div
+                  key={`refused-${refusedDoc}`}
+                  id="fm-doc-err"
+                  className="form-err"
+                  role="alert"
+                >
                   <Icon name="alert" />
-                  {doc.err}
+                  Give the document a file name.
                 </div>
+              ) : (
+                doc.err && (
+                  <div className="form-err">
+                    <Icon name="alert" />
+                    {doc.err}
+                  </div>
+                )
               )}
               <div className="fm-doc-acts">
                 <span className="fm-hint mono">
@@ -1130,20 +1182,28 @@ export function StoreBrowser({
                 <button
                   type="button"
                   className="btn ghost sm"
-                  onClick={() => editor.setDoc(null)}
+                  onClick={() => {
+                    setRefusedDoc(0);
+                    editor.setDoc(null);
+                  }}
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   className="btn sm primary"
-                  disabled={
-                    !doc.name.trim() ||
-                    doc.truncated ||
-                    editor.saving ||
-                    editor.loading
-                  }
+                  // Ruling 147: only the in-flight states and the truncated
+                  // hard block (a data-safety refusal whose reason is rendered
+                  // above) disable this; a nameless draft is refused below.
+                  disabled={doc.truncated || editor.saving || editor.loading}
+                  aria-busy={editor.saving}
                   onClick={() => {
+                    if (editor.saving || editor.loading) return;
+                    if (!doc.existing && !doc.name.trim()) {
+                      setRefusedDoc((n) => n + 1);
+                      docNameRef.current?.focus();
+                      return;
+                    }
                     // UI-59: a new document that would land on an existing file
                     // asks first. Saving an OPENED document is already an
                     // explicit edit of that file, so it replaces directly.
@@ -1175,7 +1235,10 @@ export function StoreBrowser({
               target(path);
               ops.startUpload(path);
             }}
-            onOpenDoc={editor.openExisting}
+            onOpenDoc={(dir, name) => {
+              setRefusedDoc(0);
+              editor.openExisting(dir, name);
+            }}
             onDelete={(path, node) => setConfirm({ path, node })}
             onUploadEntries={ops.submitUpload}
           />

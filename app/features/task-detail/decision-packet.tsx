@@ -30,6 +30,8 @@ import { useDialog } from "~/ui/use-dialog";
 
 /** Ties the Confirm button to its visible refusal reason (E4). */
 const BLOCK_REASON_ID = "pkt-block-reason";
+/** Ruling 147: where a refused Confirm says the directive is still empty. */
+const CUSTOM_ERR_ID = "pkt-custom-err";
 /**
  * UX19-4 — the exact label of the GitHub panel's delivery button
  * (`task-side-panels.tsx`). The note below points a human at a control BY NAME,
@@ -767,6 +769,19 @@ export function DecisionPacket({
   const choiceCount = p.options.length + (customOffered ? 1 : 0);
   const customSelected = customOffered && sel === customIndex;
   const [customText, setCustomText] = useState("");
+  // Ruling 147: Confirm stays enabled with the directive still empty, and the
+  // click is refused here. Counted, so a repeated press inserts a fresh alert;
+  // reset by every choice change, so returning to the directive is pristine.
+  const [refused, setRefused] = useState(0);
+  const customRef = useRef<HTMLTextAreaElement>(null);
+  const customInvalid =
+    refused > 0 && customSelected && customText.trim() === "";
+  /** Every choice change goes through here, so a standing refusal is dropped:
+   *  a pristine directive is never accused (ruling 147). */
+  const selectOption = (i: number) => {
+    setSel(i);
+    setRefused(0);
+  };
   // UX19-9 / F20-6 / F31-6: the option index whose ask-first ceremony is open
   // (null = none). ONE slot, not one per kind: the open ceremony is chosen by
   // the pending option's own `kind`, so two can never stand at once.
@@ -888,7 +903,7 @@ export function DecisionPacket({
     // here (this only runs from a keydown handler), matching the click path at
     // the option buttons below.
     const next = (sel + delta + choiceCount) % choiceCount;
-    setSel(next);
+    selectOption(next);
     requestAnimationFrame(() => optionRefs.current[next]?.focus());
   };
 
@@ -1023,7 +1038,7 @@ export function DecisionPacket({
               const target = Number(e.key) - 1;
               if (target < choiceCount) {
                 e.preventDefault();
-                setSel(target);
+                selectOption(target);
                 requestAnimationFrame(() => optionRefs.current[target]?.focus());
               }
             }
@@ -1058,7 +1073,7 @@ export function DecisionPacket({
                 title={refusal?.title}
                 onClick={() => {
                   if (blocked) return;
-                  setSel(i);
+                  selectOption(i);
                 }}
               >
                 <span className="radio" />
@@ -1110,7 +1125,7 @@ export function DecisionPacket({
               aria-checked={customSelected}
               tabIndex={sel === customIndex ? 0 : -1}
               className={"opt opt-custom" + (customSelected ? " sel" : "")}
-              onClick={() => setSel(customIndex)}
+              onClick={() => selectOption(customIndex)}
             >
               <span className="radio" />
               <span>
@@ -1135,13 +1150,27 @@ export function DecisionPacket({
             </label>
             <textarea
               id="pkt-custom"
+              ref={customRef}
               className="packet-note"
               value={customText}
               onChange={(e) => setCustomText(e.target.value)}
+              aria-invalid={customInvalid || undefined}
+              aria-describedby={customInvalid ? CUSTOM_ERR_ID : undefined}
               placeholder="e.g. Hold the merge, rebase onto main first, and re-run the reviewer on the new head."
               rows={2}
               data-autofocus=""
             />
+            {customInvalid && (
+              <p
+                key={`refused-${refused}`}
+                id={CUSTOM_ERR_ID}
+                className="deny-note spaced"
+                role="alert"
+              >
+                <Icon name="alert" />
+                Write the directive first.
+              </p>
+            )}
           </div>
         )}
 
@@ -1251,15 +1280,10 @@ export function DecisionPacket({
             <button
               type="button"
               className="btn primary"
-              // Only the transient/structural refusals are a real `disabled`:
-              // they need no explanation and `aria-busy` already narrates the
-              // first. A ROLE refusal stays focusable so its reason is
-              // reachable.
-              disabled={
-                busy ||
-                choiceCount === 0 ||
-                (customSelected && customText.trim() === "")
-              }
+              // Ruling 147: only a request in flight is a real `disabled` here.
+              // An empty directive is REFUSED below instead, in a sentence; a
+              // ROLE refusal stays focusable so its reason is reachable.
+              disabled={busy}
               aria-disabled={blockReason !== null || undefined}
               aria-describedby={blockReason ? BLOCK_REASON_ID : undefined}
               aria-busy={busy}
@@ -1280,7 +1304,14 @@ export function DecisionPacket({
                 // The custom choice resolves with the typed directive — it
                 // never accepts, archives or merges, so no ceremony interposes.
                 if (customSelected) {
-                  if (customText.trim()) onResolveCustom(customText);
+                  if (customText.trim()) {
+                    onResolveCustom(customText);
+                  } else {
+                    // Ruling 147: refuse in place, name the field, and never
+                    // let the attempt become a request.
+                    setRefused((n) => n + 1);
+                    customRef.current?.focus();
+                  }
                   return;
                 }
                 // The packet's one-way halves ask first (rulings 20/53), each

@@ -17,7 +17,7 @@ import { useOrgAction, type OrgActionData } from "./use-org-action";
  * validation, and a "not validated" / "validation failed" pill for
  * placeholder or broken tokens (seed's akin-ozer connection ships
  * unvalidated on purpose). Add/replace run the REAL phase-7 validator —
- * failure copy renders in the modal's `.cred-warn` and nothing is saved.
+ * failure copy renders in the modal's `.form-err` and nothing is saved.
  */
 
 // Owner ruling 2026-07-25: the required set is what Viberr's own writes use —
@@ -190,7 +190,7 @@ function ConnectionModal({
         </div>
       </div>
       {err && (
-        <div className="cred-warn">
+        <div className="form-err">
           <Icon name="alert" />
           {err}
         </div>

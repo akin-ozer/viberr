@@ -317,6 +317,25 @@ describe("NotificationsPage", () => {
     );
   });
 
+  it("ruling 148: a row with no sender names none, rather than a '−'", () => {
+    const senderless = ITEMS.map((n) =>
+      n.id === "n-148-mention" ? { ...n, from: null } : n,
+    );
+    const { container } = renderPage(senderless);
+    const row = [...container.querySelectorAll(".ntf-ev")].find((r) =>
+      r.textContent!.includes("can you take it?"),
+    )!;
+    // The bell popover row for the same notification names no sender either
+    // (UXA-10), and a glyph must not claim the fact the popover omits.
+    expect(row.querySelector(".act-actor")).toBeNull();
+    expect(row.querySelector(".act-sep")).toBeNull();
+    expect(row.textContent).not.toContain("−");
+    // The row still carries its message and its destination.
+    expect(row.querySelector(".keybtn")!.textContent).toBe(
+      "Viberr Core · VIB-148",
+    );
+  });
+
   it("stream rows: day groups, actor line, keybtn navigation, unread treatment", () => {
     const { container, onRead, onOpen } = renderPage();
     const days = [...container.querySelectorAll(".act-day")].map(

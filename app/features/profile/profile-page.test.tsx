@@ -68,7 +68,7 @@ const BASE: ProfileData = {
       methods: { signIn: ["device"], paste: ["api_key", "access_token"] },
     },
   ],
-  prefs: { notifs: DEFAULT_NOTIF_PREFS, motion: "full", tlDefault: "all" },
+  prefs: { notifs: DEFAULT_NOTIF_PREFS, tlDefault: "all" },
 };
 
 let lastSubmit: Record<string, string> | null = null;
@@ -180,11 +180,12 @@ describe("ProfilePage", () => {
     expect(getByText("Notification routing")).toBeTruthy();
     const rows = container.querySelectorAll(".pref-row");
     // 8 routing rows (controller joined, ruling 99; dependencies, ruling 131;
-    // ownership, ruling 140) + 3 appearance rows.
-    expect(rows).toHaveLength(11);
+    // ownership, ruling 140) + 2 appearance rows (theme, timeline default —
+    // ruling 148(c) removed the reduce-motion row).
+    expect(rows).toHaveLength(10);
     const toggles = container.querySelectorAll(".tgl[role='switch']");
-    // 8 category toggles + reduce motion.
-    expect(toggles).toHaveLength(9);
+    // The 8 category toggles; nothing else on the page is a switch now.
+    expect(toggles).toHaveLength(8);
 
     const packets = container.querySelector(
       ".tgl[aria-label='Decision packets for you']",
@@ -202,7 +203,7 @@ describe("ProfilePage", () => {
     expect(queryByText("Decision packets for you notifications off")).toBeNull();
   });
 
-  it("MOUNTS the Appearance panel: theme seg, reduce motion, timeline default", () => {
+  it("MOUNTS the Appearance panel: theme seg and timeline default (ruling 148(c): no motion toggle)", () => {
     const { getByText, queryByText, container } = renderProfile();
     expect(getByText("Appearance & workspace")).toBeTruthy();
 
@@ -215,20 +216,13 @@ describe("ProfilePage", () => {
     fireEvent.click(getByText("Dark"));
     expect(lastTheme).toBe("dark");
 
-    // UI-31: REWRITTEN — this asserted the bug. The toast fired synchronously at
-    // SUBMIT time, before the server answered, and no handler ever read the
-    // `set-motion` / `set-tl-default` result (the shared handler early-returned
-    // unless the intent was `set-notif`), so a failure produced no error, no
-    // rollback of the toggle and no rollback of `data-motion`. The optimistic
-    // DOM/local flip still happens (it must, for a snappy pref), but the toast
-    // now settles on the result — with this fake `submitWith` nothing ever
-    // resolves, so no toast is the CORRECT observation here.
-    const motion = container.querySelector(".tgl[aria-label='Reduce motion']")!;
-    fireEvent.click(motion);
-    expect(lastSubmit).toEqual({ intent: "set-motion", motion: "reduce" });
-    expect(document.documentElement.dataset.motion).toBe("reduce");
-    expect(queryByText("Motion reduced. Pulses and animation paused")).toBeNull();
+    // Ruling 148(c): the "Reduce motion" toggle is gone; the OS preference is
+    // the one reduced-motion signal.
+    expect(container.querySelector(".tgl[aria-label='Reduce motion']")).toBeNull();
+    expect(queryByText("Reduce motion")).toBeNull();
 
+    // UI-31: the toast settles on the result — with this fake `submitWith`
+    // nothing ever resolves, so no toast is the CORRECT observation here.
     fireEvent.click(getByText("Important"));
     expect(lastSubmit).toEqual({ intent: "set-tl-default", tlDefault: "typed" });
     expect(queryByText("Timeline opens on “Important”")).toBeNull();
@@ -244,6 +238,12 @@ describe("ProfilePage", () => {
     // the 14.
     expect(container.querySelectorAll(".rbac-yes")).toHaveLength(14);
     expect(container.querySelectorAll(".rbac-no")).toHaveLength(5);
+    // Ruling 148: each cell says the fact. The check is aria-hidden, so a
+    // glyph-only pair announced nothing at all, and the denied "−" read as a
+    // collapse control in the value slot.
+    expect(container.querySelector(".rbac-yes")!.textContent).toContain("yes");
+    expect(container.querySelector(".rbac-no")!.textContent).toBe("no");
+    expect(container.textContent).not.toContain("−");
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Policy → Human access")).toBeTruthy();
   });
@@ -265,11 +265,12 @@ describe("ProfilePage", () => {
   it("GitHub identity: not-connected card with missing chips and a real Connect button", () => {
     const { getByText } = renderProfile();
     expect(getByText("GitHub identity")).toBeTruthy();
-    expect(getByText("not connected")).toBeTruthy();
     // Ruling 127: `.cred-warn` is no longer unique to this panel — the Agent
     // accounts cards above it use the same class for their unconnected state —
-    // so these assertions are scoped to the GitHub panel rather than the page.
+    // so these assertions are scoped to the GitHub panel rather than the page
+    // (and "not connected" is now every unconnected card's badge, ruling 148).
     const github = githubPanel(getByText);
+    expect(github.textContent).toContain("not connected");
     expect(github.querySelectorAll(".scope-chip.miss")).toHaveLength(2);
     expect(github.querySelector(".cred-warn")).toBeTruthy();
     // MU-1: Connect starts the real OAuth flow via a button (POST to
@@ -303,31 +304,64 @@ describe("ProfilePage", () => {
     });
     expect(container.querySelector(".cred-ok")).toBeTruthy();
     expect(container.querySelectorAll(".scope-chip.miss")).toHaveLength(0);
+    // Ruling 149: disconnecting an identity is destructive, so the control
+    // carries the danger label. Canary: drop `danger` in `profile-page.tsx`.
+    expect(
+      Array.from(container.querySelector(".cred-ok button")!.classList),
+    ).toContain("danger");
     fireEvent.click(container.querySelector(".cred-ok button")!);
     expect(lastSubmit).toEqual({ intent: "github-disconnect" });
   });
 
-  it("Change password panel: client-side validation copy before any submit", () => {
-    const { container, getByText } = renderProfile();
-    expect(getByText("Change password", { selector: "h2" })).toBeTruthy();
-    const inputs = [...container.querySelectorAll("input[type='password']")];
-    expect(inputs).toHaveLength(3);
+  it("ruling 148(b): Change password is a row on the Profile card whose button opens a modal", () => {
+    const { container, getByText, queryByRole } = renderProfile();
+    // No inline three-field form on the page, and no panel of its own.
+    expect(container.querySelectorAll("input[type='password']")).toHaveLength(0);
+    expect(queryByRole("heading", { name: "Change password" })).toBeNull();
+    const row = getByText("Password").closest(".kv-row")!;
+    // The row sits on the Profile card, under the sign-in facts.
+    expect(row.closest(".panel")!.textContent).toContain("Signs in via");
 
+    fireEvent.click(row.querySelector("button")!);
+    const dialog = container.querySelector<HTMLDialogElement>("dialog.modal-card")!;
+    expect(dialog).toBeTruthy();
+    expect(dialog.getAttribute("aria-label")).toBe("Change password");
+    const inputs = [...dialog.querySelectorAll<HTMLInputElement>("input[type='password']")];
+    expect(inputs).toHaveLength(3);
+    const save = dialog.querySelector<HTMLButtonElement>(".modal-foot .btn.primary")!;
+    expect(save.textContent).toBe("Change password");
+
+    // Ruling 147: enabled on an incomplete form, and a submit is REFUSED with
+    // the first empty field marked and focused, no request made.
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    expect(lastSubmit).toBeNull();
+    expect(inputs[0]!.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(inputs[0]);
+    expect(dialog.querySelector(".modal-foot [role='alert']")!.textContent).toContain(
+      "Fill in all three fields",
+    );
+
+    // The two checks the server would also make, refused with the field named.
+    fireEvent.change(inputs[0]!, { target: { value: "current-pw-here" } });
     fireEvent.change(inputs[1]!, { target: { value: "short" } });
     fireEvent.change(inputs[2]!, { target: { value: "short" } });
-    fireEvent.click(getByText("Change password", { selector: "button" }));
+    fireEvent.click(save);
     expect(getByText("New password needs at least 8 characters.")).toBeTruthy();
+    expect(inputs[1]!.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(inputs[1]);
     expect(lastSubmit).toBeNull();
 
     fireEvent.change(inputs[1]!, { target: { value: "long-enough-pw" } });
     fireEvent.change(inputs[2]!, { target: { value: "different-pw!!!" } });
-    fireEvent.click(getByText("Change password", { selector: "button" }));
+    fireEvent.click(save);
     expect(getByText("Passwords don't match.")).toBeTruthy();
+    expect(inputs[2]!.getAttribute("aria-invalid")).toBe("true");
     expect(lastSubmit).toBeNull();
 
-    fireEvent.change(inputs[0]!, { target: { value: "current-pw-here" } });
     fireEvent.change(inputs[2]!, { target: { value: "long-enough-pw" } });
-    fireEvent.click(getByText("Change password", { selector: "button" }));
+    expect(inputs[2]!.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.click(save);
     expect(lastSubmit).toEqual({
       intent: "change-password",
       current: "current-pw-here",

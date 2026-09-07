@@ -315,7 +315,7 @@ function InviteModal({
           ("A user with email … already exists.", an invalid handle, an
           already-whitelisted account). */}
       {err && (
-        <div className="cred-warn" role="alert">
+        <div className="form-err" role="alert">
           <Icon name="alert" />
           {err}
         </div>
@@ -517,7 +517,7 @@ function EditUserModal({
           announced. `role="alert"` is what login.tsx and profile-page.tsx
           already use for exactly this. */}
       {err && (
-        <div className="cred-warn" role="alert">
+        <div className="form-err" role="alert">
           <Icon name="alert" />
           {err}
         </div>
@@ -631,7 +631,7 @@ export function UsersPanel({
           </span>
           <button
             type="button"
-            className="stg-x push"
+            className="icon-btn modal-close"
             aria-label="Dismiss"
             onClick={() => setSetupNotice(null)}
           >
@@ -743,7 +743,13 @@ export function UsersPanel({
               ) : (
                 <button
                   type="button"
-                  className={"stg-x" + (you ? " off" : "")}
+                  // Ruling 149: disabling signs the person out at once and
+                  // locks them out until someone re-enables them, and the
+                  // confirm it opens commits on a `btn danger`. The row's ✕
+                  // takes the destructive hover by position (`:last-child`);
+                  // this control sits before it, so it opts in by name
+                  // (ruling 150(c)).
+                  className={"stg-x destructive" + (you ? " off" : "")}
                   title="Disable user"
                   aria-label={"Disable " + u.name}
                   onClick={() => {
