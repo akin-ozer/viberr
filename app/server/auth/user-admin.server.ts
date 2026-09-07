@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { normalizeHandle } from "~/shared/github-handle";
 import { newId } from "~/shared/ids/new-id.server";
 import { USER_ROLES, type UserRecord, type UserRole } from "~/shared/mapping/user.server";
 import { recordAudit, type AuditActor } from "../audit/audit-recorder.server";
@@ -17,6 +18,7 @@ import {
   findUserById,
   insertUser,
   normalizeEmail,
+  otherEnabledGithubHandleHolders,
   updateUserFields,
   type UserFieldPatch,
 } from "./user-store.server";
@@ -141,6 +143,25 @@ export function updateUser(
       patch.disabled === true);
   if (losesAdmin && countActiveAdmins(db) <= 1) {
     throw AppError.conflict("Cannot demote or disable the last active admin.");
+  }
+
+  // Ruling 154: a handle is unique among ENABLED accounts, and the holder
+  // lookup ignores disabled rows (as the verdict reader does). So enabling a
+  // row whose handle was linked elsewhere in the meantime is the third way to
+  // make `resolveGithubHandle` answer `ambiguous` forever. Refuse and name the
+  // holder: the admin clears one side, then enables.
+  if (patch.disabled === false && existing.disabled && existing.githubHandle) {
+    const holder = otherEnabledGithubHandleHolders(
+      db,
+      normalizeHandle(existing.githubHandle) ?? existing.githubHandle,
+      userId,
+    )[0];
+    if (holder) {
+      throw AppError.conflict(
+        `@${existing.githubHandle} is linked to ${holder.name}, and a GitHub handle counts for one account. ` +
+          `Clear it there, then enable ${existing.name}.`,
+      );
+    }
   }
 
   // Only the fields the caller actually sent reach the UPDATE — an absent key

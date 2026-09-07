@@ -156,7 +156,10 @@ the tabs sit the Audit log card and the run-concurrency control.
   counts as that person's review verdict under ruling 68; normalized to lower case,
   unique among enabled accounts, refused on a GitHub-signed-in account whose handle
   syncs from the provider; audit `org.user.github_handle.set` / `.cleared` with the
-  previous value); change org
+  previous value). The invariant holds at every writer: a GitHub sign-in that carries a
+  handle an admin linked elsewhere takes it, clearing the losing row and auditing
+  `org.user.github_handle.cleared` with the reason, and enabling an account whose handle
+  was linked elsewhere while it was disabled is refused naming the holder; change org
   role; reset password (revokes all sessions); disable/enable (disable revokes
   sessions); remove (prunes memberships, releases tasks, retires the person's agent
   accounts, deletes the identity). Removal runs the vendor's own logout and deletes the

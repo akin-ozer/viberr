@@ -664,10 +664,26 @@ function ProfileGithub({
         ) : (
           <div className="cred-warn">
             <Icon name="alert" />
+            {/* Ruling 154 (pass 35, G35-3): an org admin can link the handle
+                on a deployment where GitHub sign-in IS configured too, so this
+                card can no longer say the approvals go unmatched. The line
+                above already reads "@handle · linked by an org admin". */}
             <span>
-              Not connected. Actions record under your workspace identity
-              only, and your GitHub review approvals can't be matched back to
-              you.
+              {user.githubHandle ? (
+                <>
+                  Not connected. An org admin linked{" "}
+                  <strong>@{user.githubHandle}</strong>, so your approvals on
+                  review pull requests already count as the review verdict.
+                  Connecting GitHub also records your own actions under that
+                  identity.
+                </>
+              ) : (
+                <>
+                  Not connected. Actions record under your workspace identity
+                  only, and your GitHub review approvals can't be matched back
+                  to you.
+                </>
+              )}
             </span>
             <button
               type="button"

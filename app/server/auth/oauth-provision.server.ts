@@ -12,6 +12,7 @@ import {
   findUserById,
   insertUser,
   normalizeEmail,
+  otherEnabledGithubHandleHolders,
   recordUserLogin,
   updateUserFields,
 } from "./user-store.server";
@@ -91,6 +92,39 @@ export function isOAuthWhitelisted(
  * membership for a freshly created OAuth user, resolving its role from the
  * domain allowlist or a claimed GitHub-handle placeholder.
  */
+/**
+ * Ruling 154: write a GitHub handle that a sign-in has just PROVEN, taking it
+ * off any other enabled account that carries it.
+ *
+ * Before pass 35 the column had one writer, so a duplicate was structurally
+ * impossible: two GitHub logins cannot collide. The org admin's link door made
+ * one reachable in the obvious order (an admin links `octocat` to a local
+ * account, the real octocat signs in later), and the verdict reader fails
+ * CLOSED on a duplicate: `resolveGithubHandle` answers `ambiguous` forever and
+ * that person's PR approvals stop counting as the review verdict, with nothing
+ * naming the collision. The provider's own login is the authoritative claim on
+ * a handle, so the admin's guess loses it here and the displacement is audited
+ * on the row that lost it.
+ */
+function claimGithubHandle(
+  db: DatabaseSync,
+  userId: string,
+  handle: string,
+  label: string,
+): void {
+  for (const holder of otherEnabledGithubHandleHolders(db, handle, userId)) {
+    updateUserFields(db, holder.id, { githubHandle: null });
+    recordAudit(db, {
+      action: "org.user.github_handle.cleared",
+      actor: { userId, label },
+      subjectKind: "user",
+      subjectId: holder.id,
+      details: { handle: null, previous: handle, reason: "claimed by a GitHub sign-in" },
+    });
+  }
+  updateUserFields(db, userId, { githubHandle: handle });
+}
+
 export function applyOAuthUser(db: DatabaseSync, user: OAuthUser): void {
   const email = normalizeEmail(user.email);
   const handle = normalizeHandle(user.githubHandle);
@@ -135,7 +169,7 @@ export function applyOAuthUser(db: DatabaseSync, user: OAuthUser): void {
     role,
     idp: provider,
   });
-  if (handle) updateUserFields(db, user.id, { githubHandle: handle });
+  if (handle) claimGithubHandle(db, user.id, handle, email);
   // Ensure the better-auth identity is normalized after the app row is created.
   provisionIdentity(db, {
     id: user.id,
@@ -184,7 +218,7 @@ export function recordSignIn(db: DatabaseSync, userId: string): void {
     .get(userId) as { githubHandle: string | null } | undefined;
   const handle = normalizeHandle(identity?.githubHandle);
   if (handle && handle !== existing.githubHandle) {
-    updateUserFields(db, userId, { githubHandle: handle });
+    claimGithubHandle(db, userId, handle, existing.email);
     recordAudit(db, {
       action: "auth.github_handle.recorded",
       actor: { userId, label: existing.email },

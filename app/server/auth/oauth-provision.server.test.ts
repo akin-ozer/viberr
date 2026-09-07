@@ -2,7 +2,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { whitelistGithubUser } from "../org/org-users.server";
+import { updateOrgUser, whitelistGithubUser } from "../org/org-users.server";
+import { resolveGithubHandle } from "../github/pr-human-approval.server";
 import {
   applyOAuthUser,
   isOAuthWhitelisted,
@@ -252,6 +253,67 @@ describe("applyOAuthUser", () => {
       role: "admin",
       idp: "google",
     });
+  });
+});
+
+/**
+ * Ruling 154 (pass 35, G35-3): `users.github_handle` gained a SECOND writer, so
+ * the "unique among enabled accounts" invariant has to hold at every door, not
+ * just the admin one. The reader fails closed: two enabled rows with the same
+ * handle make `resolveGithubHandle` answer `ambiguous` forever, and that
+ * person's PR approvals stop counting as the review verdict with nothing
+ * naming the collision. The provider's own login is the authoritative claim.
+ *
+ * Canary for both: write the handle with a bare `updateUserFields` again.
+ */
+describe("ruling 154: a GitHub sign-in claims a handle an admin linked elsewhere", () => {
+  const linkHandle = (db: DatabaseSync, userId: string, name: string, email: string, handle: string) =>
+    updateOrgUser(db, { userId, name, email, role: "member", githubHandle: handle }, ACTOR);
+
+  it("provisioning a new GitHub user takes the handle off the admin-linked account", () => {
+    const db = ctx.makeDb();
+    insertUser(db, { id: "u_maya", email: "maya@viberr.dev", name: "Maya Lin", role: "member" });
+    linkHandle(db, "u_maya", "Maya Lin", "maya@viberr.dev", "octocat");
+    expect(resolveGithubHandle(db, "octocat")).toMatchObject({ kind: "found", userId: "u_maya" });
+
+    applyOAuthUser(db, {
+      id: "ba_octocat",
+      email: "octocat@real.dev",
+      name: "The Octocat",
+      githubHandle: "OctoCat",
+      provider: "github",
+    });
+
+    expect(resolveGithubHandle(db, "octocat")).toMatchObject({
+      kind: "found",
+      userId: "ba_octocat",
+    });
+    expect(findUserByEmail(db, "maya@viberr.dev")?.githubHandle ?? null).toBeNull();
+    const [cleared] = listAuditEvents(db, { action: "org.user.github_handle.cleared" });
+    expect(cleared).toMatchObject({
+      subjectId: "u_maya",
+      details: { previous: "octocat", reason: "claimed by a GitHub sign-in" },
+    });
+  });
+
+  it("a repeat sign-in that mirrors the provider handle takes it off the other account too", () => {
+    const db = ctx.makeDb();
+    insertUser(db, { id: "u_selin", email: "selin@viberr.dev", name: "Selin", role: "member", idp: "local" });
+    insertUser(db, { id: "u_omar", email: "omar@viberr.dev", name: "Omar Reyes", role: "member" });
+    linkHandle(db, "u_omar", "Omar Reyes", "omar@viberr.dev", "selin-aksoy");
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt", "githubHandle")
+       VALUES (?, ?, ?, 1, ?, ?, ?)`,
+    ).run("u_selin", "Selin", "selin@viberr.dev", now, now, "Selin-Aksoy");
+
+    recordSignIn(db, "u_selin");
+
+    expect(resolveGithubHandle(db, "selin-aksoy")).toMatchObject({
+      kind: "found",
+      userId: "u_selin",
+    });
+    expect(findUserByEmail(db, "omar@viberr.dev")?.githubHandle ?? null).toBeNull();
   });
 });
 

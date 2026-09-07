@@ -22,6 +22,7 @@ import {
   insertUser,
   listUsers,
   normalizeEmail,
+  otherEnabledGithubHandleHolders,
   updateUserFields,
 } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -254,17 +255,7 @@ function otherHandleHolder(
   handle: string,
   exceptUserId: string,
 ): { id: string; name: string } | null {
-  // SAFETY: both selected columns are TEXT NOT NULL on `users`
-  // (0001_baseline.sql), and `get` returns at most one object.
-  const row = db
-    .prepare(
-      `SELECT id, name FROM users
-        WHERE lower(github_handle) = ? AND disabled = 0 AND id <> ?
-        ORDER BY id ASC
-        LIMIT 1`,
-    )
-    .get(handle, exceptUserId) as { id: string; name: string } | undefined;
-  return row ?? null;
+  return otherEnabledGithubHandleHolders(db, handle, exceptUserId)[0] ?? null;
 }
 
 /**

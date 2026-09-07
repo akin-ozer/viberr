@@ -176,6 +176,35 @@ export function updateUserFields(
   return findUserById(db, id);
 }
 
+/**
+ * Ruling 154: the still-enabled accounts, other than `exceptUserId`, that carry
+ * this GitHub handle.
+ *
+ * `users.github_handle` gained a second writer in pass 35 (an org admin links
+ * the handle of a local or Google account), and the verdict reader
+ * (`resolveGithubHandle`) fails CLOSED on a duplicate: two enabled rows with
+ * the same handle means every GitHub approval by that person is `ambiguous`
+ * forever. So this is the one query every writer of the column asks first, in
+ * one home rather than one per door. `handle` must already be normalized
+ * (`normalizeHandle`); a disabled row is not counted, mirroring the reader's
+ * own `disabled = 0` filter.
+ */
+export function otherEnabledGithubHandleHolders(
+  db: DatabaseSync,
+  handle: string,
+  exceptUserId: string,
+): { id: string; name: string }[] {
+  // SAFETY: both selected columns are TEXT NOT NULL on `users`
+  // (0001_baseline.sql), so every row carries both.
+  return db
+    .prepare(
+      `SELECT id, name FROM users
+        WHERE lower(github_handle) = ? AND disabled = 0 AND id <> ?
+        ORDER BY id ASC`,
+    )
+    .all(handle, exceptUserId) as { id: string; name: string }[];
+}
+
 /** Stamps last_login_at (successful credential or OAuth login). */
 export function recordUserLogin(db: DatabaseSync, id: string): void {
   db.prepare(`UPDATE users SET last_login_at = ? WHERE id = ?`).run(
