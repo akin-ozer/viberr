@@ -651,11 +651,17 @@ export function WorkflowRules({
               )}
             </>
           )}
+          {/* Ruling 151 (pass 35, F35-2): the boundary below is the contract
+              every actor answers to, the operator included. This sentence used
+              to say the opposite (a Direct grant "crosses them itself"), which
+              the engine now refuses outright. */}
           The per-transition <strong>Human approval / Human only</strong>{" "}
-          boundaries below apply to <strong>human</strong> actors; an operator
-          granted <em>Direct</em> stage transitions crosses them itself, so treat
-          those settings as the rule for people, not for a direct-capability
-          operator.
+          boundaries below bind every actor, the operator included: a{" "}
+          <em>Direct</em> stage-transitions grant crosses{" "}
+          <strong>Auto-advance</strong> boundaries only, a{" "}
+          <strong>Human approval</strong> boundary always files a recommendation
+          for a person to apply, and a <strong>Human only</strong> boundary is
+          refused to the operator.
         </span>
       </div>
     </div>

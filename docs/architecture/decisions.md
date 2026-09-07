@@ -2952,9 +2952,11 @@ by rewriting those paragraphs:*
     moves on a failing task (R7-4) are unchanged. `transitionStage` enforces the same
     rule for any operator-authorized caller, so a `task.transition` row with `by:
     operator` and `boundary: approval` can never be written again. The full-autonomy
-    notice, the profile modal hint and the `transition_stage` tool text say so.
+    notice, the profile modal hint, the Policy page's own closing note and the
+    `transition_stage` tool text say so.
     (`task-actions.server.ts` `transitionStage`, `operator-actions.server.ts`
-    `operatorTransitionStage`, `operator-toolkit.server.ts`, `create-profile-modal.tsx`.)
+    `operatorTransitionStage`, `operator-toolkit.server.ts`, `create-profile-modal.tsx`,
+    `policy-page.tsx`.)
 
 152. **Coordination cost is a product cost (owner, 2026-09-06, Q35-5 and Q35-15; G35-4,
     G35-5).** **(a)** An operator turn may cross consecutive `auto` boundaries in one turn:
@@ -3012,7 +3014,11 @@ by rewriting those paragraphs:*
     The handle is lowered, must be a GitHub username, is unique among enabled accounts
     (a duplicate is refused naming its holder, since the verdict path fails closed on
     one) and the change is audited (`org.user.github_handle.set` / `.cleared` with the
-    previous value). A person cannot set their own handle, because the verdict path
+    previous value). Every writer of the column keeps that invariant, not just the admin
+    door: a GitHub sign-in is the authoritative claim on a handle, so it takes one an
+    admin linked elsewhere and the losing row is cleared and audited with the reason;
+    enabling an account whose handle was linked elsewhere while it was disabled is
+    refused naming the holder. A person cannot set their own handle, because the verdict path
     counts approvals by it; their profile shows an admin-linked handle as
     `@handle · linked by an org admin`. The `unlinked_handle` refusal names both doors.
 
@@ -3020,7 +3026,8 @@ by rewriting those paragraphs:*
     goal link has started a task, the task's `blockedBy` is the wait and the goal file's
     `links[].blockedBy` mirrors it on every change (human, controller, operator or engine
     release), so a retried link is born on the wait the record last held. `edit_link` on an
-    active link may change `blockedBy` only, forwarded to the task's writer. Live, a
+    active link may change `blockedBy` only, forwarded to the task's writer after the
+    chain's own order rules have passed (the task's writer does not carry them). Live, a
     controller `update_task {blockedBy: []}` released KNC-3 while `goal-3` link 1 kept its
     declared `goal-2 link 6` and the Goals panel printed "waits on" for a task that was
     running; the controller saw the stale record and `edit_link` refused it as active.
