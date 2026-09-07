@@ -118,8 +118,9 @@ export type BackendQuotaExhaustion = z.infer<typeof exhaustionSchema>;
  * fine ten minutes after a run had died on it. Same shape as
  * exhaustion: derived from the failed run, carrying its id and the provider's
  * own sentence; retired by the next run that COMPLETES on the backend (the real
- * run is the re-probe) and by nothing else — a dead credential does not heal
- * with time.
+ * run is the re-probe) or by the person it names changing that credential
+ * (ruling 165, `retireBackendRefusalsFor`), and by nothing else — a dead
+ * credential does not heal with time.
  */
 const credentialRefusalSchema = z.object({
   ...principalFields,
@@ -138,16 +139,19 @@ export interface BackendQuotaRow {
   reading: BackendRateLimitReading | null;
   /**
    * F32-4: set while the last thing this backend told us was "your credential
-   * is not accepted". Cleared only by a run that completes on the backend.
+   * is not accepted". Cleared by a run that completes on the backend, or by the
+   * person it names changing their credential on it (ruling 165).
    */
   credentialRefused: BackendCredentialRefusal | null;
   /**
    * D5: set while the last thing this backend told us was "you are over your
    * limit". Cleared by the only honest re-probe there is — a real run that
-   * completes (the same rule model availability uses, ruling 19) — and dropped
-   * by the reader once the provider's own reset instant has passed (plus a
-   * grace window for a prose-derived one) or, for a record that named no reset
-   * at all, once it is older than `UNDATED_EXHAUSTION_TTL_MS`.
+   * completes (the same rule model availability uses, ruling 19) — by the
+   * person it names changing their credential on the backend (ruling 165), by
+   * the packet option that states the window has reset (ruling 152(c)), and
+   * dropped by the reader once the provider's own reset instant has passed
+   * (plus a grace window for a prose-derived one) or, for a record that named
+   * no reset at all, once it is older than `UNDATED_EXHAUSTION_TTL_MS`.
    */
   exhausted: BackendQuotaExhaustion | null;
 }
@@ -456,6 +460,54 @@ export function clearBackendCredentialRefusal(
     deleteSetting(db, `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`);
   } catch (error) {
     logger.warn("backend credential refusal not cleared", {
+      backend,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
+ * Ruling 165: the person the records name changed their credential slot on
+ * this backend — a confirmed sign-in, a pasted key, a disconnect, an account
+ * removal — so an exhaustion or credential refusal observed on the PREVIOUS
+ * credential is no longer evidence about the one that bills the next run.
+ * Live (2026-09-07) a Claude card kept "usage window spent · reopens 21:30"
+ * after its owner signed the backend into another account: the runs went
+ * through and the notice contradicted them, because a completed run was the
+ * record's only retirement short of the instant the OLD account had named.
+ *
+ * Scoped like the dispatch hold (ruling 146): only a record naming THIS person
+ * is retired. A record naming somebody else, or nobody (a row older than
+ * ruling 130(d)), is untouched — nothing here knows whose account it was
+ * about. Signing back into the SAME spent account retires it too: Viberr never
+ * stores the vendor identity behind a sign-in (ruling 127), so it cannot tell,
+ * and one refused run re-records the window, which is cheaper than a notice
+ * that lies about a new account. The dispatch hold rests on the same record,
+ * so it lifts with it: the next run on the new credential is the real probe.
+ *
+ * Best-effort, like every writer here: a credential change must never fail on
+ * observation housekeeping.
+ */
+export function retireBackendRefusalsFor(
+  db: DatabaseSync,
+  backend: QuotaBackend,
+  credentialUserId: string,
+): void {
+  try {
+    const exhausted = getSetting(db, `${EXHAUSTED_KEY_PREFIX}${backend}`, exhaustionSchema);
+    if (exhausted?.credentialUserId === credentialUserId) {
+      deleteSetting(db, `${EXHAUSTED_KEY_PREFIX}${backend}`);
+    }
+    const refused = getSetting(
+      db,
+      `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`,
+      credentialRefusalSchema,
+    );
+    if (refused?.credentialUserId === credentialUserId) {
+      deleteSetting(db, `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`);
+    }
+  } catch (error) {
+    logger.warn("backend refusal records not retired on credential change", {
       backend,
       err: error instanceof Error ? error : new Error(String(error)),
     });

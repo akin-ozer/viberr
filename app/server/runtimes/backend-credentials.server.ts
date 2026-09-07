@@ -12,6 +12,7 @@ import {
   sealSecret,
 } from "~/server/secrets/secret-box.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { retireBackendRefusalsFor } from "./backend-quota.server";
 import { filteredSpawnEnv, type RealBackend } from "./runtime-registry.server";
 import {
   claudeLoginCredentialPath,
@@ -337,6 +338,15 @@ interface VendorDeps {
  * deleted FIRST: leaving a live sign-in file behind would leave a credential on
  * this server that no row accounts for, and the next `runCredentialFor` would
  * happily bill it.
+ *
+ * Ruling 165: the refusal Viberr observed on the slot goes with it, row or no
+ * row. A spent window or a rejected credential is evidence about the account
+ * that was billed, and whatever takes the slot next is not that account; left
+ * standing, the Profile card kept "usage window spent · reopens 21:30" over a
+ * freshly connected account whose runs were going through, and the dispatch
+ * hold parked the new account until the old one's instant. Retired before the
+ * row is touched, and without a row to touch too, so a record that outlived an
+ * earlier disconnect is retired by the connect that follows it.
  */
 async function clearExistingCredential(
   db: DatabaseSync,
@@ -345,6 +355,7 @@ async function clearExistingCredential(
   existing: BackendCredentialRow | null,
   deps: VendorDeps,
 ): Promise<void> {
+  retireBackendRefusalsFor(db, backend, userId);
   if (!existing) return;
   if (existing.kind === "login") {
     if (deps.binary) {
@@ -554,7 +565,8 @@ function trimDetail(detail: Record<string, string>): Record<string, string> {
 /**
  * Called by the sign-in driver the moment the vendor binary reports success:
  * records the `login` row (no secret — the binary owns the credential in the
- * person's home) and retires any pasted key that held the slot.
+ * person's home), retires any pasted key that held the slot, and retires the
+ * refusal Viberr observed on whatever held it (ruling 165).
  *
  * Synchronous, and deliberately does NOT run a vendor logout for a previous
  * `login` row: the binary has just written a fresh credential into that very
@@ -602,6 +614,10 @@ export function recordBackendLogin(
     method,
     userId: actor.userId,
   });
+  // Ruling 165: this writer bypasses `clearExistingCredential` on purpose (no
+  // vendor logout over a credential the binary has just written), so it
+  // retires the refusal observed on the previous account itself.
+  retireBackendRefusalsFor(db, backend, actor.userId);
   const row = getBackendCredential(db, actor.userId, backend);
   if (!row) throw AppError.internal(`backend credential ${id} vanished after insert`);
   return row;

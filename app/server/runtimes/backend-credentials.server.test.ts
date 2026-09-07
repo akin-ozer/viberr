@@ -30,6 +30,13 @@ import {
   type BackendCredentialActor,
   type BackendCredentialRow,
 } from "./backend-credentials.server";
+import {
+  latestBackendRateLimits,
+  recordBackendCredentialRefusal,
+  recordBackendQuotaExhaustion,
+  type BackendCredentialRefusal,
+  type BackendQuotaExhaustion,
+} from "./backend-quota.server";
 import { CREDENTIAL_ENV_RE } from "./runtime-registry.server";
 import {
   claudeLoginCredentialPath,
@@ -697,5 +704,111 @@ describe("no reader hands out a box", () => {
     // The health answer every surface renders is just as clean.
     const health = userBackendHealth(db, actor.userId, "claude", { dataRoot });
     expect(JSON.stringify(health)).not.toContain(CLAUDE_KEY);
+  });
+});
+
+// ------------------------------------------- refusals on the previous account
+
+/**
+ * Ruling 165: a credential change retires the refusal Viberr observed on the
+ * credential it replaces. Live (2026-09-07) the Claude card kept "usage window
+ * spent · reopens 21:30" after its owner signed the backend into another
+ * account: the runs went through and the notice contradicted them, because a
+ * completed run was the record's only retirement short of the instant the OLD
+ * account had named. Driven through the real writers, so what is asserted is
+ * the seam each of them shares, not the store function alone.
+ *
+ * Canaries: drop `retireBackendRefusalsFor` from `clearExistingCredential` and
+ * the key and disconnect cases fail; drop it from `recordBackendLogin` and the
+ * sign-in case fails.
+ */
+describe("a credential change retires the refusal observed on the previous one (ruling 165)", () => {
+  function spentWindow(userId: string, label = "Arda Test"): BackendQuotaExhaustion {
+    return {
+      credentialUserId: userId,
+      credentialLabel: label,
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+      resetsAtPrecision: "exact",
+      providerText: "Claude AI usage limit reached|1780000000",
+      runId: "run_spent",
+      observedAt: new Date().toISOString(),
+    };
+  }
+  function rejected(userId: string | null): BackendCredentialRefusal {
+    return {
+      credentialUserId: userId,
+      credentialLabel: userId ? "Arda Test" : null,
+      providerText:
+        "The account's organization does not allow Claude Code (oauth_org_not_allowed).",
+      runId: "run_refused",
+      observedAt: new Date().toISOString(),
+    };
+  }
+  function observed(backend: "claude" | "codex") {
+    return latestBackendRateLimits(db).find((row) => row.backend === backend)!;
+  }
+
+  it("a confirmed sign-in retires both records on that backend, and that backend only", () => {
+    recordBackendQuotaExhaustion(db, "claude", spentWindow(actor.userId));
+    recordBackendCredentialRefusal(db, "claude", rejected(actor.userId));
+    recordBackendQuotaExhaustion(db, "codex", spentWindow(actor.userId));
+
+    recordBackendLogin(db, actor, "claude", "claudeai", { email: "other@example.com" });
+
+    expect(observed("claude")).toMatchObject({ exhausted: null, credentialRefused: null });
+    expect(observed("codex").exhausted).not.toBeNull();
+  });
+
+  it("a pasted key the vendor accepts retires them; one it rejects leaves them standing", async () => {
+    recordBackendQuotaExhaustion(db, "codex", spentWindow(actor.userId));
+    recordBackendCredentialRefusal(db, "codex", rejected(actor.userId));
+
+    await expect(
+      setBackendApiKey(db, actor, "codex", "api_key", OPENAI_KEY, {
+        fetchImpl: fakeProvider(401).fetchImpl,
+        dataRoot,
+      }),
+    ).rejects.toThrow();
+    // A key the vendor refused connected nothing, so the old account's
+    // verdict still stands.
+    expect(observed("codex").exhausted).not.toBeNull();
+    expect(observed("codex").credentialRefused).not.toBeNull();
+
+    await setBackendApiKey(db, actor, "codex", "api_key", OPENAI_KEY, {
+      fetchImpl: fakeProvider(200).fetchImpl,
+      dataRoot,
+    });
+    expect(observed("codex")).toMatchObject({ exhausted: null, credentialRefused: null });
+  });
+
+  it("a disconnect retires them: the account they were about is gone", async () => {
+    ensureUserBackendHome(actor.userId, "codex", dataRoot);
+    recordBackendLogin(db, actor, "codex", "device", {});
+    recordBackendQuotaExhaustion(db, "codex", spentWindow(actor.userId));
+
+    await disconnectBackend(db, actor, "codex", {
+      binary: vendors.binaries.codex,
+      dataRoot,
+    });
+
+    expect(observed("codex").exhausted).toBeNull();
+    expect(getBackendCredential(db, actor.userId, "codex")).toBeNull();
+  });
+
+  it("ruling 146: another person's record, and one naming nobody, survive this person's change", () => {
+    const murat = insertUser(db, {
+      id: "u_murat",
+      email: "murat@viberr.dev",
+      name: "Murat Test",
+      role: "member",
+    });
+    recordBackendQuotaExhaustion(db, "claude", spentWindow(murat.id, "Murat Test"));
+    recordBackendCredentialRefusal(db, "claude", rejected(null));
+
+    recordBackendLogin(db, actor, "claude", "console", {});
+
+    expect(observed("claude").exhausted?.credentialUserId).toBe(murat.id);
+    expect(observed("claude").credentialRefused).not.toBeNull();
+    expect(observed("claude").credentialRefused?.credentialUserId).toBeNull();
   });
 });

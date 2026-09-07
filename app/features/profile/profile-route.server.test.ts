@@ -461,6 +461,44 @@ describe("/profile agent accounts (ruling 127)", () => {
     }
   });
 
+  it("ruling 165: the viewer's own notice is gone once they connect a different account on that backend", async () => {
+    // Live (2026-09-07): "usage window spent · reopens 21:30" stayed on the
+    // Claude card after the owner signed it into another account, while the
+    // runs on the new account went through. Canary: drop the
+    // `retireBackendRefusalsFor` call from `recordBackendLogin`.
+    const quota = await import("~/server/runtimes/backend-quota.server");
+    const { recordBackendLogin } = await import(
+      "~/server/runtimes/backend-credentials.server"
+    );
+    quota.recordBackendQuotaExhaustion(app.db, "claude", {
+      credentialUserId: ardaId,
+      credentialLabel: "Arda Test",
+      resetsAt: Math.floor((Date.now() + 60 * 60_000) / 1000),
+      resetsAtPrecision: "exact",
+      providerText: "Claude AI usage limit reached|1780000000",
+      runId: "run_spent",
+      observedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+    });
+    try {
+      expect((await backendsOf(ardaId))[0]!.lastRefusal?.kind).toBe("quota");
+      recordBackendLogin(
+        app.db,
+        { userId: ardaId, label: "arda@viberr.dev" },
+        "claude",
+        "claudeai",
+        { email: "another@example.com" },
+      );
+      expect((await backendsOf(ardaId))[0]!.lastRefusal).toBeNull();
+    } finally {
+      quota.clearBackendQuotaExhaustion(app.db, "claude");
+      app.db
+        .prepare(
+          `DELETE FROM user_backend_credentials WHERE user_id = ? AND backend = 'claude'`,
+        )
+        .run(ardaId);
+    }
+  });
+
   it("ships both backends unconnected, with no secret and no box in the payload", async () => {
     const backends = await backendsOf(murId);
     expect(backends.map((b) => b.backend)).toEqual(["claude", "codex"]);

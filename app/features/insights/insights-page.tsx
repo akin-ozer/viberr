@@ -302,8 +302,9 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
           // F32-4 (pass 32): a REJECTED CREDENTIAL outranks every other state —
           // no run on this backend can start until someone fixes it, whatever
           // the utilization window says. It is its own record (the failed run
-          // + the provider's sentence) and is cleared only by a run that
-          // completes on the backend; the row says exactly that.
+          // + the provider's sentence) and is cleared by a run that completes
+          // on the backend or by the named account being replaced or
+          // disconnected (ruling 165); the row says exactly that.
           if (credentialRefused) {
             return (
               <li key={backend} className="bar-row">
@@ -328,7 +329,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                         : undefined
                     }
                   >
-                    from a refused run · clears when a run on this backend completes
+                    from a refused run · clears when a run on this backend completes or the account changes
                   </span>
                 </span>
               </li>
@@ -471,8 +472,9 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
         means new runs may start failing when the window is exhausted. A row
         reading &ldquo;usage limit reached&rdquo; is derived from a run the
         provider refused, not from a reported utilization figure; it clears as
-        soon as a run on that backend completes, when the window it names has
-        passed, or when the backend reports a newer reading.
+        soon as a run on that backend completes, when the account it names is
+        disconnected or replaced, when the window it names has passed, or when
+        the backend reports a newer reading.
       </p>
     </section>
   );
