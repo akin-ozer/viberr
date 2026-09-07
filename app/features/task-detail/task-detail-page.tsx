@@ -14,6 +14,7 @@ import { ContinuityRecoveryPanel } from "./continuity-recovery";
 import { DecisionPacket } from "./decision-packet";
 import type {
   DeployedSpecialistView,
+  LiveAgentRun,
   OwnerAction,
   TaskMemberView,
 } from "./execution-profile";
@@ -75,7 +76,11 @@ import {
 type PendingAccept =
   | { mode: Extract<AcceptCeremonyMode, "accept" | "force" | "complete-merge"> }
   | { mode: "apply-recommendation"; recId: string; label: string }
-  | { mode: "packet"; option: number; note: string; label: string }
+  /** Ruling 164 (pass 35, F35-14): `force` marks the `force_accept` option,
+   *  whose resolution runs the admin override — so the ceremony opens in its
+   *  FORCE form (the skipped stages, the bypassed refusal, the danger confirm)
+   *  while the click still travels as a packet resolution. */
+  | { mode: "packet"; option: number; note: string; label: string; force?: true }
   | { mode: "stage-move"; toStageId: string; label: string };
 
 /**
@@ -111,7 +116,7 @@ export function TaskDetailPage({
   operatorBackend,
   operatorAutonomy,
   runPrincipal,
-  activeAgentProfileIds,
+  liveAgentRuns,
   runsVisible = true,
   timelineHasMore,
   timelineRemaining,
@@ -164,8 +169,9 @@ export function TaskDetailPage({
    *  what those accounts can run. `null` = unowned, so nothing runs here.
    *  P11-41's "would fail fast" gate, answered per person. */
   runPrincipal: TaskRunPrincipalView | null;
-  /** Profile ids of engagements with a live run (per-agent gating). */
-  activeAgentProfileIds: string[];
+  /** The engagements' live (queued/running) runs (per-agent gating, and the
+   *  engaged-agent card's "queued"/"running…" word). */
+  liveAgentRuns: LiveAgentRun[];
   /** UI-30: false → the viewer is not a project member, so `lines`/`raw`/`sid`
    *  were withheld by the loader and the console renders an honest gate notice
    *  instead of an empty panel. */
@@ -293,6 +299,12 @@ export function TaskDetailPage({
   // card blocks it with the reason instead of 403ing on click (same treatment
   // as edit_goal / accept_completion).
   const canArchiveViaPacket = roleCan(role, "approve-transition");
+  // Ruling 164 (pass 35, F35-14): a `force_accept` packet option performs the
+  // admin override itself, whose tier is `force-accept-completion` (admin) —
+  // NOT the packet-resolver set and not the archive tier. Same treatment as its
+  // siblings: the card blocks the option with the reason instead of letting a
+  // maintainer click into the server's refusal.
+  const canForceAcceptViaPacket = roleCan(role, "force-accept-completion");
 
   // F7-UI1: "operator active" reflects a LIVE operator run (queued/running),
   // never mere attachment. The runtime projection already carries kind+state.
@@ -316,6 +328,13 @@ export function TaskDetailPage({
   // action has to replay — a recommendation id, a packet option + its note, or
   // the stage the human picked out of the Current-state menu (F19-37).
   const [confirmAccept, setConfirmAccept] = useState<PendingAccept | null>(null);
+  // Ruling 164 (pass 35, F35-14): the pending decision is the `force_accept`
+  // option, so the one ceremony opens in its force form (heading, bypass row,
+  // danger confirm) while the confirmed click still travels as a packet
+  // resolution. Derived once: the dialog reads it for BOTH the mode it renders
+  // and the refusal that mode is allowed to bypass.
+  const forcedCeremony =
+    confirmAccept?.mode === "packet" && confirmAccept.force === true;
   // D6: two consequential single-click actions gained a confirm — interrupting a
   // live run (discards its in-flight, uncommitted work) and dismissing an
   // operator recommendation (withdraws a governed, audited decision). Both were
@@ -479,6 +498,21 @@ export function TaskDetailPage({
       });
       return;
     }
+    // Ruling 164 (pass 35, F35-14): a `force_accept` option runs the admin
+    // override, and the server refuses a resolution that carries no echo of it
+    // (`forceAcceptCompletion` holds the same ceremony the button does). Open
+    // the FORCE form of the one dialog: it names the stages the close skips and
+    // the refusal it bypasses, which a title alone never did.
+    if (option?.kind === "force_accept") {
+      setConfirmAccept({
+        mode: "packet",
+        option: optionIndex,
+        note,
+        label: option.t,
+        force: true,
+      });
+      return;
+    }
     submitResolve(optionIndex, note);
   };
 
@@ -619,67 +653,28 @@ export function TaskDetailPage({
       tabIndex={-1}
       data-screen-label={"Task " + task.key}
     >
-      {/* U7 (D2's other half): the side column is FIRST in the DOM.
-          UX spec §Breakpoint Strategy asks for a reading order — "the task
-          detail's side-by-side regions stack, preserving reading order: current
-          state, latest packet, next action, then the timeline" — and reading
-          order is source order, which is what a screen reader announces and
-          what Tab walks. Pass 20 fixed only the paint (`order: -1` at 1100px)
-          and recorded the departure in a CSS comment that cited this very
-          sentence; below that width a sighted keyboard user then SAW "Accept
-          completion → Done" at the top and reached it LAST, after every
-          timeline entry (WCAG 2.2 SC 1.3.2 / 2.4.3). The desktop layout is
-          unchanged: `.detail` is a grid and both columns name their cell in
-          app.css, so main still paints left of side at any source order. */}
-      <div className="detail-side">
-        <GithubTrace
-          task={task}
-          githubHost={githubHost}
-          acceptance={acceptance}
-          reconciledAt={githubReconciledAt}
-          checkedAt={githubCheckedAt}
-          {...(onCompleteMerge
-            ? { onCompleteMerge: () => setConfirmAccept({ mode: "complete-merge" }) }
-            : {})}
-          {...(onForceAccept
-            ? { onForceAccept: () => setConfirmAccept({ mode: "force" }) }
-            : {})}
-          {...(canDeliver && !taskClosed ? { onDeliver } : {})}
-          delivering={deliverBusy}
-          merging={runBusy}
-        />
-        <CurrentStatePanel
-          task={task}
-          stage={stage}
-          meId={me.id}
-          myRole={myRole}
-          archived={archived}
-          acceptance={acceptance}
-          ownerBusy={ownerBusy}
-          onOwner={onOwner}
-          onRelease={() => setReleasing(true)}
-          onArchive={() => (archived ? submitArchive(false) : setArchiving(true))}
-          onAccept={() => setConfirmAccept({ mode: "accept" })}
-          onTransition={onTransition}
-          transitionBusy={transitionBusy}
-          acceptBusy={acceptBusy}
-          dispositionBusy={archiveBusy}
-        />
-        <TaskDetailsPanel
-          task={task}
-          canEdit={canEditMeta}
-          labelSuggestions={labelSuggestions}
-        />
-        <PolicyPanel
-          projectSlug={task.projectSlug}
-          myRole={myRole}
-          stages={task.stages}
-          ownsTask={isOwner}
-          acceptanceAuthority={acceptanceAuthority}
-        />
-      </div>
-
-      <div className="detail-main">
+      {/* U35-2 (pass 35): three regions, and source order IS the reading order
+          at every width, so a screen reader, the Tab key and the one-column
+          phone stack all meet the page in the same sequence. Below 1100px the
+          grid placement drops (app.css) and the DOM order is the stack:
+            1. `.detail-head`: the task's name and goal, then the open decision
+               packet, the page's most important object. Before this the side
+               rail came first (U7 chose it for "current state, latest packet,
+               next action, then the timeline"), but the title and the packet
+               lived in the main column, so on a 390px viewport a person read
+               the GitHub card, Current state, Details and Permissions before
+               the task's name (y=1659 on KNC-6) or the question it asked
+               (y=2070).
+            2. `.detail-side`: Current state first (it carries the next action
+               and the acceptance button), then the GitHub trace, Details and
+               Permissions.
+            3. `.detail-main`: the live run, diagnostics, continuity,
+               recommendations, the run controls, the console and the timeline.
+          On desktop `.detail-head` spans both columns and the two columns
+          keep their cells by PLACEMENT (`grid-column`/`grid-row` in app.css),
+          never by `order`, which U7 found re-splits what the eye and the focus
+          ring see (WCAG 2.2 SC 1.3.2 / 2.4.3). */}
+      <div className="detail-head">
         <TaskHero
           task={task}
           stage={stage}
@@ -687,36 +682,11 @@ export function TaskDetailPage({
           archived={archived}
           editGoalSignal={editGoalSignal}
           editGoalDraft={editGoalDraft}
+          // F35-6: while a decided edit_goal packet waits, the hero's own Edit
+          // opens with the SAME draft the decided card shows (one mapping
+          // field), not the goal the decision asked to replace.
+          pendingGoalDraft={task.packet?.goalDraft ?? null}
         />
-
-        {runtime.length > 0 ? (
-          <LiveRunPanel
-            runtime={runtime}
-            onViewLogs={onViewLogs}
-            // D6: the button opens a confirm instead of interrupting on the click.
-            onInterrupt={(id) => setConfirmInterrupt(id)}
-            canInterrupt={canInterrupt}
-            interrupting={runBusy}
-          />
-        ) : null}
-
-        <DiagnosticsPanel diagnostics={task.diagnostics} />
-
-        {/* D18 — above the packet, not below it. The Operator Desk order canon
-            names is "current state, execution truth, latest packet, steering
-            actions above timeline depth": degraded continuity is execution
-            TRUTH, so it sits with Diagnostics, ahead of the decision it may
-            well explain. It renders itself away when there is nothing to
-            report. */}
-        <ContinuityRecoveryPanel
-          timeline={task.timeline}
-          runtime={runtime}
-          runsVisible={runsVisible}
-          canRunAgents={canRunAgents}
-          {...(runsVisible ? { onOpenConsole: onViewLogs } : {})}
-          onAsk={() => setAsk((a) => a + 1)}
-        />
-
         {task.packet && (
           <DecisionPacket
             packet={task.packet}
@@ -731,6 +701,11 @@ export function TaskDetailPage({
             // F20-6: discard_branch re-checks the same `approve-transition` tier
             // the archive-with-branch-deletion needs (it destroys commits).
             canDiscardBranch={canArchiveViaPacket}
+            // Ruling 164 (pass 35, F35-14): a `force_accept` option runs the
+            // admin override, and a `move_stage` option runs the stage
+            // picker's move, so each carries that control's own tier.
+            canForceAccept={canForceAcceptViaPacket}
+            canMoveStage={canArchiveViaPacket}
             // UX19-9: what an `archive_task` resolution destroys — the branch
             // its `deleteBranch` variant deletes permanently, and the
             // recommendations the archive withdraws. The same two facts
@@ -749,6 +724,9 @@ export function TaskDetailPage({
                 task.pr && (task.pr.state === "review" || task.pr.state === "accepted")
                   ? task.pr.number
                   : null,
+              // Ruling 161 (U35-8): what origin's branch holds when it is not
+              // this task's work, so the delete-branch row says so.
+              foreignHead: task.foreignHead,
             }}
             onResolve={onResolve}
             onResolveCustom={submitResolveCustom}
@@ -765,6 +743,86 @@ export function TaskDetailPage({
             }}
           />
         )}
+      </div>
+
+      <div className="detail-side">
+        <CurrentStatePanel
+          task={task}
+          stage={stage}
+          meId={me.id}
+          myRole={myRole}
+          archived={archived}
+          acceptance={acceptance}
+          ownerBusy={ownerBusy}
+          onOwner={onOwner}
+          onRelease={() => setReleasing(true)}
+          onArchive={() => (archived ? submitArchive(false) : setArchiving(true))}
+          onAccept={() => setConfirmAccept({ mode: "accept" })}
+          onTransition={onTransition}
+          transitionBusy={transitionBusy}
+          acceptBusy={acceptBusy}
+          dispositionBusy={archiveBusy}
+        />
+        <GithubTrace
+          task={task}
+          githubHost={githubHost}
+          acceptance={acceptance}
+          reconciledAt={githubReconciledAt}
+          checkedAt={githubCheckedAt}
+          {...(onCompleteMerge
+            ? { onCompleteMerge: () => setConfirmAccept({ mode: "complete-merge" }) }
+            : {})}
+          {...(onForceAccept
+            ? { onForceAccept: () => setConfirmAccept({ mode: "force" }) }
+            : {})}
+          {...(canDeliver && !taskClosed ? { onDeliver } : {})}
+          delivering={deliverBusy}
+          merging={runBusy}
+        />
+        <TaskDetailsPanel
+          task={task}
+          canEdit={canEditMeta}
+          labelSuggestions={labelSuggestions}
+        />
+        <PolicyPanel
+          projectSlug={task.projectSlug}
+          myRole={myRole}
+          stages={task.stages}
+          ownsTask={isOwner}
+          acceptanceAuthority={acceptanceAuthority}
+        />
+      </div>
+
+      <div className="detail-main">
+        {runtime.length > 0 ? (
+          <LiveRunPanel
+            runtime={runtime}
+            onViewLogs={onViewLogs}
+            // D6: the button opens a confirm instead of interrupting on the click.
+            onInterrupt={(id) => setConfirmInterrupt(id)}
+            canInterrupt={canInterrupt}
+            interrupting={runBusy}
+          />
+        ) : null}
+
+        <DiagnosticsPanel diagnostics={task.diagnostics} />
+
+        {/* D18: with Diagnostics, ahead of the recommendations and the
+            timeline. The Operator Desk order canon names is "current state,
+            execution truth, latest packet, steering actions above timeline
+            depth": degraded continuity is execution TRUTH, so it sits with
+            Diagnostics. U35-2 moved the open packet into `.detail-head` above
+            every column, so this no longer precedes the decision it may
+            explain; it still precedes every steering action. It renders
+            itself away when there is nothing to report. */}
+        <ContinuityRecoveryPanel
+          timeline={task.timeline}
+          runtime={runtime}
+          runsVisible={runsVisible}
+          canRunAgents={canRunAgents}
+          {...(runsVisible ? { onOpenConsole: onViewLogs } : {})}
+          onAsk={() => setAsk((a) => a + 1)}
+        />
 
         <OperatorRecommendations
           recommendations={recommendations}
@@ -772,6 +830,10 @@ export function TaskDetailPage({
           busy={recBusy}
           onApply={onApplyRec}
           onDismiss={onDismissRec}
+          // Ruling 162: the same gate verdict the sidebar and the accept
+          // dialog read, so an acceptance card never offers a refused click.
+          acceptanceRefusal={acceptance.blockedReason}
+          terminalStageId={terminalStageId}
         />
 
         {/* Scheduling lives INSIDE the two run controls (dynamic-dispatch
@@ -788,7 +850,7 @@ export function TaskDetailPage({
           operatorAutonomy={operatorAutonomy}
           runPrincipal={runPrincipal}
           canRunAgents={canRunAgents}
-          activeAgentProfileIds={activeAgentProfileIds}
+          liveAgentRuns={liveAgentRuns}
           operatorRunActive={operatorRunActive}
           schedules={schedules}
         />
@@ -871,7 +933,17 @@ export function TaskDetailPage({
           workRevisionSha={workRevisionSha}
           noChanges={noChanges}
           // F32-11: the open decision this acceptance withdraws, if any.
-          openPacketTitle={task.packet?.title ?? null}
+          // Ruling 164 + F19-7, applied to the sibling row: a PACKET resolution
+          // (the `accept_completion` option, and the `force_accept` one ruling
+          // 164 added) ANSWERS the open decision, so nothing is withdrawn. The
+          // row used to name that packet and say it "closes unanswered", while
+          // `task.acceptance.forced` recorded `withdrawnPacket: null` — the
+          // disclosure is read after the packet path has cleared it. Only the
+          // direct doors (Accept, Force accept, a recommendation, a stage move)
+          // close a standing decision unanswered.
+          openPacketTitle={
+            confirmAccept.mode === "packet" ? null : (task.packet?.title ?? null)
+          }
           // F20-6 (R20-2): no PR + the completion never claimed no-change → the
           // accept path auto-detects it by re-probing the branch. The dialog
           // states that instead of promising a merge. `noChanges` (the flagged
@@ -886,17 +958,34 @@ export function TaskDetailPage({
           verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
           ceremony={
             "label" in confirmAccept
-              ? { mode: confirmAccept.mode, label: confirmAccept.label }
+              ? {
+                  // Ruling 164: the `force_accept` option is a packet
+                  // resolution that performs the override, so it wears the
+                  // force ceremony and keeps the option's title as its subject.
+                  mode: forcedCeremony ? "force" : confirmAccept.mode,
+                  label: confirmAccept.label,
+                }
               : { mode: confirmAccept.mode }
           }
           blockedReason={
-            confirmAccept.mode === "force"
-              ? (task.blockReason ??
-                acceptance.blockedReason ??
-                (task.packet?.type === "blocked"
-                  ? "An open blocked decision is holding this task."
-                  : null))
-              : // The merge is the SECOND half of an acceptance that already
+            // Ruling 164 + F19-7: the `force_accept` option is a PACKET
+            // resolution, so it clears the packet before the override runs.
+            // `task.blockReason` and `acceptance.blockedReason` both fold in
+            // the open-blocked-packet sentence, and that packet is the one this
+            // very click is answering — printing it under "Bypassing" would name
+            // the decision as the gate it bypasses, tell the admin to resolve
+            // the packet the button resolves, and disagree with the
+            // `task.acceptance.forced` record, which is computed after the
+            // packet is gone. The packet path's own refusal is the honest one.
+            forcedCeremony
+              ? acceptance.blockedReasonViaPacket
+              : confirmAccept.mode === "force"
+                ? (task.blockReason ??
+                  acceptance.blockedReason ??
+                  (task.packet?.type === "blocked"
+                    ? "An open blocked decision is holding this task."
+                    : null))
+                : // The merge is the SECOND half of an acceptance that already
                 // happened (R16-6), so the acceptance gate has nothing left to
                 // say about it — quoting a stale refusal here would read as a
                 // block on a merge nothing is blocking.

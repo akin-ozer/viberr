@@ -60,6 +60,9 @@ function resolveOrgTab(raw: string | null): OrgSettingsTab {
 export interface RunConcurrencyView {
   /** Configured cap (0 = unlimited). */
   cap: number;
+  /** Ruling 152(b): the extra slots operator and controller turns may take
+   *  beyond the cap (one per four of it, minimum one; 0 when the cap is 0). */
+  lane: number;
   /** Runs executing right now. */
   live: number;
   /** Runs waiting on a slot right now. */
@@ -645,6 +648,14 @@ function AuditExportCard({
  * unlimited (the default). A positive N caps live provider processes at N and
  * queues the rest (run-service gate); this control shows the live/queued counts
  * so an admin can see the cap biting. Admin-only, like the whole page.
+ *
+ * Ruling 152(b): a cap also carries a coordination lane (`lane` extra slots for
+ * operator and controller turns), and the sentence under the field says so,
+ * because "capped at 4" alone would make five live runs look like a broken cap.
+ * It prints the `lane` the server derived, never the rule it came from: the
+ * lane is `max(1, ceil(cap / 4))`, so "one extra slot per four" named the wrong
+ * number at every cap that is not a multiple of four (zero at a cap of 2, one
+ * at a cap of 5 where the instance grants two).
  */
 function RunConcurrencyControl({
   runConcurrency,
@@ -721,6 +732,14 @@ function RunConcurrencyControl({
           </button>
           <span className="conc-hint fine sm">0 = unlimited</span>
         </span>
+        {runConcurrency.cap > 0 && (
+          <span className="conc-lane fine sm">
+            Cap {runConcurrency.cap}: up to{" "}
+            {countLabel(runConcurrency.cap, "agent run")} at once, plus{" "}
+            {countLabel(runConcurrency.lane, "slot")} for operator and controller
+            turns so a decision is not stuck behind the builds it is about.
+          </span>
+        )}
         {invalid && (
           <span
             className="form-err"

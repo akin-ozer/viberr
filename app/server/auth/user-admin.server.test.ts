@@ -13,7 +13,13 @@ import {
   resetPassword,
   updateUser,
 } from "./user-admin.server";
-import { findUserByEmail, findUserById, insertUser } from "./user-store.server";
+import {
+  findUserByEmail,
+  findUserById,
+  insertUser,
+  updateUserFields,
+} from "./user-store.server";
+import { resolveGithubHandle } from "../github/pr-human-approval.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -162,6 +168,47 @@ describe("updateUser", () => {
     enableUser(db, user.id, ACTOR);
     expect(findUserById(db, user.id)?.disabled).toBe(false);
     expect(listAuditEvents(db, { action: "org.user.enabled" })).toHaveLength(1);
+  });
+
+  /**
+   * Ruling 154: the handle is unique among ENABLED accounts, and the holder
+   * lookup ignores disabled rows, exactly as the verdict reader does. So
+   * enabling a row whose handle was linked elsewhere while it was disabled is
+   * a third way to make `resolveGithubHandle` answer `ambiguous` forever.
+   * Canary: drop the enable-time holder check in `updateUser`.
+   */
+  it("refuses to enable an account whose GitHub handle is now linked elsewhere", async () => {
+    const db = ctx.makeDb();
+    seedAdmin(db);
+    const maya = await createUser(
+      db,
+      { email: "maya@viberr.test", name: "Maya Lin", role: "member" },
+      ACTOR,
+    );
+    const arda = await createUser(
+      db,
+      { email: "arda@viberr.test", name: "Arda Kaya", role: "member" },
+      ACTOR,
+    );
+    updateUserFields(db, maya.id, { githubHandle: "octocat" });
+    disableUser(db, maya.id, ACTOR);
+    // Free while Maya is disabled, so the admin door accepts it for Arda.
+    updateUserFields(db, arda.id, { githubHandle: "octocat" });
+
+    try {
+      enableUser(db, maya.id, ACTOR);
+      expect.unreachable("the handle collision must refuse the enable");
+    } catch (error) {
+      expect(isAppError(error) && error.status === 409).toBe(true);
+      expect(isAppError(error) && error.message).toContain(
+        "@octocat is linked to Arda Kaya",
+      );
+    }
+    expect(findUserById(db, maya.id)?.disabled).toBe(true);
+    expect(resolveGithubHandle(db, "octocat")).toMatchObject({
+      kind: "found",
+      userId: arda.id,
+    });
   });
 
   it("refuses to demote or disable the last active admin", async () => {

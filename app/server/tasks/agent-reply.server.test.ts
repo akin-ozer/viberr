@@ -788,7 +788,7 @@ describe("runFailureReason (F7-RUN1)", () => {
     // still comes from the tag).
     const facts = {
       kind: "quota" as const, resetsAt: "2026-09-06T19:50:00.000Z", window: "five_hour", windowRejected: true,
-      apiError: null, apiErrorStatus: 429, terminalReason: "api_error",
+      apiError: null, apiErrorStatus: 429, terminalReason: "api_error", origin: null,
     };
     const structured = classify([errLine({ tag: "run·error·quota", text: "The Claude account is over its usage quota.", failure: facts })]);
     expect(structured).toMatchObject({ kind: "quota", facts });
@@ -988,7 +988,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     );
     expect(result.agent?.profileId).toBe("rev");
     expect(result.triggered).toBeNull();
-    expect(result.runNotStarted).toMatch(/rev is not eligible for the "impl" stage/);
+    expect(result.runNotStarted).toMatch(/rev is not eligible for the In Progress stage/);
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     expect(file.parsed.timeline.some((e) => e.type === "comment" && e.actor.kind === "human")).toBe(true);
   });
@@ -1034,7 +1034,201 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBeNull();
-    expect(result.runNotStarted).toMatch(/rev is not eligible for the "impl" stage/);
+    expect(result.runNotStarted).toMatch(/rev is not eligible for the In Progress stage/);
+  });
+});
+
+/**
+ * Ruling 157 (pass 35, F35-8): the hold lift belongs to every door that starts
+ * work. `commentToAgent` has TWO run-start branches, and only the fresh one
+ * goes through `dispatchAgentRun`, where the sibling lift sits — the RESUME
+ * branch calls `resumeRun` directly. KNC-25 is that branch: the hold exists
+ * because an agent's run failed, so the agent HAS a prior session, so a
+ * person's "@dev try again" resumes it.
+ */
+describe("ruling 157: an @mention that RESUMES a session lifts a packet-less hold", () => {
+  it("readiness returns to ready with a 'Hold lifted' note and task.hold.lifted", async () => {
+    // Canary: remove the `liftHoldForRun` call from the `triggered ===
+    // "resumed"` branch in commentToAgent.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        // The hold shape: stored `blocked`, no packet, no dependency list.
+        readiness: "blocked",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    upsertRun(store.db, {
+      id: "run_dev_failed",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "dev-thread",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: "run_dev_failed-session",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev try again" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("resumed");
+
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.frontmatter.readiness).toBe("ready");
+    const note = file.parsed.timeline.find((e) => e.title === "Hold lifted")!;
+    expect(note).toBeDefined();
+    expect(note.text).toBe(
+      "**Hold lifted:** dev was dispatched, so VIB-1 is no longer held. The run's outcome decides what happens next.",
+    );
+    const rows = listAuditEvents(store.db, { action: "task.hold.lifted" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({ cause: "dispatch", profileId: "dev", previous: "blocked" });
+  });
+});
+
+/**
+ * Ruling 152(c) (pass 35, G35-4), cluster review: a RESUME is a dispatch. The
+ * hold lived in `dispatchAgentRun` only, so the most common repeat — an
+ * @mention of the agent that is already working the task — walked past it,
+ * spent the MCP pre-flight and the skill re-mount of
+ * `resolveResumeConfinement`, and paid a refused provider run on a window the
+ * instance already knew was spent. That is exactly what G35-4 exists to stop,
+ * and both `task-lifecycle.md` and `agents-and-runtime.md` already say every
+ * door is held.
+ */
+describe("ruling 152(c): an @mention that RESUMES a session is held like any other dispatch", () => {
+  it("starts no run, records the hold and its retry, and returns the hold sentence", async () => {
+    // Canary: remove the `assertDispatchNotHeld` call from commentToAgent's
+    // resume branch — the mention resumes and `triggered` reads "resumed".
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    upsertRun(store.db, {
+      id: "run_dev_failed",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "dev-thread",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: "run_dev_failed-session",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    const { recordBackendQuotaExhaustion } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    const resetsAt = Math.round(Date.now() / 1000) + 3600;
+    recordBackendQuotaExhaustion(store.db, "claude", {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt,
+      resetsAtPrecision: "clock",
+      providerText: "5-hour limit reached",
+      runId: "run_dev_failed",
+      observedAt: new Date().toISOString(),
+    });
+
+    const before = startedRunSpecs().length;
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev try again" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBeNull();
+    expect(result.runNotStarted).toMatch(
+      /^Held: Claude is out of quota until .* UTC; dev's run is scheduled for then\.$/,
+    );
+    // Nothing reached the provider, and the finished run was not resumed.
+    expect(startedRunSpecs()).toHaveLength(before);
+    const rows = listRunsForTaskRows(store.db, store.slug, "VIB-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.state).toBe("finished");
+    // The hold's own record, made by the same helper every other door uses.
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.timeline.find((e) => e.title === "Dispatch held")).toBeDefined();
+    const pending = file.parsed.frontmatter.schedules.filter((x) => x.status === "pending");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      action: "run-agent",
+      profileId: "dev",
+      prompt: "@dev try again",
+    });
+    expect(listAuditEvents(store.db, { action: "task.agent.run_held" })).toHaveLength(1);
+    // The comment itself is still on the record (the A8 partial success).
+    expect(file.parsed.timeline.some((e) => e.type === "comment")).toBe(true);
+  });
+
+  it("a hold on the OTHER backend does not touch this resume: the hold is per backend", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    upsertRun(store.db, {
+      id: "run_dev_done",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "dev-thread",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: "run_dev_done-session",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    const { recordBackendQuotaExhaustion } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    recordBackendQuotaExhaustion(store.db, "codex", {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt: Math.round(Date.now() / 1000) + 3600,
+      resetsAtPrecision: "clock",
+      providerText: "You've hit your usage limit.",
+      runId: "run_other",
+      observedAt: new Date().toISOString(),
+    });
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev try again" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("resumed");
   });
 });
 

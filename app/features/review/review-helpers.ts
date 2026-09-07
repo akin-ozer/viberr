@@ -9,6 +9,13 @@ import { plainText } from "~/features/notifications/notification-meta";
 export interface ReviewRowView {
   key: string;
   title: string;
+  /** U35-5: the display name of the stage the task sits at; the subline names
+   *  it for a row that is not at the review boundary. */
+  stageName: string;
+  /** U35-5: at the project's resolved review stage (the acceptance boundary).
+   *  False for review work listed from an earlier stage: an open review PR, or
+   *  a required reviewer's verdict outstanding on the current revision. */
+  atAcceptanceBoundary: boolean;
   /** F26-14: the same lightweight triage metadata the board card shows, carried
    *  to the acceptance boundary (where a forgotten high/overdue task costs most).
    *  Rendered via the shared `task-meta.tsx` pills. */
@@ -74,14 +81,9 @@ function prStateSub(pr: NonNullable<ReviewRowView["pr"]>): string {
   // Ruling 135 (pass 34, F34-11): the delivered revision is not on the PR.
   // Ranked ABOVE the conflict: `mergeable` describes the head GitHub has, and
   // the fact a person can act on is that the reviewed revision never reached it.
-  if (pr.unpushedRevision) {
-    const rev = pr.unpushedRevision.revisionSha.slice(0, 7);
-    return pr.unpushedRevision.relation === "diverged"
-      ? `PR #${pr.number} does not carry the delivered revision ${rev}, and its head holds commits the workspace does not. Resolve the history, then deliver the branch to push it.`
-      : `PR #${pr.number} does not carry the delivered revision ${rev}. Deliver the branch to push it.`;
-  }
-  if (pr.mergeable === "conflicting") {
-    return `PR #${pr.number} conflicts with the base branch. GitHub can't merge it until the branch is rebased.`;
+  if (pr.unpushedRevision || pr.mergeable === "conflicting") {
+    const acted = actionablePrSub(pr);
+    if (acted) return acted;
   }
   // F19-32 / ruling 40 (R16-6): "accepted" means a human (or a direct-grant
   // operator) accepted the completion and the REAL merge is still outstanding.
@@ -92,14 +94,67 @@ function prStateSub(pr: NonNullable<ReviewRowView["pr"]>): string {
   if (pr.state === "accepted") {
     return `PR #${pr.number} is accepted. The merge is still pending; a human completes it on the task.`;
   }
+  return actionablePrSub(pr) ?? `PR #${pr.number} is open for review on GitHub.`;
+}
+
+/**
+ * The live PR facts a person can ACT on, in the order `prStateSub` ranks them,
+ * or null when the pull request carries none of them and is simply open.
+ *
+ * Ruling 135 names "the review row subline" among the surfaces that must
+ * consult `unpushedRevisionBlockedReason`; ruling 132 calls the drift line the
+ * one canonical sentence; P14-LV-07 puts the conflict here. None of them is
+ * decoration, and none of them belongs to the acceptance boundary alone — the
+ * queue is the triage surface, so a row listed from an EARLIER stage carries
+ * them too (`reviewInProgressSub`). Split out so the two callers cannot drift
+ * into two vocabularies for one fact.
+ */
+function actionablePrSub(pr: NonNullable<ReviewRowView["pr"]>): string | null {
+  if (pr.unpushedRevision) {
+    const rev = pr.unpushedRevision.revisionSha.slice(0, 7);
+    return pr.unpushedRevision.relation === "diverged"
+      ? `PR #${pr.number} does not carry the delivered revision ${rev}, and its head holds commits the workspace does not. Resolve the history, then deliver the branch to push it.`
+      : `PR #${pr.number} does not carry the delivered revision ${rev}. Deliver the branch to push it.`;
+  }
+  if (pr.mergeable === "conflicting") {
+    return `PR #${pr.number} conflicts with the base branch. GitHub can't merge it until the branch is rebased.`;
+  }
   // R17-1 (F17-L12) as amended by ruling 132 (pass 34, F34-14): the head moved
   // after the review — the ONE canonical sentence says what moved, and only
   // authored commits are called unreviewed.
   const drift = describeRevisionDrift(pr.revisionDrift);
-  if (drift.kind !== "none") {
-    return `PR #${pr.number} is open. ${drift.sentence}.`;
-  }
-  return `PR #${pr.number} is open for review on GitHub.`;
+  if (drift.kind !== "none") return `PR #${pr.number} is open. ${drift.sentence}.`;
+  return null;
+}
+
+/**
+ * U35-5 (pass 35): the subline for review work that is NOT at the acceptance
+ * boundary. Such a row is listed because its PR is open for review or a
+ * required reviewer has not approved the current revision, so the sentence
+ * says where the task is, which PR, and what the verdict state is:
+ * "Review in progress at Validation · PR #8 · awaiting verdict"
+ * (`awaiting verdict` for `changed`, `changes requested` for `failing`; an
+ * approved revision with the PR still open reads "approved", and a row with no
+ * verdict subject carries no verdict segment at all rather than a word for a
+ * state it does not have).
+ *
+ * A LIVE PR fact outranks all of that: an unpushed delivered revision, a
+ * conflicting pull request or a drifted head is what the person is being asked
+ * to act on (rulings 135 / 132, P14-LV-07), and the stage name still says where
+ * the task stands. Nothing else on the row renders those facts — `RQRow` draws
+ * no mergeable pill — so ranking them below this sentence hid them on the one
+ * surface built for triage.
+ */
+function reviewInProgressSub(t: ReviewRowView): string {
+  const where = `Review in progress at ${t.stageName}`;
+  const acted = t.pr ? actionablePrSub(t.pr) : null;
+  if (acted) return `${where} · ${acted}`;
+  const parts = [where];
+  if (t.pr) parts.push(`PR #${t.pr.number}`);
+  if (t.validation === "failing") parts.push("changes requested");
+  else if (t.validation === "changed") parts.push("awaiting verdict");
+  else if (t.validation === "healthy") parts.push("approved");
+  return parts.join(" · ");
 }
 
 /** The subline stripper is the shared `plainText` helper (same regexes as
@@ -119,6 +174,12 @@ export function reviewRowSub(t: ReviewRowView): string {
   // holding that acceptance, so a merged row keeps naming the gate, exactly as
   // the task page does.
   if (t.pr?.state === "closed") return prStateSub(t.pr);
+  // U35-5: a row listed from BEFORE the boundary is review work in progress,
+  // not a task awaiting acceptance. Every sentence below this line describes
+  // the boundary (the acceptance gate, the packet the operator opened there,
+  // the live PR facts of a delivered task), so an off-boundary row says where
+  // it actually is instead. Only the closed-PR terminal fact above outranks it.
+  if (!t.atAcceptanceBoundary) return reviewInProgressSub(t);
   // F10-11: a not-yet-acceptable task states WHY (failing / awaiting a reviewer /
   // no delivered revision) instead of a generic "needs a human decision".
   if (t.blockReason) return t.blockReason;

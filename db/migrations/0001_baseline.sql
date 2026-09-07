@@ -546,10 +546,19 @@ CREATE TABLE "agent_runs" (
   cached_input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
   total_cost_usd REAL,
+  -- The PERSON who interrupted the run (a users.id), or NULL. Never a
+  -- pseudo-actor: a restart is a reason, not a person (pass 35 U35-7).
   interrupted_by TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   agent_name TEXT,
+  -- F35-1: 1 once a PROVIDER usage figure landed on the row (a Claude result
+  -- envelope, a Codex turn.completed). While 0 the token columns hold the
+  -- Claude adapter's live ESTIMATE of the output (from the streamed text; the
+  -- SDK's per-envelope output_tokens is a placeholder) or nothing at all
+  -- (Codex before its turn ends), so the Live run panel prints the figure as
+  -- an estimate and Insights leaves the row out of its token totals.
+  usage_final INTEGER NOT NULL DEFAULT 0,
   agent_profile_id TEXT NOT NULL,
   -- Staging key for a Claude report_outcome envelope (staged_outcomes). Persisted
   -- so boot recovery (recoverUnreactedAgentRuns) can look the staged outcome up
@@ -570,7 +579,15 @@ CREATE TABLE "agent_runs" (
   -- non-null principal. A run refused because the owner has not connected THAT
   -- backend still records the owner (refusedPrincipalUserId). Also the key the
   -- transcript lookup uses — a run's session lives in that person's runtime home.
-  credential_user_id TEXT
+  credential_user_id TEXT,
+  -- Pass 35 U35-7 (ruling 158 addendum): WHY an `interrupted` run stopped when
+  -- no person did it. 'restart' = boot recovery (finalizeOrphanedRuns, and the
+  -- operator drive's own orphan sweep) found the row still queued/running with
+  -- no process behind it. A human interrupt leaves this NULL and stamps
+  -- interrupted_by instead. Readers: run-projection (the pill and footer say
+  -- "interrupted by a restart") and Insights (a restart-interrupted run is not
+  -- an error; one that never started is out of the completion denominator).
+  interrupted_reason TEXT CHECK (interrupted_reason IN ('restart'))
 );
 CREATE TABLE run_log_lines (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

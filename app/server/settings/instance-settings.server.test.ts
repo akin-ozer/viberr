@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  coordinationLane,
   deleteSetting,
   getMaxConcurrentRuns,
   getSetting,
@@ -42,6 +43,19 @@ describe("instance settings — run concurrency cap", () => {
     expect(() => setMaxConcurrentRuns(db, Number.NaN)).toThrow();
     // The prior value is intact — a bad write never silently reset the cap.
     expect(getMaxConcurrentRuns(db)).toBe(5);
+  });
+
+  // Ruling 152(b): one extra slot per four of the cap, minimum one, none when
+  // the gate is off. The org-settings sentence, the admission gate and the
+  // health snapshot all read this one function.
+  it("ruling 152: the coordination lane is one slot per four of the cap, minimum one", () => {
+    expect(coordinationLane(0)).toBe(0);
+    expect(coordinationLane(1)).toBe(1);
+    expect(coordinationLane(4)).toBe(1);
+    expect(coordinationLane(5)).toBe(2);
+    expect(coordinationLane(8)).toBe(2);
+    expect(coordinationLane(9)).toBe(3);
+    expect(coordinationLane(MAX_CONCURRENT_RUNS_CEILING)).toBe(16);
   });
 });
 

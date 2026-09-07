@@ -10,8 +10,10 @@ import type {
   TaskFileEvent,
   TaskFrontmatter, UnpushedRevision } from "~/schemas/task-file.schema";
 import {
+  activeWorkRevision,
   deriveValidation,
   nextWorkRevision,
+  type GithubCache,
 } from "~/schemas/task-file.schema";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
@@ -37,6 +39,19 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
 import type { PrCacheState } from "./pr-linker.server";
 import { POLICY_ENGINE_ACTOR } from "./scope-flag.server";
+
+/** The github cache a workspace-side collision note writes: the base cache's
+ *  footprint plus the unowned PR, carrying the reconciler's foreign-head
+ *  record only while it stands (ruling 161). */
+function collisionCache(base: GithubCache | null, unownedPr: number): GithubCache {
+  const cache: GithubCache = {
+    commits: base?.commits ?? [],
+    changed: base?.changed ?? null,
+    unownedPr,
+  };
+  if (base?.foreignHead) cache.foreignHead = base.foreignHead;
+  return cache;
+}
 
 /**
  * Workspace delivery reconciliation (finding #31).
@@ -493,6 +508,9 @@ export async function reconcileWorkspaceDelivery(
         // here re-armed the "branch name collision" note on the next poll tick.
         unownedPr: fm.github?.unownedPr ?? null,
       };
+      // Ruling 161: the foreign-head record is the reconciler's; carried the
+      // same way, and only while it stands (an absent key stays absent).
+      if (fm.github?.foreignHead) branchPatch.github.foreignHead = fm.github.foreignHead;
       commitsChanged = true;
     }
     if (Object.keys(branchPatch).length > 0) {
@@ -604,7 +622,9 @@ export async function reconcileWorkspaceDelivery(
                 state: liveState,
                 prHeadSha: view.headRefOid,
                 revisionHeadSha:
-                  workRevisionPatch?.headSha ?? fm.workRevision?.headSha ?? null,
+                  workRevisionPatch?.headSha ??
+                  activeWorkRevision(fm.workRevision)?.headSha ??
+                  null,
               });
           if (!adoption.adopt) {
             // Not this task's PR — say so once (the marker in the github cache
@@ -625,17 +645,15 @@ export async function reconcileWorkspaceDelivery(
                     branch: effectiveBranch,
                     prNumber: number,
                     revisionHeadSha:
-                      workRevisionPatch?.headSha ?? fm.workRevision?.headSha ?? null,
+                      workRevisionPatch?.headSha ??
+                      activeWorkRevision(fm.workRevision)?.headSha ??
+                      null,
                   }),
                   toAgent: false,
                   evidence: null,
                 },
                 {
-                  github: {
-                    commits: baseCache?.commits ?? [],
-                    changed: baseCache?.changed ?? null,
-                    unownedPr: number,
-                  },
+                  github: collisionCache(baseCache, number),
                 },
               );
               rebuildPath(db, resolveTaskFilePath(ref), { dataRoot });
@@ -667,7 +685,7 @@ export async function reconcileWorkspaceDelivery(
           // Ruling 135: the moment a delivering run mints a revision on a branch
           // whose PR is open, the file says whether that PR carries it, so the
           // acceptance gate does not wait for the five-minute poll.
-          const revisionNow = workRevisionPatch ?? fm.workRevision ?? null;
+          const revisionNow = workRevisionPatch ?? activeWorkRevision(fm.workRevision);
           const unpushed = await classifyUnpushedRevision(exec, repoDir, {
             revisionSha: revisionNow?.headSha ?? null,
             prHeadSha: view.headRefOid,

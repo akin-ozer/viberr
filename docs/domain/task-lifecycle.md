@@ -103,7 +103,8 @@ task leaves the entry stage.
 no counter value). The task is written with the list, `waiting: none`, a "Waits on
 other work" note, and its stored readiness at the birth value `input_required`; the
 `blocked` it shows is the derived floor. The controller's `create_task` and a goal
-link's declared `blockedBy` both come in through this door.
+link's declared `blockedBy` both come in through this door; from then on the link's
+record follows the task's list (ruling 155, §6).
 
 
 ## 4. Stages and the workflow graph
@@ -144,17 +145,32 @@ profile's stages.
 4. Authority: `manual` (board menu, any stage) → `approve-transition`; an `auto`
    boundary → any member; `approval` → `approve-transition`; `human` →
    `requireAcceptCompletion`. Operator authority skips human RBAC but is forbidden a
-   bare move to terminal; a supervised operator recommends instead of moving, except
-   across `auto` boundaries and on a backward rework move while validation is
-   `failing`.
+   bare move to terminal, and (ruling 151, pass 35) is forbidden every declared
+   `approval` or `human` boundary whatever its grant says: "The Review to Merge
+   boundary is approved by a human on this board: the operator may recommend it, not
+   cross it." The operator crosses `auto` boundaries and backward rework moves while
+   validation is `failing`, and (ruling 163, pass 35) the one backward move a `changed`
+   revision licenses: into the stage where the task's required reviewers can run
+   (`verdictStageFor`: the nearest earlier stage where a verdict-capable engagement is
+   eligible; the acceptance-boundary stage when none is deployed), so a revision that
+   moved after a verdict goes back for its re-verdict instead of waiting at Merge. The
+   operator's move INTO the acceptance-boundary stage is refused with the acceptance
+   gate's own sentence while the review PR conflicts with the base or lacks the
+   delivered revision (`mergeReadinessRefusal`, ruling 162: Merge means mergeable). An
+   applied recommendation arrives with the human's `recommendationAuthorized`, never
+   with operator authority.
 5. Inside the file lock the stage is re-read: already there → write nothing; moved
    elsewhere → 409, because every guard above judged `fromStageId`.
 6. On success: `previousStageId = fromStageId` (the durable "came back from Review"
    fact the operator weighs, ruling 98); terminal → `waiting = none`; leaving the
    entry stage attaches the operator and clears the triage gate; `task.transitioned`
    audit and a `transition` timeline event; the operator is re-triggered
-   (`transition`); goal chains reconcile; held dependents are swept
-   (`maybeReleaseDependents`, ruling 131(e)).
+   (`transition`) unless the move was made by a live operator run, whose own turn
+   continues (ruling 152(a)); a human or system move onto the acceptance boundary
+   first files the acceptance recommendation under the deployed operator's gate and
+   skips the re-trigger when the card was filed (the fold, owner decision Q35-15);
+   goal chains reconcile; held dependents are swept (`maybeReleaseDependents`,
+   ruling 131(e)).
 
 ## 6. The three signals on a card
 
@@ -162,11 +178,21 @@ profile's stages.
   inconsistency_risk_detected | blocked`. The projection stores the derived value:
   diagnostics floor it (warning → `input_required`, error →
   `inconsistency_risk_detected`, hard stop → `blocked`); a `blocked` packet sets it to
-  `blocked`; recovery options lift it back to `ready`. Surfaces render the derived
+  `blocked`; recovery options lift it back to `ready`, and a person's operator run,
+  a scheduled operator run or any dispatch lifts a packet-less, list-less hold with a
+  "Hold lifted" note and `task.hold.lifted` (ruling 157; the display side, an agent
+  carrying such a hold reading `agent_working`, is in `deriveDisplayReadiness`).
+  Surfaces render the derived
   display value `agent_working` instead of readiness while `waiting === "agent"`
   (`deriveDisplayReadiness`, ruling 91), `goal_edit_pending` while a decided `edit_goal`
   packet waits for the edited goal (ruling 138: below `agent_working`, above
   `input_required` and a stored `blocked`), and "accepted" for terminal-stage tasks.
+  A stored `blocked` never yields to a run, with one exception (ruling 157): a
+  stored block with no open packet and no dependency list is a hold, and while an
+  agent carries such a hold the display reads `agent_working`, exactly as the server
+  lifts it on the record; a diagnostics floor (derived `blocked` over a stored
+  `ready`), a dependency hold and an open `blocked` packet keep reading `blocked`
+  (`deriveDisplayReadiness`, fourth argument from `stored_readiness` and the list).
 - **Waiting**: `human | agent | none`. Raising a packet or a recommendation flips it
   to `human`; dispatching an agent sets `agent`; terminal forces `none`. It is a
   display flag: `liveRuns` is the only proof a run is in flight.
@@ -209,7 +235,13 @@ NEVER complete is noticed by the same sweep, whatever killed it (an archived tas
 cancelled goal, a removed link, a reference to nothing): ONE "Waiting on work that cannot
 complete" note, one notification, `waiting: human`, and the list left for a person to
 edit. A task that already reached the terminal stage has its list cleared quietly — no
-note, no operator turn.
+note, no operator turn. When the task carries a goal link (`goalRef`) and that link is
+`active` on it, every one of these writes, the quiet terminal clear included, mirrors
+the task's list onto the goal file's `links[].blockedBy` (ruling 155, `mirrorLinkWait`)
+with a goal timeline line naming the task and who changed it (the engine as "Viberr
+(release)"), and rebuilds the goal projection: the Goals panel's "waits on" and a later
+retry of the link read the list the task last held. The link's `edit_link` accepts
+`blockedBy` alone on an active link and forwards it to this same writer.
 
 ## 7. Ownership, comments, mentions
 
@@ -270,7 +302,16 @@ note, no operator turn.
   composer and the server (`app/ui/mention-spans.ts`). The resume door is stage-gated
   like every other door (ruling 133): the engaged deliverer resumes at any stage; a
   supporting or released agent at a stage its profile does not declare gets the comment
-  posted and the run refused with the dispatcher's sentence.
+  posted and the run refused with the dispatcher's sentence, which names stages by
+  their board names. **A refused mention leaves a trace** (F35-5, pass 35): whenever
+  the mentioned agent's run does not start (stage ineligibility, a run already in
+  flight, an owner without the backend), the comment stays on the record and the
+  server writes a `note` titled "Mention not started" ("**Not started:** @Architecture
+  Reviewer was mentioned, but its run did not start: Architecture Reviewer is not
+  eligible for the Triage stage; its profile is scoped to Design, Review. ... The
+  comment stays on the record.") plus `task.comment.unrouted {profileId, reason:
+  "run-not-started", detail}`; the toast carries the same reason. A packet decision
+  the server relays through the same door reports to its resolver instead.
 - Comment bodies are escaped so that a line that would read as file structure
   (`## `, `### `, `title:`, `to:`, `evidence:`) cannot forge a section or an event.
 
@@ -294,7 +335,13 @@ releasing a reviewer restates history.
 
 A delivering run's reconcile mints a **work revision** (`{id, headSha, treeSha,
 branch, kind: delivered}`); a new head with a different tree mints a new revision and
-stales every prior verdict. A reviewer's `report_outcome` records a **verdict**
+stales every prior verdict. A revision is minted when the agent reports, before any
+push: it has **left the workspace** only once a PR tracks the branch, an unowned PR
+stands on the name, or the delivery push stamped `pushedAt` (ruling 161). Until then a
+person may discard the branch through a `discard_branch` packet, and the discard retires
+the revision (`kind: discarded`, verdicts kept as history, `validation: none`); readers of
+"the revision under review" go through `activeWorkRevision`, so no verdict binds to a
+retired head and a re-created head mints a fresh id. A reviewer's `report_outcome` records a **verdict**
 (`approve | request_changes`) bound to a revision id. A project member's GitHub
 approval on the PR, whose `commit_id` equals the delivered head and whose login maps
 to a member through `users.github_handle`, counts as an approving verdict (ruling 68);
@@ -309,6 +356,17 @@ anything ambiguous fails closed with the reason recorded.
   `awaiting`, so the card, the hero, the queue and the rail all read the packet as decided
   after a reload, and the editor prefill is `goalDraftForOption` (the option's `goalDraft`,
   else its title and detail) on both the confirm and the reload path (ruling 138).
+  The mapping composes it once as `packet.goalDraft` (pass 35, F35-6): the decided
+  card prints it under the decision line as "Requested goal (opens in the editor)",
+  its "Edit the goal" opens it, and the hero's own Edit under the goal seeds it too
+  while the packet waits, so a reload never hides the requested text or hands the
+  nearest door the goal the decision asked to replace.
+  Saving the goal UNCHANGED while the packet awaits the edit is refused (F35-6, pass 35:
+  "The goal reads exactly as before, so the requested edit has not landed. Open the
+  requested goal from the decision card, or write the edit."); an unchanged save with
+  no packet writes nothing and the route toasts "Goal unchanged". A resolved
+  `hold_runtime_debug` leaves a packet-less hold that the next person-started operator
+  run or any dispatch lifts (ruling 157).
 - **Recommendations** are the supervised operator's pending cards (`transition`,
   `run_agent`, `accept_completion`, `delivery`). `applyRecommendation` passes
   `recommendationAuthorized` into the inner mutation, whose own capability gate still
@@ -323,8 +381,10 @@ anything ambiguous fails closed with the reason recorded.
   all three, and the "Waiting on you" bell is marked read only when no card survives.
 - **Schedules** live in `task.md` `schedules[]`: `run-operator` (optional steer) or
   `run-agent` (a profile id and prompt; the profile must be deployed when the entry is
-  created). Creating one needs `run-agents`. Each run control carries a when-picker
-  (now, 5m, 1h, 6h, 24h). The runner ticks every 60 seconds, claims an occurrence
+  created). Creating one needs `run-agents`, through the task page's run controls or
+  the controller's `schedule_task_action` / `cancel_task_schedule` (ruling 153, pass
+  35: the entry carries the `<email> · via controller` label). Each run control
+  carries a when-picker (now, 5m, 1h, 6h, 24h). The runner ticks every 60 seconds, claims an occurrence
   before enqueuing (`pending → claimed → fired | failed`, `cancelled` by a human),
   never fires on a terminal or archived task, and resolves the **live** deployment at
   fire time (ruling 94). A fire-time refusal no retry can cure (profile undeployed,
@@ -339,7 +399,23 @@ anything ambiguous fails closed with the reason recorded.
   76 refuses for a person); one that was queued behind a live drive records
   `queued-behind-drive` at fire time and, if the drive leaves a packet open, its final
   `skipped-packet` row (`atDrain: true`) and a "Scheduled action skipped" note when it
-  reaches the front of the lease queue.
+  reaches the front of the lease queue. A dispatch of any kind (the Run control, an
+  @mention, the operator's `run_agent`, a schedule, `retry_other_backend`) into a
+  backend the instance already knows is out of quota for the account the run bills is
+  HELD (ruling 152(c), pass 35): no run, a "Dispatch held" note by the policy engine
+  naming the reopen instant and the provider's own words, a `task.agent.run_held` audit
+  row, and a `run-agent` schedule for one minute after the window reopens (thirty
+  minutes after the refusal when the provider named no instant) carrying the same
+  profile and prompt. The door reads "Held: Codex is out of quota until Sep 6, 2026 ·
+  18:18 UTC; Developer's run is scheduled for then." A repeat dispatch inside the same
+  window reuses that pending occurrence — one retry per profile per window, a newer
+  directive replacing its prompt, no second note — so a cascade of held attempts cannot
+  become a queue of duplicate runs at reopen. A hold is not a decision packet and
+  costs no operator turn; a scheduled occurrence that lands on a hold retires
+  `held-quota`. Resolving the quota or auth packet's option that states the window has
+  reset (or that the account changed) retires the instance's exhaustion record for that
+  backend: the option promises the agent continues now, and only a completed run would
+  otherwise clear it (ruling 164).
 
 ## 10. Delivery
 
@@ -348,8 +424,11 @@ by the server (ruling 21); humans trigger it with the `deliver-review` intent
 (`run-agents` or the owner). `performDelivery` makes sure the repository's default
 branch exists first (ruling 128: an empty repository is bootstrapped, never
 misreported as unreachable), pushes the workspace branch (auto-committing a dirty
-tree, refusing a non-fast-forward as a `push_conflict`; reading origin's head first
-and answering `up_to_date` when there is nothing to push, ruling 134), detects a
+tree, refusing a non-fast-forward as a `push_conflict`; refusing a tree that carries
+Viberr's own store layout under `projects/<slug>/tasks/` as `store_layout` with the
+paths named, ruling 159; reading origin's head first
+and answering `up_to_date` when there is nothing to push, ruling 134; stamping
+`workRevision.pushedAt` on the revision whose head the push published, ruling 161), detects a
 verified empty branch as a no-change outcome, opens or adopts the PR (adoption only
 when the PR is open **and** its head is the delivered revision; anything else is a
 branch collision, whose `resolve_remote_collision` ceremony re-confirms a cached open PR
@@ -366,7 +445,14 @@ open is delivered the same way: the push moves the PR's head; nobody is ever ask
 push by hand. The task page offers the same door as "Push `<sha>` to PR #N" whenever
 the open PR does not carry the delivered revision (ruling 134(c)), and shows a disabled
 control naming the refusal for a diverged remote. Entering the review stage with no PR
-writes a typed event, never silence.
+writes a typed event, never silence. Ruling 163 (pass 35): a delivery that moved the
+PR's head on a task standing PAST the stage where its reviewers can run, with a
+revision that changed or failed after the last verdict, records the transition back to
+that stage in the same delivery ("Transition: KNC-20 returns from Merge to Review: `17e4a8c`
+changed after the last verdict, so the reviewers judge it there"; audit `task.transition`
+with `via: delivery`). The redirect option of a branch-conflict packet does the same when
+it is resolved (`rework: true` on the option; `via: packet_redirect`), and the option's
+detail says so before the person decides.
 Details in [github-delivery.md](github-delivery.md).
 
 ## 11. Acceptance and the endings
@@ -381,19 +467,69 @@ Every writer to the terminal stage goes through one contract:
    `accept_disclosure_stale`. In-process callers (the full-autonomy operator) carry
    their own contract.
 3. **Terminal GitHub fact first**: a closed, unmerged PR refuses acceptance and
-   withdraws force-accept entirely (ruling 37). Lower in the stack, a delivered revision
+   withdraws force-accept entirely (ruling 37), and refuses a new delivery too: a
+   person's close is a decision about the task, recorded as `pr.closure`, and no fresh
+   PR is opened for the branch until a person answers the recovery packet or reopens
+   the PR (ruling 160; `closed_by_human` on every delivery door). Lower in the stack, a delivered revision
    that is not on the pull request refuses with "deliver the branch to push it" (ruling
    135) and outranks a conflicting PR, whose `mergeable` describes the head GitHub has,
-   not the one that was reviewed; a conflicting PR refuses after it.
+   not the one that was reviewed; a conflicting PR refuses after it. Both sentences come
+   from ONE function, `mergeReadinessRefusal` (ruling 162, pass 35), read by the
+   acceptance stack, the operator's `get_task` (`notAcceptableReason`, computed by the
+   whole stack through `acceptanceRefusalFor`), the operator's move into the
+   acceptance-boundary stage, and the post-gate GitHub merge refusal: a 405 re-reads the
+   pull, records `mergeable: conflicting`, and the person reads the gate's sentence with
+   its way out instead of "GitHub refuses to merge ...". No surface offers an acceptance
+   the gate will refuse: the task page's recommendation card prints the refusal as an
+   alert and its Apply refuses the click, the accept dialog prints it above a disabled
+   confirm, the GitHub card wears the "conflicts" pill, and the reconciler withdraws a
+   pending `accept_completion` card the moment `mergeable` flips to conflicting, with a
+   "Conflict:" note on the timeline.
+3a. **The base refresh, once** (ruling 162 / G35-5(d)): after the gate re-check and
+   before the merge, the acceptance ceremony brings the branch up to date with the base through the
+   same workspace merge `update_branch_from_base` performs, records it in
+   `baseRefreshes` (ruling 132), reconciles, writes "Accepting the completion brought
+   `<branch>` up to date with `<base>` ..." on the timeline and audits
+   `github.branch_update.acceptance`. A refresh that CONFLICTS refuses the acceptance
+   with the gate's sentence, records `mergeable: conflicting` and names the conflicting
+   paths on the timeline; a branch that cannot be refreshed from here (no workspace, no
+   credential, a diverged origin) proceeds to the merge, where GitHub decides. The
+   The refresh is itself an irreversible publish (the workspace merge is pushed), so
+   the gate stack runs on BOTH sides of it: the packet path's identity check
+   (P14-GV-05) and the full acceptance gate refuse before the branch is moved, and
+   again afterwards, since the refresh changes the facts they read.
+   The
+   operator's own tool refuses at the acceptance-boundary stage and past it ("... the
+   branch is brought up to date once, at acceptance time, and merged in the same
+   ceremony"), except on a PR GitHub already reports conflicting, where its job is to
+   record the conflict list and open the packet.
 4. **Verdict gate**: every required reviewer must have approved the current revision
    and none may request changes (ruling 20). Force-accept bypasses this and is
-   audited `task.acceptance.forced` with what it bypassed, records `acceptance: forced`
-   and enumerates the stages it skips. Force never bypasses two facts: a closed unmerged
+   audited `task.acceptance.forced` with EVERY gate it bypassed (U35-3, pass 35:
+   `bypassedGates` is the full refusal list in gate order, `skippedStages` the stage
+   ids jumped, `validation`, `withdrawnPacket`; `bypassed` keeps the sentences joined
+   with " | " for older readers), records `acceptance: forced`, and the forced
+   `completion` event appends the same list, each gate reduced to its FIRST sentence
+   ("Bypassed: Review skipped; the review gate; VIB-1 is at In Progress, not Review;
+   This task's latest review requests changes on the current revision; the open
+   decision "..." withdrawn unanswered"). The remedy half of each refusal
+   ("Move the task through the workflow first") stays in `bypassedGates` only: the
+   reader of a completion event is looking at an override that already happened, the
+   same rule the audit panel applies to this row. Force never bypasses two facts: a closed unmerged
    PR (ruling 37) and, since ruling 123, an **archived** task — restore it first. Both are
    `forceIrreducibleRefusal`, and on an archived task the affordance is withdrawn rather
    than disabled. The offer itself appears only once the task has something to accept — a
    branch, a PR or a delivered revision — or is demonstrably wedged by an open `blocked`
-   packet (ruling 124).
+   packet (ruling 124). Since ruling 164 (pass 35, F35-14) a packet can offer the same
+   override as a `force_accept` option: the resolution calls `forceAcceptCompletion`
+   itself, so the tier, the ceremony, the irreducible gate and the audit record are the
+   button's, and a non-admin resolver hears the button's own refusal instead of a
+   decision that records nothing. Its sibling `move_stage` performs a manual board move
+   on the stage picker's path; the terminal stage is refused there, because a move to it
+   is this contract, not a move. Resolving a `move_stage` option lifts a stored
+   `blocked` the packet was holding down, as every other resolution arm does: a
+   transition deliberately lets a block survive, so leaving it would show a blocked
+   task with no packet on it.
 5. **PR head containment**: the PR head must contain the delivered commit. A head
    ahead of the reviewed revision is accepted with a disclosed divergence (ruling 42; since
    ruling 132 the disclosure is the classified drift sentence: authored commits are named
@@ -417,6 +553,28 @@ Post-acceptance: the task workspace is reclaimed once no run is live, goal chain
 reconcile, held dependents are swept (ruling 131(e): a task whose every `blockedBy`
 entry is now done is released), and the board renders "accepted".
 
+**The review queue's membership** (`review-queue.server.ts`, U35-5, pass 35) has two
+halves with two rules. "Waiting on your acceptance" is about the boundary: a
+non-archived task standing at a stage acceptance is legal from (the acceptance
+boundary the workflow graph declares, the same predicate the accept writer and the
+board gate use, so a board with several edges into the terminal stage keeps them all)
+that waits on a human, whose acceptance nothing in the stack above refuses, for a
+viewer who may accept it (maintainer+, or the owner). "Still in review"
+is about review work, which the board defines by engagements and verdicts rather than
+by one stage id: every other non-archived, non-terminal task that sits at the review
+stage, or carries a pull request open for review (`pr.state: review`), or has a
+required reviewer (`verdictCapable`) whose verdict on the current revision is missing
+(`validation: changed`) or is request_changes (`failing`). On the default board the two
+rules coincide at Review; on a board whose reviews happen at Validation and Review while
+the edge into Done leaves Merge, the second rule is what lists the work. The row names
+its stage ("Review in progress at Validation · PR #8 · awaiting verdict"), with a live
+pull-request fact taking the place of the verdict words when there is one ("Review in
+progress at Validation · PR #8 does not carry the delivered revision 385047c. Deliver
+the branch to push it." — ruling 135, and the same for a conflict or a drifted head),
+the header
+reads "N in review · M waiting on your acceptance", and the workspace rail badge is the
+queue's `total`. Nothing before the boundary is ever offered for acceptance.
+
 ## 12. Archive and restore
 
 `archive-task` (`approve-transition`) is a terminal disposition, not a delete: the
@@ -436,7 +594,10 @@ same door every branch cleanup uses: a cached open PR is re-confirmed against Gi
 (ruling 136(c)), a PR GitHub reports closed lets the delete proceed, and an unconfirmed
 state refuses with "GitHub could not confirm whether PR #N is still open", which the
 archive note repeats verbatim. The no-change acceptance's empty-branch cleanup inherits
-the same check.
+the same check. Ruling 161 (U35-8): when the reconciler recorded `github.foreignHead`
+(origin's branch carries commits this task did not author), the confirm dialog says so
+before the button, the ref's head is read before the DELETE, and the audit records both
+heads (`github.branch.deleted {sha}`, `task.branch.discarded {localSha, remoteSha}`).
 
 ## 13. Timeline and noise control
 

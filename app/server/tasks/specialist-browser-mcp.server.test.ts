@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { resetEnvCacheForTests } from "~/server/config/env.server";
 import {
   BROWSER_MCP_NAME,
+  attachmentsDropSection,
   browserPersonaSection,
   browserRuntimeStatus,
   resolveBrowserMcp,
@@ -190,9 +191,43 @@ describe("browserPersonaSection — the load-bearing screenshot contract", () =>
   // it, on both backends.
   it("always instructs a filename-less screenshot and points at the attachments dir", () => {
     for (const backend of ["claude", "codex"] as const) {
-      const p = browserPersonaSection("tasks/VQP-1/attachments", backend);
+      const p = browserPersonaSection("/data/projects/vqp/tasks/VQP-1/attachments", backend);
       expect(p).toContain("WITHOUT a `filename`");
-      expect(p).toContain("tasks/VQP-1/attachments");
+      expect(p).toContain("/data/projects/vqp/tasks/VQP-1/attachments");
+    }
+  });
+
+  /**
+   * Ruling 159 (pass 35, F35-10): the path the agent is handed is ABSOLUTE and
+   * said to be outside the checkout. The store-relative form
+   * (`projects/<slug>/tasks/<key>/attachments`, "reachable from your working
+   * directory") was created inside the clone by KNC-9's agent and pushed.
+   */
+  it("ruling 159: the browser section says the dir is outside the checkout and never committed", () => {
+    const p = browserPersonaSection("/data/projects/vqp/tasks/VQP-1/attachments", "claude");
+    expect(p).toContain("outside the repository checkout");
+    expect(p).toContain("never commit it");
+  });
+});
+
+describe("attachmentsDropSection — ruling 159, an absolute path outside the checkout", () => {
+  const dir = "/data/projects/knc/tasks/KNC-9/attachments";
+  it("prints the absolute dir, says it is outside the checkout and never to commit it", () => {
+    const p = attachmentsDropSection(dir);
+    expect(path.isAbsolute(dir)).toBe(true);
+    expect(p).toContain(`\`${dir}\``);
+    expect(p).toContain("ABSOLUTE path");
+    expect(p).toContain("outside the repository checkout");
+    expect(p).toContain("never commit it");
+    // The sentence that produced the stray folder is gone for good.
+    expect(p).not.toContain("reachable from your working directory");
+  });
+
+  it("never prints a bare store-relative path as the instruction", () => {
+    const p = attachmentsDropSection(dir);
+    // Every `projects/...` mention in the section is the absolute dir itself.
+    for (const m of p.matchAll(/`([^`]*projects\/[^`]*)`/g)) {
+      expect(path.isAbsolute(m[1]!)).toBe(true);
     }
   });
 

@@ -700,17 +700,24 @@ describe("Codex structured operator completion", () => {
   });
 
   it("executes a valid structured plan larger than the timeline preview limit", async () => {
+    // Ruling 151: impl → review is an `approval` boundary the operator may only
+    // recommend, so the plan crosses the `auto` edge ready → impl instead.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: { ...task().frontmatter, stage: "ready" },
+      goal: task().goal,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await start();
     const reasoning = `Observed: ${"implementation evidence ".repeat(70)}`;
     const text = JSON.stringify({
       reasoning,
-      actions: [transitionAction()],
+      actions: [transitionAction({ toStageId: "impl" })],
     });
     expect(text.length).toBeGreaterThan(1_200);
     adapter.finish(store, text, "finished");
 
     await eventually(() => {
-      expect(task().frontmatter.stage).toBe("review");
+      expect(task().frontmatter.stage).toBe("impl");
     });
     expect(task().packet).toBeNull();
     expect(
@@ -1359,6 +1366,12 @@ describe("stranded auto-stage resume", () => {
     // Ruling 131(d): a task waiting on other work is a RECORDED hold, never a
     // stranding. Canary: delete the `blockedBy` early return.
     expect(operatorLeftTaskStranded({ ...base, blockedBy: ["JC-3"] }, wf)).toBe(false);
+    // Ruling 152(a) review: a stage THIS drive's own move landed on is stranded
+    // whatever its outbound boundary, since nothing else follows that move up.
+    // The guards above still rank first.
+    expect(operatorLeftTaskStranded({ ...base, stage: "impl" }, wf, true)).toBe(true);
+    expect(operatorLeftTaskStranded({ ...base, stage: "impl", packet: { title: "?" } }, wf, true)).toBe(false);
+    expect(operatorLeftTaskStranded({ ...base, stage: "impl", blockedBy: ["JC-3"] }, wf, true)).toBe(false);
   });
 
   it("goal-drafting is labeled SETUP in the turn instruction — the live stranding's exact misreading", () => {
@@ -1581,6 +1594,66 @@ describe("stranded auto-stage resume", () => {
       // Give the settle a beat: no fourth drive appears.
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(operatorRuns()).toHaveLength(3);
+    });
+
+    /**
+     * Ruling 152(a) review (pass 35, G35-5): the drive's OWN move queues no
+     * re-trigger any more, so the settle-time backstop is the whole follow-up
+     * for it — and on the shipped board the operator's own move lands on In
+     * Progress, whose outbound boundary is `approval`. Judged by the `auto`
+     * test alone the task was not "stranded", so nothing followed up at all
+     * and `clearWaitingToHuman` flipped the board to "waiting on you" with no
+     * agent engaged, no packet and nothing to decide.
+     */
+    it("a drive that MOVES the task onto a non-auto stage and then does nothing is resumed there", async () => {
+      // Canary: drop the `ownMoveLandedHere` argument at the
+      // `operatorLeftTaskStranded` call site — exactly one run.
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          title: "list files in the project",
+          stage: "ready",
+          readiness: "ready",
+          waiting: "human",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "List the files.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "create",
+        dataRoot: store2.dataRoot,
+      });
+      expect(adapter2.pending).not.toBeNull();
+
+      // The drive crosses Ready to In Progress (auto) and stops: no dispatch,
+      // no packet, no recommendation. In Progress's outbound boundary is
+      // `approval`.
+      adapter2.finish(
+        store2,
+        JSON.stringify({
+          reasoning: "",
+          actions: [transitionAction({ toStageId: "impl", reason: "Ready for work." })],
+        }),
+        "finished",
+      );
+
+      await eventually(() => {
+        const fm = readTaskFile({
+          projectSlug: store2.slug,
+          taskKey: "VIB-1",
+          dataRoot: store2.dataRoot,
+        })!.parsed.frontmatter;
+        expect(fm.stage).toBe("impl");
+        // The settle resumed the chain at the stage the drive's own move
+        // landed on, instead of leaving the task with no follow-up.
+        expect(operatorRuns()).toHaveLength(2);
+        expect(adapter2.pending).not.toBeNull();
+      });
     });
 
     /**
@@ -1870,6 +1943,40 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     expect(prompt).toContain("Agents surface");
     // The ruling's other half: it points, it never reconfigures.
     expect(prompt).toContain("never change that configuration yourself");
+  });
+
+  /**
+   * Pass-35 cluster review: ruling 164's authoring door refuses a send-back
+   * option whose words ask a person to edit an agent profile, and this turn
+   * text (the ONE both backends receive) still told the operator to write one.
+   * The remedy is still named on every turn; it is named in the packet's own
+   * words instead of as an option the door answers `noop` to.
+   */
+  it("ruling 85 under ruling 164: the remedy is named in the packet, never authored as an option", () => {
+    // Canary: restore "offer it as an option a human can act on".
+    for (const prompt of [
+      operatorPrompts.buildOperatorTurnPrompt(snap(), "create"),
+      operatorPrompts.buildCodexOperatorPrompt(snap(), "create"),
+    ]) {
+      expect(prompt).toContain("grantable on an agent profile");
+      expect(prompt).toContain("lists only workarounds hides the fix");
+      expect(prompt).toContain("Never write it as an OPTION");
+      expect(prompt).not.toMatch(/offer it as an option/i);
+      // The named-resource half of the same instruction says it too.
+      expect(prompt).not.toMatch(/offer granting it .{0,60} as an option/i);
+    }
+  });
+
+  it("ruling 152(a): the stage rule says to walk consecutive auto boundaries in ONE turn", () => {
+    // Pass 35, G35-5: the old sentence ("advancing one boundary and stopping is
+    // fine") paid a fresh operator turn per stage. Canary: restore it.
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(
+      snap({ stage: "ready", stageName: "Ready", goal: "Add the parser and its tests to src/parser." }),
+      "transition",
+    );
+    expect(prompt).toContain("call transition_stage again in this same turn");
+    expect(prompt).toContain("re-invoked only when your turn ends at a stage that still needs work");
+    expect(prompt).not.toContain("advancing one boundary and stopping is fine");
   });
 
   it("R21-2: the Codex plan prompt carries the same remedy instruction", () => {
@@ -2772,6 +2879,103 @@ describe("runOperator — authority, ordering, orphans", () => {
     });
   });
 
+  describe("ruling 157: a hold ends when a person starts the operator", () => {
+    // Pass 35, F35-8 (KNC-25): `hold_runtime_debug` stored `readiness: blocked`
+    // with no packet; a person's Run operator passed every fire-time refusal
+    // (both read the packet or the `blockedBy` list) and the projection read
+    // `blocked` beside `waiting: agent`. Canary: delete the `liftHoldForRun`
+    // call in runOperator: the run still starts and the `"ready"` assert is red.
+    const holdThroughTheWriter = async (over: Partial<Parameters<typeof baseTaskFrontmatter>[1]> = {}): Promise<void> => {
+      writeTask(store5.dataRoot, store5.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          readiness: "blocked",
+          waiting: "human",
+          ownerUserId: store5.users.arda.id,
+          ...over,
+        }),
+        goal: "Ship the parser.",
+        packet: {
+          type: "blocked",
+          kind: "Work stalled",
+          from: "operator",
+          title: "The Developer's run failed",
+          body: "",
+          observations: [],
+          options: [{ kind: "hold_runtime_debug", t: "Hold for runtime debug", d: "", rec: false }],
+        },
+      });
+      writeTask(store5.dataRoot, store5.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
+      rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+      const { resolvePacket } = await import("~/server/tasks/task-actions.server");
+      await resolvePacket(
+        store5.db,
+        { projectSlug: store5.slug, taskKey: "VIB-1", optionIndex: 0, ack: null },
+        { userId: store5.users.arda.id, label: store5.users.arda.email },
+        { dataRoot: store5.dataRoot },
+      );
+      expect(task().frontmatter.readiness).toBe("blocked");
+      expect(task().packet).toBeNull();
+    };
+    const arda = () => ({ userId: store5.users.arda.id, label: store5.users.arda.email });
+
+    it("a person's manual run lifts the hold: readiness ready, a 'Hold lifted' note, task.hold.lifted", async () => {
+      deployAgents([operatorAgent()]);
+      await holdThroughTheWriter();
+      const result = await drive({ trigger: "manual", actor: arda() });
+      expect(result.refused).toBeUndefined();
+      expect(adapter5.pending).not.toBeNull();
+      expect(task().frontmatter.readiness).toBe("ready");
+      expect(task().frontmatter.waiting).toBe("agent");
+      const note = task().timeline[0]!;
+      expect(note).toMatchObject({ type: "note", title: "Hold lifted" });
+      expect(note.text).toContain("started an operator run, so VIB-1 is no longer held");
+      const rows = listAuditEvents(store5.db, { action: "task.hold.lifted" });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.details).toMatchObject({ cause: "operator-run", trigger: "manual", byUserId: store5.users.arda.id });
+      expect(rows[0]!.actorUserId).toBe(store5.users.arda.id);
+    });
+
+    it("a scheduled run lifts it too (owner, Q35-9)", async () => {
+      deployAgents([operatorAgent()]);
+      await holdThroughTheWriter();
+      const result = await drive({ trigger: "scheduled" });
+      expect(result.refused).toBeUndefined();
+      expect(task().frontmatter.readiness).toBe("ready");
+      expect(task().timeline[0]!.text).toContain("a scheduled operator run started");
+      expect(listAuditEvents(store5.db, { action: "task.hold.lifted" })[0]!.details).toMatchObject({ trigger: "scheduled" });
+    });
+
+    it("a bare manual with no actor and a machine trigger lift nothing", async () => {
+      deployAgents([operatorAgent()]);
+      await holdThroughTheWriter();
+      const bare = await drive({ trigger: "manual" });
+      expect(bare.refused).toBeUndefined();
+      expect(task().frontmatter.readiness).toBe("blocked");
+      adapter5.finish(store5, JSON.stringify({ reasoning: "held", actions: [] }), "finished");
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(1);
+        expect(operatorRuns()[0]!.state).toBe("finished");
+      });
+      const reactive = await drive({ trigger: "agent-reply" });
+      expect(reactive.refused).toBeUndefined();
+      expect(task().frontmatter.readiness).toBe("blocked");
+      expect(task().timeline.some((e) => e.title === "Hold lifted")).toBe(false);
+      expect(listAuditEvents(store5.db, { action: "task.hold.lifted" })).toHaveLength(0);
+    });
+
+    it("a hold that also waits on other work keeps ruling 131's floor", async () => {
+      deployAgents([operatorAgent()]);
+      await holdThroughTheWriter({ blockedBy: ["VIB-2"] });
+      const result = await drive({ trigger: "manual", actor: arda() });
+      // Ruling 131(d): a manual run still answers a person on a held task.
+      expect(result.refused).toBeUndefined();
+      expect(adapter5.pending).not.toBeNull();
+      expect(task().frontmatter.readiness).toBe("blocked");
+      expect(task().timeline.some((e) => e.title === "Hold lifted")).toBe(false);
+    });
+  });
+
   describe("ruling 130: a failed operator run's packet", () => {
     const RESET = "2026-09-07T11:50:00.000Z";
     const RESET_LABEL = "Sep 7, 2026 · 11:50 UTC";
@@ -3184,9 +3388,12 @@ describe("runOperator — authority, ordering, orphans", () => {
     expect(started.runId).not.toBe("run_prev_boot");
     // A real run started instead of the trigger sitting in `pending` forever…
     expect(adapter5.pending).not.toBeNull();
-    // …and the orphan row no longer reads as live work on the board.
-    const orphan = operatorRuns().find((r) => r.id === "run_prev_boot")!;
-    expect(orphan.state).toBe("error");
+    // …and the orphan row no longer reads as live work on the board. Pass 35
+    // U35-7: the same shape boot recovery writes, interrupted by a restart.
+    const orphan = getRun(store5.db, "run_prev_boot")!;
+    expect(orphan.state).toBe("interrupted");
+    expect(orphan.interrupted_reason).toBe("restart");
+    expect(orphan.interrupted_by).toBeNull();
   });
 
   it("B10: a run row from THIS process still coalesces (the backstop is not a free-for-all)", async () => {

@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import {
   acceptanceBlockedReason,
+  activeWorkRevision,
   closedPrBlockedReason,
   conflictingPrBlockedReason,
   unpushedRevisionBlockedReason,
@@ -370,7 +371,11 @@ function acceptanceBlockReason(
       ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
       : null) ??
     // Ruling 135: the delivered revision is not on the PR, above the conflict.
-    unpushedRevisionBlockedReason(fm.pr, fm.workRevision?.headSha ?? null, fm.key) ??
+    unpushedRevisionBlockedReason(
+      fm.pr,
+      activeWorkRevision(fm.workRevision)?.headSha ?? null,
+      fm.key,
+    ) ??
     // P14-LV-07: a PR GitHub cannot merge cannot be accepted.
     conflictingPrBlockedReason(fm, fm.key)
   );
@@ -614,8 +619,8 @@ export function rebuildTaskFile(
     // (`fm.workRevision?.headSha ?? "none"`, task-actions.server.ts), so a board
     // echo built from this column can only differ from the live task when the
     // task really moved under the dialog — which is the refusal the echo exists
-    // to produce.
-    fm.workRevision?.headSha ?? null,
+    // to produce. Ruling 161: a discarded revision projects as none.
+    activeWorkRevision(fm.workRevision)?.headSha ?? null,
     parsed.goal,
     parsed.packet ? JSON.stringify(parsed.packet) : null,
     fm.recommendations.length,

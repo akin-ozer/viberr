@@ -40,6 +40,7 @@ const loaderView = z.object({
     staleSelection: z.boolean(),
     scope: z.object({
       kind: z.enum(["instance", "board", "task"]),
+      projectName: z.string().nullable(),
       label: z.string(),
       contextLine: z.string(),
       pageHref: z.string(),
@@ -109,6 +110,13 @@ describe("GET /resources/controller", () => {
     // Identical shape for the forbidden and the missing project.
     expect(nonMember.view.unavailable).toBe(unknown.view.unavailable);
     expect(nonMember.view.scope.contextLine).toBe(unknown.view.scope.contextLine);
+    // F35-4 (pass 35): the refusal leaks no display name. A non-member used
+    // to read `projectName: "Viberr Core"` and a label built from it off a
+    // typed slug, while every other door answers the slug alone. Canary:
+    // restore the `describeDockScope` spread in `unavailableDockView`.
+    expect(nonMember.view.scope.projectName).toBeNull();
+    expect(nonMember.view.scope.label).toBe("Not available here");
+    expect(JSON.stringify(nonMember.view)).not.toContain("Viberr Core");
   });
 
   it("answers the task scope, newest thread first, and refuses a thread from another scope", async () => {
@@ -164,31 +172,135 @@ describe("POST /resources/controller", () => {
     expect(reply.data.error).toMatch(/expired/);
   });
 
-  it("creates a conversation bound to the exact scope, records the surface, and runs the turn", async () => {
-    const reply = z
-      .object({ ok: z.literal(true), conversationId: z.string() })
-      .parse(
+  /**
+   * U35-4 (pass 35): the dock disables its composer for a person with no
+   * Claude connected (ruling 127), and this door used to answer 200 `{ ok }`
+   * anyway, creating a thread whose only reply was the refusal. The hermetic
+   * root has no credential, so this is exactly arda's state here. Canary:
+   * restore `{ ok: true }` for a refused turn (or drop the availability check
+   * before `createConversation`).
+   */
+  it("refuses a send with no Claude connected: 409, the refusal sentence, and no thread created", async () => {
+    const { listConversations } = await import(
+      "~/server/controller/controller-conversations.server"
+    );
+    const before = listConversations(app.db, { userId: arda }).length;
+    const refused = returnedRefusal.parse(
+      await post(arda, {
+        intent: "send",
+        text: "What is this task about?",
+        project: SLUG,
+        task: "VIB-142",
+        conversationId: "new",
+      }),
+    );
+    expect(refused.init?.status).toBe(409);
+    expect(refused.data.error).toContain("Claude isn't connected for you yet");
+    expect(listConversations(app.db, { userId: arda }).length).toBe(before);
+  });
+
+  /**
+   * Pass-35 review: "unavailable" is TWO states. A `login` credential whose
+   * sign-in file is gone from this server has its own sentence, and the door
+   * refuses before any transcript exists, so this 409 body is the only place
+   * the person can read it. Canary: answer the flat
+   * `CONTROLLER_NOT_CONNECTED_NOTE` at the door again.
+   */
+  it("names the wiped sign-in file at the door, not the generic isn't-connected sentence", async () => {
+    const { recordBackendLogin, disconnectBackend } = await import(
+      "~/server/runtimes/backend-credentials.server"
+    );
+    const actor = { userId: arda, label: "arda@viberr.dev" };
+    recordBackendLogin(app.db, actor, "claude", "claudeai", {});
+    try {
+      const refused = returnedRefusal.parse(
         await post(arda, {
           intent: "send",
           text: "What is this task about?",
           project: SLUG,
-          task: "VIB-142",
-          surface: "/projects/viberr-core/tasks/VIB-142",
+          conversationId: "new",
         }),
       );
-    const { getConversation, listMessages } = await import(
+      expect(refused.init?.status).toBe(409);
+      expect(refused.data.error).toContain("sign-in file is missing from this server");
+      expect(refused.data.error).not.toContain("Claude isn't connected for you yet");
+    } finally {
+      await disconnectBackend(app.db, actor, "claude");
+    }
+  });
+
+  /**
+   * Pass-35 review: the POST-turn arm is its own door. An EXISTING conversation
+   * skips the availability pre-check, so a credential that stopped being
+   * available between the dock's view load and the send lands here. Canary:
+   * delete the `result.state === "refused"` block and this goes green on a
+   * `{ ok: true }` that answers nothing.
+   */
+  it("answers 409 for a refused turn on an existing conversation", async () => {
+    const { createConversation, listMessages } = await import(
       "~/server/controller/controller-conversations.server"
     );
-    const conversation = getConversation(app.db, reply.conversationId)!;
-    expect(conversation.projectSlug).toBe(SLUG);
-    expect(conversation.taskKey).toBe("VIB-142");
-    const messages = listMessages(app.db, conversation.id);
-    expect(messages[0]).toMatchObject({ author: "user", surface: "/projects/viberr-core/tasks/VIB-142" });
-    // The hermetic root has no Claude credential: the honest refusal is in the transcript.
-    expect(messages.some((m) => m.author === "controller")).toBe(true);
-    // The dock then reads it back as the newest thread of that scope.
-    const res = loaderView.parse(await get(arda, `?project=${SLUG}&task=VIB-142`));
-    expect(res.view.conversation?.id).toBe(conversation.id);
+    const thread = createConversation(app.db, {
+      userId: arda,
+      userLabel: "arda@viberr.dev",
+      projectSlug: SLUG,
+    });
+    const refused = returnedRefusal.parse(
+      await post(arda, {
+        intent: "send",
+        text: "Are you there?",
+        project: SLUG,
+        conversationId: thread.id,
+      }),
+    );
+    expect(refused.init?.status).toBe(409);
+    expect(refused.data.error).toContain("Claude isn't connected for you yet");
+    // The same sentence is in the transcript the reload shows.
+    const messages = listMessages(app.db, thread.id);
+    expect(messages[messages.length - 1]).toMatchObject({ author: "controller" });
+  });
+
+  it("creates a conversation bound to the exact scope, records the surface, and runs the turn", async () => {
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../test-support/backend-credentials"
+    );
+    const { queueFakeRun } = await import("../../test-support/fake-runtime");
+    await connectFakeBackend(app.db, arda, "claude");
+    try {
+      queueFakeRun({
+        lines: [{ t: "1", ev: "text", tag: "assistant", text: "It is about the task." }],
+        sessionId: "sess-dock-send",
+      });
+      const reply = z
+        .object({ ok: z.literal(true), conversationId: z.string() })
+        .parse(
+          await post(arda, {
+            intent: "send",
+            text: "What is this task about?",
+            project: SLUG,
+            task: "VIB-142",
+            surface: "/projects/viberr-core/tasks/VIB-142",
+          }),
+        );
+      const { getConversation, listMessages } = await import(
+        "~/server/controller/controller-conversations.server"
+      );
+      const conversation = getConversation(app.db, reply.conversationId)!;
+      expect(conversation.projectSlug).toBe(SLUG);
+      expect(conversation.taskKey).toBe("VIB-142");
+      const messages = listMessages(app.db, conversation.id);
+      expect(messages[0]).toMatchObject({ author: "user", surface: "/projects/viberr-core/tasks/VIB-142" });
+      // The dock then reads it back as the newest thread of that scope.
+      const res = loaderView.parse(await get(arda, `?project=${SLUG}&task=VIB-142`));
+      expect(res.view.conversation?.id).toBe(conversation.id);
+      // Let the fake turn settle before the store closes.
+      for (let i = 0; i < 200; i += 1) {
+        if (listMessages(app.db, conversation.id).some((m) => m.author === "controller")) break;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    } finally {
+      await disconnectFakeBackend(app.db, arda, "claude");
+    }
   });
 
   it("refuses to speak in a thread from another scope, and applies the members-only 404 on send", async () => {

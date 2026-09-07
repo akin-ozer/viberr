@@ -561,6 +561,19 @@ describe("WorkflowRules — states the project's operator autonomy (F20-19)", ()
     expect(note.textContent).toContain("not active");
   });
 
+  // Ruling 151 (pass 35): the closing sentence used to tell every reader that a
+  // Direct-grant operator crosses the approval and human boundaries itself. The
+  // engine refuses that now, so the note has to say the shipped rule.
+  it("says the boundaries bind the operator too (ruling 151)", () => {
+    const { container } = renderWith(undefined);
+    const note = container.querySelector(".pol-note.after")!;
+    expect(note.textContent).toContain("bind every actor, the operator included");
+    expect(note.textContent).toContain("crosses Auto-advance boundaries only");
+    expect(note.textContent).toContain("is refused to the operator");
+    expect(note.textContent).not.toContain("crosses them itself");
+    expect(note.textContent).not.toContain("the rule for people");
+  });
+
   it("keeps the generic invariant (no per-project clause) when no roster is supplied", () => {
     const { container } = renderWith(undefined);
     const note = container.querySelector(".pol-note.after")!;

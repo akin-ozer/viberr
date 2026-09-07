@@ -212,7 +212,14 @@ export function dockTaskExists(
 }
 
 /** The view for a scope this person cannot talk in here: the panel explains
- *  itself and offers no composer, and the page it sits on is untouched. */
+ *  itself and offers no composer, and the page it sits on is untouched.
+ *
+ *  F35-4 (pass 35): this view names nothing but what the person typed. It used
+ *  to spread `describeDockScope`, which reads the project's display name out
+ *  of the projection into `projectName`, `label` and `contextLine`, so a
+ *  non-member learned a project's name from a slug they guessed while every
+ *  other door (board, task, `.data`, attachments, run-log, the controller's own
+ *  tools) answers the slug alone. The projection is not read here at all. */
 export function unavailableDockView(
   db: DatabaseSync,
   /** Ruling 127: even the refusal view answers availability for THIS person. */
@@ -220,15 +227,23 @@ export function unavailableDockView(
   binding: { projectSlug: string | null; taskKey: string | null },
   dataRoot?: string,
 ): ControllerDockView {
-  const scope = describeDockScope(db, binding);
   return {
     available: isBackendAvailableFor(db, viewer.id, "claude", { dataRoot }),
     controllerName: resolveControllerConfig(dataRoot).name,
     unavailable: true,
     staleSelection: false,
     scope: {
-      ...scope,
+      kind: conversationScopeOf(binding),
+      projectSlug: binding.projectSlug,
+      taskKey: binding.taskKey,
+      projectName: null,
+      label: "Not available here",
       contextLine: "Not available here: this project or task is not open to you.",
+      // A place to go, built from the slug the person typed (the page route
+      // answers its own 404 there), never from the projection.
+      pageHref: binding.projectSlug
+        ? `/projects/${binding.projectSlug}/controller`
+        : "/controller",
     },
     conversation: null,
     messages: [],

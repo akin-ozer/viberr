@@ -288,8 +288,12 @@ function proseInstantMs(phrase: string): number | null {
  *    silently answer in whatever timezone the SERVER happens to run in — a
  *    container is usually UTC, a laptop is not, and the same message would
  *    retire the record at different moments on the two).
- *  - Claude: "Claude AI usage limit reached|1750000000" — a bare unix epoch
+*  - Claude: "Claude AI usage limit reached|1750000000" — a bare unix epoch
  *    after a pipe, which needs no interpretation at all.
+ *  - Codex, five-hour window: "… or try again at 6:18 PM." — a time with no
+ *    date, printed in the local zone of the process that ran the CLI
+ *    (G35-4). Resolved with the process's own local setters to the next
+ *    occurrence at or after the observation; precision `clock`.
  *
  * The returned `precision` says which of those happened, so the reader can be
  * conservative about the derived one and the panel can render it honestly.
@@ -330,8 +334,30 @@ export function parseQuotaResetAt(text: string, observedAtIso?: string): QuotaRe
   const phrase = /try again(?:\s+(?:at|on))?\s+([^.\n]+)/i.exec(text);
   if (!phrase) return null;
   const ms = proseInstantMs(phrase[1]!);
-  if (ms == null || !Number.isFinite(ms)) return null;
-  return { at: Math.round(ms / 1000), precision: "prose" };
+  if (ms != null && Number.isFinite(ms)) {
+    return { at: Math.round(ms / 1000), precision: "prose" };
+  }
+  // G35-4 (pass 35, ruling 152(c)): the TIME-ONLY shape a five-hour Codex
+  // window refuses with ("try again at 6:18 PM"): no month, no day, no zone.
+  // The Codex CLI prints the wall clock of the PROCESS that ran it (verified
+  // live: "6:18 PM" in a UTC container was 18:18Z), so the hour is resolved
+  // with the process's own local setters, never `Date.UTC`, at the next
+  // occurrence at or after the observation. Precision `clock`: a real
+  // to-the-minute time on an inferred day.
+  const timeOnly = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i.exec(phrase[1]!.trim());
+  if (!timeOnly) return null;
+  const hourRaw = Number(timeOnly[1]);
+  const minute = timeOnly[2] ? Number(timeOnly[2]) : 0;
+  const meridiem = timeOnly[3]?.toLowerCase() ?? null;
+  const hourOk = meridiem ? hourRaw >= 1 && hourRaw <= 12 : hourRaw >= 0 && hourRaw <= 23;
+  if (!hourOk || minute < 0 || minute > 59) return null;
+  const hour = meridiem ? (hourRaw % 12) + (meridiem === "pm" ? 12 : 0) : hourRaw;
+  const observedMs = observedAtIso ? Date.parse(observedAtIso) : Date.now();
+  const base = Number.isFinite(observedMs) ? new Date(observedMs) : new Date();
+  const local = new Date(base.getTime());
+  local.setHours(hour, minute, 0, 0);
+  if (local.getTime() < base.getTime()) local.setDate(local.getDate() + 1);
+  return { at: Math.round(local.getTime() / 1000), precision: "clock" };
 }
 
 /** Ruling 130(d): the rows without their principal, for the unauthenticated
@@ -513,4 +539,66 @@ export function latestBackendRateLimits(
       exhausted: expired ? null : stored,
     };
   });
+}
+
+/**
+ * G35-4 / ruling 152(c) (pass 35): the hold a dispatch must honour.
+ *
+ * Live, nine Codex deliveries were dispatched one after another into a window
+ * the instance had already recorded as spent: each paid a clone, an adapter
+ * spawn, a refused run, an operator turn and a "Work stalled" packet for a
+ * failure the health body was already displaying. This is the ONE read a
+ * dispatch makes before it spends anything.
+ *
+ * A hold stands while the stored exhaustion has not passed the instant the
+ * provider named (`resetsAt`), or, when the provider named none, for
+ * `UNDATED_HOLD_MS` after the observation. No grace window: the hold trusts
+ * the provider's instant (the Insights card keeps its grace, because
+ * SHOWING a spent window too long is cheap and holding a dispatch too long
+ * is not).
+ *
+ * Ruling 146: a refusal is a statement about ONE person's account, so a hold
+ * applies to the account it names. Pass the principal the dispatch would
+ * bill: a record naming a different person holds nothing for this one, and a
+ * record naming nobody (an older row) holds every dispatch on the backend.
+ */
+export interface BackendDispatchHold {
+  /** Unix MILLISECONDS the window reopens; null when the provider named none
+   *  (then the hold ends `UNDATED_HOLD_MS` after `observedAt`). */
+  until: number | null;
+  /** The provider's own sentence, for the note a human reads. */
+  providerText: string;
+  /** ISO instant of the refusal the hold rests on. */
+  observedAt: string;
+}
+
+/** How long a dispatch is held on an exhaustion that named no reset instant:
+ *  long enough to stop the live cascade, short enough that a transient
+ *  reading never parks a task for the afternoon. */
+export const UNDATED_HOLD_MS = 30 * 60_000;
+
+export function backendDispatchHold(
+  db: DatabaseSync,
+  backend: QuotaBackend,
+  input: {
+    nowMs?: number;
+    /** The user the dispatch bills (ruling 127); the hold is scoped to it. */
+    credentialUserId: string;
+  },
+): BackendDispatchHold | null {
+  const stored = getSetting(db, `${EXHAUSTED_KEY_PREFIX}${backend}`, exhaustionSchema);
+  if (!stored) return null;
+  if (stored.credentialUserId !== null && stored.credentialUserId !== input.credentialUserId) {
+    return null;
+  }
+  const nowMs = input.nowMs ?? Date.now();
+  if (!Number.isFinite(nowMs)) return null;
+  if (stored.resetsAt != null) {
+    const until = stored.resetsAt * 1000;
+    if (until <= nowMs) return null;
+    return { until, providerText: stored.providerText, observedAt: stored.observedAt };
+  }
+  const observedMs = Date.parse(stored.observedAt);
+  if (!Number.isFinite(observedMs) || observedMs + UNDATED_HOLD_MS <= nowMs) return null;
+  return { until: null, providerText: stored.providerText, observedAt: stored.observedAt };
 }

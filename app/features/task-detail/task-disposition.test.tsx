@@ -5,6 +5,7 @@ import { MemoryRouter, createRoutesStub } from "react-router";
 import {
   ExecutionProfile,
   type DeployedSpecialistView,
+  type LiveAgentRun,
 } from "./execution-profile";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type {
@@ -89,6 +90,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     commits: [],
     changed: null,
     unownedPr: null,
+    foreignHead: null,
     goal: "Keep the timeline readable on long tasks.",
     packet: null,
     eventCount: 0,
@@ -128,7 +130,7 @@ function renderPage(props: {
   schedules?: TaskSchedule[];
   runtime?: RunView[];
   deployedSpecialists?: DeployedSpecialistView[];
-  activeAgentProfileIds?: string[];
+  liveAgentRuns?: LiveAgentRun[];
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -143,7 +145,7 @@ function renderPage(props: {
             operatorBackend="claude"
             operatorAutonomy="supervised"
             runPrincipal={CONNECTED_PRINCIPAL}
-            activeAgentProfileIds={props.activeAgentProfileIds ?? []}
+            liveAgentRuns={props.liveAgentRuns ?? []}
             timelineHasMore={false}
             timelineRemaining={0}
             timelineNextLimit={50}
@@ -618,6 +620,208 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(submitted[0]!.ackPr).toBe("review");
     expect(submitted[0]!.ackRevision).toBe("none");
     expect(submitted[0]!.ackVerdict).toBe("healthy");
+  });
+
+  /**
+   * Ruling 164 (pass 35, F35-14): a `force_accept` option performs the admin
+   * override, so it opens the same ceremony the Force accept button opens (the
+   * force form: skipped stages, the bypassed refusal, the danger confirm) and
+   * still travels as the packet resolution the server dispatches on.
+   */
+  it("ruling 164: a force_accept option opens the FORCE ceremony and resolves the packet with its echo", async () => {
+    // Canary: route the option through the plain packet ceremony (or through no
+    // ceremony at all) and the heading is "Accept this completion?", with an
+    // echo-less POST the server refuses.
+    const { container, submitted, getByText } = renderPage({
+      myRole: "admin",
+      // Off the boundary and refused: the wedge a force-accept exists for.
+      // The server computes BOTH: `blockedReason` folds in the open blocked
+      // packet, `blockedReasonViaPacket` is the refusal a packet resolution
+      // really meets (F19-7). A `force_accept` option is a packet resolution,
+      // so the second one is the gate this ceremony bypasses.
+      acceptance: {
+        atBoundary: false,
+        blockedReason: "The latest review requests changes.",
+        blockedReasonViaPacket: "The latest review requests changes.",
+      },
+      task: {
+        stage: "triage",
+        validation: "failing",
+        packet: {
+          ...packetWith("force_accept"),
+          options: [
+            {
+              kind: "force_accept",
+              t: "Force-accept as admin without a fresh verdict",
+              d: "",
+              rec: true,
+            },
+            { kind: "request_edit", t: "Send it back for edits", d: "", rec: false },
+          ],
+        },
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    expect(submitted).toHaveLength(0);
+    expect(getByText("Force-accept this completion?")).toBeTruthy();
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    // The option's own title is the subject, and the force form states what the
+    // close jumps: the stages it skips and the refusal it bypasses.
+    expect(dialog.textContent).toContain("Force-accept as admin without a fresh verdict");
+    expect(dialog.textContent).toContain("Bypassing");
+    expect(dialog.textContent).toContain("The latest review requests changes.");
+    fireEvent.click(findButton(container, "Force-accept VIB-151")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    // The packet resolution, not the force-accept intent: the server resolves
+    // the decision and runs the override behind it.
+    expect(submitted[0]!.intent).toBe("resolve-packet");
+    expect(submitted[0]!.option).toBe("0");
+    expect(submitted[0]!.ackVerdict).toBe("failing");
+  });
+
+  /**
+   * Pass-35 cluster review of ruling 164. A `force_accept` option is offered
+   * FROM a blocked packet, and the resolution clears that packet BEFORE
+   * `forceAcceptCompletion` runs, so the open-blocked-decision sentence is not
+   * a gate this override bypasses. Both `task.blockReason` (the projection's
+   * `validation_block_reason`) and `acceptance.blockedReason` fold it in, and
+   * the ceremony read them: the "Bypassing" row named the decision the click
+   * was answering and told the admin to resolve the packet the button
+   * resolves, while `task.acceptance.forced` recorded something else, being
+   * computed after the packet is gone.
+   */
+  it("ruling 164 + F19-7: the force ceremony never bypasses the packet it is resolving", async () => {
+    // Canary: restore `task.blockReason ?? acceptance.blockedReason` for the
+    // forced ceremony and the dialog quotes the open blocked decision.
+    const openPacketSentence =
+      "This task has an open blocked decision. Resolve the operator's packet before accepting it.";
+    const { container } = renderPage({
+      myRole: "admin",
+      acceptance: {
+        atBoundary: false,
+        // What every gate says while the packet stands, the packet included.
+        blockedReason: openPacketSentence,
+        // What the packet RESOLUTION meets: the packet is what it clears.
+        blockedReasonViaPacket: null,
+      },
+      task: {
+        stage: "triage",
+        validation: "failing",
+        blockReason: openPacketSentence,
+        packet: {
+          ...packetWith("force_accept"),
+          options: [
+            {
+              kind: "force_accept",
+              t: "Force-accept as admin without a fresh verdict",
+              d: "",
+              rec: true,
+            },
+            { kind: "request_edit", t: "Send it back for edits", d: "", rec: false },
+          ],
+        },
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    // Still the force ceremony, still naming the option.
+    expect(dialog.textContent).toContain("Force-accept as admin without a fresh verdict");
+    // But it neither quotes the packet gate nor tells the admin to resolve the
+    // decision this very click resolves.
+    expect(dialog.textContent).not.toContain("open blocked decision");
+    expect(dialog.textContent).not.toContain("Bypassing");
+  });
+
+  /**
+   * Live validation of ruling 164 (2026-09-07): the force ceremony opened from
+   * a `force_accept` option still carried the Withdraws row, naming the very
+   * packet the click answers and saying it "closes unanswered with the task".
+   * The `task.acceptance.forced` audit row written by that same click reads
+   * `withdrawnPacket: null` (the disclosure is built after the packet path has
+   * cleared the packet), so the screen and the record disagreed — the class the
+   * Bypassing row above was already fixed for. A packet resolution answers the
+   * decision; only the direct doors withdraw one.
+   */
+  it("ruling 164: a packet resolution withdraws nothing, so the ceremony claims no withdrawal", async () => {
+    // Canary: pass `task.packet?.title` unconditionally again and both halves
+    // of this test go red — the force ceremony and the plain packet accept both
+    // print "Withdraws" for the decision they resolve.
+    const forced = renderPage({
+      myRole: "admin",
+      acceptance: {
+        atBoundary: false,
+        blockedReason: "The latest review requests changes.",
+        blockedReasonViaPacket: "The latest review requests changes.",
+      },
+      task: {
+        stage: "triage",
+        validation: "failing",
+        packet: {
+          ...packetWith("force_accept"),
+          title: "Continuity degraded, pick a recovery path",
+          options: [
+            {
+              kind: "force_accept",
+              t: "Force-accept as admin without a fresh verdict",
+              d: "",
+              rec: true,
+            },
+            { kind: "request_edit", t: "Send it back for edits", d: "", rec: false },
+          ],
+        },
+      },
+    });
+    fireEvent.click(findButton(forced.container, "Confirm decision")!);
+    const forcedDialog = forced.container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    expect(forcedDialog.textContent).toContain("Force-accept this completion?");
+    expect(forcedDialog.textContent).not.toContain("Withdraws");
+    expect(forcedDialog.textContent).not.toContain("closes unanswered");
+    forced.unmount();
+
+    // The same rule on the plain `accept_completion` option: it, too, resolves
+    // the packet it was offered on.
+    const accepted = renderPage({
+      myRole: "admin",
+      task: {
+        pr: acceptedPr({ state: "review" }),
+        packet: {
+          ...packetWith("accept_completion"),
+          title: "Accept completion, or send back for one fix?",
+        },
+      },
+    });
+    fireEvent.click(findButton(accepted.container, "Confirm decision")!);
+    const acceptDialog = accepted.container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    expect(acceptDialog.textContent).toContain("Accept this completion?");
+    expect(acceptDialog.textContent).not.toContain("Withdraws");
+    accepted.unmount();
+
+    // The DIRECT door still discloses it: the Accept button closes a standing
+    // decision unanswered, and the row is the only warning a person gets.
+    const direct = renderPage({
+      myRole: "admin",
+      task: {
+        pr: acceptedPr({ state: "review" }),
+        packet: {
+          ...packetWith("redirect"),
+          title: "Resume the rehydrated thread?",
+        },
+      },
+    });
+    fireEvent.click(findButton(direct.container, "Accept completion")!);
+    const directDialog = direct.container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    expect(directDialog.textContent).toContain("Withdraws");
+    expect(directDialog.textContent).toContain("Resume the rehydrated thread?");
   });
 
   it("every OTHER packet option still resolves in one click — none of them writes to GitHub", async () => {
@@ -1490,6 +1694,7 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
     branch: "vib-151",
     pendingRecommendations: 2,
     unownedPr: null,
+    foreignHead: null,
     openPr: null,
   };
 
@@ -1843,7 +2048,7 @@ interface RecordedExecCalls {
 function renderExec(opts: {
   task?: Partial<TaskDetail>;
   deployedSpecialists?: DeployedSpecialistView[];
-  activeAgentProfileIds?: string[];
+  liveAgentRuns?: LiveAgentRun[];
   schedules?: TaskSchedule[];
   canRunAgents?: boolean;
 } = {}) {
@@ -1867,7 +2072,7 @@ function renderExec(opts: {
         operatorAutonomy="supervised"
         runPrincipal={CONNECTED_PRINCIPAL}
         canRunAgents={opts.canRunAgents ?? true}
-        activeAgentProfileIds={opts.activeAgentProfileIds ?? []}
+        liveAgentRuns={opts.liveAgentRuns ?? []}
         operatorRunActive={false}
         runBusy={false}
         onRunAgent={(profileId, prompt, delayMinutes) =>
@@ -1977,7 +2182,7 @@ describe("the Engaged agents ledger marks authority per row", () => {
     const { container } = renderExec({
       task: { specialist: engagement("developer", "Implementation") },
       deployedSpecialists: [dev],
-      activeAgentProfileIds: ["developer"],
+      liveAgentRuns: [{ profileId: "developer", lifecycle: "running" }],
     });
     expect(rowFor(container, "Developer").querySelector(".sub")!.textContent).toContain(
       "· running…",
@@ -2206,6 +2411,7 @@ describe("D6: consequential actions confirm before they act", () => {
     finished: null,
     turns: 1,
     tokens: 0,
+    tokensEstimated: false,
     lines: [],
     raw: [],
     lineCount: 0,
@@ -2300,7 +2506,7 @@ describe("D6: consequential actions confirm before they act", () => {
 });
 
 /**
- * U7 — D2's other half.
+ * U7 — D2's other half — and U35-2 (pass 35).
  *
  * UX spec §Breakpoint Strategy: *"the task detail's side-by-side regions stack,
  * preserving reading order: current state, latest packet, next action, then the
@@ -2311,26 +2517,58 @@ describe("D6: consequential actions confirm before they act", () => {
  * keyboard user then saw "Accept completion → Done" at the top of the page and
  * reached it LAST, after every timeline entry (WCAG 2.2 SC 1.3.2 / 2.4.3).
  *
- * The columns are ordered in the markup now and placed by grid cell in app.css,
- * so the desktop paint is unchanged while one order serves both. This asserts
- * the order and its CONTENT — a swap that moved empty divs would pass on order
- * alone.
+ * U7 answered by putting the side column first, but the task's name, its goal
+ * and the open decision packet lived in the main column, so a 390px viewport
+ * stacked the GitHub card, Current state, Details and Permissions ABOVE the
+ * title (y=1659 on KNC-6) and the question the packet asked (y=2070). The page
+ * is three regions now: `.detail-head` (title, goal, the open packet), then
+ * `.detail-side` (Current state first, with the next action), then
+ * `.detail-main` (runs and the timeline); placed by grid cell in app.css, so the
+ * desktop paint keeps two columns while one order serves both. This asserts the
+ * order and its CONTENT — a swap that moved empty divs would pass on order
+ * alone. Canary: swap the JSX regions back and the order assert is red.
  */
-describe("U7: the task detail's reading order matches its stacking rule", () => {
-  it("puts the current-state / acceptance column ahead of the timeline in the DOM", () => {
-    const { container } = renderPage({});
+describe("U7 / U35-2: the task detail's reading order matches its stacking rule", () => {
+  it("puts the title and the open packet first, current state next, the timeline last in the DOM", () => {
+    const { container } = renderPage({
+      task: {
+        packet: {
+          type: "blocked",
+          kind: "Blocked decision",
+          from: "Operator",
+          title: "Which spec wins?",
+          body: "The goal and the merged spec disagree.",
+          observations: [],
+          options: [
+            { kind: "edit_goal", t: "Align the goal", d: "", rec: true },
+            { kind: "redirect", t: "Redirect", d: "", rec: false },
+          ],
+        },
+      },
+    });
     const detail = container.querySelector(".detail")!;
-    const columns = Array.from(detail.children)
+    const regions = Array.from(detail.children)
       .map((el) => el.className)
-      .filter((c) => c === "detail-main" || c === "detail-side");
-    expect(columns).toEqual(["detail-side", "detail-main"]);
+      .filter((c) => c === "detail-head" || c === "detail-main" || c === "detail-side");
+    expect(regions).toEqual(["detail-head", "detail-side", "detail-main"]);
 
+    const head = detail.querySelector(".detail-head")!;
     const side = detail.querySelector(".detail-side")!;
     const main = detail.querySelector(".detail-main")!;
-    // The consequential action really is in the column that comes first…
+    // The head carries the task's name and the decision it asks for…
+    expect(head.querySelector(".task-hero h1")?.textContent).toBe("Compress long-running task timelines");
+    expect(head.querySelector(".packet")).not.toBeNull();
+    expect(head.textContent).toContain("Which spec wins?");
+    expect(main.querySelector(".packet")).toBeNull();
+    // …the head precedes the side rail, and the side rail precedes the main column.
+    expect(head.compareDocumentPosition(side) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(side.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The consequential action really is in the region that comes second…
     expect(side.textContent).toContain("Accept completion → Done");
     expect(main.textContent).not.toContain("Accept completion → Done");
-    // …and the timeline really is in the one that follows it.
+    // …Current state leads it (it carries the next action), ahead of GitHub…
+    expect(side.firstElementChild?.textContent).toContain("Accept completion → Done");
+    // …and the timeline really is in the region that follows both.
     expect(main.querySelector(".tl-list, .timeline, .tl-wrap")).not.toBeNull();
   });
 });
@@ -2401,6 +2639,7 @@ describe("C3: the collision confirm describes the right branch, and warns before
       task: {
         packet: collisionPacket,
         unownedPr: null,
+        foreignHead: null,
         pr: { number: 77, state: "review", title: "VIB-151 work" },
       },
     });
@@ -2417,6 +2656,7 @@ describe("C3: the collision confirm describes the right branch, and warns before
       task: {
         packet: collisionPacket,
         unownedPr: null,
+        foreignHead: null,
         pr: { number: 77, state: "merged", title: "VIB-151 work" },
       },
     });

@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { seedDefaultAgentAssets } from "~/server/seed/default-assets.server";
@@ -551,6 +553,26 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
     ).toBe(true);
   });
 
+  /**
+   * Ruling 153 (pass 35, G35-2): the template's default `effort` is not a
+   * display nicety. `effectiveProfileView(...).effort` flows through
+   * `toResolved` into a run's `runInput.effort`, and the seeded roster rows
+   * carry no `definition`, so a template default decides what those runs spend.
+   * Canary: revert the view to `def?.effort ?? ""`.
+   */
+  it("ruling 153: a definition-less deployment takes the template's effort; a definition's own wins", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const file = join(dataRoot, "agents", "profiles", "developer.md");
+    const raw = readFileSync(file, "utf8");
+    writeFileSync(file, raw.replace(/^---\n/, "---\neffort: max\n"), "utf8");
+
+    expect(view(developer(), dataRoot).effort).toBe("max");
+    expect(
+      view(developer({ kind: "specialist", name: "Developer", effort: "low" }), dataRoot).effort,
+    ).toBe("low");
+  });
+
   it("a snapshot carrying ONLY resource grants is not an identity customization", () => {
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
@@ -561,6 +583,36 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
     expect(resourcesOnly.customized).toBe(false);
     // Non-vacuity: the grants really did reach the view.
     expect(resourcesOnly.resources.skills).toEqual(["developer-expertise"]);
+  });
+
+  /**
+   * Ruling 156 (pass 35, F35-7): the grants signal beside the identity one.
+   * A copy whose lists differ from the template's carries the exact drift;
+   * `customized` stays an identity signal. Canary: hard-code
+   * `templateDrift: null` in the view.
+   */
+  it("ruling 156: a copy whose grants differ carries the drift; a definition-less or equal copy carries none", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const drifted = view(
+      developer({ resources: { skills: [], mcps: [], kb: [] } }),
+      dataRoot,
+    );
+    expect(drifted.templateDrift?.missing.skills).toEqual(["developer-expertise"]);
+    expect(drifted.templateDrift?.templateResources.skills).toEqual(["developer-expertise"]);
+    expect(drifted.customized).toBe(false);
+    // No definition: the template resolves live, nothing to drift.
+    expect(view(developer(), dataRoot).templateDrift).toBeNull();
+    // The template's own lists (the shipped template carries no KB grants):
+    // no drift. Order-insensitivity is pinned on `resourceDrift` itself.
+    const equal = view(
+      developer({
+        resources: { skills: ["developer-expertise"], mcps: [], kb: [] },
+      }),
+      dataRoot,
+    );
+    expect(equal.resources.skills).toEqual(["developer-expertise"]);
+    expect(equal.templateDrift).toBeNull();
   });
 
   it("a snapshot that only echoes the template's own identity is not customized", () => {

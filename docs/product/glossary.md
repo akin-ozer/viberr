@@ -37,7 +37,7 @@
 
 **Data root** — `VIBERR_DATA_ROOT`. Holds canonical files, SQLite, run logs, KBs, skills and the per-person agent homes under `runtimes/users/` (ruling 127). One app process per data root, enforced by `state/writer.lock`.
 
-**Decision packet** — the one open structured question on a task (`## Packet` in `task.md`): `type` `input | blocked`, observations, and options whose `kind` is one of `PACKET_OPTION_KINDS` (`accept_completion`, `request_edit`, `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`, `archive_task`, `discard_branch`, `resolve_remote_collision`, `custom`). Resolution dispatches on the kind, never the title (ruling 7). A failed run's recovery packet names the cause Viberr classified and the credential principal's own remedy, and a recovery option's label states what the human asserts; its recorded decision is that label or its pre-authored `ev` (ruling 130).
+**Decision packet** — the one open structured question on a task (`## Packet` in `task.md`): `type` `input | blocked`, observations, and options whose `kind` is one of `PACKET_OPTION_KINDS` (`accept_completion`, `request_edit`, `block_on_policy`, `hold_runtime_debug`, `redirect`, `retry_other_backend`, `edit_goal`, `archive_task`, `discard_branch`, `resolve_remote_collision`, `force_accept`, `move_stage`, `custom`). Resolution dispatches on the kind, never the title (ruling 7), which is why an option's title is a promise its kind has to keep: a send-back option whose words describe a force-accept, a stage move or an agent-profile edit is refused where it is authored, and named for the kind that performs it (ruling 164). A failed run's recovery packet names the cause Viberr classified and the credential principal's own remedy, and a recovery option's label states what the human asserts; its recorded decision is that label or its pre-authored `ev` (ruling 130).
 
 **Delivery** — pushing the task branch and opening the review PR. An operator decision (capability `deliver-review-pr`, ruling 21) executed by the server; specialists never push and nobody pushes by hand. Humans can trigger it directly (`deliver-review` intent). Delivery is defined by the remote (ruling 134): the push reads origin's head first, answers `up_to_date` when it already carries the workspace head, and otherwise pushes and says what moved; rework on a task whose PR is already open is delivered the same way and moves that PR's head.
 
@@ -87,7 +87,7 @@
 
 **Ruling** — a numbered owner decision recorded in [decisions.md](../architecture/decisions.md). Code comments cite them as "ruling N"; superseded rulings are kept and marked, never deleted.
 
-**Run** — one execution of an agent through a backend: `agent_runs` row + raw NDJSON transcript. `kind` is a delivery axis (`operator | primary | reviewer | controller`); `state` is `queued | running | finished | error | interrupted`.
+**Run** — one execution of an agent through a backend: `agent_runs` row + raw NDJSON transcript. `kind` is a delivery axis (`operator | primary | reviewer | controller`); `state` is `queued | running | finished | error | interrupted`. An `interrupted` run names who stopped it (`interrupted_by`, a person) or why (`interrupted_reason: restart`, boot recovery); a restart is never an error.
 
 **Schedule** — a future run recorded in `task.md` `schedules[]`: `run-operator` (optional steer) or `run-agent` (a profile id + prompt). Statuses `pending | claimed | fired | failed | cancelled`. Resolves the live deployment at fire time; never fires on a terminal task.
 

@@ -22,12 +22,15 @@ const FULL: InsightsSummary = {
     inputTokens: 120_000,
     cachedInputTokens: 40_000,
     outputTokens: 2_400_000,
+    tokenlessRuns: 2,
     turns: 130,
   },
   outcomes: {
     finished: 30,
     error: 6,
     interrupted: 4,
+    interruptedNeverStarted: 0,
+    interruptedByRestart: 0,
     running: 2,
     queued: 0,
     successRate: 30 / 40,
@@ -90,7 +93,7 @@ describe("InsightsPage", () => {
   it("carries the Insights screen label", () => {
     const noRuns: InsightsSummary = {
       ...FULL,
-      totals: { runs: 0, costedRuns: 0, cost: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, turns: 0 },
+      totals: { runs: 0, costedRuns: 0, cost: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, tokenlessRuns: 0, turns: 0 },
     };
     for (const summary of [FULL, noRuns]) {
       const { container } = renderPage(summary);
@@ -114,6 +117,31 @@ describe("InsightsPage", () => {
     expect(getByText("2.4M")).toBeTruthy(); // output tokens (unique)
     expect(getByText("75%")).toBeTruthy(); // success rate 30/40
     expect(getByText("3m 5s")).toBeTruthy(); // avg duration 185s
+  });
+
+  /**
+   * F35-1: the token sums cover provider totals only, so the card names the
+   * runs they leave out, off the sums' OWN count and with nothing running.
+   * The old note was gated on a run being in flight and spoke only of running
+   * runs, so on the common screen (nothing running, some stopped or errored
+   * rows outside the sums) the page showed an understated headline and said
+   * nothing. Canary: gate the sub on `outcomes.running` again and the first
+   * assertion fails.
+   */
+  it("F35-1: the token card names the runs outside its sums, with nothing running", () => {
+    const idle = structuredClone(FULL);
+    idle.outcomes.running = 0;
+    idle.totals.tokenlessRuns = 3;
+    expect(renderPage(idle).container.textContent).toContain(
+      "3 of 42 runs report no provider token total",
+    );
+    cleanup();
+    // Every run reported a provider total: no qualifier at all.
+    const clean = structuredClone(FULL);
+    clean.totals.tokenlessRuns = 0;
+    expect(renderPage(clean).container.textContent).not.toContain(
+      "report no provider token total",
+    );
   });
 
   it("renders the breakdown bars and the daily chart", () => {
@@ -414,7 +442,7 @@ describe("InsightsPage", () => {
   it("shows an empty state when there are no runs", () => {
     const { getByText, container } = renderPage({
       ...FULL,
-      totals: { runs: 0, costedRuns: 0, cost: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, turns: 0 },
+      totals: { runs: 0, costedRuns: 0, cost: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, tokenlessRuns: 0, turns: 0 },
     });
     expect(getByText(/No agent runs yet/)).toBeTruthy();
     expect(container.querySelector(".stat-grid")).toBeNull();
@@ -460,8 +488,9 @@ describe("ruling 130(d): whose account, and the hour", () => {
     });
     expect(getByText(/from a refused run on Arda Kaya's account/)).toBeTruthy();
     // The reading row names the HOUR (local once hydrated, UTC on the first
-    // paint), never a bare calendar date.
-    expect(getByText(/resets .+ · \d{1,2}:\d{2}/)).toBeTruthy();
+    // paint), never a bare calendar date. The day bucket is optional: on the
+    // fixture's own calendar day `formatDayDotTime` prints the bare clock.
+    expect(getByText(/resets (.+ · )?\d{1,2}:\d{2}/)).toBeTruthy();
   });
 
   it("a refused credential row names the account", () => {
@@ -478,5 +507,28 @@ describe("ruling 130(d): whose account, and the hour", () => {
       ],
     });
     expect(getByText(/credential refused · Arda Kaya's account/)).toBeTruthy();
+  });
+});
+
+/**
+ * Pass 35 U35-7: the stopped count says how many a restart stopped and how
+ * many never started, so a boot's toll reads as what it was and the rate's
+ * smaller denominator is explained on the card. Canary: return the bare
+ * `${outcomes.interrupted} stopped` from `stoppedLabel` and this fails.
+ */
+describe("Completion rate names restart-stopped and never-started runs", () => {
+  it("renders the detail when either count is non-zero", () => {
+    const { getByText } = renderPage({
+      ...FULL,
+      outcomes: { ...FULL.outcomes, interrupted: 23, interruptedByRestart: 23, interruptedNeverStarted: 17 },
+    });
+    expect(
+      getByText("30 finished · 6 error · 23 stopped (23 by a restart, 17 never started) · 2 running"),
+    ).toBeTruthy();
+  });
+
+  it("stays the plain count when neither applies", () => {
+    const { getByText } = renderPage(FULL);
+    expect(getByText("30 finished · 6 error · 4 stopped · 2 running")).toBeTruthy();
   });
 });

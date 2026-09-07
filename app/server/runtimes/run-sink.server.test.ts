@@ -148,7 +148,9 @@ describe("the sink names a result that lands below the live sum", () => {
   const usageLine = (usage: { input_tokens: number; cached_input_tokens: number; output_tokens: number }, isResult = false): EmittedLine => ({
     raw: JSON.stringify({ type: isResult ? "result" : "assistant" }),
     display: { t: "00:00:00", ev: isResult ? "result" : "text", tag: isResult ? "result" : "assistant", text: "x" },
-    facts: isResult ? { usage, isResult: true } : { usage },
+    facts: isResult
+      ? { usage: { input_tokens: usage.input_tokens, cached_input_tokens: usage.cached_input_tokens, output_tokens: usage.output_tokens, outputEstimated: false }, isResult: true }
+      : { usage: { input_tokens: usage.input_tokens, cached_input_tokens: usage.cached_input_tokens, output_tokens: usage.output_tokens, outputEstimated: true } },
     occurredAt: new Date().toISOString(),
   });
 
@@ -185,6 +187,53 @@ describe("the sink names a result that lands below the live sum", () => {
     sink.line(usageLine({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 300 }, true));
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+/**
+ * F35-1 (pass 35): the Claude adapter's live output is an ESTIMATE from the
+ * streamed text (`outputEstimated: true`). It folds by max like every other
+ * live figure, but the provider's own total REPLACES it (an estimate may
+ * overshoot, and max would keep the wrong number for good) and stamps
+ * `usage_final = 1` on the row, which is what the projection and Insights read
+ * to tell an estimate from a total.
+ */
+describe("F35-1: an estimated output is a lower bound, the provider's figure replaces it", () => {
+  const line = (
+    usage: { input_tokens: number; cached_input_tokens: number; output_tokens: number; outputEstimated: boolean },
+    isResult = false,
+  ): EmittedLine => ({
+    raw: JSON.stringify({ type: isResult ? "result" : "assistant" }),
+    display: { t: "00:00:00", ev: isResult ? "result" : "text", tag: isResult ? "result" : "assistant", text: "x" },
+    facts: isResult ? { usage, isResult: true } : { usage },
+    occurredAt: new Date().toISOString(),
+  });
+  const rowOf = (runId: string) =>
+    // SAFETY: the statement selects INTEGER NOT NULL columns (0001_baseline) of
+    // the row `sinkFor` just upserted under this id.
+    store.db.prepare(`SELECT output_tokens, usage_final FROM agent_runs WHERE id = ?`).get(runId) as { output_tokens: number; usage_final: number };
+
+  it("a result BELOW the live estimate replaces it and marks the row final", () => {
+    // Canary: restore `Math.max` for the result arm and the row keeps 1200.
+    const sink = sinkFor("run_estimate_high");
+    sink.line(line({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 1200, outputEstimated: true }));
+    expect(rowOf("run_estimate_high")).toEqual({ output_tokens: 1200, usage_final: 0 });
+    sink.line(line({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 900, outputEstimated: false }, true));
+    expect(rowOf("run_estimate_high")).toEqual({ output_tokens: 900, usage_final: 1 });
+  });
+
+  it("estimates fold by max and never mark the row final", () => {
+    const sink = sinkFor("run_estimate_fold");
+    sink.line(line({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 1200, outputEstimated: true }));
+    sink.line(line({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 1000, outputEstimated: true }));
+    expect(rowOf("run_estimate_fold")).toEqual({ output_tokens: 1200, usage_final: 0 });
+  });
+
+  it("an errored result's empty usage leaves the estimate and the flag alone", () => {
+    const sink = sinkFor("run_estimate_empty");
+    sink.line(line({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 1200, outputEstimated: true }));
+    sink.line(line({ input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, outputEstimated: false }, true));
+    expect(rowOf("run_estimate_empty")).toEqual({ output_tokens: 1200, usage_final: 0 });
   });
 });
 
@@ -884,7 +933,7 @@ describe("quota exhaustion from a refused run (D5)", () => {
  */
 describe("ruling 130(d): structured refusals and the principal", () => {
   const facts = (over: Partial<RunFailureFacts>): RunFailureFacts => ({
-    kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, ...over,
+    kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, origin: null, ...over,
   });
   function principalSink(runId: string) {
     upsertRun(store.db, {

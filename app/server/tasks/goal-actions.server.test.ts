@@ -1169,3 +1169,122 @@ describe("removing a link sees another goal's PENDING wait on it", () => {
     ).rejects.toThrow(/link 2/);
   });
 });
+
+/**
+ * Ruling 155 (pass 35, F35-3): `edit_link` on an ACTIVE link may change
+ * `blockedBy` only, forwarded to the task's one writer, which mirrors the
+ * list back onto the link; a title or goal edit is refused with the sentence
+ * that names the task.
+ */
+describe("ruling 155: edit_link on an active link edits its wait through the task", () => {
+  it("blockedBy alone clears both records; a title edit is refused naming the task", async () => {
+    // Canaries: restore the pending-or-failed refusal ahead of the active arm
+    // (the clear is refused with the old sentence); drop the forward after
+    // the lock (the task keeps its list).
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { readGoalFile } = await import("~/server/files/goal-writer.server");
+    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const base = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Base for the wait edit",
+        links: [
+          { title: "Base one", goal: "One. Done when merged." },
+          { title: "Base two", goal: "Two. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const held = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Held chain",
+        links: [{ title: "Log view", goal: "Held. Done when merged.", blockedBy: [`${base.goalId} link 2`] }],
+      },
+      actor,
+      ctx,
+    );
+    const taskKey = held.activeTaskKey!;
+    const task = () => readTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot })!.parsed.frontmatter;
+    const link = () => readGoalFile({ projectSlug: SLUG, goalId: held.goalId, dataRoot: app.dataRoot })!.parsed.frontmatter.links[0]!;
+    expect(link().status).toBe("active");
+    expect(task().blockedBy).toEqual([`${base.goalId} link 2`]);
+
+    await expect(
+      updateGoal(app.db, { projectSlug: SLUG, goalId: held.goalId, action: { op: "edit_link", index: 1, title: "Renamed" } }, actor, ctx),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: `Only a pending or failed link's title or goal can be edited; link 1 is active. Its wait follows ${taskKey}: pass blockedBy here or edit it on the task.`,
+    });
+    // Nothing without a list to forward, either.
+    await expect(
+      updateGoal(app.db, { projectSlug: SLUG, goalId: held.goalId, action: { op: "edit_link", index: 1 } }, actor, ctx),
+    ).rejects.toMatchObject({ status: 409, message: expect.stringContaining("pass blockedBy here") });
+    expect(link().title).toBe("Log view");
+
+    const cleared = await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: held.goalId, action: { op: "edit_link", index: 1, blockedBy: [] } },
+      actor,
+      ctx,
+    );
+    expect(cleared.message).toBe(`Link 1 waits on nothing, through ${taskKey}.`);
+    expect(task().blockedBy).toEqual([]);
+    expect(link().blockedBy).toEqual([]);
+    const view = getGoalView(SLUG, held.goalId, ctx)!;
+    expect(view.links[0]!.blockedBy).toEqual([]);
+    expect(view.history[0]!.text).toBe(`Link 1 (Log view) now waits on nothing: ${taskKey}'s list was changed by selin@viberr.dev.`);
+    // The task's own record says a person cleared it (ruling 131(e)).
+    const timeline = readTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot })!.parsed.timeline;
+    expect(timeline.some((e) => e.title === "Dependencies released")).toBe(true);
+  });
+
+  // Pass-35 review: forwarding the list to the task's writer alone drops the
+  // chain-order rule, which only `validateLinkWait` carries. A pending later
+  // link declares no edges, so no cycle closes and the wait is accepted: link 1
+  // then waits on link 2, and link 2 cannot start before link 1 completes.
+  // Canary: forward `op.blockedBy` unvalidated again.
+  it("refuses a wait on a LATER link of the same chain, and leaves the task's list alone", async () => {
+    const { createGoal, updateGoal } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Chain that must run in order",
+        links: [
+          { title: "Order one", goal: "One. Done when merged." },
+          { title: "Order two", goal: "Two. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const taskKey = chain.activeTaskKey!;
+    const task = () => readTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot })!.parsed.frontmatter;
+    expect(task().blockedBy).toEqual([]);
+
+    await expect(
+      updateGoal(
+        app.db,
+        {
+          projectSlug: SLUG,
+          goalId: chain.goalId,
+          action: { op: "edit_link", index: 1, blockedBy: [`${chain.goalId} link 2`] },
+        },
+        actor,
+        ctx,
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("a link cannot wait on a LATER link of its own chain"),
+    });
+    expect(task().blockedBy).toEqual([]);
+  });
+});

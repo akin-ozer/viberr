@@ -23,6 +23,10 @@ function insertRun(
     turns?: number;
     startedAt?: string | null;
     finishedAt?: string | null;
+    /** Pass 35 U35-7: the stored reason an interrupted run stopped. */
+    interruptedReason?: "restart" | null;
+    /** F35-1: 0 while the row holds a live estimate (default 1: a total). */
+    usageFinal?: 0 | 1;
   },
 ) {
   seq += 1;
@@ -30,9 +34,10 @@ function insertRun(
     `INSERT INTO agent_runs
        (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
         started_at, finished_at, turns, input_tokens, cached_input_tokens,
-        output_tokens, total_cost_usd, created_at, updated_at, agent_profile_id)
-     VALUES (?, ?, ?, ?, 'Dev', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', 'developer')`,
+        output_tokens, usage_final, total_cost_usd, created_at, updated_at, agent_profile_id,
+        interrupted_reason)
+     VALUES (?, ?, ?, ?, 'Dev', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', 'developer', ?)`,
   ).run(
     `run_${seq}`,
     `VIB-${seq}`,
@@ -48,7 +53,9 @@ function insertRun(
     r.inTok ?? 0,
     r.cachedTok ?? 0,
     r.outTok ?? 0,
+    r.usageFinal ?? 1,
     r.cost ?? null,
+    r.interruptedReason ?? null,
   );
 }
 
@@ -60,7 +67,8 @@ describe("getInsightsSummary", () => {
     insertRun(db, { state: "finished", cost: 0.1, outTok: 100, inTok: 50, turns: 2 });
     insertRun(db, { state: "finished", cost: 0.2, outTok: 200, inTok: 60, turns: 3 });
     insertRun(db, { state: "error", cost: 0.05, outTok: 10 });
-    insertRun(db, { state: "interrupted", cost: null, outTok: 5 });
+    // A person stopped this one mid-run: it started, so it stays in the rate.
+    insertRun(db, { state: "interrupted", cost: null, outTok: 5, startedAt: "2026-08-22T09:00:00.000Z" });
     insertRun(db, { state: "running", cost: null });
 
     const s = getInsightsSummary(db, NOW);
@@ -77,6 +85,54 @@ describe("getInsightsSummary", () => {
     expect(s.outcomes.successRate).toBeCloseTo(0.5, 5);
   });
 
+  /**
+   * F35-1 (pass 35): a running row's token columns hold the Claude adapter's
+   * live ESTIMATE (or nothing, on Codex), not a total. The sums used to add
+   * them in, so the headline moved with every streamed envelope and then
+   * corrected itself at the result. Runs and turns still count the row.
+   */
+  it("F35-1: token totals leave out rows whose provider total has not landed", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { state: "finished", outTok: 100, inTok: 50, cachedTok: 20, turns: 2 });
+    // Canary: restore the plain SUM and the totals read 5100 / 1050 / 420.
+    insertRun(db, { state: "running", outTok: 5000, inTok: 1000, cachedTok: 400, turns: 3, usageFinal: 0 });
+    const s = getInsightsSummary(db, NOW);
+    expect(s.totals.runs).toBe(2);
+    expect(s.totals.turns).toBe(5);
+    expect(s.totals.outputTokens).toBe(100);
+    expect(s.totals.inputTokens).toBe(50);
+    expect(s.totals.cachedInputTokens).toBe(20);
+  });
+
+  /**
+   * The rows the sums drop are not only the ones in flight: a run somebody
+   * stopped, and one that errored before the provider answered, never get a
+   * provider figure, so they are out of the token sums for good while they
+   * still count in Total runs and Turns. The totals therefore report HOW MANY
+   * runs they leave out, so the card can name them (the sums cannot be read
+   * honestly without that number). Canary: drop `tokenless_runs` from the
+   * SELECT and the count is 0.
+   */
+  it("F35-1: the totals count the runs their token sums leave out, whatever state those runs are in", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { state: "finished", outTok: 100, inTok: 50, cachedTok: 20, turns: 2 });
+    insertRun(db, {
+      state: "interrupted",
+      outTok: 5000,
+      inTok: 1000,
+      cachedTok: 400,
+      turns: 3,
+      usageFinal: 0,
+      startedAt: "2026-08-22T09:00:00.000Z",
+      finishedAt: "2026-08-22T09:12:00.000Z",
+    });
+    insertRun(db, { state: "running", outTok: 20, inTok: 10, usageFinal: 0 });
+    const s = getInsightsSummary(db, NOW);
+    expect(s.totals.runs).toBe(3);
+    expect(s.totals.outputTokens).toBe(100);
+    expect(s.totals.tokenlessRuns).toBe(2);
+  });
+
   it("a day whose runs all report no cost shows null, not $0, in the daily series (bug-sweep #15)", () => {
     const db = ctx.makeDb();
     const day = "2026-08-22";
@@ -90,6 +146,62 @@ describe("getInsightsSummary", () => {
     expect(point.cost).toBeNull();
     // A gap-filled quiet day (no runs) is still a real 0, not "not reported".
     expect(s.daily.find((d) => d.runs === 0)!.cost).toBe(0);
+  });
+
+  /**
+   * Pass 35 U35-7 (owner, Q35-16: "interrupted state, honest counts"). Boot
+   * recovery interrupts every row a restart orphaned; live that was 23 runs,
+   * 17 of them queued runs that never executed a turn, and every one used to
+   * land in `error` and pull the completion rate down. Canary: drop the
+   * `interruptedNeverStarted` subtraction from the denominator and the rate
+   * assertion fails (2/3 becomes 1/2); drop the by-restart count and its
+   * assertion fails.
+   */
+  it("two restart-interrupted orphans (one started, one queued) count as stopped, never as errors, and the queued one leaves the denominator", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { state: "finished", cost: 0.1, turns: 3, startedAt: "2026-08-22T09:00:00.000Z" });
+    // The primary a restart cut mid-step: it ran, so its interruption is an outcome.
+    insertRun(db, {
+      state: "interrupted",
+      interruptedReason: "restart",
+      turns: 4,
+      startedAt: "2026-08-22T10:00:00.000Z",
+      finishedAt: "2026-08-22T10:40:30.000Z",
+    });
+    // The queued run the same boot finalized: no started_at, no turn, nothing ran.
+    insertRun(db, {
+      state: "interrupted",
+      interruptedReason: "restart",
+      turns: 0,
+      startedAt: null,
+      finishedAt: "2026-08-22T10:40:30.000Z",
+    });
+    const s = getInsightsSummary(db, NOW).outcomes;
+    expect(s.error).toBe(0);
+    expect(s.interrupted).toBe(2);
+    expect(s.interruptedByRestart).toBe(2);
+    expect(s.interruptedNeverStarted).toBe(1);
+    // 1 finished of (1 finished + 1 interrupted that ran) = 0.5; the
+    // never-started run is out of the denominator.
+    expect(s.successRate).toBeCloseTo(0.5, 5);
+    // The counts still reconcile with the total (F26-5).
+    expect(s.finished + s.error + s.interrupted + s.running + s.queued).toBe(3);
+  });
+
+  it("a person's stop of a still-queued run leaves the denominator too, with no restart counted", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { state: "finished", turns: 2, startedAt: "2026-08-22T09:00:00.000Z" });
+    insertRun(db, { state: "interrupted", turns: 0, startedAt: null });
+    const s = getInsightsSummary(db, NOW).outcomes;
+    expect(s.interruptedNeverStarted).toBe(1);
+    expect(s.interruptedByRestart).toBe(0);
+    expect(s.successRate).toBe(1);
+  });
+
+  it("successRate is null when every terminal run never started", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { state: "interrupted", interruptedReason: "restart", turns: 0, startedAt: null });
+    expect(getInsightsSummary(db, NOW).outcomes.successRate).toBeNull();
   });
 
   it("successRate is null with no terminal runs", () => {

@@ -46,6 +46,28 @@ export interface AgentDeploymentView {
   taskWaiting: Waiting;
 }
 
+/** The three grant lists a profile carries, by resource kind. The keys are
+ *  the STORE keys the runtime mounts by (file-formats §4). */
+export interface ResourceLists {
+  skills: string[];
+  mcps: string[];
+  kb: string[];
+}
+
+/** Ruling 156: what a deployment's copy lacks (`missing`: on the template,
+ *  not on the copy) and holds beyond the template (`extra`). Order-insensitive:
+ *  a copy naming the same keys in another order does not drift. */
+export interface ResourceDrift {
+  missing: ResourceLists;
+  extra: ResourceLists;
+}
+
+/** The drift plus the template's own lists, so a card can say exactly what
+ *  "the template's grants" would be before anyone presses the button. */
+export interface TemplateDrift extends ResourceDrift {
+  templateResources: ResourceLists;
+}
+
 /** Effective agent profile as the roster renders it: org template merged
  * with the project.md deployment (definition override wins per-field). */
 export interface AgentProfileView {
@@ -100,6 +122,14 @@ export interface AgentProfileView {
   /** Bespoke labels with no catalog id — display-only, preserved on save. */
   extras: { label: string; mode: "direct" | "recommend" | "human" | "off" }[];
   resources: { skills: string[]; mcps: string[]; kb: string[] };
+  /**
+   * Ruling 156 (pass 35, F35-7): how this deployment's COPY of the grants
+   * differs from its template's, or null when there is no template, the
+   * deployment carries no copy (it resolves the template live), or the two
+   * agree. `customized` stays an identity signal (OBS-7) and never widens to
+   * grants; this is the grants signal beside it, with the exact difference.
+   */
+  templateDrift: TemplateDrift | null;
   /** "template" = org base deployed here · "project" = created in-project. */
   source: "template" | "project";
   /** B5 (pass 34, U34-3): the identity of the deployment record this view was

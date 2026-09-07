@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
+  activeWorkRevision,
   EVIDENCE_EMPTY_COLUMN,
   type PrRef,
   type TaskFileEvent,
@@ -18,6 +19,7 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { appOrigin } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import { taskBranchName } from "./branch-sync.server";
+import type { GithubActionContext } from "./github-reconciler.server";
 import { githubWebHost } from "./github-client.server";
 import {
   getProjectGithubContext,
@@ -237,6 +239,11 @@ export type OpenTaskPrResult =
       message: string;
     }
   | { status: "scope_violation"; scope: string; violationId: string }
+  /** Ruling 160 (pass 35, F35-11): the task's pull request was closed WITHOUT
+   *  merging by a person, and no person has answered the recovery packet yet.
+   *  Nothing was opened. `closedBy` is the GitHub login GitHub named as the
+   *  closer, null when it named none. */
+  | { status: "closed_by_human"; prNumber: number; closedBy: string | null }
   | { status: "auth_failed"; message: string }
   /** GitHub said "No commits between <base> and <head>" — the branch has no
    *  commits ahead of base, so there is nothing to review. An honest "nothing to
@@ -355,7 +362,7 @@ export async function openTaskPr(
   };
   const file = readTaskFile(ref);
   if (!file) return { status: "task_not_found" };
-  const fm = file.parsed.frontmatter;
+  let fm = file.parsed.frontmatter;
 
   // P13-D-5: task-level repo override deleted (owner ruling) — project repo only.
   // Optional key: only a test hands over a transport.
@@ -364,13 +371,52 @@ export async function openTaskPr(
   const gh = getProjectGithubContext(db, input.projectSlug, ghOptions);
   if (gh.status !== "ok") return gh;
 
-  // 0. The task already carries a live PR — e.g. captured from agent-side
-  //    delivery on a branch the head= dedup below would never match. Never
-  //    open a duplicate: reconcile the cached record against the real PR and
-  //    reuse it. A TERMINAL cached PR (closed unmerged OR already merged) clears
-  //    the way for a fresh one — reworking a branch whose PR already merged must
-  //    open a new review PR, not resurrect the merged one (which would dead-end
-  //    acceptance at "merge pending" forever).
+  // 0. The task already carries a PR. Three cases, by what the cache says
+  //    and what GitHub says now:
+  //    · MERGED (cached, or discovered live): DG-1. Reworking a branch whose PR
+  //      already merged must open a new review PR, never resurrect the merged
+  //      one (which would dead-end acceptance at "merge pending" forever).
+  //    · CLOSED WITHOUT MERGING: ruling 160 (pass 35, F35-11). A person closed
+  //      the pull request, and that is a decision about the task. No new PR is
+  //      opened for the branch until a person has answered the closed-PR
+  //      recovery packet (`pr.closure.answered`); until then delivery answers
+  //      `closed_by_human`. A cached closure that was never surfaced (the
+  //      cache still says review while GitHub says closed) is handed to the
+  //      reconciler, the ONE writer of `pr.state: closed` and of the R8-6
+  //      event, notification and operator wake, so the packet appears in the
+  //      same turn. Live (KNC-23) this door used to "fall through to a fresh
+  //      PR" and overwrite the cache with #26 before any reconcile saw #10
+  //      close: the owner's rejection vanished from every surface.
+  //    · LIVE: reuse it, never open a duplicate (a PR captured from agent-side
+  //      delivery on a branch the head= dedup below would never match).
+  //
+  //    A cached `closed` with NO closure record is a close nobody surfaced.
+  //    `pr.state: closed` has a second writer: the workspace reconcile reads
+  //    `gh pr view <branch>` from the agent's clone and writes the state it
+  //    sees, knowing nothing of who closed it, and `performDelivery` runs that
+  //    reconcile one step BEFORE this door. Refusing straight off such a cache
+  //    would be a wedge: the R8-6 note, the inbox alert and the `pr-diverged`
+  //    wake that raises the recovery packet all key on the closure being
+  //    unrecorded, and `resolvePacket` has no record to stamp, so the refusal
+  //    would stand with nothing able to lift it. So the closure is repaired
+  //    first, through the one writer that owns it, and the refusal is read off
+  //    what that pass recorded (including a PR reopened in the meantime, which
+  //    lifts the block entirely).
+  if (fm.pr?.state === "closed" && !fm.pr.closure) {
+    const { reconcileTask } = await import("./github-reconciler.server");
+    const repairCtx: GithubActionContext = {};
+    if (ctx.dataRoot) repairCtx.dataRoot = ctx.dataRoot;
+    if (ctx.fetchImpl) repairCtx.fetchImpl = ctx.fetchImpl;
+    await reconcileTask(db, input, actor, repairCtx);
+    fm = readTaskFile(ref)?.parsed.frontmatter ?? fm;
+  }
+  if (fm.pr?.state === "closed" && !fm.pr.closure?.answered) {
+    return {
+      status: "closed_by_human",
+      prNumber: fm.pr.number,
+      closedBy: fm.pr.closure?.by ?? null,
+    };
+  }
   const cachedPrIsTerminal =
     fm.pr?.state === "closed" || fm.pr?.state === "merged";
   if (fm.pr && !cachedPrIsTerminal) {
@@ -380,14 +426,6 @@ export async function openTaskPr(
       ghPullSchema,
     );
     if (live.ok) {
-      // Even a cached "review"/"accepted" PR may have been merged or closed
-      // out-of-band on GitHub since we last reconciled. Reuse ONLY a PR that is
-      // still genuinely open; otherwise fall through to open a FRESH PR so a
-      // reworked branch is never stapled to a dead (merged/closed) PR (DG-1). We
-      // do NOT reconcile the terminal PR into the cache here — that would record
-      // a misleading `github.pr.opened` audit for a PR being discarded; the
-      // reconcile poller keeps the cache honest, and the create path below
-      // overwrites it with the fresh PR on success.
       const liveIsOpen =
         live.data.state === "open" && live.data.merged !== true;
       if (liveIsOpen) {
@@ -399,7 +437,34 @@ export async function openTaskPr(
           url: live.data.html_url,
         };
       }
-      // terminal on GitHub → fall through to the create path below.
+      const liveClosedUnmerged =
+        live.data.state === "closed" && mapPrToCacheState(live.data) === "closed";
+      if (liveClosedUnmerged) {
+        // Ruling 160: the transition is the reconciler's to record. It reads
+        // the cached number directly when the branch listing no longer names
+        // it (the push that preceded this call moved the branch), writes the
+        // closure with the closer's login, posts the divergence note, notifies
+        // the task's watchers and wakes the operator for the recovery packet.
+        // A pass that could not land the state leaves the cache as it was:
+        // this door refuses on GitHub's live answer either way, and the next
+        // pass records the transition.
+        const { reconcileTask } = await import("./github-reconciler.server");
+        const reconcileCtx: GithubActionContext = {};
+        if (ctx.dataRoot) reconcileCtx.dataRoot = ctx.dataRoot;
+        if (ctx.fetchImpl) reconcileCtx.fetchImpl = ctx.fetchImpl;
+        await reconcileTask(db, input, actor, reconcileCtx);
+        const after = readTaskFile(ref)?.parsed.frontmatter.pr ?? null;
+        return {
+          status: "closed_by_human",
+          prNumber: live.data.number,
+          closedBy:
+            after && after.number === live.data.number ? (after.closure?.by ?? null) : null,
+        };
+      }
+      // Merged on GitHub → fall through to the create path below (DG-1). The
+      // merged PR is not reconciled into the cache here (that would record a
+      // misleading `github.pr.opened` audit); the create path overwrites it
+      // with the fresh PR on success and the poller keeps the cache honest.
     } else if (live.kind === "network") {
       return { status: "network_unavailable", message: live.message };
     } else if (live.kind === "http" && live.status === 401) {
@@ -446,7 +511,7 @@ export async function openTaskPr(
           : decidePrAdoption({
               state: mapPrToCacheState(pr),
               prHeadSha: pr.head?.sha ?? null,
-              revisionHeadSha: fm.workRevision?.headSha ?? null,
+              revisionHeadSha: activeWorkRevision(fm.workRevision)?.headSha ?? null,
             });
       if (!adoption.adopt) {
         return {
@@ -458,7 +523,7 @@ export async function openTaskPr(
             taskKey: input.taskKey,
             branch,
             prNumber: pr.number,
-            revisionHeadSha: fm.workRevision?.headSha ?? null,
+            revisionHeadSha: activeWorkRevision(fm.workRevision)?.headSha ?? null,
           }),
         };
       }
@@ -525,7 +590,7 @@ export async function openTaskPr(
   // back to the frontmatter only when the compare is unreachable.
   const liveStats = await deliveredDiffStats(gh, gh.defaultBranch, branch);
   const liveParts = liveStats
-    ? deliveredStatsToPrParts(liveStats, branch, fm.workRevision?.headSha ?? null)
+    ? deliveredStatsToPrParts(liveStats, branch, activeWorkRevision(fm.workRevision)?.headSha ?? null)
     : null;
   const body = composePrBody({
     taskKey: input.taskKey,

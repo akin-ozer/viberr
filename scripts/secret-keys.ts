@@ -12,9 +12,11 @@
  * a dormant project or an MCP credential used by one agent stays on the old
  * key indefinitely, and dropping the retired key then breaks it silently.
  *
- * `status` opens the projection READ-ONLY and takes no lock, so it answers on
- * a live instance. `reseal` writes, so it takes the data-root writer lock and
- * refuses while the app is running.
+ * `status` is a reader and takes no lock, so it answers on a live instance;
+ * while the app holds the writer lock it reads a copy of the database taken
+ * next to the store, never a second connection to the live file (ruling 158).
+ * `reseal` writes, so it takes the data-root writer lock and refuses while the
+ * app is running.
  */
 import { getEnv } from "../app/server/config/env.server";
 import { runWithDataRootWriterLock } from "../app/server/db/cli-lock.server";
@@ -45,11 +47,20 @@ if (command !== "status" && command !== "reseal") {
 }
 
 if (command === "status") {
-  const db = openDatabaseReadOnly(getProjectionDbPath());
+  const reader = openDatabaseReadOnly(getProjectionDbPath());
   try {
-    console.log(secretKeyRotationStatus(db).text);
+    if (reader.snapshot) {
+      const holder = reader.snapshot.holder;
+      console.log(
+        holder
+          ? `Read from a copy of the database: state/writer.lock names a holder for this data root (pid ${holder.pid} on ${holder.hostname}), and only the app itself may open the live file.`
+          : "Read from a copy of the database: state/writer.lock names a holder this command cannot read.",
+      );
+      console.log("");
+    }
+    console.log(secretKeyRotationStatus(reader.db).text);
   } finally {
-    db.close();
+    reader.close();
   }
 } else {
   await runWithDataRootWriterLock(

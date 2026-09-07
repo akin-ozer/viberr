@@ -249,6 +249,28 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc("transition_stage")).not.toContain("does not work the review stage");
   });
 
+  it("ruling 160 (pass 35, F35-11): deliver_for_review says a closed-unmerged PR is a person's decision and names the packet", () => {
+    // Canary: restore the description from before S14.
+    const defs = build(withPolicy(uniform("direct"))).tools;
+    const desc = (name: string) => defs.find((t) => t.name === name)!.description;
+    expect(desc("deliver_for_review")).toContain("A pull request a person closed WITHOUT merging is that person's decision about the task (ruling 160)");
+    expect(desc("deliver_for_review")).toContain("the tool answers `closed_by_human`, opens no new PR for the branch");
+    expect(desc("deliver_for_review")).toContain("closed-PR recovery packet");
+    expect(desc("deliver_for_review")).toContain("Only a MERGED pull request clears the way for a fresh review PR");
+  });
+
+  it("pass 35 S15 (rulings 162 and 163): the tool text names the gate's verdict, the acceptance-stage refusal, the rework route and the acceptance-time refresh", () => {
+    // Canary: restore any of the four descriptions from before S15.
+    const defs = build(withPolicy(uniform("direct"))).tools;
+    const desc = (name: string) => defs.find((t) => t.name === name)!.description;
+    expect(desc("get_task")).toContain("a PR the gate would refuse cannot be recommended for acceptance");
+    expect(desc("accept_completion")).toContain("A pull request the acceptance gate would refuse cannot be recommended for acceptance");
+    expect(desc("transition_stage")).toContain("Backwards to the review stage is allowed when the revision changed after a verdict");
+    expect(desc("transition_stage")).toContain("Merge means mergeable");
+    expect(desc("update_branch_from_base")).toContain("Never call it once the task stands at the acceptance stage");
+    expect(desc("update_branch_from_base")).toContain("the acceptance ceremony brings the branch up to date once and merges in the same step");
+  });
+
   it("nothing granted: Claude builds no governed tool; the Codex plan enum falls back and never advertises delivery", () => {
     const auth = withPolicy(uniform("off"));
     expect([...claudeGovernedTools(build(auth).allowedTools)]).toEqual([]);
@@ -527,5 +549,118 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(declared).toContain('"goalDraft"');
     expect(declared).toContain("written AS a goal");
     expect(declared).toContain("Refused on any other kind");
+  });
+
+  /**
+   * Ruling 164 (pass 35, F35-14): the tool that AUTHORS options says the title
+   * is a promise, names the two kinds that keep it, and declares `toStage`.
+   * The operator wrote "Force-accept as admin ..." as a `custom` title because
+   * nothing here told it there was another way.
+   */
+  it("ruling 164: the tool text names the promise, force_accept, move_stage and toStage", () => {
+    // Canary: restore the description and the option schema from before S18.
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const def = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
+    expect(def.description).toContain("An option TITLE is a promise the resolution keeps");
+    expect(def.description).toContain("'force_accept'");
+    expect(def.description).toContain("'move_stage'");
+    // SAFETY: as above, the SDK types the raw input fields loosely; `options`
+    // is the zod array whose JSON Schema form carries the per-option fields.
+    const options = (def.inputSchema as { options: z.ZodType }).options;
+    const declared = JSON.stringify(z.toJSONSchema(options));
+    expect(declared).toContain('"toStage"');
+    expect(declared).toContain("move_stage only");
+  });
+
+  /**
+   * Pass-35 cluster review: ONE description carried both halves of a
+   * contradiction. Ruling 164's new sentence refuses "a custom option that asks
+   * a person to edit an agent profile", while the older ruling-85 clause still
+   * told the operator to offer exactly that ("offer it as an option beside any
+   * workaround"). An operator following the second sentence burned a turn on
+   * the first: `operatorOpenPacket` answers `noop`. Ruling 85's substance is
+   * untouched (the remedy is still named); only the surface it is named ON is
+   * settled here, which is what ruling 164 already says the refusal means.
+   */
+  it("ruling 85 and ruling 164 agree in one string: the remedy is named, never offered as an option", () => {
+    // Canary: restore "and offer it as an option beside any workaround".
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const def = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
+    // Ruling 85 still stands: the capability and where a human grants it.
+    expect(def.description).toContain("grantable on an agent profile");
+    expect(def.description).toContain("Agents surface");
+    expect(def.description).toContain("lists only workarounds hides the fix");
+    // Ruling 164 decides the surface, and nothing here contradicts it.
+    expect(def.description).toContain("never write it as an OPTION");
+    expect(def.description).not.toMatch(/offer it (as an option )?beside any workaround/i);
+  });
+});
+
+/**
+ * Pass-35 cluster review of ruling 162. `notAcceptableReason` is
+ * `acceptanceRefusalFor`, i.e. the FIRST of EVERY acceptance gate, and its
+ * third is `acceptanceStageBlockedReason` — "KNC-x is at Review, not Merge ...
+ * Move the task through the workflow first." So the field stands on every task
+ * short of the boundary, and the shipped texts keyed the MOVE into that stage
+ * on it: the operator was told a legal, required move would be refused for
+ * every task, by a sentence whose own remedy is that move.
+ *
+ * `mergeStageEntryRefusal` never read that field. It reads
+ * `mergeReadinessRefusal` — a conflicting pull request or an unpushed
+ * delivered revision — which is what F35-12(b) asked for, so the texts are what
+ * was wrong.
+ */
+describe("buildOperatorToolkit — the acceptance-stage move reads the pull request, not the whole gate", () => {
+  const toolkitFor = () =>
+    buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("stage-transitions", "direct");
+        return auth;
+      })(),
+    });
+
+  it("transition_stage names the pull request facts and does not key the move on notAcceptableReason", () => {
+    // Canary: restore "refused while get_task shows `notAcceptableReason`".
+    const def = toolkitFor().tools.find((t) => t.name === "transition_stage")!;
+    expect(def.description).toContain("Merge means mergeable");
+    expect(def.description).toContain("`pr.unpushedRevision`");
+    expect(def.description).not.toMatch(
+      /refused while get_task shows `notAcceptableReason`/,
+    );
+    // And it says outright that the field is not a reason to hold the task.
+    expect(def.description).toContain("never read it as a refusal to advance");
+  });
+
+  it("get_task keeps notAcceptableReason for the acceptance verbs and says what else it covers", () => {
+    // Canary: restore "the task cannot be moved into the acceptance stage".
+    const def = toolkitFor().tools.find((t) => t.name === "get_task")!;
+    expect(def.description).toContain("`notAcceptableReason`");
+    expect(def.description).not.toMatch(/cannot be moved into the\s+acceptance stage/);
+    expect(def.description).toContain("has simply not reached the boundary yet");
   });
 });

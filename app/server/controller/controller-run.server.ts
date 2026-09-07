@@ -22,6 +22,7 @@ import {
   resolveUserRunPrincipal,
   type RunPrincipalRefusal,
 } from "~/server/runtimes/run-principal.server";
+import type { UserBackendHealth } from "~/server/runtimes/backend-credentials.server";
 import type { RunMcpServers } from "~/server/runtimes/adapter.server";
 import {
   interruptRun,
@@ -299,27 +300,39 @@ export async function runControllerTurn(
  * from the health detail, which is person-agnostic. The one thing both must
  * say, and do: nothing was started.
  */
-function controllerRefusalNote(refusal: RunPrincipalRefusal): string {
-  // The discriminator is the ROW, not the verification: every unavailable
-  // health has `verification: "none"` (that is what unavailable means), so
-  // testing it here skipped this branch on every refusal and the wiped-volume
-  // case got the generic "isn't connected yet" copy. `kind !== null` is what
-  // `principalRefusalMessage` uses for the same choice — a login row whose
-  // credential file vanished has a kind, and the detail that goes with it.
-  if (
-    refusal.kind === "no-credential" &&
-    refusal.health.kind !== null &&
-    refusal.health.detail
-  ) {
-    // The health detail is the specific case ("your sign-in file is missing…")
-    // and it is already addressed to the person themselves.
-    return `${refusal.health.detail} The controller runs on your own Claude account, so I cannot answer until it is connected.`;
+/**
+ * The refusal a person with no Claude connected reads: in the transcript
+ * (this engine) and, U35-4 (pass 35), from the HTTP send door itself, which
+ * answers it as a 409 before any thread is created, so the door says no where
+ * the dock's disabled composer already did.
+ */
+export const CONTROLLER_NOT_CONNECTED_NOTE =
+  "The controller runs on your own Claude account, and Claude isn't connected for you yet. " +
+  "Connect it on your Profile → Agent accounts, then send your message again.";
+
+/**
+ * The sentence an unavailable Claude gets, from the health alone: one home for
+ * the choice, so the HTTP send door (U35-4) and this engine cannot drift apart.
+ *
+ * The discriminator is the ROW, not the verification: every unavailable health
+ * has `verification: "none"` (that is what unavailable means), so testing it
+ * here skipped this branch on every refusal and the wiped-volume case got the
+ * generic "isn't connected yet" copy. `kind !== null` is what
+ * `principalRefusalMessage` uses for the same choice — a login row whose
+ * credential file vanished has a kind, and the detail that goes with it.
+ */
+export function controllerNotConnectedSentence(health: UserBackendHealth): string {
+  // The health detail is the specific case ("your sign-in file is missing…")
+  // and it is already addressed to the person themselves.
+  if (health.kind !== null && health.detail) {
+    return `${health.detail} The controller runs on your own Claude account, so I cannot answer until it is connected.`;
   }
+  return CONTROLLER_NOT_CONNECTED_NOTE;
+}
+
+function controllerRefusalNote(refusal: RunPrincipalRefusal): string {
   if (refusal.kind === "no-credential") {
-    return (
-      "The controller runs on your own Claude account, and Claude isn't connected for you yet. " +
-      "Connect it on your Profile → Agent accounts, then send your message again."
-    );
+    return controllerNotConnectedSentence(refusal.health);
   }
   // The asker IS the signed-in user, so the remaining refusals can only mean
   // their own account was disabled or deleted mid-session (a live session
@@ -517,6 +530,15 @@ function failedTurnNote(failure: RunFailure | null): string {
     return (
       `I could not finish this turn: your Claude account was refused by the provider${code ? ` (${code})` : ""}: ${cause}. ` +
       "Connect a different Claude account or an API key on Profile → Agent accounts, then send your message again." +
+      (failure.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "")
+    );
+  }
+  if (failure?.kind === "overloaded" && facts?.origin === "local") {
+    // U35-11: the request never reached the provider; the deployment's own
+    // network path failed. Same retry, honest attribution.
+    return (
+      "I could not finish this turn: Claude could not be reached from this deployment (the connection failed before the provider answered). " +
+      "Nothing about your account is wrong. Say it again in a few minutes." +
       (failure.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "")
     );
   }

@@ -96,3 +96,57 @@ describe("R19-1: the persona grounds repo claims in the read-only checkout", () 
     );
   });
 });
+
+/**
+ * Ruling 164 (pass 35, F35-14) — the persona is read on every turn, and it was
+ * silent on the one thing that made KNC-3's decision inert: the operator wrote
+ * "Force-accept as admin without a fresh verdict" as a `custom` title because
+ * nothing told it a kind existed that performs it.
+ */
+describe("ruling 164: the persona says an option title is a promise", () => {
+  it("names the promise, the two kinds that keep it, and the Agents surface for a profile", () => {
+    // Canary: drop the paragraph and the operator is free to write a title its
+    // kind cannot honour again.
+    expect(operatorDefinitionMd).toMatch(
+      /Every option you write is a promise the resolution keeps/,
+    );
+    expect(operatorDefinitionMd).toContain("`force_accept`");
+    expect(operatorDefinitionMd).toContain("`move_stage` with `toStage`");
+    expect(operatorDefinitionMd).toMatch(
+      /Nothing a person confirms on a packet edits an agent profile/,
+    );
+  });
+
+  /**
+   * Pass-35 cluster review: the persona said both things. The capability-gap
+   * paragraph told the operator to "offer it beside any workaround you
+   * propose"; the paragraph four lines below refuses that option. Canary:
+   * restore the older half.
+   */
+  it("says the capability remedy is named, not offered as an option", () => {
+    expect(operatorDefinitionMd).toContain("grantable on an agent profile");
+    expect(operatorDefinitionMd).toContain("Never write it as an OPTION");
+    expect(operatorDefinitionMd).not.toMatch(/offer it beside any workaround/i);
+  });
+});
+
+/**
+ * Pass-35 cluster review of ruling 162: `notAcceptableReason` is the FIRST of
+ * every acceptance gate, and one of them is "this task has not reached the
+ * boundary yet". The doctrine forbade the move into the acceptance stage while
+ * the field was set, which is every task short of that stage, by a sentence
+ * whose own remedy is that exact move. `mergeStageEntryRefusal` reads the pull
+ * request instead, which is what the doctrine now says.
+ */
+describe("the acceptance-stage move reads the pull request, not the whole gate", () => {
+  it("keeps notAcceptableReason for the acceptance verbs and keys the move on the pull request", () => {
+    // Canary: restore "never move the task into the acceptance stage" keyed on
+    // `notAcceptableReason`.
+    expect(operatorDefinitionMd).toContain("never recommend or accept completion");
+    expect(operatorDefinitionMd).not.toMatch(
+      /never move the task into the acceptance stage/,
+    );
+    expect(operatorDefinitionMd).toContain("`pr.unpushedRevision`");
+    expect(operatorDefinitionMd).toContain("not reached the boundary yet");
+  });
+});

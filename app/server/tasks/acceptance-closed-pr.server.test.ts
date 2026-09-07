@@ -380,6 +380,8 @@ describe("path 3 — operatorAcceptCompletion", () => {
       headSha: null,
       unpushedRevision: null,
       unpushedRevisionSentence: "",
+      // Ruling 162 (pass 35): a settled PR carries no mergeability.
+      mergeable: null,
     });
   });
 

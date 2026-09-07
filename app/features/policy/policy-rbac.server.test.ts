@@ -1288,11 +1288,13 @@ describe("ALWAYS_HUMAN capabilities are unreachable whatever the grants say", ()
     })!;
     expect(after.parsed.frontmatter.stage).toBe("review");
     // …and the refusal is about the TERMINAL stage, not about the operator: the
-    // same call to a non-terminal stage goes through.
-    resetTaskStage("impl");
+    // same call across an `auto` boundary goes through (ruling 151: an
+    // `approval` boundary is a human's, so the auto edge is the one that
+    // proves the operator itself is not refused).
+    resetTaskStage("ready");
     await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot, operatorAuthorized: true },
     );
@@ -1301,7 +1303,7 @@ describe("ALWAYS_HUMAN capabilities are unreachable whatever the grants say", ()
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(moved.parsed.frontmatter.stage).toBe("review");
+    expect(moved.parsed.frontmatter.stage).toBe("impl");
   });
 
   /**

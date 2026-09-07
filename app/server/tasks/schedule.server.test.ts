@@ -713,6 +713,60 @@ describe("fireDueSchedules", () => {
     expect(note?.text).toContain("names no agent to run");
   });
 
+  it("ruling 152(c): a run-agent occurrence fired into a known-exhausted backend retires `fired` as held-quota, spends no retry, and the hold's own schedule carries the retry", async () => {
+    // Canary: route the hold through the 409 arm and the occurrence goes back
+    // to pending, minting a fresh hold and a fresh schedule row every tick.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "dev", role: "developer", backends: ["codex"], model: "gpt-5-codex" },
+        },
+      ],
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        schedules: [rawSchedule({ id: "sch_held", action: "run-agent", profileId: "dev", prompt: "continue" })],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { recordBackendQuotaExhaustion } = await import("~/server/runtimes/backend-quota.server");
+    const resetsAt = Math.round(Date.now() / 1000) + 3600;
+    recordBackendQuotaExhaustion(store.db, "codex", {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt,
+      resetsAtPrecision: "clock",
+      providerText: "try again at 6:18 PM",
+      runId: "run_refused",
+      observedAt: new Date().toISOString(),
+    });
+
+    const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(1);
+    await waitForSchedule("VIB-1", "sch_held", "fired");
+    expect(startedRunSpecs()).toHaveLength(0);
+    const all = schedules("VIB-1");
+    const fired = all.find((x) => x.id === "sch_held")!;
+    expect(fired.retries).toBe(0);
+    const retry = all.find((x) => x.id !== "sch_held")!;
+    expect(retry).toMatchObject({ action: "run-agent", profileId: "dev", prompt: "continue", status: "pending" });
+    expect(Date.parse(retry.dueAt)).toBe(resetsAt * 1000 + 60_000);
+    const audit = listAuditEvents(store.db, { action: "task.schedule.fired" }).find(
+      (e) => e.details?.scheduleId === "sch_held",
+    );
+    expect(audit?.details).toMatchObject({ outcome: "held-quota", rescheduledAs: retry.id });
+    expect(timeline("VIB-1").some((e) => e.title === "Dispatch held")).toBe(true);
+    expect(timeline("VIB-1").some((e) => /Scheduled action failed/.test(e.text))).toBe(false);
+  });
+
   it("the claim lease outlives the slowest LEGITIMATE start (a clone), so a live drive is never re-driven", () => {
     // R19-1 put a repository clone inside `runOperator`, BEFORE the drive
     // starts: a healthy scheduled drive can now sit there for up to

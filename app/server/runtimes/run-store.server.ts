@@ -1,7 +1,13 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
-import type { LogLine, RunBackend, RunKind, RunState } from "~/features/runtime/runtime-types";
+import type {
+  LogLine,
+  RunBackend,
+  RunInterruptedReason,
+  RunKind,
+  RunState,
+} from "~/features/runtime/runtime-types";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 
 /**
@@ -39,8 +45,19 @@ export type AgentRunRow = {
   input_tokens: number;
   cached_input_tokens: number;
   output_tokens: number;
+  /** F35-1: 1 once a PROVIDER usage figure landed on the row (a Claude result,
+   *  a Codex turn.completed), 0 while the token columns hold the Claude
+   *  adapter's live estimate or nothing at all. The projection prints an
+   *  estimated row as `~n`; Insights leaves it out of its token totals. */
+  usage_final: number;
   total_cost_usd: number | null;
+  /** The PERSON who interrupted the run (a users.id), else null. Never a
+   *  pseudo-actor: a restart is a reason (below), not a person. */
   interrupted_by: string | null;
+  /** Pass 35 U35-7: why an `interrupted` run stopped when no person did it
+   *  (`'restart'` = boot recovery / the operator drive's orphan sweep). Null
+   *  on every other row, a human interrupt included. */
+  interrupted_reason: RunInterruptedReason | null;
   created_at: string;
   updated_at: string;
   /** Staging key for a Claude `report_outcome` envelope (`staged_outcomes`).
@@ -90,6 +107,7 @@ export interface InsertRunInput {
   outputTokens?: number;
   totalCostUsd?: number | null;
   interruptedBy?: string | null;
+  interruptedReason?: RunInterruptedReason | null;
   /** Ruling 127: the credential principal (see `AgentRunRow.credential_user_id`).
    *  Optional at THIS layer — the store is a plain writer, also driven by
    *  fixtures that build a row directly, and an omitted principal stores NULL.
@@ -107,13 +125,13 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         model, session_id, sdk, agent_name, agent_profile_id, state, phase, step,
         started_at, finished_at,
         turns, input_tokens, cached_input_tokens, output_tokens, total_cost_usd,
-        interrupted_by, credential_user_id, created_at, updated_at)
+        interrupted_by, interrupted_reason, credential_user_id, created_at, updated_at)
      VALUES
        (@id, @taskKey, @projectSlug, @threadId, @role, @kind, @backend,
         @model, @sessionId, @sdk, @agentName, @agentProfileId, @state, @phase, @step,
         @startedAt, @finishedAt,
         @turns, @inputTokens, @cachedInputTokens, @outputTokens, @totalCostUsd,
-        @interruptedBy, @credentialUserId, @createdAt, @updatedAt)
+        @interruptedBy, @interruptedReason, @credentialUserId, @createdAt, @updatedAt)
      ON CONFLICT(id) DO UPDATE SET
         task_key=excluded.task_key, project_slug=excluded.project_slug,
         thread_id=excluded.thread_id, role=excluded.role, kind=excluded.kind,
@@ -126,6 +144,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         input_tokens=excluded.input_tokens, cached_input_tokens=excluded.cached_input_tokens,
         output_tokens=excluded.output_tokens, total_cost_usd=excluded.total_cost_usd,
         interrupted_by=excluded.interrupted_by,
+        interrupted_reason=excluded.interrupted_reason,
         credential_user_id=excluded.credential_user_id,
         updated_at=excluded.updated_at`,
   ).run({
@@ -152,6 +171,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
     outputTokens: input.outputTokens ?? 0,
     totalCostUsd: input.totalCostUsd ?? null,
     interruptedBy: input.interruptedBy ?? null,
+    interruptedReason: input.interruptedReason ?? null,
     credentialUserId: input.credentialUserId ?? null,
     createdAt: now,
     updatedAt: now,
@@ -169,8 +189,13 @@ export interface RunPatch {
   inputTokens?: number;
   cachedInputTokens?: number;
   outputTokens?: number;
+  /** See `AgentRunRow.usage_final` (F35-1): 1 once a provider figure landed. */
+  usageFinal?: 0 | 1;
   totalCostUsd?: number | null;
   interruptedBy?: string | null;
+  /** Pass 35 U35-7: the reason an `interrupted` run stopped with no person
+   *  behind it. The orphan sweeps write `"restart"`; nothing else writes it. */
+  interruptedReason?: RunInterruptedReason | null;
   backend?: RunBackend;
   /** C1 (pass 31): the `staged_outcomes` key for this run's Claude
    *  `report_outcome` envelope. It used to be written by a raw
@@ -204,8 +229,10 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     inputTokens: ["input_tokens", patch.inputTokens],
     cachedInputTokens: ["cached_input_tokens", patch.cachedInputTokens],
     outputTokens: ["output_tokens", patch.outputTokens],
+    usageFinal: ["usage_final", patch.usageFinal],
     totalCostUsd: ["total_cost_usd", patch.totalCostUsd],
     interruptedBy: ["interrupted_by", patch.interruptedBy],
+    interruptedReason: ["interrupted_reason", patch.interruptedReason],
     backend: ["backend", patch.backend],
     outcomeKey: ["outcome_key", patch.outcomeKey],
     dispatchedByName: ["dispatched_by_name", patch.dispatchedByName],

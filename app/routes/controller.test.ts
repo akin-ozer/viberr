@@ -104,6 +104,23 @@ async function settled(runId: string): Promise<void> {
   for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/**
+ * U35-4 (pass 35): a refused turn (no Claude connected for the asker, ruling
+ * 127) used to answer `{ ok: true }` on both pages, so the HTTP door said yes
+ * where the composer said no. The refusal stays in the transcript; the door
+ * answers 409 with it. Murat has no fake credential here. Canary: restore
+ * `{ ok: true }` in the `refused` branch.
+ */
+describe.each<Surface>(["instance", "project"])("POST intent=send on the %s surface", (surface) => {
+  it("answers a refused turn with 409 and the refusal sentence", async () => {
+    const reply = refusal.parse(
+      await post(surface, murat, { intent: "send", text: "hello?" }),
+    );
+    expect(reply.init?.status).toBe(409);
+    expect(reply.data.error).toContain("Claude isn't connected for you yet");
+  });
+});
+
 describe.each<Surface>(["instance", "project"])("POST intent=interrupt on the %s surface", (surface) => {
   it("the owner stops the working turn and is told so", async () => {
     // Canary: drop the `interrupt` branch from the route and this answers the

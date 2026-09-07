@@ -231,7 +231,9 @@ export function forceDataRootTakeover(env: Pick<Env, "VIBERR_FORCE_DATA_ROOT_LOC
 
 /** Signal 0 probes existence without delivering anything. EPERM = alive but
  *  owned by another user, which still means "do not touch this root". */
-function isProcessAlive(pid: number): boolean {
+/** Is a process with this pid alive (or at least present, `EPERM` counting as
+ *  alive)? Exported for the reader-side snapshot sweep (ruling 158). */
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -294,11 +296,20 @@ const lockFileSchema = z
     return holder;
   });
 
-function readHolder(lockPath: string): LockHolder | null {
+/** The lock file's text as a holder, or null when it is not one. */
+function parseHolder(text: string): LockHolder | null {
   try {
-    const raw: unknown = JSON.parse(readFileSync(lockPath, "utf8"));
+    const raw: unknown = JSON.parse(text);
     const parsed = lockFileSchema.safeParse(raw);
     return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function readHolder(lockPath: string): LockHolder | null {
+  try {
+    return parseHolder(readFileSync(lockPath, "utf8"));
   } catch {
     return null;
   }
@@ -343,6 +354,50 @@ export function classifyLock(
     }
   }
   return isAlive(holder.pid) ? "held" : "stale";
+}
+
+/**
+ * The writer lock as a READER sees it (ruling 158). `absent` = no lock file at
+ * all; `present` = there is one, carrying the holder it names (null when the
+ * file could not be read as a holder).
+ */
+export type DataRootLockJudgement =
+  | { verdict: "absent"; holder: null }
+  | { verdict: "present"; holder: LockHolder | null };
+
+/**
+ * Ruling 158: no process but the server opens a live root's `projection.sqlite`.
+ * A read-only CLI (`keys status`, `backup`) asks this BEFORE it opens anything,
+ * and the answer is the lock file's PRESENCE, not the boot's verdict on it: a
+ * reader that finds a lock copies the database and opens the copy, and only a
+ * root with no lock at all is just files it may open in place.
+ *
+ * Deliberately NOT {@link classifyLock}. That verdict is the boot's, and its two
+ * staleness tests are both pid-namespace-local: `isAlive(holder.pid)` probes the
+ * READER's namespace, and the self-pid branch compares `/proc/<self.pid>` start
+ * ticks, which in another namespace are never the holder's. The hostname test
+ * does not separate the container boundary either, because `compose.yml` pins
+ * `hostname: viberr` for every container built from it and two containers over
+ * one data root routinely land on the same low pid (see {@link LockHolder}'s
+ * `bootId`). So a reader in a SECOND container from that file (`docker compose
+ * run --rm app npm run backup -- --out …`) would call a genuinely live holder
+ * stale and open the live database: the second `-shm` mapping ruling 158 exists
+ * to prevent. The boot survives the same ambiguity only because it has two
+ * backstops a reader has not, its own `bootId` and F18-5's ownership re-check,
+ * which fails the loser closed.
+ *
+ * A needless copy costs disk. A wrong "stale" costs the server, twice measured
+ * (exit 135, one second after the reader). So presence is the whole question.
+ */
+export function judgeDataRootLock(stateDir: string): DataRootLockJudgement {
+  const lockPath = path.join(stateDir, DATA_ROOT_LOCK_FILENAME);
+  let raw: string;
+  try {
+    raw = readFileSync(lockPath, "utf8");
+  } catch {
+    return { verdict: "absent", holder: null };
+  }
+  return { verdict: "present", holder: parseHolder(raw) };
 }
 
 const DEFAULT_OWNERSHIP_PROBES: LockOwnershipProbes = {

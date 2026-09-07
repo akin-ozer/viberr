@@ -71,6 +71,46 @@ describe("describeRunFailure", () => {
     expect(d.reason + d.remedy).not.toMatch(/retry on the other backend|review the runtime configuration|fix the credential/i);
   });
 
+  it("ruling 152(c): the options that assert the window has reset NAME the backend they assert about", () => {
+    // The assertion is what retires the instance's exhaustion record
+    // (`resolvePacket`), and the record is per backend — so the option carries
+    // the backend that refused. Canary: drop `backend: failed` from the quota
+    // and auth arms and the resolution has nothing to clear, so the hold that
+    // ruling 152(c) put on the next dispatch outlives the person's statement.
+    const store = setupTestStore(ctx);
+    const operatorQuota = describe_(store, {
+      failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: RESET }),
+    });
+    expect(operatorQuota.options.find((o) => o.recommended)).toMatchObject({
+      kind: "block_on_policy",
+      backend: "claude",
+    });
+    const operatorAuth = describe_(store, {
+      failure: failure("auth", { apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error" }),
+    });
+    expect(operatorAuth.options.find((o) => o.recommended)).toMatchObject({
+      kind: "block_on_policy",
+      backend: "claude",
+    });
+    const specialistQuota = describe_(store, {
+      role: "specialist",
+      agentHandle: "jc-developer",
+      failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: RESET }),
+    });
+    expect(specialistQuota.options[0]).toMatchObject({
+      kind: "request_edit",
+      backend: "claude",
+    });
+    // An overload asserts nothing about a usage window, so it names nothing.
+    const overloaded = describe_(store, {
+      role: "specialist",
+      agentHandle: "jc-developer",
+      failure: failure("overloaded", { apiErrorStatus: 529 }),
+    });
+    expect(overloaded.options[0]!.kind).toBe("request_edit");
+    expect(overloaded.options[0]!.backend).toBeUndefined();
+  });
+
   it("auth (operator): names the org restriction and the account remedy, and says a retry fails the same way", () => {
     const store = setupTestStore(ctx);
     const d = describe_(store, {
@@ -193,6 +233,38 @@ describe("describeRunFailure", () => {
     ]);
     expect(withOther.options[0]).toMatchObject({ backend: "codex" });
     expect(withOther.remedy).toContain("or run it on Codex now");
+  });
+
+  /**
+   * U35-11 (pass 35): a local TLS or connection failure keeps the overload
+   * class and its retry, but is attributed to this deployment's own network
+   * path, never to "the provider's own side". Canary: drop the `origin ===
+   * "local"` branch and the reason reads "failed on its own side".
+   */
+  it("overloaded with origin local (operator + specialist): names this deployment's network path, keeps the retry, and the same-backend option says the deployment could not reach the provider", async () => {
+    const store = setupTestStore(ctx);
+    await connectFakeBackend(store.db, store.users.arda.id, "codex");
+    const local = (): RunFailure => ({
+      ...failure("overloaded", { apiError: "server_error", apiErrorStatus: null, origin: "local" }),
+      providerText: "API Error: Unable to connect to API (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)",
+    });
+    const op = describe_(store, { failure: local() });
+    expect(op.reason).toBe(
+      "Claude could not be reached from this deployment: the connection failed before the provider answered (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR).",
+    );
+    expect(op.reason).not.toContain("provider failed on its own side");
+    expect(op.remedy).toBe(
+      "Nothing about Arda Test's account or the task is wrong; the fault is on this deployment's network path (TLS, DNS or a proxy). Retry in a few minutes, or run it on Codex now.",
+    );
+    expect(op.options[0]).toMatchObject({ kind: "block_on_policy", title: "Re-run the operator now", recommended: true });
+
+    const sp = describe_(store, { failure: local(), role: "specialist", agentHandle: "jc-developer", profileId: "jc-developer" });
+    expect(sp.options[0]).toMatchObject({ kind: "retry_other_backend", backend: "codex", recommended: true });
+    expect(sp.options[1]).toMatchObject({
+      kind: "request_edit",
+      title: "Retry @jc-developer on Claude now: this deployment could not reach the provider, nothing was changed",
+    });
+    expect(sp.options[1]!.ev).toContain("this deployment could not reach Claude; the agent is retried as it was");
   });
 
   it("an unowned task yields no owner sentence and no retry option", () => {

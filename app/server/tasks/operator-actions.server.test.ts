@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { describeRevisionDrift } from "~/shared/revision-drift";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { insertUser } from "~/server/auth/user-store.server";
@@ -9,6 +9,8 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
+import type { openTaskPr } from "~/server/github/pr-open.server";
 import {
   deliveringEngagement,
   supportingEngagements,
@@ -57,6 +59,7 @@ import {
   operatorBackendFor,
   resolveOperatorAuthority,
   type OperatorAutonomy,
+  type OperatorPacketOptionInput,
   GOAL_DRAFT_MAX_CHARS,
 } from "./operator-actions.server";
 
@@ -477,6 +480,72 @@ describe("operatorDispatchAgent", () => {
     expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
     expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "primary")).toBe(true);
     await interruptRunningRuns("VIB-1");
+  });
+
+  it("ruling 152(c): a dispatch into a held backend is a NOOP naming the hold, never a throw", async () => {
+    // The plan's own shape for this door. It matters most on the Codex
+    // operator: its plan executor catches a throw from any governed action,
+    // ABORTS every remaining step and writes "Coordination stopped" on the
+    // timeline — so one held `run_agent` cost the rest of a paid turn for a
+    // hold whose own note says nothing was dispatched and no decision is
+    // needed. Canary: remove the `isDispatchHeld` arms in
+    // `operatorDispatchAgent` and both calls throw.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    // The hold is read for the account the run would bill, so the owner has to
+    // have one connected (ruling 127); without it the dispatch is refused for
+    // the credential before quota is anyone's question.
+    const { connectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    await connectFakeBackend(store.db, store.users.arda.id, "claude");
+    const { recordBackendQuotaExhaustion } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    const resetsAt = Math.round(Date.now() / 1000) + 3600;
+    recordBackendQuotaExhaustion(store.db, "claude", {
+      credentialUserId: null,
+      credentialLabel: null,
+      resetsAt,
+      resetsAtPrecision: "clock",
+      providerText: "5-hour limit reached",
+      runId: "run_refused",
+      observedAt: new Date().toISOString(),
+    });
+    const bare = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      authority("supervised"),
+    );
+    expect(bare.outcome).toBe("noop");
+    expect(bare.message).toContain("Claude is out of quota until");
+    expect(bare.message).toContain(
+      "Do not open a packet for this; pick a Codex profile if the work cannot wait.",
+    );
+    // The prompt arm is the same door and answers the same way.
+    const prompted = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        prompt: "continue the migration",
+      },
+      authority("supervised"),
+    );
+    expect(prompted.outcome).toBe("noop");
+    expect(prompted.message).toContain("Claude is out of quota until");
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
+    // The hold wrote its own record, and ONE retry stands for both tries: the
+    // second attempt carried a directive the first did not, so it replaced the
+    // pending occurrence's prompt rather than adding an occurrence.
+    const pending = task().frontmatter.schedules.filter((x) => x.status === "pending");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ action: "run-agent", profileId: "developer" });
+    expect(pending[0]!.prompt).toContain("continue the migration");
+    expect(task().timeline.some((e) => e.title === "Dispatch held")).toBe(true);
   });
 
   it("recommend mode adds ONE actionable run_agent card and does NOT engage or run", async () => {
@@ -1480,7 +1549,11 @@ describe("operatorTransitionStage", () => {
     expect(task().frontmatter.waiting).toBe("human");
   });
 
-  it("full autonomy moves the task across an approval boundary as the operator", async () => {
+  it("ruling 151: full autonomy RECOMMENDS an approval boundary instead of crossing it", async () => {
+    // Pass 35, F35-2 (owner Q35-1): the boundary always wins. This case used to
+    // assert the opposite ("full autonomy moves the task across an approval
+    // boundary as the operator"). Canary: delete the `boundary === "approval"`
+    // branch in operatorTransitionStage and the task moves.
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     const r = await operatorTransitionStage(
@@ -1489,10 +1562,185 @@ describe("operatorTransitionStage", () => {
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
       authority("full"),
     );
+    expect(r.outcome).toBe("recommended");
+    expect(r.message).toContain("approved by a human");
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(task().frontmatter.recommendations.map((x) => x.kind)).toEqual(["transition"]);
+    expect(
+      listAuditEvents(store.db, { action: "task.transition" }).filter(
+        (row) => row.details?.by === "operator",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("ruling 151: an EXPLICIT `stage-transitions: direct` grant under supervised autonomy still recommends an approval boundary", async () => {
+    // The live KNC-1 shape: the controller set the grant to `direct` and the
+    // operator crossed Review to Merge alone (audit `boundary: approval, by:
+    // operator`) while every surface said a human approves it.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "stage-transitions"),
+      { capabilityId: "stage-transitions", mode: "direct" },
+    ]);
+    seedTask("impl");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("recommended");
+    expect(task().frontmatter.stage).toBe("impl");
+    // …and the same grant still crosses an `auto` boundary directly.
+    seedTask("ready");
+    const auto = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+      authority("supervised"),
+    );
+    expect(auto.outcome).toBe("done");
+    expect(task().frontmatter.stage).toBe("impl");
+  });
+
+  it("ruling 151: a declared `human` boundary before the terminal stage is refused with a sentence", async () => {
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "stage-transitions"),
+      { capabilityId: "stage-transitions", mode: "direct" },
+    ]);
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      stages: [
+        { id: "triage", name: "Triage", color: "#a5a8b5" },
+        { id: "impl", name: "Build", color: "#7b61ff" },
+        { id: "signoff", name: "Sign-off", color: "#5b76fe" },
+        { id: "done", name: "Done", color: "#00b473" },
+      ],
+      workflow: [
+        { from: "triage", to: "impl", boundary: "auto", by: "Operator", locked: false },
+        { from: "impl", to: "signoff", boundary: "human", by: "A person", locked: false },
+        { from: "signoff", to: "done", boundary: "human", by: "Human acceptance", locked: true },
+      ],
+    });
+    seedTask("impl");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "signoff" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("denied");
+    expect(r.message).toBe(
+      "Moving VIB-1 to Sign-off is a human decision on this board; the operator cannot cross that boundary. A human moves the task or accepts the completion.",
+    );
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+  });
+
+  it("ruling 152(a): the done reply names the NEXT boundary so one turn walks consecutive auto stages", async () => {
+    // Canary: return the bare "Moved …" sentence again.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("triage");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      authority("supervised"),
+    );
     expect(r.outcome).toBe("done");
-    expect(task().frontmatter.stage).toBe("review");
-    // The transition event is attributed to the operator, not a human.
-    expect(task().timeline.some((e) => e.type === "transition" && e.actor.kind === "operator")).toBe(true);
+    expect(r.message).toMatch(/^Moved VIB-1 to Ready\. The next boundary, Ready to In Progress, is auto: continue in this turn/);
+    const next = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+      authority("supervised"),
+    );
+    expect(next.message).toMatch(/next boundary, In Progress to Review, is approved by a human: recommend it/);
+  });
+
+  describe("Q35-15: the transition turn writes the acceptance recommendation itself (the fold)", () => {
+    // A board whose edge INTO the acceptance boundary is `auto`, so the
+    // operator's own move lands there directly (KNC-30 took two operator
+    // turns: one for Review to Merge, a second only to write the card).
+    const foldBoard = (): void => {
+      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...file.parsed.frontmatter,
+        workflow: [
+          { from: "triage", to: "ready", boundary: "auto", by: "Operator", locked: false },
+          { from: "ready", to: "impl", boundary: "auto", by: "Operator", locked: false },
+          { from: "impl", to: "review", boundary: "auto", by: "Operator", locked: false },
+          { from: "review", to: "done", boundary: "human", by: "Human acceptance", locked: true },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    };
+
+    it("a direct move onto the acceptance boundary files the accept_completion card in the same call", async () => {
+      // Canary: delete the `foldAcceptanceRecommendation` call from the done
+      // branch of operatorTransitionStage.
+      deployRoster(DEFAULT_POLICY);
+      foldBoard();
+      seedTask("impl");
+      const r = await operatorTransitionStage(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+        authority("supervised"),
+      );
+      expect(r.outcome).toBe("done");
+      expect(task().frontmatter.stage).toBe("review");
+      expect(r.message).toMatch(/^Moved VIB-1 to Review\. Recommended accepting completion: move VIB-1 to Done\./);
+      expect(task().frontmatter.recommendations.map((x) => x.kind)).toEqual(["accept_completion"]);
+      expect(
+        listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
+      ).toHaveLength(1);
+    });
+
+    it("a refused acceptance gate is reported in the reply and no card is filed", async () => {
+      deployRoster(DEFAULT_POLICY);
+      foldBoard();
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          ownerUserId: store.users.arda.id,
+          operator: { assignedAtStageId: "triage" },
+          // A closed, unmerged PR: acceptance is refused by a terminal fact.
+          pr: { number: 8, state: "closed", title: "[VIB-1] work" },
+        }),
+        goal: "Prove the fold reports a refusal.",
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const r = await operatorTransitionStage(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+        authority("supervised"),
+      );
+      expect(r.outcome).toBe("done");
+      expect(task().frontmatter.stage).toBe("review");
+      expect(r.message).toMatch(/Acceptance is not recommended yet: /);
+      expect(task().frontmatter.recommendations).toHaveLength(0);
+    });
+
+    it("full autonomy with a DIRECT acceptance grant is never folded into an acceptance", async () => {
+      deployRoster([
+        ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+        { capabilityId: "completion-for-acceptance", mode: "direct" },
+      ]);
+      foldBoard();
+      seedTask("impl");
+      const r = await operatorTransitionStage(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+        authority("full"),
+      );
+      expect(r.outcome).toBe("done");
+      expect(task().frontmatter.stage).toBe("review");
+      expect(r.message).toMatch(/is acceptance: call accept_completion/);
+      expect(task().frontmatter.recommendations).toHaveLength(0);
+    });
   });
 
   it("supervised operator CROSSES the triage → ready `auto` boundary directly", async () => {
@@ -2324,6 +2572,10 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     );
     expect(refused.outcome).toBe("noop");
     expect(refused.message).toContain("resolve_remote_collision");
+    // Ruling 161: the refusal names the REAL reason (the unowned PR), not
+    // "has a delivered revision".
+    expect(refused.message).toContain("unowned PR #232 stands on the branch name `vib-1`");
+    expect(refused.message).not.toContain("has a delivered revision");
     expect(task().packet).toBeNull();
 
     const accepted = await operatorOpenPacket(
@@ -2347,6 +2599,263 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     );
     expect(accepted.outcome).toBe("done");
     expect(task().packet!.options[0]!.kind).toBe("resolve_remote_collision");
+  });
+
+  /**
+   * Ruling 161 (pass 35, G35-6): KNC-21's revision was registered by the
+   * agent's completion report at 18:56Z, the push was refused at 19:10Z, and
+   * the operator's `discard_branch` was refused at 19:3xZ because "a revision
+   * exists". The gate keys on whether the revision LEFT the workspace.
+   */
+  function reportedRevision(pushedAt: string | null): WorkRevision {
+    const revision: WorkRevision = {
+      id: "rev_MBEIgNbXXyFX",
+      headSha: "8c463b7".padEnd(40, "0"),
+      treeSha: "b".repeat(40),
+      branch: "vib-1",
+      createdAt: "2026-09-06T18:56:57.000Z",
+      sourceProfileId: "developer",
+      kind: "delivered",
+    };
+    // The key is absent, not undefined, when there was no push: that is the
+    // shape a file that never saw a delivery parses to.
+    if (pushedAt) revision.pushedAt = pushedAt;
+    return revision;
+  }
+  const discardOption = {
+    kind: "discard_branch" as const,
+    title: "Throw the local vib-1 draft away",
+    recommended: true,
+  };
+
+  it("ruling 161: discard_branch is accepted on a reported, never-pushed revision with no PR on the branch", async () => {
+    // Canary: restore `hasDeliveredWork = fm.workRevision !== null` and this
+    // authoring is refused ("has a delivered revision").
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        title: "Reported, never pushed",
+        branch: "vib-1",
+        workRevision: reportedRevision(null),
+        github: { commits: [{ sha: "8c463b7", msg: "[VIB-1] work" }], changed: null },
+      }),
+      goal: "Discard a local draft.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const accepted = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "The push was refused: keep or throw away the local work?",
+        options: [discardOption, { kind: "custom" as const, title: "Something else" }],
+      },
+      authority("supervised"),
+    );
+    expect(accepted.outcome).toBe("done");
+    expect(task().packet!.options[0]!.kind).toBe("discard_branch");
+  });
+
+  it("ruling 161: discard_branch is refused once the delivery push published the head, naming the push", async () => {
+    // Canary: drop the `pushed` arm of `revisionLeftWorkspace` and a pushed
+    // revision is offered for a local discard that cannot remove it.
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        title: "Pushed, PR not yet open",
+        branch: "vib-1",
+        workRevision: reportedRevision("2026-09-06T19:10:35.000Z"),
+      }),
+      goal: "Refuse the discard of pushed work.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const refused = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Throw the work away?",
+        options: [discardOption],
+      },
+      authority("supervised"),
+    );
+    expect(refused.outcome).toBe("noop");
+    expect(refused.message).toContain("ruling 161");
+    expect(refused.message).toContain("`8c463b7` was pushed to origin at 2026-09-06T19:10:35.000Z");
+    expect(refused.message).toContain("archive_task with deleteBranch");
+    expect(task().packet).toBeNull();
+  });
+
+  /**
+   * Ruling 164 (pass 35, F35-14) — an option title is a promise the resolution
+   * keeps, checked where the option is AUTHORED (the one door both operator
+   * backends reach). The two live titles are the cases; the third is the
+   * profile surgery KNC-20's packet offered, which no kind can perform.
+   */
+  it("ruling 164: refuses a send-back option that promises a force-accept, a stage move, or a profile edit", async () => {
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    const open = (option: OperatorPacketOptionInput) => {
+      seedTask("impl");
+      return operatorOpenPacket(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          packetType: "blocked",
+          title: "Stuck at the acceptance boundary",
+          options: [option, { kind: "archive_task", title: "Archive it" }],
+        },
+        authority("supervised"),
+      );
+    };
+
+    const force = await open({
+      kind: "custom",
+      title: "Force-accept as admin without a fresh verdict",
+      recommended: true,
+    });
+    expect(force.outcome).toBe("noop");
+    expect(force.message).toContain("'force_accept'");
+    expect(force.message).toContain("promise the resolution keeps");
+    expect(task().packet).toBeNull();
+
+    const move = await open({
+      kind: "redirect",
+      title: "Move VIB-1 back to Review so the reviewer can verdict 701b5b3",
+      recommended: true,
+    });
+    expect(move.outcome).toBe("noop");
+    expect(move.message).toContain("'move_stage'");
+    expect(move.message).toContain("toStage: 'review'");
+    expect(task().packet).toBeNull();
+
+    const profile = await open({
+      kind: "custom",
+      title: "Add Review to the two reviewer profiles",
+      detail: "The product's own remedy for the eligibility gap.",
+      recommended: true,
+    });
+    expect(profile.outcome).toBe("noop");
+    expect(profile.message).toContain("Agents");
+    expect(task().packet).toBeNull();
+
+    // The stock send-back vocabulary is untouched: a guard that refused this
+    // would take the operator's ordinary options away.
+    const fine = await open({
+      kind: "redirect",
+      title: "Reassign or redirect the work",
+      recommended: true,
+    });
+    expect(fine.outcome).toBe("done");
+    expect(task().packet!.options[0]!.kind).toBe("redirect");
+  });
+
+  it("ruling 164: a move_stage option names a stage the resolution can move to, and only that kind carries one", async () => {
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    const open = (option: OperatorPacketOptionInput, stage = "impl") => {
+      seedTask(stage);
+      return operatorOpenPacket(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          packetType: "input",
+          title: "Where should this task be shown?",
+          options: [option, { kind: "custom", title: "Answer in my own words" }],
+        },
+        authority("supervised"),
+      );
+    };
+
+    const noStage = await open({ kind: "move_stage", title: "Move it back", recommended: true });
+    expect(noStage.outcome).toBe("noop");
+    expect(noStage.message).toContain("has to name the stage");
+
+    const unknown = await open({
+      kind: "move_stage",
+      title: "Move it to QA",
+      toStage: "qa",
+      recommended: true,
+    });
+    expect(unknown.outcome).toBe("noop");
+    expect(unknown.message).toContain("not a stage of this project");
+
+    const terminal = await open({
+      kind: "move_stage",
+      title: "Move it to Done",
+      toStage: "done",
+      recommended: true,
+    });
+    expect(terminal.outcome).toBe("noop");
+    expect(terminal.message).toContain("accepts its completion");
+
+    const standingThere = await open({
+      kind: "move_stage",
+      title: "Move it to In Progress",
+      toStage: "impl",
+      recommended: true,
+    });
+    expect(standingThere.outcome).toBe("noop");
+    expect(standingThere.message).toContain("already stands at");
+
+    const stray = await open({
+      kind: "redirect",
+      title: "Send it back",
+      toStage: "review",
+      recommended: true,
+    });
+    expect(stray.outcome).toBe("noop");
+    expect(stray.message).toContain("toStage only fits a move_stage option");
+
+    // Pass-35 cluster review: `move_stage` carries BOTH a free-text title and a
+    // target, and the card renders only the words — so a title naming another
+    // stage is the ruling's own broken promise, invisible to the person
+    // confirming it. Canary: drop the `moveStagePromiseMismatch` call.
+    const mismatched = await open({
+      kind: "move_stage",
+      title: "Move VIB-1 back to Review so the reviewer can verdict",
+      toStage: "triage",
+      recommended: true,
+    });
+    expect(mismatched.outcome).toBe("noop");
+    expect(mismatched.message).toContain("says Review");
+    expect(mismatched.message).toContain("toStage is 'triage'");
+    expect(task().packet).toBeNull();
+
+    const good = await open({
+      kind: "move_stage",
+      title: "Show it at Review while the reviewer runs",
+      toStage: "review",
+      recommended: true,
+    });
+    expect(good.outcome).toBe("done");
+    expect(task().packet!.options[0]!.toStage).toBe("review");
   });
 
   it("rejects an unknown option kind", async () => {
@@ -2833,6 +3342,43 @@ describe("A4 — an UNDEPLOYED operator has no authority at all", () => {
     );
     expect(res.outcome).toBe("denied");
     expect(res.message).toContain("not permitted");
+  });
+
+  it("ruling 160: a closed_by_human delivery answers the operator with the refusal and the packet path, never a retry", async () => {
+    // Canary: fold `closed_by_human` into the generic "Delivery did not
+    // complete" arm.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const pushMock = vi.fn<typeof pushWorkspaceBranch>().mockResolvedValue({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "c".repeat(40),
+      remoteHeadBefore: null,
+      workflowFiles: null,
+    });
+    const openPrMock = vi.fn<typeof openTaskPr>().mockResolvedValue({
+      status: "closed_by_human",
+      prNumber: 10,
+      closedBy: "akin-ozer",
+    });
+    const callCtx: TaskActionContext = {
+      dataRoot: store.dataRoot,
+      deps: { pushWorkspaceBranch: pushMock, openTaskPr: openPrMock },
+    };
+    const res = await operatorDeliverForReview(
+      store.db,
+      callCtx,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(res.outcome).toBe("noop");
+    expect(res.message).toContain("Delivery was refused: No pull request was opened for VIB-1: PR #10 was closed without merging by akin-ozer");
+    expect(res.message).toContain("Do not deliver again and do not ask any agent to push or open a PR");
+    expect(res.message).toContain("The closed-PR recovery packet is the path");
+    expect(res.message).toContain("reopening the PR on GitHub is also a valid answer");
+    const rows = listAuditEvents(store.db, { action: "github.delivery.operator" });
+    expect(rows.at(-1)?.details).toEqual({ status: "closed_by_human" });
   });
 
   it("a DEPLOYED operator still delivers with the grant absent (the R15-2 polarity is intact)", async () => {
@@ -4009,5 +4555,189 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(r.outcome).toBe("noop");
     expect(r.message).toContain('goalDraft only fits an edit_goal option — "Have the developer redo it" is redirect');
     expect(task().packet).toBeNull();
+  });
+});
+
+/**
+ * Pass 35 S15: rulings 162 and 163 (F35-12, F35-13). Live (KNC-6, KNC-20) the
+ * operator moved tasks to Merge and recommended acceptance on PRs whose
+ * `mergeable: conflicting` was already on the file; after a conflict rework
+ * at Merge it found no route back to a stage where a reviewer could run.
+ */
+describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and the rework route (ruling 163)", () => {
+  const HEAD = "a".repeat(40);
+  function seedReviewedWithPr(stage: string, mergeable: "clean" | "conflicting"): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage,
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        branch: "vib-1-work",
+        workRevision: {
+          id: "rev_1",
+          headSha: HEAD,
+          treeSha: "t".repeat(40),
+          branch: "vib-1-work",
+          createdAt: "2026-07-25T09:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+        engagements: [
+          { profileId: "developer", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+          { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: true },
+        ],
+        verdicts: [
+          { profileId: "reviewer", revisionId: "rev_1", headSha: HEAD, result: "approve", reason: "looks right", at: "2026-07-25T09:30:00.000Z" },
+        ],
+        validation: "healthy",
+        pr: { number: 7, state: "review", title: "[VIB-1] work", headSha: HEAD, mergeable },
+      }),
+      goal: "g",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  function withMergeBoard(): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      stages: [
+        { id: "triage", name: "Triage", color: "#a5a8b5" },
+        { id: "impl", name: "In Progress", color: "#7b61ff" },
+        { id: "review", name: "Review", color: "#5b76fe" },
+        { id: "merge", name: "Merge", color: "#187574" },
+        { id: "done", name: "Done", color: "#00b473" },
+      ],
+      workflow: [
+        { from: "triage", to: "impl", boundary: "auto", by: "Operator", locked: false },
+        { from: "impl", to: "review", boundary: "approval", by: "Operator", locked: false },
+        { from: "review", to: "merge", boundary: "approval", by: "Operator", locked: false },
+        { from: "merge", to: "done", boundary: "human", by: "Human", locked: true },
+      ],
+      // The reviewer is eligible at Review only (the k9s board's shape): no
+      // verdict can be given at Merge.
+      agents: file.parsed.frontmatter.agents.map((a) =>
+        a.profileId === "reviewer"
+          ? { ...a, definition: { ...a.definition, stages: ["review"] } }
+          : a,
+      ),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("ruling 162 (a): the snapshot carries `pr.mergeable` and the gate's `notAcceptableReason`; a clean PR carries null", () => {
+    // Canary: drop `notAcceptableReason` from `operatorSnapshot`.
+    deployRoster(DEFAULT_POLICY);
+    seedReviewedWithPr("review", "conflicting");
+    const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+    expect(snap.pr?.mergeable).toBe("conflicting");
+    expect(snap.notAcceptableReason).toContain("VIB-1's review PR #7 conflicts with the base branch");
+    expect(snap.notAcceptableReason).toContain("Rebase the branch and re-review, or archive the task.");
+    seedReviewedWithPr("review", "clean");
+    const clean = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+    expect(clean.pr?.mergeable).toBe("clean");
+    expect(clean.notAcceptableReason).toBeNull();
+  });
+
+  it("ruling 162 (a): accept_completion refuses with the gate's sentence on a conflicting PR and files no card", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedReviewedWithPr("review", "conflicting");
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("conflicts with the base branch");
+    expect(task().frontmatter.recommendations).toEqual([]);
+    expect(listAuditEvents(store.db, { action: "task.operator.recommended_completion" })).toHaveLength(0);
+  });
+
+  it("ruling 162 (b): the move INTO the acceptance stage is refused with the same sentence while the PR conflicts", async () => {
+    // Canary: drop the `mergeStageEntryRefusal` read in operatorTransitionStage:
+    // the move files a "Move the task to Review" card (the approval boundary).
+    deployRoster(DEFAULT_POLICY);
+    seedReviewedWithPr("impl", "conflicting");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("denied");
+    expect(r.message).toContain("VIB-1's review PR #7 conflicts with the base branch");
+    expect(r.message).toContain("VIB-1 stays at In Progress");
+    expect(r.message).toContain("Open the conflict packet (update_branch_from_base)");
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(task().frontmatter.recommendations).toEqual([]);
+    // A clean PR crosses the same boundary as before (a recommendation card) —
+    // and it crosses it WITH `notAcceptableReason` standing. Pass-35 cluster
+    // review: the field is `acceptanceRefusalFor`, whose third gate is "this
+    // task is not at the boundary yet", so it is set on every task short of the
+    // acceptance stage and its own remedy is this move. The shipped tool and
+    // persona texts keyed the refusal on it; only `mergeReadinessRefusal` may.
+    seedReviewedWithPr("impl", "clean");
+    const standing = operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    );
+    expect(standing.notAcceptableReason).toContain("Move the task through the workflow first.");
+    const ok = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+      authority("full"),
+    );
+    expect(ok.outcome).toBe("recommended");
+  });
+
+  it("ruling 163 (a): Merge to Review is a rework move on `validation: changed`; Merge to In Progress is not offered", async () => {
+    // Canary: require `failing` again in the operator's `isReworkMove`.
+    deployRoster(DEFAULT_POLICY);
+    withMergeBoard();
+    seedReviewedWithPr("merge", "clean");
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      // The revision moved after the verdict: `changed`.
+      parsed.frontmatter.workRevision!.id = "rev_2";
+      parsed.frontmatter.workRevision!.treeSha = "u".repeat(40);
+      parsed.frontmatter.validation = "changed";
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("supervised"));
+    expect(snap.reworkStages.map((s) => s.id)).toEqual(["review"]);
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", reason: "the conflict rework needs its verdict" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().frontmatter.stage).toBe("review");
+    expect(task().frontmatter.previousStageId).toBe("merge");
+  });
+
+  it("ruling 163 (d): the acceptance refusal past the review stage names the rework move and the person's stage picker", async () => {
+    deployRoster(DEFAULT_POLICY);
+    withMergeBoard();
+    seedReviewedWithPr("merge", "clean");
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.workRevision!.id = "rev_2";
+      parsed.frontmatter.workRevision!.treeSha = "u".repeat(40);
+      parsed.frontmatter.validation = "changed";
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("belongs back at Review");
+    expect(r.message).toContain("transition_stage");
+    expect(r.message).toContain("stage picker on the task page");
   });
 });

@@ -29,6 +29,12 @@ export const ERROR_CODES = {
    *  "retry" — the run service turns it into the honest `run·unavailable`
    *  error run rather than a thrown 409 at a route. */
   RUN_UNAVAILABLE: "run_unavailable",
+  /** G35-4 / ruling 152(c) (pass 35): the dispatch was HELD because the
+   *  instance already knows the backend is out of quota for the account the
+   *  run would bill. Not a failure and not a decision: the retry is already
+   *  on the task's schedule, the timeline says so, and the thrower's
+   *  `details` carry the backend, the reopen instant and the schedule id. */
+  DISPATCH_HELD: "dispatch_held",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

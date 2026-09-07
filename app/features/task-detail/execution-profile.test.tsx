@@ -60,6 +60,7 @@ function unownedTask(): TaskSummary {
     commits: [],
     changed: null,
     unownedPr: null,
+    foreignHead: null,
     goal: "Keep the console readable on long runs.",
     eventCount: 0,
     commentCount: 0,
@@ -116,7 +117,7 @@ function renderExec(props: Partial<ComponentProps<typeof ExecutionProfile>> = {}
         operatorAutonomy="supervised"
         runPrincipal={null}
         canRunAgents
-        activeAgentProfileIds={[]}
+        liveAgentRuns={[]}
         operatorRunActive={false}
         runBusy={false}
         onRunAgent={() => {}}
@@ -535,5 +536,56 @@ describe("ruling 127: the run controls answer for the task owner", () => {
     expect(container.querySelector(".agent-run")!.textContent).toContain(
       "Codex isn't connected for Ada Lovelace",
     );
+  });
+});
+
+/**
+ * Pass 35 U35-7 (screenshot 65): the engaged-agent card said "running…" for an
+ * engagement whose live run was still QUEUED behind the concurrency cap. The
+ * word follows the run's lifecycle now. Canary: make `liveAgentRunLabel`
+ * return "running…" for any live run and the queued assertion fails.
+ */
+describe("the engaged-agent card names the live run's lifecycle", () => {
+  const engaged = (): TaskSummary => ({
+    ...ownedTask(),
+    specialist: {
+      kind: "agent",
+      profileId: "developer",
+      backend: "codex",
+      name: "Codex",
+      role: "Implementation",
+    },
+  });
+  const row = (container: HTMLElement) =>
+    [...container.querySelectorAll(".rev-agent")].find((r) => r.textContent?.includes("Developer"))!;
+
+  it("says queued for a queued live run", () => {
+    const { container } = renderExec({
+      task: engaged(),
+      liveAgentRuns: [{ profileId: "developer", lifecycle: "queued" }],
+    });
+    const sub = row(container).querySelector(".sub")!.textContent!;
+    expect(sub).toContain("· queued");
+    expect(sub).not.toContain("running…");
+  });
+
+  it("says running… once the run executes, and running wins over a queued sibling", () => {
+    const { container } = renderExec({
+      task: engaged(),
+      liveAgentRuns: [
+        { profileId: "developer", lifecycle: "queued" },
+        { profileId: "developer", lifecycle: "running" },
+      ],
+    });
+    const sub = row(container).querySelector(".sub")!.textContent!;
+    expect(sub).toContain("· running…");
+    expect(sub).not.toContain("queued");
+  });
+
+  it("says nothing with no live run", () => {
+    const { container } = renderExec({ task: engaged(), liveAgentRuns: [] });
+    const sub = row(container).querySelector(".sub")!.textContent!;
+    expect(sub).not.toContain("queued");
+    expect(sub).not.toContain("running…");
   });
 });

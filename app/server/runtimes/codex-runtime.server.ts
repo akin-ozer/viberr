@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { emptyRunFailureFacts } from "~/shared/run-failure";
+import {
+  LOCAL_NETWORK_FAILURE_RE,
+  emptyRunFailureFacts,
+  localNetworkFailureCode,
+  type RunFailureFacts,
+} from "~/shared/run-failure";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import type {
@@ -540,6 +545,9 @@ interface CodexFailure {
   kind: CodexFailureKind;
   message: string;
   providerText: string;
+  /** U35-11: where an `overloaded` failure happened (see `RunFailureFacts`);
+   *  null for every other kind. */
+  origin: RunFailureFacts["origin"];
 }
 
 /** Classify a provider failure IN MEMORY before its raw text is redacted, and
@@ -587,6 +595,7 @@ function classifyCodexFailure(
       message:
         "The Codex session could not be resumed — its rollout no longer exists under $CODEX_HOME/sessions. Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
       providerText,
+      origin: null,
     };
   }
   if (/usage limit|quota|rate limit|too many requests|\b429\b/i.test(raw)) {
@@ -595,6 +604,7 @@ function classifyCodexFailure(
       message:
         "Codex usage limit was reached. Retry after the subscription limit resets.",
       providerText,
+      origin: null,
     };
   }
   if (
@@ -607,6 +617,24 @@ function classifyCodexFailure(
       message:
         "Codex authentication failed. Review the configured subscription credential.",
       providerText,
+      origin: null,
+    };
+  }
+  // U35-11 (pass 35): a connection that failed BEFORE the provider answered
+  // (TLS, DNS, a refused or reset socket) is the deployment's own network
+  // path, not the provider's side. Same class and the same retry, its own
+  // origin and sentence; parity with the Claude adapter. Codex streams no HTTP
+  // status, so an explicit 5xx in the prose is the provider's answer and wins.
+  if (
+    !/\b5(?:0[023]|29)\b/.test(raw) &&
+    LOCAL_NETWORK_FAILURE_RE.test(raw)
+  ) {
+    const code = localNetworkFailureCode(raw);
+    return {
+      kind: "overloaded",
+      message: `Codex could not be reached from this deployment: the connection failed before the provider answered${code ? ` (${code})` : ""}. Nothing about the account or the task is wrong; check this deployment's network path (TLS, DNS, proxy) and retry in a few minutes.`,
+      providerText,
+      origin: "local",
     };
   }
   if (
@@ -619,6 +647,7 @@ function classifyCodexFailure(
       message:
         "Codex could not serve this run: the provider was overloaded or failed on its own side. Nothing about the account or the task is wrong; retry in a few minutes.",
       providerText,
+      origin: "provider",
     };
   }
   return {
@@ -628,6 +657,7 @@ function classifyCodexFailure(
         ? "Codex could not start. Review its authentication and runtime configuration."
         : "Codex execution failed. Review its authentication and runtime configuration.",
     providerText,
+    origin: null,
   };
 }
 
@@ -769,6 +799,8 @@ export function createCodexAdapter(
         message: string,
         kind: CodexFailureKind = "unknown",
         providerText = "",
+        // U35-11: the origin of an `overloaded` failure rides the typed record.
+        origin: RunFailureFacts["origin"] = null,
       ) => {
         if (emittedAdapterFailure) return;
         emittedAdapterFailure = true;
@@ -786,13 +818,15 @@ export function createCodexAdapter(
         } satisfies ThreadErrorEvent;
         const occurredAt = new Date().toISOString();
         const { display, facts } = projectEnvelope("codex", event, occurredAt);
+        // Ruling 130(a): the same typed record the Claude adapter attaches;
+        // Codex streams no structured refusal facts, so every field but the
+        // kind (and, U35-11, the origin of an overload) is unknown.
+        const failure = emptyRunFailureFacts(kind);
+        failure.origin = origin;
         cb.onLine({
           raw: JSON.stringify(event),
-          // Ruling 130(a): the same typed record the Claude adapter attaches;
-          // Codex streams no structured refusal facts, so every field but the
-          // kind is unknown.
           display: display
-            ? { ...display, tag: `${display.tag}·${kind}`, failure: emptyRunFailureFacts(kind) }
+            ? { ...display, tag: `${display.tag}·${kind}`, failure }
             : display,
           facts,
           occurredAt,
@@ -967,7 +1001,7 @@ export function createCodexAdapter(
             "execution",
             lastFatalMessage,
           );
-          emitAdapterFailure(failure.message, failure.kind, failure.providerText);
+          emitAdapterFailure(failure.message, failure.kind, failure.providerText, failure.origin);
           return settle("error");
         }
 
@@ -982,7 +1016,7 @@ export function createCodexAdapter(
             "execution",
             lastFatalMessage,
           );
-          emitAdapterFailure(failure.message, failure.kind, failure.providerText);
+          emitAdapterFailure(failure.message, failure.kind, failure.providerText, failure.origin);
         } else if (!sawFatalError) {
           emitAdapterFailure("Codex ended before reporting turn completion.");
         }
@@ -995,7 +1029,7 @@ export function createCodexAdapter(
           err: safeCodexError(error),
         });
         const failure = classifyCodexFailure(error, "start");
-        emitAdapterFailure(failure.message, failure.kind, failure.providerText);
+        emitAdapterFailure(failure.message, failure.kind, failure.providerText, failure.origin);
         settle("error");
       });
 

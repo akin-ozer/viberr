@@ -949,6 +949,22 @@ describe("codex failure classification survives redaction into runFailureReason 
     expect(reason?.text).not.toContain("/data/codex/sessions");
   });
 
+  it("U35-11: a connection that failed before the provider answered classifies 'overloaded' with origin local and names this deployment", async () => {
+    // Canary: delete the local-network arm and the sentence blames the
+    // provider's own side (or, for `fetch failed`, falls to `unknown`).
+    for (const text of [
+      "error sending request: Unable to connect to API (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)",
+      "fetch failed: connect ECONNREFUSED 10.0.0.1:443",
+    ]) {
+      const reason = await classifyThrownFailure(text);
+      expect(reason?.kind, text).toBe("overloaded");
+      expect(reason?.text, text).toContain("Codex could not be reached from this deployment: the connection failed before the provider answered");
+      expect(reason?.text, text).not.toContain("failed on its own side");
+    }
+    const tls = await classifyThrownFailure("Unable to connect to API (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)");
+    expect(tls?.text).toContain("(UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)");
+  });
+
   it("a provider overload / 5xx classifies as 'overloaded' (parity with the Claude adapter's structural class), never 'unknown'", async () => {
     // Codex streams no structured status, so the leg is prose-only, on the
     // signatures the run projection has always read as backend unavailability.
@@ -1580,7 +1596,7 @@ describe("ruling 130(a): failure record parity", () => {
     await drain();
     const terminal = lines.find((l) => (l.display?.tag ?? "").endsWith("·quota"));
     expect(terminal?.display?.failure).toEqual({
-      kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null,
+      kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, origin: null,
     });
   });
 });

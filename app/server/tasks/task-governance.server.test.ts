@@ -967,6 +967,84 @@ describe("resolvePacket kind matrix", () => {
     });
   });
 
+  it("ruling 152(c) + 164: the option that says the window has reset RETIRES the exhaustion record", async () => {
+    // The specialist quota packet's "The window has reset …, or the Codex
+    // account changed: send @dev back to continue" and the operator's "…: re-run"
+    // are the person's statement that the stored record is stale. Nothing else
+    // retires it — only a run that COMPLETES on the backend clears it, and the
+    // dispatch hold stops any run from starting until the recorded instant
+    // passes — so the option resolved, the dispatch was held again and the
+    // stated remedy was overridden by the record it contradicts. Canary: drop
+    // the `clearBackendQuotaExhaustion` call from `resolvePacket`.
+    const store = prepared();
+    const quotaPacket: TaskPacket = {
+      ...PACKET,
+      options: [
+        {
+          kind: "request_edit",
+          t: "The window has reset (Sep 7, 2026 · 16:00 UTC), or the Codex account changed: send @dev back to continue",
+          d: "Closes this decision and re-runs the agent on the owner's current account with the same directive.",
+          rec: true,
+          backend: "codex",
+        },
+        { kind: "redirect", t: "Redirect with sharper guidance", d: "", rec: false },
+      ],
+    };
+    withTask(store, { stage: "review", waiting: "human" }, quotaPacket);
+    const { recordBackendQuotaExhaustion, backendDispatchHold } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    const record = {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt: Math.round(Date.now() / 1000) + 6 * 3600,
+      resetsAtPrecision: "clock" as const,
+      providerText: "You've hit your usage limit.",
+      runId: "run_refused",
+      observedAt: new Date().toISOString(),
+    };
+    recordBackendQuotaExhaustion(store.db, "codex", record);
+    const hold = { credentialUserId: store.users.arda.id };
+    expect(backendDispatchHold(store.db, "codex", hold)).not.toBeNull();
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(backendDispatchHold(store.db, "codex", hold)).toBeNull();
+
+  });
+
+  it("an option that asserts nothing about quota names no backend and leaves the record standing", async () => {
+    const store = prepared();
+    withTask(store, { stage: "review", waiting: "human" }, PACKET);
+    const { recordBackendQuotaExhaustion, backendDispatchHold } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    recordBackendQuotaExhaustion(store.db, "codex", {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt: Math.round(Date.now() / 1000) + 6 * 3600,
+      resetsAtPrecision: "clock",
+      providerText: "You've hit your usage limit.",
+      runId: "run_refused",
+      observedAt: new Date().toISOString(),
+    });
+    // Option 1 is the plain "Request one edit": a send-back that says nothing
+    // about anyone's usage window.
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(
+      backendDispatchHold(store.db, "codex", { credentialUserId: store.users.arda.id }),
+    ).not.toBeNull();
+  });
+
   it("R20-1 block_on_policy: UNBLOCKS (readiness→ready, waiting→agent), resolves, refuses a second confirm", async () => {
     const store = prepared();
     withTask(store, { stage: "review", waiting: "human" }, PACKET);
@@ -2369,6 +2447,84 @@ describe("resolvePacket kind matrix", () => {
     expect(discarded[0]!.details).toMatchObject({ branch: "vib-1-work", basis: "local_only" });
   });
 
+  it("ruling 161 (G35-6): the discard retires the reported revision: kind discarded, validation none, note and audit name it", async () => {
+    // Canary: drop the `retires` block from the discard_branch resolution and
+    // the revision stays `delivered` with its approve keeping the task healthy.
+    const store = prepared();
+    const revisionId = "rev_MBEIgNbXXyFX";
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        branch: "vib-1-work",
+        engagements: [
+          {
+            profileId: "reviewer",
+            backend: "claude",
+            role: "Review",
+            delivers: false,
+            verdictCapable: true,
+          },
+        ],
+        workRevision: {
+          id: revisionId,
+          headSha: "8c463b7".padEnd(40, "0"),
+          treeSha: "b".repeat(40),
+          branch: "vib-1-work",
+          createdAt: "2026-09-06T18:56:57.000Z",
+          sourceProfileId: "developer",
+          kind: "delivered",
+        },
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId,
+            headSha: "8c463b7".padEnd(40, "0"),
+            result: "approve",
+            reason: "fine",
+            at: "2026-09-06T19:00:00.000Z",
+          },
+        ],
+        validation: "healthy",
+      },
+      DISCARD_PACKET,
+    );
+    initTaskWorkspace(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.branch).toBeNull();
+    expect(fm.workRevision?.id).toBe(revisionId);
+    expect(fm.workRevision?.kind).toBe("discarded");
+    // The verdict is history, not erased; the derived cache says nothing is owed.
+    expect(fm.verdicts).toHaveLength(1);
+    expect(fm.validation).toBe("none");
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(
+      texts.some(
+        (t) => t.includes(`Revision \`${revisionId}\``) && t.includes("is retired with it"),
+      ),
+    ).toBe(true);
+    const discarded = listAuditEvents(store.db, { action: "task.branch.discarded" });
+    expect(discarded).toHaveLength(1);
+    expect(discarded[0]!.details).toMatchObject({
+      branch: "vib-1-work",
+      localSha: expect.any(String),
+      basis: "local_only",
+      remoteSha: null,
+      retiredRevisionId: revisionId,
+    });
+  });
+
   it("discard_branch / ruling 17: refuses an on-remote branch, keeps fm.branch, still resolves the packet", async () => {
     const store = prepared();
     withTask(
@@ -2443,6 +2599,77 @@ describe("resolvePacket kind matrix", () => {
     const discarded = listAuditEvents(store.db, { action: "task.branch.discarded" });
     expect(
       discarded.some((a) => a.details!.basis === "archive_cleanup"),
+    ).toBe(true);
+  });
+
+  it("ruling 161 (U35-8): archive + deleteBranch records BOTH heads: the local sha and the foreign remote head it deleted", async () => {
+    // Live (KNC-21): the audit named the local head 8c463b7 while the deleted
+    // remote `knc-21` held the foreign fixture commit d5f23aa. Canary: drop
+    // the pre-delete ref read in `deleteTaskRemoteBranch` (remoteSha null) or
+    // write `sha` instead of `localSha`/`remoteSha` on the archive row.
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const { createPat, setProjectCredential } = await import(
+      "~/server/secrets/pat-store.server"
+    );
+    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_foreignhead000000000000000000001" },
+      patActor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    const remoteSha = "d5f23aa".padEnd(40, "1");
+    const github = fakeGithubFetch({
+      "GET /repos/akin-ozer/viberr/git/ref/heads/vib-1-work": {
+        status: 200,
+        body: { ref: "refs/heads/vib-1-work", object: { sha: remoteSha, type: "commit" } },
+      },
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
+    });
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        pr: { number: 318, state: "closed", title: "PR" },
+        branch: "vib-1-work",
+        github: {
+          commits: [],
+          changed: null,
+          foreignHead: { sha: remoteSha, prNumber: null },
+        },
+      },
+      RECOVERY_PACKET,
+    );
+    const repoDir = initTaskWorkspace(store);
+    const localSha = gitc(repoDir, ["rev-parse", "refs/heads/vib-1-work"]);
+    expect(localSha).not.toBe(remoteSha);
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+    );
+    expect(
+      github.callsTo("DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work"),
+    ).toHaveLength(1);
+    const deleted = listAuditEvents(store.db, { action: "github.branch.deleted" });
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]!.details).toMatchObject({ branch: "vib-1-work", sha: remoteSha });
+    const discarded = listAuditEvents(store.db, { action: "task.branch.discarded" });
+    expect(discarded).toHaveLength(1);
+    expect(discarded[0]!.details).toEqual({
+      branch: "vib-1-work",
+      localSha,
+      remoteSha,
+      basis: "archive_cleanup",
+    });
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.includes(`Its head was \`${remoteSha.slice(0, 12)}\``))).toBe(true);
+    expect(
+      texts.some((t) => t.includes(`Origin's copy stood at \`${remoteSha.slice(0, 12)}\``)),
     ).toBe(true);
   });
 
@@ -3015,5 +3242,259 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
     expect(fm.pr?.state).toBe("accepted");
+  });
+});
+
+/**
+ * Ruling 164 (pass 35, F35-14) — the two kinds that perform what their title
+ * promises.
+ *
+ * Live: KNC-3's `custom` "Force-accept as admin without a fresh verdict"
+ * recorded a decision and re-ran the operator into a no-op behind the verdict
+ * gate; KNC-16's `redirect` "Move KNC-16 back to Review" moved nothing. These
+ * cases assert the acts themselves, on the same paths their buttons take.
+ */
+describe("ruling 164: force_accept and move_stage perform their option's promise", () => {
+  const forcePacket: TaskPacket = {
+    type: "blocked",
+    kind: "Blocked decision",
+    from: "operator",
+    title: "No verdict-capable agent can run at this stage",
+    body: "b",
+    observations: [],
+    options: [
+      {
+        kind: "force_accept",
+        t: "Force-accept as admin without a fresh verdict",
+        d: "",
+        rec: true,
+      },
+    ],
+  };
+
+  const movePacket = (toStage: string): TaskPacket => ({
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "The reviewer cannot run where the task stands",
+    body: "b",
+    observations: [],
+    options: [
+      {
+        kind: "move_stage",
+        t: "Move VIB-1 back to Review so the reviewer can verdict",
+        d: "",
+        rec: true,
+        toStage,
+      },
+    ],
+  });
+
+  /** A task wedged exactly as KNC-3 was: a standing rejection on the current
+   *  revision, so the acceptance gate refuses and only the override is left. */
+  function wedged(store: TestStore, packet: TaskPacket): void {
+    withTask(
+      store,
+      {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        branch: "vib-1-work",
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        workRevision: workRev("rev_1"),
+        verdicts: [rejectionVerdict("rev_1")],
+        validation: "failing",
+      },
+      packet,
+    );
+  }
+
+  it("force_accept: an admin's confirm closes the task through the force path, audited", async () => {
+    const store = prepared();
+    wedged(store, forcePacket);
+
+    const res = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda), // admin: the Force accept button's own tier
+      { dataRoot: store.dataRoot },
+    );
+    expect(res.option.kind).toBe("force_accept");
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // The act, not just its record: the task is closed and the durable bypass
+    // fact is stamped, exactly as the button leaves it.
+    expect(fm.stage).toBe("done");
+    expect(fm.acceptance).toBe("forced");
+    // The same audited bypass record, naming the gate it overrode.
+    const forced = listAuditEvents(store.db, { action: "task.acceptance.forced" });
+    expect(forced).toHaveLength(1);
+    expect(String(forced[0]!.details!.bypassed)).toContain("request");
+    // The decision is on the record too, above the acceptance it caused.
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map(
+      (e) => e.text,
+    );
+    expect(texts).toContain(
+      "**Decision:** Force-accept as admin without a fresh verdict.",
+    );
+    expect(texts.some((t) => t.includes("Completion accepted"))).toBe(false);
+  });
+
+  it("force_accept: a maintainer is refused in the Force accept button's own words, and the packet stands", async () => {
+    const store = prepared();
+    wedged(store, forcePacket);
+
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.murat), // maintainer: may resolve packets, may not force
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/force-accept past the review gate/i);
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    // Refused BEFORE the write: the decision is still open and nothing closed.
+    expect(parsed.frontmatter.stage).toBe("impl");
+    expect(parsed.packet).not.toBeNull();
+    expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(0);
+  });
+
+  it("move_stage: the confirm moves the task on the stage picker's path, with its transition record", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      },
+      movePacket("review"),
+    );
+
+    const res = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat), // maintainer: the stage picker's own tier
+      { dataRoot: store.dataRoot },
+    );
+    expect(res.task.stage).toBe("review");
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.frontmatter.previousStageId).toBe("impl");
+    expect(parsed.packet).toBeNull();
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map(
+      (e) => e.text,
+    );
+    // The decision states the decision; the move's own event states the move.
+    expect(texts).toContain(
+      "**Decision:** Move VIB-1 back to Review so the reviewer can verdict.",
+    );
+    expect(
+      texts.some((t) => t.includes("**Transition:**") && t.includes("to Review")),
+    ).toBe(true);
+    const moves = listAuditEvents(store.db, { action: "task.transition" });
+    expect(moves).toHaveLength(1);
+    expect(moves[0]!.details!.to).toBe("review");
+    expect(moves[0]!.details!.manual).toBe(true);
+  });
+
+  it("move_stage: resolving a BLOCKED packet lifts the block it was holding down", async () => {
+    // Canary: restore `mutate = () => {}` in the move_stage arm. The packet
+    // clears, `transitionStage` deliberately lets a stored `blocked` survive a
+    // move, and the board is left showing a blocked task with no decision on
+    // it and nothing a person can do — the shape this kind was created for
+    // (KNC-16: the reviewer cannot run where the task stands, which arrives as
+    // a `blocked` packet).
+    const store = prepared();
+    const blockedMove: TaskPacket = { ...movePacket("review"), type: "blocked" };
+    withTask(
+      store,
+      {
+        stage: "impl",
+        readiness: "blocked",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      },
+      blockedMove,
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.packet).toBeNull();
+    expect(parsed.frontmatter.readiness).toBe("ready");
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")!.displayReadiness).not.toBe("blocked");
+  });
+
+  it("move_stage: a stage this project does not have is refused before the packet clears", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, movePacket("nowhere"));
+
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/not a stage of this project/i);
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.frontmatter.stage).toBe("impl");
+    expect(parsed.packet).not.toBeNull();
+  });
+
+  it("move_stage: a contributor owner hears the stage picker's tier, not a silent widening", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.selin.id }, // selin = contributor
+      movePacket("review"),
+    );
+
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/change the task stage/i);
+
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.stage,
+    ).toBe("impl");
   });
 });

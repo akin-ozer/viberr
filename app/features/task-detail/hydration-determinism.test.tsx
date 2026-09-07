@@ -162,6 +162,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     commits: [],
     changed: null,
     unownedPr: null,
+    foreignHead: null,
     goal: "Keep the timeline readable on long tasks.",
     packet: null,
     eventCount: TIMELINE.length,
@@ -216,7 +217,9 @@ function run(patch: Partial<RunView>): RunView {
     startedAt: "2026-07-03T23:31:00.000Z",
     finished: null,
     turns: 4,
+    // F35-1: a live Claude run carries the adapter's estimate until the result.
     tokens: 1500,
+    tokensEstimated: true,
     lines: CONSOLE,
     raw: CONSOLE_RAW,
     lineCount: CONSOLE.length,
@@ -247,6 +250,7 @@ const FINISHED_OPERATOR = run({
   finished: "2026-07-03T23:29:30.000Z",
   turns: 2,
   tokens: 800,
+  tokensEstimated: false,
   lines: [
     { t: "23:20:01", ev: "init", tag: "system·init", text: "session op-1" },
     { t: "23:29:30", ev: "result", tag: "result", text: "success · 2 turns", stats: { subtype: "success", dur: 569, api: 400, turns: 2, cost: 0.02, in: 500, cached: 0, out: 300 } },
@@ -323,7 +327,7 @@ const BASE_PROPS: Omit<PageProps, "task" | "runtime"> = {
     claude: { available: true, detail: null },
     codex: { available: true, detail: null },
   },
-  activeAgentProfileIds: [],
+  liveAgentRuns: [],
   runsVisible: true,
   timelineHasMore: true,
   timelineRemaining: 12,
@@ -358,7 +362,7 @@ function duringLiveRun(): PageProps {
     ...BASE_PROPS,
     task: detail({ waiting: "agent", displayReadiness: "agent_working" }),
     runtime: [run({}), FINISHED_OPERATOR],
-    activeAgentProfileIds: ["developer"],
+    liveAgentRuns: [{ profileId: "developer", lifecycle: "running" }],
   };
 }
 

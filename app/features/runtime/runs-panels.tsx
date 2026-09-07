@@ -242,7 +242,24 @@ export function LiveRunPanel({
           </div>
           <div className="run-cell">
             <div className="lbl">Tokens</div>
-            <div className="val mono">{fmtTok(run.tokens)}</div>
+            {/* F35-1: an estimate is marked as one, for as long as it is one.
+                The live figure used to be the SDK's placeholder output (a few
+                tokens per API message) and read "49" for twelve minutes of
+                writing; now it is a text estimate the provider's total
+                replaces at the result. A stopped run has no result, so its
+                estimate keeps the tilde after it ends. */}
+            {run.tokens === null ? (
+              <div className="val mono">pending</div>
+            ) : run.tokensEstimated ? (
+              <div
+                className="val mono"
+                title="Estimated from the streamed text. The provider's own total replaces it when one lands; a run that was stopped never gets one"
+              >
+                ~{fmtTok(run.tokens)}
+              </div>
+            ) : (
+              <div className="val mono">{fmtTok(run.tokens)}</div>
+            )}
           </div>
           <div className="run-cell">
             <div className="lbl">Runtime</div>
@@ -634,7 +651,17 @@ export function AgentLogsPanel({
           // footer "thread alive — no run executing", which contradicted it.
           "queued: waiting for a runtime slot; output appears once it starts"
         : cur!.lifecycle === "interrupted"
-          ? `interrupted${cur!.interruptedBy ? " by " + cur!.interruptedBy.label.split(" ")[0] : ""}; the thread stays resumable`
+          ? // Pass 35 U35-7: a restart is a reason, not a person. Boot
+            // recovery re-invokes the operator for a task run it interrupted
+            // (a controller turn gets a note on its conversation instead), so
+            // the footer says what already happened rather than "resumable".
+            cur!.interruptedBy
+            ? `interrupted by ${cur!.interruptedBy.label.split(" ")[0]}; the thread stays resumable`
+            : cur!.interruptedReason === "restart"
+              ? cur!.kind === "controller"
+                ? "interrupted by a restart; the conversation carries a note"
+                : "interrupted by a restart; the operator was re-invoked"
+              : "interrupted; the thread stays resumable"
           : cur!.state === "done"
             ? // Ruling 148: a missing timestamp is said by leaving the clause
               // out, not by a "−" mid-sentence — "run finished at −;" read as a
@@ -656,7 +683,11 @@ export function AgentLogsPanel({
                   : cur!.failureKind === "overloaded"
                   ? // The provider's side, not the account's: the sentence
                     // must not send the reader to a quota or account remedy.
-                    `${cur!.backend === "codex" ? "Codex" : "Claude"} could not serve this run: the provider was overloaded or failed on its side; nothing about the account is wrong, retry in a few minutes${retryClause}`
+                    // U35-11: unless the request never reached the provider,
+                    // which is this deployment's network path, not its side.
+                    cur!.failureOrigin === "local"
+                    ? `${cur!.backend === "codex" ? "Codex" : "Claude"} could not be reached from this deployment: the connection failed before the provider answered; nothing about the account is wrong, check the network path and retry in a few minutes${retryClause}`
+                    : `${cur!.backend === "codex" ? "Codex" : "Claude"} could not serve this run: the provider was overloaded or failed on its side; nothing about the account is wrong, retry in a few minutes${retryClause}`
                   : backendUnavailable
                 ? // Ruling 127: the same `run·unavailable` classification now
                   // also covers "the account this run bills has not connected

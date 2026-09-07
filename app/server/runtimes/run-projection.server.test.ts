@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
-import { insertRunLine, upsertRun, type InsertRunInput } from "./run-store.server";
+import { insertRunLine, patchRun, upsertRun, type InsertRunInput } from "./run-store.server";
 import {
   RUN_LOG_WINDOW_BYTES,
   RUN_LOG_WINDOW_LINES,
   projectRunsForTask,
 } from "./run-projection.server";
+import { runStatePill } from "~/features/runtime/runs-helpers";
 
 /**
  * Run projection GROUPING (BUG 2): one Agent-logs entry PER AGENT, not per run
@@ -249,6 +250,7 @@ describe("projectRunsForTask grouping", () => {
           apiError: null,
           apiErrorStatus: null,
           terminalReason: null,
+          origin: null,
         },
       },
     });
@@ -293,6 +295,7 @@ describe("projectRunsForTask grouping", () => {
           apiError: null,
           apiErrorStatus: 529,
           terminalReason: "api_error",
+          origin: "provider",
         },
       },
     });
@@ -300,6 +303,24 @@ describe("projectRunsForTask grouping", () => {
     expect(view!.failureKind).toBe("overloaded");
     expect(view!.failedBackendUnavailable).toBe(true);
     expect(view!.altBackend).toBe("codex");
+    expect(view!.failureOrigin).toBe("provider");
+  });
+
+  it("U35-11: the origin of an overload rides the view (`local` for a connection that failed in this deployment), and only for that kind", () => {
+    // Canary: drop the `failureOrigin` assignment in `projectRunsForTask`.
+    insert({ id: "run_net", threadId: "primary", kind: "primary", backend: "claude", state: "error", credentialUserId: "u_owner" });
+    insertRunLine(db, {
+      runId: "run_net", seq: 0, occurredAt: "2026-09-06T21:41:00.000Z", raw: "",
+      display: {
+        t: "21:41:00", ev: "err", tag: "run·error·overloaded",
+        text: "Claude could not be reached from this deployment: the connection failed before the provider answered (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR).",
+        failure: { kind: "overloaded", resetsAt: null, window: null, windowRejected: false, apiError: "server_error", apiErrorStatus: null, terminalReason: "api_error", origin: "local" },
+      },
+    });
+    const view = projectRunsForTask(db, SLUG, TASK).find((v) => v.serverRunId === "run_net")!;
+    expect(view.failureKind).toBe("overloaded");
+    expect(view.failureOrigin).toBe("local");
+    expect(view.failedBackendUnavailable, "the retry offer is unchanged").toBe(true);
   });
 
   it("does NOT flag a genuine task failure as backend-unavailable", () => {
@@ -317,6 +338,51 @@ describe("projectRunsForTask grouping", () => {
 });
 
 /* ------------- resumed history stays visible (P13-UI-53) ------------- */
+
+/**
+ * F35-1 (pass 35): the strip's Tokens cell tells an estimate from a total. A
+ * live Claude row holds the adapter's estimate until the result lands
+ * (`usage_final = 0`), a live Codex row holds nothing until its turn ends, and
+ * a row the provider has totalled prints plain.
+ */
+describe("F35-1: tokens are marked estimated until the provider's total lands", () => {
+  it("a running Claude row projects its live figure as an estimate", () => {
+    insert({ id: "run_live", threadId: "primary", state: "running", inputTokens: 1000, outputTokens: 500 });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.tokens).toBe(1500);
+    // Canary: drop the `usage_final` test in the projection and this is false.
+    expect(view!.tokensEstimated).toBe(true);
+  });
+
+  it("a running Codex row with no usage yet projects null", () => {
+    insert({ id: "run_codex", threadId: "primary", backend: "codex", model: "gpt-5.4-codex", sdk: "Codex SDK", state: "running" });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.tokens).toBeNull();
+    expect(view!.tokensEstimated).toBe(true);
+  });
+
+  it("a row whose provider total landed projects plain, live or finished", () => {
+    insert({ id: "run_final", threadId: "primary", state: "running", inputTokens: 1000, outputTokens: 900 });
+    patchRun(db, "run_final", { usageFinal: 1 });
+    expect(projectRunsForTask(db, SLUG, TASK)[0]).toMatchObject({ tokens: 1900, tokensEstimated: false });
+
+    patchRun(db, "run_final", { state: "finished", finishedAt: "2026-09-06T10:00:00.000Z" });
+    expect(projectRunsForTask(db, SLUG, TASK)[0]).toMatchObject({ tokens: 1900, tokensEstimated: false });
+  });
+
+  /**
+   * A run somebody stopped never receives a Claude `result` or a Codex
+   * `turn.completed`, so its row keeps the adapter's estimate for good. The
+   * figure is the best one that will ever exist for the run (never "pending"),
+   * and it is still an estimate, so it keeps the tilde. Canary: put `&&
+   * !finished` back on `tokensEstimated` and the panel prints the estimate as
+   * the provider's total on exactly the rows Insights leaves out of its sums.
+   */
+  it("an interrupted row that never got a provider total keeps its figure AND its estimate mark", () => {
+    insert({ id: "run_cut", threadId: "primary", state: "interrupted", finishedAt: "2026-09-06T10:00:00.000Z", inputTokens: 300, outputTokens: 40 });
+    expect(projectRunsForTask(db, SLUG, TASK)[0]).toMatchObject({ tokens: 340, tokensEstimated: true });
+  });
+});
 
 describe("projectRunsForTask — resumed history", () => {
   it("keeps every run's lines, with an explicit resume boundary", () => {
@@ -492,7 +558,7 @@ describe("ruling 130(a): the classified failure reaches the view for every run k
       runId: "run_auth", seq: 0, occurredAt: "2026-09-04T00:00:00.000Z", raw: JSON.stringify({ type: "result" }),
       display: {
         t: "00:00:00", ev: "err", tag: "run·error·auth", text: "refused",
-        failure: { kind: "auth", resetsAt: null, window: null, windowRejected: false, apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error" },
+        failure: { kind: "auth", resetsAt: null, window: null, windowRejected: false, apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error", origin: null },
       },
     });
     insert({ id: "run_op", threadId: "operator", kind: "operator", backend: "claude", state: "error", credentialUserId: "u_owner" });
@@ -507,5 +573,44 @@ describe("ruling 130(a): the classified failure reaches the view for every run k
     const operator = views.find((v) => v.id === "operator")!;
     expect(operator.failedBackendUnavailable).toBe(true);
     expect(operator.failureKind).toBe("quota");
+  });
+});
+
+describe("pass 35 U35-7: a restart is a reason, not an actor", () => {
+  /**
+   * Boot recovery used to store the literal "restart" in `interrupted_by`, so
+   * this projection called `findUserById(db, "restart")` and the pill named a
+   * pseudo-user. Canary: drop `interruptedReason` from the view and the first
+   * two assertions fail; the pill assertion fails with it.
+   */
+  it("projects interrupted_reason as interruptedReason with no interrupter, and the pill says so", () => {
+    insert({
+      id: "run_restart",
+      threadId: "primary",
+      state: "interrupted",
+      interruptedReason: "restart",
+      startedAt: "2026-09-06T18:30:00.000Z",
+      finishedAt: "2026-09-06T18:40:30.963Z",
+    });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.lifecycle).toBe("interrupted");
+    expect(view!.interruptedReason).toBe("restart");
+    expect(view!.interruptedBy).toBeNull();
+    // Idle-shaped, never an error: no continuity was lost, a process was.
+    expect(view!.state).toBe("idle");
+    expect(view!.failureKind).toBeUndefined();
+    expect(runStatePill(view!)).toEqual({ kind: "neutral", label: "interrupted · by a restart" });
+  });
+
+  it("a person's interrupt still names the person and carries no reason", () => {
+    insert({
+      id: "run_human",
+      threadId: "primary",
+      state: "interrupted",
+      interruptedBy: "u-nobody",
+    });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.interruptedReason).toBeNull();
+    expect(view!.interruptedBy).toEqual({ userId: "u-nobody", label: "u-nobody" });
   });
 });

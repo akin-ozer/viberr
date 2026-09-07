@@ -308,6 +308,74 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(quality).toBeTruthy();
   });
 
+  /**
+   * Ruling 159 (pass 35, F35-10): an agent under an older prompt created
+   * `projects/<slug>/tasks/<key>/attachments` INSIDE its repository checkout,
+   * so the file never reached the task page and the person never learned why.
+   * Completion scans the run's workspace for that folder and posts a warning
+   * line naming it, the files it holds and the real folder. Canary: delete
+   * the `warnStrayAttachmentsFolder` call (no line is posted).
+   */
+  it("ruling 159: a stray store-layout attachments folder inside the checkout is named on the timeline", async () => {
+    writeReviewTask();
+    const workdir = path.join(store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "workspace", "viberr");
+    const strayDir = path.join(workdir, "projects", store.slug, "tasks", "VIB-1", "attachments");
+    mkdirSync(strayDir, { recursive: true });
+    writeFileSync(path.join(strayDir, "knc-9-licence-verification.txt"), "MIT, verified");
+    const runId = await finishedRunWith("Attached the licence verification note.");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    const warning = taskFile().parsed.timeline.find(
+      (e) => e.type === "policy" && e.text.includes("store layout"),
+    );
+    expect(warning).toBeTruthy();
+    expect(warning?.text).toContain(`\`projects/${store.slug}/tasks/VIB-1/attachments\``);
+    expect(warning?.text).toContain(`\`${strayDir}\``);
+    expect(warning?.text).toContain("`knc-9-licence-verification.txt`");
+    expect(warning?.text).toContain("NOT posted on this task");
+    // The real folder is named so the person knows where files belong.
+    expect(warning?.text).toContain(
+      `\`${path.join(store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "attachments")}\``,
+    );
+    // The reply itself claims no attachment: nothing reached the real folder.
+    const reply = taskFile().parsed.timeline.find((e) => e.type === "comment");
+    expect(reply?.attachments).toBeUndefined();
+  });
+
+  it("ruling 159: no warning line when the workspace holds no stray folder", async () => {
+    writeReviewTask();
+    const runId = await finishedRunWith("Nothing stray here.");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: store.dataRoot,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    expect(taskFile().parsed.timeline.some((e) => e.text.includes("store layout"))).toBe(false);
+  });
+
   it("ruling 105: prunes uncited browser working artifacts at completion; cited + visual stay", async () => {
     // The browser MCP's --output-dir IS the attachments store, so its aria
     // snapshots and console dumps land next to the screenshots. Completion

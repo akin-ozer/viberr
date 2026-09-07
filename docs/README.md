@@ -55,7 +55,7 @@ app-owned config homes; the rest are `architecture/decisions.md`,
 | [architecture/data-model.md](architecture/data-model.md) | Data-root layout including the per-person runtime homes, every SQLite table (primary vs derived vs config), indexes, retention, ids |
 | [architecture/file-formats.md](architecture/file-formats.md) | The canonical `project.md`, `task.md`, goal and agent-profile formats; timeline grammar; packet YAML (the `## Packet` section is pinned by a test) |
 | [architecture/projections-and-events.md](architecture/projections-and-events.md) | Writers, watcher, tolerant parsing and diagnostics, rebuilder, rescan/rebuild, SSE broker and client |
-| [architecture/decisions.md](architecture/decisions.md) | Conventions, 150 numbered owner rulings (1–150; 117 records a number that was never used), the unrecorded decisions since 2026-08-20, the route map |
+| [architecture/decisions.md](architecture/decisions.md) | Conventions, 164 numbered owner rulings (1–164; 117 records a number that was never used), the unrecorded decisions since 2026-08-20, the route map |
 
 ### Domain
 
@@ -64,7 +64,7 @@ app-owned config homes; the rest are `architecture/decisions.md`,
 | [domain/task-lifecycle.md](domain/task-lifecycle.md) | Governed mutation shape, RBAC matrix, creation, stages and boundaries, transitions, readiness/waiting/validation, ownership, engagements, packets, recommendations, schedules, delivery, the acceptance endings, archive, timeline, notifications |
 | [domain/operator.md](domain/operator.md) | The per-task coordinator: authority and gates, triggers, the turn, the 12 `viberr` tools, packets, guardrails |
 | [domain/agents-and-runtime.md](domain/agents-and-runtime.md) | Backends, the credential principal and per-person runtime homes (ruling 127), models, a run's life (persistence, admission, streaming, failure kinds, resume), specialist dispatch and tools, capability catalog and enforcement, context mounting, workspaces and git, boot recovery, seeded catalog |
-| [domain/controller-and-goals.md](domain/controller-and-goals.md) | The instance controller: the dock on every surface, conversation scopes and the per-turn context read (ruling 121), the asker's own Claude account (ruling 127), the 38 `viberr_controller` tools, `viberr_ops`, deployment locks, chained goals |
+| [domain/controller-and-goals.md](domain/controller-and-goals.md) | The instance controller: the dock on every surface, conversation scopes and the per-turn context read (ruling 121), the asker's own Claude account (ruling 127), the 41 `viberr_controller` tools, `viberr_ops`, deployment locks, chained goals |
 | [domain/github-delivery.md](domain/github-delivery.md) | PATs and connections, repo attach, the delivery pipeline, PR adoption and collisions, revisions and verdicts, the reconciler, scope violations |
 | [domain/auth-and-rbac.md](domain/auth-and-rbac.md) | better-auth setup, CSRF, OAuth whitelist, org and project roles, enforcement, org settings, audit, insights, profile (incl. Agent accounts) |
 

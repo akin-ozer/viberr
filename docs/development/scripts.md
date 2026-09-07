@@ -36,10 +36,10 @@ container starts or stop it first.
 | `npm run seed:demo [-- --reset]` | **writer** | test/dev fixture: five users, three projects, twelve tasks, notifications, one scope violation; refuses in the production image (no `test-support/`) |
 | `npm run rescan [-- --force]` | **writer** | `rescanProjections` (hash short-circuit unless `--force`) and a report of untrusted files from the `diagnostics` table |
 | `npm run store:check` | none, no DB | parses every `project.md`, `tasks/*/task.md`, `goals/*.md`; exit 1 when any file is untrusted |
-| `npm run backup [-- --out <dir>] [--include-runtimes]` | none (read-only DB) | `VACUUM INTO` snapshot + store tree copy (incl. `audit-exports/`, ruling 102) + manifest |
+| `npm run backup [-- --out <dir>] [--include-runtimes]` | none; with a `state/writer.lock` present at all it reads a copy of the DB taken under `state/tmp/`, never the live file (ruling 158) | `VACUUM INTO` snapshot + store tree copy (incl. `audit-exports/`, ruling 102) + manifest, whose first `contains` line says whether the projection was read from the file or from a copy |
 | `npm run restore -- --from <artefact> [--force]` | **writer** | whole-root restore; occupied roots need `--force` and are moved aside, never deleted |
 | `npm run restore -- --from <artefact> --file <store path>` | none | single canonical file restore; the displaced file is kept as `<file>.broken-<ts>` |
-| `npm run keys -- status` | none (read-only DB) | how many sealed secrets still open only under a retired `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` key, across every registered store: GitHub PATs, org MCP credentials, OAuth client secrets, the S3 key and, since ruling 127, `user_backend_credentials` ("Personal backend API keys"; a `login` row has no box and is skipped) |
+| `npm run keys -- status` | none; reads a copy of the DB whenever `state/writer.lock` is present (ruling 158), and says so | how many sealed secrets still open only under a retired `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` key, across every registered store: GitHub PATs, org MCP credentials, OAuth client secrets, the S3 key and, since ruling 127, `user_backend_credentials` ("Personal backend API keys"; a `login` row has no box and is skipped) |
 | `npm run keys -- reseal [--dry-run]` | **writer** | re-seal them under the current key, personal backend keys included. A row it reports as unopenable is a person who must connect that backend again; the report names the backend, never the person's email |
 | `node scripts/measure-routes.mjs [routeId…]` | none | client asset closure per route (raw + gzip bytes) from a prior `npm run build`; not in `package.json` |
 
@@ -92,8 +92,14 @@ for Arda; one open scope violation on VIB-142; audit `seed.demo_dataset`; then
 ### `npm run backup`
 
 Writes `<--out ?? ./backups>/viberr-backup-<timestamp>/` (refuses an existing dir and
-any path inside the data root): `projection.sqlite` via `VACUUM INTO` from a read-only
-connection (WAL folded in, no sidecars), `projects/`, `agents/`, `kb/`, `skills/`,
+any path inside the data root): `projection.sqlite` via `VACUUM INTO` on whatever
+`openDatabaseReadOnly` handed it (WAL folded in, no sidecars) — the live file, opened
+read-only, ONLY on a root with no `state/writer.lock`; with a lock file there at all, a
+copy of `projection.sqlite` and its `-wal` under `state/tmp/reader-<pid>/`, opened
+read-write so SQLite recovers the WAL into it, and removed on close (ruling 158: no
+process but the server opens a live root's database, and a reader cannot judge a
+holder's liveness from another pid namespace, so presence is the whole question) —
+`projects/`, `agents/`, `kb/`, `skills/`,
 `audit-exports/` (`BACKED_UP_STORE_DIRS`; a directory that does not exist yet is
 skipped) — and `runtimes/` only with `--include-runtimes`, which since ruling 127 means
 every person's live vendor sign-in under `runtimes/users/`; treat that artefact as a

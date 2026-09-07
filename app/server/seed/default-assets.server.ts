@@ -197,6 +197,16 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Pass 35 cluster review: before the ruling-85 clause stopped telling the
+    // operator to OFFER the profile grant as an option the ruling-164 door
+    // refuses, and before the acceptance-stage move was keyed on the pull
+    // request rather than on `notAcceptableReason`.
+    "0a65da9c91b81dee99de6cc9e5b641cf59850e5c14e9feed9fb3c243b5210608",
+    // Pass 35 S18: before the option-title-is-a-promise paragraph (ruling 164).
+    "da74b11b369961a7b99065589cfb7cab3eb3c33ee8901311fd6e3c76e233a47a",
+    // Pass 35 S15: before the acceptance-time refresh and the
+    // `notAcceptableReason` sentences (rulings 162 and 163).
+    "2e05f1546999a3a5924b90565d8ccfdeff9182cb6f3e573f589199028161327a",
     // Pass 34 A19: before the ruling-133 rework paragraph.
     "dd42d1a7614df74f937519f53a0e9690affa0e0eb8a89da07d38cac4fc580752",
     // Pass 34 A13: before the set_dependencies sentence (ruling 131).
@@ -250,6 +260,8 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "d3c186ee40962eff069c577e026843e4ce3c97fed269b99384e5bdad2fd9e108",
   ],
   [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
+    // Pass 35 S15: before the acceptance-stage clause on update_branch_from_base.
+    "92e91052fbe1e5f3bd9898e450172de9ea87b125d52e330536b0e1d5ff2cd9ff",
     "2350a2f50e425868056d9866d885b70078b183e9934b925f1469ea0e7cc5f989",
     "4b92cd7cb4b0c050faca518f76cb3328119d26c5f76c8b12367c2fd053f5fa26",
     "73d05eb921a0763f0f3f2312e90fdc367dbe820d740008f884fb17c7c619b40e",

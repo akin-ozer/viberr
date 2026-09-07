@@ -22,7 +22,6 @@ import { countOpenPolicyViolations } from "~/server/projections/policy-violation
 import { getReviewQueue } from "~/server/projections/review-queue.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import { roleCan } from "~/shared/rbac";
-import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { isArchived } from "~/features/board/board-filters";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { Icon } from "~/ui/icon";
@@ -36,10 +35,12 @@ import { Topbar } from "~/features/shell/topbar";
  * counts + topbar + child view Outlet. Children read this loader's data via
  * useRouteLoaderData("routes/project").
  *
- * Rail counts: board = ALL LIVE tasks incl. Done (ruling 16), review = LIVE
- * tasks in the STRUCTURAL review stage (`resolveStageRoles`, not the stage
- * literally named "review"), settings = open policy violations (Phase-4
- * derivation — see policy-violations.server.ts).
+ * Rail counts: board = ALL LIVE tasks incl. Done (ruling 16), review = the
+ * review queue's own `total` (U35-5, pass 35: the queue's membership is no
+ * longer one stage id — review work at Validation with an open PR counts too —
+ * so the badge reads the queue instead of re-deriving a stage filter that had
+ * drifted from it), settings = open policy violations (Phase-4 derivation — see
+ * policy-violations.server.ts).
  *
  * F19-9 (pass 19): "live" is the load-bearing word. `getBoard` loads with
  * `includeArchived: true` (the board's Archived filter is the only way back to
@@ -106,13 +107,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // under "Waiting on your acceptance" while the board's chip excluded it.
   // Union the two predicates here so both surfaces read one answer; the review
   // queue's `ready` list is already viewer-scoped by acceptance authority.
+  // U35-5: read the queue ONCE; `ready` feeds the board's "waiting on me" and
+  // `total` is the rail badge, so the badge links to a list of the same length.
+  const reviewQueue = getReviewQueue(db, params.slug, { viewerUserId: user.id });
   const myDecisions = new Set([
     ...decisionsRequiring(db, user.id, { projectSlug: params.slug }).mine.map(
       (d) => d.taskKey,
     ),
-    ...getReviewQueue(db, params.slug, { viewerUserId: user.id }).ready.map(
-      (r) => r.key,
-    ),
+    ...reviewQueue.ready.map((r) => r.key),
   ]);
   // Gap 10: generic, so the columns keep the fields the activity projection
   // adds (`lastActivityAt`, `quiet`). Re-typing through `TaskSummary` erased
@@ -143,21 +145,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // the GitHub page's cached probe); null means nothing has ever looked.
     repoAccess: readRepoHealth(db, params.slug)?.result ?? null,
     taskCount: liveTasks.length,
-    reviewCount: (() => {
-      // F25-2 (pass 25): an ARCHIVED project has no review boundary — the server
-      // refuses acceptance and `getReviewQueue` returns total 0 for it (D-1). The
-      // rail badge must agree, or it shows "Review N" one click from a queue that
-      // says "0 tasks · no review work in flight" (the F19-9 badge/queue-parity
-      // class, recurring). Zero it for an archived project, same predicate.
-      if (board.project.archived) return 0;
-      const reviewId = resolveStageRoles(
-        board.project.stages,
-        board.project.workflow,
-      ).reviewId;
-      return reviewId
-        ? liveTasks.filter((t) => t.stage === reviewId).length
-        : 0;
-    })(),
+    // U35-5: the queue's own count. It already answers the archived-project
+    // case with 0 (F25-2 / D-1: an archived project has no review boundary) and
+    // excludes archived tasks (F19-9), so the badge and the list it opens are
+    // one number by construction, not by two predicates kept in step.
+    reviewCount: reviewQueue.total,
     violations: countOpenPolicyViolations(db, params.slug),
     notifications: listNotifications(db, user.id, { limit: 100 }),
     unread: countUnreadNotifications(db, user.id),

@@ -163,6 +163,18 @@ no credential, no repository and an unknown task are standing states and only lo
    it replaced. A non-fast-forward is a `push_conflict` (a branch collision, never a
    credential error); other failures surface git's redacted words in a fenced "What
    the push reported" block. An unreadable `ls-remote` never blocks the push. Ruling
+   159 (pass 35, F35-10): after the auto-commit and before anything else, the tree at
+   HEAD is read under the store's own prefix (`git ls-tree -r -z --name-only HEAD --
+   projects/<slug>/tasks/`, NUL-delimited so a path git would quote for its non-ASCII
+   bytes cannot read as an empty tree); a branch that carries any such path is refused
+   (`push_refused_store_layout`, the paths named), because Viberr never publishes its
+   store layout into a customer repository, whatever an agent did. `performDelivery`
+   reports it on the task as "Delivery push refused: store layout in the branch"
+   (`store_layout`, the same shape as the scope refusal: no PR, a `github` timeline
+   line, a policy notification), and the operator's `deliver_for_review` reply says to
+   re-prompt the delivering agent to remove the folder. An unreadable tree is not a
+   measurement and the push answers for itself. The base refresh reads the same tree
+   (below): it is the other door that publishes the branch. Ruling
    144(b): before pushing, delivery lists the files under `.github/workflows/` the push
    changes as GitHub measures them (`git log --format= --name-only <origin head>..HEAD`,
    falling back to the base only on a first push, so a workflow file already on origin
@@ -178,9 +190,21 @@ no credential, no repository and an unknown task are standing states and only lo
    branch, PR, revision or commits, with `defaultBranchEvidence.verified === true`,
    sets `noChanges`, mints a `kind: verified` work revision at the default-branch head
    and routes the task to the "Completed, no changes" acceptance path.
-4. **`openTaskPr`**: reuse a cached live PR if GitHub still reports it open; else list
-   open PRs on the branch and apply the adoption rule (§4); a refused adoption is a
-   `branch_collision`. Otherwise `POST /pulls` with title `[KEY] <task title>` and a
+4. **`openTaskPr`**: reuse a cached live PR if GitHub still reports it open. A pull
+   request closed WITHOUT merging is a person's decision (ruling 160, pass 35 F35-11):
+   a cached `closed` PR whose `closure` no person has answered refuses with
+   `closed_by_human` before GitHub is asked (a `closed` cache carrying NO closure
+   record is one the workspace reconcile wrote, so it goes through `reconcileTask`
+   first and the refusal reads off what that pass recorded), and a cached live PR that GitHub now
+   reports closed and unmerged is handed to `reconcileTask` (the one writer of the
+   closure record and of the R8-6 note, inbox alert and `pr-diverged` wake; the
+   workspace reconcile writes the closed STATE too, which is why the record, not the
+   state, is what those three key on) and then refused the same way; no fresh PR is opened for the
+   branch until a person answers the recovery packet (rework, archive) or reopens the
+   PR on GitHub. Only a MERGED pull request, cached or discovered live, clears the way
+   for a fresh review PR (DG-1: a reworked branch never resurrects a merged PR). Else
+   list open PRs on the branch and apply the adoption rule (§4); a refused adoption is
+   a `branch_collision`. Otherwise `POST /pulls` with title `[KEY] <task title>` and a
    body composed from the task: a link back to the task when `BETTER_AUTH_URL` is set
    (a relative link would 404 on github.com), the goal, a change summary and evidence
    from the live compare, and a footer stating that review and merge are
@@ -243,9 +267,9 @@ and the note itself, used to assert the reused-key origin alone.)*
 | Remedy | What it does | Gate |
 |---|---|---|
 | `resolve_remote_collision` packet option | Deletes the stale remote branch first, closes the recorded unowned PR (audit `github.pr.closed_unowned`), re-delivers this task's local work, lifts `readiness` from `blocked`. Ruling 136: the ceremony ends with exactly ONE hand-off (the `delivered` re-queue when the re-delivery fired it, else a `packet-resolved` re-queue carrying the outcome in its own `serverOutcome` field); a refusal because the PR on the ref is this task's OWN open PR is no collision: a behind or absent remote gets the delivery that pushes the work and the block lifts, a diverged remote keeps the block and names who resolves the history; every other refusal keeps the block and hands the operator its typed reason. One audit row per ceremony: `github.collision.resolved {outcome, reason, prNumber, delivered, blockLifted}`. | `approve-transition` |
-| `discard_branch` packet option | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. The operator may not author it when a work revision exists. | `approve-transition` |
-| `update_branch_from_base` (operator, capability `update-task-branch`) | Merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, records the refresh in `baseRefreshes` and reconciles at once (ruling 132). Reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)). A conflict or push conflict opens a human `blocked` packet whose options can all execute (ruling 133(b)): "Have <deliverer> resolve the conflict" is offered and recommended only when the task's delivering engagement is deployed with a repo-write grant; otherwise "Resolve the branch yourself" is recommended, the body says why (no deliverer, undeployed, grant withdrawn), a "Delivering agent" observation names it or "none", and the `github.branch_update.operator` audit row records `resolver`. | operator gate; `recommend` is refused outright |
-| Branch cleanup | After a successful merge when the `delete-branch-after-merge` guardrail is on (absence means on); on `archive_task` with `deleteBranch: true`; after a no-change acceptance. Refuses the default branch and a branch whose PR is open or accepted. Ruling 136(c): a CACHED open PR is re-confirmed against GitHub before it can refuse (a pass with the divergence notification and the operator wake suppressed); a PR GitHub reports closed or merged lets the delete proceed on the refreshed file, a PR still open refuses (`own_pr_open`), and every degraded or unexpected reconcile status refuses as `unconfirmed` ("GitHub could not confirm"), never deleting on an unconfirmed state. The archive and empty-branch doors inherit the same check and sentence. Audit `github.branch.deleted`. | human `userId` required |
+| `discard_branch` packet option | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. Ruling 161: the operator may author it until the revision has LEFT the workspace (`revisionLeftWorkspace`: a PR tracks the branch, an unowned PR stands on the name, or a delivery push stamped `workRevision.pushedAt`); a revision the agent merely reported does not block it, and the refusal names the real reason. A confirmed discard retires the reported revision (`workRevision.kind: discarded`, verdicts kept as history, `validation: none`), says so in the outcome note ("Revision `rev_…` is retired with it") and records `retiredRevisionId` on `task.branch.discarded` (`localSha`, `remoteSha: null`, `basis: local_only`). | `approve-transition` |
+| `update_branch_from_base` (operator, capability `update-task-branch`) | Merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, records the refresh in `baseRefreshes` and reconciles at once (ruling 132). Reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)). A conflict or push conflict opens a human `blocked` packet whose options can all execute (ruling 133(b)): "Have <deliverer> resolve the conflict" is offered and recommended only when the task's delivering engagement is deployed with a repo-write grant; otherwise "Resolve the branch yourself" is recommended, the body says why (no deliverer, undeployed, grant withdrawn), a "Delivering agent" observation names it or "none", and the `github.branch_update.operator` audit row records `resolver`. Ruling 162 / G35-5(d) (pass 35): refused at the acceptance-boundary stage and past it (the acceptance ceremony refreshes once), unless the PR is already `conflicting`; the redirect option is marked `rework: true` with "The task returns to Review for the re-verdict." when the task stands past the stage its reviewers can run (ruling 163). | operator gate; `recommend` is refused outright |
+| Branch cleanup | After a successful merge when the `delete-branch-after-merge` guardrail is on (absence means on); on `archive_task` with `deleteBranch: true`; after a no-change acceptance. Refuses the default branch and a branch whose PR is open or accepted. Ruling 136(c): a CACHED open PR is re-confirmed against GitHub before it can refuse (a pass with the divergence notification and the operator wake suppressed); a PR GitHub reports closed or merged lets the delete proceed on the refreshed file, a PR still open refuses (`own_pr_open`), and every degraded or unexpected reconcile status refuses as `unconfirmed` ("GitHub could not confirm"), never deleting on an unconfirmed state. The archive and empty-branch doors inherit the same check and sentence. Ruling 161 (U35-8): the ref's head is read before the DELETE and recorded (`github.branch.deleted {sha}`, "Deleted branch … Its head was `sha`"); the archive's local cleanup records both heads on `task.branch.discarded {localSha, remoteSha, basis: archive_cleanup}`, and the archive dialog says what origin holds when the reconciler recorded `github.foreignHead` ("origin's `branch` carries commits this task did not author; deleting it removes them too"). | human `userId` required |
 
 ## 5. Revisions, verdicts and acceptance
 
@@ -273,12 +297,38 @@ and the note itself, used to assert the reused-key origin alone.)*
   exactly one non-disabled member through `users.github_handle`; the reconciler stores
   `pr.humanApproval` with a status (`counted`, `unlinked_handle`, `ambiguous_handle`,
   `not_a_member`, `stale_revision`) and the binding is re-checked on every read.
-  GitHub's own review-state pill is informational, not a gate.
+  GitHub's own review-state pill is informational, not a gate. `users.github_handle`
+  has two writers (ruling 154): GitHub OAuth sign-in syncs it from the provider's
+  login for a GitHub account, and an org admin links it under Org settings, Users &
+  access for a local or Google account (`updateOrgUser`, audit
+  `org.user.github_handle.set`); the person cannot set their own. The `unlinked_handle`
+  refusal names both doors.
 - **Acceptance gate order**: archived → closed PR (terminal, withdraws force-accept)
   → stage boundary → required reviewers → live no-change probe → verdict gate → open
   blocked packet → **unpushed delivered revision** (ruling 135) → conflicting PR. Human
   acceptance needs the disclosure echo (ruling 88). Force-accept (admin only) bypasses
-  process gates but never a closed PR and never the PR-head containment check.
+  process gates but never a closed PR and never the PR-head containment check. Ruling
+  162 (pass 35): the last two are ONE function, `mergeReadinessRefusal`, read by the
+  stack, by the operator's snapshot (`notAcceptableReason` is the whole stack's verdict,
+  `pr.mergeable` the recorded fact), by the operator's move into the acceptance-boundary
+  stage, and by the accept-time merge refusal; no surface offers an acceptance the gate
+  will refuse (the recommendation card, the accept dialog, the sidebar and the GitHub
+  card's "conflicts" pill all read it), and the reconciler withdraws a pending
+  `accept_completion` card when `mergeable` flips to conflicting.
+- **The base refresh happens once, at acceptance** (ruling 162 / G35-5(d)): the
+  ceremony runs `updateWorkspaceBranchFromBase` between two runs of the gate re-check
+  (the refresh publishes, so nothing is pushed under a decision the caller can no
+  longer confirm) and before the merge,
+  records the refresh (`baseRefreshes`, the shared `recordBranchRefresh`, audit
+  `github.branch_update.acceptance`), refuses on a conflict with the gate's sentence
+  after recording `mergeable: conflicting` and the conflicting paths, and proceeds to
+  the merge when the branch cannot be refreshed from here. Operators stop refreshing at
+  the acceptance boundary. Ruling 159(b): the refresh pushes the whole workspace head,
+  so it reads HEAD's tree under `projects/<slug>/tasks/` first and answers
+  `store_layout` (the paths named, nothing fetched, merged or pushed) rather than
+  publishing the store layout a refused delivery left committed on the local branch;
+  the audit row carries the paths, and the operator's tool prints them with the
+  remedy.
 - **The unpushed delivered revision** (ruling 135, pass 34): `pr.headSha` is the PR
   head as GitHub last reported it, and `pr.unpushedRevision {revisionSha, prHeadSha,
   relation}` says the delivered revision is not on the pull request: `behind` (origin's
@@ -300,7 +350,11 @@ and the note itself, used to assert the reused-key origin alone.)*
 - **Merge is always human.** A human acceptance attempts the real merge
   (`PUT /pulls/{n}/merge`, un-drafting first, refusing a conflicting PR); an
   unreachable GitHub leaves `pr.state: accepted` (merge pending) and a refusal
-  (405/409) refuses the acceptance unless forced. A full-autonomy operator acceptance
+  (405/409) refuses the acceptance unless forced. A 405 re-reads the pull (ruling 162):
+  a conflicting answer, or GitHub's own "merge conflicts" sentence while it is still
+  computing, records `mergeable: conflicting` and the result says `mergeable:
+  "conflicting"`, so the acceptance prints the gate's sentence, never a second one for
+  the same fact. A full-autonomy operator acceptance
   writes `accepted` and never merges; "Complete merge" finishes it later after
   re-running the head check. Audit `github.pr.merged` / `github.pr.merge_refused`.
 
@@ -310,7 +364,17 @@ and the note itself, used to assert the reused-key origin alone.)*
 (`rate_limited` is transient; another 403 opens a `repo` violation), the PR (state,
 checks summary, review state, mergeability, the head sha, revision drift when the head
 is ahead of the reviewed revision, the unpushed-revision record when it is not (ruling
-135), human approval), and writes the `pr` and `github` caches into `task.md`. The
+135), human approval), and writes the `pr` and `github` caches into `task.md`. The PR
+is found by branch name, and a closed PR whose branch has since advanced is not
+returned that way (F26); when the listing names nothing and the task's cached PR is
+live (or says `closed` with no closure record), the cached NUMBER is read directly and a
+settled answer (closed, merged) is recorded (ruling 160): this is what lets a close that
+a push overtook transition at all. Writing `pr.closure` (`at`, the closer's GitHub login
+from the issue payload or null, `answered: null`) is what announces the close: the note,
+the alert and the wake fire the pass that RECORD appears, not the pass the state changes,
+because `pr.state: closed` also reaches the file from the workspace reconcile. The
+closure is carried while the PR stays closed and dropped when it is live or merged
+again. The
 operator's branch update runs one such pass right after its push (ruling 132), so the
 drift it caused is measured before the tool answers. The pass writes
 `task.md` (the reconciler never mints a PR link and never downgrades `merged` or
@@ -394,3 +458,8 @@ never gets the tool because a Codex mount would hand the child the credential.
 - Ruling 18 promised that "a refused workflow-file push surfaces as a scope violation";
   until pass 34 nothing implemented it (git push rejections never reached the violation
   path). Ruling 144 implements the promise and adds the advisory and the pre-push refusal.
+- Until pass 35 (2026-09-06) this page, `task-lifecycle.md` and ruling 68 never said that
+  `users.github_handle` was written only by GitHub OAuth sign-in, so on a deployment
+  signing in locally every GitHub approval landed as `unlinked_handle` and the refusal
+  sent people to a profile card that offered nothing to connect. Ruling 154 adds the org
+  admin's field and rewrites the refusal.

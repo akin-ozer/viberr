@@ -339,7 +339,10 @@ describe("workspace layout loader (seeded)", () => {
       "done",
     ]);
     expect(result.taskCount).toBe(10);
-    expect(result.reviewCount).toBe(2);
+    // U35-5 (pass 35): the badge is the review queue's own `total`, and the
+    // queue lists review work wherever it sits: VIB-142 and VIB-145 at Review,
+    // plus VIB-160 at In Progress with changes requested by its reviewer.
+    expect(result.reviewCount).toBe(3);
     expect(result.violations).toBe(1); // seeded VIB-142 PAT-scope violation
     expect(result.myRole).toBe("admin");
     expect(result.notifications.length).toBe(10);

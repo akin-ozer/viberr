@@ -9,7 +9,7 @@ import {
 } from "../../../test-support/test-store";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import type { TaskFrontmatter } from "~/schemas/task-file.schema";
+import type { PrClosure, TaskFrontmatter } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -858,14 +858,22 @@ describe("openTaskPr", () => {
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
   });
 
-  it("a closed-unmerged cached PR clears the way — a fresh PR is created", async () => {
+  /** Ruling 160 (pass 35, F35-11): a closed-unmerged cache, with or without a
+   *  person's answer on it. The three tests below share this seed. */
+  function seedClosedCache(closure: PrClosure | null) {
     const store = setupTestStore(ctx);
+    const pr: NonNullable<TaskFrontmatter["pr"]> = {
+      number: 7,
+      state: "closed",
+      title: "[VIB-201] abandoned",
+    };
+    if (closure) pr.closure = closure;
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-201", {
         title: "Attach execution workspace to task runtime",
         stage: "review",
         branch: BRANCH,
-        pr: { number: 7, state: "closed", title: "[VIB-201] abandoned" },
+        pr,
       }),
       goal: "Deliver.",
     });
@@ -876,7 +884,104 @@ describe("openTaskPr", () => {
       ACTOR,
     );
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
+    return store;
+  }
 
+  it("ruling 160: a cached closed-unmerged PR with no answered closure refuses a fresh PR (closed_by_human)", async () => {
+    // Canary: restore the "a TERMINAL cached PR clears the way" arm for
+    // `closed` and the POST below fires.
+    const store = seedClosedCache({ at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: null });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 43, html_url: "https://github.com/akin-ozer/viberr/pull/43", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res).toEqual({ status: "closed_by_human", prNumber: 7, closedBy: "akin-ozer" });
+    expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
+    // The refusal is decided from the record: GitHub was not asked at all.
+    expect(gh.calls).toHaveLength(0);
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toMatchObject({ number: 7, state: "closed" });
+  });
+
+  it("ruling 160: a closed cache with NO closure record is repaired before it refuses, so the closure can be answered", async () => {
+    // The KNC-23 shape. `pr.state: closed` has a second writer: `performDelivery`
+    // runs `reconcileWorkspaceDelivery` (a `gh pr view` in the agent's clone)
+    // one step BEFORE this door, and that path writes `closed` with no closure
+    // record and no closer. Refusing straight off that cache wedged the task
+    // for good: the R8-6 note, the inbox alert and the operator wake key on the
+    // closure being unrecorded, and `resolvePacket` had no record to stamp, so
+    // no packet could ever lift the refusal. Canary: drop the repair reconcile
+    // in `openTaskPr` step 0 and this refuses with `closedBy: null`, writes no
+    // closure, and surfaces nothing.
+    const store = seedClosedCache(null);
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/7`]: {
+        body: { number: 7, html_url: "https://github.com/akin-ozer/viberr/pull/7", title: "[VIB-201] abandoned", state: "closed", merged: false, merged_at: null, head: { sha: "0ld".padEnd(40, "0") } },
+      },
+      // The push that preceded this door moved the branch past the closed PR's
+      // head, so the branch listing names nothing (F26).
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`GET ${REPO_PATH}/issues/7`]: { body: { closed_by: { login: "akin-ozer" } } },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 43, html_url: "https://github.com/akin-ozer/viberr/pull/43", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res).toEqual({ status: "closed_by_human", prNumber: 7, closedBy: "akin-ozer" });
+    expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
+    const read = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed;
+    // The record the answer stamps now exists, with the closer on it.
+    expect(read().frontmatter.pr).toMatchObject({
+      number: 7,
+      state: "closed",
+      closure: { by: "akin-ozer", answered: null },
+    });
+    // And the surfacing the closure was owed fires here, once.
+    const divergence = () =>
+      read().timeline.filter((e) => /PR #7 was closed on GitHub without merging/.test(e.text));
+    expect(divergence()).toHaveLength(1);
+    // SAFETY: the SELECT names one column, declared `title TEXT NOT NULL`.
+    const inbox = store.db
+      .prepare(`SELECT title FROM notifications WHERE task_key = 'VIB-201'`)
+      .all() as { title: string }[];
+    expect(inbox.some((n) => /PR #7 closed on GitHub: VIB-201 needs a decision/.test(n.title))).toBe(true);
+
+    // Repaired once: the next call refuses from the record with no GitHub call
+    // and announces nothing again.
+    const before = gh.calls.length;
+    const again = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(again).toEqual({ status: "closed_by_human", prNumber: 7, closedBy: "akin-ozer" });
+    expect(gh.calls).toHaveLength(before);
+    expect(divergence()).toHaveLength(1);
+  });
+
+  it("ruling 160: a closed cache whose closure a person ANSWERED clears the way for a fresh PR", async () => {
+    const store = seedClosedCache({
+      at: "2026-09-06T19:33:19.000Z",
+      by: "akin-ozer",
+      answered: { at: "2026-09-06T19:40:00.000Z", byUserId: "u_arda" },
+    });
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls`]: { body: [] },
       [`POST ${REPO_PATH}/pulls`]: {
@@ -892,7 +997,96 @@ describe("openTaskPr", () => {
     );
     expect(res).toMatchObject({ status: "ok", prNumber: 43, created: true });
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    // A different PR never inherits the old one's closure.
     expect(fm.pr).toMatchObject({ number: 43, state: "review" });
+    expect(fm.pr?.closure).toBeUndefined();
+  });
+
+  it("ruling 160: a cached 'review' PR that GitHub reports CLOSED unmerged is a person's decision: recorded through the reconciler, surfaced once, no fresh PR", async () => {
+    // F35-11 live: the owner closed PR #10 at 19:33:19Z, the operator's base
+    // refresh moved the branch, and the delivery at 19:33:44Z opened PR #26
+    // over it; no event, notification or packet ever named the closure.
+    // Canary: restore the "terminal on GitHub → fall through to the create
+    // path" arm and the POST fires.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-201", {
+        title: "Attach execution workspace to task runtime",
+        stage: "review",
+        branch: BRANCH,
+        ownerUserId: store.users.arda.id,
+        pr: { number: 10, state: "review", title: "[VIB-201] rejected by hand" },
+        recommendations: [
+          { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "" },
+        ],
+      }),
+      goal: "Deliver.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000010" },
+      ACTOR,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
+
+    const gh = fakeGithubFetch({
+      // The cached number, read live: closed, not merged.
+      [`GET ${REPO_PATH}/pulls/10`]: {
+        body: { number: 10, html_url: "https://github.com/akin-ozer/viberr/pull/10", title: "[VIB-201] rejected by hand", state: "closed", merged: false, merged_at: null, head: { sha: "0ld".padEnd(40, "0") } },
+      },
+      // The branch listing no longer names it: the branch advanced past the
+      // closed PR's head (the F26 blind spot the reconciler now reads around).
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      // Pull requests are issues, and the issue names who closed it.
+      [`GET ${REPO_PATH}/issues/10`]: { body: { closed_by: { login: "akin-ozer" } } },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 26, html_url: "https://github.com/akin-ozer/viberr/pull/26", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res).toEqual({ status: "closed_by_human", prNumber: 10, closedBy: "akin-ozer" });
+    expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
+
+    const read = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed;
+    const fm = read().frontmatter;
+    expect(fm.pr).toMatchObject({
+      number: 10,
+      state: "closed",
+      closure: { by: "akin-ozer", answered: null },
+    });
+    // R8-6 fired from the reconciler, exactly as an out-of-band close does:
+    // the divergence note, the withdrawn acceptance offer, the inbox alert.
+    const divergence = (events: ReturnType<typeof read>["timeline"]) =>
+      events.filter((e) => /PR #10 was closed on GitHub without merging/.test(e.text));
+    expect(divergence(read().timeline)).toHaveLength(1);
+    expect(fm.recommendations).toEqual([]);
+    // SAFETY: the SELECT names one column, declared `title TEXT NOT NULL`.
+    const inbox = store.db
+      .prepare(`SELECT title FROM notifications WHERE task_key = 'VIB-201'`)
+      .all() as { title: string }[];
+    expect(inbox.some((n) => /PR #10 closed on GitHub: VIB-201 needs a decision/.test(n.title))).toBe(true);
+    expect(listAuditEvents(store.db, { action: "github.pr.opened" })).toHaveLength(0);
+
+    // A second delivery over the recorded closure refuses from the record
+    // (no GitHub call) and surfaces nothing twice: a transition, not a repeat.
+    const before = gh.calls.length;
+    const again = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(again).toEqual({ status: "closed_by_human", prNumber: 10, closedBy: "akin-ozer" });
+    expect(gh.calls).toHaveLength(before);
+    expect(divergence(read().timeline)).toHaveLength(1);
   });
 
   it("a MERGED cached PR clears the way — a reworked branch opens a fresh PR (DG-1)", async () => {
@@ -1134,7 +1328,15 @@ describe("ruling 135: writePrToTask and the PR head", () => {
         title: "Attach execution workspace to task runtime",
         stage: "review",
         branch: BRANCH,
-        pr: { number: 7, state: "closed", title: "[VIB-201] abandoned", headSha: "1".repeat(40) },
+        // Ruling 160: a closed cache clears the way only once a person has
+        // answered the closure; the fresh PR inherits neither the head nor it.
+        pr: {
+          number: 7,
+          state: "closed",
+          title: "[VIB-201] abandoned",
+          headSha: "1".repeat(40),
+          closure: { at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: { at: "2026-09-06T19:40:00.000Z", byUserId: "u_arda" } },
+        },
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });

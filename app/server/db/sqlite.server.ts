@@ -1,8 +1,23 @@
-import { mkdirSync } from "node:fs";
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  readdirSync,
+  rmSync,
+  rmdirSync,
+} from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { getEnv } from "../config/env.server";
 import { logger } from "../logging/logger.server";
+import {
+  isProcessAlive,
+  judgeDataRootLock,
+  type LockHolder,
+} from "./data-root-lock.server";
 import { runMigrations } from "./migration-runner.server";
 
 /**
@@ -18,16 +33,215 @@ export function openDatabase(dbPath: string): DatabaseSync {
   return db;
 }
 
+/** Where a reader's copy lives, relative to `state/`: `state/tmp/reader-<pid>/`. */
+export const READER_SNAPSHOT_DIR = "tmp";
+
 /**
- * Opens the database READ-ONLY: a reader, never the second writer B-FD1
- * refuses. Used by the read-only maintenance CLIs (`npm run backup`,
- * `npm run keys -- status`), which must work against a LIVE instance and
- * therefore cannot take the writer lock. No migrations are run — a read-only
- * handle could not apply them, and a reporting command has no business
- * changing a schema.
+ * A read-only handle on the projection database (ruling 158). `db` is either
+ * the live file itself or a private copy of it; `close` releases the handle and
+ * removes the copy. Callers never hold a bare `DatabaseSync` here, so the copy
+ * cannot be left behind by a caller that closed the handle and forgot the
+ * directory.
  */
-export function openDatabaseReadOnly(dbPath: string): DatabaseSync {
-  return new DatabaseSync(dbPath, { readOnly: true });
+export interface ReadOnlyDatabase {
+  db: DatabaseSync;
+  /** The file `db` opened: the live projection, or the copy under `state/tmp/`. */
+  path: string;
+  /**
+   * Set when a `writer.lock` was there at all and the reader copied the database
+   * before opening it, with the holder that file named (null when it could not
+   * be read as one); null when the root carried no lock, so it was just files
+   * and `db` is the live file, opened read-only.
+   */
+  snapshot: { dir: string; holder: LockHolder | null } | null;
+  /** Idempotent: closes `db` and, for a snapshot, removes its directory. */
+  close(): void;
+}
+
+/** How many times a reader retakes a copy the writer moved under it. */
+const READER_COPY_ATTEMPTS = 3;
+
+/**
+ * The identity of a write-ahead log: the salt in its 32-byte header (bytes
+ * 16..24), or null when there is no WAL beside the database. SQLite changes the
+ * salt every time it RESETS the file (`salt1` is incremented on a checkpoint
+ * that restarts or truncates it), and never for the frames it appends, so an
+ * unchanged identity across a copy means every frame the copied WAL holds still
+ * belongs to the main file that was copied with it. A header shorter than 32
+ * bytes is a WAL that was just truncated: its own identity, distinct from both
+ * a missing file and any salt.
+ */
+export function readWalIdentity(walPath: string): string | null {
+  if (!existsSync(walPath)) return null;
+  let fd: number | null = null;
+  try {
+    fd = openSync(walPath, "r");
+    const header = Buffer.alloc(32);
+    const read = readSync(fd, header, 0, 32, 0);
+    return read < 32 ? "truncated" : header.subarray(16, 24).toString("hex");
+  } catch {
+    // Unreadable for a moment (the writer replacing it) counts as a change:
+    // two unreadable probes in a row are not proof of a pinned pair either.
+    return "unreadable";
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
+
+/**
+ * Copies `projection.sqlite` and its `-wal` to `copyPath`, pinned: the WAL's
+ * identity is read before the first copy and after the last, and a copy that
+ * straddles a WAL reset is discarded and retaken. Throws when the writer keeps
+ * resetting the WAL under every attempt, which is honest: the alternative is a
+ * copy that can pass an integrity check and still be wrong.
+ */
+export function copyStorePair(dbPath: string, copyPath: string): void {
+  const wal = `${dbPath}-wal`;
+  let straddled = "";
+  for (let attempt = 1; attempt <= READER_COPY_ATTEMPTS; attempt += 1) {
+    const before = readWalIdentity(wal);
+    copyFileSync(dbPath, copyPath);
+    if (existsSync(wal)) copyFileSync(wal, `${copyPath}-wal`);
+    else rmSync(`${copyPath}-wal`, { force: true });
+    const after = readWalIdentity(wal);
+    if (before === after) return;
+    straddled = `${before ?? "no wal"} then ${after ?? "no wal"}`;
+    logger.info("reader copy straddled a WAL reset — retaking it", {
+      dbPath,
+      attempt,
+      wal: straddled,
+    });
+  }
+  rmSync(`${copyPath}-wal`, { force: true });
+  rmSync(copyPath, { force: true });
+  throw new Error(
+    `could not copy ${dbPath} with its WAL: the writer reset the log during every attempt (${straddled}). Retry, or stop the app and read the root directly.`,
+  );
+}
+
+/**
+ * Opens the database for READING, never as the second connection to a live root
+ * (ruling 158). Used by the read-only maintenance CLIs (`npm run backup`,
+ * `npm run keys -- status`), which must work against a LIVE instance and
+ * therefore cannot take the writer lock.
+ *
+ * Until pass 35 this opened the file with `readOnly: true` and called that a
+ * reader. It is not one, on either side of the container boundary: a second
+ * connection maps the WAL index (`-shm`) the server has memory-mapped, and on
+ * the shipped deployment (a bind mount over VirtioFS) the open path's lock probe
+ * on that file is unreliable, so a reader can truncate the index under the
+ * server. Pass 34 saw the server die with SIGBUS (exit 135) one second after a
+ * host-side reader; pass 35 saw the same exit one second after an IN-CONTAINER
+ * `readOnly: true` reader, and boot recovery then interrupted 23 runs. "Read
+ * only" was never the protection; not sharing the mapping is.
+ *
+ * So the writer lock decides which case this is, by its PRESENCE and nothing
+ * else (`judgeDataRootLock`; a reader cannot judge a holder's liveness across a
+ * pid namespace, and the boot's `stale` verdict answered for a live holder in a
+ * second container would open the live file, which is the whole hazard):
+ *  - `absent`: no lock file, so nothing holds the root, the database is just a
+ *    file, and it is opened read-only in place, as before;
+ *  - `present`: the server may be writing, so `projection.sqlite`
+ *    and `projection.sqlite-wal` (when present) are copied to a fresh directory
+ *    next to the store (`state/tmp/reader-<pid>/`), the COPY is opened
+ *    read-write so SQLite recovers the copied WAL into it, and `close` removes
+ *    the directory. The `-shm` is never copied: it is the wal-index the copy
+ *    rebuilds for itself, and sharing it is the hazard. The copy is a moment's
+ *    snapshot (the main file first, then the WAL; a torn WAL tail fails its
+ *    frame checksum and is dropped by recovery), which is what a reader against
+ *    a live writer can honestly have, and `backup`'s `VACUUM INTO` then runs on
+ *    it and stays a single-file artefact.
+ *
+ * The pair is PINNED across the two copies (`copyStorePair`). Frame checksums
+ * cover a torn tail and nothing else: when SQLite checkpoints and RESETS the
+ * WAL between the two copies, the copied WAL holds frames numbered from 1 again
+ * under a new salt and recovery applies them to a main file that predates the
+ * checkpoint. That is not detectable after the fact — reproduced on this
+ * machine both ways: "database disk image is malformed" on open, and (small
+ * window) a copy that answers `PRAGMA quick_check` with `ok` and has lost a
+ * table. So the WAL's salt is read before the main file is copied and again
+ * after the WAL is copied; a change (or the `-wal` appearing or vanishing)
+ * means the pair straddles a reset, and the copy is discarded and retaken.
+ *
+ * No migrations are run either way: a reporting command has no business
+ * changing a schema, and on the copy a change would be thrown away with it.
+ */
+export function openDatabaseReadOnly(dbPath: string): ReadOnlyDatabase {
+  const stateDir = path.dirname(dbPath);
+  const lock = judgeDataRootLock(stateDir);
+  if (lock.verdict === "absent" || !existsSync(dbPath)) {
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    return {
+      db,
+      path: dbPath,
+      snapshot: null,
+      close() {
+        if (db.isOpen) db.close();
+      },
+    };
+  }
+  const tmpRoot = path.join(stateDir, READER_SNAPSHOT_DIR);
+  sweepStaleReaderSnapshots(tmpRoot);
+  const dir = path.join(tmpRoot, `reader-${process.pid}`);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const copy = path.join(dir, path.basename(dbPath));
+  let db: DatabaseSync;
+  try {
+    copyStorePair(dbPath, copy);
+    db = new DatabaseSync(copy);
+  } catch (error) {
+    // A copy that failed to open is not a snapshot anybody will close: remove
+    // it now rather than leave it for the next reader's sweep.
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
+  }
+  return {
+    db,
+    path: copy,
+    snapshot: { dir, holder: lock.holder },
+    close() {
+      if (db.isOpen) db.close();
+      rmSync(dir, { recursive: true, force: true });
+      // `state/tmp/` exists only while a reader holds a copy: gone when the
+      // last one leaves, left alone while a sibling still reads.
+      try {
+        rmdirSync(tmpRoot);
+      } catch {
+        // Not empty (another reader), or already gone: both fine.
+      }
+    },
+  };
+}
+
+/**
+ * A reader that died mid-read leaves `state/tmp/reader-<pid>/` behind. The next
+ * reader removes every sibling whose pid is gone; a directory whose pid is alive
+ * (another reader, or a pid this side of a container boundary cannot judge) is
+ * left alone. Best effort: a directory this process may not remove is not a
+ * reason to refuse the read.
+ */
+function sweepStaleReaderSnapshots(tmpRoot: string): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(tmpRoot);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const match = /^reader-(\d+)$/.exec(entry);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    if (pid === process.pid || isProcessAlive(pid)) continue;
+    try {
+      rmSync(path.join(tmpRoot, entry), { recursive: true, force: true });
+    } catch (error) {
+      logger.warn("a dead reader's snapshot directory could not be removed", {
+        dir: path.join(tmpRoot, entry),
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
 }
 
 /** Resolves the projection database path under the configured data root. */
@@ -151,7 +365,20 @@ export function ensureSingleFlightIndexes(db: DatabaseSync): void {
  */
 const BASELINE_COLUMNS: readonly {
   table: string;
-  columns: readonly { name: string; ddl: string }[];
+  columns: readonly {
+    name: string;
+    ddl: string;
+    /**
+     * Run ONCE, right after this column is added, to give the rows that
+     * predate it their meaning. A DEFAULT is a value, not a meaning: a column
+     * whose 0 says "no provider figure landed for this run" would otherwise
+     * claim that of every historical row, and readers that skip those rows
+     * (the Insights token sums) would drop a whole store's history the first
+     * time an upgraded root booted. Only for columns whose default is WRONG
+     * for existing rows; omitted everywhere the default is the truth.
+     */
+    backfill?: string;
+  }[];
 }[] = [
   {
     table: "agent_runs",
@@ -163,6 +390,25 @@ const BASELINE_COLUMNS: readonly {
       // every run start rather than degrade — the exact failure this healer
       // exists for.
       { name: "credential_user_id", ddl: "credential_user_id TEXT" },
+      // Pass 35 U35-7: the reason an `interrupted` run stopped ('restart' from
+      // boot recovery, NULL for a person's interrupt). `patchRun` names it on
+      // every orphan sweep and the run projection reads it on every task page.
+      // ALTER TABLE cannot carry the baseline's CHECK; the two writers only
+      // ever store 'restart', which is the enforcement on an upgraded root.
+      { name: "interrupted_reason", ddl: "interrupted_reason TEXT" },
+      // F35-1: the sink patches it on every persisted line, so a root that
+      // predates it would fail every run's first line. Before the column
+      // existed the token columns of a FINISHED run held the provider's own
+      // figures (the sink folded them from the result envelope; there was no
+      // estimate to hold), so those rows are backfilled as final and keep
+      // counting in the Insights token sums. A row that was stopped or errored
+      // carried the old live placeholder instead, which is not a total: it
+      // stays 0 and the card names it with the rest.
+      {
+        name: "usage_final",
+        ddl: "usage_final INTEGER NOT NULL DEFAULT 0",
+        backfill: "UPDATE agent_runs SET usage_final = 1 WHERE state = 'finished'",
+      },
     ],
   },
   {
@@ -238,6 +484,23 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
           table,
           column: column.name,
         });
+        if (column.backfill) {
+          // Its own try: a backfill that cannot run (an older root whose table
+          // lacks a column the statement names) must not skip the columns
+          // still to be added for this table.
+          try {
+            db.exec(column.backfill);
+          } catch (error) {
+            logger.warn(
+              "a baseline column was added but its backfill did not run — rows that predate the column keep the column default",
+              {
+                table,
+                column: column.name,
+                err: error instanceof Error ? error : new Error(String(error)),
+              },
+            );
+          }
+        }
       }
     } catch (error) {
       logger.warn(

@@ -11,6 +11,8 @@ afterEach(cleanup);
 const rowHuman: ReviewRowView = {
   key: "VIB-142",
   title: "Attach execution workspace to task runtime",
+  stageName: "Review",
+  atAcceptanceBoundary: true,
   priority: "normal",
   labels: [],
   dueDate: null,
@@ -32,6 +34,8 @@ const rowHuman: ReviewRowView = {
 const rowAgent: ReviewRowView = {
   key: "VIB-145",
   title: "Live task activity via SSE",
+  stageName: "Review",
+  atAcceptanceBoundary: true,
   priority: "normal",
   labels: [],
   dueDate: null,
@@ -80,7 +84,7 @@ describe("ReviewQueuePage", () => {
     expect(getByText("Review queue")).toBeTruthy();
     expect(
       getByText(
-        "2 tasks at the review boundary · 1 waiting on your acceptance",
+        "2 in review · 1 waiting on your acceptance",
       ),
     ).toBeTruthy();
     // UI-27/UI-49: REWRITTEN. The chip used to be a `<button class="hero-file">`
@@ -267,14 +271,14 @@ describe("ReviewQueuePage", () => {
     ).toBeTruthy();
     expect(getByText(/No review work in flight/)).toBeTruthy();
     expect(
-      getByText("0 tasks at the review boundary · 0 waiting on your acceptance"),
+      getByText("0 in review · 0 waiting on your acceptance"),
     ).toBeTruthy();
   });
 
-  it("singular header copy for exactly one review task", () => {
+  it("header copy for exactly one review task carries no stage word (U35-5)", () => {
     const { getByText } = renderQueue([rowHuman], []);
     expect(
-      getByText("1 task at the review boundary · 1 waiting on your acceptance"),
+      getByText("1 in review · 1 waiting on your acceptance"),
     ).toBeTruthy();
   });
 });
@@ -288,6 +292,8 @@ describe("R16-3: a closed PR is stated as the terminal fact it is", () => {
   const closedRow: ReviewRowView = {
     key: "VIB-9",
     title: "Delivered, then rejected on GitHub",
+    stageName: "Review",
+    atAcceptanceBoundary: true,
     priority: "normal",
     labels: [],
     dueDate: null,
@@ -445,5 +451,34 @@ describe("gap-10: a review row that has gone quiet says so", () => {
   it("says nothing on a row that is still moving", () => {
     const { container } = renderQueue([rowHuman], [rowAgent]);
     expect(container.textContent).not.toContain("no activity");
+  });
+});
+
+/**
+ * U35-5 (pass 35): the header used to read "N tasks at the review boundary",
+ * naming the one stage every row shared. The rows are review work now,
+ * wherever it sits, so the count says what it counts and nothing about a
+ * stage. The live shape: eight tasks at Validation with open PRs under review
+ * and no one owed an acceptance yet. Canary: restore the old sentence.
+ */
+describe("U35-5: the header counts review work, not a stage", () => {
+  it("renders `8 in review · 0 waiting on your acceptance` for eight off-boundary rows", () => {
+    const working = Array.from({ length: 8 }, (_, i): ReviewRowView => ({
+      ...rowAgent,
+      key: `KNC-${i + 8}`,
+      stageName: "Validation",
+      atAcceptanceBoundary: false,
+      pr: { number: i + 1, state: "review" },
+      validation: "changed",
+    }));
+    const { getByText, container } = renderQueue([], working);
+    expect(getByText("8 in review · 0 waiting on your acceptance")).toBeTruthy();
+    expect(container.textContent).not.toContain("at the review boundary");
+    expect(container.textContent).not.toContain("No review work in flight");
+    // The rows say where they are.
+    expect(container.querySelector(".rq-row .sub")!.textContent).toBe(
+      "Review in progress at Validation · PR #1 · awaiting verdict",
+    );
+    expect(getByText("0 of 8")).toBeTruthy();
   });
 });

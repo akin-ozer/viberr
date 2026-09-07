@@ -38,6 +38,7 @@ import {
   KB_PRECEDENCE_NOTE,
 } from "~/server/files/kb-injection.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { resetWriteCacheForTests } from "~/server/files/write-cache.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
@@ -74,7 +75,9 @@ import {
   startAgentRun,
   buildSpecialistPersona,
   githubReadForRun,
+  isDispatchHeld,
   resolveResumeConfinement,
+  type DispatchHeldError,
 } from "./specialist-run.server";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -657,12 +660,101 @@ describe("startSpecialistRun", () => {
     // The supporting engagement is refused with the dispatcher's own sentence.
     await expect(
       startAgentRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "helper" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
-    ).rejects.toThrow(/helper is not eligible for the "impl" stage/);
+    ).rejects.toThrow(/helper is not eligible for the In Progress stage/);
     // A NEW delivering engagement is gated at `assignSpecialist`.
     await expect(
       startAgentRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
-    ).rejects.toThrow(/dev is not eligible for the "impl" stage/);
+    ).rejects.toThrow(/dev is not eligible for the In Progress stage/);
     expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter.engagements.map((e) => e.profileId)).toEqual(["helper"]);
+  });
+
+  it("ruling 157: a dispatch on a held task lifts the hold on the record", async () => {
+    // Pass 35, F35-8 (KNC-25): `hold_runtime_debug` stored `readiness: blocked`
+    // with no packet and nothing lifted it, so the card read "blocked" and
+    // "agent working" on one line. Canary: remove the `liftHoldForRun` call
+    // from dispatchAgentRun.
+    const seedHeld = (patch: Partial<Parameters<typeof baseTaskFrontmatter>[1]> = {}, packet: TaskPacket | null = null) => {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          ownerUserId: store.users.arda.id,
+          readiness: "blocked",
+          waiting: "human",
+          ...patch,
+        }),
+        packet,
+      });
+      // The re-seed lands within the write cache's slack of the previous
+      // dispatch's own write, which the locked read would otherwise "repair"
+      // back to the old content.
+      resetWriteCacheForTests();
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    };
+    const fm = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    const stop = (runId: string) =>
+      interruptRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId, dataRoot: store.dataRoot },
+        actor(store.users.arda),
+      );
+    seedHeld();
+    const first = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(fm().frontmatter.readiness).toBe("ready");
+    expect(fm().frontmatter.waiting).toBe("agent");
+    const note = fm().timeline.find((e) => e.title === "Hold lifted")!;
+    expect(note).toBeDefined();
+    expect(note.text).toContain("dev was dispatched");
+    const rows = listAuditEvents(store.db, { action: "task.hold.lifted" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({ cause: "dispatch", profileId: "dev" });
+    await stop(first.runId);
+
+    // An open `blocked` packet keeps the success-time withdrawal as the lift.
+    seedHeld(
+      { engagements: [] },
+      {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Pick a recovery path",
+        body: "",
+        observations: [],
+        options: [{ kind: "block_on_policy", t: "Unblock", d: "", rec: true }],
+      },
+    );
+    const second = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // The packet's own withdrawal path may lift the readiness (the
+    // superseded-stuck-packet rule); the HOLD lift wrote nothing for it (the
+    // re-seed emptied the timeline, so any note here would be a new one).
+    expect(fm().timeline.filter((e) => e.title === "Hold lifted")).toHaveLength(0);
+    expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
+    await stop(second.runId);
+
+    // A dependency list is ruling 131's own floor.
+    seedHeld({ engagements: [], blockedBy: ["VIB-2"] });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const third = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(fm().frontmatter.readiness).toBe("blocked");
+    expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
+    await stop(third.runId);
   });
 
   it("creates a run row with the specialist backend and streams output", async () => {
@@ -1841,6 +1933,50 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   });
 
   /**
+   * Ruling 159 (pass 35, F35-10): the persona input of a fresh run carries the
+   * ABSOLUTE attachments dir, so the "Posting files" section names a path the
+   * agent can reach from its checkout. The store-relative form it used to
+   * print was created inside the clone and pushed (KNC-9).
+   */
+  it("ruling 159: a fresh evidence-granted run's persona names the ABSOLUTE attachments dir", async () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "attach-evidence-references", mode: "direct" }],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const sys = specs.at(-1)!.systemPrompt ?? "";
+    const attachments = path.join(
+      store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "attachments",
+    );
+    expect(path.isAbsolute(attachments)).toBe(true);
+    expect(sys).toContain("Posting files on the task thread");
+    expect(sys).toContain(`\`${attachments}\``);
+    expect(sys).not.toContain(`\`projects/${store.slug}/tasks/VIB-1/attachments\``);
+    expect(sys).not.toContain("reachable from your working directory");
+  });
+
+  /**
    * F20-32: on Codex the ask-human capability IS the envelope `question` field —
    * there is no callable `ask_human` tool. A Codex developer, told its goal to
    * "ask the human via your ask-human capability", went hunting for a tool,
@@ -2252,10 +2388,14 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     };
     const withDrop = buildAnalyzePrompt({
       ...base,
-      attachmentsDropRel: "projects/p/tasks/VIB-2/attachments",
+      attachmentsDropDir: "/data/projects/p/tasks/VIB-2/attachments",
     });
     expect(withDrop).toContain("One deliberate exception");
-    expect(withDrop).toContain("projects/p/tasks/VIB-2/attachments");
+    expect(withDrop).toContain("`/data/projects/p/tasks/VIB-2/attachments`");
+    // Ruling 159: the exception names an absolute path outside the checkout
+    // and forbids creating it inside the working directory.
+    expect(withDrop).toContain("never create it inside the working directory");
+    expect(withDrop).toContain("never commit it");
     // The exception sits INSIDE the contract, after the confinement rule.
     expect(withDrop.indexOf("One deliberate exception")).toBeGreaterThan(
       withDrop.indexOf("Work ONLY inside the current working directory"),
@@ -2273,11 +2413,14 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     const withDrop = buildSpecialistPersona({
       profileId: "dev",
       skills: [],
-      attachmentsDrop: { attachmentsRel: "projects/p/tasks/T-1/attachments" },
+      attachmentsDrop: { attachmentsDir: "/data/projects/p/tasks/T-1/attachments" },
     });
     expect(withDrop).toContain("Posting files on the task thread");
-    expect(withDrop).toContain("projects/p/tasks/T-1/attachments");
+    expect(withDrop).toContain("`/data/projects/p/tasks/T-1/attachments`");
     expect(withDrop).toContain("posted on your reply");
+    // Ruling 159: an absolute path, outside the checkout, never committed.
+    expect(withDrop).toContain("outside the repository checkout");
+    expect(withDrop).not.toContain("reachable from your working directory");
     // Without the evidence grant the section must not appear — the completion
     // pipeline would still stamp the files, but the prompt must not invite a
     // mechanic the capability matrix withholds.
@@ -3341,8 +3484,13 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     );
     expect(confinement.attachmentsWritableDir).toBe(attachments);
     expect(existsSync(attachments)).toBe(true);
-    // The persona carries the same drop section the fresh run gets.
+    // The persona carries the same drop section the fresh run gets, and
+    // (ruling 159) it names the ABSOLUTE dir, never the store-relative form.
     expect(confinement.systemPrompt ?? "").toContain("Posting files on the task thread");
+    expect(confinement.systemPrompt ?? "").toContain(`\`${attachments}\``);
+    expect(confinement.systemPrompt ?? "").not.toContain(
+      `\`projects/${store.slug}/tasks/VIB-1/attachments\``,
+    );
     // …and the disclosure names the sandbox this confinement yields on Codex:
     // withheld write family + evidence ⇒ the carve-out, honestly labeled.
     expect(confinement.runInputs.sandbox).toEqual({
@@ -4403,5 +4551,277 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
     const rows = listRunsForTaskRows(store.db, store.slug, "VIB-1");
     expect(rows).toHaveLength(1);
     expect(rows[0]!.id).toBe(observed[0]!.runId);
+  });
+});
+
+/**
+ * G35-4 / ruling 152(c) (pass 35): no dispatch into a backend the instance
+ * already knows is out of quota for the account the run bills.
+ *
+ * Live, nine Codex deliveries were dispatched one after another into a window
+ * the health body was already showing as spent; each paid a clone, a refused
+ * run, an operator turn and a "Work stalled" packet. Canary: remove the
+ * `backendDispatchHold` call in `dispatchAgentRun` and a run starts.
+ */
+describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 152(c))", () => {
+  const CODEX_TIME_ONLY =
+    "You've hit your usage limit. To continue using Codex, start a free trial of Plus today, or try again at 6:18 PM.";
+
+  async function exhaustCodex(resetsAt: number | null): Promise<void> {
+    const { recordBackendQuotaExhaustion } = await import("~/server/runtimes/backend-quota.server");
+    recordBackendQuotaExhaustion(store.db, "codex", {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt,
+      resetsAtPrecision: resetsAt === null ? null : "clock",
+      providerText: CODEX_TIME_ONLY,
+      runId: "run_refused",
+      observedAt: new Date().toISOString(),
+    });
+  }
+
+  it("holds a Codex dispatch: no run row, a 'Dispatch held' note, a pending run-agent schedule for the reopen instant, an audit row; the door reads the hold sentence", async () => {
+    deployDevSpecialist(["codex"]);
+    const resetsAt = Math.round(Date.now() / 1000) + 3600;
+    await exhaustCodex(resetsAt);
+    let thrown: DispatchHeldError | null = null;
+    try {
+      await startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", directive: "continue the migration" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+    } catch (error) {
+      if (!isDispatchHeld(error)) throw error;
+      thrown = error;
+    }
+    if (!thrown) throw new Error("expected the dispatch to be held");
+    expect(thrown.status).toBe(409);
+    expect(thrown.userMessage).toMatch(/^Held: Codex is out of quota until .* UTC; dev's run is scheduled for then\.$/);
+    expect(thrown.hold).toMatchObject({ backend: "codex", profileId: "dev", agentName: "dev" });
+    expect(thrown.hold.until).toBe(new Date(resetsAt * 1000).toISOString());
+
+    // Nothing ran and nothing was reserved.
+    expect(listRunsForTaskRows(store.db, store.slug, "VIB-1")).toHaveLength(0);
+    expect(startedRunSpecs()).toHaveLength(0);
+
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const note = file.parsed.timeline.find((e) => e.title === "Dispatch held");
+    expect(note).toBeDefined();
+    expect(note!.type).toBe("note");
+    expect(note!.actor).toEqual({ kind: "system", systemId: "policy-engine" });
+    expect(note!.toAgent).toBe(false);
+    expect(note!.text).toContain("**Held:** Codex is out of quota until");
+    expect(note!.text).toContain(`(the provider said: "${CODEX_TIME_ONLY}")`);
+    expect(note!.text).toContain("dev's run starts when the window reopens");
+    expect(note!.text).toContain("nothing was dispatched and no decision is needed");
+
+    const schedule = file.parsed.frontmatter.schedules.find((x) => x.status === "pending");
+    expect(schedule).toMatchObject({ action: "run-agent", profileId: "dev", prompt: "continue the migration" });
+    expect(thrown.hold.scheduleId).toBe(schedule!.id);
+    // Due one minute after the provider's instant.
+    expect(Date.parse(schedule!.dueAt)).toBe(resetsAt * 1000 + 60_000);
+
+    const held = listAuditEvents(store.db, { action: "task.agent.run_held" });
+    expect(held).toHaveLength(1);
+    expect(held[0]!.details).toMatchObject({
+      backend: "codex",
+      until: new Date(resetsAt * 1000).toISOString(),
+      scheduleId: schedule!.id,
+      profileId: "dev",
+    });
+    expect(listAuditEvents(store.db, { action: "task.agent.run_started" })).toHaveLength(0);
+  });
+
+  it("the same dispatch on Claude starts: the hold is per backend", async () => {
+    deployDevSpecialist(["claude"]);
+    await exhaustCodex(Math.round(Date.now() / 1000) + 3600);
+    const result = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.backend).toBe("claude");
+    expect(listRunsForTaskRows(store.db, store.slug, "VIB-1")).toHaveLength(1);
+    expect(listAuditEvents(store.db, { action: "task.agent.run_held" })).toHaveLength(0);
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
+      actor(store.users.arda),
+    );
+  });
+
+  it("a record with no reset instant holds for thirty minutes and says the reopen time is unknown", async () => {
+    deployDevSpecialist(["codex"]);
+    await exhaustCodex(null);
+    const { UNDATED_HOLD_MS } = await import("~/server/runtimes/backend-quota.server");
+    const before = Date.now();
+    let thrown: DispatchHeldError | null = null;
+    try {
+      await startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+    } catch (error) {
+      if (!isDispatchHeld(error)) throw error;
+      thrown = error;
+    }
+    if (!thrown) throw new Error("expected the dispatch to be held");
+    expect(thrown.userMessage).toMatch(/^Held: Codex is out of quota and the reopen time is unknown; dev's run is retried at .* UTC\.$/);
+    expect(thrown.hold.until).toBeNull();
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const schedule = file.parsed.frontmatter.schedules.find((x) => x.status === "pending")!;
+    const due = Date.parse(schedule.dueAt);
+    expect(due).toBeGreaterThanOrEqual(before + UNDATED_HOLD_MS + 60_000 - 5_000);
+    expect(due).toBeLessThanOrEqual(Date.now() + UNDATED_HOLD_MS + 60_000 + 5_000);
+    const note = file.parsed.timeline.find((e) => e.title === "Dispatch held")!;
+    expect(note.text).toContain("the reopen time is unknown, so dev's run is retried at");
+  });
+
+  it("a hold whose instant has passed no longer holds: the dispatch starts", async () => {
+    deployDevSpecialist(["codex"]);
+    await exhaustCodex(Math.round(Date.now() / 1000) - 60);
+    const result = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.backend).toBe("codex");
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
+      actor(store.users.arda),
+    );
+  });
+
+  it("an operator prompt into a held backend leaves the hold note alone: no 'needs to be re-sent' note, one pending schedule", async () => {
+    // Canary: drop the `isDispatchHeld(error)` re-throw from
+    // `operatorPromptAgent`'s catch (task-actions.server.ts) — the catch then
+    // writes "the prompt above did NOT start a run: Held: … The directive needs
+    // to be re-sent once the blocker is resolved.", which contradicts the hold
+    // note's "nothing was dispatched and no decision is needed" and asks for a
+    // re-send that mints a SECOND schedule on top of the pending one.
+    deployDevSpecialist(["codex"]);
+    await exhaustCodex(Math.round(Date.now() / 1000) + 3600);
+    const { operatorPromptAgent } = await import("./task-actions.server");
+    let thrown: DispatchHeldError | null = null;
+    try {
+      await operatorPromptAgent(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          profileId: "dev",
+          handle: "dev",
+          directive: "continue the migration",
+        },
+        { dataRoot: store.dataRoot },
+      );
+    } catch (error) {
+      if (!isDispatchHeld(error)) throw error;
+      thrown = error;
+    }
+    if (!thrown) throw new Error("expected the prompt's dispatch to be held");
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.timeline.find((e) => e.title === "Dispatch held")).toBeDefined();
+    const notes = file.parsed.timeline.filter((e) => e.type === "note");
+    expect(notes.some((e) => e.text.includes("did NOT start a run"))).toBe(false);
+    expect(notes.some((e) => e.text.includes("needs to be re-sent"))).toBe(false);
+    // The directive rides the hold's own schedule, and only that one.
+    const pending = file.parsed.frontmatter.schedules.filter((x) => x.status === "pending");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      action: "run-agent",
+      profileId: "dev",
+      prompt: "@dev continue the migration",
+    });
+  });
+
+  it("a repeat dispatch inside one window reuses the pending retry: one schedule, one note, and the audit row says it was reused", async () => {
+    // Cluster review (pass 35): the hold is reached by every door and a spent
+    // window is exactly what makes a person dispatch again, so an
+    // unconditional `scheduleTaskAction` turned N held attempts into N pending
+    // `run-agent` occurrences all due at the same instant. At reopen the first
+    // starts the run and the rest bounce off the single-flight 409, defer back
+    // to pending with no retry spent, and start the SAME directive again once
+    // that run ends. Canary: reuse the `scheduleTaskAction` call
+    // unconditionally in `holdDispatch` and this reads 3 / 3.
+    deployDevSpecialist(["codex"]);
+    const resetsAt = Math.round(Date.now() / 1000) + 3600;
+    await exhaustCodex(resetsAt);
+    const held = async (directive: string): Promise<DispatchHeldError> => {
+      try {
+        await startAgentRun(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", directive },
+          actor(store.users.arda),
+          { dataRoot: store.dataRoot },
+        );
+      } catch (error) {
+        if (!isDispatchHeld(error)) throw error;
+        return error;
+      }
+      throw new Error("expected the dispatch to be held");
+    };
+    const first = await held("continue the migration");
+    const second = await held("continue the migration");
+    const third = await held("continue the migration");
+    expect(second.hold.scheduleId).toBe(first.hold.scheduleId);
+    expect(third.hold.scheduleId).toBe(first.hold.scheduleId);
+
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const pending = file.parsed.frontmatter.schedules.filter((x) => x.status === "pending");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.prompt).toBe("continue the migration");
+    expect(file.parsed.timeline.filter((e) => e.title === "Dispatch held")).toHaveLength(1);
+    // The "Scheduled:" event beside it is not repeated either.
+    expect(
+      file.parsed.timeline.filter((e) => e.text.includes("**Scheduled:** a **dev** run")),
+    ).toHaveLength(1);
+    // The audit row IS written for every held attempt — it is the machine's
+    // record of the repeat — and names which one minted the retry.
+    const rows = listAuditEvents(store.db, { action: "task.agent.run_held" });
+    expect(rows).toHaveLength(3);
+    // Newest first: the two repeats reused the retry the first one minted.
+    // SAFETY: `details` is this action's own audit payload, written two lines
+    // of product code above with exactly this key.
+    expect(rows.map((r) => (r.details as { reusedSchedule?: boolean }).reusedSchedule)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+  });
+
+  it("a repeat dispatch carrying a NEWER directive replaces the pending one and says so, still without a second schedule", async () => {
+    deployDevSpecialist(["codex"]);
+    await exhaustCodex(Math.round(Date.now() / 1000) + 3600);
+    const held = async (directive: string): Promise<void> => {
+      try {
+        await startAgentRun(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", directive },
+          actor(store.users.arda),
+          { dataRoot: store.dataRoot },
+        );
+      } catch (error) {
+        if (!isDispatchHeld(error)) throw error;
+        return;
+      }
+      throw new Error("expected the dispatch to be held");
+    };
+    await held("continue the migration");
+    await held("drop the migration and fix the flake first");
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const pending = file.parsed.frontmatter.schedules.filter((x) => x.status === "pending");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.prompt).toBe("drop the migration and fix the flake first");
+    expect(file.parsed.timeline.filter((e) => e.title === "Dispatch held")).toHaveLength(2);
   });
 });

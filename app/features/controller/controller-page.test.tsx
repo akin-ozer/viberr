@@ -316,6 +316,7 @@ describe("the open conversation's execution", () => {
     finished: null,
     turns: 3,
     tokens: 1200,
+    tokensEstimated: false,
     lines: [{ t: "10:00:01", ev: "text", tag: "assistant", text: "Reading the board." }],
     raw: ['{"type":"assistant"}'],
     lineCount: 1,

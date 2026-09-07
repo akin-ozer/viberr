@@ -125,6 +125,17 @@ import { canRunAgents } from "~/server/auth/project-authority.server";
 import { listUsers } from "~/server/auth/user-store.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import {
+  cancelScheduledAction,
+  scheduleTaskAction,
+} from "~/server/tasks/schedule.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
+import {
+  describeDriftLists,
+  listTemplateResourceDrift,
+  type TemplateCopyDrift,
+} from "~/server/org/template-propagation.server";
+import { displayNameRefusal, normalizeDisplayName } from "~/shared/names";
+import {
   controllerToolGuards,
   NotVisibleError,
   notVisible,
@@ -183,6 +194,27 @@ export const CONTROLLER_TOOLKIT_INSTRUCTIONS =
 
 const prose = normalizeEscapedNewlines;
 
+/**
+ * Ruling 156: "1 project copy does not carry this change: k9c-k9s-clone is
+ * missing MCP server context7." One clause per project, joined with
+ * semicolons; a copy holding grants the template does not says so too.
+ */
+function divergedSentence(diverged: TemplateCopyDrift[]): string {
+  const clauses = diverged.map((d) => {
+    const missing = describeDriftLists(d.drift.missing);
+    const extra = describeDriftLists(d.drift.extra);
+    const parts: string[] = [];
+    if (missing.length) parts.push(`is missing ${missing.join(", ")}`);
+    if (extra.length) parts.push(`holds ${extra.join(", ")} the template does not`);
+    return `${d.projectSlug} ${parts.join(" and ")}`;
+  });
+  const n = diverged.length;
+  return `${n} project cop${n === 1 ? "y does" : "ies do"} not carry this change: ${clauses.join("; ")}.`;
+}
+
+/** The ceiling the task page's schedule form applies (28 days). */
+const SCHEDULE_MAX_MINUTES = 40_320;
+
 /** Build the toolkit for one controller turn. */
 export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerToolkit {
   const { db, ctx, user } = deps;
@@ -227,6 +259,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     throw AppError.validation(
       "Name the task (this conversation is not anchored to one).",
     );
+  }
+
+  /**
+   * U35-1 (pass 35): a display name as the person meant it. The model sent
+   * `Test &amp; CI Engineer` and the writer stored the entity; decode once,
+   * refuse markup, and let the writer derive the id from the clean text.
+   */
+  function personName(raw: string): string {
+    const name = normalizeDisplayName(raw);
+    const refusal = displayNameRefusal(name);
+    if (refusal) throw AppError.validation(refusal);
+    return name;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -344,7 +388,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         requireOrgAdmin("create users");
         const result = await createLocalAccount(
           db,
-          { name: args.name, email: args.email, role: args.role },
+          { name: personName(args.name), email: args.email, role: args.role },
           auditActor,
         );
         return (
@@ -392,7 +436,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               db,
               {
                 userId: args.userId,
-                name: args.name ?? current.name,
+                name: args.name ? personName(args.name) : current.name,
                 email: args.email ?? current.email,
                 role: args.role ?? current.role,
               },
@@ -652,7 +696,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_global_agents",
-      "List the org's global agent templates (specialists a project can deploy), each with the resource grants it holds. Org admins only. Read this before save_global_agent so an edit is not blind.",
+      "List the org's global agent templates (specialists a project can deploy), each with the resource grants it holds, its default model and effort, and `copiesDiffering`: the projects whose deployed copy no longer carries the template's grants (ruling 156). Org admins only. Read this before save_global_agent so an edit is not blind.",
       {},
       run(() => {
         requireOrgAdmin("read the global agent templates");
@@ -665,12 +709,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             id: g.id,
             name: g.name,
             backend: g.backend,
+            model: g.model,
+            effort: g.effort,
             summary: g.summary,
             stages: g.stages,
             skills: g.skills,
             mcps: g.mcps,
             kbs: g.kbs,
             usedByProjects: g.used,
+            // Ruling 156: "is it granted on the project?" is answerable
+            // without a run.
+            copiesDiffering: listTemplateResourceDrift(db, g.id, { dataRoot }).map(
+              (d) => d.projectSlug,
+            ),
           })),
         );
       }),
@@ -681,7 +732,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_global_agent",
-      "Create or update a global agent template (name, backend, summary, persona, eligible stages, resource grants). Org admins only. The controller itself and the operator are system profiles this tool cannot touch. Grant merge semantics: an omitted skills/mcps/kbs list leaves the stored grants unchanged, and an empty list clears them — read list_global_agents first, and grant by grantKey, never by id.",
+      "Create or update a global agent template (name, backend, summary, persona, eligible stages, default model and effort, resource grants). Org admins only. The controller itself and the operator are system profiles this tool cannot touch. Grant merge semantics: an omitted skills/mcps/kbs list leaves the stored grants unchanged, and an empty list clears them — read list_global_agents first, and grant by grantKey, never by id. A project deployment keeps its own copy of the grants; the reply names every copy that now differs and how to update it.",
       {
         id: z.string().optional().describe("Existing template id to update; omit to create."),
         name: z.string(),
@@ -689,6 +740,24 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         summary: z.string().describe("One scannable paragraph the operator selects by."),
         persona: z.string().optional().describe("The long persona/system-prompt body."),
         stages: z.array(z.string()).min(1).describe("Eligible stage ids, e.g. ready, impl."),
+        model: z
+          .string()
+          .optional()
+          .describe(
+            "Default model id for the template's backend, checked by name (ruling 139); deploy_agent uses it when no override is given. Omit to keep the stored default; \"\" clears it.",
+          ),
+        effort: z
+          .string()
+          .optional()
+          .describe(
+            "Default effort tier the backend offers: Claude low|medium|high|xhigh|max, Codex low|medium|high|xhigh. Omit to keep the stored tier; \"\" clears it.",
+          ),
+        propagate: z
+          .boolean()
+          .optional()
+          .describe(
+            "Also rewrite the grants of every project copy that no longer matches this template. Off by default: a project's copy is its own record.",
+          ),
         skills: z
           .array(z.string())
           .optional()
@@ -716,6 +785,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           summary: string;
           persona?: string;
           stages: string[];
+          model?: string;
+          effort?: string;
+          propagate?: boolean;
           skills?: string[];
           mcps?: string[];
           kbs?: string[];
@@ -742,10 +814,38 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (grants.skills) input.skills = grants.skills;
           if (grants.mcps) input.mcps = grants.mcps;
           if (grants.kbs) input.kbs = grants.kbs;
-          const saved = saveGlobalAgentProfile(db, input, auditActor, {
+          if (args.model !== undefined) input.model = args.model;
+          if (args.effort !== undefined) input.effort = args.effort;
+          if (args.propagate) input.propagate = true;
+          const saved = await saveGlobalAgentProfile(db, input, auditActor, {
             dataRoot,
           });
-          return `[done] ${saved.toast}.`;
+          // Ruling 153: the reply states the defaults a deploy will take.
+          const defaults =
+            ` Template defaults: ${saved.profile.backend === "codex" ? "Codex" : "Claude"}, ` +
+            `model ${saved.profile.model || defaultModelFor(saved.profile.backend)}, ` +
+            `effort ${saved.profile.effort || defaultEffortFor(saved.profile.backend)}.`;
+          // Ruling 156: the reply is built from the RESULT, not the toast. A
+          // copy that differs is named with what it lacks and how to update
+          // it; a propagation names what each copy gained.
+          const verb = args.id ? "updated" : "created";
+          const head = `[done] ${saved.profile.name} ${verb}.`;
+          if (saved.propagated.length > 0) {
+            const per = saved.propagated.map((p) => {
+              const parts: string[] = [];
+              if (p.added.length) parts.push(`added ${p.added.join(", ")}`);
+              if (p.removed.length) parts.push(`dropped ${p.removed.join(", ")}`);
+              return `${p.projectSlug}${parts.length ? ` (${parts.join("; ")})` : ""}`;
+            });
+            return `${head} Grants copied to ${saved.propagated.length} project${saved.propagated.length === 1 ? "" : "s"}: ${per.join("; ")}.${defaults}`;
+          }
+          if (saved.diverged.length > 0) {
+            return `${head} ${divergedSentence(saved.diverged)} Call save_global_agent again with propagate: true to rewrite those copies, or an org admin takes the template's grants on that project's Agents page.${defaults}`;
+          }
+          if (args.id && saved.profile.used > 0) {
+            return `${head} Every project copy carries the template's grants.${defaults}`;
+          }
+          return `${head}${defaults}`;
         },
       ),
     ),
@@ -950,6 +1050,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               model: row.model,
               modelLabel: row.modelLabel,
               effort: row.effort,
+              // Ruling 156: the grants a run on this project MOUNTS (the
+              // deployment's own copy), and how that copy differs from the
+              // template it came from (null when it does not).
+              resources: row.resources,
+              templateDrift: row.templateDrift,
               capabilities: row.capabilities.map((c) => ({
                 capabilityId: c.capabilityId,
                 mode: c.mode,
@@ -1017,7 +1122,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_task",
-      "One task's live state: stage, readiness, goal text, engaged agents, PR state, open packet, plus the newest timeline events. Membership gated. Historical (Done, archived) tasks read the same way.",
+      "One task's live state: stage, readiness, goal text, engaged agents, PR state, open packet, its pending schedules (`schedules`, ruling 153), plus the newest timeline events. Membership gated. Historical (Done, archived) tasks read the same way.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -1038,7 +1143,23 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             title: e.title,
             text: e.text.length > 700 ? `${e.text.slice(0, 700)}…` : e.text,
           }));
-        return json({ task: summary, newestEvents: events });
+        // Ruling 153: the pending schedules, read from the task file itself
+        // (the summary mapping carries none), so the controller can name and
+        // cancel what it or a person set up.
+        const schedules = (
+          readTaskFile({ projectSlug: slug, taskKey: key, dataRoot })?.parsed
+            .frontmatter.schedules ?? []
+        )
+          .filter((s) => s.status === "pending")
+          .map((s) => ({
+            id: s.id,
+            action: s.action,
+            dueAt: s.dueAt,
+            profileId: s.profileId,
+            prompt: s.prompt,
+            status: s.status,
+          }));
+        return json({ task: summary, schedules, newestEvents: events });
       }),
     ),
     "get_task",
@@ -1301,14 +1422,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           let firstError: AppError | null = null;
           if (args.goal !== undefined) {
             try {
-              await updateTaskGoal(
+              const { changed } = await updateTaskGoal(
                 db,
                 { projectSlug: slug, taskKey: key, goal: prose(args.goal) },
                 actor,
                 { dataRoot },
               );
-              if (before && before.goal === prose(args.goal).trim()) unchanged.push("goal");
-              else applied.push("goal");
+              if (changed) applied.push("goal");
+              else unchanged.push("goal");
             } catch (error) {
               if (!(error instanceof AppError)) throw error;
               firstError ??= error;
@@ -1463,6 +1584,152 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       ),
     ),
     "run_agent_on_task",
+  );
+
+  /** Ruling 153: the `run-agents` tier the task page's schedule form needs. */
+  function requireScheduleTier(slug: string, what: string): string | null {
+    const file = readProjectFile({ projectSlug: slug, dataRoot });
+    if (!file) throw new NotVisibleError(notVisible(slug));
+    const authority = {
+      slug,
+      memberRoles: new Map(
+        file.parsed.frontmatter.members.map((m) => [m.userId, m.role] as const),
+      ),
+      archived: file.parsed.frontmatter.archived === true,
+    };
+    return canRunAgents(db, authority, actor, what)
+      ? null
+      : "[denied] Scheduling a run needs the maintainer role (or project admin) in this project.";
+  }
+
+  add(
+    tool(
+      "schedule_task_action",
+      "Schedule a future run on a task (ruling 153): an operator re-run, or a deployed agent profile's run with a directive, between 1 minute and 28 days out. Maintainer or above. The entry lands on the task file and fires on the profile deployed when it fires; get_task lists the pending entries and cancel_task_schedule cancels one.",
+      {
+        projectSlug: z.string().optional(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
+        agent: z
+          .string()
+          .describe('"operator", or a deployed profile id from get_project.'),
+        delayMinutes: z
+          .number()
+          .optional()
+          .describe("Minutes from now (1 to 40320). Give this or dueAt."),
+        dueAt: z
+          .string()
+          .optional()
+          .describe("An ISO instant (between 1 minute and 28 days out). Give this or delayMinutes."),
+        prompt: z
+          .string()
+          .optional()
+          .describe("The steer for the operator, or the agent's directive (under 4000 characters)."),
+      },
+      runWith(
+        async (args: {
+          projectSlug?: string;
+          taskKey?: string;
+          agent: string;
+          delayMinutes?: number;
+          dueAt?: string;
+          prompt?: string;
+        }) => {
+          const slug = slugOf(args.projectSlug);
+          const key = keyOf(args.taskKey, slug);
+          requireVisible(slug, "schedule a run");
+          const denied = requireScheduleTier(slug, "schedule a run through the controller");
+          if (denied) return denied;
+          // The task page's bounds and sentences (project.task.tsx
+          // `schedule-action`): a crafted delay overflowed Date once, and a
+          // schedule further out than the retention story is a note, not a plan.
+          const now = Date.now();
+          let dueMs: number;
+          if (args.delayMinutes !== undefined) {
+            const minutes = args.delayMinutes;
+            if (!Number.isFinite(minutes) || minutes < 1 || minutes > SCHEDULE_MAX_MINUTES) {
+              throw AppError.validation("Schedule between 1 minute and 28 days out.");
+            }
+            dueMs = now + Math.round(minutes) * 60_000;
+          } else if (args.dueAt !== undefined) {
+            dueMs = Date.parse(args.dueAt);
+            if (!Number.isFinite(dueMs)) throw AppError.validation("Invalid schedule time.");
+            const minutes = (dueMs - now) / 60_000;
+            if (minutes < 1 || minutes > SCHEDULE_MAX_MINUTES) {
+              throw AppError.validation("Schedule between 1 minute and 28 days out.");
+            }
+          } else {
+            throw AppError.validation("Schedule between 1 minute and 28 days out.");
+          }
+          const steer = args.prompt ? prose(args.prompt) : "";
+          if (steer.length > 4000) {
+            throw AppError.validation("Keep the run prompt under 4000 characters.");
+          }
+          const dueAt = new Date(dueMs).toISOString();
+          const operator = args.agent.trim().toLowerCase() === "operator";
+          const profileId = args.agent.trim();
+          const schedInput: Parameters<typeof scheduleTaskAction>[1] = {
+            projectSlug: slug,
+            taskKey: key,
+            dueAt,
+            prompt: steer,
+          };
+          if (!operator) {
+            schedInput.action = "run-agent";
+            schedInput.profileId = profileId;
+          }
+          // The actor is the audit actor (`<email> · via controller`): the
+          // entry's `createdByLabel` discloses the instrument, as every other
+          // controller write does.
+          const sched = await scheduleTaskAction(db, schedInput, auditActor, {
+            dataRoot,
+          });
+          let what = "an operator re-run";
+          if (!operator) {
+            const { listDeployedSpecialists } = await import(
+              "~/server/tasks/specialist-run.server"
+            );
+            const name =
+              listDeployedSpecialists(slug, { dataRoot }).find((s) => s.id === profileId)
+                ?.name ?? profileId;
+            what = `a ${name} run`;
+          }
+          return `[done] Scheduled: ${what} on ${key} at ${sched.dueAt} (${sched.id}). It runs on the profile deployed when it fires.`;
+        },
+      ),
+    ),
+    "schedule_task_action",
+  );
+
+  add(
+    tool(
+      "cancel_task_schedule",
+      "Cancel one pending scheduled run on a task (ruling 153). Maintainer or above. The schedule id comes from get_task or from schedule_task_action's reply.",
+      {
+        projectSlug: z.string().optional(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
+        scheduleId: z.string().describe("The pending entry's id (sch_...)."),
+      },
+      runWith(
+        async (args: { projectSlug?: string; taskKey?: string; scheduleId: string }) => {
+          const slug = slugOf(args.projectSlug);
+          const key = keyOf(args.taskKey, slug);
+          requireVisible(slug, "cancel a scheduled run");
+          const denied = requireScheduleTier(slug, "cancel a scheduled run through the controller");
+          if (denied) return denied;
+          const scheduleId = args.scheduleId.trim();
+          const result = await cancelScheduledAction(
+            db,
+            { projectSlug: slug, taskKey: key, scheduleId },
+            auditActor,
+            { dataRoot },
+          );
+          return result.cancelled
+            ? `[done] Schedule ${scheduleId} on ${key} cancelled.`
+            : `[noop] ${scheduleId} is not pending on ${key}.`;
+        },
+      ),
+    ),
+    "cancel_task_schedule",
   );
 
   add(
@@ -1697,7 +1964,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "deploy_agent",
-      "Deploy a global agent template into the project (from list_global_agents; delivery starts withheld until an admin opens it up). Project admin. No removal exists here. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's model and the backend's default effort. The reply states what was stored.",
+      "Deploy a global agent template into the project (from list_global_agents; delivery starts withheld until an admin opens it up). Project admin. No removal exists here. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's own model and effort (ruling 153; the backend's default stands in only when the template names none, or names a tier this backend does not offer). The reply states what was stored.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -1970,7 +2237,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_goal",
-      "Redirect a goal chain: pause, resume, cancel, skip a link, retry a failed link (a fresh task), edit a pending or failed link, add a link, or remove a pending link. The creator or a maintainer+. Completed and cancelled chains stay readable; nothing is deleted.",
+      "Redirect a goal chain: pause, resume, cancel, skip a link, retry a failed link (a fresh task), edit a pending or failed link (an active link takes blockedBy only, written on its task), add a link, or remove a pending link. The creator or a maintainer+. Completed and cancelled chains stay readable; nothing is deleted.",
       {
         projectSlug: z.string().optional(),
         goalId: z.string(),
@@ -1991,7 +2258,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         blockedBy: z
           .array(z.string())
           .optional()
-          .describe("edit_link / add_link: what the link's task waits on (the full list; [] clears; omit on edit_link to leave it)."),
+          .describe("edit_link / add_link: what the link's task waits on (the full list; [] clears; omit on edit_link to leave it). On an active link this is the only editable field: it is written on the link's task, and the link mirrors it."),
       },
       runWith(
         async (args: {
@@ -2047,6 +2314,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               if (args.title) edit.title = args.title;
               if (args.goal) edit.goal = prose(args.goal);
               // Ruling 131(c): absent leaves the link's wait; [] clears it.
+              // Ruling 155: on an active link the writer is the task's.
               if (args.blockedBy !== undefined) edit.blockedBy = args.blockedBy;
               action = edit;
               break;

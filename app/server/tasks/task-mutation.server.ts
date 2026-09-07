@@ -71,6 +71,12 @@ export interface TaskMutationContext {
      *  OPERATOR_TRANSITION_CHAIN_CAP). Optional: only the operator drive sets
      *  it; absent reads as 0. */
     transitionDepth?: number;
+    /** Ruling 152(a): the stage this drive's OWN latest transition landed on.
+     *  `transitionStage` stamps it when it skips the operator re-trigger for a
+     *  live run, so the settle-time stranded backstop judges the stage the
+     *  drive left the task at instead of treating the move as "owned by a
+     *  re-trigger" that no longer fires. */
+    movedToStageId?: string;
   };
 }
 

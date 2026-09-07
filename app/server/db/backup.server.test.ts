@@ -1,9 +1,10 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { acquireDataRootLock } from "./data-root-lock.server";
+import { acquireDataRootLock, DATA_ROOT_LOCK_FILENAME } from "./data-root-lock.server";
 import {
   DEFAULT_MIGRATIONS_DIR,
   runMigrations,
@@ -107,6 +108,53 @@ describe("createBackup", () => {
     }
     // No sidecars in the artefact: VACUUM INTO writes one self-contained file.
     expect(existsSync(path.join(backup.dir, "projection.sqlite-wal"))).toBe(false);
+  });
+
+  /**
+   * Ruling 158 (pass 35 F35-9). With the app holding the writer lock, the
+   * backup must not be the second connection to the live file: it reads a copy
+   * taken beside the store, the copy carries the WAL (so the artefact still
+   * holds every committed row), the copy is gone when the backup returns, and
+   * the manifest says which way the projection was read. Canary: put the
+   * pre-158 open back (`new DatabaseSync(source, { readOnly: true })` instead of
+   * the reader handle) and the provenance assertions fail; the snapshot
+   * semantics themselves are pinned in `sqlite.server.test.ts`.
+   */
+  it("under a live writer lock, takes the artefact from a copy and says so in the manifest", () => {
+    const f = fixture();
+    f.db.prepare(
+      `INSERT INTO users (id, email, name, title, role, idp, avatar_tone,
+         pwreset_required, theme, disabled, created_at, updated_at, created_by)
+       VALUES ('u_murat', 'murat@viberr.dev', 'Murat', NULL, 'member', 'local', NULL,
+               0, 'system', 0, '2026-08-02T00:00:00.000Z', '2026-08-02T00:00:00.000Z', NULL)`,
+    ).run();
+    expect(existsSync(`${projectionPathIn(f.dataRoot)}-wal`)).toBe(true);
+    // The app: this very process, alive by every probe, on this host.
+    writeFileSync(
+      path.join(f.dataRoot, "state", DATA_ROOT_LOCK_FILENAME),
+      JSON.stringify({ pid: process.pid, hostname: hostname(), startedAt: "2026-09-06T18:00:00.000Z" }),
+    );
+
+    const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
+
+    expect(backup.manifest.projection?.rows.users).toBe(2);
+    expect(backup.manifest.contains[0]).toContain(
+      "read from a copy of the file and its WAL taken while state/writer.lock named a holder",
+    );
+    expect(backup.text).toContain("taken while state/writer.lock named a holder");
+    // The copy is removed with the handle; the store carries nothing of it.
+    expect(existsSync(path.join(f.dataRoot, "state", "tmp", `reader-${process.pid}`))).toBe(false);
+    // …and the live database's own sidecar was left alone.
+    expect(existsSync(`${projectionPathIn(f.dataRoot)}-wal`)).toBe(true);
+  });
+
+  it("with nothing holding the root, reads the file itself and says that instead", () => {
+    const f = fixture();
+    const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
+    expect(backup.manifest.contains[0]).toContain(
+      "read from the file itself; the root carried no writer lock",
+    );
+    expect(existsSync(path.join(f.dataRoot, "state", "tmp"))).toBe(false);
   });
 
   it("carries the file-native store and skips in-flight *.tmp writes", () => {

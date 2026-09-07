@@ -21,6 +21,13 @@ export type RunState =
   | "error"
   | "interrupted";
 
+/**
+ * Pass 35 U35-7 (ruling 158 addendum): the stored reason an `interrupted` run
+ * stopped when no person interrupted it. A restart is a reason, not an actor;
+ * `interrupted_by` stays a user id or null.
+ */
+export type RunInterruptedReason = "restart";
+
 export type RunBackend = "claude" | "codex";
 
 /**
@@ -298,14 +305,22 @@ export interface RunView {
   state: "running" | "idle" | "done" | "error";
   /** Real lifecycle state (queued/running/finished/error/interrupted). */
   lifecycle: RunState;
-  /** User id + label of an interrupter, else null. */
+  /** User id + label of the PERSON who interrupted the run, else null. */
   interruptedBy?: { userId: string; label: string } | null;
+  /** Pass 35 U35-7: why an `interrupted` run stopped when no person did it.
+   *  `"restart"` = boot recovery found it queued/running with no process
+   *  behind it. Null on a human interrupt (which names the person above). */
+  interruptedReason?: RunInterruptedReason | null;
   /** The run failed because its backend was unavailable / quota-limited (not a
    *  genuine task failure). The UI offers a one-click retry on `altBackend`. */
   failedBackendUnavailable?: boolean;
   /** Ruling 130(a): the classified failure kind of an errored run, for EVERY
    *  run kind; the Agent-logs footer selects its sentence from this. */
   failureKind?: RunFailureKind;
+  /** U35-11: for an `overloaded` failure, where it happened: the provider's
+   *  side, or this deployment's own network path (`local`). The footer and
+   *  the pill attribute the failure from this, never from the prose. */
+  failureOrigin?: "provider" | "local";
   /** The OTHER backend to retry on when this one is unavailable (D4). */
   altBackend?: "claude" | "codex";
   phase: string | null;
@@ -319,8 +334,16 @@ export interface RunView {
    *  every call (cache reads and writes included) plus the output, i.e. the
    *  row's `input_tokens + output_tokens`, which means the same thing on both
    *  backends (wire-format.server.ts normalizes Claude's three prompt figures
-   *  into one). Real usage envelopes only; a lower bound until the result. */
-  tokens: number;
+   *  into one). Null while no usage envelope has landed (a Codex run before
+   *  its turn ends); the cell prints "pending". */
+  tokens: number | null;
+  /** F35-1: the figure is the Claude adapter's live ESTIMATE (the prompt sum
+   *  is exact; the output is estimated from the streamed text at ~4 characters
+   *  per token). False once a provider figure landed
+   *  (`agent_runs.usage_final = 1`), and only then: a run that was stopped, or
+   *  that errored before the provider replied, keeps its estimate after it
+   *  ends. The cell prints `~1.2M` with a tooltip while true. */
+  tokensEstimated: boolean;
   /** The projected log lines for the group's bounded window (newest last),
    * with UI-53's synthetic `── resumed · run N of M ──` boundaries between
    * runs. NOT the whole history since P13-D-11 — see `logWindow`. */

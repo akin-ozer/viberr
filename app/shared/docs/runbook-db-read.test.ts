@@ -4,33 +4,46 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * D34-1 (pass 34) — the operations docs never tell an operator to open the
- * LIVE projection database from the host.
+ * Ruling 158 (pass 35 F35-9) — the operations docs never tell anyone to open
+ * a LIVE projection database, from either side of the container boundary.
  *
- * `docs/operations/runbook.md` used to say, under "Check who is connected",
- * `sqlite3` on `$VIBERR_DATA_ROOT/state/projection.sqlite`. On the shipped
- * Docker deployment the data root is a bind mount, so that opens from the HOST
- * the WAL index of a file the GUEST is writing, across VirtioFS. Done exactly
- * that way during pass 34 (host `sqlite3 -readonly` polling every few seconds),
- * it preceded the container's SIGBUS at 09:12:46Z, exit 135. `-readonly` is no
- * protection: the shared mapping is the problem, not the write.
- * `docs/operations/deployment.md`'s lossy re-baseline recipe ran a host
- * `npm run backup` against the same live root, one line ABOVE the
- * `docker compose down` that would have made it safe.
+ * Pass 34 (D34-1) saw the server die with SIGBUS (exit 135) one second after a
+ * HOST-side `sqlite3 -readonly` reader over the bind mount, and wrote the rule
+ * "inside the container, read-only": `docker compose exec -T app node -e`
+ * opening the file with `readOnly: true`. Pass 35 (NOTES 18:40Z) saw the same
+ * exit one second after exactly that in-container `readOnly: true` reader, and
+ * boot recovery then interrupted 23 runs. The mapping of the WAL index is the
+ * hazard, not the write and not the side: a second connection to a live root
+ * is never safe. So the rule is now "copy first": `projection.sqlite` and its
+ * `-wal` are copied to a scratch directory and the COPY is opened, which is
+ * what `openDatabaseReadOnly` (`app/server/db/sqlite.server.ts`) does for
+ * `npm run backup` and `npm run keys -- status` whenever `state/writer.lock`
+ * is there at all.
  *
  * Mechanical pins over BOTH pages, so the next rewrite cannot quietly put a
- * host-side form back:
- *   1. no `sqlite3` invocation on `state/projection.sqlite` without `mode=ro`;
- *   2. the in-container read-only form (`docker compose exec -T app node -e`
- *      opening with `readOnly: true`, the option `openDatabaseReadOnly` in
- *      `app/server/db/sqlite.server.ts` uses) appears BEFORE any host-side form;
- *   3. every in-container `npm run backup` carries an explicit absolute `--out`
+ * live-file form back:
+ *   1. no `sqlite3` invocation targets `state/projection.sqlite` at all
+ *      (`mode=ro` was the pass-34 exemption; it is no protection);
+ *   2. no fenced bash block opens `state/projection.sqlite` with
+ *      `DatabaseSync(` (the pass-34 in-container form), whatever options it
+ *      passes;
+ *   3. the runbook shows the copy recipe: a fenced bash block that copies the
+ *      projection AND its `-wal` and opens the copy;
+ *   4. both pages state the rule in words ("copy first", "never a second
+ *      connection"), and the runbook names the controller's `viberr_ops` tools
+ *      as the in-process reader to ask before copying anything;
+ *   5. every in-container `npm run backup` carries an explicit absolute `--out`
  *      (`scripts/backup.ts` defaults to `./backups`, which is `/app/backups` in
  *      the container and is lost with it), outside `/data` (`createBackup`
  *      refuses a destination under the root it backs up), and the page copies
  *      the artefact out with `docker compose cp`;
- *   4. a host-side `npm run backup` in a recipe that also stops the container
- *      comes AFTER the `docker compose down`.
+ *   6. a host-side `npm run backup` in a recipe that also stops the container
+ *      comes AFTER the `docker compose down` (with the app down the CLI reads
+ *      the file itself; there is nothing to copy first);
+ *   7. `docs/development/scripts.md` — the page a developer reads when they add
+ *      the NEXT read-only CLI — describes the backup's own read the way it
+ *      ships: a copy under `state/tmp/`, not the retired "read-only connection"
+ *      to the live root, which is the shape that produced both SIGBUSes.
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -53,11 +66,14 @@ const PAGES = [RUNBOOK, DEPLOYMENT];
  * A `sqlite3` COMMAND whose file argument is the projection database: the
  * binary, optional flags, then the path token, all on one line and separated
  * by whitespace. Prose that merely names `sqlite3` next to the file (the dated
- * correction note quotes what the page used to say) is not an invocation and
+ * correction notes quote what the page used to say) is not an invocation and
  * does not match.
  */
 const SQLITE3_ON_PROJECTION =
   /\bsqlite3\s+(?:-[\w-]+\s+)*"?(?:file:)?\$?[^\s"]*state\/projection\.sqlite[^\s"]*"?/g;
+
+/** A `DatabaseSync(` constructor call whose argument names the live file. */
+const DATABASE_SYNC_ON_PROJECTION = /DatabaseSync\([^)]*state\/projection\.sqlite/;
 
 /** The page's fenced ```bash blocks, in order, with the offset of each. */
 function bashBlocks(text: string): { body: string; at: number }[] {
@@ -68,19 +84,22 @@ function bashBlocks(text: string): { body: string; at: number }[] {
 }
 
 /**
- * The in-container read-only form: a fenced bash block that runs
- * `docker compose exec … app node -e` AND opens the file with `readOnly: true`
- * inside that same block. Bounded to the block on purpose: prose elsewhere on
- * the page quotes `readOnly: true` too, and an unbounded scan would let a
- * read-write example borrow it. Returns the offset of the first such block,
- * or -1.
+ * The copy recipe: one fenced bash block that copies `state/projection.sqlite`
+ * and its `-wal` somewhere else and opens THAT copy (a `DatabaseSync(` or
+ * `sqlite3` whose argument is not the live file). Bounded to one block on
+ * purpose: a page that copies in one block and opens the live file in another
+ * has not shown the recipe. Returns the offset of the first such block, or -1.
  */
-function containerReadOnlyFormAt(text: string): number {
-  const block = bashBlocks(text).find(
-    ({ body }) =>
-      /docker compose exec\s+(?:-T\s+)?app\s+node\s+-e\b/.test(body) &&
-      /readOnly:\s*true/.test(body),
-  );
+function copyRecipeAt(text: string): number {
+  const block = bashBlocks(text).find(({ body }) => {
+    const copiesMain = /\bcp\b[^\n]*state\/projection\.sqlite\b/.test(body);
+    const copiesWal = /projection\.sqlite-wal\b/.test(body);
+    const opensACopy =
+      (/DatabaseSync\(/.test(body) || /\bsqlite3\s/.test(body)) &&
+      !DATABASE_SYNC_ON_PROJECTION.test(body) &&
+      !SQLITE3_ON_PROJECTION.test(body);
+    return copiesMain && copiesWal && opensACopy;
+  });
   return block ? block.at : -1;
 }
 
@@ -91,49 +110,54 @@ function sqlite3Invocations(text: string): { command: string; at: number }[] {
   }));
 }
 
-describe("D34-1: the operations docs never open the live projection database from the host", () => {
+describe("ruling 158: the operations docs never open a live projection database, on either side", () => {
+  it.each(PAGES)("$rel: no sqlite3 invocation targets state/projection.sqlite", ({ rel, text }) => {
+    expect(
+      sqlite3Invocations(text).map((i) => i.command),
+      `${rel} tells an operator to run sqlite3 on the live projection database; ` +
+        `a second connection to a live root is the SIGBUS of passes 34 and 35, and mode=ro is no protection. ` +
+        `Copy the file and its -wal first and open the copy.`,
+    ).toEqual([]);
+  });
+
   it.each(PAGES)(
-    "$rel: every sqlite3 invocation on state/projection.sqlite opens read-only (mode=ro)",
+    "$rel: no fenced block opens state/projection.sqlite with DatabaseSync (the pass-34 in-container form is gone)",
     ({ rel, text }) => {
-      const offenders = sqlite3Invocations(text)
-        .map((i) => i.command)
-        .filter((command) => !/[?&]mode=ro\b/.test(command));
+      const offenders = bashBlocks(text)
+        .filter(({ body }) => DATABASE_SYNC_ON_PROJECTION.test(body))
+        .map(({ body }) => body.trim());
       expect(
         offenders,
-        `${rel} tells an operator to open the projection database without mode=ro; ` +
-          `a host-side sqlite3 on a live Docker root is the pass-34 SIGBUS`,
+        `${rel} shows a node:sqlite reader opening the LIVE projection database. ` +
+          `readOnly: true does not help (pass 35, 18:40Z): copy the file and its -wal first and open the copy.`,
       ).toEqual([]);
     },
   );
 
-  it("runbook.md shows the in-container read-only form (docker compose exec … node -e, readOnly: true)", () => {
-    // Without this pin the ordering check below passes vacuously once someone
-    // deletes the container form and the bare-metal line with it.
+  it("runbook.md shows the copy recipe: cp projection.sqlite and its -wal, then open the copy", () => {
     expect(
-      containerReadOnlyFormAt(RUNBOOK.text),
-      `${RUNBOOK.rel} must show the in-container read-only form: docker compose exec -T app node -e ` +
-        `'… new DatabaseSync(path, { readOnly: true }) …'`,
+      copyRecipeAt(RUNBOOK.text),
+      `${RUNBOOK.rel} must show one fenced bash block that copies state/projection.sqlite AND ` +
+        `projection.sqlite-wal to a scratch directory and opens the copy (DatabaseSync or sqlite3 on the copy's path)`,
     ).toBeGreaterThan(-1);
   });
 
-  it.each(PAGES)(
-    "$rel: the in-container read-only form appears BEFORE any host-side sqlite3 form",
-    ({ rel, text }) => {
-      const first = sqlite3Invocations(text).at(0);
-      if (!first) return; // no host-side form on this page at all
-      const containerAt = containerReadOnlyFormAt(text);
-      expect(
-        containerAt,
-        `${rel} shows a host-side sqlite3 form ("${first.command}") with no in-container ` +
-          `read-only form anywhere on the page`,
-      ).toBeGreaterThan(-1);
-      expect(
-        containerAt,
-        `${rel} shows the host-side sqlite3 form ("${first.command}") before the in-container ` +
-          `read-only form; the container form is the one to reach for first`,
-      ).toBeLessThan(first.at);
-    },
-  );
+  it.each(PAGES)("$rel: states the rule in words", ({ rel, text }) => {
+    // `\s+`: markdown prose wraps, and the phrase may break across a line.
+    expect(text, `${rel} must say "copy first"`).toMatch(/copy\s+first/i);
+    expect(text, `${rel} must say "never a second connection"`).toMatch(
+      /never\s+a\s+second\s+connection/i,
+    );
+  });
+
+  it("runbook.md names the controller's viberr_ops tools as the in-process reader to ask first", () => {
+    const readers = /### Readers[\s\S]*?(?=\n## )/.exec(RUNBOOK.text)?.[0] ?? "";
+    expect(readers, `${RUNBOOK.rel} must keep a "### Readers" section`).not.toBe("");
+    expect(
+      readers,
+      `${RUNBOOK.rel}'s readers section must name viberr_ops: the controller reads through the server's own handle`,
+    ).toContain("viberr_ops");
+  });
 
   it.each(PAGES)(
     "$rel: every in-container `npm run backup` names an absolute --out outside /data and copies it out",
@@ -182,10 +206,35 @@ describe("D34-1: the operations docs never open the live projection database fro
         if (hostBackup === -1) continue;
         expect(
           hostBackup,
-          `${rel}: this recipe runs "npm run backup" from the host BEFORE "docker compose down", ` +
-            `i.e. against the live root over the bind mount:\n${block}`,
+          `${rel}: this recipe runs "npm run backup" from the host BEFORE "docker compose down"; ` +
+            `with the app down there is nothing to copy first:\n${block}`,
         ).toBeGreaterThan(down);
       }
     },
   );
+});
+
+describe("ruling 158: the scripts page describes the reader that shipped", () => {
+  const SCRIPTS = page("docs/development/scripts.md");
+
+  /** The `### npm run backup` section, up to the next heading of any level. */
+  function backupSection(text: string): string {
+    return /### `npm run backup`[\s\S]*?(?=\n#{2,3} )/.exec(text)?.[0] ?? "";
+  }
+
+  it("scripts.md's backup detail names the copy, never a read-only connection to the live root", () => {
+    const section = backupSection(SCRIPTS.text);
+    expect(section, `${SCRIPTS.rel} must keep a "### \`npm run backup\`" section`).not.toBe("");
+    expect(
+      section,
+      `${SCRIPTS.rel} still describes the VACUUM INTO as running "from a read-only connection", ` +
+        `which is the pre-158 shape: readOnly: true on a live root is what produced exit 135 twice. ` +
+        `The live-lock path opens a COPY, read-write, so SQLite recovers the copied WAL into it.`,
+    ).not.toMatch(/read-only\s+connection/i);
+    expect(
+      section,
+      `${SCRIPTS.rel}'s backup section must say where the copy lives (state/tmp/), ` +
+        `so the next read-only CLI is written to the shape that shipped`,
+    ).toContain("state/tmp/");
+  });
 });

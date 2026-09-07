@@ -19,7 +19,7 @@ function mkRun(patch: Partial<RunView>): RunView {
     backend: "claude", sdk: "Claude Agent SDK", model: "claude-sonnet-4-5",
     exportable: false, sid: "51d8f0e2-3a7b", state: "running", lifecycle: "running", interruptedBy: null,
     phase: "Running validation sweep", step: "Bash · npm test", startedAt: new Date(Date.now() - 402_000).toISOString(),
-    finished: null, turns: 0, tokens: 0,
+    finished: null, turns: 0, tokens: 0, tokensEstimated: false,
     lines: [{ t: "1", ev: "init", tag: "system·init", text: "session x" }],
     raw: ['{"type":"system","subtype":"init","session_id":"51d8f0e2"}'], lineCount: 1,
     logWindow: { totalLines: 1, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: 0 },
@@ -45,6 +45,31 @@ describe("LiveRunPanel", () => {
     expect(container.querySelector(".who-chip")).not.toBeNull();
     // Elapsed derives from startedAt (~402s → 06:42), never a fabricated count.
     expect(getByText("06:42")).toBeTruthy();
+  });
+
+  /**
+   * F35-1: the Tokens cell tells an estimate from a total. While the row holds
+   * the Claude adapter's live estimate it prints `~n` with the tooltip; a
+   * Codex run before its turn ends prints "pending"; a provider total prints
+   * plain. Canary: print `fmtTok(run.tokens)` unconditionally and both the
+   * tilde and the tooltip are gone.
+   */
+  it("prints an estimated token figure as ~n with a tooltip, null as pending, a total plain", () => {
+    const cell = (run: RunView) => {
+      const { container, unmount } = render(
+        <LiveRunPanel runtime={[run]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />,
+      );
+      const vals = [...container.querySelectorAll(".run-cell")].find((c) => c.querySelector(".lbl")?.textContent === "Tokens")!.querySelector<HTMLElement>(".val")!;
+      const out = { text: vals.textContent, title: vals.getAttribute("title") };
+      unmount();
+      return out;
+    };
+    expect(cell(mkRun({ tokens: 1500, tokensEstimated: true }))).toEqual({
+      text: "~1.5k",
+      title: "Estimated from the streamed text. The provider's own total replaces it when one lands; a run that was stopped never gets one",
+    });
+    expect(cell(mkRun({ tokens: null, tokensEstimated: true }))).toEqual({ text: "pending", title: null });
+    expect(cell(mkRun({ tokens: 1500, tokensEstimated: false }))).toEqual({ text: "1.5k", title: null });
   });
 
   it("shows the AgentPicker when 2+ runs are running (concurrent case)", () => {
@@ -1069,5 +1094,67 @@ describe("ruling 130(a): the classified footer", () => {
     expect(getByText("provider overloaded")).toBeTruthy();
     expect(queryByText(/quota, rate limit/)).toBeNull();
     expect(queryByText(/continuity error/)).toBeNull();
+  });
+
+  it("U35-11: an overload whose origin is this deployment's own network path says 'could not be reached from this deployment'; the pill reads 'provider unreachable'", () => {
+    // Canary: drop the `failureOrigin === "local"` branch and the footer
+    // blames the provider for a TLS failure inside the container.
+    const run = mkRun({ state: "error", lifecycle: "error", failureKind: "overloaded", failureOrigin: "local", failedBackendUnavailable: true });
+    const { getByText, queryByText } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(
+      getByText(/Claude could not be reached from this deployment: the connection failed before the provider answered; nothing about the account is wrong, check the network path and retry in a few minutes/),
+    ).toBeTruthy();
+    expect(getByText("provider unreachable")).toBeTruthy();
+    expect(queryByText(/provider was overloaded/)).toBeNull();
+  });
+});
+
+/**
+ * Pass 35 U35-7: boot recovery finalizes an orphaned run as interrupted by a
+ * RESTART; the panel used to read it as "continuity error" with the user
+ * "restart". Canary: drop the `interruptedReason` arm from the footer and the
+ * pill/footer assertions fail.
+ */
+describe("a run interrupted by a restart", () => {
+  const restartedDev = (patch: Partial<RunView> = {}) =>
+    mkRun({
+      id: "primary",
+      kind: "primary",
+      who: { kind: "agent", backend: "claude", name: "dev", role: "Developer" },
+      state: "idle",
+      lifecycle: "interrupted",
+      interruptedBy: null,
+      interruptedReason: "restart",
+      ...patch,
+    });
+
+  it("the pill and the footer name the restart and what recovery did for a task run", () => {
+    const { container } = render(
+      <AgentLogsPanel runtime={[restartedDev()]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(container.querySelector(".logs-bar .pill")!.textContent).toBe(
+      "interrupted · by a restart",
+    );
+    expect(container.textContent).toContain(
+      "interrupted by a restart; the operator was re-invoked",
+    );
+    expect(container.textContent).not.toContain("continuity error");
+  });
+
+  it("a controller turn names its own recovery: the conversation carries a note", () => {
+    const { container } = render(
+      <AgentLogsPanel
+        runtime={[restartedDev({ kind: "controller", who: { kind: "agent", name: "Controller" } })]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: [] }}
+      />,
+    );
+    expect(container.textContent).toContain(
+      "interrupted by a restart; the conversation carries a note",
+    );
+    expect(container.textContent).not.toContain("the operator was re-invoked");
   });
 });

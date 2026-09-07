@@ -1,15 +1,29 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetEnvCacheForTests } from "~/server/config/env.server";
+import { DATA_ROOT_LOCK_FILENAME, isProcessAlive } from "./data-root-lock.server";
 import {
   closeDb,
+  copyStorePair,
   ensureBaselineColumns,
   getDb,
   getProjectionDbPath,
   isDatabaseShuttingDown,
   openDatabase,
+  openDatabaseReadOnly,
+  READER_SNAPSHOT_DIR,
+  readWalIdentity,
   shutdownDatabase,
 } from "./sqlite.server";
 
@@ -40,11 +54,75 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         // Ruling 127: `upsertRun` names the credential principal on every
         // insert, so a root without this column could not start a run at all.
         "credential_user_id",
+        // Pass 35 U35-7: boot recovery writes the reason on every orphan sweep.
+        "interrupted_reason",
+        // F35-1: the sink patches it on every persisted line.
+        "usage_final",
       ]);
       // Second boot: nothing to add, nothing thrown.
       ensureBaselineColumns(db);
-      expect(columns()).toHaveLength(5);
+      expect(columns()).toHaveLength(7);
       db.prepare(`UPDATE agent_runs SET dispatched_by_name = ? WHERE id = ?`).run("x", "none");
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * F35-1 (pass 35 review). `usage_final` is added with `DEFAULT 0`, and 0
+   * means "no provider figure landed for this run" — which the Insights token
+   * sums read as "leave this row out". On a root that already has history,
+   * SQLite writes that 0 into every existing row, so without a backfill the
+   * whole store's token accounting would disappear from the dashboard at the
+   * first boot after the upgrade while Runs, Turns and Cost kept counting the
+   * same rows. Before the column existed the token columns of a FINISHED run
+   * held the provider's own figures, so those rows are healed to 1; a stopped
+   * or errored row held the live placeholder, which is not a total, and stays
+   * 0. Canary: drop the `backfill` from BASELINE_COLUMNS and the finished row
+   * reads 0.
+   */
+  it("backfills usage_final on the finished runs a pre-column root already holds", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-usagefinal-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      // The agent_runs shape a root carried before F35-1 added the column.
+      db.exec(
+        `CREATE TABLE agent_runs (
+           id TEXT PRIMARY KEY, state TEXT NOT NULL, finished_at TEXT,
+           input_tokens INTEGER NOT NULL DEFAULT 0,
+           output_tokens INTEGER NOT NULL DEFAULT 0);
+         INSERT INTO agent_runs (id, state, finished_at, input_tokens, output_tokens)
+           VALUES ('run_done', 'finished', '2026-09-01T10:00:00.000Z', 4000, 900),
+                  ('run_cut', 'interrupted', '2026-09-01T11:00:00.000Z', 300, 40),
+                  ('run_live', 'running', NULL, 120, 8);`,
+      );
+
+      ensureBaselineColumns(db);
+
+      const finals = new Map(
+        // SAFETY: the two columns are read straight back from the row above.
+        (
+          db.prepare(`SELECT id, usage_final FROM agent_runs ORDER BY id`).all() as {
+            id: string;
+            usage_final: number;
+          }[]
+        ).map((r) => [r.id, r.usage_final]),
+      );
+      expect(finals.get("run_done")).toBe(1);
+      expect(finals.get("run_cut")).toBe(0);
+      expect(finals.get("run_live")).toBe(0);
+
+      // Idempotent: the second boot adds nothing and re-stamps nothing, so a
+      // row the sink has since corrected is not overwritten.
+      db.prepare(`UPDATE agent_runs SET usage_final = 0 WHERE id = 'run_done'`).run();
+      ensureBaselineColumns(db);
+      expect(
+        // SAFETY: one INTEGER column of one row, named in the statement.
+        (db.prepare(`SELECT usage_final FROM agent_runs WHERE id = 'run_done'`).get() as {
+          usage_final: number;
+        }).usage_final,
+      ).toBe(0);
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -271,6 +349,306 @@ describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", 
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+
+/**
+ * Ruling 158, pass 35 review. A reader copies the database and then its WAL,
+ * and nothing used to pin the two: SQLite checkpoints on its own (the writer
+ * leaves `wal_autocheckpoint` at its default) and a checkpoint RESETS the log,
+ * renumbering frames from 1 under a new salt. A copy taken across that reset
+ * applies post-reset frames to a pre-reset main file. Frame checksums do not
+ * catch it — they cover a torn tail — and `backup` labels the artefact a
+ * consistent point-in-time copy, so the reader has to detect the reset itself.
+ */
+describe("copyStorePair (ruling 158): the copied pair comes from one moment", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function busyStore() {
+    const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "viberr-walpin-")));
+    dirs.push(dir);
+    const dbPath = path.join(dir, "projection.sqlite");
+    const db = openDatabase(dbPath);
+    db.exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)`);
+    const insert = db.prepare(`INSERT INTO t (v) VALUES (?)`);
+    for (let i = 0; i < 200; i += 1) insert.run("x".repeat(200));
+    return { dir, dbPath, db };
+  }
+
+  it("the WAL identity is stable while frames are appended and changes when the log is reset", () => {
+    const { dbPath, db } = busyStore();
+    const wal = `${dbPath}-wal`;
+    expect(readWalIdentity(path.join(path.dirname(dbPath), "nothing-here-wal"))).toBeNull();
+
+    const before = readWalIdentity(wal);
+    expect(before).not.toBeNull();
+    // An ordinary commit only APPENDS frames: the pair stays coherent, so a
+    // reader that treated this as a change would retry on every busy root.
+    db.prepare(`INSERT INTO t (v) VALUES (?)`).run("appended");
+    expect(readWalIdentity(wal)).toBe(before);
+
+    // The event that breaks a copy: the log is reset, then written again.
+    db.prepare(`PRAGMA wal_checkpoint(TRUNCATE)`).get();
+    for (let i = 0; i < 50; i += 1) db.prepare(`INSERT INTO t (v) VALUES (?)`).run("y".repeat(200));
+    // Canary: without `readWalIdentity` the reader has nothing to compare, and
+    // the copy below is taken and used as if it were a snapshot.
+    expect(readWalIdentity(wal)).not.toBe(before);
+    db.close();
+  });
+
+  it("a pair taken across a reset is not a faithful copy, which is why the copy is pinned", () => {
+    const { dir, dbPath, db } = busyStore();
+    const badDir = path.join(dir, "unpinned");
+    mkdirSync(badDir, { recursive: true });
+    const bad = path.join(badDir, "projection.sqlite");
+    // The old copy order, with the reset landing in the window between them.
+    copyFileSync(dbPath, bad);
+    db.prepare(`PRAGMA wal_checkpoint(TRUNCATE)`).get();
+    for (let i = 0; i < 50; i += 1) db.prepare(`INSERT INTO t (v) VALUES (?)`).run("y".repeat(200));
+    copyFileSync(`${dbPath}-wal`, `${bad}-wal`);
+    let faithful: boolean;
+    try {
+      const opened = openDatabase(bad);
+      // SAFETY: one INTEGER column named in the statement.
+      const row = opened.prepare(`SELECT count(*) AS n FROM t`).get() as { n: number };
+      faithful = row.n === 250;
+      opened.close();
+    } catch {
+      faithful = false;
+    }
+    expect(faithful).toBe(false);
+
+    // Pinned, with no reset in the window: the copy carries every committed
+    // row, the uncheckpointed ones included.
+    const goodDir = path.join(dir, "pinned");
+    mkdirSync(goodDir, { recursive: true });
+    const good = path.join(goodDir, "projection.sqlite");
+    copyStorePair(dbPath, good);
+    const copy = openDatabase(good);
+    // SAFETY: one INTEGER column named in the statement.
+    expect((copy.prepare(`SELECT count(*) AS n FROM t`).get() as { n: number }).n).toBe(250);
+    copy.close();
+    db.close();
+  });
+});
+
+/**
+ * Ruling 158 (pass 35 F35-9): no process but the server opens a live root's
+ * `projection.sqlite`. Until this, `openDatabaseReadOnly` opened the live file
+ * with `readOnly: true` and the runbook called that the safe form. Live it was
+ * not: an in-container `readOnly: true` reader preceded the server's SIGBUS
+ * (exit 135) by one second (NOTES 18:40Z), the same exit a host-side reader had
+ * produced in pass 34. The mapping of the WAL index is the hazard, not the
+ * write, so the reader now copies the database and its WAL beside the store
+ * whenever `state/writer.lock` is there AT ALL and opens the COPY. Presence is
+ * the whole question (amended in this pass's review): the boot's staleness
+ * tests are pid-namespace-local and `compose.yml` pins the hostname, so a
+ * reader that reused them would call a live holder in a second container stale
+ * and open the live file. Canary: make `openDatabaseReadOnly` open `dbPath` in
+ * place under a live lock and both assertions in the first case fail (the file
+ * is the live path, the later row is visible); restore the boot's verdict as
+ * the reader's rule and the dead-pid case opens the live file too.
+ */
+describe("openDatabaseReadOnly (ruling 158): a reader never opens a live root", () => {
+  interface Root {
+    dir: string;
+    stateDir: string;
+    dbPath: string;
+  }
+
+  function root(): Root {
+    // Resolved, so SQLite's own report of the opened file compares equal on a
+    // macOS temp dir (`/var` is a link to `/private/var`).
+    const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "viberr-reader-")));
+    const stateDir = path.join(dir, "state");
+    mkdirSync(stateDir, { recursive: true });
+    const dbPath = path.join(stateDir, "projection.sqlite");
+    return { dir, stateDir, dbPath };
+  }
+
+  /** A writer that is alive by every probe: this very process, on this host. */
+  function liveLock(r: Root, pid = process.pid): void {
+    writeFileSync(
+      path.join(r.stateDir, DATA_ROOT_LOCK_FILENAME),
+      JSON.stringify({ pid, hostname: hostname(), startedAt: "2026-09-06T18:00:00.000Z" }),
+    );
+  }
+
+  /** A pid nothing occupies, so a lock naming it is stale by the boot's own rule. */
+  function deadPid(): number {
+    for (let pid = 4_194_303; pid > 1; pid -= 1) {
+      if (!isProcessAlive(pid)) return pid;
+    }
+    throw new Error("every pid is alive");
+  }
+
+  /** The file the handle really opened, as SQLite reports it. */
+  function openedFile(reader: ReturnType<typeof openDatabaseReadOnly>): string {
+    // SAFETY: `PRAGMA database_list` yields one row per attached database with
+    // a TEXT `file`; the main database is always the first row.
+    const rows = reader.db.prepare(`PRAGMA database_list`).all() as { file: string }[];
+    return rows[0]!.file;
+  }
+
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function seeded(): Root & { live: ReturnType<typeof openDatabase> } {
+    const r = root();
+    roots.push(r.dir);
+    const live = openDatabase(r.dbPath);
+    live.exec(`CREATE TABLE users (id TEXT PRIMARY KEY)`);
+    live.prepare(`INSERT INTO users (id) VALUES ('u_before')`).run();
+    return { ...r, live };
+  }
+
+  it("with a live writer lock, opens a copy under state/tmp/ and never sees a row written after the open", () => {
+    const r = seeded();
+    liveLock(r);
+    // Committed, not checkpointed: the row lives in the -wal beside the file, so
+    // a reader that copied only the main file would miss it.
+    expect(existsSync(`${r.dbPath}-wal`)).toBe(true);
+
+    const reader = openDatabaseReadOnly(r.dbPath);
+    try {
+      const file = openedFile(reader);
+      expect(file).not.toBe(r.dbPath);
+      expect(path.dirname(path.dirname(file))).toBe(path.join(r.stateDir, READER_SNAPSHOT_DIR));
+      expect(path.basename(path.dirname(file))).toBe(`reader-${process.pid}`);
+      expect(reader.snapshot).not.toBeNull();
+      expect(reader.snapshot?.holder?.pid).toBe(process.pid);
+
+      // The copy carries the WAL: what was committed before the open is there.
+      expect(reader.db.prepare(`SELECT id FROM users ORDER BY id`).all()).toEqual([
+        { id: "u_before" },
+      ]);
+      // Snapshot semantics: a row the server writes after the open is invisible.
+      r.live.prepare(`INSERT INTO users (id) VALUES ('u_after')`).run();
+      expect(reader.db.prepare(`SELECT id FROM users ORDER BY id`).all()).toEqual([
+        { id: "u_before" },
+      ]);
+      reader.close();
+      // Close removes the copy and, it being the last reader, `state/tmp/`
+      // itself: nothing of the reader is left beside the store.
+      expect(existsSync(path.join(r.stateDir, READER_SNAPSHOT_DIR))).toBe(false);
+      // The reader never touched the live database's own sidecars (the live
+      // handle is still open here; its own clean close is what removes them).
+      expect(existsSync(`${r.dbPath}-wal`)).toBe(true);
+    } finally {
+      reader.close();
+      r.live.close();
+    }
+  });
+
+  it("with no lock at all, opens the live file itself, read-only", () => {
+    const r = seeded();
+    r.live.close();
+    const reader = openDatabaseReadOnly(r.dbPath);
+    try {
+      expect(openedFile(reader)).toBe(r.dbPath);
+      expect(reader.path).toBe(r.dbPath);
+      expect(reader.snapshot).toBeNull();
+      expect(() => reader.db.prepare(`INSERT INTO users (id) VALUES ('x')`).run()).toThrow(
+        /readonly/i,
+      );
+    } finally {
+      reader.close();
+    }
+    expect(existsSync(path.join(r.stateDir, READER_SNAPSHOT_DIR))).toBe(false);
+  });
+
+  it("with a lock naming a pid nothing occupies here, still copies: a reader cannot judge liveness across a pid namespace", () => {
+    // The boot would call this stale (same host, dead pid) and reclaim it. A
+    // READER must not: `compose.yml` pins `hostname: viberr`, so a second
+    // container from that file (`docker compose run --rm app npm run backup`)
+    // has the app's own hostname and its OWN pid namespace, where the live
+    // holder's pid is simply unoccupied. Answering "stale" there opens the live
+    // database beside the running server: the second `-shm` mapping ruling 158
+    // exists to prevent. A needless copy costs disk; this costs the server.
+    const r = seeded();
+    const gone = deadPid();
+    liveLock(r, gone);
+    const reader = openDatabaseReadOnly(r.dbPath);
+    try {
+      expect(openedFile(reader)).not.toBe(r.dbPath);
+      expect(reader.snapshot?.holder?.pid).toBe(gone);
+    } finally {
+      reader.close();
+      r.live.close();
+    }
+  });
+
+  it("with a lock naming THIS pid at another start time, still copies: the self-pid tie-break is namespace-local too", () => {
+    // `classifyLock`'s other staleness test compares `/proc/<self.pid>` start
+    // ticks, which across a namespace are never the holder's — two containers
+    // over one data root routinely land on the same low pid. Same answer: copy.
+    const r = seeded();
+    writeFileSync(
+      path.join(r.stateDir, DATA_ROOT_LOCK_FILENAME),
+      JSON.stringify({
+        pid: process.pid,
+        hostname: hostname(),
+        startedAt: "2026-09-06T18:00:00.000Z",
+        procStartedAt: 1,
+      }),
+    );
+    const reader = openDatabaseReadOnly(r.dbPath);
+    try {
+      expect(openedFile(reader)).not.toBe(r.dbPath);
+      expect(reader.snapshot).not.toBeNull();
+    } finally {
+      reader.close();
+      r.live.close();
+    }
+  });
+
+  it("with a lock file it cannot read as a holder, copies first: an unknown holder may be live", () => {
+    const r = seeded();
+    writeFileSync(path.join(r.stateDir, DATA_ROOT_LOCK_FILENAME), "not json");
+    const reader = openDatabaseReadOnly(r.dbPath);
+    try {
+      expect(openedFile(reader)).not.toBe(r.dbPath);
+      expect(reader.snapshot).toEqual({
+        dir: path.join(r.stateDir, READER_SNAPSHOT_DIR, `reader-${process.pid}`),
+        holder: null,
+      });
+    } finally {
+      reader.close();
+      r.live.close();
+    }
+  });
+
+  it("removes the copy a reader that died mid-read left behind, and leaves a live reader's alone", () => {
+    const r = seeded();
+    liveLock(r);
+    const tmpRoot = path.join(r.stateDir, READER_SNAPSHOT_DIR);
+    const dead = path.join(tmpRoot, `reader-${deadPid()}`);
+    mkdirSync(dead, { recursive: true });
+    writeFileSync(path.join(dead, "projection.sqlite"), "left behind");
+    // A directory named for a live pid (a sibling reader mid-read) is not ours to remove.
+    const alive = path.join(tmpRoot, "reader-1");
+    mkdirSync(alive, { recursive: true });
+    const unrelated = path.join(tmpRoot, "not-a-reader");
+    mkdirSync(unrelated, { recursive: true });
+
+    const reader = openDatabaseReadOnly(r.dbPath);
+    try {
+      expect(existsSync(dead)).toBe(false);
+      expect(existsSync(alive)).toBe(true);
+      expect(existsSync(unrelated)).toBe(true);
+      expect(readdirSync(tmpRoot).sort()).toEqual(
+        ["not-a-reader", "reader-1", `reader-${process.pid}`].sort(),
+      );
+    } finally {
+      reader.close();
+      r.live.close();
     }
   });
 });

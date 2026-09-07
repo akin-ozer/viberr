@@ -91,6 +91,20 @@ export type PushWorkspaceResult =
       files: string[];
       reason: string;
     }
+  /**
+   * Ruling 159 (pass 35, F35-10): the revision's tree carries Viberr's own
+   * store layout (`projects/<slug>/tasks/...`), the path an older prompt named
+   * store-relatively and an agent created inside its checkout. Viberr never
+   * publishes its store layout into a customer repository, whatever an agent
+   * did: no push ran, and `files` names every offending path for the refusal
+   * `performDelivery` reports on the task.
+   */
+  | {
+      status: "push_refused_store_layout";
+      branch: string;
+      files: string[];
+      reason: string;
+    }
   /** Ruling 134: origin already carries the workspace head; no push ran.
    *  The only honest noop for a delivery: the PR (if any) is up to date. */
   | { status: "up_to_date"; branch: string; headSha: string }
@@ -305,6 +319,43 @@ async function changedWorkflowFiles(
   // and, worse, ruling 144(c)'s resolution of a standing violation claimed
   // nothing was pushed when nothing was measured.
   return listFrom(`origin/${defaultBranch}..HEAD`);
+}
+
+/** Ruling 159: the store's own layout for one project, as a tree prefix. */
+export function storeLayoutPrefix(projectSlug: string): string {
+  return `projects/${projectSlug}/tasks/`;
+}
+
+/**
+ * Ruling 159 (pass 35, F35-10): every path in the revision's tree that lies
+ * under the store's own layout for this project. Read from HEAD itself
+ * (`git ls-tree -r -z --name-only HEAD -- <prefix>`), not from a range: a path
+ * that reached origin under an older prompt is still Viberr's layout in a
+ * customer repository, and the next delivery must refuse to carry it forward
+ * until a person removes it. `null` when git could not read the tree at all,
+ * which is not a measurement (the push then answers for itself).
+ */
+export async function storeLayoutFilesInTree(
+  exec: Exec,
+  repoDir: string,
+  projectSlug: string,
+): Promise<string[] | null> {
+  const prefix = storeLayoutPrefix(projectSlug);
+  const res = await exec(
+    "git",
+    // `-z` is what makes this a MEASUREMENT. Without it git prints paths under
+    // `core.quotePath` (on by default), so a name carrying a single non-ASCII
+    // byte — an accented screenshot an agent saved — comes back C-quoted as
+    // `"projects/…/r\303\251sum\303\251.png"`, starting with a double quote.
+    // The prefix filter then dropped it and the guard reported a clean tree:
+    // the one failure mode ruling 159(b) cannot have, because an empty list
+    // means "no store layout" and lets the push go. `-z` also ends the need to
+    // trim, so a name with leading or trailing spaces is reported verbatim.
+    ["-C", repoDir, "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", prefix],
+    { cwd: repoDir, timeoutMs: 10_000 },
+  );
+  if (!res.ok) return null;
+  return res.stdout.split("\0").filter((line) => line.startsWith(prefix));
 }
 
 /**
@@ -719,6 +770,32 @@ export async function pushWorkspaceBranch(
           });
         }
       }
+    }
+
+    // Ruling 159 (F35-10): a tree that carries the store's own layout is never
+    // pushed, whether the agent committed it or the auto-commit above just
+    // did. Decided on HEAD's tree, before the commit count, so a branch that
+    // already published the layout under an older prompt is refused too.
+    const storeLayoutFiles = await storeLayoutFilesInTree(exec, repoDir, projectSlug);
+    if (storeLayoutFiles === null) {
+      logger.info("could not read the workspace tree for the store-layout check", {
+        taskKey,
+        branch,
+      });
+    } else if (storeLayoutFiles.length > 0) {
+      logger.info("workspace branch push refused: the tree carries the store layout", {
+        taskKey,
+        branch,
+        files: storeLayoutFiles,
+      });
+      return {
+        status: "push_refused_store_layout",
+        branch,
+        files: storeLayoutFiles,
+        reason:
+          `the branch carries ${storeLayoutFiles.map((f) => `\`${f}\``).join(", ")}, ` +
+          `which is Viberr's own store layout (\`${storeLayoutPrefix(projectSlug)}\`), not part of the repository`,
+      };
     }
 
     // Count local commits not on the default branch — nothing to push otherwise.

@@ -7,6 +7,7 @@ import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type {
   PacketOption,
+  PrRef,
   PrState,
   TaskSchedule,
 } from "~/schemas/task-file.schema";
@@ -467,6 +468,7 @@ function taskFixture(ownerId: string, ownerName: string): TaskSummary {
     commits: [],
     changed: null,
     unownedPr: null,
+    foreignHead: null,
     goal: "Bound the timeline payload and add a Show-older affordance.",
     packet: null,
     eventCount: 0,
@@ -643,7 +645,7 @@ function renderExec(
         operatorAutonomy="supervised"
         runPrincipal={connectedPrincipal()}
         canRunAgents
-        activeAgentProfileIds={[]}
+        liveAgentRuns={[]}
         operatorRunActive={false}
         runBusy={false}
         onRunAgent={onRunAgent}
@@ -800,7 +802,7 @@ describe("ExecutionProfile — the AgentSelect combobox", () => {
     ];
     const { container } = renderExec(execTask(), {
       deployedSpecialists: marked,
-      activeAgentProfileIds: ["developer"],
+      liveAgentRuns: [{ profileId: "developer", lifecycle: "running" }],
     });
     fireEvent.focus(agentInput(container)!);
     const rows = agentOptions(container);
@@ -884,7 +886,7 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
 
   it("a live run on the SELECTED profile disables Run-now, but scheduling stays open", () => {
     const { container, onRunAgent } = renderExec(execTask(), {
-      activeAgentProfileIds: ["developer"],
+      liveAgentRuns: [{ profileId: "developer", lifecycle: "running" }],
     });
     pickAgent(container, "Developer");
     expect(agentRunBtn(container).disabled).toBe(true);
@@ -1288,7 +1290,7 @@ describe("ExecutionProfile — engaged agents ledger", () => {
 
   it("a live run marks its own row 'running…' and no other", () => {
     const { container } = renderExec(engagedTask(), {
-      activeAgentProfileIds: ["reviewer"],
+      liveAgentRuns: [{ profileId: "reviewer", lifecycle: "running" }],
     });
     const rows = [...container.querySelectorAll(".rev-agent")];
     expect(rows[1]!.textContent).toContain("running…");
@@ -2109,15 +2111,19 @@ describe("UI-42/UI-44: the decision packet", () => {
     ],
   };
 
-  it("ruling 138: a DECIDED edit_goal packet renders the chosen option locked, no Confirm, and one 'Edit the goal' control that opens the shared draft", () => {
+  it("ruling 138 / F35-6: a DECIDED edit_goal packet renders the chosen option locked, no Confirm, the requested goal itself, and one 'Edit the goal' control that opens that same draft", () => {
     // Canary: ignore `p.awaiting`/`p.decided` in the card and the radiogroup +
-    // Confirm come back.
+    // Confirm come back. F35-6 canary: drop the `.goal-draft` figure and the
+    // draft assert is red; hand the button `goalDraftForOption(chosen)` again
+    // instead of `p.goalDraft` and the call assert is red (the mapping's
+    // draft, not the card's own composition, is what the editor opens with).
     const onEditGoal = vi.fn();
     const onResolve = vi.fn();
     const decidedPacket: PacketRender = {
       ...goalPacket,
       awaiting: "goal_edit",
       decided: { optionIndex: 0, at: "2026-09-04T10:00:00.000Z", byUserId: "u-arda" },
+      goalDraft: "Deliverable: the search page.\n\nAcceptance: results render.",
     };
     const { container, queryByRole, getByRole } = render(
       <DecisionPacket
@@ -2143,8 +2149,19 @@ describe("UI-42/UI-44: the decision packet", () => {
     expect(container.querySelector("[data-decided-note]")?.textContent).toContain(
       "Decision made · save the edited goal to clear this packet",
     );
+    // F35-6: the requested goal is ON the page after a reload, not only inside
+    // the editor's prefill, so a person sees what "save the edited goal" means.
+    const figure = container.querySelector(".goal-draft")!;
+    expect(figure.querySelector("figcaption")?.textContent).toBe(
+      "Requested goal (opens in the editor)",
+    );
+    expect(figure.querySelector("pre.goal-draft-text")?.textContent).toBe(
+      "Deliverable: the search page.\n\nAcceptance: results render.",
+    );
     fireEvent.click(getByRole("button", { name: "Edit the goal" }));
-    expect(onEditGoal).toHaveBeenCalledWith("A human refines the goal\n\nRewrite it.");
+    expect(onEditGoal).toHaveBeenCalledWith(
+      "Deliverable: the search page.\n\nAcceptance: results render.",
+    );
     expect(onResolve).not.toHaveBeenCalled();
   });
 
@@ -2338,16 +2355,21 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
     const note = noteOf(packetView.container)!;
     expect(note).toBeTruthy();
     expect(note.textContent).toContain(DELIVER_LABEL);
-    // The honesty the trace bought: `openTaskPr` treats a CLOSED cached PR as
-    // terminal and falls through to the CREATE path, so the note must promise a
-    // new PR — never a reopen this app cannot perform.
+    // Ruling 160: the door is REFUSED while the closure is unanswered, and this
+    // packet is what answers it — so the note must name the refusal and make
+    // resolving the precondition, never a click the reader can skip to.
+    expect(note.textContent).toContain("refused while this decision stands");
+    expect(note.textContent).toContain("Answering here is what lifts it");
+    // Still true, and still the reason this is the in-app path: the fresh PR is
+    // a new one, never a reopen this app cannot perform.
     expect(note.textContent).toContain("opens a new review pull request");
     expect(note.textContent).toContain("never reopens a closed one");
-    // Nothing on the delivery path touches the packet (recordDeliveredNextStep
-    // returns early *because* one is open), while the packet body above promises
-    // that a GitHub reopen withdraws it — so the note must not let that promise
-    // travel to the in-app door.
-    expect(note.textContent).toContain("does not resolve this packet");
+    // The promise the packet body makes about GitHub travels here honestly now.
+    expect(note.textContent).toContain("Reopening the pull request on GitHub");
+    // The old copy told the reader delivering did NOT resolve the packet, which
+    // under ruling 160 reads as "click it and skip this decision" — the one
+    // path that always fails.
+    expect(note.textContent).not.toContain("does not resolve this packet");
 
     // The pin: the panel one column over must actually render a button with
     // this exact label, for the same task shape (PR closed, deliverer present).
@@ -2369,6 +2391,53 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
     ].find((b) => b.textContent?.includes(DELIVER_LABEL));
     expect(deliver).toBeTruthy();
     expect(deliver!.textContent?.trim()).toBe(DELIVER_LABEL);
+    // Ruling 160: and that control refuses, so it says so on itself rather than
+    // 409-ing after the click. The refusal names the PR and is readable, not
+    // parked in `title` alone.
+    expect(deliver!.disabled).toBe(true);
+    const refusal = panel.container.querySelector("#deliver-closed-refusal");
+    expect(refusal?.textContent).toContain("PR #143 was closed without merging");
+    expect(refusal?.textContent).toContain("closed-PR decision is answered");
+    expect(deliver!.getAttribute("aria-describedby")).toBe("deliver-closed-refusal");
+  });
+
+  it("names the closer, and lets go once a person has answered the closure", () => {
+    // The unlock is `pr.closure.answered`, the same record `openTaskPr` reads:
+    // an answered closure returns the control to its normal promise. Canary:
+    // drop `!task.pr.closure?.answered` from `closedRefusal` and the answered
+    // case stays refused.
+    const closed = (closure: PrRef["closure"]) =>
+      render(
+        <MemoryRouter>
+          <GithubTrace
+            githubHost={GH_HOST}
+            task={traceTask({
+              pr: { number: 143, state: "closed", title: "x", closure },
+            })}
+            acceptance={traceAcceptance({})}
+            onDeliver={() => {}}
+          />
+        </MemoryRouter>,
+      );
+    const unanswered = closed({
+      at: "2026-09-06T19:33:00.000Z",
+      by: "akin-ozer",
+      answered: null,
+    });
+    expect(
+      unanswered.container.querySelector("#deliver-closed-refusal")?.textContent,
+    ).toContain("closed without merging by akin-ozer");
+
+    const answered = closed({
+      at: "2026-09-06T19:33:00.000Z",
+      by: "akin-ozer",
+      answered: { at: "2026-09-06T20:00:00.000Z", byUserId: "u1" },
+    });
+    expect(answered.container.querySelector("#deliver-closed-refusal")).toBeNull();
+    const btn = [
+      ...answered.container.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((b) => b.textContent?.includes(DELIVER_LABEL));
+    expect(btn?.disabled).toBe(false);
   });
 
   it("stays silent on a packet that is not the closed-PR recovery", () => {
@@ -2567,7 +2636,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canEditGoal
         canArchive
         canDiscardBranch
-        archiveDisclosure={{ taskKey: "VIB-1", branch: "vib-1", pendingRecommendations: 0, unownedPr: null, openPr: null }}
+        archiveDisclosure={{ taskKey: "VIB-1", branch: "vib-1", pendingRecommendations: 0, unownedPr: null, openPr: null, foreignHead: null }}
         onResolveCustom={() => {}} onResolve={onResolve}
         onAsk={() => {}}
       />,
@@ -2611,6 +2680,7 @@ describe("DecisionPacket — pass-20 governance", () => {
           branch: "vib-1",
           pendingRecommendations: 0,
           unownedPr: 232,
+          foreignHead: null,
           openPr: null,
         }}
         onResolveCustom={() => {}} onResolve={onResolve}
@@ -2711,6 +2781,114 @@ describe("DecisionPacket — pass-20 governance", () => {
   });
 
   /**
+   * Ruling 164 (pass 35, F35-14): the two new kinds carry the tier of the
+   * control they perform, in the same table every other gated kind reads. A
+   * maintainer holds `approve-transition` (the stage picker) but not
+   * `force-accept-completion` (admin), so one option is live and one is not.
+   */
+  it("ruling 164: force_accept takes the admin tier and move_stage the stage picker's, each with its own sentence", () => {
+    // Canary: drop either row from PACKET_TIER_GATES and a maintainer is
+    // offered a click the server answers with a 403.
+    const { container } = render(
+      <DecisionPacket
+        packet={withOptions([
+          {
+            kind: "force_accept",
+            t: "Force-accept without a fresh verdict",
+            d: "",
+            rec: true,
+          },
+          {
+            kind: "move_stage",
+            t: "Move VIB-1 back to Review",
+            d: "",
+            toStage: "review",
+          },
+        ])}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        canDiscardBranch
+        canForceAccept={false}
+        canMoveStage
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const opts = container.querySelectorAll<HTMLButtonElement>(".options .opt");
+    expect(opts[0]!.getAttribute("aria-disabled")).toBe("true");
+    expect(opts[0]!.querySelector(".od")!.textContent).toContain(
+      "your role can't force-accept",
+    );
+    // The move stays live for the same viewer: it is the picker's own tier.
+    expect(opts[1]!.getAttribute("aria-disabled")).toBeNull();
+    const denies = container.querySelectorAll(".deny-note");
+    expect(denies).toHaveLength(1);
+    expect(denies[0]!.textContent).toContain(
+      "Force-accepting past the review gate is reserved for admins.",
+    );
+  });
+
+  /**
+   * Ruling 161 (pass 35, U35-8): the delete-branch ceremony says what origin
+   * holds when the reconciler recorded a foreign head. Live (KNC-21) the
+   * dialog promised to delete "this task's" branch while the ref held a
+   * foreign fixture commit the packet itself called "not ours".
+   */
+  it("U35-8: the archive + deleteBranch dialog names the foreign remote head and its PR before the button", () => {
+    // Canary: drop the `foreignHead` block from `PacketArchiveConfirm` and
+    // the sentence is gone.
+    const renderWith = (foreignHead: { sha: string | null; prNumber: number | null } | null) =>
+      render(
+        <DecisionPacket
+          packet={withOptions([
+            {
+              kind: "archive_task",
+              t: "Abandon VIB-1 and delete the branch",
+              d: "",
+              rec: true,
+              deleteBranch: true,
+            },
+          ])}
+          busy={false}
+          canResolve
+          canResolveCompletion
+          canEditGoal
+          canArchive
+          canDiscardBranch
+          archiveDisclosure={{
+            taskKey: "VIB-1",
+            branch: "knc-21",
+            pendingRecommendations: 0,
+            unownedPr: foreignHead?.prNumber ?? null,
+            openPr: null,
+            foreignHead,
+          }}
+          onResolveCustom={() => {}} onResolve={() => {}}
+          onAsk={() => {}}
+        />,
+      );
+    const dialogOf = (container: HTMLElement) =>
+      container.ownerDocument.querySelector('dialog[data-screen-label="Packet archive dialog"]')!;
+
+    const foreign = renderWith({ sha: "d5f23aa".padEnd(40, "1"), prNumber: 33 });
+    fireEvent.click(foreign.container.querySelector(".packet-actions .btn.primary")!);
+    const text = dialogOf(foreign.container).textContent!;
+    expect(text).toContain("carries commits this task did not author");
+    expect(text).toContain("d5f23aa");
+    expect(text).toContain("#33");
+    expect(text).toContain("deleting it removes them too");
+    foreign.unmount();
+
+    const own = renderWith(null);
+    fireEvent.click(own.container.querySelector(".packet-actions .btn.primary")!);
+    expect(dialogOf(own.container).textContent).not.toContain("did not author");
+  });
+
+  /**
    * V16 — the three ask-first ceremonies are ONE shell with three sets of rows
    * (`PacketDestructiveConfirm`). They were three shell-for-shell copies of the
    * standard rulings 20 (R15-1) and 53 (R18-7) hold every one-way write to, so
@@ -2772,6 +2950,7 @@ describe("DecisionPacket — pass-20 governance", () => {
             branch: "vib-1",
             pendingRecommendations: 0,
             unownedPr: 232,
+            foreignHead: null,
           openPr: null,
           }}
           onResolveCustom={() => {}} onResolve={() => {}}
@@ -2851,7 +3030,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canEditGoal={false}
         canArchive={false}
         canDiscardBranch={false}
-        archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0, unownedPr: null, openPr: null }}
+        archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0, unownedPr: null, openPr: null, foreignHead: null }}
         onResolveCustom={() => {}} onResolve={() => {}}
         onRequestMaintainer={onRequestMaintainer}
         onAsk={() => {}}
@@ -3275,6 +3454,35 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     const ta = container.querySelector<HTMLTextAreaElement>(
       "textarea.goal-textarea",
     )!;
+    expect(ta.value).toContain("Bound the timeline payload");
+  });
+
+  // F35-6 (live, KNC-4 14:56Z): after a reload the hero's Edit under the goal
+  // is the door a person takes, and it seeded the ORIGINAL goal while a decided
+  // edit_goal packet waited for the draft; saving that unchanged text answered
+  // "Goal updated" over a packet that still said "save the edited goal".
+  // Canary: seed `task.goal` in the Edit click again and the first assert is red.
+  it("F35-6: while a decided edit_goal packet waits, the hero's own Edit opens with the pending draft", () => {
+    const { container, getByRole } = renderWithRouter(
+      <TaskHero
+        task={heroTask()}
+        stage={undefined}
+        canEditGoal
+        pendingGoalDraft={"Deliverable: the search page.\n\nAcceptance: results render."}
+      />,
+    );
+    fireEvent.click(getByRole("button", { name: "Edit" }));
+    const ta = container.querySelector<HTMLTextAreaElement>("textarea.goal-textarea")!;
+    expect(ta.value).toBe("Deliverable: the search page.\n\nAcceptance: results render.");
+    expect(ta.value).not.toContain("Bound the timeline payload");
+  });
+
+  it("F35-6: with no pending draft the hero's Edit opens with the current goal", () => {
+    const { container, getByRole } = renderWithRouter(
+      <TaskHero task={heroTask()} stage={undefined} canEditGoal pendingGoalDraft={null} />,
+    );
+    fireEvent.click(getByRole("button", { name: "Edit" }));
+    const ta = container.querySelector<HTMLTextAreaElement>("textarea.goal-textarea")!;
     expect(ta.value).toContain("Bound the timeline payload");
   });
 });

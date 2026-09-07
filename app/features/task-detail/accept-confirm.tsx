@@ -111,6 +111,11 @@ function subjectKeyFor(mode: AcceptCeremonyMode): string | undefined {
   switch (mode) {
     case "apply-recommendation":
       return "Applying";
+    // Ruling 164 (pass 35, F35-14): force-accepting is an indirect path now
+    // too. The task page's own button passes no label, so the row still does
+    // not render for it; a `force_accept` packet option passes its title.
+    case "force":
+      return "Decision";
     case "packet":
       return "Decision";
     case "stage-move":
@@ -119,6 +124,9 @@ function subjectKeyFor(mode: AcceptCeremonyMode): string | undefined {
       return undefined;
   }
 }
+
+/** The Blocked row's id, so the disabled confirm can be described by it. */
+const BLOCKED_ROW_ID = "accept-confirm-blocked";
 
 export function AcceptConfirm({
   task,
@@ -138,6 +146,7 @@ export function AcceptConfirm({
    *  packet mode the page passes `blockedReasonViaPacket` here — the refusal a
    *  packet resolution would hit, never the open packet it clears (F19-7). */
   blockedReason,
+  blockedReasonAuthoritative = true,
   /** F32-11 (pass 32): the OPEN decision packet this acceptance withdraws
    *  (its title), or null. Accepting a task with an open packet used to clear
    *  it silently — no row here, no timeline note, no audit — so the human
@@ -175,6 +184,17 @@ export function AcceptConfirm({
   /** R19-B: the human GitHub approval carrying the verdict gate, or null. */
   verdictSatisfiedBy?: string | null;
   blockedReason: string | null;
+  /** Ruling 162's interlock applies to the refusal the SERVER will re-decide
+   *  from the same facts (the task page reads the live task file through
+   *  `resolveAcceptanceAffordance`), so a dialog quoting it may disable its own
+   *  confirm. The board composes its refusal from a projection summary instead
+   *  (`boardAcceptRefusal`, deliberately belt-and-braces so a stale row fails
+   *  CLOSED), and it has no force path: disabling there would dead-end the only
+   *  control on a row the server may well accept. Such a caller passes false —
+   *  the reason is still disclosed above the confirm, and the confirmed click
+   *  lets the server answer. Default true: the interlock is the rule, opting
+   *  out is the exception that has to say so. */
+  blockedReasonAuthoritative?: boolean;
   busy: boolean;
   onCancel: () => void;
   /** Ruling 88: receives the disclosure this dialog just made, for the submit
@@ -186,6 +206,9 @@ export function AcceptConfirm({
   const { ref: panelRef, close } = useDialog(onCancel);
   const mode = ceremony.mode;
   const force = mode === "force";
+  // Ruling 162's interlock, and only where the quoted refusal is the one the
+  // server will re-decide (see `blockedReasonAuthoritative`).
+  const interlocked = blockedReason !== null && blockedReasonAuthoritative;
   const mergeOnly = mode === "complete-merge";
   const terminalName =
     task.stages.length > 0 ? task.stages[task.stages.length - 1]!.name : "Done";
@@ -256,6 +279,10 @@ export function AcceptConfirm({
   // completion on the timeline already (applyAcceptanceWrite), and the only
   // ceremony that reaches `complete-merge` opens from that state.
   const alreadyMerged = pr?.state === "merged";
+  // The exact shape `refreshBranchForAcceptance` acts on: an open (or
+  // accepted-pending) pull request on a branch. A no-change completion and a
+  // merged PR reach the ceremony with nothing to refresh.
+  const refreshedPr = pr !== null && (pr.state === "review" || pr.state === "accepted");
   // Ruling 88 (F21-2): exactly what the three rows below state — the PR behind
   // the "Merges" pill, the sha on the "Revision" row, the value the "Verdict"
   // pill renders. Built here, from the rendered props, so the acknowledgment
@@ -365,6 +392,27 @@ export function AcceptConfirm({
               )}
             </span>
           </div>
+          {/* Ruling 162 / G35-5(d): the acceptance ceremony now runs the base
+              refresh itself (`refreshBranchForAcceptance`) immediately before
+              the gate re-check and the merge — the same workspace merge
+              `update_branch_from_base` performs, pushed to origin. That is a
+              WRITE to the person's branch on GitHub, made by this click, and
+              the dialog is the ruling-88 disclosure: it may not stay silent
+              about it, and the "Merge head" row below is the sha the refresh
+              supersedes when the base has moved. `complete-merge` is excluded
+              because its path (`completeTaskMerge`) merges the PR without the
+              ceremony, so nothing refreshes there. */}
+          {!mergeOnly && task.branch && refreshedPr && (
+            <div className="obs">
+              <span className="k">Branch</span>
+              <span>
+                <span className="mono">{task.branch}</span> is brought up to
+                date with <span className="mono">{defaultBranch}</span> first.
+                If the base has moved, that merge commit is pushed to the
+                branch and becomes the merge head.
+              </span>
+            </div>
+          )}
           <div className="obs">
             <span className="k">Revision</span>
             <span>
@@ -431,10 +479,12 @@ export function AcceptConfirm({
             </div>
           )}
           {blockedReason && (
-            <div className="obs">
+            <div className="obs" id={BLOCKED_ROW_ID}>
               {/* Only force-accept BYPASSES a refusal. On every other path a
                   standing refusal means the server will refuse this click —
-                  saying "Bypassing" there would promise an override nobody has. */}
+                  saying "Bypassing" there would promise an override nobody has.
+                  Ruling 162 (pass 35): that click is not offered either; the
+                  confirm below is disabled and described by this row. */}
               <span className="k">{force ? "Bypassing" : "Blocked"}</span>
               <span>{blockedReason}</span>
             </div>
@@ -483,7 +533,15 @@ export function AcceptConfirm({
           <button
             type="button"
             className={"btn " + (force ? "danger" : "primary")}
-            disabled={busy}
+            // Ruling 162 (pass 35, F35-12 (c)): no surface offers an acceptance
+            // the gate will refuse. A standing refusal disables the confirm on
+            // every mode but force (the one that bypasses it); the reason sits
+            // in the Blocked row above and describes the control. This is a
+            // server-side interlock, not form validation, so ruling 147's
+            // enabled-until-busy rule does not apply — which is exactly why it
+            // needs the refusal to BE the server's own (`blockedReasonAuthoritative`).
+            disabled={busy || (interlocked && !force)}
+            aria-describedby={blockedReason && !force ? BLOCKED_ROW_ID : undefined}
             onClick={() => onConfirm(disclosure)}
           >
             <Icon name={force ? "shield" : mergeOnly ? "github" : "check"} />

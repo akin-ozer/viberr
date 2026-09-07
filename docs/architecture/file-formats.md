@@ -156,6 +156,11 @@ Notes:
   body). A project's `agents:` list *deploys* templates by `profileId` and
   carries the project-effective capability policy (may override the
   template). Task assignments store `profileId` — never joined by role text.
+  `definition.resources` is a COPY of the template's grants taken at deploy
+  time (ruling 156): it changes only through the project editor,
+  `update_agent_deployment`, the org resource-rename rewriter, or a propagation
+  from the template (`save_global_agent { propagate }`, the org modal's box, the
+  Agents page's "Use the template's grants"), and a run mounts the copy.
 - The three always-human capabilities (`merge-pull-request`,
   `transition-to-done`, `change-project-policy`) are a server invariant list
   (`ALWAYS_HUMAN_CAPABILITY_IDS` in `app/shared/capabilities.ts`) — stored
@@ -220,6 +225,18 @@ workRevision:                     # the immutable revision under review, or null
   branch: vib-142-attach-workspace
   createdAt: 2026-07-04T06:41:00.000Z
   sourceProfileId: developer
+  kind: delivered                 # delivered (absent = delivered) | verified (a
+                                  # no-change verification, names the base sha) |
+                                  # discarded (ruling 161: a person discarded the
+                                  # never-pushed branch; the record stays so the
+                                  # verdicts read as history, readers go through
+                                  # `activeWorkRevision`, which answers null)
+  pushedAt: 2026-09-06T19:10:35Z  # ruling 161: stamped by the delivery push that
+                                  # published this head (pushed, or up_to_date with
+                                  # it). Absent = no delivery has seen it on origin;
+                                  # `revisionLeftWorkspace` reads it (never
+                                  # `github.commits`, which the workspace reconcile
+                                  # writes from the local clone)
 verdicts:                         # per-engagement, each bound to a revision
   - profileId: reviewer
     revisionId: rev_9f2c
@@ -264,9 +281,25 @@ pr:                               # GitHub projection mirrored into the file
                                   # and by the workspace reconcile the moment a run
                                   # mints a new revision on an open PR; cleared by
                                   # a delivery that pushes; never for `verified`
+  closure:                        # ruling 160: a person closed this PR without
+    at: 2026-09-06T19:33:19Z      # merging. Stamped by the reconciler on the
+    by: akin-ozer                 # transition into `closed` (the closer's GitHub
+    answered:                     # login, or null); `answered` is stamped when a
+      at: 2026-09-06T19:40:02Z    # person resolves a packet while the PR is closed
+      byUserId: u_arda            # (null until then). Until answered, delivery
+                                  # refuses `closed_by_human`; dropped on reopen
 github:                           # more GitHub cache: commits + change stats
   commits: [{ sha: a91f7c2, msg: "[VIB-142] …" }]
   changed: { files: 9, add: 412, del: 87 }
+  unownedPr: 232                  # R15-15: a PR on the branch name this task did
+                                  # not open (null/absent = no collision)
+  foreignHead:                    # ruling 161 (U35-8): origin's branch carries
+    sha: d5f23aa…                 # commits this task's record does not account
+    prNumber: 232                 # for. Written by the reconciler while it holds
+                                  # (the unowned PR's head, else the compare's tip;
+                                  # null when GitHub named neither), dropped the
+                                  # pass the head is proven this task's; the
+                                  # archive ceremony's delete-branch row reads it
 priority: normal                  # R26-1: normal | high | urgent-ish metadata the OPERATOR
                                   # reads (advisory); never in the specialist prompt
 labels: []                        # R26-2: free-text labels, searchable on the board and ⌘K
@@ -302,8 +335,13 @@ said "The 8 kinds" and omitted `archive_task`, which arrived with R14-3 (the tas
 Updated 2026-08-15, pass 20 — F20-6/R20-2 added `discard_branch` (decisions.md ruling 7), so
 the block that said "The 9 kinds" was itself the straggler. Updated 2026-08-31, pass 31 —
 F31-6 added `resolve_remote_collision`, the branch-collision remedy (close the unowned PR,
-delete the stale remote branch, re-deliver the local work). Eleven is the count today —
-re-derive it from the schema rather than from here.)*
+delete the stale remote branch, re-deliver the local work). Updated 2026-09-07, pass 35 —
+F35-14 added `force_accept` (the admin override, run through the same path as the task
+page's Force accept button) and `move_stage` (a manual board move to the option's own
+`toStage`, run through the stage picker's path), because an option title is a promise the
+resolution keeps and both acts were being written as `custom` and `redirect` titles that
+performed nothing. Thirteen is the count today — re-derive it from the schema rather than
+from here.)*
 
 *(Corrected 2026-08-31, pass 31 — A3. The option sample below carried an `accept: true` field
 annotated "acceptance path marker — human-only". `packetOptionSchema` has no such field:
@@ -311,8 +349,12 @@ acceptance is gated **solely** on `kind === "accept_completion"`, plus the admin
 re-check in `resolvePacket`. The schema is `.loose()`, so an `accept:` key copied out of this
 doc would round-trip as an unknown field and be read by nothing — a silent no-op that looked
 load-bearing. Beyond the four keys shown, the fields the schema actually defines on an option
-are `ev`, `backend`, `profileId`, `deleteBranch` and, since pass 34 (ruling 138), `goalDraft` on
-an `edit_goal` option.)*
+are `ev`, `backend`, `profileId`, `deleteBranch`, since pass 34 (ruling 138) `goalDraft` on
+an `edit_goal` option, since pass 35 (ruling 163) `rework` on a `redirect` option (the
+branch-conflict packet sets it when the task stands past the stage where its reviewers can
+run, and `resolvePacket` then returns the task to that stage in the same write), and since
+pass 35 (ruling 164) `toStage` on a `move_stage` option: the stage id the resolution moves
+the task to, required on that kind and refused on every other.)*
 
 ```yaml
 type: input                       # input | blocked (card tint)
@@ -325,12 +367,13 @@ observations:
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
 options:
-  - kind: accept_completion       # STABLE kind (ruling 7). The 11 kinds:
+  - kind: accept_completion       # STABLE kind (ruling 7). The 13 kinds:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
     rec: true                     #   redirect | retry_other_backend |
                                   #   edit_goal | archive_task | discard_branch |
-                                  #   resolve_remote_collision | custom
+                                  #   resolve_remote_collision | force_accept |
+                                  #   move_stage | custom
                                   # There is NO acceptance marker field: the
                                   # acceptance path is gated on the KIND alone.
                                   # Source of truth: PACKET_OPTION_KINDS in
@@ -340,6 +383,11 @@ options:
     d: …
     rec: false
     ev: "**Decision:** request one edit. …"   # pre-authored timeline copy
+  - kind: move_stage              # ruling 164: the stage the resolution moves to,
+    t: Move KNC-16 back to Review #   on the stage picker's own path. Required on
+    d: So the reviewer can run.   #   this kind, refused on every other, and the
+    toStage: review               #   terminal stage is refused (that is an accept).
+    rec: false
   - kind: edit_goal
     t: Align the goal to the merged spec
     d: Why the goal should change.
@@ -354,6 +402,14 @@ decided:                          # ruling 138: WHICH option, so a reload render
   at: 2026-07-04T07:00:00.000Z    # one "Edit the goal" control) and rebuilds the
   byUserId: u_abc123              # same draft; both clear with the packet
 ```
+
+*(Added 2026-09-07, pass 35, F35-6. `decided` and `goalDraft` stay as above on disk; the
+projection's packet render derives one more field from them, `goalDraft` on the render
+itself (`mapPacket`, `app/shared/mapping/task.server.ts`): `goalDraftForOption` of the
+option `decided.optionIndex` names, present exactly while `awaiting: goal_edit` and a
+decision is recorded. It is never written to the file. Every door into the goal editor
+reads that one field: the decided card prints it and its "Edit the goal" opens it, and the
+hero's own Edit seeds it while the packet waits.)*
 
 ## Timeline
 
@@ -384,7 +440,10 @@ Notes:
 - `validation`, `workRevision` and `verdicts` are a set. `validation` is a derived cache
   recomputed from the other two plus the required-reviewer set on every write; do not
   hand-edit it as a source of truth. A verdict names the `revisionId` it judged, so a new
-  revision automatically staleness-expires every prior verdict.
+  revision automatically staleness-expires every prior verdict. A `kind: discarded`
+  revision (ruling 161) is a retired record: `validation` derives to `none` over it, no
+  verdict binds to it, and the next delivered head mints a fresh id even for the same
+  tree.
 - **`repo` is GONE from the task frontmatter.** The task-level repository override was
   struck by owner ruling on 2026-07-25 (P13-D-5): one project, one repository. *(Corrected
   2026-08-06, pass 19 — this note used to say the field was "vestigial and always null" and
@@ -407,8 +466,9 @@ Notes:
   searchable on the board and in ⌘K; `acceptance: forced` when an admin force-accepted;
   `goalRef: { goalId, linkIndex }` back-reference to a chained goal; `engagements[].pinnedBackend`
   (set by a `retry_other_backend` resolution so the switch sticks, F27-B1); `pr.checks`,
-  `pr.review`, `pr.mergeable`, `pr.headSha`, `pr.revisionDrift`, `pr.unpushedRevision`
-  (reconciler cache, shown above); each `schedules[]`
+  `pr.review`, `pr.mergeable`, `pr.headSha`, `pr.revisionDrift`, `pr.unpushedRevision`,
+  `pr.closure` (reconciler cache, shown above; the closure's `answered` is the packet
+  resolution's); each `schedules[]`
   row carries `action` (`run-operator | run-agent`), `dueAt`, `profileId`, `prompt`,
   `status` (`SCHEDULE_STATUS_VALUES`), `claimedAt`, `firedAt`.
 - Unknown top-level frontmatter keys are preserved verbatim on write (the legacy
@@ -490,7 +550,12 @@ links:
     blockedBy: []                 # ruling 131(c): what this link's task waits on
                                   # (task keys / `goal-2 link 1`); copied onto the
                                   # task the chain creates for the link, validated
-                                  # then, so the task is born held
+                                  # then, so the task is born held. Ruling 155:
+                                  # once the link is active the TASK's list is the
+                                  # wait and this mirrors it on every change (a
+                                  # person, the controller, the operator, the
+                                  # release engine), so a retry is born on the
+                                  # list the record last held
 createdAt: 2026-08-30T10:00:00.000Z
 updatedAt: 2026-08-30T12:00:00.000Z
 ---
@@ -536,8 +601,12 @@ icon: branch                      # ui.jsx Icon name
 backends: [codex, claude]
 model: sonnet                     # ONE catalog id for the first backend (see
                                   # docs/domain/agents-and-runtime.md §2.3);
-effort: high                      # optional reasoning effort (controller today, ruling 106;
-                                  # specialists carry model+effort per deployment)
+                                  # ruling 153: the template's DEFAULT, taken by a
+                                  # library deploy when no override is given
+effort: high                      # optional reasoning effort: the controller (ruling
+                                  # 106) and, ruling 153, a specialist template's
+                                  # default that a library deploy copies onto the
+                                  # deployment when the backend offers the tier
 scope: Global base · customized for Viberr Core
 stages: [ready, impl]             # eligible stages
 spanAll: false                    # operator only

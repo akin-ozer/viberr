@@ -116,6 +116,13 @@ The route resolves the viewer's own `runCredentialFor(db, user.id, "claude")` an
 it to the catalog; a viewer who has not connected Claude gets the curated list and no
 probe is spawned, and one person's live list is never served to another (the cache entry
 carries the home that produced it).
+A template (`agents/profiles/<id>.md`) may carry its own default `model` and `effort`
+(ruling 153, pass 35 G35-2): `save_global_agent` takes both, checked by name against
+the template's backend (a backend switch whose stored model belongs to the other
+backend clears it and the toast says so), and a library deploy takes the template's
+effort when no override is given and the backend offers that tier; a definition-less
+deployment resolves the template's effort live. The org template modal has no picker
+yet (follow-up).
 Effort is ranked `minimal 0 … max 5` and clamped to the backend's list at RUN time only
 (`resolveRunEffort`, for a tier stored before the check existed); every write surface
 that takes a tier (`deploy_agent`, `update_agent_deployment`, and the profile editor for
@@ -139,9 +146,19 @@ provider's own sentence names a spent limit (`session | weekly | monthly | usage
 never transient rate-limit wording), with only the PROVIDER half of the line as its
 evidence and a reset instant that is the SDK's exact `resetsAt`, a Claude
 `usage limit reached|<epoch>` (exact), a `resets 11:50am (UTC)` clock resolved to the
-next UTC occurrence (`clock`, retired with the prose grace) or Codex "try again at …"
-prose resolved in UTC (`prose`). Grace 24 h for prose and clock; an undated exhaustion
-expires after 6 h. Ruling 130(d): every record (reading, exhaustion, credential refusal)
+next UTC occurrence (`clock`, retired with the prose grace), Codex "try again at Sep
+18th, 2026 5:20 PM" prose resolved in UTC (`prose`), or the time-only "try again at
+6:18 PM" a five-hour Codex window refuses with (G35-4, pass 35): the Codex CLI prints
+the wall clock of the process that ran it, so the hour is resolved with the process's
+own local setters (never `Date.UTC`) to the next occurrence at or after the
+observation, precision `clock`. Grace 24 h for prose and clock; an undated exhaustion
+expires after 6 h. **The dispatch hold** (ruling 152(c)): `backendDispatchHold(db,
+backend, { credentialUserId })` is the one read a dispatch makes before it spends
+anything; it stands while the stored exhaustion has not passed its reset instant (no
+grace: the hold trusts the provider's instant) or, when none was named, for
+`UNDATED_HOLD_MS` (30 min) after the refusal, and only for the account the record
+names (ruling 146; a record naming nobody holds every dispatch on the backend). See
+§4.1. Ruling 130(d): every record (reading, exhaustion, credential refusal)
 names the account it billed (`credentialUserId`, `credentialLabel`, the run's
 principal under ruling 127); one latest record per backend, and a completed run by
 ANY person retires an exhaustion or refusal. The principal reaches Insights (org
@@ -251,8 +268,10 @@ stated as the last refusal Viberr observed, retired by any completed run.
 - `agent_runs`: `id, task_key, project_slug, thread_id, role, kind, backend, model,
   session_id, sdk, state (queued|running|finished|error|interrupted), phase, step,
   started_at, finished_at, turns, input_tokens, cached_input_tokens, output_tokens,
-  total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key,
-  credential_user_id`.
+  usage_final, total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key,
+  credential_user_id, interrupted_reason`. `interrupted_by` is the person who stopped
+  the run (a `users.id`) or null; `interrupted_reason` (`restart` or null) says why an
+  `interrupted` run stopped when nobody did (ruling 158 addendum, pass 35 U35-7).
 - **Token columns mean the same thing on both backends.** `input_tokens` is the total
   input the provider processed for the run, cache reads and cache writes included: Codex
   `usage.input_tokens` verbatim (its cache figures are subsets of it); Claude
@@ -265,12 +284,30 @@ stated as the last refusal Viberr observed, retired by any completed run.
   plus the `user`-type messages that flowed through the SDK loop, so every tool result
   counts) and Codex's count of completed turns. The strip's **Tokens** is
   `input_tokens + output_tokens`: total tokens processed. During a Claude run the row
-  holds the adapter's live lower bound (each API message's whole prompt summed once per
-  `message.id`, output as the `message_start` placeholders), folded by max; the result
-  envelope supplies the final figures. Claude `result.usage` covers the main loop only
-  while `total_cost_usd` also covers side-model calls, so tokens and cost sit on slightly
-  different bases; a resumed Codex thread reports the thread's cumulative total. Claude
-  rows written before this normalization hold the uncached slice only.
+  holds the adapter's live figure: each API message's whole prompt summed once per
+  `message.id` (exact; it reproduced `result.usage` on every stored run) and an
+  **estimate** of the output from the streamed content (text, thinking and tool-call
+  input at about four characters per token, summed per envelope), because the SDK's
+  per-envelope `output_tokens` is the `message_start` placeholder of a few tokens
+  (F35-1: a twelve-minute Opus run writing 20k characters read "49 tokens" until its
+  result said 54,759). The prompt figures fold by max; the estimate folds by max while
+  it is an estimate and is **replaced** by the provider's figure when one lands (a
+  Claude `result`, a Codex `turn.completed`), which also sets `usage_final = 1`. While
+  `usage_final` is 0 the row is not a total: the Live run panel prints it as `~n`
+  with a tooltip, a Codex run whose turn has not ended prints "pending", and Insights
+  leaves the row out of its token sums. An errored result carrying an empty usage
+  reports nothing and leaves the estimate and the flag alone. Ending does not settle
+  the question: a run somebody stopped, and one that errored before the provider
+  replied, keep `usage_final = 0` for good, so the panel keeps the `~` on them and the
+  Insights card names them ("N of M runs report no provider token total") instead of
+  quietly understating its sums. Adding the column to a root that predates it heals the
+  rows it already holds: a `finished` row's token columns were the provider's own
+  figures before the estimate existed, so the boot healer stamps those 1; a stopped or
+  errored row held the old placeholder and stays 0. Claude `result.usage`
+  covers the main loop only while `total_cost_usd` also covers side-model calls, so
+  tokens and cost sit on slightly different bases; a resumed Codex thread reports the
+  thread's cumulative total. Claude rows written before this normalization hold the
+  uncached slice only.
 - `credential_user_id` (ruling 127) is the run's **credential principal**: whose account
   it billed. It is written on the reserved row and on the started row, carried in the
   `runtime.run.started` audit, and read back by the transcript locator and the run
@@ -296,6 +333,23 @@ clone. `startRun` audits `runtime.run.started`, substitutes foreign-backend mode
 fails unavailable backends, and otherwise `launch`es a reserved row or `admitRun`s into
 a `pending` queue drained on every completion. The cap is the instance setting
 `maxConcurrentRuns` (0 = unlimited, ceiling 64, Org settings → set-concurrency).
+
+**The coordination lane (ruling 152(b), pass 35).** A positive cap carries a lane of
+`coordinationLane(cap) = max(1, ceil(cap / 4))` extra slots for `operator` and
+`controller` runs, so a decision never queues behind the builds it is deciding about
+(live, fourteen operator turns waited ten minutes behind six four-minute builds). The
+instance holds at most `cap + lane` runs in all and at most `cap` DELIVERY runs
+(`primary`, `reviewer`) among them: a live operator turn never costs a build its slot,
+and an operator turn may borrow a cap slot no build is using. The lane's own slots are
+unconditional; past them a coordination turn takes a slot only while the delivery queue
+is empty, so a freed slot returns to a parked build once coordination holds its whole
+lane (otherwise the coordination bound contains the delivery one and a backlog of turns
+starves the cap's own runs). `reserveRun` and
+`admitRun` both apply the rule by the run's kind; the pending queue is one FIFO per
+lane and `drainRunQueue` promotes the coordination queue first. Every held slot
+(`handles`, `reserved`) carries its lane, so the two counts are read from the slots
+themselves, never from a counter. `runConcurrencySnapshot` is `{cap, lane, live,
+queued}` (`live` and `queued` count both lanes). Cap 0 has no lane.
 Default thread ids: `op-<8>`, `primary-<8>`, `r<idx>-<8>`, `controller`.
 
 ### 3.3 Streaming
@@ -353,6 +407,19 @@ Agent accounts; the same-backend option asserts only that nothing was changed. T
 footer reads "could not serve this run: the provider was overloaded or failed on its
 side", the pill `provider overloaded`, the controller's note "Say it again in a few
 minutes", and the projection counts it as the backend being unavailable (the retry offer).
+U35-11 (pass 35): the record carries `origin`. `provider` is the case above. `local` is a
+connection that failed BEFORE the provider answered, inside the deployment's own
+environment: the Claude CLI reports a TLS verification error, DNS or a refused socket as
+"API Error: Unable to connect to API (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)" under the
+same `server_error` banner with no HTTP status, and both adapters read the shared
+`LOCAL_NETWORK_FAILURE_RE` (`app/shared/run-failure.ts`) for it; a run the provider did
+answer with a 5xx is never local. Same class, same retry, its own attribution: the
+adapter's line reads "could not be reached from this deployment: the connection failed
+before the provider answered (<code>)", `describeRunFailure` names "this deployment's
+network path (TLS, DNS or a proxy)", the same-backend option says "this deployment could
+not reach the provider", the footer "could not be reached from this deployment", the pill
+`provider unreachable`, the controller's note "could not be reached from this
+deployment"; `RunView.failureOrigin` carries it to the client.
 The completion pipeline writes the `blocked` event, notes model availability, opens the
 stuck-loop packet and clears waiting to human. For `quota` and `auth` the event, the
 packet body and the controller's note are worded by ONE module,
@@ -416,7 +483,13 @@ two stories. With no offer the footer states the failure and advertises no retry
 The task page's own controls answer from the loader's `runPrincipal` (the owner's
 per-backend health), so a disabled Run names the person, never a deployment credential.
 Telemetry tags are collapsed by `log-noise.ts`, and the console shows the redacted
-`run·inputs` line so a human can see exactly what the agent was given.
+`run·inputs` line so a human can see exactly what the agent was given. The strip's
+**Tokens** cell (F35-1) reads `RunView.tokens` and `tokensEstimated`: `~1.2M` with the
+tooltip "Estimated from the streamed text. The provider's own total replaces it when one
+lands; a run that was stopped never gets one" whenever the row's `usage_final` is 0
+(while the run is live and after it ends), "pending" while no usage envelope has landed
+at all and the run is still live (a Codex run before its turn ends), and the plain figure
+once the provider's total landed.
 
 ## 4. Specialist runs
 
@@ -434,18 +507,68 @@ Telemetry tags are collapsed by `log-noise.ts`, and the console shows the redact
   project mirror; each supporting run gets `workspace/support/<profileId>/<repo>`, a
   fresh `git clone --local` of the delivering checkout. On clone failure the run
   continues from the workspace root and says so.
+- Ruling 152(c) (pass 35, G35-4): after the eligibility gates and the principal
+  resolution, before anything is spent, `backendDispatchHold` is read for the run's
+  backend and the account it bills. A hold makes NO run row, reservation, clone or
+  process: `holdDispatch` schedules the retry (`run-agent`, the same profile and
+  directive, due one minute after the reopen instant, or `UNDATED_HOLD_MS` after the
+  refusal when the provider named none; not scheduled when the profile is no longer
+  deployed or the task refuses a schedule), writes a `note` titled "Dispatch held" by
+  `system:policy-engine` ("**Held:** Codex is out of quota until Sep 6, 2026 · 18:18
+  UTC (the provider said: "…"). Developer's run starts when the window reopens
+  (scheduled for …); nothing was dispatched and no decision is needed."), audits
+  `task.agent.run_held { backend, until, scheduleId, profileId }`, re-projects, and
+  throws `DispatchHeldError` (`ERROR_CODES.DISPATCH_HELD`, 409, `hold` record, user
+  message "Held: Codex is out of quota until …; Developer's run is scheduled for
+  then."). ONE retry stands per profile per window: a repeat dispatch inside the same
+  hold reuses the pending `run-agent` occurrence (a newer directive replaces its
+  prompt) instead of adding a second, writes no second note and no second "Scheduled:"
+  event, and its audit row records `reusedSchedule`. Without that, N held attempts
+  became N occurrences all due at the reopen instant, and the ones that lost the
+  single-flight race at reopen deferred and then ran the same directive again.
+  Every door passes through the same read (`assertDispatchNotHeld`) against its own
+  target backend, so a Claude retry proceeds while Codex is held: the Run control
+  toasts the sentence and writes no hand-off comment (`isDispatchHeld`), an @mention
+  returns it as `runNotStarted` on both of `commentToAgent`'s branches — the RESUME
+  branch reads the hold itself, before the confinement's MCP pre-flight and skill
+  re-mount, because it never reaches `dispatchAgentRun` — the operator's `run_agent`
+  answers `noop` with the sentence plus "Do not open a packet for this; pick a Claude
+  profile if the work cannot wait" (a throw would abort the rest of the Codex
+  operator's plan), the controller's `run_agent_on_task` surfaces it as the tool's
+  refusal text, and a scheduled occurrence retires `held-quota` (§4.5). A hold is not a
+  decision packet and costs no operator turn. The record behind it is retired by a run
+  that COMPLETES on the backend and by one other thing: a person resolving the quota or
+  auth packet's option that states the window has reset or the account changed
+  (`run-failure-remedy.server.ts` names the backend on that option; `resolvePacket`
+  clears it), because the option promises the agent continues now and the record would
+  otherwise park it until the recorded instant (ruling 164).
+  The operator's PROMPT door (`operatorPromptAgent`) writes no "did NOT start a run"
+  note for a hold either: its own note asks for the directive to be re-sent, which
+  the "Dispatch held" note two lines above says is not needed and which would mint a
+  second schedule over the one the hold already made carrying that same directive.
 - Then: mount granted skills (Claude), resolve the browser MCP, build the persona and
   the analyze prompt (task text, comments and repo content are **data**, never
-  authority), resolve delivery permissions, compute the denylist (or the "everything
+  authority; ruling 159: every path the prompt hands the agent is ABSOLUTE, so the
+  "Posting files on the task thread" section, the browser section and the workspace
+  contract's one exception all name `taskAttachmentsDir` in full and say it is outside
+  the checkout and never committed, because the store-relative form was created inside
+  a clone and pushed), resolve delivery permissions, compute the denylist (or the "everything
   off" list when the profile vanished, ruling 26), write the redacted `run·inputs`
-  line, audit `task.agent.run_started`, mark `waiting: agent`, register the completion
-  callback. A resume re-derives all of it (`resolveResumeConfinement`).
+  line, audit `task.agent.run_started`, lift a packet-less hold (`liftHoldForRun`:
+  `readiness: ready`, a "Hold lifted" note naming the dispatched agent,
+  `task.hold.lifted {cause: "dispatch", profileId}`; ruling 157), mark `waiting:
+  agent`, register the completion callback. A resume re-derives all of it
+  (`resolveResumeConfinement`), the hold lift included: an @mention that resumes an
+  existing session never reaches `dispatchAgentRun`, so `commentToAgent` calls
+  `liftHoldForRun` itself on that branch. That is the common case for a hold, since a
+  hold is usually set because a run FAILED and the agent therefore has a session.
 - Git identity in the run: `<profileId>@viberr.local`; `GIT_CEILING_DIRECTORIES` is the
   task dir.
 
 Stage eligibility (`stages:` on the profile, `spanAll`) gates NEW engagements
 (`assignSpecialist`, `assignReviewer`, the dispatch's auto-engage); an empty list means
-eligible everywhere. Ruling 133 (pass 34): once a profile is the task's delivering
+eligible everywhere. The refusal sentence names stages by their board names ("Rev is
+not eligible for the Triage stage; its profile is scoped to Review."), never raw ids. Ruling 133 (pass 34): once a profile is the task's delivering
 engagement it runs at EVERY stage, on every door (the operator's `run_agent`, the Run
 control, a human @mention's resume, a schedule, `retry_other_backend`), for rework,
 conflict resolution and follow-ups; `runEligibilityFor` is the one home, and the
@@ -527,7 +650,11 @@ lane: a stored `recommend` is coerced to `off` on read (ruling 81). Delivery per
    stage a "no verdict" note unless a human directive dispatched the run.
    `verdictAuthorized = engagement.verdictCapable ?? live verdict grant`.
 4. Question → packet using the live ask grant; evidence rows are written; browser
-   working artifacts not cited are pruned (ruling 105).
+   working artifacts not cited are pruned (ruling 105). Ruling 159: the run's workspace
+   candidates (its `workdir`, `workspace/<repoName>`, `workspace/repo`, `workspace`) are
+   scanned for a stray `projects/<slug>/tasks/<KEY>/attachments` folder an older prompt
+   caused; when one exists a `policy` line by `system:delivery` names the folder, the
+   files it holds ("NOT posted on this task") and the real attachments dir.
 5. Error runs: `blocked` timeline event (worded by `describeRunFailure` for a
    classified refusal), model-availability note, stuck-loop packet whose options come
    from the same module (`retry_other_backend` only when the owner has the other
@@ -551,7 +678,9 @@ kind and backend that is not marked session-missing; the reply preview is capped
 
 `schedules[]` in `task.md`: `scheduleTaskAction({ dueAt, action: run-operator |
 run-agent, profileId?, prompt? })` (future only, not on a terminal task, profile must
-be deployed; audit `task.schedule.created`/`cancelled`). `startScheduleRunner` fires at
+be deployed; audit `task.schedule.created`/`cancelled`), reached from the task page's
+run controls and, ruling 153 (pass 35), the controller's `schedule_task_action` /
+`cancel_task_schedule` under the same `run-agents` tier and bounds. `startScheduleRunner` fires at
 boot and every 60 s: it claims in the file (lease = clone timeout + 5 min, 3 retries),
 skips moot schedules with an outcome (`skipped-done`, `skipped-archived`), starts the
 agent (`400` → failed, `409` → back to pending) or runs the operator with `trigger:
@@ -561,8 +690,13 @@ scheduled` and `scheduleId`, and audits `task.schedule.fired`. The outcomes a
 decision packet is open, the same refusal a person's Run operator gets), and
 `queued-behind-drive` (the run waits behind a live drive; a refusal at the front of the
 lease queue then writes the final `skipped-*` row with `atDrain: true` and a "Scheduled
-action skipped" note). None of the skips spends a retry. A schedule pins no backend or
-autonomy (ruling 94).
+action skipped" note). A `run-agent` occurrence fired into a backend the instance knows
+is out of quota (ruling 152(c)) retires `fired` with outcome `held-quota` and
+`rescheduledAs: <the hold's own schedule id>`: the dispatcher already wrote the
+"Dispatch held" note and put the retry on the schedule, so the occurrence spends no
+retry and is never deferred as a 409 would be (that would mint a fresh hold and a fresh
+schedule row every tick). None of the skips spends a retry. A schedule pins no backend
+or autonomy (ruling 94).
 
 ## 5. The capability catalog
 
@@ -640,6 +774,14 @@ above is the create-seed value and never the runtime's answer for a missing gran
   truncation markers; `KB_PRECEDENCE_NOTE` (repo conventions outrank KBs) is emitted only
   when KB text is present, by all three runtimes (ruling 56). Supporting runs inherit the
   deliverer's KBs, deduplicated, and nothing else (rulings 47, 57).
+- **Grants mount from the deployment's copy, never from the template** (ruling 156,
+  pass 35): a library deploy copies the template's `resources` onto `project.md`
+  `agents[].definition.resources`, and `effectiveProfileView` reads that copy first;
+  only a deployment that carries no definition (the seeded rows) resolves the template
+  live. A template edit therefore changes nothing a run mounts until the copy is
+  rewritten (the template writer's `propagate`, the org modal's box, or an org admin's
+  "Use the template's grants" on the Agents page), and the roster marks a copy whose
+  grants differ with the exact difference (`templateDrift`).
 - **MCP servers**: org registry rows resolve to stdio `{command, args, env:
   {MCP_CREDENTIAL}}` or http `{url, headers: {Authorization: Bearer}}`; reserved names
   are skipped; a missing row is reported "unresolved"; an unhealthy row is still
@@ -658,7 +800,10 @@ above is the create-seed value and never the runtime's answer for a missing gran
 
 - Layout: `projects/<slug>/tasks/<KEY>/workspace/<repoName>` (deliverer and operator,
   shared), `…/workspace/support/<profileId>/<repoName>`, Codex operator scratch
-  `<taskDir>/.operator-scratch`, attachments `<taskDir>/attachments/`.
+  `<taskDir>/.operator-scratch`, attachments `<taskDir>/attachments/`. The
+  store-relative spelling here is a display form (ruling 159); an agent is only ever
+  handed the absolute path, and a delivery whose tree carries `projects/<slug>/tasks/`
+  is refused.
 - Mirror (ruling 87): bare `projects/<slug>/.repo-mirror/<owner>__<repo>.git`, `fetch
   --prune` with a heads-to-heads refspec before each clone (timeout 120 s, rebuilt after
   2 consecutive failures), then a local hardlinked clone with `origin` rewritten to the
@@ -677,10 +822,12 @@ above is the create-seed value and never the runtime's answer for a missing gran
 
 `reconcileRestartedWork` (fire-and-forget after the watchers start):
 
-0. `finalizeOrphanedRuns`: `running|queued` rows → `error` with `interruptedBy:
-   "restart"` (controller runs skipped); one `runOperator({ trigger: "manual" })` per
-   affected task, capped at 3 per task per 30 min via `run.recovery.reinvoked` audit
-   rows.
+0. `finalizeOrphanedRuns`: `running|queued` rows → `interrupted` with
+   `interrupted_reason: "restart"` (`interrupted_by` untouched: a person or null; the
+   pill and footer say "interrupted by a restart", Insights counts the run as stopped and
+   leaves a never-started one out of the completion rate); one `runOperator({ trigger:
+   "manual" })` per affected task (controller turns get a conversation note instead),
+   capped at 3 per task per 30 min via `run.recovery.reinvoked` audit rows.
 1. `recoverUnreactedAgentRuns`: finished specialist runs on tasks still `waiting: agent`
    with no `task.agent.replied` audit row carrying their run id are replayed through the
    completion pipeline using the persisted `outcome_key` (audit
@@ -704,9 +851,13 @@ Every mutating request is also bounded by a 30 s action watchdog (503 on an asyn
 - Prompt-side rules: task text, comments, repo content and agent reports are data; a
   directive is not an authority grant; a directive asking for delivery posts a policy
   event; supporting runs get the read-only paragraph and the delivery denies.
-- Bounds: operator react depth 4, transition chain 8, carried triggers 8, recovery
-  re-invokes 3 per 30 min, schedule retries 3, Claude max turns 2000, idle 15 min per
-  backend, action watchdog 30 s.
+- Bounds: operator react depth 4, transition chain 8 (counted across re-triggered
+  turns; since ruling 152(a) a live operator run's own moves queue no turn, so
+  consecutive `auto` boundaries are walked inside one turn and the stranded-stage
+  backstop covers an abandoned chain), carried triggers 8, recovery re-invokes 3 per
+  30 min, schedule retries 3, Claude max turns 2000, idle 15 min per backend, action
+  watchdog 30 s, coordination lane `max(1, ceil(cap / 4))` extra slots beyond the run
+  cap for operator and controller turns (§3.2, ruling 152(b)).
 
 ## 10. Seeded catalog
 

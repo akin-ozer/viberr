@@ -9,6 +9,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  activeWorkRevision,
   deliveringEngagement,
   deriveValidation,
   supportingEngagements,
@@ -53,7 +54,6 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import {
-  storeRelativePath,
   taskAttachmentsDir,
   taskDir,
 } from "~/server/files/file-store-root.server";
@@ -86,6 +86,12 @@ import {
   refusedPrincipalUserId,
   resolveTaskRunPrincipal,
 } from "~/server/runtimes/run-principal.server";
+import {
+  backendDispatchHold,
+  UNDATED_HOLD_MS,
+  type BackendDispatchHold,
+} from "~/server/runtimes/backend-quota.server";
+import { formatResetLabel } from "./run-failure-remedy.server";
 import {
   defaultModelFor,
   resolveRunModel,
@@ -1543,6 +1549,30 @@ async function dispatchAgentRun(
     input.taskKey,
     backend,
   );
+  // G35-4 / ruling 152(c) (pass 35): the ONE read before anything is spent.
+  // A backend the instance already knows is out of quota for the account this
+  // run bills gets no run row, no clone and no operator turn: the dispatch is
+  // held, said on the timeline, audited, and re-scheduled for the reopen
+  // instant. Live, nine deliveries were dispatched one after another into a
+  // window the health body was already showing as spent, each paying a clone,
+  // a refused run, an operator turn and a "Work stalled" packet. The retry
+  // doors (`retry_other_backend`, the scheduled fire) pass through here
+  // against their OWN target backend, so a Claude retry proceeds while Codex
+  // is held. After the eligibility gates above: an ineligible dispatch is
+  // refused with its own sentence, never parked.
+  if (principal.ok) {
+    await assertDispatchNotHeld(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      backend,
+      credentialUserId: principal.principal.userId,
+      profileId: engagement.profileId,
+      agentName,
+      deployed: resolved !== null,
+      directive: input.directive ?? null,
+      actor: auditActor,
+    });
+  }
   // The clone gate, and every other "will a provider process actually consume
   // this?" gate below. A refused run still becomes a RUN ROW — `startRun`
   // records the refusal as an honest terminal error and the normal completion
@@ -1766,15 +1796,16 @@ async function dispatchAgentRun(
     ],
     unresolvedMcps: resolvedMcps.unresolved,
     unhealthyMcps: resolvedMcps.unhealthy,
+    // Ruling 159: the agent is handed the ABSOLUTE directory (inside the
+    // container `/data/...` is real; on bare metal it is the data root's own
+    // absolute path). The store-relative form is a display form for humans.
     browser: browser.server
-      ? { attachmentsRel: storeRelativePath(attachmentsDir, ctx.dataRoot) }
+      ? { attachmentsDir }
       : browser.refused
         ? { refusedReason: browser.refused.reason }
         : null,
     attachmentsDrop:
-      collab.evidence && realBackend
-        ? { attachmentsRel: storeRelativePath(attachmentsDir, ctx.dataRoot) }
-        : null,
+      collab.evidence && realBackend ? { attachmentsDir } : null,
     // F4: the persona section rides the same predicate the tool mount does.
     githubRead: githubReadForRun({
       githubRead: collab.githubRead,
@@ -1807,10 +1838,12 @@ async function dispatchAgentRun(
   };
   // F15-15: a reviewing run judges the DELIVERED revision (the PR head), not
   // whatever the local workspace branch holds — pin it into the prompt.
+  // Ruling 161: a discarded revision is no subject to review.
+  const activeRevision = activeWorkRevision(existing.parsed.frontmatter.workRevision);
   const reviewSubject =
-    !delivers && existing.parsed.frontmatter.workRevision
+    !delivers && activeRevision
       ? {
-          headSha: existing.parsed.frontmatter.workRevision.headSha,
+          headSha: activeRevision.headSha,
           prNumber: existing.parsed.frontmatter.pr?.number ?? null,
         }
       : null;
@@ -1833,10 +1866,7 @@ async function dispatchAgentRun(
   if (clone?.refreshed) promptInput.workspaceRefresh = clone.refreshed;
   if (anchor) promptInput.anchor = anchor;
   if (collab.evidence && realBackend) {
-    promptInput.attachmentsDropRel = storeRelativePath(
-      attachmentsDir,
-      ctx.dataRoot,
-    );
+    promptInput.attachmentsDropDir = attachmentsDir;
   }
   if (cloneFailure) {
     const promptFailure: PromptCloneFailure = {
@@ -2174,12 +2204,22 @@ async function dispatchAgentRun(
       : runStartedDetails,
   });
 
-  const { registerAgentCompletion, markWaitingAgent } = await import(
+  const { liftHoldForRun, markWaitingAgent, registerAgentCompletion } = await import(
     "./task-actions.server"
   );
   // Dynamic, like the import above: agent-reply already imports THIS module for
   // the deployed-specialist list, so a static import here would close a cycle.
   const { agentMentionHandle } = await import("./agent-reply.server");
+  // Ruling 157 (pass 35, F35-8): a dispatch that starts a run lifts a
+  // packet-less hold on the record, whichever door it came through (the Run
+  // control, an @mention, the operator's `run_agent`, a schedule,
+  // `retry_other_backend`, an applied recommendation).
+  await liftHoldForRun(db, ctx, input.projectSlug, input.taskKey, {
+    kind: "dispatch",
+    profileId: engagement.profileId,
+    name: agentName,
+    by: ctx.operatorAuthorized ? null : auditActor,
+  });
   // The board reads "agent working" while the run is in flight.
   await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
 
@@ -2222,6 +2262,264 @@ async function dispatchAgentRun(
   await registerAgentCompletion(db, ctx, completion);
 
   return { runId, backend, role: engagement.role, name: agentName };
+}
+
+// -------------------------------------------------------------- quota hold
+
+/** The sentence a door shows for a held dispatch (a toast, an @mention's
+ *  `runNotStarted`, the operator's tool reply): what is held, until when, and
+ *  that the retry is already on the schedule. */
+function dispatchHeldSentence(input: {
+  backendLabel: string;
+  agentName: string;
+  untilLabel: string | null;
+  dueLabel: string | null;
+  deployed: boolean;
+}): string {
+  const scheduled = input.dueLabel
+    ? input.untilLabel
+      ? `${input.agentName}'s run is scheduled for then`
+      : `${input.agentName}'s run is retried at ${input.dueLabel}`
+    : input.deployed
+      ? `${input.agentName}'s run was not rescheduled because this task refuses a schedule, run it again once the window reopens`
+      : `${input.agentName}'s run was not rescheduled because it is no longer deployed here`;
+  return input.untilLabel
+    ? `Held: ${input.backendLabel} is out of quota until ${input.untilLabel}; ${scheduled}.`
+    : `Held: ${input.backendLabel} is out of quota and the reopen time is unknown; ${scheduled}.`;
+}
+
+/**
+ * Ruling 152(c): the ONE read every door that starts provider work passes
+ * through, against its own target backend and the account the work bills.
+ * `dispatchAgentRun` is one caller; `commentToAgent`'s RESUME branch is the
+ * other, because it goes straight to `resumeRun` and would otherwise pay the
+ * MCP pre-flight, the skill re-mount and a refused provider run on a window
+ * the instance already knows is spent — the common repeat, since a hold is
+ * usually recorded because a run FAILED and the agent therefore has a session.
+ * Returns nothing and throws `DispatchHeldError` when the backend is held.
+ */
+export async function assertDispatchNotHeld(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    backend: RealBackend;
+    /** The user the work bills (ruling 127); the hold is scoped to it. */
+    credentialUserId: string;
+    profileId: string;
+    agentName: string;
+    deployed: boolean;
+    directive: string | null;
+    actor: AuditActor;
+  },
+): Promise<void> {
+  const hold = backendDispatchHold(db, input.backend, {
+    credentialUserId: input.credentialUserId,
+  });
+  if (!hold) return;
+  throw await holdDispatch(db, ctx, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    backend: input.backend,
+    hold,
+    profileId: input.profileId,
+    agentName: input.agentName,
+    deployed: input.deployed,
+    directive: input.directive,
+    actor: input.actor,
+  });
+}
+
+/**
+ * Ruling 152(c): record a held dispatch and hand back the error the door
+ * throws. Nothing here is a run: no row, no reservation, no process. The
+ * schedule is the retry (`run-agent`, the same profile and directive, due one
+ * minute after the reopen instant, or `UNDATED_HOLD_MS` after the refusal
+ * when the provider named none); the note is the human's record; the audit
+ * row is the machine's. A profile that is no longer deployed cannot be
+ * scheduled (the schedule writer refuses a phantom), so the note says the
+ * retry is not scheduled instead of failing the hold on that refusal.
+ */
+async function holdDispatch(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    backend: RealBackend;
+    hold: BackendDispatchHold;
+    profileId: string;
+    agentName: string;
+    deployed: boolean;
+    directive: string | null;
+    actor: AuditActor;
+  },
+): Promise<AppError> {
+  const backendLabel = input.backend === "claude" ? "Claude" : "Codex";
+  const untilIso = input.hold.until != null ? new Date(input.hold.until).toISOString() : null;
+  const untilLabel = formatResetLabel(untilIso);
+  const observedMs = Date.parse(input.hold.observedAt);
+  const reopensMs =
+    input.hold.until ?? (Number.isFinite(observedMs) ? observedMs : Date.now()) + UNDATED_HOLD_MS;
+  const dueAt = new Date(Math.max(reopensMs + 60_000, Date.now() + 60_000)).toISOString();
+  // Cluster review (pass 35): ONE pending retry per profile per window. Every
+  // door reaches this function and a spent window is exactly what makes a
+  // person (and the operator) dispatch again, so an unconditional
+  // `scheduleTaskAction` turned N refused dispatches into N pending
+  // `run-agent` occurrences all due at the same reopen instant. They are
+  // claimed in one tick: the first starts the run, the rest bounce off the
+  // single-flight 409, defer back to pending with no retry spent, and start
+  // the SAME directive again once that run ends — the paid runs G35-5(c)
+  // exists to stop, moved to the other side of the window. A pending
+  // occurrence for this profile due at or after this hold's reopen instant IS
+  // the retry, so it is reused.
+  const pendingRetry =
+    readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))
+      ?.parsed.frontmatter.schedules.find(
+        (s) =>
+          s.status === "pending" &&
+          s.action === "run-agent" &&
+          s.profileId === input.profileId &&
+          Date.parse(s.dueAt) >= reopensMs,
+      ) ?? null;
+  let scheduleId: string | null = pendingRetry?.id ?? null;
+  /** A repeat hold that changed nothing says nothing: the note, and the
+   *  "Scheduled:" event beside it, are already on the timeline. */
+  let restate = pendingRetry === null;
+  /** The newest directive wins over the pending occurrence's own (the machine
+   *  triggers' rule), and a directive that replaced another is worth the note
+   *  the reader needs to see what the reopen will actually run. */
+  const newerDirective =
+    pendingRetry !== null &&
+    input.directive !== null &&
+    input.directive.trim() !== "" &&
+    input.directive !== pendingRetry.prompt
+      ? input.directive
+      : null;
+  if (pendingRetry !== null && newerDirective !== null) restate = true;
+  if (pendingRetry === null && input.deployed) {
+    const { scheduleTaskAction } = await import("./schedule.server");
+    const scheduleInput: Parameters<typeof scheduleTaskAction>[1] = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      dueAt,
+      action: "run-agent",
+      profileId: input.profileId,
+    };
+    if (input.directive) scheduleInput.prompt = input.directive;
+    try {
+      scheduleId = (await scheduleTaskAction(db, scheduleInput, input.actor, ctx)).id;
+    } catch (error) {
+      // A task at its terminal stage refuses a schedule; the hold still
+      // stands and the note says the retry is by hand.
+      logger.warn("held dispatch could not be rescheduled", {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        profileId: input.profileId,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  const dueLabel = scheduleId ? formatResetLabel(pendingRetry?.dueAt ?? dueAt) : null;
+  const quoted = input.hold.providerText.trim();
+  const said = quoted ? ` (the provider said: "${quoted}")` : "";
+  const retry = scheduleId
+    ? untilLabel
+      ? `${input.agentName}'s run starts when the window reopens (scheduled for ${dueLabel}); nothing was dispatched and no decision is needed.`
+      : `the reopen time is unknown, so ${input.agentName}'s run is retried at ${dueLabel}. Nothing was dispatched and no decision is needed.`
+    : `nothing was dispatched and no decision is needed. The retry was not scheduled because ${input.agentName} ${input.deployed ? "cannot be scheduled on this task" : "is no longer deployed on this project"}; run it again once the window reopens.`;
+  const text = untilLabel
+    ? `**Held:** ${backendLabel} is out of quota until ${untilLabel}${said}. ${retry}`
+    : `**Held:** ${backendLabel} is out of quota${said}; ${retry}`;
+  if (restate) {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      if (newerDirective !== null) {
+        const target = parsed.frontmatter.schedules.find((s) => s.id === scheduleId);
+        if (target && target.status === "pending") target.prompt = newerDirective;
+      }
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: "Dispatch held",
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reproject(db, ctx, input.projectSlug, input.taskKey);
+  }
+  recordAudit(db, {
+    action: "task.agent.run_held",
+    actor: input.actor,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      backend: input.backend,
+      until: untilIso,
+      scheduleId,
+      profileId: input.profileId,
+      // The machine's record of a repeat: the audit row stands for every held
+      // attempt (the timeline note does not), and this says which of them
+      // minted the retry and which reused it.
+      reusedSchedule: pendingRetry !== null,
+    },
+  });
+  return new DispatchHeldError(
+    dispatchHeldSentence({
+      backendLabel,
+      agentName: input.agentName,
+      untilLabel,
+      dueLabel,
+      deployed: input.deployed,
+    }),
+    {
+      backend: input.backend,
+      until: untilIso,
+      scheduleId,
+      profileId: input.profileId,
+      agentName: input.agentName,
+    },
+  );
+}
+
+/** What a held dispatch recorded, for the door that catches it. */
+export interface DispatchHoldRecord {
+  backend: RealBackend;
+  /** ISO instant the window reopens; null when the provider named none. */
+  until: string | null;
+  /** The `run-agent` schedule the hold made; null when none could be. */
+  scheduleId: string | null;
+  profileId: string;
+  agentName: string;
+}
+
+/** Ruling 152(c): the hold a dispatch door reads as "already rescheduled,
+ *  nothing to retry" rather than as a refusal (400) or a conflict (409). A
+ *  typed subclass so the record travels as itself, not as a details bag. */
+export class DispatchHeldError extends AppError {
+  readonly hold: DispatchHoldRecord;
+  constructor(userMessage: string, hold: DispatchHoldRecord) {
+    super({
+      code: ERROR_CODES.DISPATCH_HELD,
+      status: 409,
+      userMessage,
+      details: {
+        backend: hold.backend,
+        until: hold.until,
+        scheduleId: hold.scheduleId,
+        profileId: hold.profileId,
+      },
+    });
+    this.hold = hold;
+  }
+}
+
+export function isDispatchHeld(cause: unknown): cause is DispatchHeldError {
+  return cause instanceof DispatchHeldError;
 }
 
 // ----------------------------------------------------------------- persona
@@ -2269,15 +2567,16 @@ export interface SpecialistPersonaInput {
   unresolvedMcps?: string[];
   /** Mounted, but the last health check failed (P14-LV-09b). */
   unhealthyMcps?: string[];
-  /** R19-19: browser state — mounted (with the store-relative attachments path
-   *  for the guardrail text) or granted-but-refused (with the reason). The
-   *  section renders only when the server actually mounted, so prompt and tool
-   *  surface tell the same story (XS-4). */
-  browser?: { attachmentsRel: string } | { refusedReason: string } | null;
+  /** R19-19: browser state — mounted (with the ABSOLUTE attachments dir for
+   *  the guardrail text, ruling 159) or granted-but-refused (with the reason).
+   *  The section renders only when the server actually mounted, so prompt and
+   *  tool surface tell the same story (XS-4). */
+  browser?: { attachmentsDir: string } | { refusedReason: string } | null;
   /** Owner ask 2026-08-20: the "posting files on the task thread" section —
    *  set when the profile holds `attach-evidence-references` (any backend;
-   *  the drop is a plain directory, not a tool). */
-  attachmentsDrop?: { attachmentsRel: string } | null;
+   *  the drop is a plain directory, not a tool). Ruling 159: the dir is
+   *  absolute; a store-relative path is never handed to an agent. */
+  attachmentsDrop?: { attachmentsDir: string } | null;
   /** F4: the `github_read` guardrail section — set (with the "owner/name" repo
    *  for the copy) only when the tool actually mounted: Claude, real backend,
    *  `read-github-api` granted, and a repo configured. */
@@ -2498,13 +2797,13 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   // it is the general mechanic (copy a file, it lands on your reply) that the
   // browser's default-named-screenshot behavior is a special case of.
   if (input.attachmentsDrop) {
-    parts.push(attachmentsDropSection(input.attachmentsDrop.attachmentsRel));
+    parts.push(attachmentsDropSection(input.attachmentsDrop.attachmentsDir));
   }
   if (input.githubRead) {
     parts.push(githubReadPersonaSection(input.githubRead.repo));
   }
-  if (input.browser && "attachmentsRel" in input.browser) {
-    parts.push(browserPersonaSection(input.browser.attachmentsRel, input.backend));
+  if (input.browser && "attachmentsDir" in input.browser) {
+    parts.push(browserPersonaSection(input.browser.attachmentsDir, input.backend));
   } else if (input.browser && "refusedReason" in input.browser) {
     parts.push(
       "\n\n---\n# Browser not mounted\n\n" +
@@ -2582,13 +2881,13 @@ export interface AnalyzePromptInput {
    *  so a write-granted supporting run may edit and commit in its own checkout
    *  and the prompt says so (C02-R4). */
   delivers: boolean;
-  /** Owner ask 2026-08-20: the task's attachments folder (store-relative),
+  /** Owner ask 2026-08-20: the task's attachments folder (ABSOLUTE, ruling 159),
    *  when the profile holds `attach-evidence-references`. Rendered as the ONE
    *  named exception inside the workspace contract — without it the contract's
    *  "never touch anything outside the working directory" outranks the
    *  persona's posting-files section, and a live agent (VIB-2) correctly
    *  refused the copy twice. */
-  attachmentsDropRel?: string;
+  attachmentsDropDir?: string;
   /** An operator directive that becomes the run's turn focus (when present). */
   directive?: string;
   /** The human who wrote `directive`, when it is a person's comment rather than
@@ -2631,12 +2930,13 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       `- Work ONLY inside the current working directory — it is the dedicated ` +
       `workspace for this task. Never \`cd\` to a parent directory or touch any ` +
       `repository outside it.\n` +
-      (input.attachmentsDropRel
+      (input.attachmentsDropDir
         ? `- One deliberate exception: you may COPY files INTO the task's ` +
-          `attachments folder, \`${input.attachmentsDropRel}\` — that is how a ` +
-          `file is posted on the task thread (see "Posting files on the task ` +
-          `thread"). Everything else outside the working directory stays ` +
-          `off-limits.\n`
+          `attachments folder, \`${input.attachmentsDropDir}\` (an absolute path ` +
+          `outside this checkout; never create it inside the working directory ` +
+          `and never commit it) — that is how a file is posted on the task ` +
+          `thread (see "Posting files on the task thread"). Everything else ` +
+          `outside the working directory stays off-limits.\n`
         : ``) +
       (input.cloned
         ? `- The repository \`${input.repo}\` is already checked out in the current directory.` +
@@ -2846,10 +3146,7 @@ function projectRepo(ctx: TaskMutationContext, projectSlug: string): string | nu
 export function projectBoard(
   ctx: TaskMutationContext,
   projectSlug: string,
-): {
-  stages: readonly { id: string }[];
-  workflow: readonly { from: string; to: string }[];
-} | null {
+): EligibilityBoard | null {
   const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
   if (!file) return null;
   return {
@@ -3055,12 +3352,10 @@ export async function resolveResumeConfinement(
       ],
       unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted).map((u) => u.name),
       unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
+      // Ruling 159: the absolute dir, exactly as the fresh path hands it.
       browser: resumeBrowser.server
         ? {
-            attachmentsRel: storeRelativePath(
-              taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot),
-              ctx.dataRoot,
-            ),
+            attachmentsDir: taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot),
           }
         : resumeBrowser.refused
           ? { refusedReason: resumeBrowser.refused.reason }
@@ -3069,10 +3364,7 @@ export async function resolveResumeConfinement(
       // evidence-granted run used to lose "how to post a file" mid-thread.
       attachmentsDrop: collab.evidence
         ? {
-            attachmentsRel: storeRelativePath(
-              taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot),
-              ctx.dataRoot,
-            ),
+            attachmentsDir: taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot),
           }
         : null,
       // Same predicate as the fresh path. A resume is always a REAL backend
@@ -3675,20 +3967,22 @@ export function specialistEligibleForStage(
 }
 
 type EligibilityBoard = {
-  stages: readonly { id: string }[];
+  stages: readonly { id: string; name: string }[];
   workflow: readonly { from: string; to: string }[];
 };
 
-/** The dispatcher's own refusal sentence, shared by every door (ruling 133). */
+/** The dispatcher's own refusal sentence, shared by every door (ruling 133).
+ *  F35-5 (pass 35, drift D97): stage NAMES through the board, never raw ids. */
 function stageRefusalSentence(
   spec: { name: string; stages: string[]; spanAll: boolean },
   stageId: string,
   board?: EligibilityBoard | null,
 ): string {
+  const nameOf = (id: string): string => (board ? stageName(board.stages, id) : id);
   const scopedTo = board
-    ? resolveDeclaredStages(spec.stages, board.stages, board.workflow).join(", ")
+    ? resolveDeclaredStages(spec.stages, board.stages, board.workflow).map(nameOf).join(", ")
     : spec.stages.join(", ");
-  return `${spec.name} is not eligible for the "${stageId}" stage — its profile is scoped to ${
+  return `${spec.name} is not eligible for the ${nameOf(stageId)} stage; its profile is scoped to ${
     scopedTo || spec.stages.join(", ") || "no stages"
   }. Change the task's stage or the profile's eligible stages.`;
 }

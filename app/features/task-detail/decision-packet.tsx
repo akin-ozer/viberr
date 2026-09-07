@@ -1,7 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
-import { goalDraftForOption } from "~/shared/packet-goal-draft";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -135,6 +134,17 @@ export interface PacketArchiveDisclosure {
    * refuse (live: JC-6 and JC-3, both confirmed, both refused).
    */
   openPr: number | null;
+  /**
+   * Ruling 161 (pass 35, U35-8): origin's copy of the branch carries commits
+   * this task did not author, as the reconciler last recorded it
+   * (`task.foreignHead`): the head sha when GitHub named one and the unowned
+   * PR when one stands. The delete-branch dialog says so BEFORE the button:
+   * live (KNC-21) the archive deleted a remote `knc-21` whose head was a
+   * foreign fixture commit the packet itself called "not ours", and the
+   * dialog never said the remote held someone else's work. Required for the
+   * same reason `unownedPr` is (V1). Null when the head is this task's.
+   */
+  foreignHead: { sha: string | null; prNumber: number | null } | null;
 }
 
 /**
@@ -345,6 +355,40 @@ function PacketArchiveConfirm({
               <>This task's remote branch on GitHub,</>
             )}{" "}
             and every commit that exists only there.{" "}
+            {disclosure?.foreignHead ? (
+              <>
+                Origin&rsquo;s{" "}
+                <span className="mono">{branch ?? "branch"}</span> carries
+                commits this task did not author
+                {disclosure.foreignHead.sha ? (
+                  <>
+                    {" "}
+                    (head{" "}
+                    <span className="mono">
+                      {disclosure.foreignHead.sha.slice(0, 7)}
+                    </span>
+                    {disclosure.foreignHead.prNumber !== null ? (
+                      <>
+                        , pull request{" "}
+                        <span className="mono">
+                          #{disclosure.foreignHead.prNumber}
+                        </span>{" "}
+                        stands on it
+                      </>
+                    ) : null}
+                    )
+                  </>
+                ) : disclosure.foreignHead.prNumber !== null ? (
+                  <>
+                    {" "}
+                    (pull request{" "}
+                    <span className="mono">#{disclosure.foreignHead.prNumber}</span>{" "}
+                    stands on it)
+                  </>
+                ) : null}
+                ; deleting it removes them too.{" "}
+              </>
+            ) : null}
             <strong>Deleting it cannot be undone.</strong> Restoring the task
             later does not bring the branch back.
           </span>
@@ -430,6 +474,17 @@ function PacketDiscardConfirm({
         <span>
           Nothing on GitHub changes: this branch was never pushed. (If it had
           been, the discard is refused and the archive option is the path.)
+        </span>
+      </div>
+      {/* Ruling 161: a reported revision that never left the workspace goes
+          with the branch. Its verdicts stay as history, and nothing is under
+          review afterwards. */}
+      <div className="obs">
+        <span className="k">Review</span>
+        <span>
+          A revision the agent reported on this branch is retired with it: its
+          verdicts stay on the record as history, and the task has no revision
+          under review until an agent delivers again.
         </span>
       </div>
     </PacketDestructiveConfirm>
@@ -580,6 +635,11 @@ interface PacketTierGrants {
   canEditGoal: boolean;
   canArchive: boolean;
   canDiscardBranch: boolean;
+  /** Ruling 164: `force-accept-completion` is admin-only, the tier the task
+   *  page's own Force accept button holds. */
+  canForceAccept: boolean;
+  /** Ruling 164: `approve-transition`, the tier the stage picker holds. */
+  canMoveStage: boolean;
 }
 
 /** One gated option kind: the grant it needs and how a refusal is stated. */
@@ -660,6 +720,32 @@ const PACKET_TIER_GATES = new Map<PacketOptionKind, PacketTierGate>([
     },
   ],
   [
+    "force_accept",
+    {
+      // Ruling 164 (pass 35, F35-14): the resolution runs the admin override
+      // itself, so the option carries the Force accept button's own tier.
+      held: (grants) => grants.canForceAccept,
+      denyNote: "Force-accepting past the review gate is reserved for admins.",
+      option: {
+        title: "Force-accepting past the review gate is reserved for admins",
+        note: " · your role can't force-accept (an admin must)",
+      },
+    },
+  ],
+  [
+    "move_stage",
+    {
+      // Ruling 164: the move runs on the stage picker's path, which takes the
+      // same `approve-transition` tier the picker itself takes.
+      held: (grants) => grants.canMoveStage,
+      denyNote: "Moving the task to another stage is reserved for maintainers and admins.",
+      option: {
+        title: "Moving the task to another stage is reserved for maintainers and admins",
+        note: " · your role can't move the task (a maintainer or admin must)",
+      },
+    },
+  ],
+  [
     "resolve_remote_collision",
     {
       // F31-6: deleting a remote ref takes the same `approve-transition` tier
@@ -697,6 +783,8 @@ export function DecisionPacket({
   canEditGoal,
   canArchive,
   canDiscardBranch = false,
+  canForceAccept = false,
+  canMoveStage = false,
   archiveDisclosure,
   onResolve,
   onResolveCustom,
@@ -731,6 +819,13 @@ export function DecisionPacket({
    *  authority the archive-with-branch-deletion needs). Same block-with-reason
    *  treatment as `canArchive`. */
   canDiscardBranch?: boolean;
+  /** Ruling 164 (pass 35, F35-14): whether the viewer holds
+   *  `force-accept-completion` (admin), the tier a `force_accept` option
+   *  re-checks server-side with the Force accept button's own sentence. */
+  canForceAccept?: boolean;
+  /** Ruling 164: whether the viewer holds `approve-transition`, the tier a
+   *  `move_stage` option re-checks (it is the stage picker's own move). */
+  canMoveStage?: boolean;
   /** UX19-9: what an `archive_task` resolution destroys, for its confirm. */
   archiveDisclosure?: PacketArchiveDisclosure;
   onResolve: (optionIndex: number, note: string) => void;
@@ -794,35 +889,33 @@ export function DecisionPacket({
   const authoredByOperator = p.from === "Operator";
 
   /**
-   * UX19-4 — the closed-PR recovery packet enumerated rework / archive /
-   * archive-and-delete-the-branch and told the reader that reopening the PR on
-   * GitHub was "also a valid path", while the one-click in-app path sat
-   * directly ABOVE the card: the GitHub panel's "Deliver branch & open PR". A
-   * human was sent to GitHub for something this page does. Traced end-to-end
-   * first, because naming a control that then refuses is worse than naming none:
+   * UX19-4, rewritten for ruling 160 (pass 35, F35-11) — the closed-PR recovery
+   * packet enumerated rework / archive / archive-and-delete-the-branch and told
+   * the reader that reopening the PR on GitHub was "also a valid path", while
+   * the GitHub panel's "Deliver branch & open PR" sat directly ABOVE the card.
+   * The note named that control, because it then opened a fresh review PR and
+   * really did recover a mistaken close.
    *
-   *  - the panel renders that button whenever no LIVE pr stands
-   *    (`task-side-panels.tsx`: `!task.pr || state === "closed" | "merged"`) —
-   *    a closed PR satisfies it;
+   * Ruling 160 closed that door on purpose: a pull request a person closed
+   * without merging is a decision about the task, and `openTaskPr` answers
+   * `closed_by_human` while `pr.closure.answered` is null — which is null for
+   * exactly as long as this packet stands, since answering it IS what stamps it
+   * (`resolvePacket`). So the note now says what the door does, because naming
+   * a control that then refuses is worse than naming none:
+   *
+   *  - the panel still renders the button whenever no LIVE pr stands
+   *    (`task-side-panels.tsx`: `!task.pr || state === "closed" | "merged"`),
+   *    and disables it with the same refusal while the closure is unanswered;
    *  - authority is `run-agents` OR this task's own owner
    *    (`manualDeliverForReview`), which is exactly the set `canResolve`
    *    carries here (`task-detail-page.tsx`: `canRunAgents || isOwner`), so the
    *    note is shown only to a viewer who has the button;
-   *  - `manualDeliverForReview` gates on exactly that authority and nothing
-   *    else — no packet check, no stage check — then calls `performDelivery`;
-   *  - `performDelivery` → `openTaskPr` treats a CLOSED cached PR as terminal
-   *    and falls through to the create path (`pr-open.server.ts`): it opens a
-   *    FRESH review PR and never reopens the closed one. Re-pushing a branch
-   *    with nothing new answers `up_to_date` (ruling 134, `push-workspace.server.ts`)
-   *    and the PR open still runs, so a PR closed by mistake really does come
-   *    back through this door.
-   *  - and NOTHING on that path touches the packet — `recordDeliveredNextStep`
-   *    returns early (via `alreadyActionable`) precisely because a packet is
-   *    open. So the last clause is
-   *    not politeness: the packet body (authored from `operator-run.server.ts`)
-   *    promises that reopening on GitHub is "detected automatically" and
-   *    withdraws the packet, and a reader would otherwise carry that promise
-   *    over to the in-app door, where it is false.
+   *  - resolving this packet is therefore the precondition, not an aside: a
+   *    person's answer stamps `closure.answered`, and the NEXT delivery opens a
+   *    fresh review pull request (Viberr never reopens a closed one).
+   *  - reopening the pull request on GitHub lifts the block too: the reconciler
+   *    drops the closure with the closed state, which is the promise the packet
+   *    body (authored from `operator-run.server.ts`) already makes.
    *
    * Keyed on the `archive_task` + `deleteBranch` option because that is the
    * closed-PR signature the schema itself names ("the discard-entirely path for
@@ -853,6 +946,8 @@ export function DecisionPacket({
     canEditGoal,
     canArchive,
     canDiscardBranch,
+    canForceAccept,
+    canMoveStage,
   };
   /** The gate a kind TRIPS, or null when this viewer holds its tier (or it has
    *  no tier at all: `custom`, `request_edit`, the rest). */
@@ -914,6 +1009,11 @@ export function DecisionPacket({
   const decided = p.awaiting === "goal_edit" ? p.decided : undefined;
   if (decided) {
     const chosen = p.options[decided.optionIndex];
+    // F35-6: the draft is the mapping's one `goalDraft` (composed by
+    // `goalDraftForOption` on the chosen option, `mapPacket`), rendered here
+    // so a person who reloads SEES the requested goal, and handed to the
+    // editor unchanged so both doors open the same text.
+    const draft = p.goalDraft;
     return (
       <div className={"packet " + (isBlocked ? "blocked" : "input")} data-decided="">
         <div className="packet-top">
@@ -957,6 +1057,14 @@ export function DecisionPacket({
             <Icon name="check" />
             Decision made · save the edited goal to clear this packet
           </p>
+          {draft && (
+            <figure className="goal-draft">
+              <figcaption className="fine xs dim">
+                Requested goal (opens in the editor)
+              </figcaption>
+              <pre className="goal-draft-text">{draft}</pre>
+            </figure>
+          )}
           <div className="packet-actions">
             <button
               type="button"
@@ -967,12 +1075,12 @@ export function DecisionPacket({
               <Icon name="message" />
               Ask operator
             </button>
-            {canEditGoal && chosen && onEditGoal && (
+            {canEditGoal && chosen && draft && onEditGoal && (
               <button
                 type="button"
                 className="btn primary"
                 disabled={busy}
-                onClick={() => onEditGoal(goalDraftForOption(chosen))}
+                onClick={() => onEditGoal(draft)}
               >
                 Edit the goal
               </button>
@@ -1180,12 +1288,13 @@ export function DecisionPacket({
           // sitting right above it.
           <p className="packet-lede spaced">
             Not in this list: the GitHub panel on this page still offers{" "}
-            <strong>{DELIVER_LABEL}</strong>. It pushes this task&rsquo;s branch
-            again and opens a new review pull request (Viberr never reopens a
-            closed one), so a pull request closed by mistake is recovered from
-            here, with no trip to GitHub. Delivering does not resolve this
-            packet, and the archive option that deletes the branch ends that
-            path.
+            <strong>{DELIVER_LABEL}</strong>, and it is refused while this
+            decision stands. Answering here is what lifts it: choose the rework
+            option and the next delivery opens a new review pull request
+            (Viberr never reopens a closed one), so a pull request closed by
+            mistake is recovered from here, with no trip to GitHub. Reopening
+            the pull request on GitHub lifts the block too, and the archive
+            option that deletes the branch ends that path.
           </p>
         )}
 

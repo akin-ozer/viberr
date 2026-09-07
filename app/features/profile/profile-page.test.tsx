@@ -297,6 +297,43 @@ describe("ProfilePage", () => {
     expect(getByText(/GitHub sign-in isn't configured on this deployment/)).toBeTruthy();
   });
 
+  it("ruling 154: an admin-linked handle reads as such on an OAuth-less deployment, with no Connect", () => {
+    const { getByText } = renderProfile({
+      ...BASE,
+      githubConfigured: false,
+      user: { ...BASE.user, githubConnected: false, githubHandle: "arda-kaya" },
+    });
+    const github = githubPanel(getByText);
+    expect(github.textContent).toContain("@arda-kaya · linked by an org admin");
+    expect(github.textContent).toContain(
+      "An org admin linked your GitHub handle, so your approvals on review pull requests count as the review verdict.",
+    );
+    expect(github.textContent).not.toContain("isn't configured on this deployment");
+    // The person cannot change it here: no field, no Connect, no warn chips.
+    expect(github.querySelector("input")).toBeNull();
+    expect(github.querySelector(".cred-warn")).toBeNull();
+  });
+
+  // Ruling 154: the admin link is not confined to an OAuth-less deployment.
+  // Where GitHub sign-in IS configured, an unconnected local or Google account
+  // with a linked handle takes the cred-card branch, whose warning used to deny
+  // the very capability the line above grants.
+  it("ruling 154: a linked handle on a GitHub-configured deployment is not denied by the warning", () => {
+    const { getByText } = renderProfile({
+      ...BASE,
+      githubConfigured: true,
+      user: { ...BASE.user, githubConnected: false, githubHandle: "arda-kaya" },
+    });
+    const github = githubPanel(getByText);
+    expect(github.textContent).toContain("@arda-kaya · linked by an org admin");
+    expect(github.textContent).not.toContain("can't be matched back to you");
+    expect(github.querySelector(".cred-warn")!.textContent).toContain(
+      "already count as the review verdict",
+    );
+    // The Connect affordance stays: this person still has no OAuth identity.
+    expect(github.querySelector(".cred-warn button.btn")!.textContent).toContain("Connect");
+  });
+
   it("GitHub identity: connected card offers Disconnect", () => {
     const { container } = renderProfile({
       ...BASE,

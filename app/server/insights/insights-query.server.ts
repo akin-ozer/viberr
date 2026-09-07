@@ -27,9 +27,17 @@ export interface InsightsTotals {
    *  `cost` sum below can say nothing about, because only Claude reports one. */
   costedRuns: number;
   cost: number;
+  /** F35-1: the three token sums cover only rows whose provider total landed
+   *  (`agent_runs.usage_final = 1`); a live estimate is not a total and is not
+   *  in them. */
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
+  /** Runs the three sums above leave out (`usage_final = 0`): a run still in
+   *  flight, one that was stopped or errored before a provider figure landed,
+   *  and every row a root carried before the column existed. The card names
+   *  this count, so an understated token headline is never silent. */
+  tokenlessRuns: number;
   turns: number;
 }
 
@@ -115,10 +123,22 @@ export interface InsightsSummary {
   outcomes: {
     finished: number;
     error: number;
+    /** Every `interrupted` run, a person's stop and a restart's alike, so the
+     *  five counts still reconcile with `totals.runs` (F26-5). */
     interrupted: number;
+    /** Pass 35 U35-7: the subset of `interrupted` that never executed a turn
+     *  (`turns = 0` and no `started_at`): a queued run a restart or a person
+     *  stopped before any runtime slot opened. Out of the completion
+     *  denominator, because nothing ran to complete or fail. */
+    interruptedNeverStarted: number;
+    /** Pass 35 U35-7: the subset of `interrupted` whose stored reason is a
+     *  restart (boot recovery). Named on the card so a boot's toll reads as
+     *  what it was, not as failures. */
+    interruptedByRestart: number;
     running: number;
     queued: number;
-    /** finished / (finished+error+interrupted); null when no terminal runs. */
+    /** finished / (finished + error + interrupted - interruptedNeverStarted);
+     *  null when that denominator is zero. */
     successRate: number | null;
   };
   byBackend: CountRow[];
@@ -147,6 +167,7 @@ const totalsSchema = z.object({
   input_tokens: z.number().nullable(),
   cached_input_tokens: z.number().nullable(),
   output_tokens: z.number().nullable(),
+  tokenless_runs: z.number().nullable(),
   turns: z.number().nullable(),
 });
 
@@ -157,6 +178,13 @@ const groupSchema = z.object({
 });
 
 const outcomeSchema = z.object({ state: z.string(), runs: z.number() });
+
+/** Pass 35 U35-7: the two facts about `interrupted` runs the completion rate
+ *  needs. `SUM` over no rows is NULL, hence nullable. */
+const interruptedSchema = z.object({
+  never_started: z.number().nullable(),
+  by_restart: z.number().nullable(),
+});
 
 const durationSchema = z.object({ avg_ms: z.number().nullable() });
 
@@ -456,14 +484,23 @@ export function getInsightsSummary(
         // aggregate: `operator` and `controller` are the coordination kinds
         // (RunKind) — machinery that decides what the working agents do — and
         // both carry real cost.
+        // F35-1: the token columns count only rows whose PROVIDER figure has
+        // landed (`usage_final = 1`). A running Claude row holds the adapter's
+        // live estimate and a running Codex row holds nothing; neither is a
+        // total. Cost is untouched: only the result envelope ever writes it.
+        // The rows left out are COUNTED in the same pass (`tokenless_runs`), so
+        // the card can name them: an interrupted run and an errored one whose
+        // usage was empty never get a provider figure, so their exclusion is
+        // permanent and would otherwise understate the headline in silence.
         `SELECT count(*) AS runs,
                 count(total_cost_usd) AS costed_runs,
                 COALESCE(SUM(total_cost_usd), 0) AS cost,
                 COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
                                   THEN total_cost_usd END), 0) AS coordination_cost,
-                COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
-                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(CASE WHEN usage_final = 1 THEN input_tokens END), 0) AS input_tokens,
+                COALESCE(SUM(CASE WHEN usage_final = 1 THEN cached_input_tokens END), 0) AS cached_input_tokens,
+                COALESCE(SUM(CASE WHEN usage_final = 1 THEN output_tokens END), 0) AS output_tokens,
+                COALESCE(SUM(CASE WHEN usage_final = 0 THEN 1 ELSE 0 END), 0) AS tokenless_runs,
                 COALESCE(SUM(turns), 0) AS turns
          FROM agent_runs ${clause}`,
       )
@@ -491,7 +528,25 @@ export function getInsightsSummary(
   const finished = byState("finished");
   const errored = byState("error");
   const interrupted = byState("interrupted");
-  const terminal = finished + errored + interrupted;
+  // Pass 35 U35-7: boot recovery interrupts every queued/running row a restart
+  // orphaned. Live (2026-09-06 18:40Z) that was 23 rows, 17 of them queued runs
+  // that never executed a turn, and every one counted as an error that lowered
+  // this rate. An interrupted run is not a failure, and one that never started
+  // is not an outcome at all: it leaves the denominator.
+  const interruptedFacts = interruptedSchema.parse(
+    db
+      .prepare(
+        `SELECT SUM(CASE WHEN turns = 0 AND started_at IS NULL THEN 1 ELSE 0 END)
+                  AS never_started,
+                SUM(CASE WHEN interrupted_reason = 'restart' THEN 1 ELSE 0 END)
+                  AS by_restart
+           FROM agent_runs ${and("state = 'interrupted'")}`,
+      )
+      .get(...params),
+  );
+  const interruptedNeverStarted = interruptedFacts.never_started ?? 0;
+  const interruptedByRestart = interruptedFacts.by_restart ?? 0;
+  const terminal = finished + errored + interrupted - interruptedNeverStarted;
 
   // F26-4: order by COST first, then runs. This is a cost dashboard, and the
   // breakdown is capped at TOP_N — a run-first order could truncate away a rare
@@ -597,12 +652,15 @@ export function getInsightsSummary(
       inputTokens: totals.input_tokens ?? 0,
       cachedInputTokens: totals.cached_input_tokens ?? 0,
       outputTokens: totals.output_tokens ?? 0,
+      tokenlessRuns: totals.tokenless_runs ?? 0,
       turns: totals.turns ?? 0,
     },
     outcomes: {
       finished,
       error: errored,
       interrupted,
+      interruptedNeverStarted,
+      interruptedByRestart,
       running: byState("running"),
       queued: byState("queued"),
       successRate: terminal > 0 ? finished / terminal : null,

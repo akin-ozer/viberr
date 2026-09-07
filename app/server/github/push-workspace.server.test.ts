@@ -50,6 +50,24 @@ function bindPat() {
   setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, SYS);
 }
 
+/**
+ * git's own `core.quotePath` rendering: a path with a byte outside printable
+ * ASCII is emitted as a C-quoted string (octal escapes, wrapped in double
+ * quotes). Modelled here so the fake cannot be kinder to the guard than git is.
+ */
+function gitQuotePath(p: string): string {
+  const bytes = Buffer.from(p, "utf8");
+  if (bytes.every((b) => b >= 0x20 && b < 0x7f && b !== 0x22 && b !== 0x5c)) return p;
+  const body = [...bytes]
+    .map((b) =>
+      b >= 0x20 && b < 0x7f && b !== 0x22 && b !== 0x5c
+        ? String.fromCharCode(b)
+        : `\\${b.toString(8).padStart(3, "0")}`,
+    )
+    .join("");
+  return `"${body}"`;
+}
+
 /** A fake git that answers the helper's probes and records the push. `dirty`
  * simulates uncommitted working-tree changes the agent left behind; once the
  * helper commits them, the ahead-count reflects the new commit. */
@@ -92,6 +110,14 @@ function fakeGit(opts: {
   /** Pass 34 review: the `git log` that measures those files FAILS (a shallow
    *  clone with no `origin/<default>`, a truncated history). */
   workflowLogFails?: boolean;
+  /** Ruling 159: what `git ls-tree -r --name-only HEAD -- projects/<slug>/tasks/`
+   *  lists, i.e. the store-layout paths HEAD's tree carries. `after` lists
+   *  them only once the delivery auto-commit ran (the agent left the stray
+   *  folder uncommitted). */
+  storeLayoutFiles?: string[];
+  storeLayoutFilesAfterCommit?: string[];
+  /** The tree read itself fails (a corrupt or unreadable HEAD). */
+  lsTreeFails?: boolean;
 }) {
   const calls: string[][] = [];
   /** The env the `ls-remote` read ran under (ruling 134: the askpass channel). */
@@ -109,6 +135,20 @@ function fakeGit(opts: {
       return sha
         ? { ok: true, stdout: sha, stderr: "" }
         : { ok: false, stdout: "", stderr: "" };
+    }
+    if (args.includes("ls-tree")) {
+      if (opts.lsTreeFails) return { ok: false, stdout: "", stderr: "fatal: not a tree object" };
+      const files = committed
+        ? (opts.storeLayoutFilesAfterCommit ?? opts.storeLayoutFiles ?? [])
+        : (opts.storeLayoutFiles ?? []);
+      // Real git's two output modes, because the difference between them is
+      // the whole finding: `-z` prints raw NUL-terminated paths, and WITHOUT
+      // it `core.quotePath` (on by default) C-quotes any name carrying a
+      // non-ASCII byte, so the line starts with a double quote and no prefix
+      // filter can see it.
+      return args.includes("-z")
+        ? { ok: true, stdout: files.map((f) => `${f}\0`).join(""), stderr: "" }
+        : { ok: true, stdout: files.map(gitQuotePath).join("\n"), stderr: "" };
     }
     if (args.includes("--name-only")) {
       if (opts.workflowLogFails) {
@@ -1061,5 +1101,70 @@ describe("ruling 144: workflow-file pushes and the workflow scope", () => {
   it("the classifier does not mistake a protected-branch rejection for a scope refusal", () => {
     expect(isWorkflowScopeRejection("remote: error: GH006: Protected branch update failed for refs/heads/vib-1-work.")).toBe(false);
     expect(isWorkflowScopeRejection("refusing to allow an OAuth App to create or update workflow `.github/workflows/x.yml` without `workflow` scope")).toBe(true);
+  });
+});
+
+/**
+ * Ruling 159 (pass 35, F35-10): a tree that carries Viberr's own store layout
+ * (`projects/<slug>/tasks/...`) is never pushed. KNC-9's agent created the
+ * store-relative attachments path inside its checkout, committed it, and the
+ * delivery pushed it to GitHub. Canaries: delete the pre-count check (the push
+ * proceeds); read the tree before the auto-commit (the uncommitted folder
+ * slips through); treat an unreadable tree as empty.
+ */
+describe("ruling 159: the store layout never reaches origin", () => {
+  const push = (git: ReturnType<typeof fakeGit>) =>
+    pushWorkspaceBranch({ db: store.db, projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, exec: git.exec });
+  const STRAY = (slug: string) => `projects/${slug}/tasks/VIB-1/attachments/knc-9-licence-verification.txt`;
+
+  it("refuses a revision whose tree holds projects/<slug>/tasks/..., names the path, and runs no push", async () => {
+    bindPat();
+    const stray = STRAY(store.slug);
+    const git = fakeGit({ branch: "vib-1-work", ahead: 1, storeLayoutFiles: [stray] });
+    const res = await push(git);
+    expect(res).toMatchObject({ status: "push_refused_store_layout", branch: "vib-1-work", files: [stray] });
+    expect(res.status === "push_refused_store_layout" ? res.reason : "").toContain(`\`${stray}\``);
+    expect(res.status === "push_refused_store_layout" ? res.reason : "").toContain("store layout");
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+    // The tree was read under the project's own prefix, from HEAD.
+    const lsTree = git.calls.find((c) => c.includes("ls-tree"));
+    expect(lsTree).toEqual(["-C", expect.any(String), "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", `projects/${store.slug}/tasks/`]);
+  });
+
+  it("a stray folder the agent left UNCOMMITTED is caught after the delivery auto-commit", async () => {
+    bindPat();
+    const stray = STRAY(store.slug);
+    const git = fakeGit({
+      branch: "vib-1-work",
+      ahead: 0,
+      dirty: true,
+      storeLayoutFiles: [],
+      storeLayoutFilesAfterCommit: [stray],
+    });
+    const res = await push(git);
+    expect(res).toMatchObject({ status: "push_refused_store_layout", files: [stray] });
+    expect(git.calls.some((c) => c.includes("commit"))).toBe(true);
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+  });
+
+  it("a stray file whose NAME is non-ASCII is seen too (git would quote it)", async () => {
+    bindPat();
+    // The realistic occupant of an attachments folder: a screenshot an agent
+    // named with an accent. Under git's default `core.quotePath` this path is
+    // printed C-quoted, and a guard that reads the quoted line measures an
+    // EMPTY tree and lets the push publish the store layout.
+    const stray = `projects/${store.slug}/tasks/VIB-1/attachments/résumé.png`;
+    const git = fakeGit({ branch: "vib-1-work", ahead: 1, storeLayoutFiles: [stray] });
+    const res = await push(git);
+    expect(res).toMatchObject({ status: "push_refused_store_layout", files: [stray] });
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+  });
+
+  it("a clean tree pushes as before, and an unreadable tree is not a measurement", async () => {
+    bindPat();
+    const clean = await push(fakeGit({ branch: "vib-1-work", ahead: 1, storeLayoutFiles: [] }));
+    expect(clean).toMatchObject({ status: "pushed" });
+    const unread = await push(fakeGit({ branch: "vib-1-work", ahead: 1, lsTreeFails: true }));
+    expect(unread).toMatchObject({ status: "pushed" });
   });
 });

@@ -52,7 +52,7 @@ credential principal's own account rather than a deployment-wide one.)*
 | FR23 | Authorized users reach the native runtime session for debugging | IMPLEMENTED (interpretation) | `routes/resources.session-export.ts` (export + resume locally), raw log console; no in-app live attach |
 | FR24 | Board by stage; cards show stage, agent, waiting, validation | IMPLEMENTED | `features/board/board-page.tsx`, `projections/board-query.server.ts` |
 | FR25 | Task detail prioritizes state, execution profile, latest packet before timeline | IMPLEMENTED | `features/task-detail/task-detail-page.tsx` |
-| FR26 | Structured blocking/decision packets | IMPLEMENTED | `taskPacketSchema`, `PACKET_OPTION_KINDS` (11), `task-actions.resolvePacket`, `features/task-detail/decision-packet.tsx` |
+| FR26 | Structured blocking/decision packets | IMPLEMENTED | `taskPacketSchema`, `PACKET_OPTION_KINDS` (13), `task-actions.resolvePacket`, `features/task-detail/decision-packet.tsx` |
 | FR27 | Approve/reject/redirect; Done human by default; verdict gate; Force-accept; full-autonomy acceptance = merge pending; "Completed — no changes" | IMPLEMENTED, all amendments | `task-actions` acceptance paths, `operator-actions.operatorAcceptCompletion`, `no-change-completion.server.ts`, `features/task-detail/accept-confirm.tsx`, `shared/acceptance-disclosure.ts` |
 | FR28 | Progress review without raw logs | IMPLEMENTED | live phase/step in `features/runtime/runs-panels.tsx`, evidence separation, typed events |
 | FR29 | Authenticate to GitHub, access authorized repos | IMPLEMENTED | sealed PATs (`server/secrets/*`), `server/github/github-client.server.ts`, connections; PAT-only, no GitHub App |

@@ -151,7 +151,15 @@ the tabs sit the Audit log card and the run-concurrency control.
   its PAT and cascades every project binding. A `valid` verdict older than 24 hours is
   re-proven before use. Audit `org.connection.*`, `github.pat.*`.
 - **Users & access**: allow access by local account (temp password shown once, reset
-  forced), Google account, Google domain, or GitHub handle; edit name/email; change org
+  forced), Google account, Google domain, or GitHub handle; edit name/email; link the
+  GitHub handle of a local or Google account (ruling 154: the handle whose PR approval
+  counts as that person's review verdict under ruling 68; normalized to lower case,
+  unique among enabled accounts, refused on a GitHub-signed-in account whose handle
+  syncs from the provider; audit `org.user.github_handle.set` / `.cleared` with the
+  previous value). The invariant holds at every writer: a GitHub sign-in that carries a
+  handle an admin linked elsewhere takes it, clearing the losing row and auditing
+  `org.user.github_handle.cleared` with the reason, and enabling an account whose handle
+  was linked elsewhere while it was disabled is refused naming the holder; change org
   role; reset password (revokes all sessions); disable/enable (disable revokes
   sessions); remove (prunes memberships, releases tasks, retires the person's agent
   accounts, deletes the identity). Removal runs the vendor's own logout and deletes the
@@ -168,12 +176,22 @@ the tabs sit the Audit log card and the run-concurrency control.
   plus `MCP_CREDENTIAL`, first-run installers finish in a 15-minute background warm-up;
   reserved names refused), skills (`skills/<name>/SKILL.md` plus files), global agent
   templates (specialists only, created with conservative grants, undeletable while
-  deployed), and the store browser (upload, folders, doc editing, GitHub import).
+  deployed; the edit modal's "Copy these grants to the N projects that adopted this
+  profile" box rewrites each adopted project's copy of the grants with the save,
+  ruling 156), and the store browser (upload, folders, doc editing, GitHub import).
   Renames rewrite every template and deployment reference. Audit `org.kb.*`,
-  `org.mcp.*`, `org.skill.*`, `org.store.*`, `org.agent_profile.*`.
+  `org.mcp.*`, `org.skill.*`, `org.store.*`, `org.agent_profile.*` (the `updated`
+  row's details carry `diverged` and `propagated` project slugs), and one
+  `project.agent_profile.resources_synced` row per project a propagation rewrote.
 - **Controller**: see [controller-and-goals.md §6](controller-and-goals.md#6-configuring-the-controller-rulings-106-and-108).
 - **Run concurrency**: `set-concurrency` writes `maxConcurrentRuns` (0 = unlimited,
-  ceiling 64) and drains the queue.
+  ceiling 64) and drains the queue. The control shows the cap, the live and queued
+  counts, and under the field, for a positive cap, the lane sentence of ruling 152(b):
+  "Cap N: up to N agent runs at once, plus M slots for operator and controller turns so
+  a decision is not stuck behind the builds it is about." M is the lane the server
+  derived (`max(1, ceil(cap / 4))`), printed rather than stated as a rule. That is why a
+  cap of 2 can show three runs live; the extra one is an operator or controller turn
+  ([agents-and-runtime.md §3.2](agents-and-runtime.md#32-reservation-and-admission)).
 - **Audit log card**: §5.
 
 ## 5. Audit
@@ -210,6 +228,15 @@ non-zero exit, an unconfirmed sign-in or the 15/16-minute timeout,
 the session rows and `backend_credential` for the stored ones. The `reason` is the
 same already-redacted sentence the person sees; a key, a token, a one-time code and a
 raw vendor line never reach an audit row.
+
+**Pass-35 rows.** `task.acceptance.forced` carries `bypassed` (the gate sentences
+joined with " | "), `bypassedGates` (the same list), `skippedStages`, `validation` and
+`withdrawnPacket` (U35-3). `task.hold.lifted {cause: "operator-run" | "dispatch",
+trigger?, profileId?, byUserId?, previous: "blocked"}` is written by `liftHoldForRun`,
+actor the person who started the operator or the operator actor for a dispatch
+(ruling 157). `task.comment.unrouted` gains the `reason: "run-not-started"` shape
+beside the ambiguous-handle one (F35-5). A `task.transition` row with `by: operator`
+and `boundary: approval` can no longer be written (ruling 151).
 
 Where it is read:
 
@@ -272,7 +299,10 @@ dependencies (ruling 131) and ownership; enforced inside `createNotification`), 
 setting was removed by ruling 148(c), the OS preference is the one signal),
 a read-only "Your access" table rendered from the same RBAC rows, **Agent accounts**
 (below), GitHub identity (disconnect flips `idp` back to `local`, refused without a
-password), and a self-service password change (ruling 148(b): a "Password" row on the Profile card whose
+password; on a deployment without GitHub sign-in the card shows an admin-linked handle
+as `@handle · linked by an org admin` and says what the link does, ruling 154: the
+person cannot set their own handle because the verdict path counts approvals by it),
+and a self-service password change (ruling 148(b): a "Password" row on the Profile card whose
 button opens a modal) that keeps the current session and revokes every other one (audit
 `auth.password.changed`). Preferences other than theme
 live in `user_prefs`.

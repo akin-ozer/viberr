@@ -157,6 +157,10 @@ function projectRow(
         role: row.role,
       };
 
+  // `interrupted_by` is a PERSON (a users.id) or null; a restart is not a
+  // person, it is the row's `interrupted_reason` (pass 35 U35-7: boot recovery
+  // used to store the literal "restart" here, so this looked it up as a user
+  // and the pill named it like one).
   let interruptedBy: RunView["interruptedBy"] = null;
   if (row.interrupted_by) {
     const user = findUserById(db, row.interrupted_by);
@@ -165,6 +169,7 @@ function projectRow(
       label: user?.name ?? row.interrupted_by,
     };
   }
+  const interruptedReason: RunView["interruptedReason"] = row.interrupted_reason;
 
   const finished = finishedLabel(row.finished_at);
   // A run can end in `error` because its BACKEND was unavailable / quota-limited
@@ -200,6 +205,12 @@ function projectRow(
       ? undefined
       : (terminal?.failure?.kind ??
         TAGGED_FAILURE_KINDS.find((k) => (terminal?.tag ?? "").endsWith(`·${k}`)));
+  // U35-11: the origin travels with the kind, so the footer can say "could
+  // not be reached from this deployment" instead of blaming the provider.
+  const failureOrigin: "provider" | "local" | undefined =
+    failureKind === "overloaded" && terminal?.failure?.origin
+      ? terminal.failure.origin
+      : undefined;
   const classifiedUnavailable =
     failureKind === "quota" ||
     failureKind === "auth" ||
@@ -251,12 +262,27 @@ function projectRow(
     state: renderStateOf(row.state, finished),
     lifecycle: row.state,
     interruptedBy,
+    interruptedReason,
     phase: row.phase,
     step: row.step,
     startedAt: row.started_at,
     finished,
     turns: row.turns,
-    tokens: row.input_tokens + row.output_tokens,
+    // F35-1: null until a usage envelope has landed (a Codex run before its
+    // turn ends, a Claude run before its first API message) and the run is
+    // still live; a terminal row prints the figure it has rather than
+    // "pending" for ever.
+    tokens:
+      row.usage_final === 0 && row.input_tokens + row.output_tokens === 0 && !finished
+        ? null
+        : row.input_tokens + row.output_tokens,
+    // Whether the figure is an estimate is the column's own question, and the
+    // run ending does not answer it: a run somebody stopped, and one that
+    // errored before the provider replied, keep the adapter's estimate for
+    // good. Dropping the tilde there would print an estimate as the
+    // provider's total, which is the dishonesty F35-1 exists to remove, and
+    // would disagree with the Insights sums, which leave that same row out.
+    tokensEstimated: row.usage_final === 0,
     lines,
     raw,
     // P13-D-11: the count of lines that EXIST, not of the ones this payload
@@ -266,6 +292,7 @@ function projectRow(
     logWindow,
   };
   if (failureKind) view.failureKind = failureKind;
+  if (failureOrigin) view.failureOrigin = failureOrigin;
   // Absent entirely on a run that failed for any other reason. `altBackend` is
   // the D4 offer and rides only when there is a person for the retry to bill
   // (ruling 127): without it the panel states the failure and offers nothing,

@@ -1148,6 +1148,10 @@ inventory is not regenerated automatically and has drifted; the verified module 
     option beside the workarounds. The division of labour is untouched — capability and policy edits
     are a human action (`change-project-policy` sits on the always-human list, ruling 2), so the
     operator points at the remedy and never applies it. Extends ruling 75 (R19-19).
+    *(Amended by ruling 164, pass 35: the remedy is named in the packet's own words — the body
+    and the observations, beside the workarounds — and never as an OPTION. No option kind edits
+    an agent profile, so an option that promised the grant resolved to a send-back that changed
+    nothing, which is the failure 164 exists for. What the packet must SAY is unchanged.)*
     (packet construction in `app/server/runtimes/operator-run.server.ts`; `app/shared/capabilities.ts`;
     the surface is `app/features/agents/agents-page.tsx`)
 
@@ -2608,6 +2612,15 @@ by rewriting those paragraphs:*
     kind; an option without one prefills the option's title and detail verbatim, and the prompts say
     so, so an operator never phrases them as an instruction to the human. Extends R20-1 (a made
     decision is un-re-confirmable) and F17-L3 (the editor prefills with the chosen deliverable).
+    *(Completed 2026-09-07, pass 35, F35-6, not a reversal: the draft was rendered nowhere and
+    only the decided card's own control seeded it, so after a reload the hero's Edit under the
+    goal, the door a person takes, opened with the ORIGINAL goal and an unchanged save read
+    "Goal updated" over a packet still waiting (KNC-4, 14:56Z). The projection's packet render
+    now carries `goalDraft`, composed once in `mapPacket`; the decided card prints it as
+    "Requested goal (opens in the editor)", its "Edit the goal" opens it, and the hero's Edit
+    seeds it while the packet waits. The writer's half, refusing an unchanged save while a
+    `goal_edit` packet is open and reporting "Goal unchanged" without one, lands with the task
+    actions of the same pass.)*
 
 139. **The controller's catalogued writes read first and refuse by name (owner, 2026-09-04, pass 34
     F34-2 / G34-1).** Every `viberr_controller` write that takes a catalogued identifier (a capability
@@ -2927,6 +2940,481 @@ by rewriting those paragraphs:*
     refusal). (`app.css`'s appended ruling-148(d)/149 blocks, pinned in `app.css.test.ts`;
     `features/runtime/runs-panels.tsx`; `features/org-settings/users-panel.tsx`;
     `features/project-settings/settings-page.tsx`.)
+
+151. **Boundary always wins (owner, 2026-09-06, Q35-1; pass 35 F35-2).** A workflow
+    boundary the project author declared is the contract every human reads on the
+    Policy page and in `project.md`, and an operator grant cannot void it. `auto` is
+    the only boundary `stage-transitions: direct` crosses; a declared `approval`
+    boundary always routes to a recommendation a human applies, under either autonomy
+    and either grant mode; a declared `human` boundary is refused to the operator with
+    a sentence, and the terminal stage stays reachable only through acceptance
+    (`operatorAcceptCompletion` answers a move into it under either gate). Rework
+    moves on a failing task (R7-4) are unchanged. `transitionStage` enforces the same
+    rule for any operator-authorized caller, so a `task.transition` row with `by:
+    operator` and `boundary: approval` can never be written again. The full-autonomy
+    notice, the profile modal hint, the Policy page's own closing note and the
+    `transition_stage` tool text say so.
+    (`task-actions.server.ts` `transitionStage`, `operator-actions.server.ts`
+    `operatorTransitionStage`, `operator-toolkit.server.ts`, `create-profile-modal.tsx`,
+    `policy-page.tsx`.)
+
+152. **Coordination cost is a product cost (owner, 2026-09-06, Q35-5 and Q35-15; G35-4,
+    G35-5).** **(a)** An operator turn may cross consecutive `auto` boundaries in one turn:
+    the transition reply names the next boundary, and a transition made by a live operator
+    run queues no fresh operator turn; the stranded-stage backstop covers a chain the model
+    abandons. **(b)** Under a concurrency cap, coordination has its own lane: operator and
+    controller turns are admitted up to one slot per four of the cap beyond it (minimum
+    one) and are promoted ahead of queued delivery runs. The cap itself bounds the
+    DELIVERY runs (`primary`, `reviewer`) and the instance holds at most cap plus lane runs
+    in all, so a live operator turn never costs a build its slot while an operator turn may
+    borrow a cap slot no build is using. The lane's own slots are unconditional; past them
+    the borrow lasts only while no build wants the slot back, so a freed slot goes to a
+    parked build once coordination already holds its whole lane (without that, coordination's
+    bound contains delivery's and a coordination backlog starves the cap's own runs
+    outright). The lane is derived from `maxConcurrentRuns` (`coordinationLane`), not a
+    second setting, and the org-settings control prints the derived number rather than the
+    rule it came from, because the rule names the wrong lane at every cap that is not a
+    multiple of four ("Cap N: up to N agent runs at once, plus M slots for operator and
+    controller turns so a decision is not stuck behind the builds it is about."). **(c)** No dispatch
+    starts on a backend the instance already knows is spent: a dispatch aimed at a backend
+    whose exhaustion record has not passed its reset instant (or is younger than 30 minutes
+    when the instant is unknown) is held, recorded on the timeline with an audit row, and
+    re-scheduled for the reopen time; the provider's wall-clock sentence is read in the
+    process's own time zone, the zone the CLI printed it in. A hold is not a decision
+    packet and costs no operator turn. As shipped, refined in this pass's own review: the
+    hold is scoped to the account the dispatch would bill (ruling 146 — a refusal is a
+    statement about ONE person's account, so a record naming another person holds nothing
+    here, and a record naming nobody holds every dispatch on that backend); every dispatch
+    door reads it through one `assertDispatchNotHeld`, the resume branch of an `@mention`
+    included, ahead of the MCP pre-flight and skill re-mount a refused run would pay for; a
+    repeat dispatch inside one window reuses the pending `run-agent` occurrence instead of
+    minting a second, so a window costs one retry per profile and a newer directive replaces
+    its prompt; `operatorDispatchAgent` answers a held dispatch as `noop` rather than
+    throwing, because the Codex plan executor abandons the rest of a paid turn on a throw;
+    and resolving the quota or auth packet option that states the window has reset (or that
+    the account changed) retires that backend's exhaustion record, so the option's own
+    promise can be kept. (Pass 35: (b) in `run-service.server.ts`
+    `canAdmit`/`drainRunQueue`, `instance-settings.server.ts` `coordinationLane`,
+    `org-settings-page.tsx` `RunConcurrencyControl`; (a) and (c) in the operator actions
+    and the backend-quota hold of the same pass.)
+
+153. **Controller parity for schedules and template defaults (pass 35, G35-1 and
+    G35-2).** The controller schedules and cancels a task's future run with the tier
+    the task page needs (`run-agents`): `schedule_task_action` takes the operator or a
+    deployed profile id, `delayMinutes` (1 to 40320) or an ISO `dueAt` under the same
+    bounds and sentences as the task page's form, and writes the entry to `task.md`
+    with the `<email> · via controller` label; `cancel_task_schedule` retires a pending
+    entry and answers `[noop]` for one that is not; `get_task` lists the pending
+    entries. `save_global_agent` takes a template's default `model` and `effort`,
+    checked by name against its backend (ruling 139): omitted keeps the stored value,
+    `""` clears it, and a backend switch whose stored model belongs to the other
+    backend clears the model and says so. `deploy_agent` and the library deploy take
+    the template's effort when no override is given and the backend offers the tier;
+    a definition-less deployment resolves it live. Names are stored as the person
+    meant them (U35-1): the five XML entities and numeric references are decoded
+    once, ids derive from the decoded text, and a name still carrying angle brackets
+    or control characters is refused. (`controller-toolkit.server.ts`,
+    `gagents.server.ts`, `agent-profile-actions.server.ts`, `shared/names.ts`.)
+
+154. **An org admin may link a GitHub handle (pass 35, G35-3).** On a deployment without
+    GitHub sign-in the only writer of `users.github_handle` was OAuth, so ruling 68 was
+    unreachable: every GitHub approval landed as `unlinked_handle` and the refusal sent
+    people to a profile card that offered nothing to connect. The Edit-user modal under
+    Users & access takes a handle for local and Google accounts (`updateOrgUser`, one
+    normalizer in `shared/github-handle.ts` shared with the OAuth provisioning); a
+    GitHub-signed-in account keeps syncing it from the provider and refuses a typed one.
+    The handle is lowered, must be a GitHub username, is unique among enabled accounts
+    (a duplicate is refused naming its holder, since the verdict path fails closed on
+    one) and the change is audited (`org.user.github_handle.set` / `.cleared` with the
+    previous value). Every writer of the column keeps that invariant, not just the admin
+    door: a GitHub sign-in is the authoritative claim on a handle, so it takes one an
+    admin linked elsewhere and the losing row is cleared and audited with the reason;
+    enabling an account whose handle was linked elsewhere while it was disabled is
+    refused naming the holder. A person cannot set their own handle, because the verdict path
+    counts approvals by it; their profile shows an admin-linked handle as
+    `@handle · linked by an org admin`. The `unlinked_handle` refusal names both doors.
+
+155. **An active link's wait is its task's list (pass 35, F35-3; amends 131(c)).** Once a
+    goal link has started a task, the task's `blockedBy` is the wait and the goal file's
+    `links[].blockedBy` mirrors it on every change (human, controller, operator or engine
+    release), so a retried link is born on the wait the record last held. `edit_link` on an
+    active link may change `blockedBy` only, forwarded to the task's writer after the
+    chain's own order rules have passed (the task's writer does not carry them). Live, a
+    controller `update_task {blockedBy: []}` released KNC-3 while `goal-3` link 1 kept its
+    declared `goal-2 link 6` and the Goals panel printed "waits on" for a task that was
+    running; the controller saw the stale record and `edit_link` refused it as active.
+    (`mirrorLinkWait` in `app/server/tasks/dependencies.server.ts`, called by
+    `setTaskDependencies` and `releaseTask`, convergent: it writes only while the link is
+    `active` and carried by that task and the lists differ, with the goal timeline line
+    "Link 1 (Log view) now waits on nothing: KNC-3's list was changed by arda@viberr.dev.";
+    the `edit_link` arm in `goal-actions.server.ts` forwards after the goal-file lock and
+    refuses a title or goal on an active link by naming the task.)
+
+156. **A template edit says where it did not land (pass 35, F35-7; owner, Q35-7,
+    Q35-8, Q35-11).** A project's deployment is its own copy of the template's grants,
+    taken at deploy time, and the template's writer does not reach into it. So every
+    template save names each non-archived project whose copy no longer carries the
+    template's grants and what is missing or extra, and offers the propagation:
+    `propagate` on `save_global_agent`, the "copy these grants" box on the org modal,
+    or "Use the template's grants" on the project's Agents page. Propagation REPLACES
+    the copy's three grant lists (a grant a project added on its own is dropped and
+    the reply says so) and never touches its capability policy, model, backend, stages
+    or persona; it runs through one writer (`template-propagation.server.ts`) and
+    records `project.agent_profile.resources_synced` per project. Only an org admin
+    may propagate, from any of the three doors; a project admin sees the divergence
+    marker with the exact difference and asks. The roster marks a copy whose grants
+    differ from its template (`templateDrift`); the OBS-7 `customized` flag stays an
+    identity signal and is not widened. The org modal's save toast composes its
+    clauses with middle dots, never a dash.
+
+157. **A hold ends when someone starts work (pass 35, F35-8; owner, Q35-9, Q35-10).**
+    A stored `blocked` with no open packet and no dependency list is a hold (the
+    `hold_runtime_debug` decision, the refused arm of a collision ceremony), and a hold
+    is lifted on the record by a person starting the operator (Run operator, an
+    `@operator` comment, the controller, a schedule they set) or by any dispatch that
+    starts a run: `readiness: ready`, a "Hold lifted" note naming who or what started
+    the work, and `task.hold.lifted`. The lift is not a claim that the cause is fixed:
+    the operator re-checks and opens a new packet when the block stands, as
+    `block_on_policy` already promises. Machine triggers and boot recovery lift
+    nothing; an open packet keeps the withdrawal paths as the only lift; a dependency
+    list keeps ruling 131's floor. The display never says blocked and agent working
+    together: a packet-less, list-less stored block carried by an agent renders "agent
+    working". (The record half is implemented by the operator and task actions of the same
+    pass; the display half is `deriveDisplayReadiness`'s fourth argument, `carriedHold`, read
+    from the STORED readiness and the dependency list, so a diagnostics floor and a dependency
+    hold keep reading blocked.)
+
+158. **No process but the server opens a live root's `projection.sqlite`; every other
+    reader copies first (owner, 2026-09-06, Q35-14; pass 35 F35-9).** The writer lock
+    decides which case applies. Pass 34 saw the server die with SIGBUS (exit 135) one
+    second after a host-side `sqlite3 -readonly` over the bind mount and wrote the rule
+    "inside the container, read-only"; on 2026-09-06 at 18:40:29Z the same exit followed
+    an in-container `readOnly: true` reader by one second, and boot recovery interrupted
+    23 runs and re-fired 23 operator turns. The side of the boundary was never the point:
+    a second connection maps the WAL index (`-shm`) the server has memory-mapped, and over
+    VirtioFS the open path's lock probe on that file is unreliable, so a reader can
+    truncate it under the server. **(a)** `openDatabaseReadOnly` asks `judgeDataRootLock`
+    for the PRESENCE of `state/writer.lock`, and nothing else: with a lock file there at
+    all, whatever it names, it copies `projection.sqlite` and
+    `projection.sqlite-wal` (never the `-shm`) to `state/tmp/reader-<pid>/`, opens the
+    COPY read-write so SQLite recovers the copied WAL into it, and removes the directory
+    on close; a dead reader's directory is swept by the next reader. Only a root with no
+    lock file at all is opened in place, read-only. Deliberately NOT the boot's verdict
+    (amended in review, same pass): `classifyLock`'s two staleness tests are both
+    pid-namespace-local, and `compose.yml` pins `hostname: viberr` for every container
+    built from it, so a reader in a SECOND container over one data root would call a
+    genuinely live holder stale and open the live file. The boot survives that ambiguity
+    on two backstops a reader has not, its own `bootId` and F18-5's ownership re-check;
+    a reader has only the cheap direction, and a copy it did not need costs disk where
+    a wrong "stale" costs the server. It returns a `ReadOnlyDatabase`
+    handle (`db`, `path`, `snapshot`, `close`), never a bare connection, so the copy
+    cannot outlive its reader. `npm run backup` runs its `VACUUM INTO` on that handle,
+    the artefact stays one self-contained file, and the manifest's first `contains` line
+    says which way the projection was read; `npm run keys -- status` says so on stdout.
+    **(b)** The runbook and `deployment.md` state the rule in words ("copy first, never a
+    second connection to a live database, on either side of the container boundary"),
+    replace the pass-34 in-container `readOnly: true` example with the copy recipe (`cp`
+    the file and its `-wal`, open the copy, throw it away), and name `/resources/health`
+    and the controller's in-process readers (`viberr_ops`: `instance_health`,
+    `read_run_log`, `read_store_doc`; `viberr_controller`: `inspect_audit_log`, `get_task`)
+    as the reader to ask before copying anything. `app/shared/docs/runbook-db-read.test.ts`
+    pins both pages: no `sqlite3` invocation and no fenced `DatabaseSync(` opens
+    `state/projection.sqlite`. Amends D34-1's rule; the writer-lock rulings (B-FD1, F18-5,
+    F20-8) are unchanged, their verdicts are now read by readers too. (`judgeDataRootLock`
+    in `app/server/db/data-root-lock.server.ts`; `openDatabaseReadOnly` and
+    `ReadOnlyDatabase` in `app/server/db/sqlite.server.ts`; `createBackup` in
+    `app/server/db/backup.server.ts`; `scripts/secret-keys.ts`.)
+
+    *(Addendum, owner 2026-09-06, Q35-16; pass 35 U35-7: **a restart is a reason, not an
+    actor, and the store says which.** The same 18:40:29Z restart's boot recovery wrote
+    every orphaned run as `state: error` with the literal `"restart"` in `interrupted_by`,
+    so the run projection looked "restart" up as a user, the Agent-logs pill read
+    "continuity error", and Insights counted all 23 as failures although 17 were queued
+    runs that never executed a turn. A human interrupt already wrote `interrupted`.
+    **(a)** `finalizeOrphanedRuns` and the operator drive's own orphan sweep write
+    `state: interrupted` with the new nullable `agent_runs.interrupted_reason`
+    (`'restart'`, CHECK-constrained; baseline edit, no migration); `interrupted_by` is a
+    `users.id` or null and nothing else, and a person who interrupted a run the restart
+    then finalized keeps their id beside the reason. **(b)** The run projection carries
+    `interruptedReason`; the pill reads "interrupted · by a restart" and the footer
+    "interrupted by a restart; the operator was re-invoked" (a controller turn: "the
+    conversation carries a note"). **(c)** Insights keeps such runs in `interrupted`, never
+    in `error`, and drops an interrupted run that never started (`turns = 0`, no
+    `started_at`, a person's stop of a queued run included) from the completion-rate
+    denominator; the card's stopped count names how many a restart stopped and how many
+    never started, so the five counts still reconcile with the total. **(d)** The
+    engaged-agent card on the task page says "queued" for an engagement whose live run is
+    still waiting for a slot and "running…" only once it executes; the loader ships
+    `liveAgentRuns` (profile id plus lifecycle) instead of bare profile ids.
+    (`finalizeOrphanedRuns` in `app/server/runtimes/run-recovery.server.ts`; the
+    `restartOrphan` arm of `runOperator` in `operator-run.server.ts`; `interruptedByClause`
+    in `app/features/runtime/runs-helpers.ts`; `getInsightsSummary` in
+    `app/server/insights/insights-query.server.ts`; `liveAgentRunLabel` in
+    `app/features/task-detail/execution-profile.tsx`.)*
+
+159. **Every path Viberr hands an agent is absolute, and a delivery that would publish
+    the store's layout is refused (2026-09-06, pass 35 F35-10).** A store-relative path
+    (`projects/<slug>/tasks/<key>/attachments`) is a display form for humans, never an
+    instruction: the run's cwd is the repository checkout two levels below that folder,
+    and an agent told the folder was "reachable from your working directory" created it
+    inside the clone, committed it, and the delivery pushed Viberr's store layout into
+    the customer's repository (KNC-9, GitHub tree bf52bba). **(a)** The "Posting files
+    on the task thread" section, the browser section and the workspace contract's one
+    exception print the ABSOLUTE `taskAttachmentsDir` (inside the container `/data/...`
+    is real; on bare metal it is the data root's own absolute path) and say it is
+    outside the repository checkout and never committed; `SpecialistPersonaInput.browser`
+    and `.attachmentsDrop` carry `attachmentsDir`, and `AnalyzePromptInput` carries
+    `attachmentsDropDir`. Amends 96's `attachmentsDropRel`. **(b)** `pushWorkspaceBranch`
+    reads HEAD's tree under `projects/<slug>/tasks/` after the delivery auto-commit and
+    refuses a branch that carries any such path (`push_refused_store_layout`, the paths
+    named); `performDelivery` reports it on the task as a delivery refusal in the scope
+    refusal's shape (`store_layout`, no PR opened) and the operator's reply names the
+    remedy (re-prompt the agent to remove the folder). A branch that published the
+    layout under an older prompt is refused too, until a person removes it. The tree is
+    read NUL-delimited (`git ls-tree -r -z`): git quotes any path holding a non-ASCII
+    byte, and a quoted line matches no prefix, so an accented screenshot inside the
+    stray folder read as an EMPTY tree and the push went through. Both push doors run
+    the read: `updateWorkspaceBranchFromBase` (the acceptance-time base refresh and the
+    operator's `update_branch_from_base`) pushes the whole workspace head, so the folder
+    a refused delivery left committed on the local branch would have reached origin on
+    the next refresh; it answers `store_layout` before it fetches or merges, and the
+    branch is untouched. **(c)** The
+    completion pipeline scans the run's workspace for a stray
+    `projects/<slug>/tasks/<key>/attachments` folder and posts a `policy` line naming
+    it, the files it holds and the real folder, so a person learns why an attachment is
+    missing. (`attachmentsDropSection` / `browserPersonaSection` in
+    `app/server/tasks/specialist-browser-mcp.server.ts`; `storeLayoutFilesInTree` in
+    `app/server/github/push-workspace.server.ts`, called from both push doors; the
+    `store_layout` refusal of `updateWorkspaceBranchFromBase` in
+    `app/server/github/update-branch.server.ts`; `warnStrayAttachmentsFolder` and the
+    `store_layout` arm of `performDelivery` in `app/server/tasks/task-actions.server.ts`;
+    `findStrayAttachmentsFolder` in `app/server/files/task-attachments.server.ts`.)
+
+160. **A pull request closed without merging is a human decision about the task
+    (owner, 2026-09-06, Q35-12; pass 35 F35-11).** Viberr never opens another PR for that
+    branch until a person has answered the recovery packet; only a merged PR clears the
+    way for a fresh review PR. Live (KNC-23) the owner closed PR #10 with a rejection
+    comment at 19:33:19Z, the operator's base refresh moved the branch, and the delivery
+    at 19:33:44Z opened PR #26 over it: `openTaskPr` treated a closed-unmerged PR like a
+    merged one (DG-1's "fall through to a fresh PR"), the create path overwrote the
+    cache, and the reconciler's R8-6 alarm (which keys on the cache's transition into
+    `closed`, and finds a closed PR by branch name only while the branch still stands
+    at its head, F26) never fired: no event, notification or packet named the person's
+    decision. **(a)** `openTaskPr` splits the terminal cases. MERGED keeps DG-1. A cached
+    `closed` PR whose `pr.closure` no person has answered refuses `closed_by_human`
+    before GitHub is asked; a cached live PR that GitHub now reports closed and unmerged
+    is handed to `reconcileTask`, then refused the same way, naming the PR and the
+    closer when GitHub names one (`closed_by` on the issue payload). A cached `closed`
+    carrying NO closure record is a close nobody surfaced (the workspace reconcile also
+    writes that state, from `gh pr view` in the agent's clone, and knows neither the
+    closer nor the surfacing): it is repaired through `reconcileTask` first, then refused
+    on what that pass recorded. **(b)** The reconciler stays the one writer of the
+    closure record
+    (`pr.closure: {at, by, answered}`) and of the R8-6 note, inbox alert and
+    `pr-diverged` wake: when the branch listing names nothing and the task's cached PR
+    is live (or says `closed` with no closure record), it reads the cached NUMBER directly
+    and records a settled answer, so the close a push overtook transitions in the
+    delivery's own turn and once. The note, the inbox alert and the wake fire the pass the
+    closure RECORD is written, not the pass the state changes: keyed on the state alone
+    they were swallowed by the workspace reconcile that ran one step earlier. **(c)** A
+    person resolving any packet while the PR stands closed stamps `closure.answered`, and
+    creates the record when none exists (`by: null`, never a guess) so the refusal is
+    always answerable
+    (the operator's withdrawal stamps nothing); a reopen on GitHub drops the closure with
+    the closed state. **(d)** `performDelivery` reports `closed_by_human` on the task
+    (one sentence, `closedByHumanDeliveryText`, on the operator's reply and the timeline;
+    the Deliver control states the same refusal before the click from its own client-side
+    `CLOSED_PR_DELIVERY_REFUSAL`, a hand-kept pair with the server's sentence in the shape
+    `DIVERGED_PUSH_REFUSAL` already set, since the server's lives in a `.server` module),
+    and the `deliver_for_review` description says a closed PR is a person's decision and
+    names the packet. (`openTaskPr` in
+    `app/server/github/pr-open.server.ts`; `readTerminalPrByNumber` and `readPrCloser`
+    in `app/server/github/pr-linker.server.ts`; the closure stamp in
+    `app/server/github/github-reconciler.server.ts`; `closedByHumanDeliveryText` and the
+    `resolvePacket` stamp in `app/server/tasks/task-actions.server.ts`.)
+
+161. **A revision is delivered once it has left the workspace (owner, 2026-09-06, Q35-13;
+    pass 35 G35-6 and U35-8).** Until a pull request tracks the branch, a stranger's pull
+    request stands on the branch name, or a delivery push has published the head, the branch
+    is the task's local draft and a person may discard it; the discard retires the
+    revision. Live (KNC-21) the agent's completion report registered `workRevision`
+    (`kind: delivered`, 18:56:57Z) fourteen minutes before the delivery push was refused
+    non-fast-forward, and ruling 77's authoring gate (`hasDeliveredWork = workRevision !==
+    null`) then refused `discard_branch` on exactly the branch the kind exists for: a
+    reported head counted as a delivered one, and the only door left was archiving the
+    task with `deleteBranch`. **(a)** The gate keys on `revisionLeftWorkspace`: `pr`
+    (live or settled), `github.unownedPr`, or the new `workRevision.pushedAt`, which
+    `performDelivery` stamps on the revision whose head the push published (`pushed`, or
+    `up_to_date` with that head). `github.commits` is not evidence: the workspace
+    reconcile writes it from the local clone. The refusal names the real reason ("PR #n
+    tracks `branch`", "an unowned PR #n stands on the branch name", "revision `sha` was
+    pushed to origin at …"). **(b)** A confirmed discard retires the revision in the same
+    write that clears `branch`: `workRevision.kind: discarded`, verdicts kept as history,
+    `validation` re-derived to `none`; the outcome note says "Revision `rev_…` is retired
+    with it", and the audit row `task.branch.discarded` carries `retiredRevisionId`.
+    Every reader that means "the revision under review" reads through
+    `activeWorkRevision` (null for a discarded record): the derived validation, the
+    verdict binding (a reviewer's verdict never pins to a retired head), `nextWorkRevision`
+    (a re-created head mints a fresh id even for the same tree), the acceptance gates, the
+    projection's `work_revision_sha`, the reconciler's provenance and adoption tests, the
+    reviewing agent's subject, and the delivery's no-change arm. A `verified` revision
+    names the base sha, not the branch, and is never retired by a discard. **(c)** The
+    remote holds what it holds (U35-8): the reconciler records `github.foreignHead {sha,
+    prNumber}` whenever the branch head is not proven this task's and origin holds
+    something (a stranger's PR, or commits ahead of the base with no delivery of this
+    task behind them), and drops it the pass the head is proven; "delivery" here is (a)'s
+    departure test and not the reported revision the F31-1 commit footprint keys on, or
+    KNC-21's own shape (a revision minted on the branch, the push refused) would count as
+    proof and disclose nothing; the archive ceremony's
+    delete-branch dialog says "origin's `branch` carries commits this task did not author
+    (head `sha`, pull request #n stands on it); deleting it removes them too" before the
+    button, the operator's `get_task` carries the same fact, and the toolkit tells it to
+    name it in the option text. `deleteTaskRemoteBranch` reads the ref's head before its
+    DELETE, records it on `github.branch.deleted` (`sha`) and in the timeline ("Its head
+    was `sha`"), and the archive's `task.branch.discarded` row records both heads
+    (`localSha`, `remoteSha`; a local-only discard records `remoteSha: null`). The
+    operator's push-conflict reply and the `discard_branch` description say the same
+    rule: a refused push means the revision never left the workspace, so the discard may
+    be offered when the person's choice is to throw the draft away, never as the way to
+    clear the remote. (`activeWorkRevision`, `revisionLeftWorkspace` and the `foreignHead`
+    record in `app/schemas/task-file.schema.ts`; the gate and
+    `revisionDepartureSentence` in `app/server/tasks/operator-actions.server.ts`; the
+    stamp, the retirement and the two-sha row in `app/server/tasks/task-actions.server.ts`;
+    the foreign-head write and the pre-delete read in
+    `app/server/github/github-reconciler.server.ts`; the dialog row in
+    `app/features/task-detail/decision-packet.tsx`.)
+
+162. **The acceptance gate's verdict is computed once and read everywhere a person or the
+    operator is invited to accept (owner, 2026-09-06, Q35-17 and Q35-18; F35-12, G35-5
+    addendum (d) and (e)).** No surface offers an acceptance the gate will refuse. The
+    GitHub-fact half of the gate (an unpushed delivered revision, ruling 135, then a
+    conflicting pull request) is one function, `mergeReadinessRefusal`, and the whole stack
+    reaches the operator as `get_task`'s `notAcceptableReason` beside `pr.mergeable`: a PR
+    the gate would refuse cannot be recommended for acceptance. The MOVE into the
+    acceptance-boundary stage reads the pull-request half ALONE (`mergeStageEntryRefusal`
+    over `mergeReadinessRefusal`: a conflicting pull request, or an unpushed delivered
+    revision), never `notAcceptableReason` (corrected in this pass's review: that field is
+    `acceptanceRefusalFor`, whose third gate is "this task is not at the boundary yet", so
+    it stands on every task short of the acceptance stage and its own remedy is that very
+    move; the three shipped texts that keyed the move on it told the operator a legal,
+    required move would be refused). Merge means mergeable: while the pull request
+    conflicts the task stays at the work stage where the conflict packet is the path. The task page
+    reads the same verdict: the recommendation card keeps its Apply (ruling 147's shape)
+    and prints the refusal as a keyed alert, the accept dialog prints it above a disabled
+    confirm, the GitHub card wears the "conflicts" pill, and the reconciler withdraws a
+    pending `accept_completion` card when `mergeable` flips to conflicting. A post-gate
+    GitHub merge refusal (405) re-reads the pull, records `mergeable: conflicting` and
+    prints the gate's own sentence. **The base refresh happens once, at acceptance time**
+    (amends 132): the ceremony brings the branch up to date through the same workspace
+    merge `update_branch_from_base` performs, re-runs the gate and merges in one step,
+    recording the refresh (`baseRefreshes`, `github.branch_update.acceptance`); a conflict
+    found there refuses with the gate's sentence and records it. Operators stop refreshing
+    at the acceptance boundary: the tool refuses there ("... the branch is brought up to
+    date once, at acceptance time, and merged in the same ceremony"), except on a PR
+    GitHub already reports conflicting, where its job is to record the conflict list and
+    open the packet whose redirect carries that list to the resolver.
+    (`mergeReadinessRefusal` and the acceptance ceremony's refresh in
+    `app/server/tasks/task-actions.server.ts`; `mergeStageEntryRefusal` and the snapshot's
+    `notAcceptableReason` in `app/server/tasks/operator-actions.server.ts`; the tool texts
+    in `operator-toolkit.server.ts` and `app/server/seed/assets/operator.definition.md`;
+    the refusal alert and the disabled confirm in `app/features/task-detail/`
+    `decision-packet.tsx` and `task-detail-page.tsx`; the acceptance-time refusal of
+    `update_branch_from_base` in `app/server/github/update-branch-operator.server.ts`.)
+
+163. **A revision that changes after a verdict returns the task to the review stage
+    (owner, 2026-09-06, Q35-19; F35-13).** No task waits at Merge for a verdict nobody can
+    give there. "The review stage" is where the task's required reviewers can run, and only
+    a task standing AT OR PAST the structural review stage is ever moved (`verdictStageFor`,
+    narrowed in this pass's review: null before that stage, because the task is still doing
+    the work; null at the terminal stage; null when a required reviewer is eligible where
+    the task stands; otherwise the nearest EARLIER stage where one is eligible; and when no
+    required reviewer is deployed at all, the structural acceptance-boundary stage, and only
+    while the task stands past it. Without the floor the backward scan reached from a WORK
+    stage: the seeded reviewer declares Implementation and Review, so a delivery at a
+    Validation stage between them walked the task back to Implementation, a stage that
+    reviews nothing). Three doors return the task automatically, each with
+    a `transition` event and a `task.transition` audit row: the operator's backward move
+    on `validation: changed` (a rework move it performs itself, offered in
+    `reworkStages` beside the `failing` license of R7-4), the resolution of a
+    branch-conflict packet's redirect (`rework: true` on the option, the option's detail
+    saying so before the person decides), and a delivery that moved the PR's head on a
+    changed or failing revision (`via: delivery`). The operator's acceptance refusal on
+    such a task names the way back: the rework move, and the person's stage picker on the
+    task page. (`verdictStageFor` in `app/shared/workflow/verdict-stage.ts`, read by the
+    operator's rework move and acceptance refusal in
+    `app/server/tasks/operator-actions.server.ts`, by the delivery arm in
+    `app/server/tasks/task-actions.server.ts`, and by the conflict packet's redirect in
+    `app/server/github/update-branch-operator.server.ts`.)
+
+164. **An option title is a promise the resolution keeps (pass 35, F35-14).** A packet
+    option is resolved by its `kind` and never by its English title (ruling 7), so a title
+    naming an act its kind cannot perform is a decision that does nothing. Two live ones:
+    KNC-3's `custom` "Force-accept as admin without a fresh verdict" (2026-09-07 06:06:57Z)
+    recorded the decision, re-ran the operator into a no-op behind the verdict gate, and
+    ended with the operator asking the owner to press the button by hand; KNC-16's
+    `redirect` "Move KNC-16 back to Review" (2026-09-06 20:53:26Z) moved nothing. Two new
+    kinds make the promise keepable and one guard stops it being written anywhere else.
+    `force_accept` runs `forceAcceptCompletion`, the function behind the task page's Force
+    accept button: the same admin-only tier (`force-accept-completion`), the same
+    disclosure ceremony (the card opens the dialog's force form, naming the skipped stages
+    and the bypassed refusal), the same irreducible gate, and the same
+    `task.acceptance.forced` record. `move_stage` carries `toStage` and runs
+    `transitionStage({ manual: true })`, the stage picker's path: the same
+    `approve-transition` tier, the same transition event and `task.transition` row, and the
+    operator re-invoked at the stage the task lands on; the terminal stage is refused
+    because moving there is an acceptance, not a move. Both perform their act AFTER the
+    resolution write, so the packet is answered on the record first and a refusal lands as
+    a plain timeline note rather than as an error over a decision that stands. The guard
+    sits where options are authored (`operatorOpenPacket`, so both operator backends reach
+    it): a send-back option (`custom`, `redirect`, `request_edit`) whose title or detail
+    describes a force-accept, a move to one of this board's own stages, or an edit to an
+    agent profile is refused, and the refusal names the kind that performs it, or, for a
+    profile, the Agents surface a person uses (ruling 85 already says the operator points
+    at that configuration and never changes it). The toolkit description and the operator
+    definition carry the same sentence. As shipped the guard reads the option's own ACT,
+    not its vocabulary, and it runs on both sides of the promise (refined in this pass's
+    review): the movement verbs bind to one of THIS project's stage names, so the delivery
+    idioms ("send the fix to review", "advance it") pass and a bare "send it back to the
+    specialist" is not a move; the ruling-163 rework redirect is exempt, because it really
+    does return the task to the verdict stage and says so; `toStage` is refused on any kind
+    but `move_stage`, whose resolution reads no stage; a `move_stage` naming the stage the
+    task already stands at is refused as a move that would move nothing; a `move_stage`
+    whose TITLE names a stage other than its own `toStage` is refused, since the card shows
+    the words and the resolution reads the id; and `force_accept` is refused on a task whose
+    pull request a person closed without merging, which is decided rather than wedged
+    (R16-3) and which no override can undo, the refusal naming `archive_task` and a
+    delivering redirect instead. (`misdirectedOptionPromise`, `moveStagePromiseMismatch` and
+    `SEND_BACK_OPTION_KINDS` in `app/shared/workflow/packet-options.ts`; the authoring guard
+    in `operatorOpenPacket` and the two new kinds' resolution in
+    `app/server/tasks/task-actions.server.ts` `resolvePacket`.)
+
+*(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
+found five places where a page or a sentence said something the code did not. Each is
+corrected on the page named; the note stays here so a reader who meets the old wording, in
+a ledger or in an older branch, can see when it stopped being true. Drift ids are the
+discovery index's, `planning/discovery-2026-09-06-pass35-k9s-clone/reference/INDEX.md`.)*
+
+- **D14** — `docs/README.md` said the controller had "38 tools" while 39 were registered
+  and `controller-and-goals.md` said 39. Ruling 153 adds `schedule_task_action` and
+  `cancel_task_schedule`, so the number is now **41** and both pages say it; the count is
+  `grep -c "^  add(" app/server/controller/controller-toolkit.server.ts`.
+- **D22** — `docs/architecture/data-model.md`'s `instance_settings` row named quota keys the
+  writer never used. It now names the three live keys as `backend-quota.server.ts` writes
+  them (`backendRateLimit.<backend>`, `backendQuotaExhausted.<backend>` with `resetsAt` and
+  its `resetsAtPrecision`, and `backendCredentialRefused.<backend>`), each carrying the
+  account it billed since ruling 130(d).
+- **D40** — no page said `users.github_handle` had exactly ONE writer, GitHub OAuth
+  sign-in, so ruling 68's human-approval verdict was unreachable on a deployment that signs
+  in locally. Ruling 154 gives the column its second writer and the org admin's door;
+  `github-delivery.md` §10 records the correction, and §5 now lists every writer.
+- **D88** — the `unlinked_handle` refusal told people to "link it on their profile", while
+  the profile card on an OAuth-less deployment offered nothing to connect. Ruling 154's
+  sentence names both doors: Org settings, Users & access, and the profile where GitHub
+  sign-in is configured.
+- **D97** — the stage-eligibility refusal printed the raw stage id (`impl`) where a person
+  reads a name. `stageRefusalSentence` (`app/server/tasks/specialist-run.server.ts`) resolves
+  both the task's stage and the profile's declared stages through the board, which is also
+  what makes F35-5's "Mention not started" timeline note readable.
 
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates

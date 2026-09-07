@@ -1,5 +1,9 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { taskDir } from "~/server/files/file-store-root.server";
 import {
   createTestDbContext,
   type TestDbContext,
@@ -46,6 +50,10 @@ import {
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { seedDefaultAgentAssets } from "~/server/seed/default-assets.server";
+import { deployAgentProfileFromLibrary } from "~/features/agents/agent-profile-actions.server";
+import { saveGlobalAgentProfile } from "~/server/org/gagents.server";
+import { propagateTemplateResources } from "~/server/org/template-propagation.server";
 import {
   resetFakeVendorEnv,
   setFakeVendorMode,
@@ -314,6 +322,31 @@ describe("governed actions record audit rows (table-driven)", () => {
           ),
       },
       {
+        // Ruling 157 (pass 35, F35-8): the one lift of a packet-less hold.
+        // VIB-1 carries no packet and no dependency list in this store, so a
+        // stored `blocked` is the hold shape a dispatch lifts.
+        name: "liftHoldForRun (a dispatch lifts a hold)",
+        action: "task.hold.lifted",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { liftHoldForRun } = await import("~/server/tasks/task-actions.server");
+          const { updateTaskFile } = await import("~/server/files/task-writer.server");
+          await updateTaskFile(
+            { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+            (parsed) => {
+              parsed.frontmatter.readiness = "blocked";
+              parsed.frontmatter.blockedBy = [];
+            },
+          );
+          await liftHoldForRun(store.db, fileCtx, store.slug, "VIB-1", {
+            kind: "dispatch",
+            profileId: "developer",
+            name: "Developer",
+            by: null,
+          });
+        },
+      },
+      {
         name: "resolvePacket (request_edit)",
         action: "task.packet.resolved",
         taskKey: "VIB-2",
@@ -324,6 +357,62 @@ describe("governed actions record audit rows (table-driven)", () => {
             actorArda(),
             fileCtx,
           ),
+      },
+      {
+        // Ruling 161 (pass 35): the discard row now carries `localSha`,
+        // `remoteSha` (null for a local-only discard) and the retired revision.
+        name: "resolvePacket (discard_branch)",
+        action: "task.branch.discarded",
+        taskKey: "VIB-3",
+        run: () => {
+          writeTask(store.dataRoot, store.slug, {
+            frontmatter: baseTaskFrontmatter("VIB-3", {
+              stage: "review",
+              readiness: "ready",
+              waiting: "human",
+              ownerUserId: store.users.arda.id,
+              branch: "vib-3-work",
+            }),
+            packet: {
+              type: "input",
+              kind: "Completion report",
+              from: "operator",
+              title: "Throw the local draft away?",
+              body: "vib-3-work was never pushed.",
+              observations: [],
+              options: [
+                { kind: "discard_branch", t: "Discard vib-3-work", d: "", rec: true },
+              ],
+            },
+          });
+          rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+          const repoDir = path.join(
+            taskDir(store.slug, "VIB-3", store.dataRoot),
+            "workspace",
+            "viberr",
+          );
+          rmSync(repoDir, { recursive: true, force: true });
+          mkdirSync(repoDir, { recursive: true });
+          const git = (args: string[]) =>
+            execFileSync("git", args, { cwd: repoDir, stdio: "pipe" });
+          git(["init", "-q", "-b", "main"]);
+          git(["config", "user.email", "t@viberr.local"]);
+          git(["config", "user.name", "Test"]);
+          writeFileSync(path.join(repoDir, "README.md"), "# repo\n");
+          git(["add", "-A"]);
+          git(["commit", "-q", "-m", "init"]);
+          git(["checkout", "-q", "-b", "vib-3-work"]);
+          writeFileSync(path.join(repoDir, "w.txt"), "w\n");
+          git(["add", "-A"]);
+          git(["commit", "-q", "-m", "work"]);
+          git(["checkout", "-q", "main"]);
+          return resolvePacket(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-3", optionIndex: 0 },
+            actorArda(),
+            fileCtx,
+          );
+        },
       },
       {
         name: "startRun",
@@ -695,6 +784,42 @@ describe("governed actions record audit rows (table-driven)", () => {
             actor: actorArda(),
           }),
       },
+      {
+        // Ruling 156 (pass 35): a template's grants copied onto a project's
+        // deployment, one row per project.
+        name: "propagateTemplateResources",
+        action: "project.agent_profile.resources_synced",
+        run: async () => {
+          seedDefaultAgentAssets(store.dataRoot);
+          rebuildAll(store.db, fileCtx);
+          await deployAgentProfileFromLibrary(
+            store.db,
+            { projectSlug: store.slug, profileId: "developer" },
+            actorArda(),
+            fileCtx,
+          );
+          await saveGlobalAgentProfile(
+            store.db,
+            {
+              id: "developer",
+              name: "Developer",
+              backend: "claude",
+              summary: "Implements the change.",
+              persona: "",
+              stages: ["ready", "impl"],
+              mcps: ["github"],
+            },
+            actorArda(),
+            fileCtx,
+          );
+          await propagateTemplateResources(
+            store.db,
+            { profileId: "developer", projectSlugs: [store.slug] },
+            actorArda(),
+            fileCtx,
+          );
+        },
+      },
     ];
 
     for (const row of table) {
@@ -721,6 +846,8 @@ describe("governed actions record audit rows (table-driven)", () => {
         "profile.backend.login_started",
         "profile.backend.login_failed",
         "profile.backend.login_cancelled",
+        // Ruling 156: a project-scoped row with no task.
+        "project.agent_profile.resources_synced",
       ].includes(row.action);
       if (!taskless) {
         expect(

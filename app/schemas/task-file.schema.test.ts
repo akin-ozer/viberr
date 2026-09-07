@@ -4,8 +4,11 @@ import type { YamlMapping } from "~/server/files/frontmatter.server";
 import { parseTaskFileContent } from "~/server/files/task-file.server";
 import {
   acceptanceBlockedReason,
+  activeWorkRevision,
+  currentVerdicts,
   deriveValidation,
   nextWorkRevision,
+  revisionLeftWorkspace,
   parseTaskFrontmatter,
   requiredReviewers,
   sanitizeEventAttachmentNames,
@@ -1102,5 +1105,119 @@ describe("unpushedRevisionOf / unpushedRevisionBlockedReason (ruling 135)", () =
     expect(diverged).toContain("Resolve the branch history, then deliver the branch");
     expect(diverged).not.toMatch(/rebase/i);
     expect(unpushedRevisionBlockedReason(pr("behind", "x".repeat(40)), rev, "JC-3")).toBeNull();
+  });
+});
+
+describe("ruling 161 (pass 35, G35-6): a discarded revision is retired, not under review", () => {
+  const delivered: WorkRevision = {
+    id: "rev_d1",
+    headSha: "d".repeat(40),
+    treeSha: "e".repeat(40),
+    branch: "knc-21",
+    createdAt: "2026-09-06T18:56:57.000Z",
+    sourceProfileId: "developer",
+    kind: "delivered",
+  };
+  const discarded: WorkRevision = { ...delivered, kind: "discarded" };
+  const reviewer: Engagement = {
+    profileId: "reviewer",
+    backend: "claude",
+    role: "Review",
+    delivers: false,
+    verdictCapable: true,
+  };
+  const approve: ReviewVerdict = {
+    profileId: "reviewer",
+    revisionId: "rev_d1",
+    headSha: "d".repeat(40),
+    result: "approve",
+    reason: "fine",
+    at: "2026-09-06T19:00:00.000Z",
+  };
+
+  it("activeWorkRevision answers null for a discarded revision and the same object otherwise", () => {
+    // Canary: return `rev` unconditionally and the discarded record reads as live.
+    expect(activeWorkRevision(discarded)).toBeNull();
+    expect(activeWorkRevision(delivered)).toBe(delivered);
+    expect(activeWorkRevision(null)).toBeNull();
+    expect(activeWorkRevision(undefined)).toBeNull();
+  });
+
+  it("deriveValidation is `none` and currentVerdicts empty over a discarded revision, whatever the verdicts say", () => {
+    // Canary: drop the `activeWorkRevision` read in either helper and the
+    // approve bound to the retired head keeps the task `healthy`.
+    expect(
+      deriveValidation({ engagements: [reviewer], workRevision: delivered, verdicts: [approve] }),
+    ).toBe("healthy");
+    expect(
+      deriveValidation({ engagements: [reviewer], workRevision: discarded, verdicts: [approve] }),
+    ).toBe("none");
+    expect(currentVerdicts({ workRevision: discarded, verdicts: [approve] })).toEqual([]);
+  });
+
+  it("nextWorkRevision mints a fresh id over a discarded revision even for the same tree", () => {
+    // Canary: compare `current` instead of `activeWorkRevision(current)` and the
+    // re-created head is reported as the same subject, keeping `discarded`.
+    const same = {
+      id: "rev_new",
+      headSha: "f".repeat(40),
+      treeSha: "e".repeat(40),
+      branch: "knc-21",
+      sourceProfileId: "developer",
+      createdAt: "2026-09-07T08:00:00.000Z",
+    };
+    expect(nextWorkRevision(delivered, same)).toEqual({ revision: delivered, changed: false });
+    const minted = nextWorkRevision(discarded, same);
+    expect(minted.changed).toBe(true);
+    expect(minted.revision.id).toBe("rev_new");
+    expect(minted.revision.kind).toBe("delivered");
+  });
+
+  it("revisionLeftWorkspace: a reported head is local until a PR, an unowned PR or a push says otherwise", () => {
+    const base = { pr: null, github: null, workRevision: delivered };
+    // Canary: test `workRevision !== null` here and the reported head is "delivered".
+    expect(revisionLeftWorkspace(base)).toBeNull();
+    expect(
+      revisionLeftWorkspace({ ...base, github: { commits: [{ sha: "d".repeat(7), msg: "x" }], changed: null } }),
+    ).toBeNull();
+    expect(revisionLeftWorkspace({ ...base, pr: { number: 10, state: "closed", title: "t" } })).toEqual({
+      kind: "pr",
+      number: 10,
+    });
+    expect(
+      revisionLeftWorkspace({ ...base, github: { commits: [], changed: null, unownedPr: 33 } }),
+    ).toEqual({ kind: "unowned_pr", number: 33 });
+    expect(
+      revisionLeftWorkspace({
+        ...base,
+        workRevision: { ...delivered, pushedAt: "2026-09-06T19:10:35.000Z" },
+      }),
+    ).toEqual({ kind: "pushed", at: "2026-09-06T19:10:35.000Z", headSha: "d".repeat(40) });
+    // A discarded revision's push stamp is history too.
+    expect(
+      revisionLeftWorkspace({
+        ...base,
+        workRevision: { ...discarded, pushedAt: "2026-09-06T19:10:35.000Z" },
+      }),
+    ).toBeNull();
+  });
+
+  it("the acceptance gate refuses a discarded revision by naming delivery, not an approval nobody can give", () => {
+    // Ruling 161(b) lists "the acceptance gates" among the readers that go
+    // through `activeWorkRevision`. Canary: read `fm.workRevision` raw at the
+    // first arm of `acceptanceBlockedReason` — the retired record takes the
+    // required-reviewer arm, so this task is told to wait for an approval of a
+    // revision the verdict binding can no longer pin one to, on the same
+    // frontmatter whose validation pill reads "no validation".
+    const fm = { engagements: [reviewer], workRevision: discarded, verdicts: [approve] };
+    expect(deriveValidation(fm)).toBe("none");
+    const reason = acceptanceBlockedReason(fm)!;
+    expect(reason).toContain("No reviewed revision yet");
+    expect(reason).toContain("run delivery once to verify and record that");
+    expect(reason).not.toContain("current revision");
+    // The live record still walks the required-reviewer path, approved here.
+    expect(
+      acceptanceBlockedReason({ ...fm, workRevision: delivered }),
+    ).toBeNull();
   });
 });

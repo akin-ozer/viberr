@@ -18,12 +18,13 @@ import { deriveValidation } from "~/schemas/task-file.schema";
 import type {
   Engagement,
   FileActorRef,
+  PrClosure,
   TaskFileEvent,
   TaskFrontmatter,
   WorkRevision,
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -55,9 +56,13 @@ import {
   transitionStage,
   acceptanceDisclosureOf,
   applyRecommendation,
+  commentToAgent,
   forceAcceptCompletion,
+  liftHoldForRun,
+  OPERATOR_TASK_ACTOR,
   reorderTask,
   resolvePacket,
+  updateTaskGoal,
 } from "./task-actions.server";
 import type { TaskActionDeps } from "./task-actions.server";
 import { postAgentComment } from "./agent-toolkit.server";
@@ -77,6 +82,7 @@ import type { TaskPacket } from "~/schemas/task-file.schema";
  * `no_pat_configured`, so every other test behaves exactly as it always did.
  */
 import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
+import type { openTaskPr } from "~/server/github/pr-open.server";
 import {
   fakeGithubFetch,
   type FakeGithub,
@@ -2300,6 +2306,42 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     expect(text).toContain("clean working tree");
   });
 
+  it("ruling 161 (G35-6): a reviewer's verdict never binds to a discarded revision", async () => {
+    // Canary: read `parsed.frontmatter.workRevision` instead of
+    // `activeWorkRevision(...)` at the verdict binding and the approve pins to
+    // the retired head, re-deriving `healthy` for a branch that no longer exists.
+    const store = prepared();
+    const retiredId = "rev_MBEIgNbXXyFX";
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        readiness: "ready",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        engagements: [REVIEWER_ENGAGEMENT],
+        branch: null,
+        workRevision: {
+          id: retiredId,
+          headSha: "8c463b7".padEnd(40, "0"),
+          treeSha: "b".repeat(40),
+          branch: "vib-1",
+          createdAt: "2026-09-06T18:56:57.000Z",
+          sourceProfileId: "developer",
+          kind: "discarded",
+        },
+        validation: "none",
+      }),
+      goal: "Review after a discard.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await recordReviewerReply(store, "Verdict: approve — looks fine to me.");
+    const after = fm(store);
+    expect(after.verdicts.some((v) => v.revisionId === retiredId)).toBe(false);
+    expect(after.workRevision?.kind).toBe("discarded");
+    expect(after.validation).toBe("none");
+  });
+
   it("closes to Done with no PR and no merge once the required reviewer approves", async () => {
     const store = prepared();
     seedVerifyOnly(store);
@@ -3726,6 +3768,42 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
     expect(listScopeViolations(store.db, store.slug, { status: "open" })).toEqual([]);
   });
 
+  /**
+   * Ruling 159 (pass 35, F35-10): a push refused for the store layout is a
+   * delivery refusal on the task with the offending paths named, the same
+   * shape as the scope refusal above: no PR, a timeline line, a typed outcome
+   * the operator and the Deliver button render. Canary: route
+   * `push_refused_store_layout` into the `push_failed` arm (the typed outcome
+   * and the paths vanish).
+   */
+  it("ruling 159: a push refused for the store layout names the paths, opens no PR", async () => {
+    pushMock.mockClear();
+    const store = prepared();
+    seedDeliverable(store);
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { body: { object: { sha: ROOT } } },
+      [`POST ${REPO_PATH}/pulls`]: { status: 201, body: { number: 1, html_url: "https://x/pull/1", title: "t", state: "open" } },
+    });
+    const stray = `projects/${store.slug}/tasks/VIB-1/attachments/knc-9-licence-verification.txt`;
+    pushMock.mockResolvedValueOnce({
+      status: "push_refused_store_layout",
+      branch: "vib-1",
+      files: [stray],
+      reason: `the branch carries \`${stray}\`, which is Viberr's own store layout`,
+    });
+    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    expect(outcome).toMatchObject({ status: "store_layout", files: [stray] });
+    const message = outcome.status === "store_layout" ? outcome.message : "";
+    expect(message).toContain(`\`${stray}\``);
+    expect(message).toContain("Nothing was pushed and no review PR was opened");
+    expect(message).toContain("Remove the folder from the branch");
+    expect(github.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
+    const timeline = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline;
+    expect(timeline.some((e) => e.text.includes(`\`${stray}\``) && e.text.includes("store layout"))).toBe(true);
+    // No scope violation: the credential is not the problem.
+    expect(listScopeViolations(store.db, store.slug, { status: "open" })).toEqual([]);
+  });
+
   const REPO_PATH = "/repos/akin-ozer/viberr";
   const ROOT = "d2e0fb0".padEnd(40, "0");
 
@@ -4254,5 +4332,1028 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
     expect(
       listAuditEvents(store.db, { action: "task.created" })[0]!.details,
     ).toMatchObject({ notified: { userId: store.users.murat.id } });
+  });
+});
+
+/**
+ * Pass 35 (the k9s-clone observation): the operator-and-task-actions slice.
+ * Every case here goes red when its fix is removed; the canary is named on
+ * each.
+ */
+describe("pass 35: operator and task actions", () => {
+  /** An operator deployment with the standard supervised policy, so the
+   *  transition re-trigger and the acceptance fold have an authority to read. */
+  function deployOperator(store: TestStore): void {
+    const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...projectFile.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "dispatch-agents", mode: "direct" as const },
+            { capabilityId: "stage-transitions", mode: "recommend" as const },
+            { capabilityId: "completion-for-acceptance", mode: "recommend" as const },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator" as const,
+            name: "Operator",
+            role: "Coordination",
+            icon: "shield",
+            backends: ["claude" as const],
+            model: "sonnet",
+            autonomy: "supervised" as const,
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  function seed(store: TestStore, patch: Partial<TaskFrontmatter> = {}, packet: TaskPacket | null = null): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        readiness: "ready",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        ...patch,
+      }),
+      goal: "Ship the parser.",
+      packet,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  const file = (store: TestStore) =>
+    readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+
+  /** A recording `runOperator` seam that settles a promise on its first call. */
+  function operatorSeam() {
+    let settle: (() => void) | null = null;
+    const observed = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const runOperator = vi.fn((_db: DatabaseSync, _input: RunOperatorInput) => {
+      settle?.();
+      return Promise.resolve({
+        runId: "run_seam",
+        queued: false,
+        backend: "claude" as const,
+        autonomy: "supervised" as const,
+      });
+    });
+    return { runOperator, observed };
+  }
+
+  const tick = () => new Promise((r) => setTimeout(r, 120));
+
+  describe("ruling 151 (F35-2): the boundary always wins in transitionStage", () => {
+    it("an operator-authorized move across an approval boundary is refused, whatever the caller", async () => {
+      // Canary: delete the ruling-151 throw in the `ctx.operatorAuthorized` arm.
+      const store = prepared();
+      seed(store, { stage: "impl" });
+      await expect(
+        transitionStage(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+          OPERATOR_TASK_ACTOR,
+          { dataRoot: store.dataRoot, operatorAuthorized: true },
+        ),
+      ).rejects.toThrow(/approved by a human on this board/);
+      expect(file(store).frontmatter.stage).toBe("impl");
+      expect(
+        listAuditEvents(store.db, { action: "task.transition" }).filter(
+          (row) => row.details?.by === "operator",
+        ),
+      ).toHaveLength(0);
+      // An applied recommendation carries the human's authorization and is
+      // not the operator's move: `recommendationAuthorized` still passes.
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(file(store).frontmatter.stage).toBe("review");
+    });
+  });
+
+  describe("ruling 152(a) (G35-5): a live operator run's move queues no fresh operator turn", () => {
+    it("with ctx.operatorRun set the runOperator seam is never called; without it, once", async () => {
+      // Canary: remove the `ctx.operatorRun` arm before the re-trigger.
+      const store = prepared();
+      deployOperator(store);
+      seed(store, { stage: "ready" });
+      const live = operatorSeam();
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        OPERATOR_TASK_ACTOR,
+        {
+          dataRoot: store.dataRoot,
+          operatorAuthorized: true,
+          operatorRun: { backend: "claude", autonomy: "supervised", reactDepth: 0, transitionDepth: 0 },
+          deps: { runOperator: live.runOperator },
+        },
+      );
+      expect(file(store).frontmatter.stage).toBe("impl");
+      await tick();
+      expect(live.runOperator).not.toHaveBeenCalled();
+
+      seed(store, { stage: "ready" });
+      const direct = operatorSeam();
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        OPERATOR_TASK_ACTOR,
+        { dataRoot: store.dataRoot, operatorAuthorized: true, deps: { runOperator: direct.runOperator } },
+      );
+      await Promise.race([
+        direct.observed,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("the transition trigger never fired")), 5_000)),
+      ]);
+      expect(direct.runOperator).toHaveBeenCalledTimes(1);
+      expect(direct.runOperator.mock.calls[0]![1].trigger).toBe("transition");
+    });
+  });
+
+  describe("Q35-15 (the fold): a person's move onto the acceptance boundary files the acceptance card", () => {
+    it("the applied move writes the accept_completion card and the operator is not re-invoked", async () => {
+      // Canary: delete the fold from transitionStage's re-trigger branch (the
+      // card is missing and the seam fires).
+      const store = prepared();
+      deployOperator(store);
+      seed(store, { stage: "impl" });
+      const seam = operatorSeam();
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
+      );
+      expect(file(store).frontmatter.stage).toBe("review");
+      await tick();
+      expect(file(store).frontmatter.recommendations.map((r) => r.kind)).toEqual(["accept_completion"]);
+      expect(seam.runOperator).not.toHaveBeenCalled();
+      expect(
+        listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
+      ).toHaveLength(1);
+    });
+
+    it("a refused acceptance gate files no card and re-invokes the operator as before", async () => {
+      const store = prepared();
+      deployOperator(store);
+      // A closed, unmerged PR refuses acceptance by a terminal fact.
+      seed(store, { stage: "impl", pr: { number: 8, state: "closed", title: "[VIB-1] work" } });
+      const seam = operatorSeam();
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
+      );
+      await Promise.race([
+        seam.observed,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("the transition trigger never fired")), 5_000)),
+      ]);
+      expect(file(store).frontmatter.recommendations).toHaveLength(0);
+      expect(seam.runOperator).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("U35-3: the force-accept record names every bypassed gate", () => {
+    it("the audit row and the completion event list the stage skip, the failing verdict and the withdrawn packet", async () => {
+      // Canary: return `[reasons[0]]` from acceptanceRefusalReasons (one gate).
+      const store = prepared();
+      const blocked: TaskPacket = {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Pick a recovery path",
+        body: "",
+        observations: [],
+        options: [{ kind: "block_on_policy", t: "Unblock", d: "", rec: true }],
+      };
+      seed(
+        store,
+        {
+          stage: "impl",
+          readiness: "blocked",
+          engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+          branch: "vib-1-work",
+          workRevision: workRev("rev_1"),
+          verdicts: [
+            {
+              profileId: "reviewer",
+              revisionId: "rev_1",
+              headSha: "a".repeat(40),
+              result: "request_changes",
+              reason: "needs tests",
+              at: "2026-09-06T09:30:00.000Z",
+            },
+          ],
+          validation: "failing",
+          pr: { number: 7, state: "review", title: "[VIB-1] work" },
+        },
+        blocked,
+      );
+      const ack = acceptanceDisclosureOf(file(store).frontmatter);
+      await forceAcceptCompletion(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", ack },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(file(store).frontmatter.stage).toBe("done");
+      const row = listAuditEvents(store.db, { action: "task.acceptance.forced" })[0]!;
+      const gates = z.array(z.string()).parse(row.details?.bypassedGates);
+      expect(gates.length).toBeGreaterThanOrEqual(2);
+      expect(gates.some((g) => /VIB-1 is at In Progress, not Review/.test(g))).toBe(true);
+      expect(gates.some((g) => /requests changes|request_changes|changes requested/i.test(g))).toBe(true);
+      expect(gates.some((g) => /open blocked decision/.test(g))).toBe(true);
+      expect(row.details?.skippedStages).toEqual(["review"]);
+      expect(row.details?.withdrawnPacket).toBe("Pick a recovery path");
+      expect(row.details?.validation).toBe("failing");
+      // The string every existing reader keeps carries the same list.
+      expect(String(row.details?.bypassed)).toContain(" | ");
+      const completion = file(store).timeline.find((e) => e.type === "completion")!;
+      expect(completion.text).toMatch(/Bypassed: Review skipped; the review gate; /);
+      expect(completion.text).toContain("Pick a recovery path");
+      // The clause carries each gate's CLAIM, not the refusal's remedy half.
+      // Canary: splice `disclosure.gates` whole instead of mapping `gateClaim`.
+      expect(completion.text).toContain("VIB-1 is at In Progress, not Review;");
+      expect(completion.text).not.toContain(".;");
+      for (const remedy of [
+        "Move the task through the workflow first",
+        "Rework and re-review before accepting",
+        "Resolve the operator's packet before accepting it",
+      ]) {
+        expect(completion.text).not.toContain(remedy);
+      }
+      // The full sentences stay where a reader can still ask for them.
+      expect(gates.some((g) => g.includes("Move the task through the workflow first"))).toBe(true);
+    });
+  });
+
+  describe("F35-5: an @mention whose run did not start leaves a note and an audit row", () => {
+    it("a stage-ineligible mention writes 'Mention not started' naming the stage, and task.comment.unrouted", async () => {
+      // Canary: remove the `noteMentionNotStarted` call from the catch.
+      const store = prepared();
+      const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...projectFile.parsed.frontmatter,
+        repo: null,
+        agents: [
+          {
+            profileId: "reviewer",
+            capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" as const }],
+            extras: [],
+            definition: {
+              kind: "specialist" as const,
+              name: "Rev",
+              role: "Code review",
+              backends: ["claude" as const],
+              model: "sonnet",
+              stages: ["review"],
+            },
+          },
+        ],
+      });
+      seed(store, { stage: "triage" });
+      const result = await commentToAgent(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", text: "@Rev please look" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(result.triggered).toBeNull();
+      expect(result.runNotStarted).toMatch(/Rev is not eligible for the Triage stage/);
+      const note = file(store).timeline.find((e) => e.type === "note" && e.title === "Mention not started")!;
+      expect(note).toBeDefined();
+      expect(note.text).toMatch(/^\*\*Not started:\*\* @Rev was mentioned, but its run did not start: Rev is not eligible for the Triage stage/);
+      expect(note.text).toContain("Review");
+      expect(note.text).not.toContain('"triage"');
+      const rows = listAuditEvents(store.db, { action: "task.comment.unrouted" });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.details).toMatchObject({ profileId: "reviewer", reason: "run-not-started" });
+      // The comment itself still stands.
+      expect(file(store).timeline.some((e) => e.type === "comment" && e.actor.kind === "human")).toBe(true);
+    });
+  });
+
+  describe("F35-6: updateTaskGoal is honest about an unchanged save", () => {
+    const editGoal: TaskPacket = {
+      type: "input",
+      kind: "Scope decision",
+      from: "operator",
+      title: "Narrow the goal?",
+      body: "",
+      observations: [],
+      options: [
+        {
+          kind: "edit_goal",
+          t: "Ship the parser with tests",
+          d: "Narrow to the parser and its tests.",
+          rec: true,
+          goalDraft: "Ship the parser with tests.",
+        },
+      ],
+    };
+
+    it("with a decided edit_goal packet open, the unchanged goal is refused and the packet stays; the draft clears it", async () => {
+      // Canary: restore the silent early return on unchanged text.
+      const store = prepared();
+      seed(store, { stage: "triage" }, editGoal);
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(file(store).packet?.awaiting).toBe("goal_edit");
+      await expect(
+        updateTaskGoal(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", goal: "Ship the parser." },
+          actor(store.users.arda),
+          { dataRoot: store.dataRoot },
+        ),
+      ).rejects.toThrow(/reads exactly as before, so the requested edit has not landed/);
+      expect(file(store).packet?.awaiting).toBe("goal_edit");
+      const saved = await updateTaskGoal(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", goal: "Ship the parser with tests." },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(saved.changed).toBe(true);
+      expect(file(store).packet).toBeNull();
+      expect(file(store).timeline.some((e) => e.text.includes("**Packet resolved:** the requested goal edit landed"))).toBe(true);
+    });
+
+    it("without a packet an unchanged save reports changed: false and writes nothing", async () => {
+      const store = prepared();
+      seed(store, { stage: "impl" });
+      const before = file(store).timeline.length;
+      const result = await updateTaskGoal(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", goal: "Ship the parser." },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(result.changed).toBe(false);
+      expect(file(store).timeline).toHaveLength(before);
+    });
+  });
+
+  describe("ruling 157 (F35-8): liftHoldForRun", () => {
+    const hold: TaskPacket = {
+      type: "blocked",
+      kind: "Work stalled",
+      from: "operator",
+      title: "The Developer's run failed",
+      body: "",
+      observations: [],
+      options: [{ kind: "hold_runtime_debug", t: "Hold for runtime debug", d: "", rec: false }],
+    };
+
+    async function held(store: TestStore, patch: Partial<TaskFrontmatter> = {}): Promise<void> {
+      seed(store, { stage: "review", readiness: "blocked", ...patch }, hold);
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, ack: null },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(file(store).packet).toBeNull();
+      expect(file(store).frontmatter.readiness).toBe("blocked");
+    }
+
+    it("lifts a packet-less, list-less hold once: readiness ready, a 'Hold lifted' note, task.hold.lifted", async () => {
+      // Canary: return true from liftHoldForRun without the write.
+      const store = prepared();
+      await held(store);
+      const lifted = await liftHoldForRun(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
+        kind: "dispatch",
+        profileId: "developer",
+        name: "Developer",
+        by: null,
+      });
+      expect(lifted).toBe(true);
+      expect(file(store).frontmatter.readiness).toBe("ready");
+      const note = file(store).timeline[0]!;
+      expect(note).toMatchObject({ type: "note", title: "Hold lifted" });
+      expect(note.text).toBe(
+        "**Hold lifted:** Developer was dispatched, so VIB-1 is no longer held. The run's outcome decides what happens next.",
+      );
+      const rows = listAuditEvents(store.db, { action: "task.hold.lifted" });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.details).toMatchObject({ cause: "dispatch", profileId: "developer", previous: "blocked" });
+      // A second call finds no hold and writes no second note.
+      const again = await liftHoldForRun(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
+        kind: "dispatch",
+        profileId: "developer",
+        name: "Developer",
+        by: null,
+      });
+      expect(again).toBe(false);
+      expect(file(store).timeline.filter((e) => e.title === "Hold lifted")).toHaveLength(1);
+    });
+
+    it("an open blocked packet and a dependency list are not holds", async () => {
+      const store = prepared();
+      seed(store, { stage: "review", readiness: "blocked" }, hold);
+      expect(
+        await liftHoldForRun(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
+          kind: "operator-run",
+          trigger: "manual",
+          byName: "Arda",
+          by: actor(store.users.arda),
+        }),
+      ).toBe(false);
+      expect(file(store).frontmatter.readiness).toBe("blocked");
+      await held(store, { blockedBy: ["VIB-2"] });
+      expect(
+        await liftHoldForRun(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
+          kind: "operator-run",
+          trigger: "scheduled",
+          byName: null,
+          by: null,
+        }),
+      ).toBe(false);
+      expect(file(store).frontmatter.readiness).toBe("blocked");
+      expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(0);
+    });
+  });
+});
+
+/**
+ * Pass 35 S15: rulings 162 and 163 (F35-12, F35-13, G35-5 addendum (d)).
+ *
+ * A board with a stage PAST the review one (`merge`), as the k9s clone had:
+ * the operators moved tasks to Merge and recommended acceptance on PRs whose
+ * `mergeable: conflicting` was already on the file, and a conflict rework at
+ * Merge had no route back to a stage where a reviewer could run.
+ */
+describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
+  const MERGE_STAGES = [
+    { id: "triage", name: "Triage", color: "#a5a8b5" },
+    { id: "impl", name: "In Progress", color: "#7b61ff" },
+    { id: "review", name: "Review", color: "#5b76fe" },
+    { id: "merge", name: "Merge", color: "#187574" },
+    { id: "done", name: "Done", color: "#00b473" },
+  ];
+  const MERGE_WORKFLOW = [
+    { from: "triage", to: "impl", boundary: "auto" as const, by: "Operator", locked: false },
+    { from: "impl", to: "review", boundary: "approval" as const, by: "Operator", locked: false },
+    { from: "review", to: "merge", boundary: "approval" as const, by: "Operator", locked: false },
+    { from: "merge", to: "done", boundary: "human" as const, by: "Human", locked: true },
+  ];
+
+  function withMergeBoard(store: TestStore): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    // The verdict-capable profile is eligible at Review only, as the k9s
+    // board's reviewers were: nobody can give a verdict at Merge.
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      stages: MERGE_STAGES,
+      workflow: MERGE_WORKFLOW,
+      agents: [
+        {
+          profileId: "reviewer",
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet", stages: ["review"] },
+        },
+      ],
+    });
+  }
+
+  /** A task whose verdict was given on `rev_1` and whose revision has since
+   *  moved to `rev_2`: derived validation `changed`. */
+  function seedChangedAt(store: TestStore, stage: string, patch: Partial<TaskFrontmatter> = {}): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage,
+        waiting: "agent",
+        readiness: "ready",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        branch: "vib-1-work",
+        workRevision: workRev("rev_2", "u".repeat(40)),
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: "rev_1",
+            headSha: "9".repeat(40),
+            result: "approve",
+            reason: "looked right then",
+            at: "2026-08-19T09:30:00.000Z",
+          },
+        ],
+        validation: "changed",
+        pr: { number: 7, state: "review", title: "[VIB-1] work" },
+        ...patch,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  function taskFile(store: TestStore) {
+    return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+  }
+
+  it("ruling 163 (a): the operator's rework move Merge to Review is allowed on `changed`; Merge to In Progress is not", async () => {
+    // Canary: require `validation === "failing"` again in transitionStage's
+    // `isReworkMove`. Live: KNC-20's operator was refused "No allowed
+    // transition from Merge to Review" after a conflict rework.
+    const store = prepared();
+    withMergeBoard(store);
+    seedChangedAt(store, "merge");
+    const opCtx = { dataRoot: store.dataRoot, operatorAuthorized: true };
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", rework: true },
+        OPERATOR_TASK_ACTOR,
+        opCtx,
+      ),
+    ).rejects.toThrow(/No allowed transition from Merge to In Progress/);
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", rework: true },
+      OPERATOR_TASK_ACTOR,
+      opCtx,
+    );
+    expect(taskFile(store).frontmatter.stage).toBe("review");
+    expect(taskFile(store).frontmatter.previousStageId).toBe("merge");
+  });
+
+  it("ruling 163 (b): resolving the conflict packet's redirect at Merge returns the task to Review in the same write", async () => {
+    // Canary: drop the `option.rework` branch in resolvePacket's default arm.
+    const store = prepared();
+    withMergeBoard(store);
+    seedChangedAt(store, "merge", { readiness: "blocked", waiting: "human" });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: taskFile(store).frontmatter,
+      packet: {
+        id: "pkt_conflict",
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "`vib-1-work` conflicts with `main`",
+        body: "The task branch cannot be brought up to date automatically.",
+        observations: [{ k: "Conflicting files", v: "README.md", code: true }],
+        options: [
+          {
+            kind: "redirect",
+            t: "Have Dev resolve the conflict",
+            d: "Its workspace merges and resolves the conflicting files. The task returns to Review for the re-verdict.",
+            rec: true,
+            rework: true,
+            ev: "**Decision:** Dev resolves the conflict between `vib-1-work` and `main` in its own workspace.",
+          },
+          { kind: "custom", t: "Resolve `vib-1-work` yourself", d: "", rec: false, ev: "**Decision:** a person resolves it." },
+        ],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const parsed = taskFile(store);
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.frontmatter.previousStageId).toBe("merge");
+    expect(parsed.packet).toBeNull();
+    const decision = parsed.timeline.find((e) => e.type === "transition" && e.text.startsWith("**Decision:**"))!;
+    expect(decision.text).toContain("VIB-1 returns to Review so the resolved revision gets its verdict there.");
+    const rows = listAuditEvents(store.db, { action: "task.transition" });
+    expect(rows.some((r) => r.details?.via === "packet_redirect" && r.details?.to === "review")).toBe(true);
+  });
+
+  it("ruling 163 (b): a redirect without the rework marker leaves the stage alone", async () => {
+    const store = prepared();
+    withMergeBoard(store);
+    seedChangedAt(store, "merge", { readiness: "blocked", waiting: "human" });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: taskFile(store).frontmatter,
+      packet: {
+        id: "pkt_q",
+        type: "input",
+        kind: "Decision required",
+        from: "operator",
+        title: "Which target?",
+        body: "",
+        observations: [],
+        options: [{ kind: "redirect", t: "Have Dev do it", d: "", rec: true }],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(taskFile(store).frontmatter.stage).toBe("merge");
+  });
+
+  it("ruling 163 (c): delivering a changed revision at Merge records the transition back to Review", async () => {
+    // Canary: drop the `returnChangedRevisionToReview` call in performDelivery.
+    const REPO_PATH = "/repos/akin-ozer/viberr";
+    pushMock.mockClear();
+    const store = prepared();
+    withMergeBoard(store);
+    seedChangedAt(store, "merge", {
+      pr: {
+        number: 7,
+        state: "review",
+        title: "[VIB-1] work",
+        headSha: "9".repeat(40),
+        unpushedRevision: { revisionSha: "a".repeat(40), prHeadSha: "9".repeat(40), relation: "behind" },
+      },
+    });
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_returns0000000000001" }, actor(store.users.arda));
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor(store.users.arda));
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { body: { object: { sha: "c".repeat(40) } } },
+      [`GET ${REPO_PATH}/pulls/7`]: {
+        body: { number: 7, html_url: "https://x/pull/7", title: "[VIB-1] work", state: "open", merged: false, head: { sha: "a".repeat(40) } },
+      },
+    });
+    pushMock.mockResolvedValueOnce({
+      status: "pushed",
+      branch: "vib-1-work",
+      commits: 1,
+      headSha: "a".repeat(40),
+      remoteHeadBefore: "9".repeat(40),
+      workflowFiles: [],
+    });
+    const outcome = await manualDeliverForReview(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      deliveryCtx(store),
+    );
+    github = null;
+    expect(outcome).toMatchObject({ status: "delivered", moved: true });
+    const parsed = taskFile(store);
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.frontmatter.previousStageId).toBe("merge");
+    const moved = parsed.timeline.find((e) => e.type === "transition" && e.text.includes("returns from Merge to Review"))!;
+    expect(moved.text).toContain("changed after the last verdict");
+    expect(listAuditEvents(store.db, { action: "task.transition" }).some((r) => r.details?.via === "delivery")).toBe(true);
+  });
+
+  it("ruling 162 (a0): a post-gate GitHub merge refusal prints the gate's sentence, from the gate function", async () => {
+    // KNC-16: the gate passed on a cached `clean`, GitHub answered 405 and the
+    // person read a second sentence for the same fact, with no way out.
+    // Canary: print `GitHub refuses to merge ...: <message>` whenever the merge
+    // result carries no `mergeable` field.
+    const store = prepared();
+    seedChangedAt(store, "review", {
+      workRevision: workRev("rev_1"),
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+      ],
+      validation: "healthy",
+      readiness: "ready",
+      waiting: "human",
+    });
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => {
+      // What `mergeTaskPr` does on a 405 now: the re-read pull says conflicting.
+      await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+        parsed.frontmatter.pr!.mergeable = "conflicting";
+      });
+      return { status: "not_mergeable", prNumber: 7, message: "Pull Request has merge conflicts" };
+    });
+    const refreshMock = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+      status: "no_workspace",
+      reason: "no workspace git repo",
+    }));
+    const rejected = transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
+    );
+    await expect(rejected).rejects.toThrow(
+      "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.",
+    );
+    expect(taskFile(store).frontmatter.stage).toBe("review");
+  });
+
+  it("G35-5 (d): an accept on a behind-base branch performs exactly one refresh, then one merge, in that order", async () => {
+    // Canary: drop the `refreshBranchForAcceptance` call in attemptAcceptanceMerge.
+    const store = prepared();
+    seedChangedAt(store, "review", {
+      workRevision: workRev("rev_1"),
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+      ],
+      validation: "healthy",
+      readiness: "ready",
+      waiting: "human",
+    });
+    const sequence: string[] = [];
+    const refreshMock = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => {
+      sequence.push("refresh");
+      return {
+        status: "updated",
+        branch: "vib-1-work",
+        base: "main",
+        commits: 2,
+        mergeSha: "m".repeat(40),
+        baseSha: "b".repeat(40),
+        remoteBefore: { kind: "current", headSha: "a".repeat(40) },
+        remote: { kind: "current", headSha: "m".repeat(40) },
+      };
+    });
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => {
+      sequence.push("merge");
+      return { status: "merged", prNumber: 7, sha: "m".repeat(40) };
+    });
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
+    );
+    expect(sequence).toEqual(["refresh", "merge"]);
+    const parsed = taskFile(store);
+    expect(parsed.frontmatter.stage).toBe("done");
+    expect(parsed.frontmatter.baseRefreshes).toHaveLength(1);
+    expect(parsed.frontmatter.baseRefreshes[0]).toMatchObject({ mergeSha: "m".repeat(40), base: "main", commits: 2 });
+    expect(parsed.timeline.some((e) => e.text.startsWith("Accepting the completion brought `vib-1-work` up to date with `main`"))).toBe(true);
+    expect(listAuditEvents(store.db, { action: "github.branch_update.acceptance" })[0]?.details).toMatchObject({ status: "updated", commits: 2 });
+  });
+
+  it("G35-5 (d): a refresh that CONFLICTS refuses the acceptance with the gate's sentence and records the conflict", async () => {
+    const store = prepared();
+    seedChangedAt(store, "review", {
+      workRevision: workRev("rev_1"),
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+      ],
+      validation: "healthy",
+      readiness: "ready",
+      waiting: "human",
+    });
+    const refreshMock = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+      status: "conflict",
+      branch: "vib-1-work",
+      base: "main",
+      files: ["README.md", "Makefile"],
+      detail: "CONFLICT (content): Merge conflict in README.md",
+    }));
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => ({
+      status: "merged",
+      prNumber: 7,
+      sha: "m".repeat(40),
+    }));
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
+      ),
+    ).rejects.toThrow(/conflicts with the base branch.*Rebase the branch and re-review, or archive the task/);
+    expect(mergeMock).not.toHaveBeenCalled();
+    const parsed = taskFile(store);
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.frontmatter.pr?.mergeable).toBe("conflicting");
+    const line = parsed.timeline.find((e) => e.type === "github" && e.text.includes("CONFLICT"))!;
+    expect(line.text).toContain("README.md, Makefile");
+  });
+
+  /**
+   * P14-GV-05 applied to the acceptance-time refresh: the refresh is itself an
+   * irreversible publish (a workspace merge PUSHED to origin), so the caller's
+   * last check has to run BEFORE it too. The window it guards is real: the
+   * outer gate runs, then the no-change probe and the PR head read await
+   * GitHub, and a verdict that flips during those awaits used to move the PR
+   * head, re-trigger CI and write "Accepting the completion brought ..." before
+   * the acceptance was refused.
+   */
+  it("G35-5 (d) review: a gate that stands by merge time refuses BEFORE the branch is refreshed and pushed", async () => {
+    // Canary: call `beforeMerge?.()` only after `refreshBranchForAcceptance`
+    // in attemptAcceptanceMerge — the refresh then runs and publishes first.
+    const REPO_PATH = "/repos/akin-ozer/viberr";
+    const store = prepared();
+    seedChangedAt(store, "review", {
+      workRevision: workRev("rev_1"),
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+      ],
+      validation: "healthy",
+      readiness: "ready",
+      waiting: "human",
+    });
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_beforemerge000000001" }, actor(store.users.arda));
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor(store.users.arda));
+    // The reviewer flips to request_changes during the head read — the await
+    // window between the outer gate and the merge ceremony.
+    const fetchImpl: typeof fetch = async (target) => {
+      // `Request` accepts every form the fetch signature allows, so the URL is
+      // read without branching on the argument's representation.
+      const url = new Request(target).url;
+      if (url.includes(`${REPO_PATH}/pulls/7`)) {
+        await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+          parsed.frontmatter.verdicts = [
+            { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "request_changes", reason: "needs tests", at: "2026-08-19T10:30:00.000Z" },
+          ];
+        });
+      }
+      return new Response(
+        JSON.stringify({ number: 7, state: "open", merged: false, head: { sha: "a".repeat(40) } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
+    const refreshMock = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+      status: "updated",
+      branch: "vib-1-work",
+      base: "main",
+      commits: 2,
+      mergeSha: "m".repeat(40),
+      baseSha: "b".repeat(40),
+      remoteBefore: { kind: "current", headSha: "a".repeat(40) },
+      remote: { kind: "current", headSha: "m".repeat(40) },
+    }));
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => ({
+      status: "merged",
+      prNumber: 7,
+      sha: "m".repeat(40),
+    }));
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, fetchImpl, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
+      ),
+    ).rejects.toThrow(/requests changes on the current revision/);
+    // Nothing was published under the decision the gate had already withdrawn.
+    expect(refreshMock).not.toHaveBeenCalled();
+    expect(mergeMock).not.toHaveBeenCalled();
+    const parsed = taskFile(store);
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.frontmatter.baseRefreshes).toHaveLength(0);
+    expect(parsed.timeline.some((e) => e.text.startsWith("Accepting the completion brought"))).toBe(false);
+    expect(listAuditEvents(store.db, { action: "github.branch_update.acceptance" })).toHaveLength(0);
+  });
+});
+
+// ------------------------------------------------ ruling 160: closed by a person
+
+/**
+ * Ruling 160 (pass 35, F35-11): a pull request a person closed without merging
+ * is that person's decision about the task. `openTaskPr` answers
+ * `closed_by_human`; the delivery door renders it as a refusal naming the PR
+ * and the closer, and a person's answer to the recovery packet is what lets
+ * the next delivery open a fresh PR. Canaries: drop the `closed_by_human` arm
+ * of `performDelivery` (first test); drop the `closure.answered` stamp in
+ * `resolvePacket` (second test).
+ */
+describe("ruling 160: a PR closed by a person refuses delivery until the packet is answered", () => {
+  function seedClosedPr(store: TestStore, closure: PrClosure | null = {
+    at: "2026-09-06T19:33:19.000Z",
+    by: "akin-ozer",
+    answered: null,
+  }): void {
+    const pr: NonNullable<TaskFrontmatter["pr"]> = {
+      number: 10,
+      state: "closed",
+      title: "[VIB-1] rejected by hand",
+    };
+    if (closure) pr.closure = closure;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1",
+        ownerUserId: store.users.arda.id,
+        pr,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("performDelivery renders closed_by_human as a refusal naming the PR and the closer, with the timeline note", async () => {
+    const store = prepared();
+    seedClosedPr(store);
+    pushMock.mockResolvedValueOnce({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "c".repeat(40),
+      remoteHeadBefore: null,
+      workflowFiles: null,
+    });
+    const openPrMock = vi.fn<typeof openTaskPr>().mockResolvedValue({
+      status: "closed_by_human",
+      prNumber: 10,
+      closedBy: "akin-ozer",
+    });
+    const callCtx: TaskActionContext = {
+      dataRoot: store.dataRoot,
+      deps: { pushWorkspaceBranch: pushMock, openTaskPr: openPrMock },
+    };
+    const outcome = await performDelivery(store.db, callCtx, store.slug, "VIB-1", actor(store.users.arda));
+    expect(outcome).toMatchObject({ status: "closed_by_human", prNumber: 10, closedBy: "akin-ozer" });
+    const message = outcome.status === "closed_by_human" ? outcome.message : "";
+    expect(message).toContain("PR #10 was closed without merging by akin-ozer");
+    expect(message).toContain("a person's decision about the task");
+    expect(message).toContain("Reopening PR #10 on GitHub also lifts the block");
+    const timeline = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline;
+    expect(timeline.some((e) => e.type === "github" && e.text.includes("PR #10 was closed without merging by akin-ozer"))).toBe(true);
+    // The record is untouched: the closed PR still stands, unanswered.
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toMatchObject({ number: 10, state: "closed", closure: { answered: null } });
+  });
+
+  it("a person resolving a packet while the PR stands closed answers the closure", async () => {
+    const store = prepared();
+    seedClosedPr(store);
+    const current = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: current.frontmatter,
+      packet: {
+        id: "pkt_closed",
+        type: "input",
+        kind: "Decision required",
+        from: "operator",
+        title: "PR #10 was closed on GitHub without merging",
+        body: "Decide whether to rework and open a fresh PR, or archive the task.",
+        observations: [],
+        options: [
+          { kind: "custom", t: "Rework the branch", d: "", rec: true, ev: "**Decision:** rework." },
+          { kind: "archive_task", t: "Archive the task", d: "", rec: false },
+        ],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    expect(parsed.packet).toBeNull();
+    expect(parsed.frontmatter.pr?.closure).toEqual({
+      at: "2026-09-06T19:33:19.000Z",
+      by: "akin-ozer",
+      answered: { at: expect.any(String), byUserId: store.users.arda.id },
+    });
+  });
+
+  it("answers a closure GitHub was never reachable to record, so the refusal always has a way out", async () => {
+    // `pr.state: closed` also reaches the file from the workspace reconcile,
+    // which records no closure, and a degraded GitHub read cannot repair it.
+    // The gate that refuses delivery keys on the STATE, so an answer with no
+    // record to stamp left the task undeliverable for good. Canary: restore the
+    // `closedPr.closure &&` guard on the stamp and the answer lands nowhere.
+    const store = prepared();
+    seedClosedPr(store, null);
+    const current = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    expect(current.frontmatter.pr?.closure ?? null).toBeNull();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: current.frontmatter,
+      packet: {
+        id: "pkt_closed_norecord",
+        type: "input",
+        kind: "Decision required",
+        from: "operator",
+        title: "PR #10 was closed on GitHub without merging",
+        body: "Decide whether to rework and open a fresh PR, or archive the task.",
+        observations: [],
+        options: [
+          { kind: "custom", t: "Rework the branch", d: "", rec: true, ev: "**Decision:** rework." },
+        ],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    // The record is created BY the answer: the closer is unknown and stays
+    // null rather than being guessed, but the block is answered and lifted.
+    expect(parsed.frontmatter.pr?.closure).toEqual({
+      at: expect.any(String),
+      by: null,
+      answered: { at: expect.any(String), byUserId: store.users.arda.id },
+    });
   });
 });

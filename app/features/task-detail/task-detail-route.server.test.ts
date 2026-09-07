@@ -917,7 +917,7 @@ describe("loader — deployed specialists", () => {
     expect(dev.backend === "codex" || dev.backend === "claude").toBe(true);
     // Dynamic-dispatch rework: ONE per-profile live-run set replaced the
     // deliveringActive/activeReviewerIds split — no live run on VIB-166 yet.
-    expect(result.activeAgentProfileIds).toEqual([]);
+    expect(result.liveAgentRuns).toEqual([]);
   });
 });
 
@@ -982,7 +982,7 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
     // A primary run now exists, and the loader's live-run set names its profile.
     const primary = after.runtime.find((r) => r.kind === "primary");
     expect(primary).toBeDefined();
-    expect(after.activeAgentProfileIds).toContain("developer");
+    expect(after.liveAgentRuns.map((r) => r.profileId)).toContain("developer");
 
     // Stop the run's realistic-cadence timer so it does not outlive the suite
     // and write to the DB after afterAll() closes it (the sink guards this,
@@ -1032,6 +1032,50 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
       { projectSlug: "viberr-core", taskKey: "VIB-166", runId: primary!.serverRunId },
       { userId: ids.arda, label: "arda@viberr.dev" },
     );
+  });
+
+  it("ruling 152(c) (pass 35, G35-4): a dispatch into a backend the instance knows is out of quota is HELD: the toast names the hold, no run starts, no hand-off comment is written, and the retry is on the schedule", async () => {
+    // Canary: remove the `isDispatchHeld` catch in the run-agent arm and the
+    // route answers the 409 as an error instead of the hold toast.
+    const { recordBackendQuotaExhaustion, clearBackendQuotaExhaustion } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    const resetsAt = Math.round(Date.now() / 1000) + 3600;
+    recordBackendQuotaExhaustion(app.db, "codex", {
+      credentialUserId: ids.arda,
+      credentialLabel: "Arda",
+      resetsAt,
+      resetsAtPrecision: "clock",
+      providerText: "try again at 6:18 PM",
+      runId: "run_refused",
+      observedAt: new Date().toISOString(),
+    });
+    try {
+      const before = await runLoader("VIB-166", ids.arda);
+      const runsBefore = before.runtime.length;
+      // SAFETY: the developer is engaged on VIB-166 and no run is live, so the
+      // only thing between the dispatch and a run is the hold.
+      const result = (await postIntent("VIB-166", ids.arda, {
+        intent: "run-agent", profileId: "developer", prompt: "Pick up the lint debt",
+      })) as { ok: true; toast: string };
+      expect(result.ok).toBe(true);
+      expect(result.toast).toMatch(/^Held: Codex is out of quota until .* UTC; Developer's run is scheduled for then\.$/);
+
+      const after = await runLoader("VIB-166", ids.arda);
+      expect(after.runtime.length).toBe(runsBefore);
+      expect(after.liveAgentRuns).toEqual([]);
+      const held = after.task.timeline.find((e) => e.title === "Dispatch held");
+      expect(held?.text).toContain("**Held:** Codex is out of quota until");
+      expect(held?.text).toContain("Developer's run starts when the window reopens");
+      expect(
+        after.task.timeline.find((e) => e.type === "comment" && e.text === "@Developer Pick up the lint debt"),
+        "no hand-off comment for a run that has not started",
+      ).toBeUndefined();
+      const schedule = after.schedules.find((x) => x.status === "pending" && x.action === "run-agent");
+      expect(schedule).toMatchObject({ profileId: "developer", prompt: "Pick up the lint debt" });
+    } finally {
+      clearBackendQuotaExhaustion(app.db, "codex");
+    }
   });
 
   it("a contributor is denied run-agent (admin|maintainer only)", async () => {

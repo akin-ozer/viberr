@@ -36,7 +36,7 @@ import {
   requireProjectMutable,
   type ProjectContext,
 } from "./task-actions.server";
-import { validateDependencyRefs } from "./dependencies.server";
+import { setTaskDependencies, validateDependencyRefs } from "./dependencies.server";
 import { formatDependencyRef, parseDependencyRef } from "~/shared/dependencies";
 import type { CreateTaskInput } from "./task-actions.server";
 import type { TaskActor, TaskMutationContext } from "./task-mutation.server";
@@ -291,7 +291,9 @@ export type UpdateGoalOp =
   | { op: "skip_link"; index: number; reason?: string }
   | { op: "retry_link"; index: number }
   /** `blockedBy` ABSENT leaves the link's list alone; `[]` clears it (the
-   *  same absent-vs-empty contract `update_task` keeps, ruling 131(c)). */
+   *  same absent-vs-empty contract `update_task` keeps, ruling 131(c)). On an
+   *  ACTIVE link it is the only editable field and is written on the link's
+   *  task, which mirrors it back onto the link (ruling 155). */
   | { op: "edit_link"; index: number; title?: string; goal?: string; blockedBy?: string[] }
   | { op: "add_link"; title: string; goal: string; blockedBy?: string[] }
   | { op: "remove_pending_link"; index: number };
@@ -300,6 +302,17 @@ export interface UpdateGoalInput {
   projectSlug: string;
   goalId: string;
   action: UpdateGoalOp;
+}
+
+/** Ruling 155: an active link's `blockedBy` edit, carried out of the goal-file
+ *  lock to the task's writer. */
+interface ForwardedLinkWait {
+  linkIndex: number;
+  taskKey: string;
+  blockedBy: string[];
+}
+interface LinkWaitForward {
+  wait: ForwardedLinkWait | null;
 }
 
 /** Creator-or-steering-tier gate for redirecting a chain. */
@@ -395,6 +408,10 @@ export async function updateGoal(
   let message = "";
   let retryLinkIndex: number | null = null;
   let advanceAfter = false;
+  // Ruling 155: an active link's wait lives on its task. The goal-file lock
+  // below is not re-entrant, and the task writer mirrors the list back onto
+  // this very file, so the forward runs AFTER the lock is released.
+  const forward: LinkWaitForward = { wait: null };
 
   const parsed = await updateGoalFile(
     goalRef(ctx, input.projectSlug, input.goalId),
@@ -467,6 +484,36 @@ export async function updateGoal(
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
           const link = fm.links.find((l) => l.index === op.index);
           if (!link) throw AppError.validation(`No link ${op.index}.`);
+          if (link.status === "active" && link.taskKey) {
+            // Ruling 155 (F35-3): the task carries the wait; its title and
+            // goal are settled the moment work started. `blockedBy` alone is
+            // forwarded to the task's one writer, which mirrors it back here.
+            if (op.title?.trim() || op.goal?.trim() || op.blockedBy === undefined) {
+              throw AppError.conflict(
+                `Only a pending or failed link's title or goal can be edited; link ${op.index} is active. ` +
+                  `Its wait follows ${link.taskKey}: pass blockedBy here or edit it on the task.`,
+              );
+            }
+            // The task writer re-validates the list, but `validateDependencyRefs`
+            // does not carry the CHAIN-ORDER rule: a pending later link of this
+            // same chain declares no edges, so no cycle closes and the wait is
+            // accepted, leaving link 1 held by link 2 and link 2 held by the
+            // chain order. Run the goal's own rules here first, so the active
+            // arm refuses exactly what every other arm refuses.
+            forward.wait = {
+              linkIndex: op.index,
+              taskKey: link.taskKey,
+              blockedBy: validateLinkWait(
+                db,
+                input.projectSlug,
+                fm.id,
+                link.index,
+                fm.links,
+                op.blockedBy,
+              ),
+            };
+            return;
+          }
           if (link.status !== "pending" && link.status !== "failed") {
             throw AppError.conflict(
               `Only a pending or failed link can be edited; link ${op.index} is ${link.status}.`,
@@ -546,6 +593,18 @@ export async function updateGoal(
       }
     },
   );
+  if (forward.wait) {
+    // The task writer's own gate and validation apply (ruling 131(b)); an
+    // unchanged list still re-mirrors, so a stale link record heals here too.
+    const wait = await setTaskDependencies(
+      db,
+      { projectSlug: input.projectSlug, taskKey: forward.wait.taskKey, blockedBy: forward.wait.blockedBy },
+      actor,
+      ctx,
+    );
+    const list = wait.blockedBy.length > 0 ? wait.blockedBy.join(", ") : "nothing";
+    message = `Link ${forward.wait.linkIndex} waits on ${list}, through ${forward.wait.taskKey}${wait.changed ? "" : " (unchanged)"}.`;
+  }
   rebuildGoalFile(db, input.projectSlug, input.goalId, { dataRoot: ctx.dataRoot });
   recordAudit(db, {
     action: "goal.updated",

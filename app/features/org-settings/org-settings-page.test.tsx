@@ -237,25 +237,25 @@ describe("ConnectionsPanel", () => {
 const ME: OrgUserView = {
   id: "u_arda", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK",
   tone: "", role: "admin", status: "active", idp: "local", pwreset: false,
-  disabled: false,
+  disabled: false, githubHandle: null,
 };
 const USERS: OrgUserView[] = [
   ME,
   {
     id: "u_gh", name: "@octocat", email: "github.com/octocat", initials: "O",
     tone: "teal", role: "member", status: "whitelisted", idp: "github",
-    pwreset: false, disabled: false,
+    pwreset: false, disabled: false, githubHandle: "octocat",
   },
   {
     id: "u_selin", name: "Selin Aksoy", email: "selin@viberr.dev", initials: "SA",
     tone: "violet", role: "member", status: "active", idp: "local",
-    pwreset: true, disabled: false,
+    pwreset: true, disabled: false, githubHandle: null,
   },
 ];
 const DISABLED_USER: OrgUserView = {
   id: "u_dz", name: "Deniz Yıldız", email: "deniz@viberr.dev", initials: "DY",
   tone: "", role: "member", status: "active", idp: "local", pwreset: false,
-  disabled: true,
+  disabled: true, githubHandle: null,
 };
 const DOMAINS: DomainRecord[] = [
   { id: "d1", domain: "@viberr.dev", role: "member", createdAt: "2026-07-01T09:00:00.000Z" },
@@ -432,10 +432,10 @@ const SKILLS: SkillView[] = [
 const GAGENTS: GagentView[] = [
   { id: "developer", name: "Developer", backend: "codex",
     summary: "Primary implementation specialist.", role: "Implementation",
-    persona: "", stages: ["ready", "impl"],
+    persona: "", stages: ["ready", "impl"], model: "", effort: "",
     skills: ["terraform-review"], mcps: ["github-mcp"], kbs: [], used: 4 },
   { id: "spare", name: "Spare", backend: "claude", summary: "Unused.",
-    role: "Spare hands",
+    role: "Spare hands", model: "", effort: "",
     persona: "", stages: ["impl"], skills: [], mcps: [], kbs: [], used: 0 },
 ];
 const STAGES = [
@@ -684,15 +684,52 @@ describe("ResourcesPanel", () => {
     expect(chips.some((c) => c.textContent === "Done")).toBe(false);
     // P13-AP-05/AP-07: a template is ADOPTED (copied) by a project, so an org
     // edit does not silently reach an already-adopted project on its next run.
+    // Ruling 156 (pass 35): the hint no longer points at "re-adopt" (a door the
+    // deploy refuses); the box above the foot copies the grants with this save.
     expect(
       getByText(
-        "adopted by 4 projects. Each keeps its own copy; re-adopt to pick up this edit",
+        "adopted by 4 projects. Each project keeps its own copy of the grants and its own capability policy; the box above updates the grants with this save",
       ),
     ).toBeTruthy();
     // Three ctx groups over the org resources; the selected skill chip is on.
     expect(document.querySelectorAll(".ctx-group")).toHaveLength(3);
     const skillChip = chips.find((c) => c.textContent === "terraform-review")!;
     expect(skillChip.className).toContain(" on");
+  });
+
+  /**
+   * Ruling 156 (pass 35, F35-7): a project's deployment is its own COPY of the
+   * grants, so an org edit never reached it. The modal offers the propagation
+   * as a box, unchecked by default, and the save carries the decision. Canary:
+   * drop `propagate` from the submitted fields.
+   */
+  it("ruling 156: the copy-grants box posts propagate=1 with the save, and an unadopted template has no box", async () => {
+    const { getByLabelText, getByText, queryByLabelText } = renderResources();
+    fireEvent.click(getByLabelText("Edit Developer"));
+    const box = getByLabelText(
+      "Copy these grants to the 4 projects that adopted this profile",
+    );
+    expect(box.getAttribute("type")).toBe("checkbox");
+    fireEvent.click(box);
+    fireEvent.click(getByText("Save changes"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "agent-save",
+        profileId: "developer",
+        propagate: "1",
+      }),
+    );
+    cleanup();
+
+    // Spare is adopted by nobody: nothing to copy to, so no box, and the save
+    // says so explicitly.
+    const again = renderResources();
+    fireEvent.click(again.getByLabelText("Edit Spare"));
+    expect(queryByLabelText(/Copy these grants/)).toBeNull();
+    fireEvent.click(again.getByText("Save changes"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({ intent: "agent-save", profileId: "spare", propagate: "0" }),
+    );
   });
 
   it("review F10: a legacy template whose role repeats its name explains the greyed Save", () => {
@@ -1197,7 +1234,7 @@ describe("F32-2 (pass 32): the Settings page holds a live stream", () => {
           }}
           meId={ME.id}
           callbackOrigin="http://localhost:5173"
-          runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+          runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
           s3Audit={null}
           controllerConfig={CONTROLLER_CONFIG}
           controllerLocks={CONTROLLER_LOCKS}
@@ -1234,7 +1271,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
         }}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1290,7 +1327,7 @@ describe("C9: instance storage line", () => {
         })}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1320,7 +1357,7 @@ describe("C9: instance storage line", () => {
         })}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1354,7 +1391,7 @@ describe("run concurrency control", () => {
         view={viewBase}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 2, live: 2, queued: 1 }}
+        runConcurrency={{ cap: 2, lane: 1, live: 2, queued: 1 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1365,13 +1402,93 @@ describe("run concurrency control", () => {
     expect(getByText(/2 runs live, 1 queued/)).toBeTruthy();
   });
 
+  // Ruling 152(b): a cap carries a coordination lane, and the control says so
+  // under the field, because "capped at 2" beside three live runs would
+  // otherwise read as a cap that does not hold.
+  it("ruling 152: a positive cap names the coordination lane under the field", () => {
+    // Canary: drop the `.conc-lane` sentence from RunConcurrencyControl and
+    // the first assertion fails.
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 2, lane: 1, live: 3, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    const sentence = getByText(/Cap 2: up to 2 agent runs at once,/);
+    expect(sentence.textContent).toContain(
+      "plus 1 slot for operator and controller turns so a decision is not stuck behind the builds it is about.",
+    );
+    expect(sentence.className).toContain("conc-lane");
+  });
+
+  // The lane is `max(1, ceil(cap / 4))`, so a sentence that states the rule
+  // instead of the number lies at every cap that is not a multiple of four:
+  // "one extra slot per four" reads as none at cap 2 and as one at cap 5.
+  it("ruling 152: the sentence prints the lane the server derived, at any cap", () => {
+    // Canary: render the words "one extra slot per four" again (or `cap` in
+    // place of `countLabel`) and both assertions fail.
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 5, lane: 2, live: 5, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    expect(
+      getByText(/Cap 5: up to 5 agent runs at once, plus 2 slots for/).textContent,
+    ).toContain("operator and controller turns");
+  });
+
+  it("ruling 152: a cap of 1 counts one agent run and one slot", () => {
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 1, lane: 1, live: 1, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    expect(getByText(/Cap 1: up to 1 agent run at once, plus 1 slot for/)).toBeTruthy();
+  });
+
+  it("ruling 152: an unlimited cap has no lane sentence", () => {
+    const { queryByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    expect(queryByText(/for operator and controller turns/)).toBeNull();
+  });
+
   it("says unlimited when the cap is 0", () => {
     const { getByText } = renderPanel(
       <OrgSettingsPage
         view={viewBase}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1391,7 +1508,7 @@ describe("run concurrency control", () => {
         view={viewBase}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1438,7 +1555,7 @@ describe("run concurrency control", () => {
         view={viewBase}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1463,7 +1580,7 @@ describe("run concurrency control", () => {
         view={viewBase}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 2, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 2, lane: 1, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1507,7 +1624,7 @@ describe("run concurrency control", () => {
         view={viewBase}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 2, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 2, lane: 1, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1556,7 +1673,7 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
       }}
       meId={ME.id}
       callbackOrigin="http://localhost:5173"
-      runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+      runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
       s3Audit={s3Audit}
       controllerConfig={CONTROLLER_CONFIG}
       controllerLocks={CONTROLLER_LOCKS}
@@ -1696,7 +1813,7 @@ describe("FR33: the audit card discloses the export-before-purge record", () => 
         }}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1742,7 +1859,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
         }}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}

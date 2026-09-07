@@ -11,6 +11,7 @@ import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "./rebuilder.server";
 import { getReviewQueue } from "./review-queue.server";
+import { reviewRowSub } from "~/features/review/review-helpers";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -909,5 +910,236 @@ describe("ruling 138: the queue row flags a decided edit_goal packet", () => {
     const rows = [...queue.ready, ...queue.working];
     expect(rows.find((r) => r.key === "VIB-105")?.goalEditPending).toBe(true);
     expect(rows.find((r) => r.key === "VIB-106")?.goalEditPending).toBe(false);
+  });
+});
+
+/**
+ * U35-5 (pass 35): the `working` half keys on review WORK, not on the one stage
+ * with an edge into Done. The live board (`triage, design, impl, validation,
+ * review, merge, done`) resolves `reviewId` to Merge, so the old
+ * `stage === reviewId` filter printed "0 tasks at the review boundary" while
+ * eight tasks sat at Validation with open PRs and engaged reviewers.
+ *
+ * Canary: restore `t.stage === reviewId` as the membership filter for the
+ * working half; KNC-8, KNC-9 and KNC-5 vanish and the first four cases go red.
+ */
+describe("U35-5: review work before the boundary is listed on a custom board", () => {
+  const STAGES = [
+    { id: "triage", name: "Triage", color: "#a5a8b5" },
+    { id: "design", name: "Design", color: "#187574" },
+    { id: "impl", name: "Implementation", color: "#7b61ff" },
+    { id: "validation", name: "Validation", color: "#5b76fe" },
+    { id: "review", name: "Review", color: "#5b76fe" },
+    { id: "merge", name: "Merge", color: "#5b76fe" },
+    { id: "done", name: "Done", color: "#00b473" },
+  ];
+  const edge = (from: string, to: string, boundary: "auto" | "approval" | "human") => ({
+    from,
+    to,
+    boundary,
+    by: boundary === "human" ? "Human acceptance" : "Operator",
+    locked: boundary === "human",
+  });
+  const WORKFLOW = [
+    edge("triage", "design", "auto"),
+    edge("design", "impl", "auto"),
+    edge("impl", "validation", "auto"),
+    edge("validation", "review", "auto"),
+    edge("review", "merge", "approval"),
+    edge("merge", "done", "human"),
+  ];
+  const revision = (key: string) => ({
+    id: `rev-${key.toLowerCase()}`,
+    headSha: "a".repeat(40),
+    treeSha: "t".repeat(40),
+    branch: key.toLowerCase(),
+    createdAt: "2026-09-06T10:00:00.000Z",
+    sourceProfileId: "developer",
+  });
+  const engaged = [
+    { profileId: "developer", backend: "claude" as const, role: "Developer", delivers: true, verdictCapable: false },
+    { profileId: "reviewer", backend: "claude" as const, role: "Reviewer", delivers: false, verdictCapable: true },
+  ];
+  const verdict = (key: string, result: "approve" | "request_changes") => ({
+    profileId: "reviewer",
+    revisionId: `rev-${key.toLowerCase()}`,
+    headSha: "a".repeat(40),
+    result,
+    reason: "r",
+    at: "2026-09-06T11:00:00.000Z",
+  });
+
+  function seed(workflow: typeof WORKFLOW = WORKFLOW) {
+    const store = setupTestStore(ctx);
+    writeProject(store.dataRoot, {
+      name: "k9s clone",
+      slug: "k9c",
+      repo: null,
+      defaultBranch: "main",
+      taskPrefix: "KNC",
+      nextTaskNumber: 20,
+      stages: STAGES,
+      workflow,
+      members: [{ userId: store.users.arda.id, role: "admin" }],
+      agents: [],
+      credentialPolicy: null,
+      guardrails: [],
+    });
+    const write = (key: string, patch: Partial<TaskFrontmatter>) =>
+      writeTask(store.dataRoot, "k9c", {
+        frontmatter: baseTaskFrontmatter(key, patch),
+      });
+    // (c) + (b): at Validation, PR open, reviewer engaged, no verdict yet.
+    write("KNC-8", {
+      title: "Namespace picker",
+      stage: "validation",
+      waiting: "agent",
+      branch: "knc-8",
+      pr: { number: 8, state: "review", title: "Namespace picker" },
+      workRevision: revision("KNC-8"),
+      engagements: engaged,
+    });
+    // (c): at Validation, changes requested on the current revision.
+    write("KNC-9", {
+      title: "Pod logs",
+      stage: "validation",
+      waiting: "agent",
+      branch: "knc-9",
+      pr: { number: 9, state: "review", title: "Pod logs" },
+      workRevision: revision("KNC-9"),
+      engagements: engaged,
+      verdicts: [verdict("KNC-9", "request_changes")],
+    });
+    // Neither: at Implementation with no PR and no reviewer.
+    write("KNC-2", {
+      title: "Scaffold",
+      stage: "impl",
+      waiting: "agent",
+      branch: "knc-2",
+    });
+    // (a): at Merge (the resolved review stage), approved, waiting on a human.
+    write("KNC-3", {
+      title: "Context switcher",
+      stage: "merge",
+      waiting: "human",
+      branch: "knc-3",
+      pr: { number: 3, state: "review", title: "Context switcher", mergeable: "clean" },
+      workRevision: revision("KNC-3"),
+      engagements: engaged,
+      verdicts: [verdict("KNC-3", "approve")],
+    });
+    // (c) alone: no PR yet, but a required reviewer owes a verdict on the
+    // delivered revision. Canary for the `verdictCapable` carry-through in
+    // `mapAgentRef`: drop it and this row is the one that vanishes.
+    write("KNC-7", {
+      title: "Resource table",
+      stage: "impl",
+      waiting: "agent",
+      branch: "knc-7",
+      workRevision: revision("KNC-7"),
+      engagements: engaged,
+    });
+    // (b) alone: an open review PR at Design, no reviewer engaged.
+    write("KNC-5", {
+      title: "Help overlay",
+      stage: "design",
+      waiting: "agent",
+      branch: "knc-5",
+      pr: { number: 5, state: "review", title: "Help overlay" },
+    });
+    // Terminal: Done with a pending verdict shape is an ending, never a row.
+    write("KNC-4", {
+      title: "Already done",
+      stage: "done",
+      waiting: "none",
+      branch: "knc-4",
+      pr: { number: 4, state: "review", title: "Already done" },
+      workRevision: revision("KNC-4"),
+      engagements: engaged,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    return store;
+  }
+
+  it("lists the Validation task with an open PR and an outstanding verdict under `working`, naming both", () => {
+    const store = seed();
+    const q = getReviewQueue(store.db, "k9c", {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    const row = q.working.find((t) => t.key === "KNC-8")!;
+    expect(row).toBeTruthy();
+    expect(row.stageName).toBe("Validation");
+    expect(row.atAcceptanceBoundary).toBe(false);
+    expect(row.pr).toMatchObject({ number: 8, state: "review" });
+    expect(row.validation).toBe("changed");
+    expect(reviewRowSub(row)).toBe(
+      "Review in progress at Validation · PR #8 · awaiting verdict",
+    );
+  });
+
+  it("a changes-requested revision reads so, and an open PR alone is enough", () => {
+    const store = seed();
+    const q = getReviewQueue(store.db, "k9c", {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    expect(reviewRowSub(q.working.find((t) => t.key === "KNC-9")!)).toBe(
+      "Review in progress at Validation · PR #9 · changes requested",
+    );
+    expect(reviewRowSub(q.working.find((t) => t.key === "KNC-5")!)).toBe(
+      "Review in progress at Design · PR #5",
+    );
+    expect(reviewRowSub(q.working.find((t) => t.key === "KNC-7")!)).toBe(
+      "Review in progress at Implementation · awaiting verdict",
+    );
+  });
+
+  it("a task with no PR and no reviewer is not review work, and Done is never a row", () => {
+    const store = seed();
+    const q = getReviewQueue(store.db, "k9c", {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    const keys = [...q.ready, ...q.working].map((t) => t.key);
+    expect(keys).not.toContain("KNC-2");
+    expect(keys).not.toContain("KNC-4");
+    expect(q.total).toBe(5);
+  });
+
+  it("the Merge task with a healthy verdict is `ready`; nothing before the boundary ever is", () => {
+    const store = seed();
+    const q = getReviewQueue(store.db, "k9c", {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    expect(q.ready.map((t) => t.key)).toEqual(["KNC-3"]);
+    expect(q.ready[0]!.atAcceptanceBoundary).toBe(true);
+    expect(q.ready[0]!.stageName).toBe("Merge");
+    expect(q.working.map((t) => t.key)).toEqual(["KNC-5", "KNC-7", "KNC-8", "KNC-9"]);
+  });
+
+  it("the acceptance half is the graph's boundary, not the first stage with an edge into Done", () => {
+    // A board may declare SEVERAL edges into the terminal stage — the acceptance
+    // writer allows every one of them (`acceptanceStageBlockedReason`), and the
+    // board offers Accept on every one of them (`atAcceptanceBoundary`).
+    // `resolveStageRoles` names only the FIRST as `reviewId`, so keying the
+    // queue's ready half on `stage === reviewId` filed a task the server would
+    // accept, and the board offers Accept on, under "Still in review" with a
+    // "Review in progress" subline.
+    // CANARY: set the row's `atAcceptanceBoundary` from `t.stage === reviewId`
+    // again — KNC-3 drops out of `ready` and reads as still in review.
+    const store = seed([
+      ...WORKFLOW.filter((w) => w.to !== "done"),
+      edge("review", "done", "human"),
+      edge("merge", "done", "human"),
+    ]);
+    const q = getReviewQueue(store.db, "k9c", {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    expect(q.ready.map((t) => t.key)).toEqual(["KNC-3"]);
+    expect(q.ready[0]!.stageName).toBe("Merge");
+    expect(q.working.map((t) => t.key)).not.toContain("KNC-3");
   });
 });

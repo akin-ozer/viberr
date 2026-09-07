@@ -29,19 +29,19 @@ POST.
 | `/projects` | `projects.tsx` | user | redirects to `/` | |
 | `/projects/:slug` | `project.tsx` + `project._index.tsx` | user → member (404 parity) | workspace shell (rail, topbar, palette, live updates); index redirects to the board | |
 | `/projects/:slug/board` | `project.board.tsx` | member, form | board by stage, filters in the URL (`filter`, `view`, `q`), drag-and-drop, accept-from-board confirm | `create-task`, `reorder`, `rescan` (admin/maintainer) |
-| `/projects/:slug/review` | `project.review.tsx` | member | review queue split into "Waiting on your acceptance" and "Still in review" | |
+| `/projects/:slug/review` | `project.review.tsx` | member | review queue split into "Waiting on your acceptance" (tasks at a stage the workflow makes acceptance legal from, whose acceptance nothing blocks, for a viewer who can accept) and "Still in review" (every other review-work row: at the review stage, an open review PR at any stage, or a required reviewer's verdict outstanding on the current revision; a row before the boundary reads "Review in progress at Validation · PR #8 · awaiting verdict", or names the live PR fact instead when it carries one (unpushed revision, conflict, drifted head); U35-5). Header: "N in review · M waiting on your acceptance" | |
 | `/projects/:slug/controller` | `project.controller.tsx` | member (CSRF checked as a result, not a throw) | the instance controller addressed inside this project; goal chain controls; with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send`, `goal-op` (`pause`, `resume`, `cancel`, `skip_link`, `retry_link`), `interrupt` (`conversationId`, `runId`) |
-| `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail, capability matrix modal | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile` |
+| `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail (a copy whose grants differ from its template says so on the scope line and under each list, ruling 156), capability matrix modal | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile`, `sync-profile-resources` (org admin only, carries the record's fingerprint) |
 | `/projects/:slug/policy` | `project.policy.tsx` | member, form | role matrix (rendered from `rbac.ts`), member roles, transition boundaries, guardrails (ruling 112) | `set-role`, `set-boundary`, `set-guardrail` |
 | `/projects/:slug/github` | `project.github.tsx` | member, form | credential card (with the workflow-scope advisory, ruling 144), repo state, branched tasks, scope violations, update status | `set-credential`, `clear-credential`, `grant-scope`, `reconcile` |
 | `/projects/:slug/activity` | `project.activity.tsx` | member | activity feed with day groups; audit column (compacted, ruling 61) | |
 | `/projects/:slug/settings` | `project.settings.tsx` | member, form (admin for writes) | project profile, stages, members (the invite form is a head button opening the `Add member` modal, ruling 148(b)), repository, branch cleanup, archive/delete | `save-project`, `add-stage`, `rename-stage`, `remove-stage`, `reorder-stages`, `invite`, `remove-member`, `set-credential`, `clear-credential`, `grant-scope`, `repair-repo`, `set-branch-cleanup`, `archive-project`, `delete-project` |
-| `/projects/:slug/tasks/:key` | `project.task.tsx` | member, form | task detail: state (the "Waiting on" row reads "Other work: …" for a held task), the hero's wait chips (one neutral link per `blockedBy` entry with its state, ruling 131), execution profile (the operator run control carries a hold note with Run left enabled), packet, recommendations, Details (a "Blocked by" row and its own "Edit what it waits on" form), timeline, runs, GitHub trace (with the "Unpushed" row and the "Push `<sha>` to PR #N" control when the open PR lacks the delivered revision, ruling 134(c); disabled with the refusal named for a diverged remote), diagnostics | `comment`, `transition`, `update-goal`, `set-task-metadata`, `set-task-dependencies` (ruling 131: the full `blockedBy` list, empty clears and releases), `owner-take`, `owner-release`, `owner-assign`, `run-agent`, `run-operator`, `run-interrupt`, `release-agent`, `resolve-packet`, `apply-recommendation`, `dismiss-recommendation`, `deliver-review`, `accept-completion`, `force-accept`, `complete-merge`, `request-maintainer-decision`, `schedule-action`, `cancel-schedule`, `archive-task`, `restore-task` |
+| `/projects/:slug/tasks/:key` | `project.task.tsx` | member, form | task detail: state (the "Waiting on" row reads "Other work: …" for a held task), the hero's wait chips (one neutral link per `blockedBy` entry with its state, ruling 131), execution profile (the operator run control carries a hold note with Run left enabled), packet, recommendations (an acceptance card prints the gate's refusal as an alert and its Apply refuses the click while one stands, ruling 162), Details (a "Blocked by" row and its own "Edit what it waits on" form), timeline, runs, GitHub trace (with the "conflicts" pill on a conflicting open PR, ruling 162; the "Unpushed" row and the "Push `<sha>` to PR #N" control when the open PR lacks the delivered revision, ruling 134(c); disabled with the refusal named for a diverged remote), diagnostics | `comment`, `transition`, `update-goal`, `set-task-metadata`, `set-task-dependencies` (ruling 131: the full `blockedBy` list, empty clears and releases), `owner-take`, `owner-release`, `owner-assign`, `run-agent`, `run-operator`, `run-interrupt`, `release-agent`, `resolve-packet`, `apply-recommendation`, `dismiss-recommendation`, `deliver-review`, `accept-completion`, `force-accept`, `complete-merge`, `request-maintainer-decision`, `schedule-action`, `cancel-schedule`, `archive-task`, `restore-task` |
 | `/projects/:slug/tasks/:key/attachments/:file` | `task-attachment.ts` | member | raw bytes, whitelist renders inline, `?download=1` forces the save dialog (ruling 105) | |
 | `/org/settings` | `org.settings.tsx` | org admin | tabs: Users & access, GitHub connections, Sign-in & SSO, Agent resources, Controller settings; audit export card (the S3 target is one fact row plus a button that opens the target modal, ruling 148(b) — "Export to S3 now" and "Remove" stay on the card); concurrency; under the standalone-page header (ruling 145) | see §3 |
 | `/org/settings/audit-export` | `org.settings.audit-export.ts` | org admin | CSV/JSON download, 100 000-row cap | |
 | `/controller` | `controller.tsx` | user (CSRF checked as a result, not a throw) | instance controller conversation (per user); with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send`, `interrupt` (`conversationId`, `runId`) |
-| `/insights` | `insights.tsx` | org admin | run analytics: counts, cost, tokens, outcomes, backend quota readings (a refused or exhausted row names whose account, a reading names the hour of its reset, ruling 130(d)); under the standalone-page header (ruling 145) | |
+| `/insights` | `insights.tsx` | org admin | run analytics: counts, cost, tokens, outcomes (a restart-interrupted run is stopped, not an error, and a never-started one is out of the completion rate; the stopped count names both, ruling 158 addendum), backend quota readings (a refused or exhausted row names whose account, a reading names the hour of its reset, ruling 130(d)); under the standalone-page header (ruling 145) | |
 | `/profile` | `profile.tsx` | user | identity, password, **Agent accounts** (ruling 127: connect Claude and Codex for yourself; ruling 130(d): each connected card shows the last refusal Viberr observed on YOUR account, never another person's), GitHub identity disconnect, theme, notification and timeline prefs (ruling 148: the password change is a row on the Profile card whose button opens a modal; the reduce-motion setting is gone) | `identity`, `change-password`, `github-disconnect`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
 | `/notifications` | `notifications.tsx` | user | newest 200, auto-read on viewing the target | |
 | `/notifications/read` | `notifications.read.tsx` | user | fetcher target | `read-all` |
@@ -74,8 +74,10 @@ Intents behind `project.task.tsx` are explained in
 
 - **Rail** order and copy are exact: Board · Review queue · Controller · Agents ·
   Policy · GitHub · Activity · Settings (`WORKSPACE_NAV`). The task route counts as
-  "Board" for crumb and rail purposes. The rail count includes Done; the policy
-  violation badge is the open-violation count.
+  "Board" for crumb and rail purposes. The rail count includes Done; the Review
+  queue count is the queue's own `total` (`getReviewQueue`, so the badge and the
+  list it opens are one number, U35-5); the policy violation badge is the
+  open-violation count.
 - **Board URL state** lives only in the query string (`filter`, `view`, `q`); `boardHref`
   keeps it when navigating from the board itself and drops it from anywhere else.
 - **⌘K palette** is mounted by Home, the workspace layout and the pathless
@@ -133,7 +135,13 @@ Intents behind `project.task.tsx` are explained in
   `select`, the search, board-filter and palette inputs, the comment and
   controller composers, the goal editor, the label, stage and steer
   inputs, the store browser's inputs and the concurrency field (the 720px block
-  in `app.css` is the list).
+  in `app.css` is the list). Under the 1100px collapse the task page stacks
+  title and goal, the open decision, current state and next action, then the
+  rest (GitHub, Details, Permissions, runs, the timeline): the page is three
+  regions in source order (`.detail-head`, `.detail-side`, `.detail-main`) and
+  the stack is that order, so the screen reader, the Tab key and the phone
+  read the task's name and the question it asks before its metadata (pass 35,
+  U35-2; on desktop the head spans both columns).
 - **Dock clearance**: `--dock-clear` (`:root`) is the fixed dock trigger's reach,
   `44px + max(20px, safe-area-inset-bottom) + 1rem`; the scroll containers that
   end under the trigger (`.home-shell`, `.insights`, `.policy-wrap`, `.detail`,

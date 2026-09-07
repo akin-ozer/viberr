@@ -49,7 +49,7 @@ import {
 } from "~/server/tasks/task-actions.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { splitDependencyText } from "~/shared/dependencies";
-import { coercePriority } from "~/schemas/task-file.schema";
+import { activeWorkRevision, coercePriority } from "~/schemas/task-file.schema";
 import { resolveAcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
@@ -59,6 +59,7 @@ import {
 import {
   listDeployedSpecialists,
   removeReviewer,
+  isDispatchHeld,
   startAgentRun,
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
@@ -95,7 +96,10 @@ import {
 } from "~/server/tasks/schedule.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
 import type { TaskRunPrincipalView } from "~/features/task-detail/run-principal-view";
-import type { TaskMemberView } from "~/features/task-detail/execution-profile";
+import type {
+  LiveAgentRun,
+  TaskMemberView,
+} from "~/features/task-detail/execution-profile";
 import type { TimelineFilterId } from "~/features/task-detail/timeline";
 import {
   clampTimelineLimit,
@@ -259,12 +263,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // F10-04: per-engagement run gating. The server single-flights only the
   // DELIVERING run; supporting/reviewing runs are read-only and may run
   // concurrently. The run-agent control mirrors this: it warns/disables per
-  // profile, from the live run set.
-  const activeRuns = runtime.filter(
-    (r) => r.lifecycle === "running" || r.lifecycle === "queued",
-  );
-  const activeAgentProfileIds = activeRuns.flatMap((r) =>
-    !r.op && r.profileId ? [r.profileId] : [],
+  // profile, from the live run set. Pass 35 U35-7: the lifecycle rides along,
+  // so the engaged-agent card can say "queued" for a run that has not started.
+  const liveAgentRuns: LiveAgentRun[] = runtime.flatMap((r) =>
+    !r.op && r.profileId && (r.lifecycle === "running" || r.lifecycle === "queued")
+      ? [{ profileId: r.profileId, lifecycle: r.lifecycle }]
+      : [],
   );
 
   // @-mention autocomplete directory for the comment composer: deployed
@@ -289,7 +293,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // R15-1: the accept confirm names exactly what merges — the delivered
   // revision (task file) and the merge target (project default branch).
   const workRevisionSha =
-    taskFile?.parsed.frontmatter.workRevision?.headSha ?? null;
+    activeWorkRevision(taskFile?.parsed.frontmatter.workRevision)?.headSha ?? null;
   // R17-2: a verified no-change completion (empty branch, no PR) accepts to Done
   // without a merge — the confirm says so instead of implying delivered work.
   const noChanges = taskFile?.parsed.frontmatter.noChanges === true;
@@ -369,7 +373,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       db,
       taskFile?.parsed.frontmatter.ownerUserId ?? null,
     ),
-    activeAgentProfileIds,
+    liveAgentRuns,
     /** UI-30: false → the console content above was withheld (non-member). */
     runsVisible,
     mentionables,
@@ -512,12 +516,14 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "update-goal": {
-        await updateTaskGoal(
+        // F35-6 (pass 35): an unchanged save is reported as unchanged; while a
+        // requested goal edit is pending the server refuses it out loud.
+        const { changed } = await updateTaskGoal(
           db,
           { projectSlug, taskKey, goal: String(formData.get("goal") ?? "") },
           actor,
         );
-        return { ok: true as const, intent, toast: "Goal updated" };
+        return { ok: true as const, intent, toast: changed ? "Goal updated" : "Goal unchanged" };
       }
       case "set-task-metadata": {
         // The detail editor submits all three axes at once, so it is a full
@@ -591,7 +597,11 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
         if (note.trim()) resolveInput.note = note;
         if (custom.trim()) resolveInput.custom = custom;
-        const { option } = await resolvePacket(db, resolveInput, actor);
+        const { task: resolvedTask, option } = await resolvePacket(
+          db,
+          resolveInput,
+          actor,
+        );
         const retryStarted =
           option.kind === "retry_other_backend" &&
           listRunsForTask(db, projectSlug, taskKey).some(
@@ -600,6 +610,23 @@ export async function action({ request, params }: Route.ActionArgs) {
         const toast =
           option.kind === "accept_completion"
             ? `Completion accepted · ${taskKey} moved to Done`
+            // Ruling 164 (pass 35, F35-14): the two kinds that PERFORM what
+            // their title promises say what happened, in the same words the
+            // button and the picker use. A generic "Decision recorded" was the
+            // whole defect: the record read like an act.
+            : option.kind === "force_accept"
+              ? `Force-accepted ${taskKey} · moved to Done (review gate overridden)`
+              : option.kind === "move_stage"
+                ? resolvedTask.stage === option.toStage
+                  ? `Decision recorded · ${taskKey} moved to ${
+                      getProject(db, projectSlug)?.stages.find(
+                        (s) => s.id === resolvedTask.stage,
+                      )?.name ?? resolvedTask.stage
+                    }`
+                  : // Toast honesty: the move runs after the decision and can
+                    // refuse (the task moved underneath it, the project froze).
+                    // Its reason is the timeline note the resolution wrote.
+                    "Decision recorded, but the stage move did NOT complete. The reason is on the timeline"
             : option.kind === "block_on_policy"
               ? // R20-1 (F20-5): the option UNBLOCKS + re-queues the operator now
                 // (it used to hold the task and deep-nav to settings).
@@ -889,7 +916,20 @@ export async function action({ request, params }: Route.ActionArgs) {
           dispatch.directive = prompt;
           dispatch.directiveFrom = dispatcherName;
         }
-        const result = await startAgentRun(db, dispatch, actor);
+        let result: Awaited<ReturnType<typeof startAgentRun>>;
+        try {
+          result = await startAgentRun(db, dispatch, actor);
+        } catch (error) {
+          // Ruling 152(c) (pass 35, G35-4): a hold is not a refusal. The
+          // dispatcher already scheduled the retry for the reopen instant and
+          // put the prompt on that schedule, so the person reads the hold as
+          // the outcome and no hand-off comment is written for a run that
+          // has not started.
+          if (isDispatchHeld(error)) {
+            return { ok: true as const, intent, toast: error.userMessage };
+          }
+          throw error;
+        }
         // R21-9's law, applied to the dispatch prompt: a directive that reaches
         // an agent off the record is invisible to supervision — record it as the
         // human's own timeline comment addressed to the agent. After the start,
@@ -1182,7 +1222,7 @@ export default function TaskDetailRoute({
       // so the whole principal travels, not a pair of booleans that could only
       // ever say "no" without saying whose "no" it is.
       runPrincipal={loaderData.runPrincipal}
-      activeAgentProfileIds={loaderData.activeAgentProfileIds}
+      liveAgentRuns={loaderData.liveAgentRuns}
       runsVisible={loaderData.runsVisible}
       timelineHasMore={loaderData.timelineHasMore}
       timelineRemaining={loaderData.timelineRemaining}
