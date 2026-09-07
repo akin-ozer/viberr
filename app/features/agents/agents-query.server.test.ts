@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { seedDefaultAgentAssets } from "~/server/seed/default-assets.server";
@@ -549,6 +551,26 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
     expect(
       view(developer({ autonomy: "full", role: "Delivery" }), dataRoot).customized,
     ).toBe(true);
+  });
+
+  /**
+   * Ruling 153 (pass 35, G35-2): the template's default `effort` is not a
+   * display nicety. `effectiveProfileView(...).effort` flows through
+   * `toResolved` into a run's `runInput.effort`, and the seeded roster rows
+   * carry no `definition`, so a template default decides what those runs spend.
+   * Canary: revert the view to `def?.effort ?? ""`.
+   */
+  it("ruling 153: a definition-less deployment takes the template's effort; a definition's own wins", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const file = join(dataRoot, "agents", "profiles", "developer.md");
+    const raw = readFileSync(file, "utf8");
+    writeFileSync(file, raw.replace(/^---\n/, "---\neffort: max\n"), "utf8");
+
+    expect(view(developer(), dataRoot).effort).toBe("max");
+    expect(
+      view(developer({ kind: "specialist", name: "Developer", effort: "low" }), dataRoot).effort,
+    ).toBe("low");
   });
 
   it("a snapshot carrying ONLY resource grants is not an identity customization", () => {

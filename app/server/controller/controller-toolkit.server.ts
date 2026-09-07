@@ -1964,7 +1964,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "deploy_agent",
-      "Deploy a global agent template into the project (from list_global_agents; delivery starts withheld until an admin opens it up). Project admin. No removal exists here. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's model and the backend's default effort. The reply states what was stored.",
+      "Deploy a global agent template into the project (from list_global_agents; delivery starts withheld until an admin opens it up). Project admin. No removal exists here. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's own model and effort (ruling 153; the backend's default stands in only when the template names none, or names a tier this backend does not offer). The reply states what was stored.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),

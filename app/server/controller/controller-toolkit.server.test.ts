@@ -1537,6 +1537,35 @@ describe("effort and model at deploy are settable and refused by name (ruling 13
     const row = listAuditEvents(app.db, { action: "project.agent_profile.deployed" })[0]!;
     expect(row.details).toMatchObject({ name: "Effort Probe", model: "opus", effort: "max" });
   });
+
+  // Ruling 153 (pass 35, G35-2): an omitted `effort` takes the TEMPLATE's tier,
+  // not the backend default. The description is this door's only contract for
+  // the model calling it, so it has to say the shipped rule.
+  it("deploy_agent takes the template's own effort when none is given, and says so", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const admin = findUserById(app.db, ids.projectAdmin)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: admin.id, email: admin.email, name: admin.name },
+      projectSlug: SLUG,
+    });
+    const def = toolkit.tools.find((t) => t.name === "deploy_agent")!;
+    expect(def.description).not.toContain("the backend's default effort");
+    expect(def.description).toContain("keep the template's own model and effort");
+
+    const minted = await call(ids.orgAdmin, "save_global_agent", {
+      name: "Tier Probe",
+      backend: "claude",
+      summary: "Carries a default effort of its own.",
+      stages: ["impl"],
+      effort: "max",
+    });
+    expect(minted).toContain("[done]");
+    const deployed = await call(ids.projectAdmin, "deploy_agent", { profileId: "tier-probe" });
+    expect(deployed).toContain("at effort max.");
+  });
 });
 
 /**
