@@ -79,3 +79,29 @@ viewport. Times in the file names' order follow NOTES.md.
 | 116-review-queue-final-light | Review queue at the close (Merge-stage rows only, U35-5) | 22:01Z |
 | 117-github-page-final-dark | GitHub page at the close: per-branch sync rows, PR states | 22:01Z |
 | 118-activity-final-light | Activity feed at the close | 22:01Z |
+
+## Fix validation (2026-09-07, `screenshots/fixes/`)
+
+Captured after the fixes landed, on a scratch data root seeded with `npm run seed:demo` and a dev
+server on port 5175 (never the live instance). Headless Playwright signed in as arda (org admin),
+except the profile shots, which are Elif's own page. `-desktop` is 1440x1100, `-mobile` is
+390x844, `-light`/`-dark` name the theme. The evidence each one belongs to is in VALIDATION.md.
+
+| file | surface | what it shows |
+|---|---|---|
+| task-page-desktop-light, task-page-desktop-dark | VIB-142 task page | U35-2: title and the open packet span both columns on row 1, the two panel columns follow |
+| task-page-mobile-light, task-page-mobile-dark | VIB-142 task page, 390px | U35-2: key, title, pills, goal, then the packet, before any metadata panel |
+| accept-dialog-desktop-light, accept-dialog-desktop-dark | Accept button ceremony | ruling 162: the branch is brought up to date with the base first, disclosed before the click |
+| packet-accept-ceremony-desktop-light, packet-accept-ceremony-desktop-dark | accept_completion packet option | the same ceremony reached through the packet, with no withdrawal claimed (D35-V1) |
+| acceptance-refusal-conflict-desktop-light, acceptance-refusal-conflict-desktop-dark | VIB-142 with a conflicting PR | F35-12: the acceptance is refused, not offered, in the gate's own sentence |
+| review-queue-desktop-light, review-queue-desktop-dark | Review queue | U35-5: "3 in review · 1 waiting on your acceptance", an off-boundary row naming its stage |
+| review-queue-mobile-light, review-queue-mobile-dark | Review queue, 390px | the same two halves stacked |
+| packet-new-option-kinds-desktop-light, packet-new-option-kinds-desktop-dark, packet-new-option-kinds-mobile-light | VIB-145 packet | ruling 164: force_accept and move_stage offered as ordinary options |
+| packet-force-accept-ceremony-desktop-light, packet-force-accept-ceremony-desktop-dark, packet-force-accept-ceremony-mobile-light | force_accept resolution | ruling 164 + U35-3: the force form names the skipped stages and the bypassed gate |
+| insights-desktop-light, insights-desktop-dark, insights-mobile-light, insights-mobile-dark | Insights | U35-7 "4 stopped (3 by a restart, 1 never started)"; F35-1 "2 of 8 runs report no provider token total" |
+| org-settings-concurrency-desktop-light, org-settings-concurrency-desktop-dark, org-settings-concurrency-mobile-light | Instance settings | ruling 152(b): cap 5 plus 2 coordination slots, in the sentence under the field |
+| org-users-github-handle-desktop-light, org-users-github-handle-desktop-dark | Users & access, Edit user | ruling 154: an org admin links a GitHub handle to a local account |
+| org-users-github-handle-duplicate-refusal-desktop-light | the same modal, second account | ruling 154: "@elif-demir is already linked to Elif Demir." |
+| profile-github-handle-desktop-light, profile-github-handle-desktop-dark, profile-github-handle-mobile-light | Elif's Profile, GitHub identity | ruling 154: "@elif-demir · linked by an org admin", and what the link does |
+| agents-template-divergence-desktop-light, agents-template-divergence-desktop-dark, agents-template-divergence-mobile-light | Project Agents, Developer | ruling 156: "grants differ from the template", the per-list difference, and the org-admin button |
+| closed-pr-block-desktop-light, closed-pr-block-desktop-dark | VIB-145 GitHub card | ruling 160: the closure names its closer and the Deliver control is refused while it stands |

@@ -736,6 +736,94 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(dialog.textContent).not.toContain("Bypassing");
   });
 
+  /**
+   * Live validation of ruling 164 (2026-09-07): the force ceremony opened from
+   * a `force_accept` option still carried the Withdraws row, naming the very
+   * packet the click answers and saying it "closes unanswered with the task".
+   * The `task.acceptance.forced` audit row written by that same click reads
+   * `withdrawnPacket: null` (the disclosure is built after the packet path has
+   * cleared the packet), so the screen and the record disagreed — the class the
+   * Bypassing row above was already fixed for. A packet resolution answers the
+   * decision; only the direct doors withdraw one.
+   */
+  it("ruling 164: a packet resolution withdraws nothing, so the ceremony claims no withdrawal", async () => {
+    // Canary: pass `task.packet?.title` unconditionally again and both halves
+    // of this test go red — the force ceremony and the plain packet accept both
+    // print "Withdraws" for the decision they resolve.
+    const forced = renderPage({
+      myRole: "admin",
+      acceptance: {
+        atBoundary: false,
+        blockedReason: "The latest review requests changes.",
+        blockedReasonViaPacket: "The latest review requests changes.",
+      },
+      task: {
+        stage: "triage",
+        validation: "failing",
+        packet: {
+          ...packetWith("force_accept"),
+          title: "Continuity degraded, pick a recovery path",
+          options: [
+            {
+              kind: "force_accept",
+              t: "Force-accept as admin without a fresh verdict",
+              d: "",
+              rec: true,
+            },
+            { kind: "request_edit", t: "Send it back for edits", d: "", rec: false },
+          ],
+        },
+      },
+    });
+    fireEvent.click(findButton(forced.container, "Confirm decision")!);
+    const forcedDialog = forced.container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    expect(forcedDialog.textContent).toContain("Force-accept this completion?");
+    expect(forcedDialog.textContent).not.toContain("Withdraws");
+    expect(forcedDialog.textContent).not.toContain("closes unanswered");
+    forced.unmount();
+
+    // The same rule on the plain `accept_completion` option: it, too, resolves
+    // the packet it was offered on.
+    const accepted = renderPage({
+      myRole: "admin",
+      task: {
+        pr: acceptedPr({ state: "review" }),
+        packet: {
+          ...packetWith("accept_completion"),
+          title: "Accept completion, or send back for one fix?",
+        },
+      },
+    });
+    fireEvent.click(findButton(accepted.container, "Confirm decision")!);
+    const acceptDialog = accepted.container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    expect(acceptDialog.textContent).toContain("Accept this completion?");
+    expect(acceptDialog.textContent).not.toContain("Withdraws");
+    accepted.unmount();
+
+    // The DIRECT door still discloses it: the Accept button closes a standing
+    // decision unanswered, and the row is the only warning a person gets.
+    const direct = renderPage({
+      myRole: "admin",
+      task: {
+        pr: acceptedPr({ state: "review" }),
+        packet: {
+          ...packetWith("redirect"),
+          title: "Resume the rehydrated thread?",
+        },
+      },
+    });
+    fireEvent.click(findButton(direct.container, "Accept completion")!);
+    const directDialog = direct.container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    expect(directDialog.textContent).toContain("Withdraws");
+    expect(directDialog.textContent).toContain("Resume the rehydrated thread?");
+  });
+
   it("every OTHER packet option still resolves in one click — none of them writes to GitHub", async () => {
     const { container, submitted, queryByText } = renderPage({
       myRole: "admin",

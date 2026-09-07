@@ -410,29 +410,37 @@ describe("/profile agent accounts (ruling 127)", () => {
     // card said "connected · verified". Canary: drop the
     // `credentialUserId === userId` filter in `ownRefusal` and Murat's card
     // shows Arda's refusal.
+    //
+    // The instants are RELATIVE (validation, 2026-09-07): an exhaustion whose
+    // reset has passed is dropped by `latestBackendRateLimits`, so a fixture
+    // pinned to a wall-clock instant asserts a fact with a shelf life — this
+    // test passed until 11:50Z on the day its literals named and failed after.
+    const observedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    const refusedAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    const resetsAtSeconds = Math.floor((Date.now() + 60 * 60_000) / 1000);
     const quota = await import("~/server/runtimes/backend-quota.server");
     quota.recordBackendCredentialRefusal(app.db, "claude", {
       credentialUserId: ardaId,
       credentialLabel: "Arda Test",
       providerText: "The account's organization does not allow Claude Code (oauth_org_not_allowed).",
       runId: "run_refused",
-      observedAt: "2026-09-07T10:00:00.000Z",
+      observedAt: refusedAt,
     });
     quota.recordBackendQuotaExhaustion(app.db, "codex", {
       credentialUserId: ardaId,
       credentialLabel: "Arda Test",
-      resetsAt: 1_788_781_800,
+      resetsAt: resetsAtSeconds,
       resetsAtPrecision: "exact",
       providerText: "You've hit your usage limit.",
       runId: "run_spent",
-      observedAt: "2026-09-07T10:05:00.000Z",
+      observedAt,
     });
     try {
       const arda = await backendsOf(ardaId);
       expect(arda[0]!.lastRefusal).toEqual({
         kind: "credential",
         providerText: "The account's organization does not allow Claude Code (oauth_org_not_allowed).",
-        observedAt: "2026-09-07T10:00:00.000Z",
+        observedAt: refusedAt,
         runId: "run_refused",
         resetsAt: null,
         resetsAtPrecision: null,
@@ -440,9 +448,9 @@ describe("/profile agent accounts (ruling 127)", () => {
       expect(arda[1]!.lastRefusal).toEqual({
         kind: "quota",
         providerText: "You've hit your usage limit.",
-        observedAt: "2026-09-07T10:05:00.000Z",
+        observedAt,
         runId: "run_spent",
-        resetsAt: "2026-09-07T11:50:00.000Z",
+        resetsAt: new Date(resetsAtSeconds * 1000).toISOString(),
         resetsAtPrecision: "exact",
       });
       const murat = await backendsOf(murId);

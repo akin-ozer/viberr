@@ -933,7 +933,17 @@ export function TaskDetailPage({
           workRevisionSha={workRevisionSha}
           noChanges={noChanges}
           // F32-11: the open decision this acceptance withdraws, if any.
-          openPacketTitle={task.packet?.title ?? null}
+          // Ruling 164 + F19-7, applied to the sibling row: a PACKET resolution
+          // (the `accept_completion` option, and the `force_accept` one ruling
+          // 164 added) ANSWERS the open decision, so nothing is withdrawn. The
+          // row used to name that packet and say it "closes unanswered", while
+          // `task.acceptance.forced` recorded `withdrawnPacket: null` — the
+          // disclosure is read after the packet path has cleared it. Only the
+          // direct doors (Accept, Force accept, a recommendation, a stage move)
+          // close a standing decision unanswered.
+          openPacketTitle={
+            confirmAccept.mode === "packet" ? null : (task.packet?.title ?? null)
+          }
           // F20-6 (R20-2): no PR + the completion never claimed no-change → the
           // accept path auto-detects it by re-probing the branch. The dialog
           // states that instead of promising a merge. `noChanges` (the flagged
