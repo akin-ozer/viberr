@@ -3096,3 +3096,28 @@ describe("app.css ruling 149: the destructive control is GitHub's danger button"
     expect(decls(".obs.warn .k")).toMatch(/color:\s*var\(--coral-dark\)/);
   });
 });
+
+/**
+ * 2026-09-07: the New project primary shows its request in flight (the loader
+ * glyph spinning where the plus was, "Creating project…"), and like every
+ * create/save primary it is `disabled={busy}`. The sheet names two opacity
+ * steps for unavailable controls, .45 disabled and .7 busy, but
+ * `.btn:disabled` is declared AFTER `.btn[aria-busy="true"]` at equal
+ * specificity, so a button that was both painted at .45 with a not-allowed
+ * cursor: in flight read as refused.
+ */
+describe("app.css paints a busy AND disabled button with the busy step", () => {
+  it("keeps the two steps: .45 disabled, .7 busy", () => {
+    expect(CODE).toMatch(/\.btn\[aria-busy="true"\]\s*\{[^}]*opacity:\s*\.7/);
+    expect(CODE).toMatch(/\.btn:disabled,[^{]*\{[^}]*opacity:\s*\.45/);
+  });
+
+  it("lets the busy step win where both apply, by specificity rather than order", () => {
+    // Order is a fragile tie-break (the disabled rule sits 400 lines later);
+    // the override adds a pseudo-class so it wins wherever it is declared.
+    const both = CODE.match(/\.btn\[aria-busy="true"\]:disabled\s*\{([^}]*)\}/);
+    expect(both, "the busy+disabled override must exist").not.toBeNull();
+    expect(both![1]).toMatch(/opacity:\s*\.7/);
+    expect(both![1]).not.toMatch(/cursor:\s*not-allowed/);
+  });
+});

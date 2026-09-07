@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useEffect, useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
@@ -255,5 +256,180 @@ describe("the Workflow field states the starting board, it does not pretend to p
     ).toContain("Starts on the Standard · 5 stages board");
     expect(container.querySelector(".pick-chip:not(button)")).toBeNull();
     expect(container.querySelector("span[aria-disabled]")).toBeNull();
+  });
+});
+
+/**
+ * 2026-09-07, owner report with a screenshot: the key-collision note flipped
+ * to "Another project already uses PA" for the last ~300ms of a SUCCESSFUL
+ * create, then the dialog closed. `existingKeys` is the home loader's project
+ * list, and `/` revalidates it on the all-projects live scope, which fires the
+ * moment the new project is projected, still mid-request (createProject
+ * writes and re-projects before it proves the credential and returns). Read
+ * live, the list then carried the very key being created. The note now reads
+ * the list as it was when Create was pressed and goes live again once a
+ * refused submit has settled, so a collision that appeared meanwhile is still
+ * shown.
+ *
+ * Same block: the primary shows the request in flight the way the app's other
+ * busy buttons already do (and reui's "spinner in button" pattern the owner
+ * pointed at): a spinning loader glyph in place of the plus, "Creating
+ * project…" in place of the label, `aria-busy` and `disabled` until the server
+ * answers.
+ */
+describe("the create request in flight", () => {
+  const withConnection = {
+    connections: ["akin-ozer"],
+    connectionHealth: { "akin-ozer": "valid" as const },
+  };
+  /** A create action the TEST answers, when it decides to. */
+  function heldAction() {
+    let answer: (reply: CreateProjectReply) => void = () => {};
+    let posted = 0;
+    const reply = new Promise<CreateProjectReply>((resolve) => {
+      answer = resolve;
+    });
+    return {
+      action: async () => {
+        posted += 1;
+        return reply;
+      },
+      answer: (reply: CreateProjectReply) => answer(reply),
+      posted: () => posted,
+    };
+  }
+  const primary = (container: HTMLElement) =>
+    container.querySelector<HTMLButtonElement>(".modal-foot .btn.primary")!;
+
+  /** The handle the stub page hands out for replacing its project list. */
+  interface LiveList {
+    setKeys?: (keys: string[]) => void;
+  }
+
+  /**
+   * The stub page OWNS `existingKeys`, so a test can play the home loader's
+   * mid-request revalidation by handing the modal a new list.
+   */
+  function renderLive(action: () => Promise<CreateProjectReply>) {
+    const live: LiveList = {};
+    function Page() {
+      const [keys, setKeys] = useState<string[]>([]);
+      useEffect(() => {
+        live.setKeys = setKeys;
+      }, []);
+      return (
+        <ToastProvider>
+          <NewProjectModal
+            {...withConnection}
+            storeRoot={null}
+            existingKeys={keys}
+            onClose={() => {}}
+          />
+        </ToastProvider>
+      );
+    }
+    const Stub = createRoutesStub([
+      { path: "/", Component: Page, action },
+      { path: "/projects/:slug/board", Component: () => <div>board</div> },
+    ]);
+    const rendered = render(<Stub initialEntries={["/"]} />);
+    // Every text the key note ever showed, so a flip that lasts a single
+    // render is still caught after the fact.
+    const noteTexts: string[] = [];
+    const watch = new MutationObserver(() => {
+      const note = rendered.container.querySelector("#np-key-note");
+      if (note) noteTexts.push(note.textContent ?? "");
+    });
+    watch.observe(rendered.container, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
+    return {
+      ...rendered,
+      listNowCarries: (keys: string[]) => act(() => live.setKeys!(keys)),
+      noteTexts,
+      stopWatching: () => watch.disconnect(),
+    };
+  }
+
+  it("keeps the collision note quiet while the list starts carrying the key being created", async () => {
+    const server = heldAction();
+    const { container, queryByText, getByText, findByText, noteTexts, listNowCarries, stopWatching } =
+      renderLive(server.action);
+    fireEvent.change(container.querySelector("#np-name")!, {
+      target: { value: "Payments" },
+    });
+    fireEvent.click(primary(container));
+    await waitFor(() => expect(server.posted()).toBe(1));
+
+    // The new project is projected, the live scope revalidates, and the
+    // list lists PAY while the request is still open.
+    listNowCarries(["PAY"]);
+    expect(queryByText(/already uses/)).toBeNull();
+    expect(getByText(/ids look like PAY-1/)).toBeTruthy();
+
+    await act(async () => {
+      server.answer({ ok: true, key: "PAY", slug: "payments", storePath: "projects/payments" });
+    });
+    // F15-04 lands in the new project; up to that unmount the note never flipped.
+    await findByText("board");
+    stopWatching();
+    expect(noteTexts.filter((t) => /already uses/.test(t))).toEqual([]);
+  });
+
+  it("reads the live list again once a refused submit has settled", async () => {
+    const server = heldAction();
+    const { container, queryByText, getByText, stopWatching, listNowCarries } =
+      renderLive(server.action);
+    fireEvent.change(container.querySelector("#np-name")!, {
+      target: { value: "Payments" },
+    });
+    fireEvent.click(primary(container));
+    await waitFor(() => expect(server.posted()).toBe(1));
+    listNowCarries(["PAY"]);
+    expect(queryByText(/already uses/)).toBeNull();
+
+    await act(async () => {
+      server.answer({ ok: false, error: "refused for the test" });
+    });
+    await waitFor(() =>
+      expect(container.querySelector(".form-err")).not.toBeNull(),
+    );
+    // Settled and refused: PAY really is in use now, and the note says so.
+    expect(getByText(/Another project already uses PAY/)).toBeTruthy();
+    stopWatching();
+  });
+
+  it("spins a loader on the primary and reads 'Creating project…' until the server answers", async () => {
+    const server = heldAction();
+    const { container } = renderModal(withConnection, server.action);
+    fireEvent.change(container.querySelector("#np-name")!, {
+      target: { value: "Payments" },
+    });
+    const create = primary(container);
+    expect(create.textContent!.trim()).toBe("Create project");
+    expect(create.querySelector("svg.ico.spin")).toBeNull();
+
+    fireEvent.click(create);
+    await waitFor(() => expect(create.getAttribute("aria-busy")).toBe("true"));
+    expect(create.disabled).toBe(true);
+    expect(create.textContent!.trim()).toBe("Creating project…");
+    // One glyph, and it is the spinning loader, not the plus.
+    expect(create.querySelectorAll("svg.ico")).toHaveLength(1);
+    expect(create.querySelector("svg.ico.spin")).not.toBeNull();
+
+    await act(async () => {
+      server.answer({ ok: false, error: "refused for the test" });
+    });
+    await waitFor(() =>
+      expect(container.querySelector(".form-err")).not.toBeNull(),
+    );
+    // Back to the resting label and glyph, enabled again for the retry.
+    expect(create.getAttribute("aria-busy")).not.toBe("true");
+    expect(create.disabled).toBe(false);
+    expect(create.textContent!.trim()).toBe("Create project");
+    expect(create.querySelector("svg.ico.spin")).toBeNull();
+    expect(create.querySelectorAll("svg.ico")).toHaveLength(1);
   });
 });

@@ -34,6 +34,11 @@ const ICON_PATHS = {
   sparkle:
     '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/>',
+  // The busy-state glyph: a three-quarter arc with no arrowhead (lucide's
+  // `loader-circle`, the glyph shadcn/reui's Spinner draws), meant to be
+  // rendered with the `spin` class. `refresh` keeps its arrowhead for the
+  // re-scan / re-index buttons, where the arrow IS the meaning.
+  loader: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   bolt: '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
   memory:

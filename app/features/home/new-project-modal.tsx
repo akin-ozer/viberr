@@ -432,7 +432,10 @@ function NewProjectFooter({
         </button>
         {/* Enabled until the request starts: an invalid submit is refused
             with the blocker beside it, the field marked and focused
-            (submit()). Only `busy` disables; the aria-busy sheet rule paints it. */}
+            (submit()). Only `busy` disables; the aria-busy sheet rule paints it,
+            and the button itself shows the request in flight the way the app's
+            other busy buttons do: the loader glyph spinning where the plus was,
+            the label naming the work under way. */}
         <button
           type="button"
           className="btn primary"
@@ -440,8 +443,8 @@ function NewProjectFooter({
           onClick={submit}
           aria-busy={busy}
         >
-          <Icon name="plus" />
-          Create project
+          <Icon name={busy ? "loader" : "plus"} className={busy ? "spin" : ""} />
+          {busy ? "Creating project…" : "Create project"}
         </button>
       </span>
     </div>
@@ -515,11 +518,23 @@ export function NewProjectModal({
   }, []);
 
   const effKey = keyTouched ? key : keyFromName(name);
+  const busy = fetcher.state !== "idle";
+  // The collision note is a PRE-submit aid, so it reads the project list as it
+  // was when Create was pressed. `existingKeys` is the home loader's list, and
+  // `/` revalidates it on the all-projects live scope, which fires the moment
+  // the new project is projected, still mid-request (createProject writes and
+  // re-projects before it proves the credential and returns). Read live, the
+  // list then carried the very key being created and the note flipped to
+  // "Another project already uses PA" for the last ~300ms before the dialog
+  // closed (owner screenshot, 2026-09-07). Live again once a refused submit
+  // has settled, so a collision that appeared meanwhile is still shown.
+  const [keysAtSubmit, setKeysAtSubmit] = useState<string[]>([]);
+  const keyPool = busy || fetcher.data?.ok ? keysAtSubmit : existingKeys ?? [];
   // Q26-3: does the resolved key already belong to another project? (Only once
   // it is a valid 2+-letter key; case-insensitive, since keys are upper-cased.)
   const keyInUse =
     effKey.length >= 2 &&
-    (existingKeys ?? []).some((k) => k.toUpperCase() === effKey.toUpperCase());
+    keyPool.some((k) => k.toUpperCase() === effKey.toUpperCase());
   const effRepo = repo || slugifyProjectName(name);
   const slug = slugifyProjectName(name);
   // Name ↔ repo AUTOCOMPLETE (not a persistent two-way lock — pass-8 P1 ruling):
@@ -542,7 +557,6 @@ export function NewProjectModal({
     setRepoTouched(true);
     if (v && !nameTouched) setName(projectNameFromRepo(v));
   };
-  const busy = fetcher.state !== "idle";
   // The effective repo owner: a picked connection. A repository (and therefore
   // a PAT connection) is REQUIRED — repo-less projects were cut (2026-07-17,
   // reverses F10): agents deliver through GitHub, so a project without a repo
@@ -620,6 +634,8 @@ export function NewProjectModal({
     fd.set("owner", effOwner);
     fd.set("repoName", effRepo);
     fd.set("policy", policy);
+    // The list the collision note keeps reading until this request settles.
+    setKeysAtSubmit(existingKeys ?? []);
     fetcher.submit(fd, { method: "post" });
   };
 
