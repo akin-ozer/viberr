@@ -112,9 +112,13 @@ export async function action({ request }: Route.ActionArgs) {
         surface: String(formData.get("surface") ?? "") || null,
       });
       if (result.state === "refused") {
-        // The refusal is already recorded IN the conversation; the transcript
-        // shows it, so the action itself still succeeds.
-        return { ok: true as const, conversationId };
+        // U35-4 (pass 35): the refusal is recorded IN the conversation (a
+        // reload still shows it), and the door says so too: 409, never a 200
+        // for a message nothing will answer.
+        return data(
+          { ok: false as const, error: result.reason, conversationId },
+          { status: 409 },
+        );
       }
       return { ok: true as const, conversationId };
     }

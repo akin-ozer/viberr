@@ -323,8 +323,10 @@ anything ambiguous fails closed with the reason recorded.
   all three, and the "Waiting on you" bell is marked read only when no card survives.
 - **Schedules** live in `task.md` `schedules[]`: `run-operator` (optional steer) or
   `run-agent` (a profile id and prompt; the profile must be deployed when the entry is
-  created). Creating one needs `run-agents`. Each run control carries a when-picker
-  (now, 5m, 1h, 6h, 24h). The runner ticks every 60 seconds, claims an occurrence
+  created). Creating one needs `run-agents`, through the task page's run controls or
+  the controller's `schedule_task_action` / `cancel_task_schedule` (ruling 153, pass
+  35: the entry carries the `<email> · via controller` label). Each run control
+  carries a when-picker (now, 5m, 1h, 6h, 24h). The runner ticks every 60 seconds, claims an occurrence
   before enqueuing (`pending → claimed → fired | failed`, `cancelled` by a human),
   never fires on a terminal or archived task, and resolves the **live** deployment at
   fire time (ruling 94). A fire-time refusal no retry can cure (profile undeployed,

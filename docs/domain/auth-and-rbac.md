@@ -168,9 +168,13 @@ the tabs sit the Audit log card and the run-concurrency control.
   plus `MCP_CREDENTIAL`, first-run installers finish in a 15-minute background warm-up;
   reserved names refused), skills (`skills/<name>/SKILL.md` plus files), global agent
   templates (specialists only, created with conservative grants, undeletable while
-  deployed), and the store browser (upload, folders, doc editing, GitHub import).
+  deployed; the edit modal's "Copy these grants to the N projects that adopted this
+  profile" box rewrites each adopted project's copy of the grants with the save,
+  ruling 156), and the store browser (upload, folders, doc editing, GitHub import).
   Renames rewrite every template and deployment reference. Audit `org.kb.*`,
-  `org.mcp.*`, `org.skill.*`, `org.store.*`, `org.agent_profile.*`.
+  `org.mcp.*`, `org.skill.*`, `org.store.*`, `org.agent_profile.*` (the `updated`
+  row's details carry `diverged` and `propagated` project slugs), and one
+  `project.agent_profile.resources_synced` row per project a propagation rewrote.
 - **Controller**: see [controller-and-goals.md §6](controller-and-goals.md#6-configuring-the-controller-rulings-106-and-108).
 - **Run concurrency**: `set-concurrency` writes `maxConcurrentRuns` (0 = unlimited,
   ceiling 64) and drains the queue. The control shows the cap, the live and queued

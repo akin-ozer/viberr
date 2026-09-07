@@ -590,7 +590,7 @@ export async function action({ request }: Route.ActionArgs) {
       case "skill-delete":
         return ok((await deleteSkill(db, field("skillId"), actor)).toast);
       case "agent-save": {
-        const result = saveGlobalAgentProfile(
+        const result = await saveGlobalAgentProfile(
           db,
           {
             id: field("profileId") || null,
@@ -603,6 +603,9 @@ export async function action({ request }: Route.ActionArgs) {
             skills: parseJsonStringArray(field("skills")),
             mcps: parseJsonStringArray(field("mcps")),
             kbs: parseJsonStringArray(field("kbs")),
+            // Ruling 156: the modal's "copy these grants" box; this route is
+            // org-admin only, so the propagation stays an org admin's act.
+            propagate: field("propagate") === "1",
           },
           actor,
         );

@@ -299,6 +299,16 @@ export async function runControllerTurn(
  * from the health detail, which is person-agnostic. The one thing both must
  * say, and do: nothing was started.
  */
+/**
+ * The refusal a person with no Claude connected reads: in the transcript
+ * (this engine) and, U35-4 (pass 35), from the HTTP send door itself, which
+ * answers it as a 409 before any thread is created, so the door says no where
+ * the dock's disabled composer already did.
+ */
+export const CONTROLLER_NOT_CONNECTED_NOTE =
+  "The controller runs on your own Claude account, and Claude isn't connected for you yet. " +
+  "Connect it on your Profile → Agent accounts, then send your message again.";
+
 function controllerRefusalNote(refusal: RunPrincipalRefusal): string {
   // The discriminator is the ROW, not the verification: every unavailable
   // health has `verification: "none"` (that is what unavailable means), so
@@ -315,12 +325,7 @@ function controllerRefusalNote(refusal: RunPrincipalRefusal): string {
     // and it is already addressed to the person themselves.
     return `${refusal.health.detail} The controller runs on your own Claude account, so I cannot answer until it is connected.`;
   }
-  if (refusal.kind === "no-credential") {
-    return (
-      "The controller runs on your own Claude account, and Claude isn't connected for you yet. " +
-      "Connect it on your Profile → Agent accounts, then send your message again."
-    );
-  }
+  if (refusal.kind === "no-credential") return CONTROLLER_NOT_CONNECTED_NOTE;
   // The asker IS the signed-in user, so the remaining refusals can only mean
   // their own account was disabled or deleted mid-session (a live session
   // outliving the account). `principalRefusalMessage` would say "this task's

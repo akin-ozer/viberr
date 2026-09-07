@@ -339,11 +339,31 @@ function CapColumn({
   );
 }
 
+/**
+ * Ruling 156: the sentence under a grant list whose copy differs from the
+ * template's. "there" is the template, "here" is this project's copy.
+ */
+function driftSentence(drift: { missing: string[]; extra: string[] }): string {
+  const parts: string[] = [];
+  if (drift.missing.length) {
+    parts.push(
+      `${drift.missing.join(", ")} ${drift.missing.length === 1 ? "is" : "are"} granted there, not here`,
+    );
+  }
+  if (drift.extra.length) {
+    parts.push(
+      `${drift.extra.join(", ")} ${drift.extra.length === 1 ? "is" : "are"} granted here, not on the template`,
+    );
+  }
+  return `Differs from the template: ${parts.join("; ")}.`;
+}
+
 function ResGroup({
   label,
   icon,
   items,
   known,
+  drift,
 }: {
   label: string;
   icon: IconName;
@@ -351,10 +371,14 @@ function ResGroup({
   /** P14-KM-11: the ids the store actually holds. `undefined` = unknown here, so
    *  nothing is marked (never invent a "missing" state from missing data). */
   known?: ReadonlySet<string>;
+  /** Ruling 156: how this list differs from the template's, when it does. */
+  drift?: { missing: string[]; extra: string[] };
 }) {
+  const differs = drift && (drift.missing.length > 0 || drift.extra.length > 0);
   return (
     <div className="res-group">
       <div className="lbl">{label}</div>
+      {differs && <span className="sub fine">{driftSentence(drift)}</span>}
       <div className="res-chips">
         {items.length ? (
           items.map((x) => {
@@ -706,9 +730,11 @@ export function ProfileDetail({
   insts,
   projectName,
   canManage,
+  canSyncTemplate = false,
   onOpen,
   onDelete,
   onEdit,
+  onSyncResources = () => {},
 }: {
   a: AgentProfileView;
   stages: StageView[];
@@ -723,9 +749,13 @@ export function ProfileDetail({
   insts: AgentDeploymentView[];
   projectName: string;
   canManage: boolean;
+  /** Ruling 156 (owner, Q35-8): org admins only may take the template's
+   *  grants onto this project's copy. */
+  canSyncTemplate?: boolean;
   onOpen: (taskKey: string) => void;
   onDelete: (id: string) => void;
   onEdit: (a: AgentProfileView) => void;
+  onSyncResources?: (a: AgentProfileView) => void;
 }) {
   const activeKeys = [...new Set(insts.map((d) => d.taskKey))];
   // "running on N" is a claim about LIVE runs, not engagements: an assigned
@@ -869,6 +899,9 @@ export function ProfileDetail({
             {a.customized && (
               <> · customized for {projectName}</>
             )}
+            {/* Ruling 156: the grants signal beside the identity one, with the
+                exact difference under each list in the resources panel. */}
+            {a.templateDrift && <> · grants differ from the template</>}
           </div>
         </div>
         <div className="ag-hero-actions">
@@ -972,11 +1005,49 @@ export function ProfileDetail({
         <div className="panel-head">
           <Icon name="cpu" />
           <h2>Context resources &amp; runtime</h2>
+          {/* Ruling 156 (owner, Q35-8): only an org admin copies the template's
+              grants onto this project; a project admin sees the difference and
+              asks. The button carries the record the page rendered (B5), so a
+              save landing in between is refused, never reverted. */}
+          {canSyncTemplate && a.templateDrift && (
+            <button
+              type="button"
+              className="btn ghost sm right"
+              onClick={() => onSyncResources(a)}
+            >
+              <Icon name="cpu" />
+              Use the template&apos;s grants
+            </button>
+          )}
         </div>
         <div className="res-groups">
-          <ResGroup label="Skills" icon="bolt" items={a.resources.skills} known={known("skills")} />
-          <ResGroup label="MCP servers" icon="cpu" items={a.resources.mcps} known={known("mcps")} />
-          <ResGroup label="Knowledge bases" icon="file" items={a.resources.kb} known={known("kb")} />
+          <ResGroup
+            label="Skills"
+            icon="bolt"
+            items={a.resources.skills}
+            known={known("skills")}
+            {...(a.templateDrift
+              ? { drift: { missing: a.templateDrift.missing.skills, extra: a.templateDrift.extra.skills } }
+              : {})}
+          />
+          <ResGroup
+            label="MCP servers"
+            icon="cpu"
+            items={a.resources.mcps}
+            known={known("mcps")}
+            {...(a.templateDrift
+              ? { drift: { missing: a.templateDrift.missing.mcps, extra: a.templateDrift.extra.mcps } }
+              : {})}
+          />
+          <ResGroup
+            label="Knowledge bases"
+            icon="file"
+            items={a.resources.kb}
+            known={known("kb")}
+            {...(a.templateDrift
+              ? { drift: { missing: a.templateDrift.missing.kb, extra: a.templateDrift.extra.kb } }
+              : {})}
+          />
         </div>
         <div className="runtime-row">
           <div className="rt-cell">
@@ -1355,6 +1426,7 @@ export function AgentsPage({
   projectSlug,
   projectName,
   myRole,
+  viewerIsOrgAdmin = false,
   resourceCatalog,
   backendHealth,
 }: {
@@ -1369,6 +1441,9 @@ export function AgentsPage({
   projectSlug: string;
   projectName: string;
   myRole: ProjectRole | null;
+  /** Ruling 156 (owner, Q35-8): the org role decides who may copy a
+   *  template's grants onto this project; a project admin sees the marker. */
+  viewerIsOrgAdmin?: boolean;
   /** Live store resources for the profile-editor picker (F6/item-2). */
   resourceCatalog?: readonly ResCatalogGroup[];
   /** F16 + ruling 127: per backend, whether the VIEWER connected it and how
@@ -1545,6 +1620,20 @@ export function AgentsPage({
   const deployFromLibrary = (profileId: string) => {
     fetcher.submit(
       { intent: "deploy-profile", _csrf: csrf, profileId },
+      { method: "post" },
+    );
+  };
+
+  // Ruling 156: take the template's grants onto this project's copy, carrying
+  // the record the page rendered so a save landing in between is refused.
+  const syncResources = (a: AgentProfileView) => {
+    fetcher.submit(
+      {
+        intent: "sync-profile-resources",
+        _csrf: csrf,
+        profileId: a.id,
+        fingerprint: a.fingerprint,
+      },
       { method: "post" },
     );
   };
@@ -1732,9 +1821,11 @@ export function AgentsPage({
               insts={deployments.filter((d) => d.profileId === current.id)}
               projectName={projectName}
               canManage={canManage}
+              canSyncTemplate={viewerIsOrgAdmin}
               onOpen={onOpen}
               onDelete={deleteProfile}
               onEdit={setEditing}
+              onSyncResources={syncResources}
             />
           )}
         </div>

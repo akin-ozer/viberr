@@ -156,6 +156,11 @@ Notes:
   body). A project's `agents:` list *deploys* templates by `profileId` and
   carries the project-effective capability policy (may override the
   template). Task assignments store `profileId` — never joined by role text.
+  `definition.resources` is a COPY of the template's grants taken at deploy
+  time (ruling 156): it changes only through the project editor,
+  `update_agent_deployment`, the org resource-rename rewriter, or a propagation
+  from the template (`save_global_agent { propagate }`, the org modal's box, the
+  Agents page's "Use the template's grants"), and a run mounts the copy.
 - The three always-human capabilities (`merge-pull-request`,
   `transition-to-done`, `change-project-policy`) are a server invariant list
   (`ALWAYS_HUMAN_CAPABILITY_IDS` in `app/shared/capabilities.ts`) — stored
@@ -536,8 +541,12 @@ icon: branch                      # ui.jsx Icon name
 backends: [codex, claude]
 model: sonnet                     # ONE catalog id for the first backend (see
                                   # docs/domain/agents-and-runtime.md §2.3);
-effort: high                      # optional reasoning effort (controller today, ruling 106;
-                                  # specialists carry model+effort per deployment)
+                                  # ruling 153: the template's DEFAULT, taken by a
+                                  # library deploy when no override is given
+effort: high                      # optional reasoning effort: the controller (ruling
+                                  # 106) and, ruling 153, a specialist template's
+                                  # default that a library deploy copies onto the
+                                  # deployment when the backend offers the tier
 scope: Global base · customized for Viberr Core
 stages: [ready, impl]             # eligible stages
 spanAll: false                    # operator only

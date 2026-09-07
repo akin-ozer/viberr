@@ -116,6 +116,13 @@ The route resolves the viewer's own `runCredentialFor(db, user.id, "claude")` an
 it to the catalog; a viewer who has not connected Claude gets the curated list and no
 probe is spawned, and one person's live list is never served to another (the cache entry
 carries the home that produced it).
+A template (`agents/profiles/<id>.md`) may carry its own default `model` and `effort`
+(ruling 153, pass 35 G35-2): `save_global_agent` takes both, checked by name against
+the template's backend (a backend switch whose stored model belongs to the other
+backend clears it and the toast says so), and a library deploy takes the template's
+effort when no override is given and the backend offers that tier; a definition-less
+deployment resolves the template's effort live. The org template modal has no picker
+yet (follow-up).
 Effort is ranked `minimal 0 … max 5` and clamped to the backend's list at RUN time only
 (`resolveRunEffort`, for a tier stored before the check existed); every write surface
 that takes a tier (`deploy_agent`, `update_agent_deployment`, and the profile editor for
@@ -622,7 +629,9 @@ kind and backend that is not marked session-missing; the reply preview is capped
 
 `schedules[]` in `task.md`: `scheduleTaskAction({ dueAt, action: run-operator |
 run-agent, profileId?, prompt? })` (future only, not on a terminal task, profile must
-be deployed; audit `task.schedule.created`/`cancelled`). `startScheduleRunner` fires at
+be deployed; audit `task.schedule.created`/`cancelled`), reached from the task page's
+run controls and, ruling 153 (pass 35), the controller's `schedule_task_action` /
+`cancel_task_schedule` under the same `run-agents` tier and bounds. `startScheduleRunner` fires at
 boot and every 60 s: it claims in the file (lease = clone timeout + 5 min, 3 retries),
 skips moot schedules with an outcome (`skipped-done`, `skipped-archived`), starts the
 agent (`400` → failed, `409` → back to pending) or runs the operator with `trigger:
@@ -716,6 +725,14 @@ above is the create-seed value and never the runtime's answer for a missing gran
   truncation markers; `KB_PRECEDENCE_NOTE` (repo conventions outrank KBs) is emitted only
   when KB text is present, by all three runtimes (ruling 56). Supporting runs inherit the
   deliverer's KBs, deduplicated, and nothing else (rulings 47, 57).
+- **Grants mount from the deployment's copy, never from the template** (ruling 156,
+  pass 35): a library deploy copies the template's `resources` onto `project.md`
+  `agents[].definition.resources`, and `effectiveProfileView` reads that copy first;
+  only a deployment that carries no definition (the seeded rows) resolves the template
+  live. A template edit therefore changes nothing a run mounts until the copy is
+  rewritten (the template writer's `propagate`, the org modal's box, or an org admin's
+  "Use the template's grants" on the Agents page), and the roster marks a copy whose
+  grants differ with the exact difference (`templateDrift`).
 - **MCP servers**: org registry rows resolve to stdio `{command, args, env:
   {MCP_CREDENTIAL}}` or http `{url, headers: {Authorization: Bearer}}`; reserved names
   are skipped; a missing row is reported "unresolved"; an unhealthy row is still

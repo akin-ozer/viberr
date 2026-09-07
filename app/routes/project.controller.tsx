@@ -133,7 +133,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           projectSlug: params.slug,
         }).id;
       }
-      await runControllerTurn(db, {
+      const result = await runControllerTurn(db, {
         conversationId,
         text,
         user: {
@@ -145,6 +145,14 @@ export async function action({ request, params }: Route.ActionArgs) {
         // Ruling 121(d): the page a user message was sent from (finding 23).
         surface: String(formData.get("surface") ?? "") || null,
       });
+      if (result.state === "refused") {
+        // U35-4 (pass 35): the refusal is in the transcript, and the door
+        // answers 409 rather than a 200 for a message nothing will answer.
+        return data(
+          { ok: false as const, error: result.reason, conversationId },
+          { status: 409 },
+        );
+      }
       return { ok: true as const, conversationId };
     }
     if (intent === "goal-op") {

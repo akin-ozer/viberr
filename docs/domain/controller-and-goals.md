@@ -67,7 +67,7 @@ Identity facts:
 | `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Goals panel**. Eighth item in the workspace rail. Same execution panels as the instance page. |
 | Org settings → Controller tab | org admins | Configures the controller itself (§6). |
 | **The dock**, on every signed-in surface | any signed-in user | Ruling 121: a floating Controller button, bottom-right, opening a non-modal panel bound to the place the person is standing (§2.1). Hidden on the two controller pages and on `/login`. |
-| `/resources/controller` | any signed-in user; project and task scopes require membership | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn. |
+| `/resources/controller` | any signed-in user; project and task scopes require membership | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn (409 when the asker has no Claude connected, U35-4). |
 
 Entry points: the dock (everywhere), the workspace rail item, the Home hero link (once a
 project exists), the org-settings tab's "Open the controller", and the goal chip on a
@@ -129,7 +129,16 @@ overlay, which would leave the dock inert behind it.
   scope the person cannot reach and falls back to this scope's newest thread for a
   selection it cannot honour (reporting `staleSelection`, which the dock uses to forget
   the stored id). A thrown response from a root-owned fetcher would replace the whole
-  page, which is the hazard ruling 121(f) named for CSRF.
+  page, which is the hazard ruling 121(f) named for CSRF. The unavailable view names
+  nothing but what was typed (F35-4, pass 35): `projectName` is null, the label reads
+  "Not available here", and the projection is never read for it, so a non-member
+  cannot learn a project's display name from a guessed slug (the same posture as
+  every other door).
+- **The send door says no where the composer does** (U35-4, pass 35): `POST
+  intent=send` for a person with no Claude connected answers `409 { ok:false, error }`
+  with the refusal sentence and creates no thread for a new conversation; a refused
+  turn on an existing thread answers 409 too, with the note already in the transcript.
+  Both page routes (`/controller`, `/projects/:slug/controller`) answer the same 409.
 - **Motion**: the panel grows from its trigger (`transform-origin: bottom right`,
   .18s `--ease-out` in, .12s out on a pointer close, instant on Escape); a reply that
   arrives while the panel is open lands with a .2s fade-and-rise (history never
@@ -199,7 +208,9 @@ owner-routed SSE event `controller.updated`.
 **One user message is one run** (`runControllerTurn` in `controller-run.server.ts`):
 
 1. The user message is recorded first.
-2. If Claude is unavailable, a refusal is written into the transcript.
+2. If Claude is unavailable, a refusal is written into the transcript and the turn
+   returns `{ state: "refused", reason }`; every send door answers that as a 409
+   (U35-4, pass 35), and the dock's door refuses before creating a new thread.
 3. Single-flight per conversation with a FIFO capped at 8 queued messages; overflow
    is refused in-transcript.
 4. The run row is `agent_runs.kind = 'controller'`, `project_slug = ''`,
@@ -269,7 +280,7 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
 - Every handler maps a 401/403 to `[denied] <sentence>` and anything else to
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 
-The 39 tools (ruling 121: `projectSlug` defaults to the bound project and, on a
+The 41 tools (ruling 121: `projectSlug` defaults to the bound project and, on a
 task-anchored conversation, every task tool's `taskKey` defaults to the anchored task —
 **only within the anchor's own project**: a call that names a different `projectSlug`
 must name its task, or it is refused. `whoami` reports both bindings):
@@ -277,10 +288,10 @@ must name its task, or it is refused. `whoami` reports both bindings):
 | Scope | Tools | Gate |
 |---|---|---|
 | Instance reads | `whoami`, `list_users`, `list_knowledge_bases`, `list_skills`, `list_mcp_servers`, `list_global_agents`, `inspect_audit_log` (limit 50, max 200), `inspect_run_analytics` | `whoami`: signed-in; the rest: org admin |
-| Instance writes | `create_user` (relays the one-time temp password), `update_user`, `set_user_org_role`, `save_knowledge_base`, `save_skill`, `save_mcp_server` (takes no credential; reserved names refused), `test_mcp_server`, `save_global_agent` (specialists only; **grants are store keys and an omitted list is left alone** — see below) | org admin |
+| Instance writes | `create_user` (relays the one-time temp password), `update_user`, `set_user_org_role`, `save_knowledge_base`, `save_skill`, `save_mcp_server` (takes no credential; reserved names refused), `test_mcp_server`, `save_global_agent` (specialists only; **grants are store keys and an omitted list is left alone** — see below; ruling 153: `model` and `effort` set the template's defaults, checked by name; ruling 156: the reply names every project copy whose grants differ and `propagate: true` rewrites them) | org admin |
 | Project creation | `create_project` (any shape: stages, boundaries, members, description) | any signed-in user; the asker is seeded project admin (FR5) |
-| Board reads | `get_project`, `list_tasks`, `get_task` (events 12, max 50), `get_github_state`, `list_goals`, `get_goal` | `requireVisible` |
-| Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier; ruling 140(b): the person whose seat changed is notified, and the audit row says whether they were told), `update_task` (ruling 121: the goal under `update-goal`, priority / labels / due date under `edit-task-meta` as a full replace — the task page's two writers and gates, each part reported on its own, and an axis already holding the asked-for value answers `[noop]` rather than claiming a write nobody made; ruling 131: `blockedBy` is the FULL list of what the task waits on through `setTaskDependencies`, reported on its own arm, a refusal in the validator's words, `[]` clearing it and releasing the task), `create_task` also takes `blockedBy` (validated before a key is allocated; the task is born held) and, ruling 140(a), `owner` (a member email or `me`; seated in the creating write before the first operator run, checked by the hand-off rule; the release word is refused by name) and `dueDate`, with `priority: urgent` as the urgent flag itself, `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `terminal-stage` / queued honestly, else `startAgentRun`), `update_project_settings`, `update_stages`, `set_transition_boundary` (`edit-policy`), `invite_member` (C4: takes the `role` the member joins in, seated in ONE write with one audit row; omitted is viewer, and an unknown role is refused by name with nothing written), `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
+| Board reads | `get_project` (each deployment with its `resources` copy and `templateDrift`, ruling 156), `list_tasks`, `get_task` (events 12, max 50; `schedules` lists the pending entries, ruling 153), `get_github_state`, `list_goals`, `get_goal` | `requireVisible` |
+| Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier; ruling 140(b): the person whose seat changed is notified, and the audit row says whether they were told), `update_task` (ruling 121: the goal under `update-goal`, priority / labels / due date under `edit-task-meta` as a full replace — the task page's two writers and gates, each part reported on its own, and an axis already holding the asked-for value answers `[noop]` rather than claiming a write nobody made; ruling 131: `blockedBy` is the FULL list of what the task waits on through `setTaskDependencies`, reported on its own arm, a refusal in the validator's words, `[]` clearing it and releasing the task), `create_task` also takes `blockedBy` (validated before a key is allocated; the task is born held) and, ruling 140(a), `owner` (a member email or `me`; seated in the creating write before the first operator run, checked by the hand-off rule; the release word is refused by name) and `dueDate`, with `priority: urgent` as the urgent flag itself, `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `terminal-stage` / queued honestly, else `startAgentRun`), `schedule_task_action` and `cancel_task_schedule` (ruling 153; `run-agents`: the task page's schedule form through the controller, `agent: "operator"` or a deployed profile id, `delayMinutes` 1 to 40320 or an ISO `dueAt` with the same bounds and sentences, the entry on `task.md` with the `<email> · via controller` label; a cancel answers `[noop]` when the entry is not pending), `update_project_settings`, `update_stages`, `set_transition_boundary` (`edit-policy`), `invite_member` (C4: takes the `role` the member joins in, seated in ONE write with one audit row; omitted is viewer, and an unknown role is refused by name with nothing written), `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
 | Goals | `create_goal` (`create-task`, 1..20 links, each with an optional `blockedBy`), `update_goal` (creator or `run-agents`; `edit_link` without `blockedBy` leaves the link's list, `[]` clears it; `add_link` takes one) | `requireVisible` then the goal gate (§7) |
 
 Invariants pinned by tests: there is **no** tool for merge, acceptance,
@@ -314,6 +325,22 @@ tool descriptions.
   erased every grant — and `list_global_agents` returned no grants at all, so the model
   could not see what it was about to erase. That tool now returns `skills`, `mcps` and
   `kbs`.
+- **A project copy is its own record** (ruling 156, pass 35 F35-7). A library deploy
+  copies the template's three lists onto the deployment (`definition.resources`) and a
+  run mounts that copy, so a template grant never reached a deployed project and the
+  tool answered a bare `[done]` (live: `context7` on the template, `mcp.mounted:
+  ["viberr_agent"]` on the next run). The reply is built from the result now: it names
+  every non-archived project whose copy differs and what it lacks or holds beyond the
+  template ("1 project copy does not carry this change: k9c-k9s-clone is missing MCP
+  server context7"), and the two doors: `propagate: true` on the next call, or an org
+  admin's "Use the template's grants" on that project's Agents page (owner, Q35-8:
+  org admins only; a project admin sees the marker and asks). Propagation REPLACES the
+  copy's three lists (owner, Q35-7: a project-local extra is dropped and the reply says
+  so) and nothing else, records `project.agent_profile.resources_synced` per project,
+  and `list_global_agents` carries `copiesDiffering` so "is it granted on the project?"
+  is answerable without a run. Names are entity-decoded once and angle brackets are
+  refused (U35-1): `Test &amp; CI Engineer` is stored as `Test & CI Engineer` with the
+  id `test-ci-engineer`.
 
 ### 4.2 Catalogued writes read first and refuse by name (pass 34, ruling 139)
 

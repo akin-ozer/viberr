@@ -303,6 +303,7 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
 
   const roleless = (patch: Partial<AgentProfileView>): AgentProfileView => ({
     fingerprint: "fp-fixture",
+    templateDrift: null,
     id: "docs-writer",
     kind: "specialist",
     name: "Org Docs Writer",

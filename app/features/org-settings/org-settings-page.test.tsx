@@ -432,10 +432,10 @@ const SKILLS: SkillView[] = [
 const GAGENTS: GagentView[] = [
   { id: "developer", name: "Developer", backend: "codex",
     summary: "Primary implementation specialist.", role: "Implementation",
-    persona: "", stages: ["ready", "impl"],
+    persona: "", stages: ["ready", "impl"], model: "", effort: "",
     skills: ["terraform-review"], mcps: ["github-mcp"], kbs: [], used: 4 },
   { id: "spare", name: "Spare", backend: "claude", summary: "Unused.",
-    role: "Spare hands",
+    role: "Spare hands", model: "", effort: "",
     persona: "", stages: ["impl"], skills: [], mcps: [], kbs: [], used: 0 },
 ];
 const STAGES = [
@@ -684,15 +684,52 @@ describe("ResourcesPanel", () => {
     expect(chips.some((c) => c.textContent === "Done")).toBe(false);
     // P13-AP-05/AP-07: a template is ADOPTED (copied) by a project, so an org
     // edit does not silently reach an already-adopted project on its next run.
+    // Ruling 156 (pass 35): the hint no longer points at "re-adopt" (a door the
+    // deploy refuses); the box above the foot copies the grants with this save.
     expect(
       getByText(
-        "adopted by 4 projects. Each keeps its own copy; re-adopt to pick up this edit",
+        "adopted by 4 projects. Each project keeps its own copy of the grants and its own capability policy; the box above updates the grants with this save",
       ),
     ).toBeTruthy();
     // Three ctx groups over the org resources; the selected skill chip is on.
     expect(document.querySelectorAll(".ctx-group")).toHaveLength(3);
     const skillChip = chips.find((c) => c.textContent === "terraform-review")!;
     expect(skillChip.className).toContain(" on");
+  });
+
+  /**
+   * Ruling 156 (pass 35, F35-7): a project's deployment is its own COPY of the
+   * grants, so an org edit never reached it. The modal offers the propagation
+   * as a box, unchecked by default, and the save carries the decision. Canary:
+   * drop `propagate` from the submitted fields.
+   */
+  it("ruling 156: the copy-grants box posts propagate=1 with the save, and an unadopted template has no box", async () => {
+    const { getByLabelText, getByText, queryByLabelText } = renderResources();
+    fireEvent.click(getByLabelText("Edit Developer"));
+    const box = getByLabelText(
+      "Copy these grants to the 4 projects that adopted this profile",
+    );
+    expect(box.getAttribute("type")).toBe("checkbox");
+    fireEvent.click(box);
+    fireEvent.click(getByText("Save changes"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "agent-save",
+        profileId: "developer",
+        propagate: "1",
+      }),
+    );
+    cleanup();
+
+    // Spare is adopted by nobody: nothing to copy to, so no box, and the save
+    // says so explicitly.
+    const again = renderResources();
+    fireEvent.click(again.getByLabelText("Edit Spare"));
+    expect(queryByLabelText(/Copy these grants/)).toBeNull();
+    fireEvent.click(again.getByText("Save changes"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({ intent: "agent-save", profileId: "spare", propagate: "0" }),
+    );
   });
 
   it("review F10: a legacy template whose role repeats its name explains the greyed Save", () => {

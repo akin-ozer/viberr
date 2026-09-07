@@ -107,9 +107,9 @@ describe("global agent profiles", () => {
     expect(usedByProject(db)).toEqual({ developer: 2, reviewer: 1 });
   });
 
-  it("create writes a template file; duplicate names are refused", () => {
+  it("create writes a template file; duplicate names are refused", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { profile, toast } = saveGlobalAgentProfile(
+    const { profile, toast } = await saveGlobalAgentProfile(
       db,
       {
         name: "Security reviewer",
@@ -129,12 +129,12 @@ describe("global agent profiles", () => {
     // toast pointed at a "grant eligibility in a project's policy" surface that
     // did not exist.
     expect(toast).toBe(
-      "Security reviewer created — add it to a project from Agents → Add from library",
+      "Security reviewer created · add it to a project from Agents → Add from library",
     );
     expect(profile.id).toBe("security-reviewer");
     expect(existsSync(agentProfileFilePath("security-reviewer", dataRoot))).toBe(true);
 
-    expect(() =>
+    await expect(
       saveGlobalAgentProfile(
         db,
         {
@@ -150,12 +150,126 @@ describe("global agent profiles", () => {
         ACTOR,
         ctx,
       ),
-    ).toThrowError(/already exists/);
+    ).rejects.toThrowError(/already exists/);
   });
 
-  it("D32-7: a role given here lands in the file; a blank one keeps the stored role", () => {
+  /**
+   * U35-1 (pass 35): the controller sent `Test &amp; CI Engineer` and this
+   * writer stored the entity, derived the id from the escaped text
+   * (`test-amp-ci-engineer`) and every card printed `&amp;` literally. Canary:
+   * drop the `normalizeDisplayName` call.
+   */
+  it("U35-1: a name is stored as the person meant it, the id follows, and markup is refused", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { profile } = saveGlobalAgentProfile(
+    const { profile } = await saveGlobalAgentProfile(
+      db,
+      {
+        name: "Test &amp; CI Engineer",
+        backend: "claude",
+        summary: "Runs the suite.",
+        persona: "",
+        stages: ["impl"],
+      },
+      ACTOR,
+      ctx,
+    );
+    expect(profile.name).toBe("Test & CI Engineer");
+    expect(profile.id).toBe("test-ci-engineer");
+    expect(existsSync(agentProfileFilePath("test-ci-engineer", dataRoot))).toBe(true);
+    await expect(
+      saveGlobalAgentProfile(
+        db,
+        { name: "<b>x</b>", backend: "claude", summary: "s", persona: "", stages: ["impl"] },
+        ACTOR,
+        ctx,
+      ),
+    ).rejects.toThrowError("Names cannot contain < or > or control characters.");
+  });
+
+  /**
+   * Ruling 153 (pass 35, G35-2): a template carries its default model and
+   * effort, checked by name against its backend (ruling 139); an edit that
+   * omits both keeps them. Canary: drop `effort` from the created frontmatter.
+   */
+  it("ruling 153: create stores model and effort, a foreign model is refused, and an edit omitting both keeps them", async () => {
+    const { db, dataRoot, ctx } = setup();
+    await saveGlobalAgentProfile(
+      db,
+      {
+        name: "Astra Engineer",
+        backend: "codex",
+        summary: "Ships on Astra.",
+        persona: "",
+        stages: ["impl"],
+        model: "gpt-6-astra",
+        effort: "medium",
+      },
+      ACTOR,
+      ctx,
+    );
+    const read = () =>
+      parseAgentProfileContent(
+        readFileSync(agentProfileFilePath("astra-engineer", dataRoot), "utf8"),
+        { fallbackId: "astra-engineer" },
+      ).parsed!.frontmatter;
+    expect(read().model).toBe("gpt-6-astra");
+    expect(read().effort).toBe("medium");
+    expect(listGlobalAgentProfiles(db, ctx)[0]).toMatchObject({
+      id: "astra-engineer",
+      model: "gpt-6-astra",
+      effort: "medium",
+    });
+
+    await expect(
+      saveGlobalAgentProfile(
+        db,
+        { name: "Opus On Codex", backend: "codex", summary: "s", persona: "", stages: ["impl"], model: "opus" },
+        ACTOR,
+        ctx,
+      ),
+    ).rejects.toThrowError(/is a Claude model\. Codex cannot run it/);
+    await expect(
+      saveGlobalAgentProfile(
+        db,
+        { name: "Ultra On Codex", backend: "codex", summary: "s", persona: "", stages: ["impl"], effort: "ultra" },
+        ACTOR,
+        ctx,
+      ),
+    ).rejects.toThrowError(/not an effort tier Codex offers/);
+
+    // An edit that names neither keeps both; "" clears the tier.
+    const base = {
+      id: "astra-engineer",
+      name: "Astra Engineer",
+      backend: "codex" as const,
+      summary: "Ships on Astra, still.",
+      persona: "",
+      stages: ["impl"],
+    };
+    await saveGlobalAgentProfile(db, base, ACTOR, ctx);
+    expect(read().model).toBe("gpt-6-astra");
+    expect(read().effort).toBe("medium");
+    await saveGlobalAgentProfile(db, { ...base, effort: "" }, ACTOR, ctx);
+    expect(read().effort).toBeUndefined();
+
+    // A backend switch whose stored model belongs to the other backend clears
+    // it and the toast says so (Q35-11: no dash in the toast).
+    const switched = await saveGlobalAgentProfile(
+      db,
+      { ...base, backend: "claude" },
+      ACTOR,
+      ctx,
+    );
+    expect(read().model).toBe("");
+    expect(switched.toast).toContain(
+      "backend is now Claude; the stored model belonged to Codex and was cleared",
+    );
+    expect(switched.toast).not.toMatch(/[–—]/);
+  });
+
+  it("D32-7: a role given here lands in the file; a blank one keeps the stored role", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { profile } = await saveGlobalAgentProfile(
       db,
       {
         name: "Docs writer",
@@ -183,7 +297,7 @@ describe("global agent profiles", () => {
     // Blank keeps the stored role (canary: replace the edit branch's
     // `input.role?.trim() || existing.frontmatter.role || name` with a bare
     // `name` and this reads "Docs writer").
-    saveGlobalAgentProfile(
+    await saveGlobalAgentProfile(
       db,
       {
         id: "docs-writer",
@@ -204,7 +318,7 @@ describe("global agent profiles", () => {
     // A NEW role on edit lands (review F9a: this is the half the blank-edit
     // assertion alone could not lock — canary: drop `input.role?.trim() ||`
     // on the edit branch and this still reads "Documentation").
-    saveGlobalAgentProfile(
+    await saveGlobalAgentProfile(
       db,
       {
         id: "docs-writer",
@@ -224,10 +338,10 @@ describe("global agent profiles", () => {
     expect(read()).toBe("Docs lead");
   });
 
-  it("edit preserves capability policy + extras (fields the modal doesn't own)", () => {
+  it("edit preserves capability policy + extras (fields the modal doesn't own)", async () => {
     const { db, dataRoot, ctx } = setup();
     writeTemplate(dataRoot, "developer", "specialist");
-    saveGlobalAgentProfile(
+    await saveGlobalAgentProfile(
       db,
       {
         id: "developer",
@@ -263,10 +377,10 @@ describe("global agent profiles", () => {
     expect(parsed!.description).toBe("Implements stage work.");
   });
 
-  it("an edited persona replaces the body while the summary stays the blurb", () => {
+  it("an edited persona replaces the body while the summary stays the blurb", async () => {
     const { db, dataRoot, ctx } = setup();
     writeTemplate(dataRoot, "developer", "specialist");
-    saveGlobalAgentProfile(
+    await saveGlobalAgentProfile(
       db,
       {
         id: "developer",
@@ -290,9 +404,9 @@ describe("global agent profiles", () => {
     );
   });
 
-  it("a created template carries EXPLICIT capability grants, never an empty list", () => {
+  it("a created template carries EXPLICIT capability grants, never an empty list", async () => {
     const { db, dataRoot, ctx } = setup();
-    saveGlobalAgentProfile(
+    await saveGlobalAgentProfile(
       db,
       {
         name: "Doc writer",
@@ -430,7 +544,7 @@ describe("resource grants on a template", () => {
     expect(resolveResourceGrants(db, {}, ctx)).toEqual({});
   });
 
-  it("F33-7: an omitted grant list keeps what is stored; an empty one clears it", () => {
+  it("F33-7: an omitted grant list keeps what is stored; an empty one clears it", async () => {
     const { db, dataRoot, ctx } = setup();
     writeTemplate(dataRoot, "developer", "specialist");
     const base = {
@@ -443,7 +557,7 @@ describe("resource grants on a template", () => {
     };
 
     // A summary-only edit: every stored grant survives it.
-    saveGlobalAgentProfile(db, base, ACTOR, ctx);
+    await saveGlobalAgentProfile(db, base, ACTOR, ctx);
     const kept = listGlobalAgentProfiles(db, ctx)[0]!;
     expect(kept).toMatchObject({
       skills: ["repo-write"],
@@ -452,7 +566,7 @@ describe("resource grants on a template", () => {
     });
 
     // An empty list is still a decision: it clears that one list and no other.
-    saveGlobalAgentProfile(db, { ...base, kbs: [] }, ACTOR, ctx);
+    await saveGlobalAgentProfile(db, { ...base, kbs: [] }, ACTOR, ctx);
     const cleared = listGlobalAgentProfiles(db, ctx)[0]!;
     expect(cleared).toMatchObject({
       skills: ["repo-write"],

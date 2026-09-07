@@ -27,11 +27,13 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
   defaultEffortFor,
   defaultModelFor,
+  effortsFor,
   foreignModelBackend,
   modelDisplayName,
   assertEffortForBackend,
   assertModelForBackend,
 } from "~/server/runtimes/model-catalog.server";
+import { displayNameRefusal, normalizeDisplayName } from "~/shared/names";
 import { existsSync, readFileSync } from "node:fs";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import {
@@ -201,7 +203,19 @@ export function deploymentFingerprint(deployment: AgentDeployment): string {
 }
 
 const profileFormSchema = z.object({
-  name: z.string().trim().min(1, "Name is required."),
+  // U35-1 (pass 35): the name as the person meant it, entities decoded once
+  // and markup refused; the id is derived from the normalized text.
+  name: z
+    .string()
+    .transform(normalizeDisplayName)
+    .superRefine((name, issue) => {
+      if (!name) {
+        issue.addIssue({ code: "custom", message: "Name is required." });
+        return;
+      }
+      const refusal = displayNameRefusal(name);
+      if (refusal) issue.addIssue({ code: "custom", message: refusal });
+    }),
   role: z.string().trim().min(1, "Role is required."),
   backend: z.enum(["codex", "claude"]),
   stages: z.array(z.string().min(1)).min(1, "At least one stage is required."),
@@ -615,6 +629,7 @@ export async function deployAgentProfileFromLibrary(
       // the run would have used anyway; the difference is that project.md now
       // records it, so the agents page and the run agree.
       const templateModel = fm.model.trim();
+      const templateEffort = fm.effort?.trim() ?? "";
       // Ruling 139: an EXPLICIT override is judged by name against the backend
       // the deployment will run on; the template's own values are taken as
       // they are (the F21-13 rule above stays true).
@@ -633,7 +648,14 @@ export async function deployAgentProfileFromLibrary(
           (templateModel && !foreignModelBackend(backend, templateModel)
             ? templateModel
             : defaultModelFor(backend)),
-        effort: effortOverride || defaultEffortFor(backend),
+        // Ruling 153 (pass 35, G35-2): the template's own default effort is
+        // taken when it is a tier this backend offers; an override still wins,
+        // and an absent or foreign tier falls back to the backend default.
+        effort:
+          effortOverride ||
+          (templateEffort && effortsFor(backend).includes(templateEffort)
+            ? templateEffort
+            : defaultEffortFor(backend)),
         scope: `Added from the global library to ${project.frontmatter.name}`,
         desc: fm.desc || parsed.description,
       };
@@ -868,7 +890,7 @@ export async function updateAgentProfile(
     const message = directDoneLive
       ? `${form.name} now runs at full autonomy with “Accept completion into Done” granted. It can move tasks to Done without a human.`
       : autonomyElevatedToFull
-        ? `${form.name} autonomy raised to full. It performs approval-boundary transitions itself. “Accept completion into Done” still needs its direct grant to close tasks.`
+        ? `${form.name} autonomy raised to full. It crosses auto boundaries and dispatches agents without asking; approval and human boundaries still wait for a person, and “Accept completion into Done” still needs its direct grant to close tasks.`
         : `“Accept completion into Done” granted to ${form.name}. It takes effect only at full autonomy (currently ${gov.newAutonomy}).`;
     governanceNotice = { message };
     recordAudit(db, {

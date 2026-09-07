@@ -2951,6 +2951,55 @@ by rewriting those paragraphs:*
     `org-settings-page.tsx` `RunConcurrencyControl`; (a) and (c) in the operator actions
     and the backend-quota hold of the same pass.)
 
+153. **Controller parity for schedules and template defaults (pass 35, G35-1 and
+    G35-2).** The controller schedules and cancels a task's future run with the tier
+    the task page needs (`run-agents`): `schedule_task_action` takes the operator or a
+    deployed profile id, `delayMinutes` (1 to 40320) or an ISO `dueAt` under the same
+    bounds and sentences as the task page's form, and writes the entry to `task.md`
+    with the `<email> · via controller` label; `cancel_task_schedule` retires a pending
+    entry and answers `[noop]` for one that is not; `get_task` lists the pending
+    entries. `save_global_agent` takes a template's default `model` and `effort`,
+    checked by name against its backend (ruling 139): omitted keeps the stored value,
+    `""` clears it, and a backend switch whose stored model belongs to the other
+    backend clears the model and says so. `deploy_agent` and the library deploy take
+    the template's effort when no override is given and the backend offers the tier;
+    a definition-less deployment resolves it live. Names are stored as the person
+    meant them (U35-1): the five XML entities and numeric references are decoded
+    once, ids derive from the decoded text, and a name still carrying angle brackets
+    or control characters is refused. (`controller-toolkit.server.ts`,
+    `gagents.server.ts`, `agent-profile-actions.server.ts`, `shared/names.ts`.)
+
+156. **A template edit says where it did not land (pass 35, F35-7; owner, Q35-7,
+    Q35-8, Q35-11).** A project's deployment is its own copy of the template's grants,
+    taken at deploy time, and the template's writer does not reach into it. So every
+    template save names each non-archived project whose copy no longer carries the
+    template's grants and what is missing or extra, and offers the propagation:
+    `propagate` on `save_global_agent`, the "copy these grants" box on the org modal,
+    or "Use the template's grants" on the project's Agents page. Propagation REPLACES
+    the copy's three grant lists (a grant a project added on its own is dropped and
+    the reply says so) and never touches its capability policy, model, backend, stages
+    or persona; it runs through one writer (`template-propagation.server.ts`) and
+    records `project.agent_profile.resources_synced` per project. Only an org admin
+    may propagate, from any of the three doors; a project admin sees the divergence
+    marker with the exact difference and asks. The roster marks a copy whose grants
+    differ from its template (`templateDrift`); the OBS-7 `customized` flag stays an
+    identity signal and is not widened. The org modal's save toast composes its
+    clauses with middle dots, never a dash.
+
+157. **A hold ends when someone starts work (pass 35, F35-8; owner, Q35-9, Q35-10).**
+    A stored `blocked` with no open packet and no dependency list is a hold (the
+    `hold_runtime_debug` decision, the refused arm of a collision ceremony), and a hold
+    is lifted on the record by a person starting the operator (Run operator, an
+    `@operator` comment, the controller, a schedule they set) or by any dispatch that
+    starts a run: `readiness: ready`, a "Hold lifted" note naming who or what started
+    the work, and `task.hold.lifted`. The lift is not a claim that the cause is fixed:
+    the operator re-checks and opens a new packet when the block stands, as
+    `block_on_policy` already promises. Machine triggers and boot recovery lift
+    nothing; an open packet keeps the withdrawal paths as the only lift; a dependency
+    list keeps ruling 131's floor. The display never says blocked and agent working
+    together: a packet-less, list-less stored block carried by an agent renders "agent
+    working". (Implemented by the operator and task actions of the same pass.)
+
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates
 that pass and remains unnumbered.)*
