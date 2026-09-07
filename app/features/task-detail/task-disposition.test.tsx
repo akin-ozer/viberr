@@ -635,7 +635,15 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     const { container, submitted, getByText } = renderPage({
       myRole: "admin",
       // Off the boundary and refused: the wedge a force-accept exists for.
-      acceptance: { atBoundary: false, blockedReason: "The latest review requests changes." },
+      // The server computes BOTH: `blockedReason` folds in the open blocked
+      // packet, `blockedReasonViaPacket` is the refusal a packet resolution
+      // really meets (F19-7). A `force_accept` option is a packet resolution,
+      // so the second one is the gate this ceremony bypasses.
+      acceptance: {
+        atBoundary: false,
+        blockedReason: "The latest review requests changes.",
+        blockedReasonViaPacket: "The latest review requests changes.",
+      },
       task: {
         stage: "triage",
         validation: "failing",
@@ -671,6 +679,61 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(submitted[0]!.intent).toBe("resolve-packet");
     expect(submitted[0]!.option).toBe("0");
     expect(submitted[0]!.ackVerdict).toBe("failing");
+  });
+
+  /**
+   * Pass-35 cluster review of ruling 164. A `force_accept` option is offered
+   * FROM a blocked packet, and the resolution clears that packet BEFORE
+   * `forceAcceptCompletion` runs, so the open-blocked-decision sentence is not
+   * a gate this override bypasses. Both `task.blockReason` (the projection's
+   * `validation_block_reason`) and `acceptance.blockedReason` fold it in, and
+   * the ceremony read them: the "Bypassing" row named the decision the click
+   * was answering and told the admin to resolve the packet the button
+   * resolves, while `task.acceptance.forced` recorded something else, being
+   * computed after the packet is gone.
+   */
+  it("ruling 164 + F19-7: the force ceremony never bypasses the packet it is resolving", async () => {
+    // Canary: restore `task.blockReason ?? acceptance.blockedReason` for the
+    // forced ceremony and the dialog quotes the open blocked decision.
+    const openPacketSentence =
+      "This task has an open blocked decision. Resolve the operator's packet before accepting it.";
+    const { container } = renderPage({
+      myRole: "admin",
+      acceptance: {
+        atBoundary: false,
+        // What every gate says while the packet stands, the packet included.
+        blockedReason: openPacketSentence,
+        // What the packet RESOLUTION meets: the packet is what it clears.
+        blockedReasonViaPacket: null,
+      },
+      task: {
+        stage: "triage",
+        validation: "failing",
+        blockReason: openPacketSentence,
+        packet: {
+          ...packetWith("force_accept"),
+          options: [
+            {
+              kind: "force_accept",
+              t: "Force-accept as admin without a fresh verdict",
+              d: "",
+              rec: true,
+            },
+            { kind: "request_edit", t: "Send it back for edits", d: "", rec: false },
+          ],
+        },
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    // Still the force ceremony, still naming the option.
+    expect(dialog.textContent).toContain("Force-accept as admin without a fresh verdict");
+    // But it neither quotes the packet gate nor tells the admin to resolve the
+    // decision this very click resolves.
+    expect(dialog.textContent).not.toContain("open blocked decision");
+    expect(dialog.textContent).not.toContain("Bypassing");
   });
 
   it("every OTHER packet option still resolves in one click — none of them writes to GitHub", async () => {

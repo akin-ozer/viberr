@@ -958,13 +958,24 @@ export function TaskDetailPage({
               : { mode: confirmAccept.mode }
           }
           blockedReason={
-            confirmAccept.mode === "force" || forcedCeremony
-              ? (task.blockReason ??
-                acceptance.blockedReason ??
-                (task.packet?.type === "blocked"
-                  ? "An open blocked decision is holding this task."
-                  : null))
-              : // The merge is the SECOND half of an acceptance that already
+            // Ruling 164 + F19-7: the `force_accept` option is a PACKET
+            // resolution, so it clears the packet before the override runs.
+            // `task.blockReason` and `acceptance.blockedReason` both fold in
+            // the open-blocked-packet sentence, and that packet is the one this
+            // very click is answering — printing it under "Bypassing" would name
+            // the decision as the gate it bypasses, tell the admin to resolve
+            // the packet the button resolves, and disagree with the
+            // `task.acceptance.forced` record, which is computed after the
+            // packet is gone. The packet path's own refusal is the honest one.
+            forcedCeremony
+              ? acceptance.blockedReasonViaPacket
+              : confirmAccept.mode === "force"
+                ? (task.blockReason ??
+                  acceptance.blockedReason ??
+                  (task.packet?.type === "blocked"
+                    ? "An open blocked decision is holding this task."
+                    : null))
+                : // The merge is the SECOND half of an acceptance that already
                 // happened (R16-6), so the acceptance gate has nothing left to
                 // say about it — quoting a stale refusal here would read as a
                 // block on a merge nothing is blocking.
