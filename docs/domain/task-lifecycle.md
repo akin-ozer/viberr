@@ -148,8 +148,16 @@ profile's stages.
    `approval` or `human` boundary whatever its grant says: "The Review to Merge
    boundary is approved by a human on this board: the operator may recommend it, not
    cross it." The operator crosses `auto` boundaries and backward rework moves while
-   validation is `failing`; an applied recommendation arrives with the human's
-   `recommendationAuthorized`, never with operator authority.
+   validation is `failing`, and (ruling 163, pass 35) the one backward move a `changed`
+   revision licenses: into the stage where the task's required reviewers can run
+   (`verdictStageFor`: the nearest earlier stage where a verdict-capable engagement is
+   eligible; the acceptance-boundary stage when none is deployed), so a revision that
+   moved after a verdict goes back for its re-verdict instead of waiting at Merge. The
+   operator's move INTO the acceptance-boundary stage is refused with the acceptance
+   gate's own sentence while the review PR conflicts with the base or lacks the
+   delivered revision (`mergeReadinessRefusal`, ruling 162: Merge means mergeable). An
+   applied recommendation arrives with the human's `recommendationAuthorized`, never
+   with operator authority.
 5. Inside the file lock the stage is re-read: already there → write nothing; moved
    elsewhere → 409, because every guard above judged `fromStageId`.
 6. On success: `previousStageId = fromStageId` (the durable "came back from Review"
@@ -392,7 +400,14 @@ open is delivered the same way: the push moves the PR's head; nobody is ever ask
 push by hand. The task page offers the same door as "Push `<sha>` to PR #N" whenever
 the open PR does not carry the delivered revision (ruling 134(c)), and shows a disabled
 control naming the refusal for a diverged remote. Entering the review stage with no PR
-writes a typed event, never silence.
+writes a typed event, never silence. Ruling 163 (pass 35): a delivery that moved the
+PR's head on a task standing PAST the stage where its reviewers can run, with a
+revision that changed or failed after the last verdict, records the transition back to
+that stage in the same delivery ("Transition: KNC-20 returns from Merge to Review: `17e4a8c`
+changed after the last verdict, so the reviewers judge it there"; audit `task.transition`
+with `via: delivery`). The redirect option of a branch-conflict packet does the same when
+it is resolved (`rework: true` on the option; `via: packet_redirect`), and the option's
+detail says so before the person decides.
 Details in [github-delivery.md](github-delivery.md).
 
 ## 11. Acceptance and the endings
@@ -410,7 +425,31 @@ Every writer to the terminal stage goes through one contract:
    withdraws force-accept entirely (ruling 37). Lower in the stack, a delivered revision
    that is not on the pull request refuses with "deliver the branch to push it" (ruling
    135) and outranks a conflicting PR, whose `mergeable` describes the head GitHub has,
-   not the one that was reviewed; a conflicting PR refuses after it.
+   not the one that was reviewed; a conflicting PR refuses after it. Both sentences come
+   from ONE function, `mergeReadinessRefusal` (ruling 162, pass 35), read by the
+   acceptance stack, the operator's `get_task` (`notAcceptableReason`, computed by the
+   whole stack through `acceptanceRefusalFor`), the operator's move into the
+   acceptance-boundary stage, and the post-gate GitHub merge refusal: a 405 re-reads the
+   pull, records `mergeable: conflicting`, and the person reads the gate's sentence with
+   its way out instead of "GitHub refuses to merge ...". No surface offers an acceptance
+   the gate will refuse: the task page's recommendation card prints the refusal as an
+   alert and its Apply refuses the click, the accept dialog prints it above a disabled
+   confirm, the GitHub card wears the "conflicts" pill, and the reconciler withdraws a
+   pending `accept_completion` card the moment `mergeable` flips to conflicting, with a
+   "Conflict:" note on the timeline.
+3a. **The base refresh, once** (ruling 162 / G35-5(d)): before the gate re-check and the
+   merge, the acceptance ceremony brings the branch up to date with the base through the
+   same workspace merge `update_branch_from_base` performs, records it in
+   `baseRefreshes` (ruling 132), reconciles, writes "Accepting the completion brought
+   `<branch>` up to date with `<base>` ..." on the timeline and audits
+   `github.branch_update.acceptance`. A refresh that CONFLICTS refuses the acceptance
+   with the gate's sentence, records `mergeable: conflicting` and names the conflicting
+   paths on the timeline; a branch that cannot be refreshed from here (no workspace, no
+   credential, a diverged origin) proceeds to the merge, where GitHub decides. The
+   operator's own tool refuses at the acceptance-boundary stage and past it ("... the
+   branch is brought up to date once, at acceptance time, and merged in the same
+   ceremony"), except on a PR GitHub already reports conflicting, where its job is to
+   record the conflict list and open the packet.
 4. **Verdict gate**: every required reviewer must have approved the current revision
    and none may request changes (ruling 20). Force-accept bypasses this and is
    audited `task.acceptance.forced` with EVERY gate it bypassed (U35-3, pass 35:

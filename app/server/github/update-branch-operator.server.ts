@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import {
   appendTimelineEvent,
   readTaskFile,
@@ -26,8 +26,16 @@ import {
   type UpdateBranchResult,
 } from "./update-branch.server";
 import type { Exec } from "./push-workspace.server";
-import { deliveringEngagement, type Engagement } from "~/schemas/task-file.schema";
+import {
+  deliveringEngagement,
+  type Engagement,
+  type FileActorRef,
+  type TaskFrontmatter,
+} from "~/schemas/task-file.schema";
 import { listDeployedSpecialists } from "~/server/tasks/specialist-run.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
+import { verdictStageFor } from "~/shared/workflow/verdict-stage";
 
 /**
  * The DECISION half of "bring the task branch up to date" (N19 gap 9, owner
@@ -168,6 +176,9 @@ function conflictOptions(
   base: string,
   resolver: ConflictResolver,
   outcome: "conflict" | "push_conflict",
+  /** Ruling 163: the redirect's resolution returns the task to the review
+   *  stage; null when the task stands before it (nothing to return to). */
+  returnsToReview: { stageName: string } | null = null,
 ) {
   const byHand = {
     kind: "custom" as const,
@@ -192,6 +203,14 @@ function conflictOptions(
   if (resolver.kind === "none") {
     return [{ ...byHand, recommended: true }, archive];
   }
+  // Ruling 163 (pass 35, F35-13): a redirect resolved on a task at or past the
+  // review stage RETURNS it there in the same write (`rework: true` is what
+  // `resolvePacket` reads), so the resolved revision gets its verdict where
+  // the reviewers are eligible instead of waiting at Merge for a verdict
+  // nobody can give there (KNC-20, KNC-22, KNC-16).
+  const returnNote = returnsToReview
+    ? ` The task returns to ${returnsToReview.stageName} for the re-verdict.`
+    : "";
   return [
     {
       // `redirect` routes the decision back to the agent side (the resolver
@@ -206,12 +225,13 @@ function conflictOptions(
           ? `Have ${resolver.name} resolve the conflict`
           : `Have ${resolver.name} reconcile the branch with origin`,
       detail:
-        outcome === "conflict"
+        (outcome === "conflict"
           ? `Its workspace already has \`origin/${base}\` fetched: it merges and resolves ` +
             `the conflicting files, and the next delivery pushes the result.`
           : `Its workspace fetches origin's copy of \`${branch}\`, merges the history it does not ` +
-            `have, and the next delivery pushes the result; nothing is forced.`,
+            `have, and the next delivery pushes the result; nothing is forced.`) + returnNote,
       recommended: true,
+      rework: returnsToReview !== null,
       ev:
         outcome === "conflict"
           ? `**Decision:** ${resolver.name} resolves the conflict between \`${branch}\` and ` +
@@ -223,12 +243,28 @@ function conflictOptions(
   ];
 }
 
-/** One sentence per outcome, for the model AND the audit trail. */
-function outcomeSentence(r: UpdateBranchResult): string {
+/** Ruling 163: the review stage a redirect's resolution returns the task to,
+ *  by display name, when the task stands at or past it (and is not terminal);
+ *  null otherwise. */
+function redirectReturnsToReview(
+  ctx: TaskActionContext,
+  projectSlug: string,
+  fm: TaskFrontmatter,
+  project: { stages: { id: string; name: string }[]; workflow: { from: string; to: string }[] } | null,
+): { stageName: string } | null {
+  if (!project) return null;
+  const target = verdictStageFor(project, fm, listDeployedSpecialists(projectSlug, ctx));
+  return target === null ? null : { stageName: stageName(project.stages, target) };
+}
+
+/** One sentence per outcome, for the model AND the audit trail. `lead` is the
+ *  verb phrase an `updated` sentence opens with (the operator's "Brought", the
+ *  acceptance ceremony's "Accepting the completion brought"). */
+function outcomeSentence(r: UpdateBranchResult, lead = "Brought"): string {
   switch (r.status) {
     case "updated":
       return (
-        `Brought \`${r.branch}\` up to date with \`${r.base}\` (${r.commits} commit${r.commits === 1 ? "" : "s"} ` +
+        `${lead} \`${r.branch}\` up to date with \`${r.base}\` (${r.commits} commit${r.commits === 1 ? "" : "s"} ` +
         `merged in, merge commit \`${r.mergeSha.slice(0, 7)}\`; the push published it, so origin now ` +
         `carries the workspace head` +
         (r.remoteBefore.kind === "behind"
@@ -253,6 +289,105 @@ function outcomeSentence(r: UpdateBranchResult): string {
     default:
       return `The branch was not updated: ${r.reason}.`;
   }
+}
+
+/**
+ * Ruling 132 (pass 34, F34-14), in three explicit steps, shared since pass 35
+ * (ruling 162) by the operator's tool and the acceptance ceremony. (A) Under
+ * the file lock, record the refresh: the merge commit, the base tip, the base
+ * name and the count. Without this row the reconciler has no way to tell this
+ * merge from authored work, and it would report the base's commits as
+ * unreviewed. (B) Reconcile, so `pr.revisionDrift` is re-measured NOW rather
+ * than by the five-minute poll (the PR is open, so no divergence arm fires; the
+ * reconcile may still notify watchers or wake the operator on an out-of-band
+ * change, which is the same behaviour any pass has). (C) Re-read and write the
+ * timeline event from the re-read, carrying the canonical drift sentence; the
+ * returned sentence is built from that same re-read. The crash window between
+ * the push and (A) is closed by the next classified pass, which sees the merge
+ * commit without a row and counts it as authored: honest, and self-healing once
+ * the row lands.
+ */
+export async function recordBranchRefresh(
+  db: DatabaseSync,
+  ctx: GithubActionContext,
+  ref: { projectSlug: string; taskKey: string },
+  result: Extract<UpdateBranchResult, { status: "updated" }>,
+  by: {
+    /** Who the timeline line is attributed to. */
+    timelineActor: FileActorRef;
+    /** Who the reconcile's audit rows name. */
+    reconcileActor: AuditActor;
+    /** The verb phrase the sentence opens with. */
+    lead: string;
+  },
+): Promise<string> {
+  const fileRef = { projectSlug: ref.projectSlug, taskKey: ref.taskKey, dataRoot: ctx.dataRoot };
+  await updateTaskFile(fileRef, (parsed) => {
+    parsed.frontmatter.baseRefreshes.push({
+      mergeSha: result.mergeSha,
+      baseSha: result.baseSha,
+      base: result.base,
+      commits: result.commits,
+      at: new Date().toISOString(),
+    });
+  });
+  const reconcile = await reconcileTask(db, ref, by.reconcileActor, ctx);
+  const after = readTaskFile(fileRef)?.parsed.frontmatter ?? null;
+  const drift = describeRevisionDrift(after?.pr?.revisionDrift);
+  const measured =
+    reconcile.status === "reconciled"
+      ? after?.pr
+        ? drift.kind === "none"
+          ? `The review PR's head now equals the reviewed revision.`
+          : `Drift re-measured: ${drift.sentence}.`
+        : ""
+      : `Drift could not be re-measured now (${reconcile.status}); the next GitHub pass will.`;
+  const sentence = `${outcomeSentence(result, by.lead)}${measured ? ` ${measured}` : ""}`;
+  // A branch that moved must SAY it moved. The tool result is text the model
+  // reads; the timeline is the record the humans read, and a base merge
+  // changes what every reviewer is looking at.
+  await appendTimelineEvent(fileRef, {
+    occurredAt: new Date().toISOString(),
+    type: "github",
+    actor: by.timelineActor,
+    title: null,
+    text: sentence,
+    toAgent: false,
+    evidence: null,
+  });
+  rebuildPath(db, resolveTaskFilePath(fileRef), { dataRoot: ctx.dataRoot });
+  return sentence;
+}
+
+/**
+ * Ruling 162 / G35-5(d) (pass 35): why the operator may not refresh the
+ * branch from where the task stands, or null. At the acceptance boundary (the
+ * stage with the edge into the terminal one, and anything past it) the base
+ * refresh belongs to the acceptance ceremony, which brings the branch up to
+ * date once, re-runs the gate and merges in the same step; an operator
+ * refresh there pushed merge commits that conflicted again minutes later. The
+ * one exception is a PR GitHub already reports conflicting: acceptance would
+ * only refuse, so the tool's job is to attempt the merge, record the
+ * conflict list and open the conflict packet.
+ */
+function acceptanceBoundaryRefusal(
+  fm: TaskFrontmatter,
+  taskKey: string,
+  project: { stages: { id: string; name: string }[]; workflow: { from: string; to: string }[] },
+): string | null {
+  const roles = resolveStageRoles(project.stages, project.workflow);
+  if (roles.reviewId === null || roles.terminalId === null) return null;
+  const stageIndex = project.stages.findIndex((s) => s.id === fm.stage);
+  const reviewIndex = project.stages.findIndex((s) => s.id === roles.reviewId);
+  if (stageIndex < 0 || reviewIndex < 0) return null;
+  if (stageIndex < reviewIndex || fm.stage === roles.terminalId) return null;
+  if (fm.pr?.mergeable === "conflicting") return null;
+  const here = stageName(project.stages, fm.stage);
+  return (
+    `${taskKey} is at ${here}, the acceptance boundary: the branch is brought up to date ` +
+    `once, at acceptance time, and merged in the same ceremony. Do not refresh it here; ` +
+    `recommend or accept the completion instead.`
+  );
 }
 
 /**
@@ -294,6 +429,27 @@ export async function operatorUpdateBranchFromBase(
   if (!existing) {
     return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
   }
+  // Ruling 162 / G35-5(d): the operator stops refreshing at the acceptance
+  // boundary; the acceptance ceremony refreshes once and merges.
+  const projectFile = readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot });
+  const boundaryRefusal = projectFile
+    ? acceptanceBoundaryRefusal(
+        existing.parsed.frontmatter,
+        input.taskKey,
+        projectFile.parsed.frontmatter,
+      )
+    : null;
+  if (boundaryRefusal) return { outcome: "denied", message: boundaryRefusal };
+  // Ruling 163: a task at or past the review stage returns to it when the
+  // conflict's redirect is resolved, so the resolved revision gets its verdict
+  // where the reviewers are eligible. Decided here so the option's own text
+  // says what its resolution does.
+  const returnsToReview = redirectReturnsToReview(
+    ctx,
+    input.projectSlug,
+    existing.parsed.frontmatter,
+    projectFile?.parsed.frontmatter ?? null,
+  );
 
   const updateInput: UpdateBranchInput = {
     db,
@@ -338,60 +494,19 @@ export async function operatorUpdateBranchFromBase(
   });
 
   if (result.status === "updated") {
-    // Ruling 132 (pass 34, F34-14), in three explicit steps. (A) Under the
-    // file lock, record the refresh: the merge commit, the base tip, the base
-    // name and the count. Without this row the reconciler has no way to tell
-    // this merge from authored work, and it would report the base's commits as
-    // unreviewed. (B) Reconcile, so `pr.revisionDrift` is re-measured NOW rather
-    // than by the five-minute poll (the PR is open, so no divergence arm fires;
-    // the reconcile may still notify watchers or wake the operator on an
-    // out-of-band change, which is the same behaviour any pass has). (C) Re-read
-    // and write the timeline event from the re-read, carrying the canonical drift
-    // sentence; the tool message is built from that same re-read. The crash
-    // window between the push and (A) is closed by the next classified pass,
-    // which sees the merge commit without a row and counts it as authored:
-    // honest, and self-healing once the row lands.
-    await updateTaskFile(ref, (parsed) => {
-      parsed.frontmatter.baseRefreshes.push({
-        mergeSha: result.mergeSha,
-        baseSha: result.baseSha,
-        base: result.base,
-        commits: result.commits,
-        at: new Date().toISOString(),
-      });
-    });
     const reconcileCtx: GithubActionContext = { dataRoot: ctx.dataRoot };
     if (ctx.fetchImpl) reconcileCtx.fetchImpl = ctx.fetchImpl;
-    const reconcile = await reconcileTask(
+    const sentence = await recordBranchRefresh(
       db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey },
-      OPERATOR_AUDIT_ACTOR,
       reconcileCtx,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      result,
+      {
+        timelineActor: { kind: "operator" },
+        reconcileActor: OPERATOR_AUDIT_ACTOR,
+        lead: "Brought",
+      },
     );
-    const after = readTaskFile(ref)?.parsed.frontmatter ?? null;
-    const drift = describeRevisionDrift(after?.pr?.revisionDrift);
-    const measured =
-      reconcile.status === "reconciled"
-        ? after?.pr
-          ? drift.kind === "none"
-            ? `The review PR's head now equals the reviewed revision.`
-            : `Drift re-measured: ${drift.sentence}.`
-          : ""
-        : `Drift could not be re-measured now (${reconcile.status}); the next GitHub pass will.`;
-    const sentence = `${outcomeSentence(result)}${measured ? ` ${measured}` : ""}`;
-    // A branch that moved must SAY it moved. The tool result is text the model
-    // reads; the timeline is the record the humans read, and a base merge
-    // changes what every reviewer is looking at.
-    await appendTimelineEvent(ref, {
-      occurredAt: new Date().toISOString(),
-      type: "github",
-      actor: { kind: "operator" },
-      title: null,
-      text: sentence,
-      toAgent: false,
-      evidence: null,
-    });
-    rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
     return { outcome: "done", message: sentence };
   }
 
@@ -453,6 +568,7 @@ export async function operatorUpdateBranchFromBase(
           result.base,
           resolver ?? { kind: "none", reason: "this task has no delivering agent" },
           result.status,
+          returnsToReview,
         ),
       },
       authority,

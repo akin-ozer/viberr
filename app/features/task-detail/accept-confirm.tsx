@@ -120,6 +120,9 @@ function subjectKeyFor(mode: AcceptCeremonyMode): string | undefined {
   }
 }
 
+/** The Blocked row's id, so the disabled confirm can be described by it. */
+const BLOCKED_ROW_ID = "accept-confirm-blocked";
+
 export function AcceptConfirm({
   task,
   workRevisionSha,
@@ -431,10 +434,12 @@ export function AcceptConfirm({
             </div>
           )}
           {blockedReason && (
-            <div className="obs">
+            <div className="obs" id={BLOCKED_ROW_ID}>
               {/* Only force-accept BYPASSES a refusal. On every other path a
                   standing refusal means the server will refuse this click —
-                  saying "Bypassing" there would promise an override nobody has. */}
+                  saying "Bypassing" there would promise an override nobody has.
+                  Ruling 162 (pass 35): that click is not offered either; the
+                  confirm below is disabled and described by this row. */}
               <span className="k">{force ? "Bypassing" : "Blocked"}</span>
               <span>{blockedReason}</span>
             </div>
@@ -483,7 +488,14 @@ export function AcceptConfirm({
           <button
             type="button"
             className={"btn " + (force ? "danger" : "primary")}
-            disabled={busy}
+            // Ruling 162 (pass 35, F35-12 (c)): no surface offers an acceptance
+            // the gate will refuse. A standing refusal disables the confirm on
+            // every mode but force (the one that bypasses it); the reason sits
+            // in the Blocked row above and describes the control. This is a
+            // server-side interlock, not form validation, so ruling 147's
+            // enabled-until-busy rule does not apply.
+            disabled={busy || (blockedReason !== null && !force)}
+            aria-describedby={blockedReason && !force ? BLOCKED_ROW_ID : undefined}
             onClick={() => onConfirm(disclosure)}
           >
             <Icon name={force ? "shield" : mergeOnly ? "github" : "check"} />

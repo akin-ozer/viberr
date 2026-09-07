@@ -3192,3 +3192,99 @@ describe("ruling 132: drift is classified, not counted", () => {
     expect((await partial.run(partialRoutes)).pr?.revisionDrift).toEqual(cached);
   });
 });
+
+/**
+ * Pass 35 S15: ruling 162 (F35-12 (a0) and (d)). The conflict the acceptance
+ * gate refuses on reaches the file from BOTH GitHub answers (the detail read
+ * and the merge refusal), and a flip to conflicting withdraws the acceptance
+ * offer the gate would refuse.
+ */
+describe("pass 35 S15: ruling 162 in the reconciler", () => {
+  function seedWithAcceptRec(store: TestStore) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 318, state: "review", title: "Attach execution workspace", mergeable: "clean" },
+        recommendations: [
+          { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-301 to Done", detail: "" },
+          { id: "r-trans", kind: "transition", toStageId: "done", label: "Move VIB-301 to Done", detail: "" },
+          { id: "r-assign", kind: "run_agent", profileId: "developer", label: "Run Developer", detail: "" },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("(d): a PR that flips to conflicting withdraws the pending accept_completion card with the gate's sentence on the timeline", async () => {
+    // Canary: drop `conflictText` from the superseded filter.
+    const { store, actor } = setup();
+    seedWithAcceptRec(store);
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: { number: 318, title: "Attach execution workspace", state: "open", merged: false,
+        merged_at: null, head: { sha: "headsha318" }, mergeable: false, mergeable_state: "dirty",
+        additions: 1, deletions: 0, changed_files: 1 },
+    };
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed;
+    expect(parsed.frontmatter.pr?.mergeable).toBe("conflicting");
+    expect(parsed.frontmatter.recommendations.map((r) => r.id).sort()).toEqual(["r-assign", "r-trans"]);
+    const note = parsed.timeline.find((e) => e.type === "note" && e.text.startsWith("**Conflict:**"))!;
+    expect(note.text).toContain("VIB-301's review PR #318 conflicts with the base branch");
+    expect(note.text).toContain("“Accept completion and move VIB-301 to Done” recommendation was withdrawn");
+    // A second pass on the same answer flips nothing and writes nothing new.
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
+    const again = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed;
+    expect(again.timeline.filter((e) => e.text.startsWith("**Conflict:**"))).toHaveLength(1);
+  });
+
+  it("(a0): a 405 whose re-read pull conflicts records `mergeable: conflicting` and says so in the result", async () => {
+    // Canary: return the bare `not_mergeable` on every 405. The pre-merge
+    // detail read still sees GitHub computing (`mergeable: null`), so only the
+    // re-read AFTER the 405 can learn the conflict (KNC-16: the base moved
+    // between the two calls).
+    const { store, actor } = setup();
+    const gh = fakeGithubFetch({
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: { status: 405, body: { message: "Pull Request is not mergeable" } },
+      [`GET ${REPO_PATH}/pulls/318`]: (call) => ({
+        body:
+          call.attempt === 1
+            ? { number: 318, state: "open", merged: false, head: { sha: "headsha318" }, mergeable: null }
+            : { number: 318, state: "open", merged: false, head: { sha: "headsha318" }, mergeable: false, mergeable_state: "dirty" },
+      }),
+    });
+    const result = await mergeTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result).toMatchObject({ status: "not_mergeable", prNumber: 318, mergeable: "conflicting" });
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr?.mergeable).toBe("conflicting");
+    expect(fm.pr?.state).toBe("review");
+  });
+
+  it("(a0): a 405 that names merge conflicts while GitHub is still computing counts as conflicting too", async () => {
+    const { store, actor } = setup();
+    const gh = fakeGithubFetch({
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: { status: 405, body: { message: "Pull Request has merge conflicts" } },
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: { number: 318, state: "open", merged: false, head: { sha: "headsha318" }, mergeable: null },
+      },
+    });
+    const result = await mergeTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result).toMatchObject({ status: "not_mergeable", mergeable: "conflicting" });
+    expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter.pr?.mergeable).toBe("conflicting");
+  });
+});

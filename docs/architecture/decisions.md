@@ -2965,3 +2965,42 @@ per-route guard and form-intent inventory is in [`../ui/surfaces.md`](../ui/surf
 CALLER's own live sign-in session plus the public half of their `userBackendHealth` (no
 `verification` verdict, no ids), so the Profile poller stops when the backend flips to
 available. It reads nobody else's session.)*
+
+162. **The acceptance gate's verdict is computed once and read everywhere a person or the
+    operator is invited to accept (owner, 2026-09-06, Q35-17 and Q35-18; F35-12, G35-5
+    addendum (d) and (e)).** No surface offers an acceptance the gate will refuse. The
+    GitHub-fact half of the gate (an unpushed delivered revision, ruling 135, then a
+    conflicting pull request) is one function, `mergeReadinessRefusal`, and the whole stack
+    reaches the operator as `get_task`'s `notAcceptableReason` beside `pr.mergeable`: a PR
+    the gate would refuse cannot be recommended for acceptance, and the operator may not
+    move a task into the acceptance-boundary stage while it stands (Merge means mergeable;
+    the task stays at the work stage where the conflict packet is the path). The task page
+    reads the same verdict: the recommendation card keeps its Apply (ruling 147's shape)
+    and prints the refusal as a keyed alert, the accept dialog prints it above a disabled
+    confirm, the GitHub card wears the "conflicts" pill, and the reconciler withdraws a
+    pending `accept_completion` card when `mergeable` flips to conflicting. A post-gate
+    GitHub merge refusal (405) re-reads the pull, records `mergeable: conflicting` and
+    prints the gate's own sentence. **The base refresh happens once, at acceptance time**
+    (amends 132): the ceremony brings the branch up to date through the same workspace
+    merge `update_branch_from_base` performs, re-runs the gate and merges in one step,
+    recording the refresh (`baseRefreshes`, `github.branch_update.acceptance`); a conflict
+    found there refuses with the gate's sentence and records it. Operators stop refreshing
+    at the acceptance boundary: the tool refuses there ("... the branch is brought up to
+    date once, at acceptance time, and merged in the same ceremony"), except on a PR
+    GitHub already reports conflicting, where its job is to record the conflict list and
+    open the packet whose redirect carries that list to the resolver.
+
+163. **A revision that changes after a verdict returns the task to the review stage
+    (owner, 2026-09-06, Q35-19; F35-13).** No task waits at Merge for a verdict nobody can
+    give there. "The review stage" is where the task's required reviewers can run
+    (`verdictStageFor`: the nearest earlier stage where a verdict-capable engagement is
+    eligible; the acceptance-boundary stage when none is deployed; nothing when one is
+    eligible where the task stands). Three doors return the task automatically, each with
+    a `transition` event and a `task.transition` audit row: the operator's backward move
+    on `validation: changed` (a rework move it performs itself, offered in
+    `reworkStages` beside the `failing` license of R7-4), the resolution of a
+    branch-conflict packet's redirect (`rework: true` on the option, the option's detail
+    saying so before the person decides), and a delivery that moved the PR's head on a
+    changed or failing revision (`via: delivery`). The operator's acceptance refusal on
+    such a task names the way back: the rework move, and the person's stage picker on the
+    task page.

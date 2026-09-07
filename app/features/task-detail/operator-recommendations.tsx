@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 
@@ -58,12 +59,23 @@ const KIND_LABEL = {
   delivery: "Delivery",
 } as const satisfies Record<RecommendationView["kind"], string>;
 
+/** Ruling 162: a card whose Apply IS an acceptance (the same test the page
+ *  routes through the accept confirm, `recReachesAcceptance`). */
+function reachesAcceptance(r: RecommendationView, terminalStageId: string | null): boolean {
+  return (
+    r.kind === "accept_completion" ||
+    (r.kind === "transition" && terminalStageId !== null && r.toStageId === terminalStageId)
+  );
+}
+
 export function OperatorRecommendations({
   recommendations,
   canApply,
   busy,
   onApply,
   onDismiss,
+  acceptanceRefusal = null,
+  terminalStageId = null,
 }: {
   recommendations: RecommendationView[];
   /** admin|maintainer — gates the Apply button (server re-checks). */
@@ -73,7 +85,18 @@ export function OperatorRecommendations({
    *  reaches the acceptance confirm before it submits (F19-3). */
   onApply: (recId: string) => void;
   onDismiss: (recId: string) => void;
+  /** Ruling 162 (pass 35, F35-12 (c)): the acceptance gate's standing refusal
+   *  (`acceptance.blockedReason`), or null. An acceptance card renders it as
+   *  a keyed alert and its Apply refuses the click instead of opening a
+   *  confirm the server would answer 409 (ruling 147's shape: the control
+   *  stays, the refusal sentence is the alert). */
+  acceptanceRefusal?: string | null;
+  /** The terminal stage id, so a `transition` card into it counts as an
+   *  acceptance card too. */
+  terminalStageId?: string | null;
 }) {
+  // A refused Apply re-keys the alert so the sentence is announced again.
+  const [refused, setRefused] = useState<{ id: string; n: number } | null>(null);
   if (recommendations.length === 0) return null;
   return (
     <div className="panel op-recs">
@@ -123,6 +146,18 @@ export function OperatorRecommendations({
                   Directive: &ldquo;{r.prompt}&rdquo;
                 </div>
               )}
+              {acceptanceRefusal && reachesAcceptance(r, terminalStageId) && (
+                <p
+                  key={`refusal-${r.id}-${refused?.id === r.id ? refused.n : 0}`}
+                  className="deny-note spaced"
+                  role="alert"
+                >
+                  <Icon name="alert" />
+                  <span>
+                    <strong>Not acceptable now.</strong> {acceptanceRefusal}
+                  </span>
+                </p>
+              )}
             </div>
             {/* Apply AND Dismiss are both maintainer-level (M1) — the server
                 enforces admin|maintainer for each, so hide them from lower
@@ -133,7 +168,15 @@ export function OperatorRecommendations({
                   type="button"
                   className="btn sm"
                   disabled={busy}
-                  onClick={() => onApply(r.id)}
+                  onClick={() => {
+                    // Ruling 162: an acceptance the gate refuses is not offered;
+                    // the click re-announces the reason instead of submitting.
+                    if (acceptanceRefusal && reachesAcceptance(r, terminalStageId)) {
+                      setRefused((cur) => ({ id: r.id, n: cur?.id === r.id ? cur.n + 1 : 1 }));
+                      return;
+                    }
+                    onApply(r.id);
+                  }}
                   title={
                     r.kind === "accept_completion"
                       ? "Apply the operator's recommendation (asks before merging)"

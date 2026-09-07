@@ -47,8 +47,10 @@ const SYS = { userId: null, label: "test" };
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
+  // Ruling 162 (pass 35): the tool refuses at the acceptance boundary (Review
+  // on this board), so the ordinary fixtures stand at the work stage.
   writeTask(store.dataRoot, store.slug, {
-    frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", branch: "vib-1" }),
+    frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", branch: "vib-1" }),
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   mkdirSync(
@@ -178,7 +180,7 @@ function deployDeliverer(repoWrite: boolean, engaged = true): void {
   });
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter("VIB-1", {
-      stage: "review",
+      stage: "impl",
       branch: "vib-1",
       engagements: engaged
         ? [{ profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false }]
@@ -468,7 +470,7 @@ describe("ruling 134(c): the remote report", () => {
   it("ruling 132: a successful update records the row, re-measures drift and says so", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
-        stage: "review",
+        stage: "impl",
         branch: "vib-1",
         workRevision: { id: "rev_1", headSha: PRE_SHA, treeSha: null, branch: "vib-1", createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
         pr: { number: 5, state: "review", title: "[VIB-1] t" },
@@ -509,5 +511,110 @@ describe("ruling 134(c): the remote report", () => {
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.baseRefreshes).toHaveLength(1);
     expect(fm.baseRefreshes[0]).toMatchObject({ mergeSha: MERGE_SHA, baseSha: BASE_SHA, commits: 1 });
+  });
+});
+
+/**
+ * Pass 35 S15: ruling 162 / G35-5 (d) (the operator stops refreshing at the
+ * acceptance boundary) and ruling 163 (the conflict packet's redirect returns
+ * a task past the review stage to it).
+ */
+describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework marker", () => {
+  function seedAt(stage: string, patch: Partial<Parameters<typeof baseTaskFrontmatter>[1]> = {}): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage, branch: "vib-1", ...patch }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  function withMergeBoard(): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      stages: [
+        { id: "triage", name: "Triage", color: "#a5a8b5" },
+        { id: "impl", name: "In Progress", color: "#7b61ff" },
+        { id: "review", name: "Review", color: "#5b76fe" },
+        { id: "merge", name: "Merge", color: "#187574" },
+        { id: "done", name: "Done", color: "#00b473" },
+      ],
+      workflow: [
+        { from: "triage", to: "impl", boundary: "auto", by: "Operator", locked: false },
+        { from: "impl", to: "review", boundary: "approval", by: "Operator", locked: false },
+        { from: "review", to: "merge", boundary: "approval", by: "Operator", locked: false },
+        { from: "merge", to: "done", boundary: "human", by: "Human", locked: true },
+      ],
+      agents: [
+        ...file.parsed.frontmatter.agents,
+        {
+          profileId: "reviewer",
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet", stages: ["review"] },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("G35-5 (d): at the acceptance boundary the tool refuses with the sentence naming acceptance-time refresh, and runs no git", async () => {
+    // Canary: drop the `acceptanceBoundaryRefusal` read.
+    seedAt("review", { pr: { number: 7, state: "review", title: "[VIB-1] t", mergeable: "clean" } });
+    const git = fakeGit({ behind: 2 });
+    const res = await act(git.exec);
+    expect(res.outcome).toBe("denied");
+    expect(res.message).toBe(
+      "VIB-1 is at Review, the acceptance boundary: the branch is brought up to date once, at acceptance time, and merged in the same ceremony. Do not refresh it here; recommend or accept the completion instead.",
+    );
+    expect(git.calls).toHaveLength(0);
+    expect(listAuditEvents(store.db).find((e) => e.action === "github.branch_update.operator")).toBeUndefined();
+  });
+
+  it("G35-5 (d): a PR GitHub already reports conflicting is the exception: the tool records the conflict and opens the packet", async () => {
+    deployDeliverer(true);
+    seedAt("review", {
+      engagements: [{ profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false }],
+      pr: { number: 7, state: "review", title: "[VIB-1] t", mergeable: "conflicting" },
+    });
+    const git = fakeGit({ conflict: true });
+    const res = await act(git.exec);
+    expect(res.outcome).toBe("noop");
+    expect(res.message).toContain("CONFLICTS");
+    const packet = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.packet!;
+    expect(packet.title).toContain("conflicts with");
+  });
+
+  it("ruling 163 (b): past the review stage the redirect option carries the rework marker and says the task returns to Review", async () => {
+    // Canary: pass `null` for `returnsToReview` unconditionally.
+    deployDeliverer(true);
+    withMergeBoard();
+    seedAt("merge", {
+      engagements: [
+        { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+        { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: true },
+      ],
+      pr: { number: 7, state: "review", title: "[VIB-1] t", mergeable: "conflicting" },
+    });
+    const res = await act(fakeGit({ conflict: true }).exec);
+    expect(res.outcome).toBe("noop");
+    const packet = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.packet!;
+    const redirect = packet.options.find((o) => o.kind === "redirect")!;
+    expect(redirect.rework).toBe(true);
+    expect(redirect.d).toContain("The task returns to Review for the re-verdict.");
+  });
+
+  it("ruling 163 (b): at the work stage there is nothing to return to: no marker, no sentence", async () => {
+    // A separate store: the write cache (write-cache.server) keeps the packet
+    // write above ahead of a raw fixture rewrite of the same path.
+    deployDeliverer(true);
+    withMergeBoard();
+    seedAt("impl", {
+      engagements: [{ profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false }],
+    });
+    await act(fakeGit({ conflict: true }).exec);
+    const atWork = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.packet!;
+    const workRedirect = atWork.options.find((o) => o.kind === "redirect")!;
+    expect(workRedirect.rework).toBeUndefined();
+    expect(workRedirect.d).not.toContain("returns to Review");
   });
 });

@@ -29,6 +29,7 @@ import {
   supportingEngagements,
   type Engagement,
   type PacketOption,
+  type PrMergeable,
   type PrState,
   type PacketOptionKind,
   type Recommendation,
@@ -57,6 +58,7 @@ import {
   resolveStageRoles,
   stageName,
 } from "~/shared/workflow/stage-roles";
+import { verdictStageFor } from "~/shared/workflow/verdict-stage";
 import { newId } from "~/shared/ids/new-id.server";
 import {
   recordAudit,
@@ -92,6 +94,7 @@ import {
   OPERATOR_TASK_ACTOR,
   RECOMMENDATION_DISMISSED_AUDIT_ACTION,
   acceptanceRefusalFor,
+  mergeReadinessRefusal,
   applyAcceptanceWrite,
   notifyTaskWatchers,
   operatorPromptAgent,
@@ -940,6 +943,9 @@ export interface OperatorPacketOptionInput {
   profileId?: string;
   /** archive_task — also delete the task's remote branch (discard the work). */
   deleteBranch?: boolean;
+  /** redirect — ruling 163: the resolution returns the task to the review
+   *  stage when it stands at or past it (the branch-conflict packet sets it). */
+  rework?: boolean;
   /** edit_goal only — ruling 138: the proposed goal text itself, what the goal
    *  editor opens with when the human confirms. Refused on any other kind. */
   goalDraft?: string;
@@ -1177,6 +1183,8 @@ export async function operatorOpenPacket(
     if (backend) option.backend = backend;
     if (profileId) option.profileId = profileId;
     if (o.deleteBranch) option.deleteBranch = true;
+    // Ruling 163: only a redirect returns the task to the review stage.
+    if (o.rework && o.kind === "redirect") option.rework = true;
     // Ruling 138: the draft is model-authored prose bound for task.md — capped
     // here, the one chokepoint both operator backends reach.
     const goalDraft = o.goalDraft?.trim();
@@ -1585,8 +1593,21 @@ export interface OperatorTaskSnapshot {
         headSha: string | null;
         unpushedRevision: UnpushedRevision | null;
         unpushedRevisionSentence: string;
+        /** Ruling 162 (pass 35, F35-12): GitHub's mergeability as the
+         *  reconciler last read it (`conflicting` is the fact the acceptance
+         *  gate refuses on); null when never read or settled. Optional only so
+         *  hand-built fixtures need not restate it; the producer always sets it. */
+        mergeable?: PrMergeable | null;
       }
     | null;
+  /** Ruling 162 (pass 35, F35-12): the acceptance gate's own refusal, computed
+   *  by the SAME function every acceptance surface reads
+   *  (`acceptanceRefusalFor`), or null when the task could be accepted now.
+   *  A PR the gate would refuse cannot be recommended for acceptance and the
+   *  task cannot be moved into the acceptance stage; open the conflict packet
+   *  (or deliver the unpushed revision) instead. Optional only so hand-built
+   *  fixtures need not restate it; `operatorSnapshot` always sets it. */
+  notAcceptableReason?: string | null;
   /** The task's delivery branch (null before any delivery). Lets recovery
    *  packets name the branch a `deleteBranch` archive option would remove. */
   branch: string | null;
@@ -1839,13 +1860,25 @@ export function operatorSnapshot(
   // R7-4: the rework license, listed rather than left to be inferred. Same
   // predicate `isReworkMove` vets on the way in (backward + validation
   // failing), so what this offers is exactly what transition_stage accepts.
+  // Ruling 163 (pass 35, F35-13): a revision that CHANGED after a verdict is
+  // rework by definition, so a task past the review stage with `validation:
+  // changed` may go back to the review stage (and only there) for its
+  // re-verdict; `failing` keeps the whole backward license.
   const currentStageIndex = stages.findIndex((s) => s.id === fm.stage);
+  const changedTarget =
+    fm.validation === "changed"
+      ? verdictStageFor({ stages, workflow }, fm, listDeployedSpecialists(projectSlug, ctx))
+      : null;
   const reworkStages =
     fm.validation === "failing" && currentStageIndex > 0
       ? stages
           .slice(0, currentStageIndex)
           .map((s) => ({ id: s.id, name: s.name }))
-      : [];
+      : changedTarget !== null
+        ? stages
+            .filter((s) => s.id === changedTarget)
+            .map((s) => ({ id: s.id, name: s.name }))
+        : [];
 
   const ownerName = fm.ownerUserId
     ? (userNameSchema.safeParse(
@@ -1979,8 +2012,19 @@ export function operatorSnapshot(
           unpushedRevision: unpushedRevisionOf(fm.pr, fm.workRevision?.headSha ?? null),
           unpushedRevisionSentence:
             unpushedRevisionBlockedReason(fm.pr, fm.workRevision?.headSha ?? null, taskKey) ?? "",
+          // Ruling 162: the fact the acceptance gate refuses on, exposed as the
+          // reconciler recorded it (settled PRs carry none).
+          mergeable:
+            fm.pr.state === "review" || fm.pr.state === "accepted"
+              ? (fm.pr.mergeable ?? null)
+              : null,
         }
       : null,
+    // Ruling 162 (pass 35, F35-12): the acceptance gate's verdict, from the ONE
+    // function every acceptance surface reads. KNC-6 and KNC-20 were
+    // recommended for acceptance with `pr.mergeable: conflicting` already on
+    // the file; the operator's snapshot simply did not carry the fact.
+    notAcceptableReason: acceptanceRefusalFor({ projectSlug, taskKey }, ctx),
     // The task branch, so recovery copy can NAME what an `archive_task`
     // option with `deleteBranch: true` would delete instead of gesturing at
     // "the branch".
@@ -2833,6 +2877,17 @@ export async function operatorTransitionStage(
     );
   }
   const name = stageNameOf(ctx, input.projectSlug, input.toStageId);
+  // Ruling 162 (pass 35, F35-12 (b), owner Q35-17): Merge means mergeable. A
+  // move INTO the acceptance stage (the stage with the edge into the terminal
+  // one) is refused with the gate's own sentence while the review PR conflicts
+  // with the base or lacks the delivered revision, so the task stays at the
+  // work stage where the conflict packet is the path. Live (KNC-6, KNC-20) the
+  // operator moved both to Merge and recommended acceptance on PRs whose
+  // `mergeable: conflicting` was already on the file.
+  {
+    const mergeEntry = mergeStageEntryRefusal(ctx, input.projectSlug, input.taskKey, input.toStageId);
+    if (mergeEntry) return { outcome: "denied", message: mergeEntry };
+  }
   // Ruling 151 (owner, Q35-1): the boundary the project author declared is the
   // contract every human reads on the Policy page and in project.md, and a
   // grant cannot void it. `direct` crosses `auto` boundaries only; a declared
@@ -3046,11 +3101,84 @@ function isReworkMove(
     dataRoot: ctx.dataRoot,
   });
   if (!task || !project) return false;
-  if (task.parsed.frontmatter.validation !== "failing") return false;
   const stages = project.parsed.frontmatter.stages;
   const fromIndex = stages.findIndex((s) => s.id === task.parsed.frontmatter.stage);
   const toIndex = stages.findIndex((s) => s.id === toStageId);
-  return toIndex >= 0 && fromIndex >= 0 && toIndex < fromIndex;
+  const backward = toIndex >= 0 && fromIndex >= 0 && toIndex < fromIndex;
+  if (!backward) return false;
+  const validation = task.parsed.frontmatter.validation;
+  if (validation === "failing") return true;
+  // Ruling 163 (pass 35, F35-13): a revision that changed after a verdict is
+  // rework by definition; the one backward move it licenses is INTO the review
+  // stage, where the re-verdict can be given. Same predicate `transitionStage`
+  // re-vets, and the same shape `reworkStages` offers.
+  if (validation !== "changed") return false;
+  const target = verdictStageFor(
+    { stages, workflow: project.parsed.frontmatter.workflow },
+    task.parsed.frontmatter,
+    listDeployedSpecialists(projectSlug, ctx),
+  );
+  return target !== null && toStageId === target;
+}
+
+/**
+ * Ruling 163 (pass 35, F35-13 (d)): the sentence naming the way back to the
+ * review stage for a task standing past it with a changed or failing
+ * revision, or null when it does not apply. The operator's move is the first
+ * remedy (`transition_stage` to the review stage, a rework move it performs
+ * itself); the person's stage picker on the task page is the second, named so
+ * the operator can point a human at it when its own move is refused.
+ */
+function reworkRemedySentence(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  fm: { stage: string; validation: string; engagements: Engagement[] },
+  stages: { id: string; name: string }[],
+): string | null {
+  if (fm.validation !== "changed" && fm.validation !== "failing") return null;
+  const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  if (!project) return null;
+  const target = verdictStageFor(
+    { stages, workflow: project.parsed.frontmatter.workflow },
+    fm,
+    listDeployedSpecialists(projectSlug, ctx),
+  );
+  if (target === null) return null;
+  const review = stageName(stages, target);
+  return (
+    `The revision changed after the last verdict, so the task belongs back at ${review} ` +
+    `where the reviewers are eligible: move it there with transition_stage (a rework move ` +
+    `you perform yourself); a person can also move it with the stage picker on the task page.`
+  );
+}
+
+/**
+ * Ruling 162: why the operator may not move `taskKey` INTO the acceptance
+ * stage right now, or null. Reads `mergeReadinessRefusal`, the GitHub-fact
+ * half of the acceptance gate, so the move and the acceptance refuse with one
+ * sentence. Null for any other target stage.
+ */
+function mergeStageEntryRefusal(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  toStageId: string,
+): string | null {
+  const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  if (!project || !task) return null;
+  const stages = project.parsed.frontmatter.stages;
+  const reviewId = resolveStageRoles(stages, project.parsed.frontmatter.workflow).reviewId;
+  if (reviewId === null || toStageId !== reviewId) return null;
+  const refusal = mergeReadinessRefusal(task.parsed.frontmatter, taskKey);
+  if (!refusal) return null;
+  const from = stageName(stages, task.parsed.frontmatter.stage);
+  const to = stageName(stages, reviewId);
+  return (
+    `${refusal} ${taskKey} stays at ${from}: ${to} is where acceptance happens, and the gate ` +
+    `would refuse it. Open the conflict packet (update_branch_from_base) or deliver the ` +
+    `revision instead of moving the task.`
+  );
 }
 
 /** The workflow boundary the operator would cross to move a task from its
@@ -3181,7 +3309,14 @@ export async function operatorAcceptCompletion(
       ctx,
       noChange,
     );
-    if (refusal) return { outcome: "noop", message: refusal };
+    if (refusal) {
+      // Ruling 163 (pass 35, F35-13 (d)): a task past the review stage whose
+      // revision changed or failed after a verdict names its way out, so the
+      // operator never has to discover the gap (KNC-20's packet offered profile
+      // surgery and force-accept; the working remedy was the stage move).
+      const remedy = reworkRemedySentence(ctx, input.projectSlug, file.parsed.frontmatter, stages);
+      return { outcome: "noop", message: remedy ? `${refusal} ${remedy}` : refusal };
+    }
   }
 
   // Supervised, or `completion-for-acceptance: recommend` → recommend only: post

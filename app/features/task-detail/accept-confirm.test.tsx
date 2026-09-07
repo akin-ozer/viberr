@@ -398,3 +398,52 @@ describe("F21-23: an already-merged PR is not promised a merge", () => {
     expect(applying.text).not.toContain("Nothing is written either");
   });
 });
+
+/**
+ * Ruling 162 (pass 35, F35-12 (c)): the accept dialog prints the gate's
+ * refusal above a DISABLED confirm; only force-accept, which bypasses the
+ * gate, keeps its button. Live (KNC-6) the dialog's controls were all enabled
+ * while the server answered 409 on every click.
+ */
+describe("ruling 162: a standing refusal disables the confirm", () => {
+  const REFUSAL =
+    "VIB-151's review PR #16 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.";
+  function confirmButton(mode: "accept" | "force", blockedReason: string | null) {
+    const { container } = render(
+      <AcceptConfirm
+        task={detail({ stage: mode === "force" ? "triage" : "review", pr: { number: 16, state: "review", title: "[VIB-151] t" } })}
+        workRevisionSha={"a".repeat(40)}
+        noChanges={false}
+        defaultBranch="main"
+        ceremony={{ mode }}
+        atBoundary={mode !== "force"}
+        blockedReason={blockedReason}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const dialog = container.querySelector('dialog[data-screen-label="Accept completion dialog"]')!;
+    const buttons = Array.from(dialog.querySelectorAll("button"));
+    return { dialog, button: buttons[buttons.length - 1]! };
+  }
+
+  it("prints the reason and disables the confirm on the accept ceremony", () => {
+    // Canary: disable on `busy` alone.
+    const { dialog, button } = confirmButton("accept", REFUSAL);
+    expect(dialog.textContent).toContain("Blocked");
+    expect(dialog.textContent).toContain(REFUSAL);
+    expect(button.textContent).toContain("Accept");
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-describedby")).toBe("accept-confirm-blocked");
+    expect(dialog.querySelector("#accept-confirm-blocked")?.textContent).toContain(REFUSAL);
+  });
+
+  it("keeps the confirm enabled with no refusal, and on force-accept, which bypasses the gate", () => {
+    expect(confirmButton("accept", null).button.disabled).toBe(false);
+    const forced = confirmButton("force", REFUSAL);
+    expect(forced.dialog.textContent).toContain("Bypassing");
+    expect(forced.button.disabled).toBe(false);
+    expect(forced.button.getAttribute("aria-describedby")).toBeNull();
+  });
+});

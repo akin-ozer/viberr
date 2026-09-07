@@ -234,14 +234,26 @@ Details that matter:
 - **Transitions.** An `auto` boundary is crossed directly even when supervised; an
   `approval` boundary always files a recommendation card for a human, whatever the
   autonomy or the grant (ruling 151); a `human` boundary is refused; a backward move
-  on a `failing` task is a rework move performed directly; a move into the terminal
+  on a `failing` task is a rework move performed directly, and so is the one backward
+  move a `changed` revision licenses, into the stage where the task's reviewers can
+  run (`reworkStages` lists it; ruling 163); a move INTO the acceptance-boundary stage
+  is refused with the gate's own sentence while `get_task` shows `notAcceptableReason`
+  for a conflicting or unpushed PR ("... KNC-6 stays at Review: Merge is where
+  acceptance happens, and the gate would refuse it. Open the conflict packet
+  (update_branch_from_base) or deliver the revision instead of moving the task.",
+  ruling 162); a move into the terminal
   stage is rerouted to `operatorAcceptCompletion` under either gate so the acceptance
   capability, not `stage-transitions`, answers for it. The done reply names the next
   boundary, and a move onto the acceptance boundary files the acceptance
   recommendation in the same call (ruling 152(a) and the fold, §3).
 - **Acceptance.** `completionCapabilityRefusal` runs first (`off` and `human` refuse
   with different wording), then the no-change check, then the shared acceptance
-  refusal stack. Full autonomy plus `completion-for-acceptance: direct` writes
+  refusal stack, the same one `get_task` exposes as `notAcceptableReason` beside
+  `pr.mergeable` (ruling 162: a PR the gate would refuse cannot be recommended for
+  acceptance). A refusal on a task standing past the stage where its reviewers can run
+  appends the way back (ruling 163): "move it there with transition_stage (a rework
+  move you perform yourself); a person can also move it with the stage picker on the
+  task page". Full autonomy plus `completion-for-acceptance: direct` writes
   through `applyAcceptanceWrite`; anything else files an `accept_completion` card.
   The operator **cannot merge**: it records `pr.state: accepted` (merge pending) and a
   human completes the merge (`complete-merge` intent). A racing human acceptance wins
@@ -258,7 +270,16 @@ Details that matter:
   48 and 134). The doctrine and the seeded persona say that pushing is never a
   person's job and never an agent's.
 - **Branch update.** `update_branch_from_base` merges the base into the task branch in
-  the delivering workspace (`--no-ff`, never rebase, never force) and pushes. Ruling
+  the delivering workspace (`--no-ff`, never rebase, never force) and pushes. Ruling 162
+  / G35-5(d) (pass 35): it refuses at the acceptance-boundary stage and past it, because
+  the acceptance ceremony refreshes the branch once and merges in the same step ("KNC-1
+  is at Merge, the acceptance boundary: the branch is brought up to date once, at
+  acceptance time, and merged in the same ceremony. Do not refresh it here; recommend or
+  accept the completion instead."); a PR GitHub already reports conflicting is the
+  exception, so the conflict list and the packet can be produced. The conflict packet's
+  redirect option carries `rework: true` and says "The task returns to Review for the
+  re-verdict." when the task stands past the stage where its reviewers can run (ruling
+  163). Ruling
   134(c): it also fetches origin's copy of the TASK branch and reports it beside the
   base answer, derived from the workspace's own history: current, behind by N ("call
   `deliver_for_review` to push it; do not ask a person to push"), diverged ("a person

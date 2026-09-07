@@ -23,7 +23,7 @@ import type {
   WorkRevision,
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -4699,5 +4699,350 @@ describe("pass 35: operator and task actions", () => {
       expect(file(store).frontmatter.readiness).toBe("blocked");
       expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(0);
     });
+  });
+});
+
+/**
+ * Pass 35 S15: rulings 162 and 163 (F35-12, F35-13, G35-5 addendum (d)).
+ *
+ * A board with a stage PAST the review one (`merge`), as the k9s clone had:
+ * the operators moved tasks to Merge and recommended acceptance on PRs whose
+ * `mergeable: conflicting` was already on the file, and a conflict rework at
+ * Merge had no route back to a stage where a reviewer could run.
+ */
+describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
+  const MERGE_STAGES = [
+    { id: "triage", name: "Triage", color: "#a5a8b5" },
+    { id: "impl", name: "In Progress", color: "#7b61ff" },
+    { id: "review", name: "Review", color: "#5b76fe" },
+    { id: "merge", name: "Merge", color: "#187574" },
+    { id: "done", name: "Done", color: "#00b473" },
+  ];
+  const MERGE_WORKFLOW = [
+    { from: "triage", to: "impl", boundary: "auto" as const, by: "Operator", locked: false },
+    { from: "impl", to: "review", boundary: "approval" as const, by: "Operator", locked: false },
+    { from: "review", to: "merge", boundary: "approval" as const, by: "Operator", locked: false },
+    { from: "merge", to: "done", boundary: "human" as const, by: "Human", locked: true },
+  ];
+
+  function withMergeBoard(store: TestStore): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    // The verdict-capable profile is eligible at Review only, as the k9s
+    // board's reviewers were: nobody can give a verdict at Merge.
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      stages: MERGE_STAGES,
+      workflow: MERGE_WORKFLOW,
+      agents: [
+        {
+          profileId: "reviewer",
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet", stages: ["review"] },
+        },
+      ],
+    });
+  }
+
+  /** A task whose verdict was given on `rev_1` and whose revision has since
+   *  moved to `rev_2`: derived validation `changed`. */
+  function seedChangedAt(store: TestStore, stage: string, patch: Partial<TaskFrontmatter> = {}): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage,
+        waiting: "agent",
+        readiness: "ready",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        branch: "vib-1-work",
+        workRevision: workRev("rev_2", "u".repeat(40)),
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: "rev_1",
+            headSha: "9".repeat(40),
+            result: "approve",
+            reason: "looked right then",
+            at: "2026-08-19T09:30:00.000Z",
+          },
+        ],
+        validation: "changed",
+        pr: { number: 7, state: "review", title: "[VIB-1] work" },
+        ...patch,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  function taskFile(store: TestStore) {
+    return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+  }
+
+  it("ruling 163 (a): the operator's rework move Merge to Review is allowed on `changed`; Merge to In Progress is not", async () => {
+    // Canary: require `validation === "failing"` again in transitionStage's
+    // `isReworkMove`. Live: KNC-20's operator was refused "No allowed
+    // transition from Merge to Review" after a conflict rework.
+    const store = prepared();
+    withMergeBoard(store);
+    seedChangedAt(store, "merge");
+    const opCtx = { dataRoot: store.dataRoot, operatorAuthorized: true };
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", rework: true },
+        OPERATOR_TASK_ACTOR,
+        opCtx,
+      ),
+    ).rejects.toThrow(/No allowed transition from Merge to In Progress/);
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", rework: true },
+      OPERATOR_TASK_ACTOR,
+      opCtx,
+    );
+    expect(taskFile(store).frontmatter.stage).toBe("review");
+    expect(taskFile(store).frontmatter.previousStageId).toBe("merge");
+  });
+
+  it("ruling 163 (b): resolving the conflict packet's redirect at Merge returns the task to Review in the same write", async () => {
+    // Canary: drop the `option.rework` branch in resolvePacket's default arm.
+    const store = prepared();
+    withMergeBoard(store);
+    seedChangedAt(store, "merge", { readiness: "blocked", waiting: "human" });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: taskFile(store).frontmatter,
+      packet: {
+        id: "pkt_conflict",
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "`vib-1-work` conflicts with `main`",
+        body: "The task branch cannot be brought up to date automatically.",
+        observations: [{ k: "Conflicting files", v: "README.md", code: true }],
+        options: [
+          {
+            kind: "redirect",
+            t: "Have Dev resolve the conflict",
+            d: "Its workspace merges and resolves the conflicting files. The task returns to Review for the re-verdict.",
+            rec: true,
+            rework: true,
+            ev: "**Decision:** Dev resolves the conflict between `vib-1-work` and `main` in its own workspace.",
+          },
+          { kind: "custom", t: "Resolve `vib-1-work` yourself", d: "", rec: false, ev: "**Decision:** a person resolves it." },
+        ],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const parsed = taskFile(store);
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.frontmatter.previousStageId).toBe("merge");
+    expect(parsed.packet).toBeNull();
+    const decision = parsed.timeline.find((e) => e.type === "transition" && e.text.startsWith("**Decision:**"))!;
+    expect(decision.text).toContain("VIB-1 returns to Review so the resolved revision gets its verdict there.");
+    const rows = listAuditEvents(store.db, { action: "task.transition" });
+    expect(rows.some((r) => r.details?.via === "packet_redirect" && r.details?.to === "review")).toBe(true);
+  });
+
+  it("ruling 163 (b): a redirect without the rework marker leaves the stage alone", async () => {
+    const store = prepared();
+    withMergeBoard(store);
+    seedChangedAt(store, "merge", { readiness: "blocked", waiting: "human" });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: taskFile(store).frontmatter,
+      packet: {
+        id: "pkt_q",
+        type: "input",
+        kind: "Decision required",
+        from: "operator",
+        title: "Which target?",
+        body: "",
+        observations: [],
+        options: [{ kind: "redirect", t: "Have Dev do it", d: "", rec: true }],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(taskFile(store).frontmatter.stage).toBe("merge");
+  });
+
+  it("ruling 163 (c): delivering a changed revision at Merge records the transition back to Review", async () => {
+    // Canary: drop the `returnChangedRevisionToReview` call in performDelivery.
+    const REPO_PATH = "/repos/akin-ozer/viberr";
+    pushMock.mockClear();
+    const store = prepared();
+    withMergeBoard(store);
+    seedChangedAt(store, "merge", {
+      pr: {
+        number: 7,
+        state: "review",
+        title: "[VIB-1] work",
+        headSha: "9".repeat(40),
+        unpushedRevision: { revisionSha: "a".repeat(40), prHeadSha: "9".repeat(40), relation: "behind" },
+      },
+    });
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_returns0000000000001" }, actor(store.users.arda));
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor(store.users.arda));
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { body: { object: { sha: "c".repeat(40) } } },
+      [`GET ${REPO_PATH}/pulls/7`]: {
+        body: { number: 7, html_url: "https://x/pull/7", title: "[VIB-1] work", state: "open", merged: false, head: { sha: "a".repeat(40) } },
+      },
+    });
+    pushMock.mockResolvedValueOnce({
+      status: "pushed",
+      branch: "vib-1-work",
+      commits: 1,
+      headSha: "a".repeat(40),
+      remoteHeadBefore: "9".repeat(40),
+      workflowFiles: [],
+    });
+    const outcome = await manualDeliverForReview(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      deliveryCtx(store),
+    );
+    github = null;
+    expect(outcome).toMatchObject({ status: "delivered", moved: true });
+    const parsed = taskFile(store);
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.frontmatter.previousStageId).toBe("merge");
+    const moved = parsed.timeline.find((e) => e.type === "transition" && e.text.includes("returns from Merge to Review"))!;
+    expect(moved.text).toContain("changed after the last verdict");
+    expect(listAuditEvents(store.db, { action: "task.transition" }).some((r) => r.details?.via === "delivery")).toBe(true);
+  });
+
+  it("ruling 162 (a0): a post-gate GitHub merge refusal prints the gate's sentence, from the gate function", async () => {
+    // KNC-16: the gate passed on a cached `clean`, GitHub answered 405 and the
+    // person read a second sentence for the same fact, with no way out.
+    // Canary: print `GitHub refuses to merge ...: <message>` whenever the merge
+    // result carries no `mergeable` field.
+    const store = prepared();
+    seedChangedAt(store, "review", {
+      workRevision: workRev("rev_1"),
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+      ],
+      validation: "healthy",
+      readiness: "ready",
+      waiting: "human",
+    });
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => {
+      // What `mergeTaskPr` does on a 405 now: the re-read pull says conflicting.
+      await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+        parsed.frontmatter.pr!.mergeable = "conflicting";
+      });
+      return { status: "not_mergeable", prNumber: 7, message: "Pull Request has merge conflicts" };
+    });
+    const refreshMock = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+      status: "no_workspace",
+      reason: "no workspace git repo",
+    }));
+    const rejected = transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
+    );
+    await expect(rejected).rejects.toThrow(
+      "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.",
+    );
+    expect(taskFile(store).frontmatter.stage).toBe("review");
+  });
+
+  it("G35-5 (d): an accept on a behind-base branch performs exactly one refresh, then one merge, in that order", async () => {
+    // Canary: drop the `refreshBranchForAcceptance` call in attemptAcceptanceMerge.
+    const store = prepared();
+    seedChangedAt(store, "review", {
+      workRevision: workRev("rev_1"),
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+      ],
+      validation: "healthy",
+      readiness: "ready",
+      waiting: "human",
+    });
+    const sequence: string[] = [];
+    const refreshMock = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => {
+      sequence.push("refresh");
+      return {
+        status: "updated",
+        branch: "vib-1-work",
+        base: "main",
+        commits: 2,
+        mergeSha: "m".repeat(40),
+        baseSha: "b".repeat(40),
+        remoteBefore: { kind: "current", headSha: "a".repeat(40) },
+        remote: { kind: "current", headSha: "m".repeat(40) },
+      };
+    });
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => {
+      sequence.push("merge");
+      return { status: "merged", prNumber: 7, sha: "m".repeat(40) };
+    });
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
+    );
+    expect(sequence).toEqual(["refresh", "merge"]);
+    const parsed = taskFile(store);
+    expect(parsed.frontmatter.stage).toBe("done");
+    expect(parsed.frontmatter.baseRefreshes).toHaveLength(1);
+    expect(parsed.frontmatter.baseRefreshes[0]).toMatchObject({ mergeSha: "m".repeat(40), base: "main", commits: 2 });
+    expect(parsed.timeline.some((e) => e.text.startsWith("Accepting the completion brought `vib-1-work` up to date with `main`"))).toBe(true);
+    expect(listAuditEvents(store.db, { action: "github.branch_update.acceptance" })[0]?.details).toMatchObject({ status: "updated", commits: 2 });
+  });
+
+  it("G35-5 (d): a refresh that CONFLICTS refuses the acceptance with the gate's sentence and records the conflict", async () => {
+    const store = prepared();
+    seedChangedAt(store, "review", {
+      workRevision: workRev("rev_1"),
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+      ],
+      validation: "healthy",
+      readiness: "ready",
+      waiting: "human",
+    });
+    const refreshMock = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+      status: "conflict",
+      branch: "vib-1-work",
+      base: "main",
+      files: ["README.md", "Makefile"],
+      detail: "CONFLICT (content): Merge conflict in README.md",
+    }));
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => ({
+      status: "merged",
+      prNumber: 7,
+      sha: "m".repeat(40),
+    }));
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
+      ),
+    ).rejects.toThrow(/conflicts with the base branch.*Rebase the branch and re-review, or archive the task/);
+    expect(mergeMock).not.toHaveBeenCalled();
+    const parsed = taskFile(store);
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.frontmatter.pr?.mergeable).toBe("conflicting");
+    const line = parsed.timeline.find((e) => e.type === "github" && e.text.includes("CONFLICT"))!;
+    expect(line.text).toContain("README.md, Makefile");
   });
 });

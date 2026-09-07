@@ -244,7 +244,7 @@ and the note itself, used to assert the reused-key origin alone.)*
 |---|---|---|
 | `resolve_remote_collision` packet option | Deletes the stale remote branch first, closes the recorded unowned PR (audit `github.pr.closed_unowned`), re-delivers this task's local work, lifts `readiness` from `blocked`. Ruling 136: the ceremony ends with exactly ONE hand-off (the `delivered` re-queue when the re-delivery fired it, else a `packet-resolved` re-queue carrying the outcome in its own `serverOutcome` field); a refusal because the PR on the ref is this task's OWN open PR is no collision: a behind or absent remote gets the delivery that pushes the work and the block lifts, a diverged remote keeps the block and names who resolves the history; every other refusal keeps the block and hands the operator its typed reason. One audit row per ceremony: `github.collision.resolved {outcome, reason, prNumber, delivered, blockLifted}`. | `approve-transition` |
 | `discard_branch` packet option | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. The operator may not author it when a work revision exists. | `approve-transition` |
-| `update_branch_from_base` (operator, capability `update-task-branch`) | Merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, records the refresh in `baseRefreshes` and reconciles at once (ruling 132). Reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)). A conflict or push conflict opens a human `blocked` packet whose options can all execute (ruling 133(b)): "Have <deliverer> resolve the conflict" is offered and recommended only when the task's delivering engagement is deployed with a repo-write grant; otherwise "Resolve the branch yourself" is recommended, the body says why (no deliverer, undeployed, grant withdrawn), a "Delivering agent" observation names it or "none", and the `github.branch_update.operator` audit row records `resolver`. | operator gate; `recommend` is refused outright |
+| `update_branch_from_base` (operator, capability `update-task-branch`) | Merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, records the refresh in `baseRefreshes` and reconciles at once (ruling 132). Reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)). A conflict or push conflict opens a human `blocked` packet whose options can all execute (ruling 133(b)): "Have <deliverer> resolve the conflict" is offered and recommended only when the task's delivering engagement is deployed with a repo-write grant; otherwise "Resolve the branch yourself" is recommended, the body says why (no deliverer, undeployed, grant withdrawn), a "Delivering agent" observation names it or "none", and the `github.branch_update.operator` audit row records `resolver`. Ruling 162 / G35-5(d) (pass 35): refused at the acceptance-boundary stage and past it (the acceptance ceremony refreshes once), unless the PR is already `conflicting`; the redirect option is marked `rework: true` with "The task returns to Review for the re-verdict." when the task stands past the stage its reviewers can run (ruling 163). | operator gate; `recommend` is refused outright |
 | Branch cleanup | After a successful merge when the `delete-branch-after-merge` guardrail is on (absence means on); on `archive_task` with `deleteBranch: true`; after a no-change acceptance. Refuses the default branch and a branch whose PR is open or accepted. Ruling 136(c): a CACHED open PR is re-confirmed against GitHub before it can refuse (a pass with the divergence notification and the operator wake suppressed); a PR GitHub reports closed or merged lets the delete proceed on the refreshed file, a PR still open refuses (`own_pr_open`), and every degraded or unexpected reconcile status refuses as `unconfirmed` ("GitHub could not confirm"), never deleting on an unconfirmed state. The archive and empty-branch doors inherit the same check and sentence. Audit `github.branch.deleted`. | human `userId` required |
 
 ## 5. Revisions, verdicts and acceptance
@@ -278,7 +278,21 @@ and the note itself, used to assert the reused-key origin alone.)*
   → stage boundary → required reviewers → live no-change probe → verdict gate → open
   blocked packet → **unpushed delivered revision** (ruling 135) → conflicting PR. Human
   acceptance needs the disclosure echo (ruling 88). Force-accept (admin only) bypasses
-  process gates but never a closed PR and never the PR-head containment check.
+  process gates but never a closed PR and never the PR-head containment check. Ruling
+  162 (pass 35): the last two are ONE function, `mergeReadinessRefusal`, read by the
+  stack, by the operator's snapshot (`notAcceptableReason` is the whole stack's verdict,
+  `pr.mergeable` the recorded fact), by the operator's move into the acceptance-boundary
+  stage, and by the accept-time merge refusal; no surface offers an acceptance the gate
+  will refuse (the recommendation card, the accept dialog, the sidebar and the GitHub
+  card's "conflicts" pill all read it), and the reconciler withdraws a pending
+  `accept_completion` card when `mergeable` flips to conflicting.
+- **The base refresh happens once, at acceptance** (ruling 162 / G35-5(d)): the
+  ceremony runs `updateWorkspaceBranchFromBase` before the gate re-check and the merge,
+  records the refresh (`baseRefreshes`, the shared `recordBranchRefresh`, audit
+  `github.branch_update.acceptance`), refuses on a conflict with the gate's sentence
+  after recording `mergeable: conflicting` and the conflicting paths, and proceeds to
+  the merge when the branch cannot be refreshed from here. Operators stop refreshing at
+  the acceptance boundary.
 - **The unpushed delivered revision** (ruling 135, pass 34): `pr.headSha` is the PR
   head as GitHub last reported it, and `pr.unpushedRevision {revisionSha, prHeadSha,
   relation}` says the delivered revision is not on the pull request: `behind` (origin's
@@ -300,7 +314,11 @@ and the note itself, used to assert the reused-key origin alone.)*
 - **Merge is always human.** A human acceptance attempts the real merge
   (`PUT /pulls/{n}/merge`, un-drafting first, refusing a conflicting PR); an
   unreachable GitHub leaves `pr.state: accepted` (merge pending) and a refusal
-  (405/409) refuses the acceptance unless forced. A full-autonomy operator acceptance
+  (405/409) refuses the acceptance unless forced. A 405 re-reads the pull (ruling 162):
+  a conflicting answer, or GitHub's own "merge conflicts" sentence while it is still
+  computing, records `mergeable: conflicting` and the result says `mergeable:
+  "conflicting"`, so the acceptance prints the gate's sentence, never a second one for
+  the same fact. A full-autonomy operator acceptance
   writes `accepted` and never merges; "Complete merge" finishes it later after
   re-running the head check. Audit `github.pr.merged` / `github.pr.merge_refused`.
 

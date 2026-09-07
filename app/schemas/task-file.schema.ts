@@ -598,6 +598,11 @@ export const packetOptionSchema = z
      *  what the goal editor opens with (`goalDraftForOption`); an option without
      *  one prefills the title and detail verbatim. Refused on any other kind. */
     goalDraft: z.string().optional(),
+    /** redirect — ruling 163 (pass 35, F35-13): the resolution RETURNS the
+     *  task to the review stage when it stands at or past it, so the reworked
+     *  revision gets its verdict where the reviewers are eligible. Written by
+     *  the branch-conflict packet; read by `resolvePacket`'s default arm. */
+    rework: z.boolean().optional(),
   })
   .loose();
 export type PacketOption = z.infer<typeof packetOptionSchema>;

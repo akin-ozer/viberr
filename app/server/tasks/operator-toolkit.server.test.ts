@@ -249,6 +249,18 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc("transition_stage")).not.toContain("does not work the review stage");
   });
 
+  it("pass 35 S15 (rulings 162 and 163): the tool text names the gate's verdict, the acceptance-stage refusal, the rework route and the acceptance-time refresh", () => {
+    // Canary: restore any of the four descriptions from before S15.
+    const defs = build(withPolicy(uniform("direct"))).tools;
+    const desc = (name: string) => defs.find((t) => t.name === name)!.description;
+    expect(desc("get_task")).toContain("a PR the gate would refuse cannot be recommended for acceptance");
+    expect(desc("accept_completion")).toContain("A pull request the acceptance gate would refuse cannot be recommended for acceptance");
+    expect(desc("transition_stage")).toContain("Backwards to the review stage is allowed when the revision changed after a verdict");
+    expect(desc("transition_stage")).toContain("Merge means mergeable");
+    expect(desc("update_branch_from_base")).toContain("Never call it once the task stands at the acceptance stage");
+    expect(desc("update_branch_from_base")).toContain("the acceptance ceremony brings the branch up to date once and merges in the same step");
+  });
+
   it("nothing granted: Claude builds no governed tool; the Codex plan enum falls back and never advertises delivery", () => {
     const auth = withPolicy(uniform("off"));
     expect([...claudeGovernedTools(build(auth).allowedTools)]).toEqual([]);

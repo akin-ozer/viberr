@@ -19,7 +19,7 @@ import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import type { AcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
-import { checksPill, prStatePill, reviewPill } from "~/features/github/github-pills";
+import { checksPill, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
@@ -263,6 +263,16 @@ export function GithubTrace({
         {task.prReview && (
           <Pill kind={reviewPill(task.prReview).kind} sm>
             {reviewPill(task.prReview).label}
+          </Pill>
+        )}
+        {/* Ruling 162 (pass 35, F35-12 (c)): the conflict the acceptance gate
+            refuses on, on the task page too. It was rendered on the GitHub
+            page alone, so this card read "PR #16 · in review" while the accept
+            click answered 409. The reconciler drops the fact for a settled PR,
+            so a merged or closed one never wears it. */}
+        {task.pr && mergeablePill(task.pr.mergeable ?? null) && (
+          <Pill kind={mergeablePill(task.pr.mergeable ?? null)!.kind} sm>
+            {mergeablePill(task.pr.mergeable ?? null)!.label}
           </Pill>
         )}
       </div>

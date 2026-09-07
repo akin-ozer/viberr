@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToString } from "react-dom/server";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import {
   OperatorRecommendations,
   type RecommendationView,
@@ -43,5 +45,72 @@ describe("OperatorRecommendations", () => {
     expect(html).toContain("for revision <code>6548677</code>");
     expect(html).not.toContain("deadbee");
     expect(html.match(/for revision/g) ?? []).toHaveLength(1);
+  });
+});
+
+afterEach(cleanup);
+
+/**
+ * Ruling 162 (pass 35, F35-12 (c)): no surface offers an acceptance the gate
+ * will refuse. The acceptance card keeps its control (ruling 147's shape) but
+ * prints the gate's refusal as a keyed alert, and Apply re-announces it
+ * instead of opening a confirm the server would answer 409 (KNC-6: the card
+ * said "Accept completion", the click said "conflicts with the base branch").
+ */
+describe("OperatorRecommendations: the acceptance gate's refusal on the card (ruling 162)", () => {
+  const REFUSAL =
+    "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.";
+  const cards: RecommendationView[] = [
+    { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-1 to Done", detail: "The review is clean." },
+    { id: "r-done", kind: "transition", toStageId: "done", label: "Move the task to Done", detail: "" },
+    { id: "r-run", kind: "run_agent", profileId: "dev", label: "Run Developer", detail: "" },
+  ];
+
+  it("renders the refusal on the acceptance cards only, and Apply there refuses the click", () => {
+    // Canary: drop the `acceptanceRefusal` branch from the Apply handler.
+    const onApply = vi.fn();
+    const { container, getAllByRole } = render(
+      <OperatorRecommendations
+        recommendations={cards}
+        canApply
+        busy={false}
+        onApply={onApply}
+        onDismiss={() => {}}
+        acceptanceRefusal={REFUSAL}
+        terminalStageId="done"
+      />,
+    );
+    const alerts = container.querySelectorAll('[role="alert"]');
+    expect(alerts).toHaveLength(2);
+    expect(alerts[0]!.textContent).toContain("Not acceptable now.");
+    expect(alerts[0]!.textContent).toContain(REFUSAL);
+    const applies = getAllByRole("button", { name: /Apply/ });
+    expect(applies).toHaveLength(3);
+    fireEvent.click(applies[0]!);
+    fireEvent.click(applies[1]!);
+    expect(onApply).not.toHaveBeenCalled();
+    // The refused click re-keys the alert: a fresh element, announced again.
+    expect(container.querySelectorAll('[role="alert"]')[0]).not.toBe(alerts[0]);
+    // The run_agent card is not an acceptance; its Apply still applies.
+    fireEvent.click(applies[2]!);
+    expect(onApply).toHaveBeenCalledWith("r-run");
+  });
+
+  it("with no refusal the acceptance card applies as before and shows no alert", () => {
+    const onApply = vi.fn();
+    const { container, getAllByRole } = render(
+      <OperatorRecommendations
+        recommendations={cards}
+        canApply
+        busy={false}
+        onApply={onApply}
+        onDismiss={() => {}}
+        acceptanceRefusal={null}
+        terminalStageId="done"
+      />,
+    );
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    fireEvent.click(getAllByRole("button", { name: /Apply/ })[0]!);
+    expect(onApply).toHaveBeenCalledWith("r-accept");
   });
 });

@@ -4190,3 +4190,174 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(task().packet).toBeNull();
   });
 });
+
+/**
+ * Pass 35 S15: rulings 162 and 163 (F35-12, F35-13). Live (KNC-6, KNC-20) the
+ * operator moved tasks to Merge and recommended acceptance on PRs whose
+ * `mergeable: conflicting` was already on the file; after a conflict rework
+ * at Merge it found no route back to a stage where a reviewer could run.
+ */
+describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and the rework route (ruling 163)", () => {
+  const HEAD = "a".repeat(40);
+  function seedReviewedWithPr(stage: string, mergeable: "clean" | "conflicting"): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage,
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        branch: "vib-1-work",
+        workRevision: {
+          id: "rev_1",
+          headSha: HEAD,
+          treeSha: "t".repeat(40),
+          branch: "vib-1-work",
+          createdAt: "2026-07-25T09:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+        engagements: [
+          { profileId: "developer", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+          { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: true },
+        ],
+        verdicts: [
+          { profileId: "reviewer", revisionId: "rev_1", headSha: HEAD, result: "approve", reason: "looks right", at: "2026-07-25T09:30:00.000Z" },
+        ],
+        validation: "healthy",
+        pr: { number: 7, state: "review", title: "[VIB-1] work", headSha: HEAD, mergeable },
+      }),
+      goal: "g",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  function withMergeBoard(): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      stages: [
+        { id: "triage", name: "Triage", color: "#a5a8b5" },
+        { id: "impl", name: "In Progress", color: "#7b61ff" },
+        { id: "review", name: "Review", color: "#5b76fe" },
+        { id: "merge", name: "Merge", color: "#187574" },
+        { id: "done", name: "Done", color: "#00b473" },
+      ],
+      workflow: [
+        { from: "triage", to: "impl", boundary: "auto", by: "Operator", locked: false },
+        { from: "impl", to: "review", boundary: "approval", by: "Operator", locked: false },
+        { from: "review", to: "merge", boundary: "approval", by: "Operator", locked: false },
+        { from: "merge", to: "done", boundary: "human", by: "Human", locked: true },
+      ],
+      // The reviewer is eligible at Review only (the k9s board's shape): no
+      // verdict can be given at Merge.
+      agents: file.parsed.frontmatter.agents.map((a) =>
+        a.profileId === "reviewer"
+          ? { ...a, definition: { ...a.definition, stages: ["review"] } }
+          : a,
+      ),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("ruling 162 (a): the snapshot carries `pr.mergeable` and the gate's `notAcceptableReason`; a clean PR carries null", () => {
+    // Canary: drop `notAcceptableReason` from `operatorSnapshot`.
+    deployRoster(DEFAULT_POLICY);
+    seedReviewedWithPr("review", "conflicting");
+    const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+    expect(snap.pr?.mergeable).toBe("conflicting");
+    expect(snap.notAcceptableReason).toContain("VIB-1's review PR #7 conflicts with the base branch");
+    expect(snap.notAcceptableReason).toContain("Rebase the branch and re-review, or archive the task.");
+    seedReviewedWithPr("review", "clean");
+    const clean = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+    expect(clean.pr?.mergeable).toBe("clean");
+    expect(clean.notAcceptableReason).toBeNull();
+  });
+
+  it("ruling 162 (a): accept_completion refuses with the gate's sentence on a conflicting PR and files no card", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedReviewedWithPr("review", "conflicting");
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("conflicts with the base branch");
+    expect(task().frontmatter.recommendations).toEqual([]);
+    expect(listAuditEvents(store.db, { action: "task.operator.recommended_completion" })).toHaveLength(0);
+  });
+
+  it("ruling 162 (b): the move INTO the acceptance stage is refused with the same sentence while the PR conflicts", async () => {
+    // Canary: drop the `mergeStageEntryRefusal` read in operatorTransitionStage:
+    // the move files a "Move the task to Review" card (the approval boundary).
+    deployRoster(DEFAULT_POLICY);
+    seedReviewedWithPr("impl", "conflicting");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("denied");
+    expect(r.message).toContain("VIB-1's review PR #7 conflicts with the base branch");
+    expect(r.message).toContain("VIB-1 stays at In Progress");
+    expect(r.message).toContain("Open the conflict packet (update_branch_from_base)");
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(task().frontmatter.recommendations).toEqual([]);
+    // A clean PR crosses the same boundary as before (a recommendation card).
+    seedReviewedWithPr("impl", "clean");
+    const ok = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+      authority("full"),
+    );
+    expect(ok.outcome).toBe("recommended");
+  });
+
+  it("ruling 163 (a): Merge to Review is a rework move on `validation: changed`; Merge to In Progress is not offered", async () => {
+    // Canary: require `failing` again in the operator's `isReworkMove`.
+    deployRoster(DEFAULT_POLICY);
+    withMergeBoard();
+    seedReviewedWithPr("merge", "clean");
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      // The revision moved after the verdict: `changed`.
+      parsed.frontmatter.workRevision!.id = "rev_2";
+      parsed.frontmatter.workRevision!.treeSha = "u".repeat(40);
+      parsed.frontmatter.validation = "changed";
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("supervised"));
+    expect(snap.reworkStages.map((s) => s.id)).toEqual(["review"]);
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", reason: "the conflict rework needs its verdict" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().frontmatter.stage).toBe("review");
+    expect(task().frontmatter.previousStageId).toBe("merge");
+  });
+
+  it("ruling 163 (d): the acceptance refusal past the review stage names the rework move and the person's stage picker", async () => {
+    deployRoster(DEFAULT_POLICY);
+    withMergeBoard();
+    seedReviewedWithPr("merge", "clean");
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.workRevision!.id = "rev_2";
+      parsed.frontmatter.workRevision!.treeSha = "u".repeat(40);
+      parsed.frontmatter.validation = "changed";
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("belongs back at Review");
+    expect(r.message).toContain("transition_stage");
+    expect(r.message).toContain("stage picker on the task page");
+  });
+});

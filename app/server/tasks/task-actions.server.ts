@@ -16,6 +16,7 @@ import {
   unpushedRevisionBlockedReason,
   unpushedRevisionOf,
   deliveringEngagement,
+  type Engagement,
   deriveValidation,
   normalizeEvidenceRows,
   sanitizeEventAttachmentNames,
@@ -164,6 +165,8 @@ import type {
   mergeTaskPr,
   GithubActionContext,
 } from "~/server/github/github-reconciler.server";
+import type { updateWorkspaceBranchFromBase } from "~/server/github/update-branch.server";
+import { verdictStageFor } from "~/shared/workflow/verdict-stage";
 import type { GithubContextOptions } from "~/server/github/github-context.server";
 import { PROVIDER_TEXT_CHARS } from "~/server/secrets/git-output-redact.server";
 import {
@@ -264,6 +267,10 @@ export interface TaskActionDeps {
   openTaskPr?: typeof openTaskPr;
   mergeTaskPr?: typeof mergeTaskPr;
   runOperator?: typeof runOperator;
+  /** Ruling 162 / G35-5(d): the acceptance-time base refresh (the workspace
+   *  merge the operator's `update_branch_from_base` performs), injectable so a
+   *  test can assert the ceremony's call sequence: one refresh, one merge. */
+  updateBranchFromBase?: typeof updateWorkspaceBranchFromBase;
 }
 
 /** The mutation ctx plus the test seams: the impls above, and the mock
@@ -295,6 +302,23 @@ function stageRolesOf(project: ProjectContext): StageRoles {
 /** The review stage id — the one with a governed edge into the final stage. */
 function reviewStageIdOf(project: ProjectContext): string | null {
   return stageRolesOf(project).reviewId;
+}
+
+/**
+ * Ruling 163: the stage a task whose revision changed after a verdict returns
+ * to (`verdictStageFor`, read against the deployed profiles' declared
+ * eligibility), or null when a verdict can be given where it stands.
+ */
+async function verdictStageOf(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  project: ProjectContext,
+  fm: { stage: string; engagements: Engagement[] },
+): Promise<string | null> {
+  const { listDeployedSpecialists } = await import("./specialist-run.server");
+  const specialistCtx: TaskMutationContext = {};
+  if (ctx.dataRoot) specialistCtx.dataRoot = ctx.dataRoot;
+  return verdictStageFor(project, fm, listDeployedSpecialists(projectSlug, specialistCtx));
 }
 
 /** The terminal (Done-equivalent) stage id. */
@@ -4986,12 +5010,24 @@ export async function transitionStage(
   // here so it can't be abused for a forward jump or on a healthy task.
   const fromIndex = project.stages.findIndex((s) => s.id === fromStageId);
   const toIndex = project.stages.findIndex((s) => s.id === input.toStageId);
+  // Ruling 163 (pass 35, F35-13): a revision that CHANGED after a verdict is
+  // rework by definition, and the one backward move it licenses is into the
+  // review stage, where the re-verdict can be given. `failing` keeps the whole
+  // backward license (R7-4). Same predicate `operatorTransitionStage` reads.
+  const backward = toIndex >= 0 && toIndex < fromIndex;
+  const changedReworkTarget =
+    input.rework === true &&
+    ctx.operatorAuthorized === true &&
+    backward &&
+    existing.parsed.frontmatter.validation === "changed"
+      ? await verdictStageOf(ctx, input.projectSlug, project, existing.parsed.frontmatter)
+      : null;
   const isReworkMove =
     input.rework === true &&
     ctx.operatorAuthorized === true &&
-    toIndex >= 0 &&
-    toIndex < fromIndex &&
-    existing.parsed.frontmatter.validation === "failing";
+    backward &&
+    (existing.parsed.frontmatter.validation === "failing" ||
+      (changedReworkTarget !== null && input.toStageId === changedReworkTarget));
   if (!boundary && !input.manual && !isReworkMove) {
     // F19-39: this string is RENDERED to a human (an `AppError` message becomes
     // the toast / route error), so the copy ban applies to it exactly as it
@@ -6001,6 +6037,14 @@ export async function performDelivery(
           actor,
         });
       }
+      // Ruling 163 (pass 35, F35-13 (c)): a delivery that moved the head of a
+      // task standing PAST the review stage, on a revision that changed or
+      // failed after the last verdict, records the transition back to the
+      // review stage instead of leaving the task at Merge waiting for a verdict
+      // nobody can give there.
+      if (moved) {
+        await returnChangedRevisionToReview(db, ctx, projectSlug, taskKey, headSha, actor);
+      }
       let operatorRequeued = false;
       const { resolveOperatorAuthority } = await import("./operator-actions.server");
       const autonomy =
@@ -6287,6 +6331,69 @@ async function recordPushedHead(
   reprojectTask(db, ctx, projectSlug, taskKey);
 }
 
+/**
+ * Ruling 163 (pass 35, F35-13 (c)): after a delivery MOVED the review PR's
+ * head, a task standing past the review stage whose derived validation is
+ * `changed` or `failing` (a verdict exists, on an older revision, or requests
+ * changes) goes back to the review stage in one write: `previousStageId`, a
+ * `transition` timeline event naming the head, and a `task.transition` audit
+ * row `via: delivery`. A task at or before the review stage, a healthy or
+ * unreviewed revision, and a terminal task are left alone.
+ */
+async function returnChangedRevisionToReview(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  headSha: string | null,
+  actor: TaskActor,
+): Promise<void> {
+  const project = loadProjectContext(ctx, projectSlug);
+  const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  if (!existing) return;
+  const fm = existing.parsed.frontmatter;
+  const validation = deriveValidation(fm);
+  if (validation !== "changed" && validation !== "failing") return;
+  const reviewId = await verdictStageOf(ctx, projectSlug, project, fm);
+  if (reviewId === null) return;
+  const fromStageId = fm.stage;
+  const actorRef: FileActorRef = ctx.operatorAuthorized
+    ? { kind: "operator" }
+    : actor.userId
+      ? humanActorRef(db, actor)
+      : { kind: "system", systemId: "delivery" };
+  const rev = headSha ? `\`${headSha.slice(0, 7)}\`` : "the delivered revision";
+  await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+    if (parsed.frontmatter.stage !== fromStageId) return;
+    parsed.frontmatter.previousStageId = fromStageId;
+    parsed.frontmatter.stage = reviewId;
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "transition",
+      actor: actorRef,
+      title: null,
+      text:
+        `**Transition:** ${taskKey} returns from ${stageName(project, fromStageId)} to ` +
+        `${stageName(project, reviewId)}: ${rev} changed after the last verdict, so the ` +
+        `reviewers judge it there.`,
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  recordAudit(db, {
+    action: "task.transition",
+    actor: ctx.operatorAuthorized
+      ? OPERATOR_AUDIT_ACTOR
+      : { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: taskKey,
+    projectSlug,
+    taskKey,
+    details: { from: fromStageId, to: reviewId, boundary: "rework", via: "delivery" },
+  });
+  reprojectTask(db, ctx, projectSlug, taskKey);
+}
+
 async function surfaceDeliveryEvent(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -6499,6 +6606,96 @@ const UNREACHABLE_MERGE_CAUSE =
   "no reachable GitHub merge; merge it manually or reconcile once credentials are set";
 
 /**
+ * Ruling 162 / G35-5(d) (pass 35): the ONE base refresh of an acceptance.
+ *
+ * Runs the same workspace merge the operator's `update_branch_from_base`
+ * performs, from the acceptance ceremony itself, immediately before the gate
+ * re-check and the merge. Returns null when the merge may proceed (the branch
+ * was refreshed, was already current, or could not be refreshed from here: no
+ * workspace, no credential, a diverged origin, a git failure; GitHub stays the
+ * authority on those) and an `unmergeable` outcome when the refresh met a
+ * CONFLICT: the file then carries `pr.mergeable: conflicting`, so the gate
+ * function prints the same sentence on every surface, and the timeline names
+ * the conflicting paths so the resolver starts from the list, not a clean tree.
+ */
+async function refreshBranchForAcceptance(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  actor: TaskActor,
+): Promise<AcceptanceMergeOutcome | null> {
+  const ref = taskRef(ctx, projectSlug, taskKey);
+  const before = readTaskFile(ref)?.parsed.frontmatter ?? null;
+  // Nothing to refresh without an open PR on a branch: no-change completions
+  // and merged PRs never reach here with work to move.
+  if (!before?.pr || !before.branch) return null;
+  if (before.pr.state !== "review" && before.pr.state !== "accepted") return null;
+  const updateBranch =
+    ctx.deps?.updateBranchFromBase ??
+    (await import("~/server/github/update-branch.server")).updateWorkspaceBranchFromBase;
+  const input: Parameters<typeof updateBranch>[0] = { db, projectSlug, taskKey };
+  if (ctx.dataRoot) input.dataRoot = ctx.dataRoot;
+  const result = await updateBranch(input);
+  const details: NonNullable<AuditEventInput["details"]> = { status: result.status };
+  if (result.status === "updated") {
+    details.commits = result.commits;
+    details.mergeSha = result.mergeSha;
+  }
+  if (result.status === "conflict") details.files = result.files;
+  recordAudit(db, {
+    action: "github.branch_update.acceptance",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "branch",
+    subjectId: before.branch,
+    projectSlug,
+    taskKey,
+    details,
+  });
+  if (result.status === "updated") {
+    const { recordBranchRefresh } = await import(
+      "~/server/github/update-branch-operator.server"
+    );
+    const reconcileCtx: GithubActionContext = { dataRoot: ctx.dataRoot };
+    if (ctx.fetchImpl) reconcileCtx.fetchImpl = ctx.fetchImpl;
+    await recordBranchRefresh(db, reconcileCtx, { projectSlug, taskKey }, result, {
+      timelineActor: humanActorRef(db, actor),
+      reconcileActor: { userId: actor.userId, label: actor.label },
+      lead: "Accepting the completion brought",
+    });
+    return null;
+  }
+  if (result.status !== "conflict") return null;
+  await updateTaskFile(ref, (parsed) => {
+    const pr = parsed.frontmatter.pr;
+    if (pr && pr.number === before.pr!.number) pr.mergeable = "conflicting";
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "github",
+      actor: humanActorRef(db, actor),
+      title: null,
+      text:
+        `The acceptance-time refresh found \`${result.branch}\` in CONFLICT with \`${result.base}\`` +
+        (result.files.length ? ` in ${result.files.join(", ")}` : "") +
+        `. The merge was aborted, the branch is untouched and the acceptance was refused.` +
+        (result.detail ? `\n\n\`\`\`\n${result.detail}\n\`\`\`` : ""),
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reprojectTask(db, ctx, projectSlug, taskKey);
+  const after = readTaskFile(ref)?.parsed.frontmatter ?? null;
+  const reason = after ? mergeReadinessRefusal(after, taskKey) : null;
+  return {
+    kind: "unmergeable",
+    reason:
+      reason ??
+      `${taskKey}'s review PR #${before.pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`,
+    cause: "the PR conflicts with the base branch; rebase it, then merge",
+  };
+}
+
+/**
  * Attempt the REAL GitHub merge of the task's review PR (FR31, human-authorized)
  * and classify the outcome. Never throws: an unexpected failure degrades to
  * `pending` so acceptance still records honestly. Only meaningful for a human
@@ -6521,6 +6718,17 @@ async function attemptAcceptanceMerge(
     const mergeTaskPr =
       ctx.deps?.mergeTaskPr ??
       (await import("~/server/github/github-reconciler.server")).mergeTaskPr;
+    // Ruling 162 / G35-5(d) (pass 35): the base refresh happens ONCE, here, as
+    // part of the acceptance ceremony. Live (19:35Z to 20:08Z) the operators
+    // refreshed every open branch on every turn while fifteen PRs shared one
+    // small repository, and each merge commit they pushed conflicted again
+    // minutes later; six conflict packets in thirty minutes. The refresh now
+    // runs when a person accepts: update the branch from base, re-run the
+    // gate (`beforeMerge`), merge. A conflict found here refuses the acceptance
+    // with the gate's own sentence and records `mergeable: conflicting` so
+    // every surface says the same thing before the next click.
+    const refresh = await refreshBranchForAcceptance(db, ctx, projectSlug, taskKey, actor);
+    if (refresh) return refresh;
     beforeMerge?.();
     const mergeCtx: GithubActionContext = { dataRoot: ctx.dataRoot };
     if (ctx.fetchImpl) mergeCtx.fetchImpl = ctx.fetchImpl;
@@ -6537,30 +6745,46 @@ async function attemptAcceptanceMerge(
       case "task_not_found":
         return { kind: "no_pr" };
       case "not_mergeable": {
-        // Ruling 135: `mergeable: conflicting` describes the head GitHub has.
-        // When the delivered revision never reached it, the push is the
-        // remedy and the sentence says so instead of "rebase".
+        // Ruling 162 (pass 35, F35-12 (a0)): the post-gate refusal reads the
+        // SAME function the gate does. `mergeTaskPr` records what GitHub said
+        // (`mergeable: conflicting`, on the 405 as well as on the detail read)
+        // before answering, so the re-read file carries the fact and
+        // `mergeReadinessRefusal` prints the gate's sentence with its way out.
+        // Ruling 135 still ranks first inside it: when the delivered revision
+        // never reached the PR, the push is the remedy, never "rebase".
+        // A merge answer that names the conflict lands on the file HERE when the
+        // merge path did not record it (the test seam, or a write that failed),
+        // so the sentence below is the gate's own on every route.
+        if (result.mergeable === "conflicting") {
+          let recorded = false;
+          await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+            const pr = parsed.frontmatter.pr;
+            if (pr && pr.number === result.prNumber && pr.mergeable !== "conflicting") {
+              pr.mergeable = "conflicting";
+              recorded = true;
+            }
+          });
+          if (recorded) reprojectTask(db, ctx, projectSlug, taskKey);
+        }
         const fmNow = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed.frontmatter ?? null;
-        const unpushedReason = fmNow
-          ? unpushedRevisionBlockedReason(fmNow.pr, fmNow.workRevision?.headSha ?? null, taskKey)
-          : null;
-        if (unpushedReason) {
+        const gateReason = fmNow ? mergeReadinessRefusal(fmNow, taskKey) : null;
+        if (gateReason) {
+          const unpushed =
+            fmNow !== null &&
+            unpushedRevisionBlockedReason(fmNow.pr, fmNow.workRevision?.headSha ?? null, taskKey) !==
+              null;
           return {
             kind: "unmergeable",
-            reason: unpushedReason,
-            cause: "the delivered revision is not on the PR; deliver the branch to push it, then merge",
+            reason: gateReason,
+            cause: unpushed
+              ? "the delivered revision is not on the PR; deliver the branch to push it, then merge"
+              : "the PR conflicts with the base branch; rebase it, then merge",
           };
         }
         return {
           kind: "unmergeable",
-          reason:
-            result.mergeable === "conflicting"
-              ? `${taskKey}'s review PR #${result.prNumber} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`
-              : `GitHub refuses to merge ${taskKey}'s review PR #${result.prNumber}: ${result.message}`,
-          cause:
-            result.mergeable === "conflicting"
-              ? "the PR conflicts with the base branch; rebase it, then merge"
-              : `GitHub refuses the merge: ${result.message}`,
+          reason: `GitHub refuses to merge ${taskKey}'s review PR #${result.prNumber}: ${result.message}`,
+          cause: `GitHub refuses the merge: ${result.message}`,
         };
       }
       case "head_changed":
@@ -7431,21 +7655,56 @@ export async function resolvePacket(
     }
     default: {
       // request_edit | redirect | custom — send back to the agent side.
+      // Ruling 163 (pass 35, F35-13 (b)): a redirect the branch-conflict
+      // packet marked `rework` RETURNS a task standing at or past the review
+      // stage to that stage in this same write, so the resolved revision gets
+      // its verdict where the reviewers are eligible. KNC-20 sat at Merge
+      // after its conflict rework with no reviewer able to run there; a human's
+      // off-graph stage move was the only way out and nothing named it.
+      const returnStage =
+        option.kind === "redirect" && option.rework === true
+          ? await verdictStageOf(ctx, input.projectSlug, project, existing.parsed.frontmatter)
+          : null;
+      const returnNote =
+        returnStage !== null
+          ? ` ${key} returns to ${stageName(project, returnStage)} so the resolved revision gets its verdict there.`
+          : "";
       event = {
         occurredAt: now,
         type: "transition",
         actor: human,
         title: null,
         text:
-          option.ev ??
-          `**Decision:** ${option.t}. Operator re-engages the specialist with a summon note.`,
+          (option.ev ??
+            `**Decision:** ${option.t}. Operator re-engages the specialist with a summon note.`) +
+          returnNote,
         toAgent: false,
         evidence: null,
       };
       mutate = (fm) => {
         fm.waiting = "agent";
         fm.readiness = "ready";
+        if (returnStage !== null && fm.stage !== returnStage) {
+          fm.previousStageId = fm.stage;
+          fm.stage = returnStage;
+        }
       };
+      if (returnStage !== null) {
+        recordAudit(db, {
+          action: "task.transition",
+          actor: { userId: actor.userId, label: actor.label },
+          subjectKind: "task",
+          subjectId: input.taskKey,
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          details: {
+            from: existing.parsed.frontmatter.stage,
+            to: returnStage,
+            boundary: "rework",
+            via: "packet_redirect",
+          },
+        });
+      }
       clearPacket = true;
       break;
     }
@@ -8275,15 +8534,6 @@ function acceptanceRefusalReasons(
 ): string[] {
   const noChangeWorkRefusal: string | null =
     opts.noChange?.probe === "has_work" ? opts.noChange.probeRefusal ?? null : null;
-  // Ruling 135: an unpushed revision OUTRANKS the conflict, whose `mergeable`
-  // describes the head GitHub has, not the one that was reviewed; while it
-  // stands, the conflict sentence ("rebase") is not a gate a person should be
-  // told about, on the force record or anywhere else.
-  const unpushed = unpushedRevisionBlockedReason(
-    fm.pr,
-    fm.workRevision?.headSha ?? null,
-    taskKey,
-  );
   const gates: (string | null)[] = [
     // R14-3: an archived task is out of the flow entirely.
     archivedTaskBlockedReason(fm, taskKey),
@@ -8326,14 +8576,37 @@ function acceptanceRefusalReasons(
     opts.blockedPacket
       ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
       : null,
-    // Ruling 135 (pass 34, F34-11): the delivered revision is not on the PR.
-    // Named ABOVE the conflict, which describes the head GitHub has, not the
-    // one that was reviewed; the remedy is to deliver, never to rebase.
-    unpushed,
-    // P14-LV-07: a conflicting PR cannot be merged, so it cannot be accepted.
-    unpushed ? null : conflictingPrBlockedReason(fm, taskKey),
+    // Ruling 162 (pass 35, F35-12): the GitHub-fact half of the gate, ONE
+    // function shared with the operator's Merge-entry check and the accept-time
+    // merge failure, so the three cannot drift.
+    mergeReadinessRefusal(fm, taskKey),
   ];
   return gates.filter((gate): gate is string => gate !== null);
+}
+
+/**
+ * Ruling 162 (pass 35, F35-12): why the review pull request cannot be merged
+ * as it stands, or null. The GitHub-fact half of the acceptance gate, kept as
+ * ONE function because three surfaces read it: the acceptance refusal stack,
+ * the operator's move INTO the acceptance stage (Merge means mergeable: a task
+ * whose PR conflicts stays at the work stage where the conflict packet is the
+ * path) and the post-gate merge failure (KNC-16: GitHub refused a merge the
+ * cached `clean` had let through, and the second sentence for the same fact
+ * had no way out).
+ *
+ * Ruling 135 (pass 34, F34-11): an unpushed delivered revision OUTRANKS the
+ * conflict, whose `mergeable` describes the head GitHub has, not the one that
+ * was reviewed; while it stands, the conflict sentence ("rebase") is not a
+ * gate a person should be told about, on the force record or anywhere else.
+ */
+export function mergeReadinessRefusal(
+  fm: Pick<TaskFrontmatter, "pr" | "workRevision">,
+  taskKey: string,
+): string | null {
+  return (
+    unpushedRevisionBlockedReason(fm.pr, fm.workRevision?.headSha ?? null, taskKey) ??
+    conflictingPrBlockedReason(fm, taskKey)
+  );
 }
 
 /** What a force-accept bypasses, as the dialog enumerated it (U35-3). */

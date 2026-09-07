@@ -772,6 +772,10 @@ export function TaskDetailPage({
           busy={recBusy}
           onApply={onApplyRec}
           onDismiss={onDismissRec}
+          // Ruling 162: the same gate verdict the sidebar and the accept
+          // dialog read, so an acceptance card never offers a refused click.
+          acceptanceRefusal={acceptance.blockedReason}
+          terminalStageId={terminalStageId}
         />
 
         {/* Scheduling lives INSIDE the two run controls (dynamic-dispatch

@@ -311,8 +311,10 @@ acceptance is gated **solely** on `kind === "accept_completion"`, plus the admin
 re-check in `resolvePacket`. The schema is `.loose()`, so an `accept:` key copied out of this
 doc would round-trip as an unknown field and be read by nothing — a silent no-op that looked
 load-bearing. Beyond the four keys shown, the fields the schema actually defines on an option
-are `ev`, `backend`, `profileId`, `deleteBranch` and, since pass 34 (ruling 138), `goalDraft` on
-an `edit_goal` option.)*
+are `ev`, `backend`, `profileId`, `deleteBranch`, since pass 34 (ruling 138) `goalDraft` on
+an `edit_goal` option, and since pass 35 (ruling 163) `rework` on a `redirect` option: the
+branch-conflict packet sets it when the task stands past the stage where its reviewers can
+run, and `resolvePacket` then returns the task to that stage in the same write.)*
 
 ```yaml
 type: input                       # input | blocked (card tint)

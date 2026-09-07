@@ -1,11 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { classifyRevisionDrift } from "~/shared/revision-drift";
-import type {
-  GithubCache,
-  PrMergeable,
-  PrRef,
-  TaskFrontmatter,
+import {
+  conflictingPrBlockedReason,
+  type GithubCache,
+  type PrMergeable,
+  type PrRef,
+  type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import {
   recordAudit,
@@ -761,13 +762,26 @@ async function reconcileTaskUnlocked(
     //    accept); when the PR MERGED out-of-band, accepting is exactly the right
     //    action, so that rec SURVIVES (the divergence text points the human at it).
     //  · assign_/run_ recs SURVIVE — doing more work is compatible with "rework".
-    const supersededRecs = divergenceText
-      ? fm.recommendations.filter(
-          (r) =>
-            r.kind === "transition" ||
-            (r.kind === "accept_completion" && closedButActive),
-        )
-      : [];
+    // Ruling 162 (pass 35, F35-12 (d)): a PR that just FLIPPED to conflicting
+    // withdraws the pending `accept_completion` offer too (the gate would
+    // refuse the click it invites) and says so on the timeline with the
+    // gate's own sentence.
+    const flippedToConflict =
+      newPr !== null &&
+      newPr.mergeable === "conflicting" &&
+      fm.pr?.number === newPr.number &&
+      fm.pr.mergeable !== "conflicting";
+    const conflictText = flippedToConflict
+      ? conflictingPrBlockedReason({ pr: newPr }, fm.key)
+      : null;
+    const supersededRecs =
+      divergenceText || conflictText
+        ? fm.recommendations.filter(
+            (r) =>
+              (divergenceText !== null && r.kind === "transition") ||
+              (r.kind === "accept_completion" && (closedButActive || conflictText !== null)),
+          )
+        : [];
     const supersededIds = new Set(supersededRecs.map((r) => r.id));
     // Everything above was decided from a snapshot taken BEFORE several awaited
     // GitHub round trips, and this is a blind whole-key assign. Another writer
@@ -835,6 +849,22 @@ async function reconcileTaskUnlocked(
         actor: POLICY_ENGINE_ACTOR,
         title: null,
         text: acceptedClosedText,
+        toAgent: false,
+        evidence: null,
+      });
+    }
+    if (conflictText && !divergenceText) {
+      const withdrawn = supersededRecs.filter((r) => r.kind === "accept_completion");
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: POLICY_ENGINE_ACTOR,
+        title: null,
+        text:
+          `**Conflict:** ${conflictText}` +
+          (withdrawn.length > 0
+            ? ` The ${withdrawn.map((r) => `“${r.label}”`).join(", ")} recommendation${withdrawn.length === 1 ? " was" : "s were"} withdrawn: the gate would refuse the acceptance it offered.`
+            : ""),
         toAgent: false,
         evidence: null,
       });
@@ -1499,6 +1529,35 @@ export async function mergeTaskPr(
   }
   // http failures
   if (merge.status === 405) {
+    // Ruling 162 (pass 35, F35-12 (a0)): GitHub refused a merge the cached
+    // `clean` had let past the gate (KNC-16: the base moved forty seconds
+    // earlier). Re-read the pull so the CONFLICT lands on the file exactly as
+    // the pre-merge detail read would have recorded it; GitHub's own sentence
+    // ("Pull Request has merge conflicts") counts while it is still computing.
+    // The acceptance path then reads the gate function off the re-read file
+    // and prints the gate's sentence, with its way out, instead of a second
+    // sentence for the same fact.
+    const again = await gh.client.request(
+      "GET",
+      `/repos/${gh.repo}/pulls/${prNumber}`,
+      ghPrViewSchema,
+    );
+    const rereadMergeable = again.ok ? deriveMergeable(again.data) : "unknown";
+    const conflicting =
+      rereadMergeable === "conflicting" ||
+      (rereadMergeable === "unknown" && /merge conflict/i.test(merge.message));
+    if (conflicting) {
+      let recorded = false;
+      await updateTaskFile(ref, (parsed) => {
+        const current = parsed.frontmatter.pr;
+        if (current && current.number === prNumber && current.mergeable !== "conflicting") {
+          current.mergeable = "conflicting";
+          recorded = true;
+        }
+      });
+      if (recorded) rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
+      return { status: "not_mergeable", prNumber, message: merge.message, mergeable: "conflicting" };
+    }
     return { status: "not_mergeable", prNumber, message: merge.message };
   }
   if (merge.status === 409) {
