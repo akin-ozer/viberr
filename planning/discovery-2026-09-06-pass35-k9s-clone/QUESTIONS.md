@@ -36,3 +36,9 @@
 - Q35-16 (U35-7): INTERRUPTED STATE, HONEST COUNTS.
 - Q35-11 (em dash in the org modal toast): rewrite under the copy rule (no question needed).
 - Scope: EVERYTHING, ONE PR on akin-ozer/viberr, based on the observation branch.
+
+## Closing answers (owner, 2026-09-07)
+- **e2e gate:** run it with the live container stopped. Done: Docker started 17:13Z, `viberr-app-1` stopped at 17:14Z (zero operator turns fired in the six minutes it was up, so no spend), `npm run e2e` in its own `viberr-e2e` compose project: **70 passed**.
+- **Ruling 160's door on an operator-less project:** LEAVE AS IT IS. The exits stay reopening the pull request on GitHub or archiving the task. No confirmed-Deliver ceremony, no auto-answer on reopen. The open issue in FIX-SUMMARY.md stands as recorded behaviour, not a defect.
+- **Insights historical rows:** NO BACKFILL. The owner is wiping the old data root ("we are still preprod"), so the `usage_final` default of 0 on existing rows needs no one-off update, and terminal estimates stay named beside the token totals rather than inside them.
+- **The k9c board:** PARK AND CLEAN UP. Done, see NOTES.
