@@ -39,6 +39,18 @@ function viewerRole(myRole: string | null): ProjectRole | null {
 /** Ruling 134(c): the push control's label, with its own busy text and tooltip. */
 export const PUSH_LABEL = (rev: string, prNumber: number): string =>
   `Push ${rev} to PR #${prNumber}`;
+/** Ruling 160 (pass 35, F35-11): the refusal the server gives a delivery over a
+ *  pull request a person closed without merging, said on the control rather than
+ *  after the click. The server's own sentence is `closedByHumanDeliveryText`;
+ *  this is its client half, so the card never offers a door that then 409s. */
+export const CLOSED_PR_DELIVERY_REFUSAL = (
+  prNumber: number,
+  closedBy: string | null,
+): string =>
+  `PR #${prNumber} was closed without merging${closedBy ? ` by ${closedBy}` : ""}. ` +
+  `A closed pull request is a person's decision about the task, so Viberr opens no new ` +
+  `pull request for this branch until the closed-PR decision is answered. Reopening PR ` +
+  `#${prNumber} on GitHub lifts the block too.`;
 /** The refusal the server would give a plain push of a diverged branch. */
 export const DIVERGED_PUSH_REFUSAL =
   "Origin's copy of this branch holds commits the workspace does not, so a plain push would be refused as non-fast-forward. Resolve the branch history first; the operator can open a decision packet for it.";
@@ -116,6 +128,14 @@ export function GithubTrace({
   const unpushed = unpushedRevisionOf(task.pr, task.workRevisionSha ?? null);
   const prTerminal =
     !task.pr || task.pr.state === "closed" || task.pr.state === "merged";
+  // Ruling 160: `closed` is terminal, so the delivery control is offered — and
+  // the server refuses it while nobody has answered the closure. The whole
+  // `PrRef` reaches this page (`pr_json`), so the refusal is derivable here and
+  // is said on the control, the way the diverged push below is.
+  const closedRefusal =
+    task.pr && task.pr.state === "closed" && !task.pr.closure?.answered
+      ? CLOSED_PR_DELIVERY_REFUSAL(task.pr.number, task.pr.closure?.by ?? null)
+      : null;
   const pushOffer =
     task.pr && !prTerminal && unpushed
       ? {
@@ -395,18 +415,27 @@ export function GithubTrace({
             delivered revision: the same door pushes the revision to that PR.
             A DIVERGED remote gets the fact and a disabled control naming the
             refusal the server would give, never a button that then fails. */}
+        {onDeliver && (prTerminal || pushOffer) && closedRefusal && (
+          <p className="deny-note spaced" id="deliver-closed-refusal">
+            <Icon name="alert" />
+            {closedRefusal}
+          </p>
+        )}
         {onDeliver && (prTerminal || pushOffer) && (
           <button
             type="button"
             className="btn primary sm panel-act"
-            disabled={delivering || pushOffer?.relation === "diverged"}
+            disabled={delivering || pushOffer?.relation === "diverged" || !!closedRefusal}
+            aria-describedby={closedRefusal ? "deliver-closed-refusal" : undefined}
             onClick={onDeliver}
             title={
-              pushOffer?.relation === "diverged"
-                ? DIVERGED_PUSH_REFUSAL
-                : pushOffer
-                  ? "Push the delivered revision to the open review PR (audited)"
-                  : "Push the delivering agent's branch and open the review PR (audited)"
+              closedRefusal
+                ? closedRefusal
+                : pushOffer?.relation === "diverged"
+                  ? DIVERGED_PUSH_REFUSAL
+                  : pushOffer
+                    ? "Push the delivered revision to the open review PR (audited)"
+                    : "Push the delivering agent's branch and open the review PR (audited)"
             }
           >
             <Icon name="branch" />

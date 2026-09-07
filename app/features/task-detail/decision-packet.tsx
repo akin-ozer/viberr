@@ -889,35 +889,33 @@ export function DecisionPacket({
   const authoredByOperator = p.from === "Operator";
 
   /**
-   * UX19-4 — the closed-PR recovery packet enumerated rework / archive /
-   * archive-and-delete-the-branch and told the reader that reopening the PR on
-   * GitHub was "also a valid path", while the one-click in-app path sat
-   * directly ABOVE the card: the GitHub panel's "Deliver branch & open PR". A
-   * human was sent to GitHub for something this page does. Traced end-to-end
-   * first, because naming a control that then refuses is worse than naming none:
+   * UX19-4, rewritten for ruling 160 (pass 35, F35-11) — the closed-PR recovery
+   * packet enumerated rework / archive / archive-and-delete-the-branch and told
+   * the reader that reopening the PR on GitHub was "also a valid path", while
+   * the GitHub panel's "Deliver branch & open PR" sat directly ABOVE the card.
+   * The note named that control, because it then opened a fresh review PR and
+   * really did recover a mistaken close.
    *
-   *  - the panel renders that button whenever no LIVE pr stands
-   *    (`task-side-panels.tsx`: `!task.pr || state === "closed" | "merged"`) —
-   *    a closed PR satisfies it;
+   * Ruling 160 closed that door on purpose: a pull request a person closed
+   * without merging is a decision about the task, and `openTaskPr` answers
+   * `closed_by_human` while `pr.closure.answered` is null — which is null for
+   * exactly as long as this packet stands, since answering it IS what stamps it
+   * (`resolvePacket`). So the note now says what the door does, because naming
+   * a control that then refuses is worse than naming none:
+   *
+   *  - the panel still renders the button whenever no LIVE pr stands
+   *    (`task-side-panels.tsx`: `!task.pr || state === "closed" | "merged"`),
+   *    and disables it with the same refusal while the closure is unanswered;
    *  - authority is `run-agents` OR this task's own owner
    *    (`manualDeliverForReview`), which is exactly the set `canResolve`
    *    carries here (`task-detail-page.tsx`: `canRunAgents || isOwner`), so the
    *    note is shown only to a viewer who has the button;
-   *  - `manualDeliverForReview` gates on exactly that authority and nothing
-   *    else — no packet check, no stage check — then calls `performDelivery`;
-   *  - `performDelivery` → `openTaskPr` treats a CLOSED cached PR as terminal
-   *    and falls through to the create path (`pr-open.server.ts`): it opens a
-   *    FRESH review PR and never reopens the closed one. Re-pushing a branch
-   *    with nothing new answers `up_to_date` (ruling 134, `push-workspace.server.ts`)
-   *    and the PR open still runs, so a PR closed by mistake really does come
-   *    back through this door.
-   *  - and NOTHING on that path touches the packet — `recordDeliveredNextStep`
-   *    returns early (via `alreadyActionable`) precisely because a packet is
-   *    open. So the last clause is
-   *    not politeness: the packet body (authored from `operator-run.server.ts`)
-   *    promises that reopening on GitHub is "detected automatically" and
-   *    withdraws the packet, and a reader would otherwise carry that promise
-   *    over to the in-app door, where it is false.
+   *  - resolving this packet is therefore the precondition, not an aside: a
+   *    person's answer stamps `closure.answered`, and the NEXT delivery opens a
+   *    fresh review pull request (Viberr never reopens a closed one).
+   *  - reopening the pull request on GitHub lifts the block too: the reconciler
+   *    drops the closure with the closed state, which is the promise the packet
+   *    body (authored from `operator-run.server.ts`) already makes.
    *
    * Keyed on the `archive_task` + `deleteBranch` option because that is the
    * closed-PR signature the schema itself names ("the discard-entirely path for
@@ -1290,12 +1288,13 @@ export function DecisionPacket({
           // sitting right above it.
           <p className="packet-lede spaced">
             Not in this list: the GitHub panel on this page still offers{" "}
-            <strong>{DELIVER_LABEL}</strong>. It pushes this task&rsquo;s branch
-            again and opens a new review pull request (Viberr never reopens a
-            closed one), so a pull request closed by mistake is recovered from
-            here, with no trip to GitHub. Delivering does not resolve this
-            packet, and the archive option that deletes the branch ends that
-            path.
+            <strong>{DELIVER_LABEL}</strong>, and it is refused while this
+            decision stands. Answering here is what lifts it: choose the rework
+            option and the next delivery opens a new review pull request
+            (Viberr never reopens a closed one), so a pull request closed by
+            mistake is recovered from here, with no trip to GitHub. Reopening
+            the pull request on GitHub lifts the block too, and the archive
+            option that deletes the branch ends that path.
           </p>
         )}
 

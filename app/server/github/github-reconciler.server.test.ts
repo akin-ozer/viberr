@@ -671,8 +671,42 @@ describe("reconcileTask", () => {
     expect(fmOf().github?.unownedPr ?? null).toBeNull();
     expect(fmOf().github?.foreignHead).toEqual({ sha: "0000000ffff", prNumber: null });
 
-    // 3. The task's own revision was minted on the branch and no stranger's PR
-    //    stands: the head is proven this task's and the record is dropped.
+    // 3. KNC-21 itself: the agent REPORTED a revision on this branch, the
+    //    delivery push was refused non-fast-forward, and origin's branch holds
+    //    a stranger's commit. Ruling 161(a) is explicit that a reported head is
+    //    not a delivered one, so this head is NOT proven the task's and the
+    //    disclosure the archive dialog needs must be recorded. Canary: gate the
+    //    record on `deliveredThisBranch` (which counts the report) and this is
+    //    null again, exactly as it was live.
+    const reported = {
+      id: "rev_1",
+      headSha: "a91f7c2ffff",
+      treeSha: null,
+      branch: "vib-301-workspace",
+      createdAt: "2026-08-31T08:00:00.000Z",
+      sourceProfileId: "developer",
+    };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        workRevision: reported,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(prLess).fetchImpl },
+    );
+    expect(fmOf().github?.foreignHead).toEqual({ sha: "0000000ffff", prNumber: null });
+
+    // 4. The same revision once the delivery push PUBLISHED its head: it left
+    //    the workspace on this branch, so the head is proven the task's and the
+    //    record is dropped.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-301", {
         title: "Attach execution workspace",
@@ -680,14 +714,7 @@ describe("reconcileTask", () => {
         branch: "vib-301-workspace",
         ownerUserId: store.users.arda.id,
         github: { commits: [], changed: null, foreignHead: { sha: "0000000ffff", prNumber: null } },
-        workRevision: {
-          id: "rev_1",
-          headSha: "a91f7c2ffff",
-          treeSha: null,
-          branch: "vib-301-workspace",
-          createdAt: "2026-08-31T08:00:00.000Z",
-          sourceProfileId: "developer",
-        },
+        workRevision: { ...reported, pushedAt: "2026-08-31T09:00:00.000Z" },
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });

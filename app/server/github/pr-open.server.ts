@@ -362,7 +362,7 @@ export async function openTaskPr(
   };
   const file = readTaskFile(ref);
   if (!file) return { status: "task_not_found" };
-  const fm = file.parsed.frontmatter;
+  let fm = file.parsed.frontmatter;
 
   // P13-D-5: task-level repo override deleted (owner ruling) — project repo only.
   // Optional key: only a test hands over a transport.
@@ -389,6 +389,27 @@ export async function openTaskPr(
   //      close: the owner's rejection vanished from every surface.
   //    · LIVE: reuse it, never open a duplicate (a PR captured from agent-side
   //      delivery on a branch the head= dedup below would never match).
+  //
+  //    A cached `closed` with NO closure record is a close nobody surfaced.
+  //    `pr.state: closed` has a second writer: the workspace reconcile reads
+  //    `gh pr view <branch>` from the agent's clone and writes the state it
+  //    sees, knowing nothing of who closed it, and `performDelivery` runs that
+  //    reconcile one step BEFORE this door. Refusing straight off such a cache
+  //    would be a wedge: the R8-6 note, the inbox alert and the `pr-diverged`
+  //    wake that raises the recovery packet all key on the closure being
+  //    unrecorded, and `resolvePacket` has no record to stamp, so the refusal
+  //    would stand with nothing able to lift it. So the closure is repaired
+  //    first, through the one writer that owns it, and the refusal is read off
+  //    what that pass recorded (including a PR reopened in the meantime, which
+  //    lifts the block entirely).
+  if (fm.pr?.state === "closed" && !fm.pr.closure) {
+    const { reconcileTask } = await import("./github-reconciler.server");
+    const repairCtx: GithubActionContext = {};
+    if (ctx.dataRoot) repairCtx.dataRoot = ctx.dataRoot;
+    if (ctx.fetchImpl) repairCtx.fetchImpl = ctx.fetchImpl;
+    await reconcileTask(db, input, actor, repairCtx);
+    fm = readTaskFile(ref)?.parsed.frontmatter ?? fm;
+  }
   if (fm.pr?.state === "closed" && !fm.pr.closure?.answered) {
     return {
       status: "closed_by_human",

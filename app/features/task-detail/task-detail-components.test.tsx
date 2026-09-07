@@ -7,6 +7,7 @@ import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type {
   PacketOption,
+  PrRef,
   PrState,
   TaskSchedule,
 } from "~/schemas/task-file.schema";
@@ -2354,16 +2355,21 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
     const note = noteOf(packetView.container)!;
     expect(note).toBeTruthy();
     expect(note.textContent).toContain(DELIVER_LABEL);
-    // The honesty the trace bought: `openTaskPr` treats a CLOSED cached PR as
-    // terminal and falls through to the CREATE path, so the note must promise a
-    // new PR — never a reopen this app cannot perform.
+    // Ruling 160: the door is REFUSED while the closure is unanswered, and this
+    // packet is what answers it — so the note must name the refusal and make
+    // resolving the precondition, never a click the reader can skip to.
+    expect(note.textContent).toContain("refused while this decision stands");
+    expect(note.textContent).toContain("Answering here is what lifts it");
+    // Still true, and still the reason this is the in-app path: the fresh PR is
+    // a new one, never a reopen this app cannot perform.
     expect(note.textContent).toContain("opens a new review pull request");
     expect(note.textContent).toContain("never reopens a closed one");
-    // Nothing on the delivery path touches the packet (recordDeliveredNextStep
-    // returns early *because* one is open), while the packet body above promises
-    // that a GitHub reopen withdraws it — so the note must not let that promise
-    // travel to the in-app door.
-    expect(note.textContent).toContain("does not resolve this packet");
+    // The promise the packet body makes about GitHub travels here honestly now.
+    expect(note.textContent).toContain("Reopening the pull request on GitHub");
+    // The old copy told the reader delivering did NOT resolve the packet, which
+    // under ruling 160 reads as "click it and skip this decision" — the one
+    // path that always fails.
+    expect(note.textContent).not.toContain("does not resolve this packet");
 
     // The pin: the panel one column over must actually render a button with
     // this exact label, for the same task shape (PR closed, deliverer present).
@@ -2385,6 +2391,53 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
     ].find((b) => b.textContent?.includes(DELIVER_LABEL));
     expect(deliver).toBeTruthy();
     expect(deliver!.textContent?.trim()).toBe(DELIVER_LABEL);
+    // Ruling 160: and that control refuses, so it says so on itself rather than
+    // 409-ing after the click. The refusal names the PR and is readable, not
+    // parked in `title` alone.
+    expect(deliver!.disabled).toBe(true);
+    const refusal = panel.container.querySelector("#deliver-closed-refusal");
+    expect(refusal?.textContent).toContain("PR #143 was closed without merging");
+    expect(refusal?.textContent).toContain("closed-PR decision is answered");
+    expect(deliver!.getAttribute("aria-describedby")).toBe("deliver-closed-refusal");
+  });
+
+  it("names the closer, and lets go once a person has answered the closure", () => {
+    // The unlock is `pr.closure.answered`, the same record `openTaskPr` reads:
+    // an answered closure returns the control to its normal promise. Canary:
+    // drop `!task.pr.closure?.answered` from `closedRefusal` and the answered
+    // case stays refused.
+    const closed = (closure: PrRef["closure"]) =>
+      render(
+        <MemoryRouter>
+          <GithubTrace
+            githubHost={GH_HOST}
+            task={traceTask({
+              pr: { number: 143, state: "closed", title: "x", closure },
+            })}
+            acceptance={traceAcceptance({})}
+            onDeliver={() => {}}
+          />
+        </MemoryRouter>,
+      );
+    const unanswered = closed({
+      at: "2026-09-06T19:33:00.000Z",
+      by: "akin-ozer",
+      answered: null,
+    });
+    expect(
+      unanswered.container.querySelector("#deliver-closed-refusal")?.textContent,
+    ).toContain("closed without merging by akin-ozer");
+
+    const answered = closed({
+      at: "2026-09-06T19:33:00.000Z",
+      by: "akin-ozer",
+      answered: { at: "2026-09-06T20:00:00.000Z", byUserId: "u1" },
+    });
+    expect(answered.container.querySelector("#deliver-closed-refusal")).toBeNull();
+    const btn = [
+      ...answered.container.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((b) => b.textContent?.includes(DELIVER_LABEL));
+    expect(btn?.disabled).toBe(false);
   });
 
   it("stays silent on a packet that is not the closed-PR recovery", () => {

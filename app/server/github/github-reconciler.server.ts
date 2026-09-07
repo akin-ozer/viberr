@@ -397,10 +397,17 @@ async function reconcileTaskUnlocked(
   // push landing after a person's close looks like. The task's OWN cached
   // number is then read directly, and a settled answer (closed, merged) is
   // this task's news: it is what lets the transition below fire at all.
+  //
+  // The same read repairs a cache that already says `closed` while carrying no
+  // closure record: `pr.state: closed` also reaches the file from the workspace
+  // reconcile (`gh pr view` in the agent's clone), which knows neither the
+  // closer nor the R8-6 surfacing, and until the record exists nobody can
+  // answer the closure and no delivery can ever be opened again.
+  const closureUnrecorded = fm.pr?.state === "closed" && !fm.pr.closure;
   if (
     prResult.status === "none" &&
     fm.pr &&
-    (fm.pr.state === "review" || fm.pr.state === "accepted")
+    (fm.pr.state === "review" || fm.pr.state === "accepted" || closureUnrecorded)
   ) {
     prResult = await readTerminalPrByNumber(gh.client, gh.repo, fm.pr.number);
   }
@@ -680,8 +687,25 @@ async function reconcileTaskUnlocked(
     compare && compare.commits.length > 0
       ? (compare.commits[compare.commits.length - 1]?.fullSha ?? null)
       : null;
+  // Ruling 161(a) draws the line the disclosure needs, and it is NOT
+  // `deliveredThisBranch`: a work revision is minted when the agent REPORTS,
+  // before any push, so it says nothing about what origin holds. KNC-21 is the
+  // whole shape — a revision minted on `knc-21`, the push refused
+  // non-fast-forward, no pull request, and origin's `knc-21` carrying a
+  // stranger's commit — and reading provenance off the report called that head
+  // "proven this task's" and disclosed nothing. So the foreign-head test asks
+  // ruling 161's own question: did this task's revision LEAVE the workspace on
+  // THIS branch (a pull request tracks it, or the delivery push published its
+  // head)? `deliveredThisBranch` keeps its F31-1/V5 meaning for the commit
+  // footprint, which is a different question.
+  const revisionHere = activeWorkRevision(fm.workRevision);
+  const departedThisBranch =
+    ownsAPr ||
+    fm.pr !== null ||
+    (revisionHere !== null && revisionHere.branch === branch && !!revisionHere.pushedAt);
   const foreignHead: GithubCache["foreignHead"] =
-    !provenBranchHead && (unownedPr || (compare && compare.aheadBy > 0))
+    !(departedThisBranch && !unownedPr) &&
+    (unownedPr || (compare && compare.aheadBy > 0))
       ? {
           sha: unownedPr?.headSha ?? lastCompareCommit,
           prNumber: unownedPr?.number ?? null,
@@ -759,10 +783,19 @@ async function reconcileTaskUnlocked(
   // since the last cache), so a persistent divergence isn't re-announced each
   // reconcile.
   const prJustMerged = newPr?.state === "merged" && fm.pr?.state !== "merged";
-  const prJustClosed =
+  // Ruling 160: the fact being announced is the CLOSURE, so the announcement
+  // fires the pass its RECORD is written, not the pass the state changes. The
+  // two came apart on the very path a delivery takes: `performDelivery` runs
+  // the workspace reconcile (a `gh pr view` in the agent's clone) before the PR
+  // door, and that writer puts `closed` in the cache with no closure record, so
+  // a state-transition test saw nothing left to announce and the person's close
+  // reached no note, no inbox and no packet. Keyed on the record, the repair
+  // pass announces once and every later pass carries it silently.
+  const closureNewlyRecorded =
     newPr?.state === "closed" &&
-    fm.pr?.state !== "closed" &&
-    !acceptedClosedExternally;
+    !!newPr.closure &&
+    !(fm.pr?.state === "closed" && fm.pr.closure);
+  const prJustClosed = closureNewlyRecorded && !acceptedClosedExternally;
   const mergedButNotDone = prJustMerged && !taskTerminal;
   const closedButActive = prJustClosed && !taskTerminal;
   // The divergence HEALING transition: a closed PR went live again — the same

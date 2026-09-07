@@ -8019,17 +8019,21 @@ export async function resolvePacket(
     // next delivery may open a fresh PR for the branch. The operator's own
     // withdrawal of a packet (`resolve_decision_packet`) is not a person's
     // answer and stamps nothing.
+    // The answer is recorded even when no closure record exists yet: the gate
+    // that refuses delivery keys on `state: "closed"`, and `closed` also reaches
+    // the file from the workspace reconcile, which records no closure. Without
+    // this the person's answer would have nothing to stamp and the refusal
+    // would outlive every decision they can make.
     const closedPr = parsed.frontmatter.pr;
+    const closure = closedPr?.state === "closed" ? (closedPr.closure ?? null) : null;
     if (
       closedPr?.state === "closed" &&
-      closedPr.closure &&
-      closedPr.closure.answered === null &&
+      (closure === null || closure.answered === null) &&
       !ctx.operatorAuthorized
     ) {
-      closedPr.closure.answered = {
-        at: new Date().toISOString(),
-        byUserId: actor.userId,
-      };
+      const answered = { at: new Date().toISOString(), byUserId: actor.userId };
+      if (closure) closure.answered = answered;
+      else closedPr.closure = { at: answered.at, by: null, answered };
     }
     // V18: a resolved decision is a human re-litigating the task's direction —
     // a recorded deliberate hold no longer speaks for them.

@@ -18,6 +18,7 @@ import { deriveValidation } from "~/schemas/task-file.schema";
 import type {
   Engagement,
   FileActorRef,
+  PrClosure,
   TaskFileEvent,
   TaskFrontmatter,
   WorkRevision,
@@ -5132,18 +5133,23 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
  * `resolvePacket` (second test).
  */
 describe("ruling 160: a PR closed by a person refuses delivery until the packet is answered", () => {
-  function seedClosedPr(store: TestStore): void {
+  function seedClosedPr(store: TestStore, closure: PrClosure | null = {
+    at: "2026-09-06T19:33:19.000Z",
+    by: "akin-ozer",
+    answered: null,
+  }): void {
+    const pr: NonNullable<TaskFrontmatter["pr"]> = {
+      number: 10,
+      state: "closed",
+      title: "[VIB-1] rejected by hand",
+    };
+    if (closure) pr.closure = closure;
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
         branch: "vib-1",
         ownerUserId: store.users.arda.id,
-        pr: {
-          number: 10,
-          state: "closed",
-          title: "[VIB-1] rejected by hand",
-          closure: { at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: null },
-        },
+        pr,
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
@@ -5215,6 +5221,49 @@ describe("ruling 160: a PR closed by a person refuses delivery until the packet 
     expect(parsed.frontmatter.pr?.closure).toEqual({
       at: "2026-09-06T19:33:19.000Z",
       by: "akin-ozer",
+      answered: { at: expect.any(String), byUserId: store.users.arda.id },
+    });
+  });
+
+  it("answers a closure GitHub was never reachable to record, so the refusal always has a way out", async () => {
+    // `pr.state: closed` also reaches the file from the workspace reconcile,
+    // which records no closure, and a degraded GitHub read cannot repair it.
+    // The gate that refuses delivery keys on the STATE, so an answer with no
+    // record to stamp left the task undeliverable for good. Canary: restore the
+    // `closedPr.closure &&` guard on the stamp and the answer lands nowhere.
+    const store = prepared();
+    seedClosedPr(store, null);
+    const current = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    expect(current.frontmatter.pr?.closure ?? null).toBeNull();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: current.frontmatter,
+      packet: {
+        id: "pkt_closed_norecord",
+        type: "input",
+        kind: "Decision required",
+        from: "operator",
+        title: "PR #10 was closed on GitHub without merging",
+        body: "Decide whether to rework and open a fresh PR, or archive the task.",
+        observations: [],
+        options: [
+          { kind: "custom", t: "Rework the branch", d: "", rec: true, ev: "**Decision:** rework." },
+        ],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    // The record is created BY the answer: the closer is unknown and stays
+    // null rather than being guessed, but the block is answered and lifted.
+    expect(parsed.frontmatter.pr?.closure).toEqual({
+      at: expect.any(String),
+      by: null,
       answered: { at: expect.any(String), byUserId: store.users.arda.id },
     });
   });

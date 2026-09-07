@@ -3198,13 +3198,22 @@ available. It reads nobody else's session.)*
     `closed` PR whose `pr.closure` no person has answered refuses `closed_by_human`
     before GitHub is asked; a cached live PR that GitHub now reports closed and unmerged
     is handed to `reconcileTask`, then refused the same way, naming the PR and the
-    closer when GitHub names one (`closed_by` on the issue payload). **(b)** The
-    reconciler stays the one writer of `pr.state: closed`, of the closure record
+    closer when GitHub names one (`closed_by` on the issue payload). A cached `closed`
+    carrying NO closure record is a close nobody surfaced (the workspace reconcile also
+    writes that state, from `gh pr view` in the agent's clone, and knows neither the
+    closer nor the surfacing): it is repaired through `reconcileTask` first, then refused
+    on what that pass recorded. **(b)** The reconciler stays the one writer of the
+    closure record
     (`pr.closure: {at, by, answered}`) and of the R8-6 note, inbox alert and
     `pr-diverged` wake: when the branch listing names nothing and the task's cached PR
-    is live, it reads the cached NUMBER directly and records a settled answer, so the
-    close a push overtook transitions in the delivery's own turn and once. **(c)** A
-    person resolving any packet while the PR stands closed stamps `closure.answered`
+    is live (or says `closed` with no closure record), it reads the cached NUMBER directly
+    and records a settled answer, so the close a push overtook transitions in the
+    delivery's own turn and once. The note, the inbox alert and the wake fire the pass the
+    closure RECORD is written, not the pass the state changes: keyed on the state alone
+    they were swallowed by the workspace reconcile that ran one step earlier. **(c)** A
+    person resolving any packet while the PR stands closed stamps `closure.answered`, and
+    creates the record when none exists (`by: null`, never a guess) so the refusal is
+    always answerable
     (the operator's withdrawal stamps nothing); a reopen on GitHub drops the closure with
     the closed state. **(d)** `performDelivery` reports `closed_by_human` on the task
     (one sentence, `closedByHumanDeliveryText`, on the operator's reply, the Deliver
@@ -3244,7 +3253,10 @@ available. It reads nobody else's session.)*
     remote holds what it holds (U35-8): the reconciler records `github.foreignHead {sha,
     prNumber}` whenever the branch head is not proven this task's and origin holds
     something (a stranger's PR, or commits ahead of the base with no delivery of this
-    task behind them), and drops it the pass the head is proven; the archive ceremony's
+    task behind them), and drops it the pass the head is proven; "delivery" here is (a)'s
+    departure test and not the reported revision the F31-1 commit footprint keys on, or
+    KNC-21's own shape (a revision minted on the branch, the push refused) would count as
+    proof and disclose nothing; the archive ceremony's
     delete-branch dialog says "origin's `branch` carries commits this task did not author
     (head `sha`, pull request #n stands on it); deleting it removes them too" before the
     button, the operator's `get_task` carries the same fact, and the toolkit tells it to

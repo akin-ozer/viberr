@@ -191,7 +191,9 @@ no credential, no repository and an unknown task are standing states and only lo
 4. **`openTaskPr`**: reuse a cached live PR if GitHub still reports it open. A pull
    request closed WITHOUT merging is a person's decision (ruling 160, pass 35 F35-11):
    a cached `closed` PR whose `closure` no person has answered refuses with
-   `closed_by_human` before GitHub is asked, and a cached live PR that GitHub now
+   `closed_by_human` before GitHub is asked (a `closed` cache carrying NO closure
+   record is one the workspace reconcile wrote, so it goes through `reconcileTask`
+   first and the refusal reads off what that pass recorded), and a cached live PR that GitHub now
    reports closed and unmerged is handed to `reconcileTask` (the one writer of
    `pr.state: closed`, the closure record and the R8-6 note, inbox alert and
    `pr-diverged` wake) and then refused the same way; no fresh PR is opened for the
@@ -355,11 +357,14 @@ is ahead of the reviewed revision, the unpushed-revision record when it is not (
 135), human approval), and writes the `pr` and `github` caches into `task.md`. The PR
 is found by branch name, and a closed PR whose branch has since advanced is not
 returned that way (F26); when the listing names nothing and the task's cached PR is
-live, the cached NUMBER is read directly and a settled answer (closed, merged) is
-recorded (ruling 160): this is what lets a close that a push overtook transition at
-all. The transition into `closed` stamps `pr.closure` (`at`, the closer's GitHub login
-from the issue payload or null, `answered: null`); the closure is carried while the PR
-stays closed and dropped when it is live or merged again. The
+live (or says `closed` with no closure record), the cached NUMBER is read directly and a
+settled answer (closed, merged) is recorded (ruling 160): this is what lets a close that
+a push overtook transition at all. Writing `pr.closure` (`at`, the closer's GitHub login
+from the issue payload or null, `answered: null`) is what announces the close: the note,
+the alert and the wake fire the pass that RECORD appears, not the pass the state changes,
+because `pr.state: closed` also reaches the file from the workspace reconcile. The
+closure is carried while the PR stays closed and dropped when it is live or merged
+again. The
 operator's branch update runs one such pass right after its push (ruling 132), so the
 drift it caused is measured before the tool answers. The pass writes
 `task.md` (the reconciler never mints a PR link and never downgrades `merged` or
