@@ -73,13 +73,16 @@ shipped baseline (see [deployment.md](./deployment.md#re-baselining-the-projecti
 Grep for it after a deploy.
 
 **One drift shape self-repairs and needs no remedy.** A baseline column ADDED after a
-data root was created is applied at open by `ensureRunRowColumns`
-(`app/server/db/sqlite.server.ts`), which `ALTER TABLE agent_runs ADD COLUMN`s each
-missing entry of `RUN_ROW_COLUMNS` — today `dispatched_by_name` and
-`dispatched_by_user_id` — idempotently, logging `added a baseline column this data root
-predated`. So the re-baseline below is **not** the remedy for those two: without the
-backstop every `patchRun` naming them would fail "no such column" and take every agent
-completion on that root with it. A failure to ALTER is warned, not fatal, and retried
+data root was created is applied at open by `ensureBaselineColumns`
+(`app/server/db/sqlite.server.ts`), which `ALTER TABLE … ADD COLUMN`s each missing entry
+of `BASELINE_COLUMNS` — on `agent_runs` `dispatched_by_name`, `dispatched_by_user_id`,
+`credential_user_id`, `interrupted_reason` and `usage_final`, plus the ruling-121
+controller columns — idempotently, logging `added a baseline column this data root
+predated`, and runs a column's one-time backfill in the same step when the DEFAULT would
+misdescribe the rows that predate it (`usage_final = 1` on the `finished` runs, so an
+upgraded root keeps its Insights token history). So the re-baseline below is **not** the
+remedy for those columns: without the backstop every `patchRun` naming them would fail
+"no such column" and take every agent completion on that root with it. A failure to ALTER is warned, not fatal, and retried
 next boot. The re-baseline remains the remedy for the shape that cannot be patched
 additively — a CHECK constraint that refuses a value the running build now produces.
 *(Added 2026-09-02, pass 32.)*

@@ -348,10 +348,15 @@ member stops projecting behind a generic `projection rebuild failed`.
 
 **First, check whether you need a remedy at all.** The WARN covers two shapes, and one
 of them repairs itself: a baseline COLUMN added after this root was created is applied
-at open by `ensureRunRowColumns` (`app/server/db/sqlite.server.ts`), which `ALTER TABLE
-agent_runs ADD COLUMN`s each missing entry of `RUN_ROW_COLUMNS` — `dispatched_by_name`
-and `dispatched_by_user_id` today — and logs `added a baseline column this data root
-predated`. Additive drift on those columns needs nothing below. What follows is for the
+at open by `ensureBaselineColumns` (`app/server/db/sqlite.server.ts`), which `ALTER
+TABLE … ADD COLUMN`s each missing entry of `BASELINE_COLUMNS` — on `agent_runs`
+`dispatched_by_name`, `dispatched_by_user_id`, `credential_user_id`,
+`interrupted_reason` and `usage_final`, plus the ruling-121 controller columns — and
+logs `added a baseline column this data root predated`. A column whose DEFAULT would be
+WRONG for the rows that predate it carries a one-time backfill run in the same step
+(`usage_final = 1` on the `finished` runs, whose token columns held the provider's own
+figures before the estimate existed); it is logged as a warn when it cannot run.
+Additive drift on those columns needs nothing below. What follows is for the
 shape no ALTER can fix: a CHECK constraint that refuses a value the running build now
 produces. *(Added 2026-09-02, pass 32.)*
 

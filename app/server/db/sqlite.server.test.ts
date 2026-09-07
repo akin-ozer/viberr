@@ -1,4 +1,5 @@
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -14,6 +15,7 @@ import { resetEnvCacheForTests } from "~/server/config/env.server";
 import { DATA_ROOT_LOCK_FILENAME, isProcessAlive } from "./data-root-lock.server";
 import {
   closeDb,
+  copyStorePair,
   ensureBaselineColumns,
   getDb,
   getProjectionDbPath,
@@ -21,6 +23,7 @@ import {
   openDatabase,
   openDatabaseReadOnly,
   READER_SNAPSHOT_DIR,
+  readWalIdentity,
   shutdownDatabase,
 } from "./sqlite.server";
 
@@ -60,6 +63,66 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
       ensureBaselineColumns(db);
       expect(columns()).toHaveLength(7);
       db.prepare(`UPDATE agent_runs SET dispatched_by_name = ? WHERE id = ?`).run("x", "none");
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * F35-1 (pass 35 review). `usage_final` is added with `DEFAULT 0`, and 0
+   * means "no provider figure landed for this run" — which the Insights token
+   * sums read as "leave this row out". On a root that already has history,
+   * SQLite writes that 0 into every existing row, so without a backfill the
+   * whole store's token accounting would disappear from the dashboard at the
+   * first boot after the upgrade while Runs, Turns and Cost kept counting the
+   * same rows. Before the column existed the token columns of a FINISHED run
+   * held the provider's own figures, so those rows are healed to 1; a stopped
+   * or errored row held the live placeholder, which is not a total, and stays
+   * 0. Canary: drop the `backfill` from BASELINE_COLUMNS and the finished row
+   * reads 0.
+   */
+  it("backfills usage_final on the finished runs a pre-column root already holds", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-usagefinal-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      // The agent_runs shape a root carried before F35-1 added the column.
+      db.exec(
+        `CREATE TABLE agent_runs (
+           id TEXT PRIMARY KEY, state TEXT NOT NULL, finished_at TEXT,
+           input_tokens INTEGER NOT NULL DEFAULT 0,
+           output_tokens INTEGER NOT NULL DEFAULT 0);
+         INSERT INTO agent_runs (id, state, finished_at, input_tokens, output_tokens)
+           VALUES ('run_done', 'finished', '2026-09-01T10:00:00.000Z', 4000, 900),
+                  ('run_cut', 'interrupted', '2026-09-01T11:00:00.000Z', 300, 40),
+                  ('run_live', 'running', NULL, 120, 8);`,
+      );
+
+      ensureBaselineColumns(db);
+
+      const finals = new Map(
+        // SAFETY: the two columns are read straight back from the row above.
+        (
+          db.prepare(`SELECT id, usage_final FROM agent_runs ORDER BY id`).all() as {
+            id: string;
+            usage_final: number;
+          }[]
+        ).map((r) => [r.id, r.usage_final]),
+      );
+      expect(finals.get("run_done")).toBe(1);
+      expect(finals.get("run_cut")).toBe(0);
+      expect(finals.get("run_live")).toBe(0);
+
+      // Idempotent: the second boot adds nothing and re-stamps nothing, so a
+      // row the sink has since corrected is not overwritten.
+      db.prepare(`UPDATE agent_runs SET usage_final = 0 WHERE id = 'run_done'`).run();
+      ensureBaselineColumns(db);
+      expect(
+        // SAFETY: one INTEGER column of one row, named in the statement.
+        (db.prepare(`SELECT usage_final FROM agent_runs WHERE id = 'run_done'`).get() as {
+          usage_final: number;
+        }).usage_final,
+      ).toBe(0);
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -287,6 +350,90 @@ describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", 
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+
+/**
+ * Ruling 158, pass 35 review. A reader copies the database and then its WAL,
+ * and nothing used to pin the two: SQLite checkpoints on its own (the writer
+ * leaves `wal_autocheckpoint` at its default) and a checkpoint RESETS the log,
+ * renumbering frames from 1 under a new salt. A copy taken across that reset
+ * applies post-reset frames to a pre-reset main file. Frame checksums do not
+ * catch it — they cover a torn tail — and `backup` labels the artefact a
+ * consistent point-in-time copy, so the reader has to detect the reset itself.
+ */
+describe("copyStorePair (ruling 158): the copied pair comes from one moment", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function busyStore() {
+    const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "viberr-walpin-")));
+    dirs.push(dir);
+    const dbPath = path.join(dir, "projection.sqlite");
+    const db = openDatabase(dbPath);
+    db.exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)`);
+    const insert = db.prepare(`INSERT INTO t (v) VALUES (?)`);
+    for (let i = 0; i < 200; i += 1) insert.run("x".repeat(200));
+    return { dir, dbPath, db };
+  }
+
+  it("the WAL identity is stable while frames are appended and changes when the log is reset", () => {
+    const { dbPath, db } = busyStore();
+    const wal = `${dbPath}-wal`;
+    expect(readWalIdentity(path.join(path.dirname(dbPath), "nothing-here-wal"))).toBeNull();
+
+    const before = readWalIdentity(wal);
+    expect(before).not.toBeNull();
+    // An ordinary commit only APPENDS frames: the pair stays coherent, so a
+    // reader that treated this as a change would retry on every busy root.
+    db.prepare(`INSERT INTO t (v) VALUES (?)`).run("appended");
+    expect(readWalIdentity(wal)).toBe(before);
+
+    // The event that breaks a copy: the log is reset, then written again.
+    db.prepare(`PRAGMA wal_checkpoint(TRUNCATE)`).get();
+    for (let i = 0; i < 50; i += 1) db.prepare(`INSERT INTO t (v) VALUES (?)`).run("y".repeat(200));
+    // Canary: without `readWalIdentity` the reader has nothing to compare, and
+    // the copy below is taken and used as if it were a snapshot.
+    expect(readWalIdentity(wal)).not.toBe(before);
+    db.close();
+  });
+
+  it("a pair taken across a reset is not a faithful copy, which is why the copy is pinned", () => {
+    const { dir, dbPath, db } = busyStore();
+    const badDir = path.join(dir, "unpinned");
+    mkdirSync(badDir, { recursive: true });
+    const bad = path.join(badDir, "projection.sqlite");
+    // The old copy order, with the reset landing in the window between them.
+    copyFileSync(dbPath, bad);
+    db.prepare(`PRAGMA wal_checkpoint(TRUNCATE)`).get();
+    for (let i = 0; i < 50; i += 1) db.prepare(`INSERT INTO t (v) VALUES (?)`).run("y".repeat(200));
+    copyFileSync(`${dbPath}-wal`, `${bad}-wal`);
+    let faithful: boolean;
+    try {
+      const opened = openDatabase(bad);
+      // SAFETY: one INTEGER column named in the statement.
+      const row = opened.prepare(`SELECT count(*) AS n FROM t`).get() as { n: number };
+      faithful = row.n === 250;
+      opened.close();
+    } catch {
+      faithful = false;
+    }
+    expect(faithful).toBe(false);
+
+    // Pinned, with no reset in the window: the copy carries every committed
+    // row, the uncheckpointed ones included.
+    const goodDir = path.join(dir, "pinned");
+    mkdirSync(goodDir, { recursive: true });
+    const good = path.join(goodDir, "projection.sqlite");
+    copyStorePair(dbPath, good);
+    const copy = openDatabase(good);
+    // SAFETY: one INTEGER column named in the statement.
+    expect((copy.prepare(`SELECT count(*) AS n FROM t`).get() as { n: number }).n).toBe(250);
+    copy.close();
+    db.close();
   });
 });
 

@@ -1,4 +1,14 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, rmdirSync } from "node:fs";
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  readdirSync,
+  rmSync,
+  rmdirSync,
+} from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { getEnv } from "../config/env.server";
@@ -47,6 +57,67 @@ export interface ReadOnlyDatabase {
   close(): void;
 }
 
+/** How many times a reader retakes a copy the writer moved under it. */
+const READER_COPY_ATTEMPTS = 3;
+
+/**
+ * The identity of a write-ahead log: the salt in its 32-byte header (bytes
+ * 16..24), or null when there is no WAL beside the database. SQLite changes the
+ * salt every time it RESETS the file (`salt1` is incremented on a checkpoint
+ * that restarts or truncates it), and never for the frames it appends, so an
+ * unchanged identity across a copy means every frame the copied WAL holds still
+ * belongs to the main file that was copied with it. A header shorter than 32
+ * bytes is a WAL that was just truncated: its own identity, distinct from both
+ * a missing file and any salt.
+ */
+export function readWalIdentity(walPath: string): string | null {
+  if (!existsSync(walPath)) return null;
+  let fd: number | null = null;
+  try {
+    fd = openSync(walPath, "r");
+    const header = Buffer.alloc(32);
+    const read = readSync(fd, header, 0, 32, 0);
+    return read < 32 ? "truncated" : header.subarray(16, 24).toString("hex");
+  } catch {
+    // Unreadable for a moment (the writer replacing it) counts as a change:
+    // two unreadable probes in a row are not proof of a pinned pair either.
+    return "unreadable";
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
+
+/**
+ * Copies `projection.sqlite` and its `-wal` to `copyPath`, pinned: the WAL's
+ * identity is read before the first copy and after the last, and a copy that
+ * straddles a WAL reset is discarded and retaken. Throws when the writer keeps
+ * resetting the WAL under every attempt, which is honest: the alternative is a
+ * copy that can pass an integrity check and still be wrong.
+ */
+export function copyStorePair(dbPath: string, copyPath: string): void {
+  const wal = `${dbPath}-wal`;
+  let straddled = "";
+  for (let attempt = 1; attempt <= READER_COPY_ATTEMPTS; attempt += 1) {
+    const before = readWalIdentity(wal);
+    copyFileSync(dbPath, copyPath);
+    if (existsSync(wal)) copyFileSync(wal, `${copyPath}-wal`);
+    else rmSync(`${copyPath}-wal`, { force: true });
+    const after = readWalIdentity(wal);
+    if (before === after) return;
+    straddled = `${before ?? "no wal"} then ${after ?? "no wal"}`;
+    logger.info("reader copy straddled a WAL reset — retaking it", {
+      dbPath,
+      attempt,
+      wal: straddled,
+    });
+  }
+  rmSync(`${copyPath}-wal`, { force: true });
+  rmSync(copyPath, { force: true });
+  throw new Error(
+    `could not copy ${dbPath} with its WAL: the writer reset the log during every attempt (${straddled}). Retry, or stop the app and read the root directly.`,
+  );
+}
+
 /**
  * Opens the database for READING, never as the second connection to a live root
  * (ruling 158). Used by the read-only maintenance CLIs (`npm run backup`,
@@ -77,6 +148,17 @@ export interface ReadOnlyDatabase {
  *    a live writer can honestly have, and `backup`'s `VACUUM INTO` then runs on
  *    it and stays a single-file artefact.
  *
+ * The pair is PINNED across the two copies (`copyStorePair`). Frame checksums
+ * cover a torn tail and nothing else: when SQLite checkpoints and RESETS the
+ * WAL between the two copies, the copied WAL holds frames numbered from 1 again
+ * under a new salt and recovery applies them to a main file that predates the
+ * checkpoint. That is not detectable after the fact — reproduced on this
+ * machine both ways: "database disk image is malformed" on open, and (small
+ * window) a copy that answers `PRAGMA quick_check` with `ok` and has lost a
+ * table. So the WAL's salt is read before the main file is copied and again
+ * after the WAL is copied; a change (or the `-wal` appearing or vanishing)
+ * means the pair straddles a reset, and the copy is discarded and retaken.
+ *
  * No migrations are run either way: a reporting command has no business
  * changing a schema, and on the copy a change would be thrown away with it.
  */
@@ -103,9 +185,7 @@ export function openDatabaseReadOnly(dbPath: string): ReadOnlyDatabase {
   const copy = path.join(dir, path.basename(dbPath));
   let db: DatabaseSync;
   try {
-    copyFileSync(dbPath, copy);
-    const wal = `${dbPath}-wal`;
-    if (existsSync(wal)) copyFileSync(wal, `${copy}-wal`);
+    copyStorePair(dbPath, copy);
     db = new DatabaseSync(copy);
   } catch (error) {
     // A copy that failed to open is not a snapshot anybody will close: remove
@@ -282,7 +362,20 @@ export function ensureSingleFlightIndexes(db: DatabaseSync): void {
  */
 const BASELINE_COLUMNS: readonly {
   table: string;
-  columns: readonly { name: string; ddl: string }[];
+  columns: readonly {
+    name: string;
+    ddl: string;
+    /**
+     * Run ONCE, right after this column is added, to give the rows that
+     * predate it their meaning. A DEFAULT is a value, not a meaning: a column
+     * whose 0 says "no provider figure landed for this run" would otherwise
+     * claim that of every historical row, and readers that skip those rows
+     * (the Insights token sums) would drop a whole store's history the first
+     * time an upgraded root booted. Only for columns whose default is WRONG
+     * for existing rows; omitted everywhere the default is the truth.
+     */
+    backfill?: string;
+  }[];
 }[] = [
   {
     table: "agent_runs",
@@ -301,8 +394,18 @@ const BASELINE_COLUMNS: readonly {
       // ever store 'restart', which is the enforcement on an upgraded root.
       { name: "interrupted_reason", ddl: "interrupted_reason TEXT" },
       // F35-1: the sink patches it on every persisted line, so a root that
-      // predates it would fail every run's first line.
-      { name: "usage_final", ddl: "usage_final INTEGER NOT NULL DEFAULT 0" },
+      // predates it would fail every run's first line. Before the column
+      // existed the token columns of a FINISHED run held the provider's own
+      // figures (the sink folded them from the result envelope; there was no
+      // estimate to hold), so those rows are backfilled as final and keep
+      // counting in the Insights token sums. A row that was stopped or errored
+      // carried the old live placeholder instead, which is not a total: it
+      // stays 0 and the card names it with the rest.
+      {
+        name: "usage_final",
+        ddl: "usage_final INTEGER NOT NULL DEFAULT 0",
+        backfill: "UPDATE agent_runs SET usage_final = 1 WHERE state = 'finished'",
+      },
     ],
   },
   {
@@ -378,6 +481,23 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
           table,
           column: column.name,
         });
+        if (column.backfill) {
+          // Its own try: a backfill that cannot run (an older root whose table
+          // lacks a column the statement names) must not skip the columns
+          // still to be added for this table.
+          try {
+            db.exec(column.backfill);
+          } catch (error) {
+            logger.warn(
+              "a baseline column was added but its backfill did not run — rows that predate the column keep the column default",
+              {
+                table,
+                column: column.name,
+                err: error instanceof Error ? error : new Error(String(error)),
+              },
+            );
+          }
+        }
       }
     } catch (error) {
       logger.warn(
