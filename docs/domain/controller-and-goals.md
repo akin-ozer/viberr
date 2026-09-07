@@ -532,8 +532,10 @@ only; a fresh task under the present caller), `edit_link` (pending or failed; ru
 131(c): `blockedBy` absent leaves the link's declared wait, `[]` clears it, any list is
 validated at declaration time, this chain's own links included; on an ACTIVE link,
 ruling 155, `blockedBy` is the only field that may change and it is forwarded to
-`setTaskDependencies` on the link's task after the goal-file lock is released, the
-task's writer validating and gating it and mirroring it back, the reply reading "Link
+`setTaskDependencies` on the link's task after the goal-file lock is released; the
+chain's own rules are applied first (never itself, an existing link, never a LATER
+link of its own chain, which the task's writer does not know), then the task's writer
+validates and gates it and mirrors it back, the reply reading "Link
 1 waits on nothing, through KNC-3."; a title or goal on an active link, or an edit
 with nothing to forward, is refused with "Only a pending or failed link's title or
 goal can be edited; link 1 is active. Its wait follows KNC-3: pass blockedBy here or

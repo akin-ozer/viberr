@@ -494,7 +494,24 @@ export async function updateGoal(
                   `Its wait follows ${link.taskKey}: pass blockedBy here or edit it on the task.`,
               );
             }
-            forward.wait = { linkIndex: op.index, taskKey: link.taskKey, blockedBy: op.blockedBy };
+            // The task writer re-validates the list, but `validateDependencyRefs`
+            // does not carry the CHAIN-ORDER rule: a pending later link of this
+            // same chain declares no edges, so no cycle closes and the wait is
+            // accepted, leaving link 1 held by link 2 and link 2 held by the
+            // chain order. Run the goal's own rules here first, so the active
+            // arm refuses exactly what every other arm refuses.
+            forward.wait = {
+              linkIndex: op.index,
+              taskKey: link.taskKey,
+              blockedBy: validateLinkWait(
+                db,
+                input.projectSlug,
+                fm.id,
+                link.index,
+                fm.links,
+                op.blockedBy,
+              ),
+            };
             return;
           }
           if (link.status !== "pending" && link.status !== "failed") {

@@ -1243,4 +1243,48 @@ describe("ruling 155: edit_link on an active link edits its wait through the tas
     const timeline = readTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot })!.parsed.timeline;
     expect(timeline.some((e) => e.title === "Dependencies released")).toBe(true);
   });
+
+  // Pass-35 review: forwarding the list to the task's writer alone drops the
+  // chain-order rule, which only `validateLinkWait` carries. A pending later
+  // link declares no edges, so no cycle closes and the wait is accepted: link 1
+  // then waits on link 2, and link 2 cannot start before link 1 completes.
+  // Canary: forward `op.blockedBy` unvalidated again.
+  it("refuses a wait on a LATER link of the same chain, and leaves the task's list alone", async () => {
+    const { createGoal, updateGoal } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Chain that must run in order",
+        links: [
+          { title: "Order one", goal: "One. Done when merged." },
+          { title: "Order two", goal: "Two. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const taskKey = chain.activeTaskKey!;
+    const task = () => readTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot })!.parsed.frontmatter;
+    expect(task().blockedBy).toEqual([]);
+
+    await expect(
+      updateGoal(
+        app.db,
+        {
+          projectSlug: SLUG,
+          goalId: chain.goalId,
+          action: { op: "edit_link", index: 1, blockedBy: [`${chain.goalId} link 2`] },
+        },
+        actor,
+        ctx,
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("a link cannot wait on a LATER link of its own chain"),
+    });
+    expect(task().blockedBy).toEqual([]);
+  });
 });
