@@ -1601,3 +1601,54 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     expect(parsed.frontmatter.recommendations).toEqual([]);
   });
 });
+
+describe("ruling 161 (pass 35, G35-6): the delivery push stamps workRevision.pushedAt", () => {
+  const HEAD = "8c463b7".padEnd(40, "0");
+  function seedReported(): void {
+    seed({
+      stage: "review",
+      branch: "vib-1",
+      workRevision: {
+        id: "rev_reported",
+        headSha: HEAD,
+        treeSha: "b".repeat(40),
+        branch: "vib-1",
+        createdAt: "2026-09-06T18:56:57.000Z",
+        sourceProfileId: "developer",
+        kind: "delivered",
+      },
+    });
+  }
+
+  it("a `pushed` push whose head is the revision stamps pushedAt; the PR step still runs", async () => {
+    // Canary: drop the stamp block in performDelivery and `pushedAt` stays
+    // absent, so the discard gate reads a published head as a local draft.
+    seedReported();
+    pushMock.mockResolvedValue({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: HEAD,
+      remoteHeadBefore: null,
+      workflowFiles: [],
+    });
+    expect(fm().frontmatter.workRevision?.pushedAt ?? null).toBeNull();
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+    const stamped = fm().frontmatter.workRevision;
+    expect(stamped?.id).toBe("rev_reported");
+    expect(stamped?.pushedAt).toEqual(expect.any(String));
+    expect(openPrMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("`up_to_date` (origin already carries the head) stamps it too; a head the push did not name is left alone", async () => {
+    seedReported();
+    pushMock.mockResolvedValue({ status: "up_to_date", branch: "vib-1", headSha: "f".repeat(40) });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+    // A different head: nothing says origin holds THIS revision.
+    expect(fm().frontmatter.workRevision?.pushedAt ?? null).toBeNull();
+
+    pushMock.mockResolvedValue({ status: "up_to_date", branch: "vib-1", headSha: HEAD });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+    expect(fm().frontmatter.workRevision?.pushedAt).toEqual(expect.any(String));
+  });
+});

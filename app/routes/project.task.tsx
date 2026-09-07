@@ -49,7 +49,7 @@ import {
 } from "~/server/tasks/task-actions.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { splitDependencyText } from "~/shared/dependencies";
-import { coercePriority } from "~/schemas/task-file.schema";
+import { activeWorkRevision, coercePriority } from "~/schemas/task-file.schema";
 import { resolveAcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
@@ -289,7 +289,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // R15-1: the accept confirm names exactly what merges — the delivered
   // revision (task file) and the merge target (project default branch).
   const workRevisionSha =
-    taskFile?.parsed.frontmatter.workRevision?.headSha ?? null;
+    activeWorkRevision(taskFile?.parsed.frontmatter.workRevision)?.headSha ?? null;
   // R17-2: a verified no-change completion (empty branch, no PR) accepts to Done
   // without a merge — the confirm says so instead of implying delivered work.
   const noChanges = taskFile?.parsed.frontmatter.noChanges === true;

@@ -39,7 +39,14 @@ import {
   unpushedRevisionOf,
   type UnpushedRevision,
 } from "~/schemas/task-file.schema";
-import { PACKET_OPTION_KINDS, unpushedRevisionBlockedReason } from "~/schemas/task-file.schema";
+import {
+  activeWorkRevision,
+  PACKET_OPTION_KINDS,
+  revisionLeftWorkspace,
+  type ForeignBranchHead,
+  type RevisionDeparture,
+  unpushedRevisionBlockedReason,
+} from "~/schemas/task-file.schema";
 import {
   compactTimelineEvents,
   DEFAULT_COMPACTION,
@@ -1026,6 +1033,30 @@ function retryOtherBackendDefaults(
 }
 
 /** Open a typed human-decision packet and notify the task's supervisors. */
+/**
+ * Ruling 161: the one sentence naming why a `discard_branch` option cannot be
+ * offered, from the fact that says the revision left the workspace.
+ */
+export function revisionDepartureSentence(
+  departure: RevisionDeparture,
+  taskKey: string,
+  branch: string | null,
+): string {
+  const name = branch ? `\`${branch}\`` : "the task branch";
+  switch (departure.kind) {
+    case "pr":
+      return `PR #${departure.number} tracks ${name}, so it is no longer a local-only branch.`;
+    case "unowned_pr":
+      return `an unowned PR #${departure.number} stands on the branch name ${name}, so the local/remote framing would mislead.`;
+    case "pushed":
+      return `${taskKey}'s revision \`${departure.headSha.slice(0, 7)}\` was pushed to origin at ${departure.at}, so discarding the local branch would not remove it.`;
+    default: {
+      const exhaustive: never = departure;
+      return exhaustive;
+    }
+  }
+}
+
 export async function operatorOpenPacket(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -1064,27 +1095,32 @@ export async function operatorOpenPacket(
   }
   // F31-6: option/semantics coherence, checked where the option is AUTHORED.
   // `discard_branch` deletes the LOCAL, never-pushed branch and destroys its
-  // commits — offered on a task that has a delivered revision, or whose branch
-  // name is occupied on GitHub (a tracked PR or a recorded unowned one), the
-  // human's confirm ceremony would truthfully promise the opposite of the
-  // option's text (live-caught: an operator authored "delete the conflicting
-  // REMOTE branch and push this task's commit fresh" onto a discard_branch
-  // option — confirming it would have destroyed the delivery it promised to
-  // push). Refuse the authoring and name the verb that fits.
+  // commits — offered on a task whose revision has LEFT the workspace (a PR
+  // tracks the branch, a stranger's PR stands on the name, or a delivery push
+  // published the head), the human's confirm ceremony would truthfully promise
+  // the opposite of the option's text (live-caught: an operator authored
+  // "delete the conflicting REMOTE branch and push this task's commit fresh"
+  // onto a discard_branch option — confirming it would have destroyed the
+  // delivery it promised to push). Refuse the authoring and name the verb that
+  // fits.
+  //
+  // Ruling 161 (pass 35, G35-6): the gate keys on `revisionLeftWorkspace`, not
+  // on `workRevision !== null`. The revision registry writes a revision when
+  // the agent's completion report lands, before any push, so "has a revision"
+  // refused the discard on exactly the branch it exists for (KNC-21: reported
+  // 18:56Z, push refused 19:10Z, discard refused 19:3xZ, and the only door left
+  // was archiving the task). A reported head that never reached origin is the
+  // task's local draft; the refusal names the real reason when one applies.
   if (rawOptions.some((o) => o.kind === "discard_branch")) {
     const fm = existing.parsed.frontmatter;
-    const hasDeliveredWork = fm.workRevision !== null;
-    const branchNameOccupied =
-      fm.pr !== null || (fm.github?.unownedPr ?? null) !== null;
-    if (hasDeliveredWork || branchNameOccupied) {
+    const departure = revisionLeftWorkspace(fm);
+    if (departure) {
       return {
         outcome: "noop",
         message:
-          "discard_branch only fits a LOCAL, never-pushed branch with no delivered revision — " +
-          (hasDeliveredWork
-            ? `${input.taskKey} has a delivered revision, so discarding would destroy it. `
-            : "the branch name is occupied on GitHub, so the local/remote framing would mislead. ") +
-          "For a task-key branch collision (an unrelated remote branch or unowned PR under this task's branch name), offer resolve_remote_collision — the human's confirm closes the unowned PR, deletes the stale remote branch, and re-delivers this task's local work. To abandon the work entirely, offer archive_task with deleteBranch.",
+          `discard_branch only fits a branch whose revision never left the workspace (ruling 161): ` +
+          `${revisionDepartureSentence(departure, input.taskKey, fm.branch)} ` +
+          "For a task-key branch collision (an unrelated remote branch or unowned PR under this task's branch name), offer resolve_remote_collision: the human's confirm closes the unowned PR, deletes the stale remote branch, and re-delivers this task's local work. To abandon pushed or tracked work entirely, offer archive_task with deleteBranch.",
       };
     }
   }
@@ -1621,6 +1657,14 @@ export interface OperatorTaskSnapshot {
    *  Optional only so hand-built test fixtures need not restate it; the real
    *  producer (`operatorSnapshot`) always sets it. */
   unownedPr?: number | null;
+  /** Ruling 161 (pass 35, U35-8): origin's copy of the task branch carries
+   *  commits this task did not author, as the reconciler last recorded it
+   *  (`github.foreignHead`): the head sha when GitHub named one and the
+   *  unowned PR when one stands. Name it in an `archive_task` option's text
+   *  when offering `deleteBranch`: deleting the branch removes those commits
+   *  too. Null when the head is this task's or was never read. Optional only
+   *  so hand-built fixtures need not restate it; `operatorSnapshot` sets it. */
+  foreignHead?: ForeignBranchHead | null;
   /** R19-1: the project's repository ("owner/name"), or null when none is
    *  attached. The coordinator used to be blind to it — it could not even NAME
    *  the repository it operates on, which is part of how it came to call its own
@@ -2009,9 +2053,16 @@ export function operatorSnapshot(
               : null,
           revisionDriftSentence: describeRevisionDrift(fm.pr.revisionDrift).sentence,
           headSha: fm.pr.headSha ?? null,
-          unpushedRevision: unpushedRevisionOf(fm.pr, fm.workRevision?.headSha ?? null),
+          unpushedRevision: unpushedRevisionOf(
+            fm.pr,
+            activeWorkRevision(fm.workRevision)?.headSha ?? null,
+          ),
           unpushedRevisionSentence:
-            unpushedRevisionBlockedReason(fm.pr, fm.workRevision?.headSha ?? null, taskKey) ?? "",
+            unpushedRevisionBlockedReason(
+              fm.pr,
+              activeWorkRevision(fm.workRevision)?.headSha ?? null,
+              taskKey,
+            ) ?? "",
           // Ruling 162: the fact the acceptance gate refuses on, exposed as the
           // reconciler recorded it (settled PRs carry none).
           mergeable:
@@ -2032,6 +2083,8 @@ export function operatorSnapshot(
     // V19: the recorded branch-name collision, so the operator can author
     // `resolve_remote_collision` from a fact instead of timeline prose.
     unownedPr: fm.github?.unownedPr ?? null,
+    // Ruling 161: what origin's branch holds when it is not this task's work.
+    foreignHead: fm.github?.foreignHead ?? null,
     // R19-1: name the repository the read-only view reads.
     repo: project.parsed.frontmatter.repo ?? null,
     // R19-8: the "nothing to deliver" shape, stated outright.
@@ -2719,11 +2772,12 @@ export async function operatorDeliverForReview(
   if (g === "recommend") {
     // The recommend arm reads the RECORDED fact, never the cache: with an open
     // PR and no unpushed revision on the record there is nothing to propose.
-    const unpushed = unpushedRevisionOf(fm.pr, fm.workRevision?.headSha ?? null);
+    const activeRevision = activeWorkRevision(fm.workRevision);
+    const unpushed = unpushedRevisionOf(fm.pr, activeRevision?.headSha ?? null);
     if (livePr && !unpushed) {
       return {
         outcome: "noop",
-        message: `PR #${livePr.number} already carries the delivered revision${fm.workRevision ? ` \`${fm.workRevision.headSha.slice(0, 7)}\`` : ""}; there is nothing to deliver.`,
+        message: `PR #${livePr.number} already carries the delivered revision${activeRevision ? ` \`${activeRevision.headSha.slice(0, 7)}\`` : ""}; there is nothing to deliver.`,
       };
     }
     await addRecommendation(
@@ -2802,9 +2856,10 @@ export async function operatorDeliverForReview(
           `Open a decision packet with a \`resolve_remote_collision\` option — its ` +
           `ceremony closes the squatting PR (when one is recorded), deletes the stale ` +
           `remote branch, and re-delivers this task's local work — or an ` +
-          `\`archive_task\` option to abandon the task. Do NOT author ` +
-          `\`discard_branch\` here: it destroys this task's LOCAL commits and is ` +
-          `refused while delivered work stands on the branch.`,
+          `\`archive_task\` option to abandon the task. A \`discard_branch\` option ` +
+          `destroys this task's LOCAL commits: the refused push means the revision never ` +
+          `left the workspace, so it MAY be offered (ruling 161) when the person's choice is ` +
+          `to throw the local work away, never as the way to clear the remote.`,
       };
     case "scope_violation":
       // Ruling 144: the remedy is a human's (grant the scope on GitHub, then
@@ -3370,7 +3425,8 @@ export async function operatorAcceptCompletion(
         ? `Complete ${input.taskKey} with no changes and move it to ${doneName}`
         : `Accept completion and move ${input.taskKey} to ${doneName}`,
     };
-    const offeredHeadSha = file.parsed.frontmatter.workRevision?.headSha ?? null;
+    const offeredHeadSha =
+      activeWorkRevision(file.parsed.frontmatter.workRevision)?.headSha ?? null;
     if (offeredHeadSha) offer.forHeadSha = offeredHeadSha;
     await addRecommendation(
       db,

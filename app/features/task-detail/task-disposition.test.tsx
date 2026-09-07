@@ -89,6 +89,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     commits: [],
     changed: null,
     unownedPr: null,
+    foreignHead: null,
     goal: "Keep the timeline readable on long tasks.",
     packet: null,
     eventCount: 0,
@@ -1490,6 +1491,7 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
     branch: "vib-151",
     pendingRecommendations: 2,
     unownedPr: null,
+    foreignHead: null,
     openPr: null,
   };
 
@@ -2401,6 +2403,7 @@ describe("C3: the collision confirm describes the right branch, and warns before
       task: {
         packet: collisionPacket,
         unownedPr: null,
+        foreignHead: null,
         pr: { number: 77, state: "review", title: "VIB-151 work" },
       },
     });
@@ -2417,6 +2420,7 @@ describe("C3: the collision confirm describes the right branch, and warns before
       task: {
         packet: collisionPacket,
         unownedPr: null,
+        foreignHead: null,
         pr: { number: 77, state: "merged", title: "VIB-151 work" },
       },
     });

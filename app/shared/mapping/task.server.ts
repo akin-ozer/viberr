@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
   AgentRef,
+  ForeignBranchHead,
   GithubCache,
   OperatorRef,
   PacketObservation,
@@ -236,6 +237,11 @@ export interface TaskSummary {
   /** R15-15 / F31-6: a PR found on this task's branch that this task did NOT
    *  open — the branch-collision signature. Null = no collision recorded. */
   unownedPr: number | null;
+  /** Ruling 161 (pass 35, U35-8): origin's copy of the branch carries commits
+   *  this task did not author, as the reconciler last recorded it. The archive
+   *  ceremony's delete-branch disclosure names it. Null = the head is this
+   *  task's, or was never read. */
+  foreignHead: ForeignBranchHead | null;
   /**
    * Ruling 53 + ruling 88 — the DELIVERED revision's head sha, or null before
    * delivery.
@@ -664,6 +670,7 @@ export function mapTaskProjectionRow(
     commits: github?.commits ?? [],
     changed: github?.changed ?? null,
     unownedPr: github?.unownedPr ?? null,
+    foreignHead: github?.foreignHead ?? null,
     workRevisionSha: row.work_revision_sha,
     goal: row.goal,
     goalRef:

@@ -2305,6 +2305,42 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     expect(text).toContain("clean working tree");
   });
 
+  it("ruling 161 (G35-6): a reviewer's verdict never binds to a discarded revision", async () => {
+    // Canary: read `parsed.frontmatter.workRevision` instead of
+    // `activeWorkRevision(...)` at the verdict binding and the approve pins to
+    // the retired head, re-deriving `healthy` for a branch that no longer exists.
+    const store = prepared();
+    const retiredId = "rev_MBEIgNbXXyFX";
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        readiness: "ready",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        engagements: [REVIEWER_ENGAGEMENT],
+        branch: null,
+        workRevision: {
+          id: retiredId,
+          headSha: "8c463b7".padEnd(40, "0"),
+          treeSha: "b".repeat(40),
+          branch: "vib-1",
+          createdAt: "2026-09-06T18:56:57.000Z",
+          sourceProfileId: "developer",
+          kind: "discarded",
+        },
+        validation: "none",
+      }),
+      goal: "Review after a discard.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await recordReviewerReply(store, "Verdict: approve — looks fine to me.");
+    const after = fm(store);
+    expect(after.verdicts.some((v) => v.revisionId === retiredId)).toBe(false);
+    expect(after.workRevision?.kind).toBe("discarded");
+    expect(after.validation).toBe("none");
+  });
+
   it("closes to Done with no PR and no merge once the required reviewer approves", async () => {
     const store = prepared();
     seedVerifyOnly(store);

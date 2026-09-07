@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
+  activeWorkRevision,
   EVIDENCE_EMPTY_COLUMN,
   type PrRef,
   type TaskFileEvent,
@@ -489,7 +490,7 @@ export async function openTaskPr(
           : decidePrAdoption({
               state: mapPrToCacheState(pr),
               prHeadSha: pr.head?.sha ?? null,
-              revisionHeadSha: fm.workRevision?.headSha ?? null,
+              revisionHeadSha: activeWorkRevision(fm.workRevision)?.headSha ?? null,
             });
       if (!adoption.adopt) {
         return {
@@ -501,7 +502,7 @@ export async function openTaskPr(
             taskKey: input.taskKey,
             branch,
             prNumber: pr.number,
-            revisionHeadSha: fm.workRevision?.headSha ?? null,
+            revisionHeadSha: activeWorkRevision(fm.workRevision)?.headSha ?? null,
           }),
         };
       }
@@ -568,7 +569,7 @@ export async function openTaskPr(
   // back to the frontmatter only when the compare is unreachable.
   const liveStats = await deliveredDiffStats(gh, gh.defaultBranch, branch);
   const liveParts = liveStats
-    ? deliveredStatsToPrParts(liveStats, branch, fm.workRevision?.headSha ?? null)
+    ? deliveredStatsToPrParts(liveStats, branch, activeWorkRevision(fm.workRevision)?.headSha ?? null)
     : null;
   const body = composePrBody({
     taskKey: input.taskKey,

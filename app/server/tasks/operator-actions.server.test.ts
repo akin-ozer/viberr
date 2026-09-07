@@ -2505,6 +2505,10 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     );
     expect(refused.outcome).toBe("noop");
     expect(refused.message).toContain("resolve_remote_collision");
+    // Ruling 161: the refusal names the REAL reason (the unowned PR), not
+    // "has a delivered revision".
+    expect(refused.message).toContain("unowned PR #232 stands on the branch name `vib-1`");
+    expect(refused.message).not.toContain("has a delivered revision");
     expect(task().packet).toBeNull();
 
     const accepted = await operatorOpenPacket(
@@ -2528,6 +2532,109 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     );
     expect(accepted.outcome).toBe("done");
     expect(task().packet!.options[0]!.kind).toBe("resolve_remote_collision");
+  });
+
+  /**
+   * Ruling 161 (pass 35, G35-6): KNC-21's revision was registered by the
+   * agent's completion report at 18:56Z, the push was refused at 19:10Z, and
+   * the operator's `discard_branch` was refused at 19:3xZ because "a revision
+   * exists". The gate keys on whether the revision LEFT the workspace.
+   */
+  function reportedRevision(pushedAt: string | null): WorkRevision {
+    const revision: WorkRevision = {
+      id: "rev_MBEIgNbXXyFX",
+      headSha: "8c463b7".padEnd(40, "0"),
+      treeSha: "b".repeat(40),
+      branch: "vib-1",
+      createdAt: "2026-09-06T18:56:57.000Z",
+      sourceProfileId: "developer",
+      kind: "delivered",
+    };
+    // The key is absent, not undefined, when there was no push: that is the
+    // shape a file that never saw a delivery parses to.
+    if (pushedAt) revision.pushedAt = pushedAt;
+    return revision;
+  }
+  const discardOption = {
+    kind: "discard_branch" as const,
+    title: "Throw the local vib-1 draft away",
+    recommended: true,
+  };
+
+  it("ruling 161: discard_branch is accepted on a reported, never-pushed revision with no PR on the branch", async () => {
+    // Canary: restore `hasDeliveredWork = fm.workRevision !== null` and this
+    // authoring is refused ("has a delivered revision").
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        title: "Reported, never pushed",
+        branch: "vib-1",
+        workRevision: reportedRevision(null),
+        github: { commits: [{ sha: "8c463b7", msg: "[VIB-1] work" }], changed: null },
+      }),
+      goal: "Discard a local draft.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const accepted = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "The push was refused: keep or throw away the local work?",
+        options: [discardOption, { kind: "custom" as const, title: "Something else" }],
+      },
+      authority("supervised"),
+    );
+    expect(accepted.outcome).toBe("done");
+    expect(task().packet!.options[0]!.kind).toBe("discard_branch");
+  });
+
+  it("ruling 161: discard_branch is refused once the delivery push published the head, naming the push", async () => {
+    // Canary: drop the `pushed` arm of `revisionLeftWorkspace` and a pushed
+    // revision is offered for a local discard that cannot remove it.
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        title: "Pushed, PR not yet open",
+        branch: "vib-1",
+        workRevision: reportedRevision("2026-09-06T19:10:35.000Z"),
+      }),
+      goal: "Refuse the discard of pushed work.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const refused = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Throw the work away?",
+        options: [discardOption],
+      },
+      authority("supervised"),
+    );
+    expect(refused.outcome).toBe("noop");
+    expect(refused.message).toContain("ruling 161");
+    expect(refused.message).toContain("`8c463b7` was pushed to origin at 2026-09-06T19:10:35.000Z");
+    expect(refused.message).toContain("archive_task with deleteBranch");
+    expect(task().packet).toBeNull();
   });
 
   it("rejects an unknown option kind", async () => {

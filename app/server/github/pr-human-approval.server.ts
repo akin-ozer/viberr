@@ -1,6 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import type { PrRef, Validation, WorkRevision } from "~/schemas/task-file.schema";
+import {
+  activeWorkRevision,
+  type PrRef,
+  type Validation,
+  type WorkRevision,
+} from "~/schemas/task-file.schema";
 import type { PrApproval } from "./pr-linker.server";
 
 /**
@@ -214,7 +219,7 @@ export function humanVerdictApproval(fm: {
   const approval = readPrHumanApproval(fm.pr);
   if (!approval || approval.status !== "counted") return null;
   if (!approval.userId || !approval.commitSha) return null;
-  const delivered = fm.workRevision?.headSha ?? null;
+  const delivered = activeWorkRevision(fm.workRevision)?.headSha ?? null;
   if (!delivered || delivered !== approval.commitSha) return null;
   return approval;
 }
@@ -323,7 +328,9 @@ export function verdictGateReason(
    */
   noChangeVerified?: boolean,
 ): string | null {
-  if (!fm.workRevision) return null;
+  // Ruling 161: a discarded revision is no delivered work.
+  const revision = activeWorkRevision(fm.workRevision);
+  if (!revision) return null;
   // Delivered work with no PR: nothing stands for review, so acceptance would
   // close the task on work no PR ever carried (R15-1 gate 1).
   if (!fm.pr) {
@@ -333,7 +340,7 @@ export function verdictGateReason(
     // there was nothing to deliver) — a "Completed — no changes" outcome. There
     // is nothing to open a PR for; acceptance closes it to Done without a merge,
     // after re-proving the basis live.
-    if (fm.noChanges || fm.workRevision.kind === "verified" || noChangeVerified)
+    if (fm.noChanges || revision.kind === "verified" || noChangeVerified)
       return null;
     return `${taskKey} has delivered work but no review pull request. Deliver the branch & open the PR before accepting.`;
   }

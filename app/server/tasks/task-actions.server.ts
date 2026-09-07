@@ -16,6 +16,7 @@ import {
   conflictingPrBlockedReason,
   unpushedRevisionBlockedReason,
   unpushedRevisionOf,
+  activeWorkRevision,
   deliveringEngagement,
   type Engagement,
   deriveValidation,
@@ -3009,7 +3010,8 @@ export function deliveredWorkEvidence(fm: {
 }): EvidenceRow[] {
   const rows: EvidenceRow[] = [];
   const changed = fm.github?.changed ?? null;
-  const branch = fm.workRevision?.branch ?? fm.branch;
+  const revision = activeWorkRevision(fm.workRevision);
+  const branch = revision?.branch ?? fm.branch;
   if (changed) {
     rows.push({
       label: `${changed.files} file(s) changed${branch ? ` on \`${branch}\`` : ""}`,
@@ -3019,7 +3021,7 @@ export function deliveredWorkEvidence(fm: {
   }
   const commits = fm.github?.commits ?? [];
   if (commits.length > 0) {
-    const rev = fm.workRevision;
+    const rev = revision;
     rows.push({
       label:
         `${commits.length} commit(s) delivered` +
@@ -3147,7 +3149,7 @@ export async function recordAgentCompletion(
       .frontmatter;
     if (
       pre &&
-      !pre.workRevision &&
+      !activeWorkRevision(pre.workRevision) &&
       !pre.pr &&
       pre.branch === null &&
       deliveringEngagement(pre) === null &&
@@ -3172,7 +3174,7 @@ export async function recordAgentCompletion(
         // In-lock re-check: a delivery could have landed during the probe above.
         if (
           noChangeMint &&
-          !parsed.frontmatter.workRevision &&
+          !activeWorkRevision(parsed.frontmatter.workRevision) &&
           !parsed.frontmatter.pr &&
           parsed.frontmatter.branch === null &&
           deliveringEngagement(parsed.frontmatter) === null
@@ -3196,7 +3198,10 @@ export async function recordAgentCompletion(
         // change) makes it stale automatically — no comment/stage-bounce
         // heuristic (F10-32). The derived `validation` cache is then recomputed
         // from the required reviewers' verdicts on the current revision.
-        const rev = parsed.frontmatter.workRevision;
+        // Ruling 161: a discarded revision is not a subject. A verdict must
+        // never pin to a head that no longer exists, so it is recorded as
+        // prose (the reply) and binds to nothing.
+        const rev = activeWorkRevision(parsed.frontmatter.workRevision);
         const reviewerProfileId =
           actorRef.kind === "agent" ? actorRef.profileId : null;
         if (rev && reviewerProfileId) {
@@ -5946,7 +5951,7 @@ export async function performDelivery(
       const neverDelivered =
         !!preFm &&
         !preFm.pr &&
-        !preFm.workRevision &&
+        !activeWorkRevision(preFm.workRevision) &&
         !preFm.branch &&
         (preFm.github?.commits ?? []).length === 0 &&
         !preFm.github?.changed;
@@ -5966,7 +5971,7 @@ export async function performDelivery(
       // so "the repo as it stands" is a checkable sha, not a placeholder; when
       // GitHub cannot be reached we mint nothing rather than invent one.
       const baseRevision =
-        verifiedNoChange && preFm && !preFm.workRevision
+        verifiedNoChange && preFm && !activeWorkRevision(preFm.workRevision)
           ? await resolveNoChangeBaseRevision(db, ctx, projectSlug, taskKey)
           : null;
       const message =
@@ -6015,7 +6020,7 @@ export async function performDelivery(
               // `acceptanceBlockedReason` gates on real approvals instead of
               // refusing for a missing revision, and the `verified`-kind (and
               // `noChanges`) acceptance arm admits the PR-less completion.
-              if (baseRevision && !fm.workRevision) {
+              if (baseRevision && !activeWorkRevision(fm.workRevision)) {
                 fm.workRevision = baseRevision;
               }
               // F19-27: `validation` is a CACHE and the projection reads the
@@ -6071,6 +6076,29 @@ export async function performDelivery(
       });
     }
 
+    // Ruling 161 (pass 35, G35-6): the push is the moment the revision LEAVES
+    // the workspace. Stamp `pushedAt` on the revision whose head origin now
+    // carries (`up_to_date` says origin already had it), so the discard gate
+    // can tell a reported head from a published one without a PR to prove it.
+    // A revision whose head the push did not name (a stale reconcile) is not
+    // stamped: the PR that opens next is the proof for that shape.
+    const pushedHead = push.headSha;
+    if (pushedHead) {
+      const before = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+      const revBefore = before
+        ? activeWorkRevision(before.parsed.frontmatter.workRevision)
+        : null;
+      if (revBefore && revBefore.headSha === pushedHead && !revBefore.pushedAt) {
+        await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+          const rev = activeWorkRevision(parsed.frontmatter.workRevision);
+          if (rev && rev.headSha === pushedHead && !rev.pushedAt) {
+            rev.pushedAt = new Date().toISOString();
+          }
+        });
+        reprojectTask(db, ctx, projectSlug, taskKey);
+      }
+    }
+
     // 2. Open (or reuse) the review PR now that the remote carries the diff.
     const openTaskPr =
       ctx.deps?.openTaskPr ??
@@ -6102,7 +6130,8 @@ export async function performDelivery(
       const cur = readTaskFile(taskRef(ctx, projectSlug, taskKey));
       const staleNoChanges = cur?.parsed.frontmatter.noChanges === true;
       const staleCollision =
-        (cur?.parsed.frontmatter.github?.unownedPr ?? null) !== null;
+        (cur?.parsed.frontmatter.github?.unownedPr ?? null) !== null ||
+        (cur?.parsed.frontmatter.github?.foreignHead ?? null) !== null;
       if (staleNoChanges || staleCollision) {
         await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
           delete parsed.frontmatter.noChanges;
@@ -6110,6 +6139,10 @@ export async function performDelivery(
           // a "checked, no collision" fact this path never established.
           if (parsed.frontmatter.github?.unownedPr != null) {
             parsed.frontmatter.github.unownedPr = null;
+          }
+          // Ruling 161: an `ok` PR open proves the head is this task's again.
+          if (parsed.frontmatter.github?.foreignHead != null) {
+            delete parsed.frontmatter.github.foreignHead;
           }
         });
         reprojectTask(db, ctx, projectSlug, taskKey);
@@ -6919,8 +6952,11 @@ async function attemptAcceptanceMerge(
         if (gateReason) {
           const unpushed =
             fmNow !== null &&
-            unpushedRevisionBlockedReason(fmNow.pr, fmNow.workRevision?.headSha ?? null, taskKey) !==
-              null;
+            unpushedRevisionBlockedReason(
+              fmNow.pr,
+              activeWorkRevision(fmNow.workRevision)?.headSha ?? null,
+              taskKey,
+            ) !== null;
           return {
             kind: "unmergeable",
             reason: gateReason,
@@ -8116,6 +8152,11 @@ export async function resolvePacket(
         if (ctx.dataRoot) discard.dataRoot = ctx.dataRoot;
         const local = await discardLocalTaskBranch(discard);
         if (local.status === "deleted") {
+          // Ruling 161 (pass 35, U35-8): the remote head the delete removed,
+          // read live by `deleteTaskRemoteBranch` before its DELETE. KNC-21's
+          // audit named the LOCAL head (8c463b7) as what was discarded while
+          // the ref it deleted held a foreign commit; both heads are recorded.
+          const remoteSha = outcome.status === "deleted" ? outcome.remoteSha : null;
           await updateTaskFile(
             taskRef(ctx, input.projectSlug, input.taskKey),
             (parsed) => {
@@ -8129,7 +8170,10 @@ export async function resolvePacket(
                 title: null,
                 text:
                   `The local workspace branch \`${local.branch}\` (\`${local.sha.slice(0, 12)}\`) ` +
-                  `was discarded too, so "discard work" now leaves no commit to re-deliver.`,
+                  `was discarded too, so "discard work" now leaves no commit to re-deliver.` +
+                  (remoteSha && remoteSha !== local.sha
+                    ? ` Origin's copy stood at \`${remoteSha.slice(0, 12)}\`, a different head, and is gone with it.`
+                    : ""),
                 toAgent: false,
                 evidence: null,
               });
@@ -8143,7 +8187,12 @@ export async function resolvePacket(
             subjectId: input.taskKey,
             projectSlug: input.projectSlug,
             taskKey: input.taskKey,
-            details: { branch: local.branch, sha: local.sha, basis: "archive_cleanup" },
+            details: {
+              branch: local.branch,
+              localSha: local.sha,
+              remoteSha,
+              basis: "archive_cleanup",
+            },
           });
         }
       }
@@ -8193,11 +8242,29 @@ export async function resolvePacket(
       };
       if (ctx.dataRoot) discard.dataRoot = ctx.dataRoot;
       const outcome = await discardLocalTaskBranch(discard);
+      // Ruling 161 (pass 35, G35-6): the discard RETIRES the revision the
+      // agent reported on that branch. The record stays (`kind: discarded`,
+      // verdicts kept as history) so no reviewer can pin a verdict to a head
+      // that no longer exists, and `validation` re-derives to `none`. A
+      // `verified` revision names the base sha, not this branch, and stays.
+      const revisionBefore = existing.parsed.frontmatter.workRevision;
+      const retires =
+        outcome.status === "deleted" &&
+        revisionBefore !== null &&
+        revisionBefore.kind !== "verified" &&
+        revisionBefore.kind !== "discarded" &&
+        (revisionBefore.branch === null || revisionBefore.branch === outcome.branch)
+          ? revisionBefore
+          : null;
       const noteText =
         outcome.status === "deleted"
           ? `Branch \`${outcome.branch}\` (\`${outcome.sha.slice(0, 12)}\`) was deleted from this ` +
             `task's workspace. It existed only there: nothing was pushed to GitHub, so nothing on ` +
-            `the remote changed.`
+            `the remote changed.` +
+            (retires
+              ? ` Revision \`${retires.id}\` (\`${retires.headSha.slice(0, 7)}\`) is retired with it: ` +
+                `its verdicts stay on the record as history, and the task has no revision under review.`
+              : "")
           : outcome.status === "not_found"
             ? `Branch \`${outcome.branch}\` was not in this task's workspace, so there was nothing to discard.`
             : outcome.status === "on_remote"
@@ -8214,6 +8281,11 @@ export async function resolvePacket(
             parsed.frontmatter.branch === outcome.branch
           ) {
             parsed.frontmatter.branch = null;
+          }
+          const rev = parsed.frontmatter.workRevision;
+          if (retires && rev && rev.id === retires.id) {
+            rev.kind = "discarded";
+            parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
           }
           parsed.timeline.unshift({
             occurredAt: new Date().toISOString(),
@@ -8239,7 +8311,14 @@ export async function resolvePacket(
         taskKey: input.taskKey,
         details:
           outcome.status === "deleted"
-            ? { branch: outcome.branch, sha: outcome.sha, basis: "local_only" }
+            ? {
+                branch: outcome.branch,
+                localSha: outcome.sha,
+                // Ruling 161: a local-only discard touched no remote head.
+                remoteSha: null,
+                basis: "local_only",
+                retiredRevisionId: retires?.id ?? null,
+              }
             : { branch, status: outcome.status },
       });
     }
@@ -8321,11 +8400,15 @@ export async function resolvePacket(
       const premise = `No collision to clear: PR #${ownPr} on \`${branchName}\` is ${input.taskKey}'s own review PR.`;
       if (fmNow?.github?.unownedPr != null && fmNow.github.unownedPr === ownPr) {
         await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-          if (parsed.frontmatter.github) parsed.frontmatter.github.unownedPr = null;
+          if (parsed.frontmatter.github) {
+            parsed.frontmatter.github.unownedPr = null;
+            // Ruling 161: a self-referencing collision record named no foreign head.
+            delete parsed.frontmatter.github.foreignHead;
+          }
         });
       }
       const record = fmNow
-        ? unpushedRevisionOf(fmNow.pr, fmNow.workRevision?.headSha ?? null)
+        ? unpushedRevisionOf(fmNow.pr, activeWorkRevision(fmNow.workRevision)?.headSha ?? null)
         : null;
       if (record?.relation === "diverged") {
         const head = record.prHeadSha ? `\`${record.prHeadSha.slice(0, 7)}\`` : "its head";
@@ -8770,8 +8853,11 @@ export function mergeReadinessRefusal(
   taskKey: string,
 ): string | null {
   return (
-    unpushedRevisionBlockedReason(fm.pr, fm.workRevision?.headSha ?? null, taskKey) ??
-    conflictingPrBlockedReason(fm, taskKey)
+    unpushedRevisionBlockedReason(
+      fm.pr,
+      activeWorkRevision(fm.workRevision)?.headSha ?? null,
+      taskKey,
+    ) ?? conflictingPrBlockedReason(fm, taskKey)
   );
 }
 
@@ -8965,7 +9051,7 @@ export async function acceptancePrHeadCheck(
     refusal: verdict.refusal,
     verification: verdict.verification,
     prNumber: fm?.pr?.number ?? null,
-    revisionHeadSha: fm?.workRevision?.headSha ?? null,
+    revisionHeadSha: activeWorkRevision(fm?.workRevision)?.headSha ?? null,
   };
 }
 
@@ -8981,7 +9067,7 @@ function assertVerifiedHeadStillApplies(
   taskKey: string,
 ): void {
   const prNumber = fm.pr?.number ?? null;
-  const revisionHeadSha = fm.workRevision?.headSha ?? null;
+  const revisionHeadSha = activeWorkRevision(fm.workRevision)?.headSha ?? null;
   if (prNumber === check.prNumber && revisionHeadSha === check.revisionHeadSha) {
     return;
   }
@@ -9035,7 +9121,7 @@ async function evaluateAcceptancePrHead(
     const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
     const fm = file?.parsed.frontmatter;
     const pr = fm?.pr ?? null;
-    const rev = fm?.workRevision ?? null;
+    const rev = activeWorkRevision(fm?.workRevision);
     if (!pr || !rev || pr.state === "merged") {
       return { refusal: null, verification: "not-applicable" };
     }
@@ -9394,7 +9480,7 @@ export function acceptanceDisclosureOf(
 ): AcceptanceDisclosure {
   return {
     pr: fm.pr?.state ?? "none",
-    revision: fm.workRevision?.headSha ?? "none",
+    revision: activeWorkRevision(fm.workRevision)?.headSha ?? "none",
     verdict: deriveValidation(fm),
   };
 }

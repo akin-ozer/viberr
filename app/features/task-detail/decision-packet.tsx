@@ -135,6 +135,17 @@ export interface PacketArchiveDisclosure {
    * refuse (live: JC-6 and JC-3, both confirmed, both refused).
    */
   openPr: number | null;
+  /**
+   * Ruling 161 (pass 35, U35-8): origin's copy of the branch carries commits
+   * this task did not author, as the reconciler last recorded it
+   * (`task.foreignHead`): the head sha when GitHub named one and the unowned
+   * PR when one stands. The delete-branch dialog says so BEFORE the button:
+   * live (KNC-21) the archive deleted a remote `knc-21` whose head was a
+   * foreign fixture commit the packet itself called "not ours", and the
+   * dialog never said the remote held someone else's work. Required for the
+   * same reason `unownedPr` is (V1). Null when the head is this task's.
+   */
+  foreignHead: { sha: string | null; prNumber: number | null } | null;
 }
 
 /**
@@ -345,6 +356,40 @@ function PacketArchiveConfirm({
               <>This task's remote branch on GitHub,</>
             )}{" "}
             and every commit that exists only there.{" "}
+            {disclosure?.foreignHead ? (
+              <>
+                Origin&rsquo;s{" "}
+                <span className="mono">{branch ?? "branch"}</span> carries
+                commits this task did not author
+                {disclosure.foreignHead.sha ? (
+                  <>
+                    {" "}
+                    (head{" "}
+                    <span className="mono">
+                      {disclosure.foreignHead.sha.slice(0, 7)}
+                    </span>
+                    {disclosure.foreignHead.prNumber !== null ? (
+                      <>
+                        , pull request{" "}
+                        <span className="mono">
+                          #{disclosure.foreignHead.prNumber}
+                        </span>{" "}
+                        stands on it
+                      </>
+                    ) : null}
+                    )
+                  </>
+                ) : disclosure.foreignHead.prNumber !== null ? (
+                  <>
+                    {" "}
+                    (pull request{" "}
+                    <span className="mono">#{disclosure.foreignHead.prNumber}</span>{" "}
+                    stands on it)
+                  </>
+                ) : null}
+                ; deleting it removes them too.{" "}
+              </>
+            ) : null}
             <strong>Deleting it cannot be undone.</strong> Restoring the task
             later does not bring the branch back.
           </span>
@@ -430,6 +475,17 @@ function PacketDiscardConfirm({
         <span>
           Nothing on GitHub changes: this branch was never pushed. (If it had
           been, the discard is refused and the archive option is the path.)
+        </span>
+      </div>
+      {/* Ruling 161: a reported revision that never left the workspace goes
+          with the branch. Its verdicts stay as history, and nothing is under
+          review afterwards. */}
+      <div className="obs">
+        <span className="k">Review</span>
+        <span>
+          A revision the agent reported on this branch is retired with it: its
+          verdicts stay on the record as history, and the task has no revision
+          under review until an agent delivers again.
         </span>
       </div>
     </PacketDestructiveConfirm>

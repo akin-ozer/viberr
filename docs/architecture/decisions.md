@@ -3025,6 +3025,54 @@ available. It reads nobody else's session.)*
     `app/server/github/github-reconciler.server.ts`; `closedByHumanDeliveryText` and the
     `resolvePacket` stamp in `app/server/tasks/task-actions.server.ts`.)
 
+161. **A revision is delivered once it has left the workspace (owner, 2026-09-06, Q35-13;
+    pass 35 G35-6 and U35-8).** Until a pull request tracks the branch, a stranger's pull
+    request stands on the branch name, or a delivery push has published the head, the branch
+    is the task's local draft and a person may discard it; the discard retires the
+    revision. Live (KNC-21) the agent's completion report registered `workRevision`
+    (`kind: delivered`, 18:56:57Z) fourteen minutes before the delivery push was refused
+    non-fast-forward, and ruling 77's authoring gate (`hasDeliveredWork = workRevision !==
+    null`) then refused `discard_branch` on exactly the branch the kind exists for: a
+    reported head counted as a delivered one, and the only door left was archiving the
+    task with `deleteBranch`. **(a)** The gate keys on `revisionLeftWorkspace`: `pr`
+    (live or settled), `github.unownedPr`, or the new `workRevision.pushedAt`, which
+    `performDelivery` stamps on the revision whose head the push published (`pushed`, or
+    `up_to_date` with that head). `github.commits` is not evidence: the workspace
+    reconcile writes it from the local clone. The refusal names the real reason ("PR #n
+    tracks `branch`", "an unowned PR #n stands on the branch name", "revision `sha` was
+    pushed to origin at …"). **(b)** A confirmed discard retires the revision in the same
+    write that clears `branch`: `workRevision.kind: discarded`, verdicts kept as history,
+    `validation` re-derived to `none`; the outcome note says "Revision `rev_…` is retired
+    with it", and the audit row `task.branch.discarded` carries `retiredRevisionId`.
+    Every reader that means "the revision under review" reads through
+    `activeWorkRevision` (null for a discarded record): the derived validation, the
+    verdict binding (a reviewer's verdict never pins to a retired head), `nextWorkRevision`
+    (a re-created head mints a fresh id even for the same tree), the acceptance gates, the
+    projection's `work_revision_sha`, the reconciler's provenance and adoption tests, the
+    reviewing agent's subject, and the delivery's no-change arm. A `verified` revision
+    names the base sha, not the branch, and is never retired by a discard. **(c)** The
+    remote holds what it holds (U35-8): the reconciler records `github.foreignHead {sha,
+    prNumber}` whenever the branch head is not proven this task's and origin holds
+    something (a stranger's PR, or commits ahead of the base with no delivery of this
+    task behind them), and drops it the pass the head is proven; the archive ceremony's
+    delete-branch dialog says "origin's `branch` carries commits this task did not author
+    (head `sha`, pull request #n stands on it); deleting it removes them too" before the
+    button, the operator's `get_task` carries the same fact, and the toolkit tells it to
+    name it in the option text. `deleteTaskRemoteBranch` reads the ref's head before its
+    DELETE, records it on `github.branch.deleted` (`sha`) and in the timeline ("Its head
+    was `sha`"), and the archive's `task.branch.discarded` row records both heads
+    (`localSha`, `remoteSha`; a local-only discard records `remoteSha: null`). The
+    operator's push-conflict reply and the `discard_branch` description say the same
+    rule: a refused push means the revision never left the workspace, so the discard may
+    be offered when the person's choice is to throw the draft away, never as the way to
+    clear the remote. (`activeWorkRevision`, `revisionLeftWorkspace` and the `foreignHead`
+    record in `app/schemas/task-file.schema.ts`; the gate and
+    `revisionDepartureSentence` in `app/server/tasks/operator-actions.server.ts`; the
+    stamp, the retirement and the two-sha row in `app/server/tasks/task-actions.server.ts`;
+    the foreign-head write and the pre-delete read in
+    `app/server/github/github-reconciler.server.ts`; the dialog row in
+    `app/features/task-detail/decision-packet.tsx`.)
+
 162. **The acceptance gate's verdict is computed once and read everywhere a person or the
     operator is invited to accept (owner, 2026-09-06, Q35-17 and Q35-18; F35-12, G35-5
     addendum (d) and (e)).** No surface offers an acceptance the gate will refuse. The

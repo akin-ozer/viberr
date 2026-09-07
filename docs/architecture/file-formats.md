@@ -220,6 +220,18 @@ workRevision:                     # the immutable revision under review, or null
   branch: vib-142-attach-workspace
   createdAt: 2026-07-04T06:41:00.000Z
   sourceProfileId: developer
+  kind: delivered                 # delivered (absent = delivered) | verified (a
+                                  # no-change verification, names the base sha) |
+                                  # discarded (ruling 161: a person discarded the
+                                  # never-pushed branch; the record stays so the
+                                  # verdicts read as history, readers go through
+                                  # `activeWorkRevision`, which answers null)
+  pushedAt: 2026-09-06T19:10:35Z  # ruling 161: stamped by the delivery push that
+                                  # published this head (pushed, or up_to_date with
+                                  # it). Absent = no delivery has seen it on origin;
+                                  # `revisionLeftWorkspace` reads it (never
+                                  # `github.commits`, which the workspace reconcile
+                                  # writes from the local clone)
 verdicts:                         # per-engagement, each bound to a revision
   - profileId: reviewer
     revisionId: rev_9f2c
@@ -274,6 +286,15 @@ pr:                               # GitHub projection mirrored into the file
 github:                           # more GitHub cache: commits + change stats
   commits: [{ sha: a91f7c2, msg: "[VIB-142] …" }]
   changed: { files: 9, add: 412, del: 87 }
+  unownedPr: 232                  # R15-15: a PR on the branch name this task did
+                                  # not open (null/absent = no collision)
+  foreignHead:                    # ruling 161 (U35-8): origin's branch carries
+    sha: d5f23aa…                 # commits this task's record does not account
+    prNumber: 232                 # for. Written by the reconciler while it holds
+                                  # (the unowned PR's head, else the compare's tip;
+                                  # null when GitHub named neither), dropped the
+                                  # pass the head is proven this task's; the
+                                  # archive ceremony's delete-branch row reads it
 priority: normal                  # R26-1: normal | high | urgent-ish metadata the OPERATOR
                                   # reads (advisory); never in the specialist prompt
 labels: []                        # R26-2: free-text labels, searchable on the board and ⌘K
@@ -393,7 +414,10 @@ Notes:
 - `validation`, `workRevision` and `verdicts` are a set. `validation` is a derived cache
   recomputed from the other two plus the required-reviewer set on every write; do not
   hand-edit it as a source of truth. A verdict names the `revisionId` it judged, so a new
-  revision automatically staleness-expires every prior verdict.
+  revision automatically staleness-expires every prior verdict. A `kind: discarded`
+  revision (ruling 161) is a retired record: `validation` derives to `none` over it, no
+  verdict binds to it, and the next delivered head mints a fresh id even for the same
+  tree.
 - **`repo` is GONE from the task frontmatter.** The task-level repository override was
   struck by owner ruling on 2026-07-25 (P13-D-5): one project, one repository. *(Corrected
   2026-08-06, pass 19 — this note used to say the field was "vestigial and always null" and

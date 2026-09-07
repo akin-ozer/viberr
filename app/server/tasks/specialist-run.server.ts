@@ -9,6 +9,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  activeWorkRevision,
   deliveringEngagement,
   deriveValidation,
   supportingEngagements,
@@ -1807,10 +1808,12 @@ async function dispatchAgentRun(
   };
   // F15-15: a reviewing run judges the DELIVERED revision (the PR head), not
   // whatever the local workspace branch holds — pin it into the prompt.
+  // Ruling 161: a discarded revision is no subject to review.
+  const activeRevision = activeWorkRevision(existing.parsed.frontmatter.workRevision);
   const reviewSubject =
-    !delivers && existing.parsed.frontmatter.workRevision
+    !delivers && activeRevision
       ? {
-          headSha: existing.parsed.frontmatter.workRevision.headSha,
+          headSha: activeRevision.headSha,
           prNumber: existing.parsed.frontmatter.pr?.number ?? null,
         }
       : null;

@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { classifyRevisionDrift } from "~/shared/revision-drift";
 import {
+  activeWorkRevision,
   conflictingPrBlockedReason,
   type GithubCache,
   type PrMergeable,
@@ -470,7 +471,7 @@ async function reconcileTaskUnlocked(
       ? decidePrAdoption({
           state: pr.state,
           prHeadSha: pr.headSha,
-          revisionHeadSha: fm.workRevision?.headSha ?? null,
+          revisionHeadSha: activeWorkRevision(fm.workRevision)?.headSha ?? null,
         })
       : null;
   const ownsAPr = sameAsCached || adoption?.adopt === true;
@@ -483,7 +484,7 @@ async function reconcileTaskUnlocked(
   // actually differs from the reviewed revision needs the extra compare call; a
   // "diverged" head (delivered revision NOT an ancestor) is a REFUSAL handled by
   // `acceptancePrHeadMismatch`, so we record drift only for a clean "ahead".
-  const reviewedSha = fm.workRevision?.headSha ?? null;
+  const reviewedSha = activeWorkRevision(fm.workRevision)?.headSha ?? null;
   // F21-17 (residual): drift is only MEASURABLE on a live PR — a settled one
   // gets no compare call, deliberately. But unlike `review` or `mergeable`, the
   // fact does not stop being TRUE when the PR settles: those extra commits were
@@ -508,7 +509,7 @@ async function reconcileTaskUnlocked(
   // was pushed once and the head moved elsewhere) keeps the three-way mapping.
   let unpushed: PrRef["unpushedRevision"] = null;
   let unpushedMeasured = false;
-  const verifiedRevision = fm.workRevision?.kind === "verified";
+  const verifiedRevision = activeWorkRevision(fm.workRevision)?.kind === "verified";
   if (pr && ownsAPr && reviewedSha && pr.headSha && driftMeasurable) {
     if (pr.headSha === reviewedSha) {
       unpushedMeasured = true;
@@ -663,8 +664,29 @@ async function reconcileTaskUnlocked(
   // the honestly-captured workspace cache survives, and a footprint with no
   // provenance at all is DROPPED rather than carried forward forever.
   const deliveredThisBranch =
-    ownsAPr || fm.pr !== null || fm.workRevision?.branch === branch;
+    ownsAPr || fm.pr !== null || activeWorkRevision(fm.workRevision)?.branch === branch;
   const provenBranchHead = deliveredThisBranch && !unownedPr;
+  // Ruling 161 (pass 35, U35-8): when the head is NOT proven this task's and
+  // origin holds something (a stranger's PR, or commits ahead of the base with
+  // no delivery of this task behind them), record what origin holds, so the
+  // archive ceremony's delete-branch disclosure can say "origin's <branch>
+  // carries commits this task did not author; deleting it removes them too"
+  // and the operator can author that sentence from a fact. KNC-21's remote
+  // `knc-21` held a foreign fixture commit the packet itself called "not
+  // ours", and the archive dialog never said so. The sha is the unowned PR's
+  // head when one stands, else the last commit of the compare; null when
+  // GitHub named neither. Dropped the pass the head is proven this task's.
+  const lastCompareCommit =
+    compare && compare.commits.length > 0
+      ? (compare.commits[compare.commits.length - 1]?.fullSha ?? null)
+      : null;
+  const foreignHead: GithubCache["foreignHead"] =
+    !provenBranchHead && (unownedPr || (compare && compare.aheadBy > 0))
+      ? {
+          sha: unownedPr?.headSha ?? lastCompareCommit,
+          prNumber: unownedPr?.number ?? null,
+        }
+      : null;
   // Commit association: `[KEY]`-prefixed commits on the branch. Agents don't
   // always follow the prefix convention, so an EMPTY filtered list must not
   // wipe a non-empty cache captured from the run workspace for this same
@@ -686,7 +708,7 @@ async function reconcileTaskUnlocked(
     ? (existingGithub?.changed ?? null)
     : null;
   const newGithub: GithubCache | null =
-    branchCommits !== null || ownedChanged || existingGithub || unownedPr
+    branchCommits !== null || ownedChanged || existingGithub || unownedPr || foreignHead
       ? {
           commits: branchCommits ?? cachedCommits,
           changed: ownedChanged ?? cachedChanged,
@@ -695,6 +717,9 @@ async function reconcileTaskUnlocked(
           unownedPr: unownedPr?.number ?? null,
         }
       : null;
+  // The key is present only while a foreign head stands (an absent key and a
+  // null one would otherwise alternate in the compared snapshot).
+  if (newGithub && foreignHead) newGithub.foreignHead = foreignHead;
   const unownedPrIsNew =
     !!unownedPr && existingGithub?.unownedPr !== unownedPr.number;
   // The collision is not a divergence and must not read like one: nothing about
@@ -708,7 +733,7 @@ async function reconcileTaskUnlocked(
           taskKey: fm.key,
           branch,
           prNumber: unownedPr.number,
-          revisionHeadSha: fm.workRevision?.headSha ?? null,
+          revisionHeadSha: activeWorkRevision(fm.workRevision)?.headSha ?? null,
         })
       : null;
 
@@ -1659,7 +1684,10 @@ export type BranchDeleteRefusal =
   | "network";
 
 export type BranchDeleteResult =
-  | { status: "deleted"; branch: string }
+  /** Ruling 161 (pass 35, U35-8): `remoteSha` is the head origin held when the
+   *  ref was read just before the DELETE, null when GitHub did not answer
+   *  the read. The audit and the archive's two-sha row name it. */
+  | { status: "deleted"; branch: string; remoteSha: string | null }
   /** GitHub reports the ref no longer exists — the cleanup already happened. */
   | { status: "already_gone"; branch: string }
   | { status: "no_branch" }
@@ -1673,6 +1701,9 @@ export type BranchDeleteResult =
       message: string;
       prNumber?: number;
     };
+
+/** Ruling 161: the one field the pre-delete ref read consumes. */
+const refHeadSchema = z.object({ object: z.object({ sha: z.string().min(1) }) }).loose();
 
 /**
  * Delete the task's remote branch — the discard half of the
@@ -1786,6 +1817,16 @@ export async function deleteTaskRemoteBranch(
   // separator. For today's task-key branches this is byte-identical to what it
   // already sent, so the working path cannot regress.
   const refPath = encodeRefPath(`heads/${branch}`);
+  // Ruling 161 (pass 35, U35-8): read the head the ref holds BEFORE deleting
+  // it, so the record names what was removed from origin (KNC-21's audit
+  // named the local head while the deleted ref held a foreign commit). A read
+  // GitHub does not answer records null; it never blocks the delete.
+  const refRead = await gh.client.request(
+    "GET",
+    `/repos/${gh.repo}/git/ref/${refPath}`,
+    refHeadSchema,
+  );
+  const remoteSha = refRead.ok ? refRead.data.object.sha : null;
   const del = await gh.client.request(
     "DELETE",
     `/repos/${gh.repo}/git/refs/${refPath}`,
@@ -1802,7 +1843,9 @@ export async function deleteTaskRemoteBranch(
         nameHint: userName(db, userId),
       },
       title: null,
-      text: `Deleted branch \`${branch}\` from GitHub.`,
+      text:
+        `Deleted branch \`${branch}\` from GitHub.` +
+        (remoteSha ? ` Its head was \`${remoteSha.slice(0, 12)}\`.` : ""),
       toAgent: false,
       evidence: null,
     });
@@ -1820,9 +1863,9 @@ export async function deleteTaskRemoteBranch(
       subjectId: `${gh.repo}:${branch}`,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
-      details: { repo: gh.repo, branch },
+      details: { repo: gh.repo, branch, sha: remoteSha },
     });
-    return { status: "deleted", branch };
+    return { status: "deleted", branch, remoteSha };
   }
 
   // GitHub answers "Reference does not exist" with a 422 — someone already

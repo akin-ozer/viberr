@@ -749,6 +749,9 @@ export function TaskDetailPage({
                 task.pr && (task.pr.state === "review" || task.pr.state === "accepted")
                   ? task.pr.number
                   : null,
+              // Ruling 161 (U35-8): what origin's branch holds when it is not
+              // this task's work, so the delete-branch row says so.
+              foreignHead: task.foreignHead,
             }}
             onResolve={onResolve}
             onResolveCustom={submitResolveCustom}

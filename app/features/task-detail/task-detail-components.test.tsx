@@ -467,6 +467,7 @@ function taskFixture(ownerId: string, ownerName: string): TaskSummary {
     commits: [],
     changed: null,
     unownedPr: null,
+    foreignHead: null,
     goal: "Bound the timeline payload and add a Show-older affordance.",
     packet: null,
     eventCount: 0,
@@ -2567,7 +2568,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canEditGoal
         canArchive
         canDiscardBranch
-        archiveDisclosure={{ taskKey: "VIB-1", branch: "vib-1", pendingRecommendations: 0, unownedPr: null, openPr: null }}
+        archiveDisclosure={{ taskKey: "VIB-1", branch: "vib-1", pendingRecommendations: 0, unownedPr: null, openPr: null, foreignHead: null }}
         onResolveCustom={() => {}} onResolve={onResolve}
         onAsk={() => {}}
       />,
@@ -2611,6 +2612,7 @@ describe("DecisionPacket — pass-20 governance", () => {
           branch: "vib-1",
           pendingRecommendations: 0,
           unownedPr: 232,
+          foreignHead: null,
           openPr: null,
         }}
         onResolveCustom={() => {}} onResolve={onResolve}
@@ -2711,6 +2713,62 @@ describe("DecisionPacket — pass-20 governance", () => {
   });
 
   /**
+   * Ruling 161 (pass 35, U35-8): the delete-branch ceremony says what origin
+   * holds when the reconciler recorded a foreign head. Live (KNC-21) the
+   * dialog promised to delete "this task's" branch while the ref held a
+   * foreign fixture commit the packet itself called "not ours".
+   */
+  it("U35-8: the archive + deleteBranch dialog names the foreign remote head and its PR before the button", () => {
+    // Canary: drop the `foreignHead` block from `PacketArchiveConfirm` and
+    // the sentence is gone.
+    const renderWith = (foreignHead: { sha: string | null; prNumber: number | null } | null) =>
+      render(
+        <DecisionPacket
+          packet={withOptions([
+            {
+              kind: "archive_task",
+              t: "Abandon VIB-1 and delete the branch",
+              d: "",
+              rec: true,
+              deleteBranch: true,
+            },
+          ])}
+          busy={false}
+          canResolve
+          canResolveCompletion
+          canEditGoal
+          canArchive
+          canDiscardBranch
+          archiveDisclosure={{
+            taskKey: "VIB-1",
+            branch: "knc-21",
+            pendingRecommendations: 0,
+            unownedPr: foreignHead?.prNumber ?? null,
+            openPr: null,
+            foreignHead,
+          }}
+          onResolveCustom={() => {}} onResolve={() => {}}
+          onAsk={() => {}}
+        />,
+      );
+    const dialogOf = (container: HTMLElement) =>
+      container.ownerDocument.querySelector('dialog[data-screen-label="Packet archive dialog"]')!;
+
+    const foreign = renderWith({ sha: "d5f23aa".padEnd(40, "1"), prNumber: 33 });
+    fireEvent.click(foreign.container.querySelector(".packet-actions .btn.primary")!);
+    const text = dialogOf(foreign.container).textContent!;
+    expect(text).toContain("carries commits this task did not author");
+    expect(text).toContain("d5f23aa");
+    expect(text).toContain("#33");
+    expect(text).toContain("deleting it removes them too");
+    foreign.unmount();
+
+    const own = renderWith(null);
+    fireEvent.click(own.container.querySelector(".packet-actions .btn.primary")!);
+    expect(dialogOf(own.container).textContent).not.toContain("did not author");
+  });
+
+  /**
    * V16 — the three ask-first ceremonies are ONE shell with three sets of rows
    * (`PacketDestructiveConfirm`). They were three shell-for-shell copies of the
    * standard rulings 20 (R15-1) and 53 (R18-7) hold every one-way write to, so
@@ -2772,6 +2830,7 @@ describe("DecisionPacket — pass-20 governance", () => {
             branch: "vib-1",
             pendingRecommendations: 0,
             unownedPr: 232,
+            foreignHead: null,
           openPr: null,
           }}
           onResolveCustom={() => {}} onResolve={() => {}}
@@ -2851,7 +2910,7 @@ describe("DecisionPacket — pass-20 governance", () => {
         canEditGoal={false}
         canArchive={false}
         canDiscardBranch={false}
-        archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0, unownedPr: null, openPr: null }}
+        archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0, unownedPr: null, openPr: null, foreignHead: null }}
         onResolveCustom={() => {}} onResolve={() => {}}
         onRequestMaintainer={onRequestMaintainer}
         onAsk={() => {}}

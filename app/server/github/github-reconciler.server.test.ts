@@ -632,6 +632,74 @@ describe("reconcileTask", () => {
     expect(fm.github?.unownedPr ?? null).toBeNull();
   });
 
+  it("ruling 161 (U35-8): a head the task's record does not account for is written as github.foreignHead", async () => {
+    // Canary: drop the `foreignHead` write in the reconciler and both records
+    // below are absent; the archive dialog then cannot say what origin holds.
+    const { store, actor } = setup();
+    const fmOf = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+    // 1. A stranger's PR stands on the branch: its head is the foreign head.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+    expect(fmOf().github?.unownedPr).toBe(318);
+    expect(fmOf().github?.foreignHead).toEqual({ sha: "headsha318", prNumber: 318 });
+
+    // 2. No PR at all, the branch ahead of the base with no delivery of this
+    //    task behind it (the V5 squatter): the compare's tip is the head.
+    const prLess = happyRoutes();
+    prLess[`GET ${REPO_PATH}/pulls`] = { body: [] };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(prLess).fetchImpl },
+    );
+    expect(fmOf().github?.unownedPr ?? null).toBeNull();
+    expect(fmOf().github?.foreignHead).toEqual({ sha: "0000000ffff", prNumber: null });
+
+    // 3. The task's own revision was minted on the branch and no stranger's PR
+    //    stands: the head is proven this task's and the record is dropped.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        github: { commits: [], changed: null, foreignHead: { sha: "0000000ffff", prNumber: null } },
+        workRevision: {
+          id: "rev_1",
+          headSha: "a91f7c2ffff",
+          treeSha: null,
+          branch: "vib-301-workspace",
+          createdAt: "2026-08-31T08:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(prLess).fetchImpl },
+    );
+    expect(fmOf().github?.foreignHead ?? null).toBeNull();
+  });
+
   it("V5: a branch this task delivered still records its commits with no PR at all", async () => {
     // The other half of positive provenance: the evidence is not only an owned
     // PR. A task whose work revision was minted ON THIS BRANCH delivered here,

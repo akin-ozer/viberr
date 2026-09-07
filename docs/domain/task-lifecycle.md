@@ -322,7 +322,13 @@ releasing a reviewer restates history.
 
 A delivering run's reconcile mints a **work revision** (`{id, headSha, treeSha,
 branch, kind: delivered}`); a new head with a different tree mints a new revision and
-stales every prior verdict. A reviewer's `report_outcome` records a **verdict**
+stales every prior verdict. A revision is minted when the agent reports, before any
+push: it has **left the workspace** only once a PR tracks the branch, an unowned PR
+stands on the name, or the delivery push stamped `pushedAt` (ruling 161). Until then a
+person may discard the branch through a `discard_branch` packet, and the discard retires
+the revision (`kind: discarded`, verdicts kept as history, `validation: none`); readers of
+"the revision under review" go through `activeWorkRevision`, so no verdict binds to a
+retired head and a re-created head mints a fresh id. A reviewer's `report_outcome` records a **verdict**
 (`approve | request_changes`) bound to a revision id. A project member's GitHub
 approval on the PR, whose `commit_id` equals the delivered head and whose login maps
 to a member through `users.github_handle`, counts as an approving verdict (ruling 68);
@@ -385,7 +391,8 @@ misreported as unreachable), pushes the workspace branch (auto-committing a dirt
 tree, refusing a non-fast-forward as a `push_conflict`; refusing a tree that carries
 Viberr's own store layout under `projects/<slug>/tasks/` as `store_layout` with the
 paths named, ruling 159; reading origin's head first
-and answering `up_to_date` when there is nothing to push, ruling 134), detects a
+and answering `up_to_date` when there is nothing to push, ruling 134; stamping
+`workRevision.pushedAt` on the revision whose head the push published, ruling 161), detects a
 verified empty branch as a no-change outcome, opens or adopts the PR (adoption only
 when the PR is open **and** its head is the delivered revision; anything else is a
 branch collision, whose `resolve_remote_collision` ceremony re-confirms a cached open PR
@@ -511,7 +518,10 @@ same door every branch cleanup uses: a cached open PR is re-confirmed against Gi
 (ruling 136(c)), a PR GitHub reports closed lets the delete proceed, and an unconfirmed
 state refuses with "GitHub could not confirm whether PR #N is still open", which the
 archive note repeats verbatim. The no-change acceptance's empty-branch cleanup inherits
-the same check.
+the same check. Ruling 161 (U35-8): when the reconciler recorded `github.foreignHead`
+(origin's branch carries commits this task did not author), the confirm dialog says so
+before the button, the ref's head is read before the DELETE, and the audit records both
+heads (`github.branch.deleted {sha}`, `task.branch.discarded {localSha, remoteSha}`).
 
 ## 13. Timeline and noise control
 

@@ -2369,6 +2369,84 @@ describe("resolvePacket kind matrix", () => {
     expect(discarded[0]!.details).toMatchObject({ branch: "vib-1-work", basis: "local_only" });
   });
 
+  it("ruling 161 (G35-6): the discard retires the reported revision: kind discarded, validation none, note and audit name it", async () => {
+    // Canary: drop the `retires` block from the discard_branch resolution and
+    // the revision stays `delivered` with its approve keeping the task healthy.
+    const store = prepared();
+    const revisionId = "rev_MBEIgNbXXyFX";
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        branch: "vib-1-work",
+        engagements: [
+          {
+            profileId: "reviewer",
+            backend: "claude",
+            role: "Review",
+            delivers: false,
+            verdictCapable: true,
+          },
+        ],
+        workRevision: {
+          id: revisionId,
+          headSha: "8c463b7".padEnd(40, "0"),
+          treeSha: "b".repeat(40),
+          branch: "vib-1-work",
+          createdAt: "2026-09-06T18:56:57.000Z",
+          sourceProfileId: "developer",
+          kind: "delivered",
+        },
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId,
+            headSha: "8c463b7".padEnd(40, "0"),
+            result: "approve",
+            reason: "fine",
+            at: "2026-09-06T19:00:00.000Z",
+          },
+        ],
+        validation: "healthy",
+      },
+      DISCARD_PACKET,
+    );
+    initTaskWorkspace(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.branch).toBeNull();
+    expect(fm.workRevision?.id).toBe(revisionId);
+    expect(fm.workRevision?.kind).toBe("discarded");
+    // The verdict is history, not erased; the derived cache says nothing is owed.
+    expect(fm.verdicts).toHaveLength(1);
+    expect(fm.validation).toBe("none");
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(
+      texts.some(
+        (t) => t.includes(`Revision \`${revisionId}\``) && t.includes("is retired with it"),
+      ),
+    ).toBe(true);
+    const discarded = listAuditEvents(store.db, { action: "task.branch.discarded" });
+    expect(discarded).toHaveLength(1);
+    expect(discarded[0]!.details).toMatchObject({
+      branch: "vib-1-work",
+      localSha: expect.any(String),
+      basis: "local_only",
+      remoteSha: null,
+      retiredRevisionId: revisionId,
+    });
+  });
+
   it("discard_branch / ruling 17: refuses an on-remote branch, keeps fm.branch, still resolves the packet", async () => {
     const store = prepared();
     withTask(
@@ -2443,6 +2521,77 @@ describe("resolvePacket kind matrix", () => {
     const discarded = listAuditEvents(store.db, { action: "task.branch.discarded" });
     expect(
       discarded.some((a) => a.details!.basis === "archive_cleanup"),
+    ).toBe(true);
+  });
+
+  it("ruling 161 (U35-8): archive + deleteBranch records BOTH heads: the local sha and the foreign remote head it deleted", async () => {
+    // Live (KNC-21): the audit named the local head 8c463b7 while the deleted
+    // remote `knc-21` held the foreign fixture commit d5f23aa. Canary: drop
+    // the pre-delete ref read in `deleteTaskRemoteBranch` (remoteSha null) or
+    // write `sha` instead of `localSha`/`remoteSha` on the archive row.
+    const store = prepared();
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const { createPat, setProjectCredential } = await import(
+      "~/server/secrets/pat-store.server"
+    );
+    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_foreignhead000000000000000000001" },
+      patActor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    const remoteSha = "d5f23aa".padEnd(40, "1");
+    const github = fakeGithubFetch({
+      "GET /repos/akin-ozer/viberr/git/ref/heads/vib-1-work": {
+        status: 200,
+        body: { ref: "refs/heads/vib-1-work", object: { sha: remoteSha, type: "commit" } },
+      },
+      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
+    });
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        pr: { number: 318, state: "closed", title: "PR" },
+        branch: "vib-1-work",
+        github: {
+          commits: [],
+          changed: null,
+          foreignHead: { sha: remoteSha, prNumber: null },
+        },
+      },
+      RECOVERY_PACKET,
+    );
+    const repoDir = initTaskWorkspace(store);
+    const localSha = gitc(repoDir, ["rev-parse", "refs/heads/vib-1-work"]);
+    expect(localSha).not.toBe(remoteSha);
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+    );
+    expect(
+      github.callsTo("DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work"),
+    ).toHaveLength(1);
+    const deleted = listAuditEvents(store.db, { action: "github.branch.deleted" });
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]!.details).toMatchObject({ branch: "vib-1-work", sha: remoteSha });
+    const discarded = listAuditEvents(store.db, { action: "task.branch.discarded" });
+    expect(discarded).toHaveLength(1);
+    expect(discarded[0]!.details).toEqual({
+      branch: "vib-1-work",
+      localSha,
+      remoteSha,
+      basis: "archive_cleanup",
+    });
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.includes(`Its head was \`${remoteSha.slice(0, 12)}\``))).toBe(true);
+    expect(
+      texts.some((t) => t.includes(`Origin's copy stood at \`${remoteSha.slice(0, 12)}\``)),
     ).toBe(true);
   });
 

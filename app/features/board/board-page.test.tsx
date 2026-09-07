@@ -59,6 +59,7 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     commits: [],
     changed: null,
     unownedPr: null,
+    foreignHead: null,
     goal: "",
     packet: null,
     eventCount: 0,

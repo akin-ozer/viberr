@@ -152,7 +152,10 @@ export const PACKET_OPTION_KINDS = [
   // disposition: the task stays on the board and closes through the ordinary
   // no-change acceptance. Refuses when the branch exists on the remote (remote
   // deletion stays ruling 17's archive-packet path). Resolution enforces
-  // `approve-transition` (it destroys commits).
+  // `approve-transition` (it destroys commits). Ruling 161 (pass 35, G35-6):
+  // a revision the agent REPORTED but never pushed does not block the offer
+  // (authoring keys on `revisionLeftWorkspace`), and the discard retires that
+  // revision (`workRevision.kind: discarded`) with the branch.
   "discard_branch",
   // pass31 F31-6: the remedy for a task-key BRANCH COLLISION — the remote holds
   // an unrelated branch (usually with an unowned PR) under this task's branch
@@ -563,6 +566,34 @@ export function unpushedRevisionBlockedReason(
   return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number} (its head is ${head}). Deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`;
 }
 
+/**
+ * Ruling 161 (pass 35, G35-6): has the task's revision LEFT the workspace?
+ * Three facts say yes, in the order a person would name them: a pull request
+ * tracks the branch (`pr`, live or settled), a stranger's pull request stands
+ * on the branch name (`github.unownedPr`), or a delivery push published the
+ * revision's head (`workRevision.pushedAt`). Until one holds, the branch is the
+ * task's local draft: a reported head is not a delivered one, and a person may
+ * discard it. `github.commits` is deliberately not read here: the workspace
+ * reconcile writes it from the local clone, so it proves nothing about origin.
+ */
+export type RevisionDeparture =
+  | { kind: "pr"; number: number }
+  | { kind: "unowned_pr"; number: number }
+  | { kind: "pushed"; at: string; headSha: string };
+
+export function revisionLeftWorkspace(fm: {
+  pr: PrRef | null;
+  github: GithubCache | null;
+  workRevision: WorkRevision | null;
+}): RevisionDeparture | null {
+  if (fm.pr) return { kind: "pr", number: fm.pr.number };
+  const unowned = fm.github?.unownedPr ?? null;
+  if (unowned !== null) return { kind: "unowned_pr", number: unowned };
+  const rev = activeWorkRevision(fm.workRevision);
+  if (rev?.pushedAt) return { kind: "pushed", at: rev.pushedAt, headSha: rev.headSha };
+  return null;
+}
+
 /** GitHub projection cache mirrored into the file by the Phase-7
  * reconciler — commits + change stats. Not human-edited truth. */
 export const githubCommitSchema = z
@@ -584,9 +615,25 @@ export const githubCacheSchema = z
      *  recorded so the collision is reported once instead of on every poll, and
      *  so the number is visible rather than silently discarded. */
     unownedPr: z.number().int().nullable().optional(),
+    /** Ruling 161 (pass 35, U35-8): origin's copy of the task's branch carries
+     *  commits this task's own record does not account for (a stranger's PR
+     *  stands on it, or the branch is ahead of the base with no delivery of
+     *  this task behind it). Written by the reconciler each pass it can tell
+     *  (`sha` = the foreign head when GitHub named one, `prNumber` = the
+     *  unowned PR when one stands), dropped the pass the head is proven this
+     *  task's, and cleared by the writers that clear `unownedPr`. Read by the
+     *  archive ceremony's delete-branch disclosure and by the operator
+     *  snapshot. Absent = the head is this task's, or was never read. */
+    foreignHead: z
+      .object({
+        sha: z.string().min(1).nullable(),
+        prNumber: z.number().int().nullable(),
+      })
+      .nullish(),
   })
   .loose();
 export type GithubCache = z.infer<typeof githubCacheSchema>;
+export type ForeignBranchHead = NonNullable<GithubCache["foreignHead"]>;
 
 export const packetObservationSchema = z
   .object({
@@ -700,11 +747,42 @@ export const workRevisionSchema = z
      *  ABSENT reads as `delivered`: every revision minted before pass 19 is one,
      *  and both minters (`nextWorkRevision`, the R19-8 verdict-time mint) now
      *  state the kind outright — so only pre-pass-19 files omit it. Read it as
-     *  `=== "verified"`, never as `!== "delivered"`. */
-    kind: z.enum(["delivered", "verified"]).optional(),
+     *  `=== "verified"`, never as `!== "delivered"`.
+     *
+     *  Ruling 161 (pass 35, G35-6): `discarded` — a delivered revision whose
+     *  branch a person discarded before it ever left the workspace
+     *  (`discard_branch`). The record stays so the verdicts bound to it read
+     *  as history, but it is no longer the revision under review: every
+     *  reader that means "the revision under review" goes through
+     *  `activeWorkRevision`, which answers null for it, and `nextWorkRevision`
+     *  mints a fresh id over it even for the same tree. */
+    kind: z.enum(["delivered", "verified", "discarded"]).optional(),
+    /** Ruling 161 (pass 35, G35-6): the instant a delivery push published
+     *  this head to origin (`performDelivery`, on `pushed` or `up_to_date`
+     *  with the same head). This is the one fact that says the revision LEFT
+     *  the workspace without a pull request to prove it: `revisionLeftWorkspace`
+     *  reads it, and the `discard_branch` authoring gate keys on it. Absent =
+     *  no delivery has seen this head on origin. `github.commits` is NOT that
+     *  evidence: the workspace reconcile writes it from the local clone. */
+    pushedAt: z.string().min(1).nullish(),
   })
   .loose();
 export type WorkRevision = z.infer<typeof workRevisionSchema>;
+
+/**
+ * Ruling 161: the revision under review, or null. A `discarded` revision is a
+ * retired record (its branch is gone, its verdicts are history), so every
+ * reader that asks "what is the delivered revision right now" reads through
+ * here rather than testing `workRevision !== null`. Returns the SAME object
+ * (never a copy) so an in-lock writer may stamp it.
+ */
+export function activeWorkRevision(
+  rev: WorkRevision | null | undefined,
+): WorkRevision | null {
+  if (!rev) return null;
+  if (rev.kind === "discarded") return null;
+  return rev;
+}
 
 export const REVIEW_VERDICT_RESULTS = ["approve", "request_changes"] as const;
 
@@ -928,7 +1006,7 @@ export function currentVerdicts(fm: {
   workRevision: WorkRevision | null;
   verdicts: ReviewVerdict[];
 }): ReviewVerdict[] {
-  const rev = fm.workRevision;
+  const rev = activeWorkRevision(fm.workRevision);
   if (!rev) return [];
   return fm.verdicts.filter((v) => v.revisionId === rev.id);
 }
@@ -940,7 +1018,8 @@ export function currentVerdicts(fm: {
 export function deriveValidation(
   fm: ReviewState,
 ): (typeof VALIDATION_VALUES)[number] {
-  if (!fm.workRevision) return "none";
+  // Ruling 161: a discarded revision owes nobody a verdict.
+  if (!activeWorkRevision(fm.workRevision)) return "none";
   const required = requiredReviewers(fm);
   const cur = currentVerdicts(fm);
   const verdictOf = (profileId: string) =>
@@ -1135,12 +1214,15 @@ export function nextWorkRevision(
     createdAt: string;
   },
 ): NextWorkRevision {
+  // Ruling 161: a discarded revision is never the same subject, whatever its
+  // tree: the branch it named is gone, and a re-created head is new work.
+  const active = activeWorkRevision(current);
   const sameSubject =
-    current != null &&
-    (input.treeSha != null && current.treeSha != null
-      ? current.treeSha === input.treeSha
-      : current.headSha === input.headSha);
-  if (sameSubject) return { revision: current, changed: false };
+    active != null &&
+    (input.treeSha != null && active.treeSha != null
+      ? active.treeSha === input.treeSha
+      : active.headSha === input.headSha);
+  if (sameSubject) return { revision: active, changed: false };
   return {
     revision: {
       id: input.id,

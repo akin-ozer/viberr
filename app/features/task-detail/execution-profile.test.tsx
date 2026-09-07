@@ -60,6 +60,7 @@ function unownedTask(): TaskSummary {
     commits: [],
     changed: null,
     unownedPr: null,
+    foreignHead: null,
     goal: "Keep the console readable on long runs.",
     eventCount: 0,
     commentCount: 0,
