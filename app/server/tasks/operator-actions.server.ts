@@ -2827,6 +2827,19 @@ export async function operatorDeliverForReview(
           `${outcome.files.map((f) => `\`${f}\``).join(", ")} from the branch (the task's real ` +
           `attachments folder is outside the checkout; its prompt names the absolute path), then deliver again.`,
       };
+    case "closed_by_human":
+      // Ruling 160: a person's close is a decision about the task, answered
+      // through the closed-PR recovery packet, never delivered around.
+      return {
+        outcome: "noop",
+        message:
+          `Delivery was refused: ${outcome.message} ` +
+          `Do not deliver again and do not ask any agent to push or open a PR. ` +
+          `The closed-PR recovery packet is the path: when no open packet already covers PR #${outcome.prNumber}, ` +
+          `open ONE decision packet (type "input") with a \`custom\` option to rework (a later \`deliver_for_review\` then opens a fresh PR), ` +
+          `an \`archive_task\` option, and an \`archive_task\` option with \`deleteBranch: true\`, ` +
+          `and say that reopening the PR on GitHub is also a valid answer. Then wait for the person.`,
+      };
     case "grant_withheld":
     case "push_failed":
     case "nothing_to_review":

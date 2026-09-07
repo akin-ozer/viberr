@@ -3288,3 +3288,71 @@ describe("pass 35 S15: ruling 162 in the reconciler", () => {
     expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter.pr?.mergeable).toBe("conflicting");
   });
 });
+
+// ------------------------------------------------- ruling 160: pr.closure
+
+/**
+ * Ruling 160 (pass 35, F35-11): a PR that went `closed` without merging was
+ * closed by a person. The reconciler, the one writer of that state, stamps the
+ * closure with the closer GitHub names, carries it while the PR stays closed
+ * and drops it the moment the PR is live again. Canaries: drop the `closure`
+ * assignment in the owned-PR assembly (first test), or copy it unconditionally
+ * (third test).
+ */
+describe("ruling 160: the reconciler records who closed the PR", () => {
+  const read = (store: TestStore) =>
+    readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter.pr;
+
+  it("the transition into closed stamps `closure` with the closer from the issue payload", async () => {
+    const { store, actor } = setup();
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: { number: 318, title: "Attach execution workspace", state: "closed",
+        merged: false, head: { sha: "headsha318" }, additions: 1, deletions: 0, changed_files: 1 },
+    };
+    routes[`GET ${REPO_PATH}/issues/318`] = { body: { closed_by: { login: "akin-ozer" } } };
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
+    const pr = read(store);
+    expect(pr).toMatchObject({ number: 318, state: "closed", closure: { by: "akin-ozer", answered: null } });
+    expect(Number.isNaN(Date.parse(pr!.closure!.at))).toBe(false);
+  });
+
+  it("a closer GitHub does not name is recorded as null, never as a guess", async () => {
+    const { store, actor } = setup();
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: { number: 318, title: "Attach execution workspace", state: "closed",
+        merged: false, head: { sha: "headsha318" }, additions: 1, deletions: 0, changed_files: 1 },
+    };
+    // No issues route: the fake answers 404.
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
+    expect(read(store)!.closure).toEqual({ at: expect.any(String), by: null, answered: null });
+  });
+
+  it("a reopened PR drops the closure with the closed state", async () => {
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: {
+          number: 318,
+          state: "closed",
+          title: "Attach execution workspace",
+          closure: { at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: null },
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // happyRoutes: PR #318 is open again on GitHub.
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl });
+    const pr = read(store);
+    expect(pr).toMatchObject({ number: 318, state: "review" });
+    expect(pr!.closure).toBeUndefined();
+  });
+});

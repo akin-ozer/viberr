@@ -264,6 +264,13 @@ pr:                               # GitHub projection mirrored into the file
                                   # and by the workspace reconcile the moment a run
                                   # mints a new revision on an open PR; cleared by
                                   # a delivery that pushes; never for `verified`
+  closure:                        # ruling 160: a person closed this PR without
+    at: 2026-09-06T19:33:19Z      # merging. Stamped by the reconciler on the
+    by: akin-ozer                 # transition into `closed` (the closer's GitHub
+    answered:                     # login, or null); `answered` is stamped when a
+      at: 2026-09-06T19:40:02Z    # person resolves a packet while the PR is closed
+      byUserId: u_arda            # (null until then). Until answered, delivery
+                                  # refuses `closed_by_human`; dropped on reopen
 github:                           # more GitHub cache: commits + change stats
   commits: [{ sha: a91f7c2, msg: "[VIB-142] …" }]
   changed: { files: 9, add: 412, del: 87 }
@@ -409,8 +416,9 @@ Notes:
   searchable on the board and in ⌘K; `acceptance: forced` when an admin force-accepted;
   `goalRef: { goalId, linkIndex }` back-reference to a chained goal; `engagements[].pinnedBackend`
   (set by a `retry_other_backend` resolution so the switch sticks, F27-B1); `pr.checks`,
-  `pr.review`, `pr.mergeable`, `pr.headSha`, `pr.revisionDrift`, `pr.unpushedRevision`
-  (reconciler cache, shown above); each `schedules[]`
+  `pr.review`, `pr.mergeable`, `pr.headSha`, `pr.revisionDrift`, `pr.unpushedRevision`,
+  `pr.closure` (reconciler cache, shown above; the closure's `answered` is the packet
+  resolution's); each `schedules[]`
   row carries `action` (`run-operator | run-agent`), `dueAt`, `profileId`, `prompt`,
   `status` (`SCHEDULE_STATUS_VALUES`), `claimedAt`, `firedAt`.
 - Unknown top-level frontmatter keys are preserved verbatim on write (the legacy

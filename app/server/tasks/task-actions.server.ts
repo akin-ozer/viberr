@@ -5657,8 +5657,34 @@ export type DeliveryOutcome =
    *  (`projects/<slug>/tasks/...`); nothing was pushed and `files` names the
    *  offending paths. The remedy is to remove them from the branch. */
   | { status: "store_layout"; files: string[]; message: string }
+  /** Ruling 160 (pass 35, F35-11): the task's pull request was closed WITHOUT
+   *  merging by a person and no person has answered the recovery packet yet.
+   *  No PR was opened; the branch was pushed (the rework waits on the branch
+   *  for the person's answer). `closedBy` is the GitHub login GitHub named as
+   *  the closer, null when it named none. */
+  | { status: "closed_by_human"; prNumber: number; closedBy: string | null; message: string }
   | { status: "nothing_to_review"; message: string }
   | { status: "failed"; message: string };
+
+/**
+ * Ruling 160 (pass 35, F35-11): the ONE sentence every delivery door prints
+ * when the task's pull request was closed by a person and nobody has answered
+ * the recovery packet: the operator's tool result, the task page's Deliver
+ * control and the timeline note all read it.
+ */
+export function closedByHumanDeliveryText(
+  taskKey: string,
+  prNumber: number,
+  closedBy: string | null,
+): string {
+  const who = closedBy ? ` by ${closedBy}` : "";
+  return (
+    `No pull request was opened for ${taskKey}: PR #${prNumber} was closed without merging${who}. ` +
+    `A closed pull request is a person's decision about the task, so Viberr opens no new PR for this branch ` +
+    `until the closed-PR decision is answered (rework and open a fresh PR, or archive the task). ` +
+    `Reopening PR #${prNumber} on GitHub also lifts the block; the pushed branch keeps the latest work.`
+  );
+}
 
 /**
  * Perform delivery: push the deliverer's workspace branch, re-reconcile the
@@ -6199,6 +6225,29 @@ export async function performDelivery(
         result.message,
       );
       return { status: "failed", message: result.message };
+    }
+
+    // Ruling 160 (pass 35, F35-11): a pull request a person closed without
+    // merging is that person's decision about the task. The push above put
+    // the rework on the branch; no PR is opened over the closed one until a
+    // person answers the recovery packet (the reconciler raised it inside
+    // `openTaskPr`, or had already). The sentence names the PR and the closer.
+    if (result.status === "closed_by_human") {
+      const message = closedByHumanDeliveryText(taskKey, result.prNumber, result.closedBy);
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        `Delivery refused: PR #${result.prNumber} was closed by a person`,
+        message,
+      );
+      return {
+        status: "closed_by_human",
+        prNumber: result.prNumber,
+        closedBy: result.closedBy,
+        message,
+      };
     }
 
     // 3. An empty-diff branch means the delivery produced no change (the failed-
@@ -7842,6 +7891,24 @@ export async function resolvePacket(
     }
     mutate(parsed.frontmatter);
     if (clearPacket) parsed.packet = null;
+    // Ruling 160 (pass 35, F35-11): a PERSON answering a packet while the
+    // task's pull request stands closed without merging is the answer to that
+    // closure, whichever option they chose (rework, archive, a redirect): the
+    // next delivery may open a fresh PR for the branch. The operator's own
+    // withdrawal of a packet (`resolve_decision_packet`) is not a person's
+    // answer and stamps nothing.
+    const closedPr = parsed.frontmatter.pr;
+    if (
+      closedPr?.state === "closed" &&
+      closedPr.closure &&
+      closedPr.closure.answered === null &&
+      !ctx.operatorAuthorized
+    ) {
+      closedPr.closure.answered = {
+        at: new Date().toISOString(),
+        byUserId: actor.userId,
+      };
+    }
     // V18: a resolved decision is a human re-litigating the task's direction —
     // a recorded deliberate hold no longer speaks for them.
     parsed.frontmatter.heldAtStage = null;

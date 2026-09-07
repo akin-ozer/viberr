@@ -81,6 +81,7 @@ import type { TaskPacket } from "~/schemas/task-file.schema";
  * `no_pat_configured`, so every other test behaves exactly as it always did.
  */
 import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
+import type { openTaskPr } from "~/server/github/pr-open.server";
 import {
   fakeGithubFetch,
   type FakeGithub,
@@ -5080,5 +5081,105 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(parsed.frontmatter.pr?.mergeable).toBe("conflicting");
     const line = parsed.timeline.find((e) => e.type === "github" && e.text.includes("CONFLICT"))!;
     expect(line.text).toContain("README.md, Makefile");
+  });
+});
+
+// ------------------------------------------------ ruling 160: closed by a person
+
+/**
+ * Ruling 160 (pass 35, F35-11): a pull request a person closed without merging
+ * is that person's decision about the task. `openTaskPr` answers
+ * `closed_by_human`; the delivery door renders it as a refusal naming the PR
+ * and the closer, and a person's answer to the recovery packet is what lets
+ * the next delivery open a fresh PR. Canaries: drop the `closed_by_human` arm
+ * of `performDelivery` (first test); drop the `closure.answered` stamp in
+ * `resolvePacket` (second test).
+ */
+describe("ruling 160: a PR closed by a person refuses delivery until the packet is answered", () => {
+  function seedClosedPr(store: TestStore): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1",
+        ownerUserId: store.users.arda.id,
+        pr: {
+          number: 10,
+          state: "closed",
+          title: "[VIB-1] rejected by hand",
+          closure: { at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: null },
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("performDelivery renders closed_by_human as a refusal naming the PR and the closer, with the timeline note", async () => {
+    const store = prepared();
+    seedClosedPr(store);
+    pushMock.mockResolvedValueOnce({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "c".repeat(40),
+      remoteHeadBefore: null,
+      workflowFiles: null,
+    });
+    const openPrMock = vi.fn<typeof openTaskPr>().mockResolvedValue({
+      status: "closed_by_human",
+      prNumber: 10,
+      closedBy: "akin-ozer",
+    });
+    const callCtx: TaskActionContext = {
+      dataRoot: store.dataRoot,
+      deps: { pushWorkspaceBranch: pushMock, openTaskPr: openPrMock },
+    };
+    const outcome = await performDelivery(store.db, callCtx, store.slug, "VIB-1", actor(store.users.arda));
+    expect(outcome).toMatchObject({ status: "closed_by_human", prNumber: 10, closedBy: "akin-ozer" });
+    const message = outcome.status === "closed_by_human" ? outcome.message : "";
+    expect(message).toContain("PR #10 was closed without merging by akin-ozer");
+    expect(message).toContain("a person's decision about the task");
+    expect(message).toContain("Reopening PR #10 on GitHub also lifts the block");
+    const timeline = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline;
+    expect(timeline.some((e) => e.type === "github" && e.text.includes("PR #10 was closed without merging by akin-ozer"))).toBe(true);
+    // The record is untouched: the closed PR still stands, unanswered.
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toMatchObject({ number: 10, state: "closed", closure: { answered: null } });
+  });
+
+  it("a person resolving a packet while the PR stands closed answers the closure", async () => {
+    const store = prepared();
+    seedClosedPr(store);
+    const current = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: current.frontmatter,
+      packet: {
+        id: "pkt_closed",
+        type: "input",
+        kind: "Decision required",
+        from: "operator",
+        title: "PR #10 was closed on GitHub without merging",
+        body: "Decide whether to rework and open a fresh PR, or archive the task.",
+        observations: [],
+        options: [
+          { kind: "custom", t: "Rework the branch", d: "", rec: true, ev: "**Decision:** rework." },
+          { kind: "archive_task", t: "Archive the task", d: "", rec: false },
+        ],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    expect(parsed.packet).toBeNull();
+    expect(parsed.frontmatter.pr?.closure).toEqual({
+      at: "2026-09-06T19:33:19.000Z",
+      by: "akin-ozer",
+      answered: { at: expect.any(String), byUserId: store.users.arda.id },
+    });
   });
 });

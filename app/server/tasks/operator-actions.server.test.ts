@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { describeRevisionDrift } from "~/shared/revision-drift";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { insertUser } from "~/server/auth/user-store.server";
@@ -9,6 +9,8 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
+import type { openTaskPr } from "~/server/github/pr-open.server";
 import {
   deliveringEngagement,
   supportingEngagements,
@@ -3012,6 +3014,43 @@ describe("A4 — an UNDEPLOYED operator has no authority at all", () => {
     );
     expect(res.outcome).toBe("denied");
     expect(res.message).toContain("not permitted");
+  });
+
+  it("ruling 160: a closed_by_human delivery answers the operator with the refusal and the packet path, never a retry", async () => {
+    // Canary: fold `closed_by_human` into the generic "Delivery did not
+    // complete" arm.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const pushMock = vi.fn<typeof pushWorkspaceBranch>().mockResolvedValue({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "c".repeat(40),
+      remoteHeadBefore: null,
+      workflowFiles: null,
+    });
+    const openPrMock = vi.fn<typeof openTaskPr>().mockResolvedValue({
+      status: "closed_by_human",
+      prNumber: 10,
+      closedBy: "akin-ozer",
+    });
+    const callCtx: TaskActionContext = {
+      dataRoot: store.dataRoot,
+      deps: { pushWorkspaceBranch: pushMock, openTaskPr: openPrMock },
+    };
+    const res = await operatorDeliverForReview(
+      store.db,
+      callCtx,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(res.outcome).toBe("noop");
+    expect(res.message).toContain("Delivery was refused: No pull request was opened for VIB-1: PR #10 was closed without merging by akin-ozer");
+    expect(res.message).toContain("Do not deliver again and do not ask any agent to push or open a PR");
+    expect(res.message).toContain("The closed-PR recovery packet is the path");
+    expect(res.message).toContain("reopening the PR on GitHub is also a valid answer");
+    const rows = listAuditEvents(store.db, { action: "github.delivery.operator" });
+    expect(rows.at(-1)?.details).toEqual({ status: "closed_by_human" });
   });
 
   it("a DEPLOYED operator still delivers with the grant absent (the R15-2 polarity is intact)", async () => {

@@ -487,10 +487,33 @@ export const prRefSchema = z
       })
       .nullish()
       .catch(null),
+    // Ruling 160 (pass 35, F35-11): a person closed this pull request without
+    // merging it. Stamped by the reconciler on the transition INTO `closed`
+    // (the only writer of that state), carried forward for the same number
+    // while it stays closed, dropped when the PR leaves `closed` (a reopen) and
+    // never inherited by a different PR. `by` is the GitHub login GitHub named
+    // as the closer, null when it named none. `answered` is stamped by
+    // `resolvePacket` when a PERSON resolves a packet while the PR is closed:
+    // until then `openTaskPr` refuses to open another PR for the branch
+    // (`closed_by_human`). Absent = the PR was never closed by a person.
+    closure: z
+      .object({
+        at: z.string().min(1),
+        by: z.string().nullable(),
+        answered: z
+          .object({
+            at: z.string().min(1),
+            byUserId: z.string().min(1),
+          })
+          .nullable(),
+      })
+      .nullish()
+      .catch(null),
   })
   .loose();
 export type PrRef = z.infer<typeof prRefSchema>;
 export type UnpushedRevision = NonNullable<PrRef["unpushedRevision"]>;
+export type PrClosure = NonNullable<PrRef["closure"]>;
 
 /** The stored `pr.revisionDrift`, typed as the shared drift record so the
  *  file and the sentence builder can never disagree on the shape. */

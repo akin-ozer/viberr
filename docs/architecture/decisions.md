@@ -2994,6 +2994,37 @@ available. It reads nobody else's session.)*
     `store_layout` arm of `performDelivery` in `app/server/tasks/task-actions.server.ts`;
     `findStrayAttachmentsFolder` in `app/server/files/task-attachments.server.ts`.)
 
+160. **A pull request closed without merging is a human decision about the task
+    (owner, 2026-09-06, Q35-12; pass 35 F35-11).** Viberr never opens another PR for that
+    branch until a person has answered the recovery packet; only a merged PR clears the
+    way for a fresh review PR. Live (KNC-23) the owner closed PR #10 with a rejection
+    comment at 19:33:19Z, the operator's base refresh moved the branch, and the delivery
+    at 19:33:44Z opened PR #26 over it: `openTaskPr` treated a closed-unmerged PR like a
+    merged one (DG-1's "fall through to a fresh PR"), the create path overwrote the
+    cache, and the reconciler's R8-6 alarm (which keys on the cache's transition into
+    `closed`, and finds a closed PR by branch name only while the branch still stands
+    at its head, F26) never fired: no event, notification or packet named the person's
+    decision. **(a)** `openTaskPr` splits the terminal cases. MERGED keeps DG-1. A cached
+    `closed` PR whose `pr.closure` no person has answered refuses `closed_by_human`
+    before GitHub is asked; a cached live PR that GitHub now reports closed and unmerged
+    is handed to `reconcileTask`, then refused the same way, naming the PR and the
+    closer when GitHub names one (`closed_by` on the issue payload). **(b)** The
+    reconciler stays the one writer of `pr.state: closed`, of the closure record
+    (`pr.closure: {at, by, answered}`) and of the R8-6 note, inbox alert and
+    `pr-diverged` wake: when the branch listing names nothing and the task's cached PR
+    is live, it reads the cached NUMBER directly and records a settled answer, so the
+    close a push overtook transitions in the delivery's own turn and once. **(c)** A
+    person resolving any packet while the PR stands closed stamps `closure.answered`
+    (the operator's withdrawal stamps nothing); a reopen on GitHub drops the closure with
+    the closed state. **(d)** `performDelivery` reports `closed_by_human` on the task
+    (one sentence, `closedByHumanDeliveryText`, on the operator's reply, the Deliver
+    control and the timeline), and the `deliver_for_review` description says a closed
+    PR is a person's decision and names the packet. (`openTaskPr` in
+    `app/server/github/pr-open.server.ts`; `readTerminalPrByNumber` and `readPrCloser`
+    in `app/server/github/pr-linker.server.ts`; the closure stamp in
+    `app/server/github/github-reconciler.server.ts`; `closedByHumanDeliveryText` and the
+    `resolvePacket` stamp in `app/server/tasks/task-actions.server.ts`.)
+
 162. **The acceptance gate's verdict is computed once and read everywhere a person or the
     operator is invited to accept (owner, 2026-09-06, Q35-17 and Q35-18; F35-12, G35-5
     addendum (d) and (e)).** No surface offers an acceptance the gate will refuse. The

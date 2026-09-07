@@ -179,6 +179,52 @@ describe("pr-diverged wakes the operator", () => {
     expect(invoked).toHaveLength(1);
   });
 
+  it("ruling 160 (F35-11): a push that moved the branch past the closed PR hides it from the branch listing; the cached number is read directly, the closure lands with the closer, and the wake fires once", async () => {
+    // KNC-23 live: the owner closed PR #10, the operator's base refresh moved
+    // the branch eleven seconds later, and the reconcile that followed found
+    // nothing under the branch name (F26) and kept saying `review`.
+    // Canary: drop the `readTerminalPrByNumber` fallback in the reconciler.
+    const { store, actor } = setup({
+      pr: { number: 318, state: "review", title: "Attach execution workspace" },
+    });
+    const routes: FakeRoutes = {
+      [`GET ${REPO_PATH}/compare/main...${BRANCH}`]: {
+        body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [] },
+      },
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: {
+          number: 318, title: "Attach execution workspace", state: "closed",
+          merged: false, merged_at: null, head: { sha: "headsha" },
+        },
+      },
+      [`GET ${REPO_PATH}/issues/318`]: { body: { closed_by: { login: "akin-ozer" } } },
+    };
+    await reconcile(store, actor, routes);
+    const read = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter.pr;
+    expect(read()).toMatchObject({
+      number: 318,
+      state: "closed",
+      closure: { by: "akin-ozer", answered: null },
+    });
+    const stampedAt = read()!.closure!.at;
+    expect(invoked).toEqual([{ projectSlug: store.slug, taskKey: "VIB-301", trigger: "pr-diverged" }]);
+
+    // The closure is a transition: the next pass carries it as it is (same
+    // instant, no second closer read) and wakes nobody again.
+    const gh = fakeGithubFetch(routes);
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl, wakeOperator },
+    );
+    expect(read()!.closure).toEqual({ at: stampedAt, by: "akin-ozer", answered: null });
+    expect(gh.callsTo(`GET ${REPO_PATH}/issues/318`)).toHaveLength(0);
+    expect(invoked).toHaveLength(1);
+  });
+
   it("merged-but-not-done fires the trigger too", async () => {
     const { store, actor } = setup({
       pr: { number: 318, state: "review", title: "Attach execution workspace" },

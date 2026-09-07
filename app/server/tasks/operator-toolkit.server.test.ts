@@ -249,6 +249,16 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc("transition_stage")).not.toContain("does not work the review stage");
   });
 
+  it("ruling 160 (pass 35, F35-11): deliver_for_review says a closed-unmerged PR is a person's decision and names the packet", () => {
+    // Canary: restore the description from before S14.
+    const defs = build(withPolicy(uniform("direct"))).tools;
+    const desc = (name: string) => defs.find((t) => t.name === name)!.description;
+    expect(desc("deliver_for_review")).toContain("A pull request a person closed WITHOUT merging is that person's decision about the task (ruling 160)");
+    expect(desc("deliver_for_review")).toContain("the tool answers `closed_by_human`, opens no new PR for the branch");
+    expect(desc("deliver_for_review")).toContain("closed-PR recovery packet");
+    expect(desc("deliver_for_review")).toContain("Only a MERGED pull request clears the way for a fresh review PR");
+  });
+
   it("pass 35 S15 (rulings 162 and 163): the tool text names the gate's verdict, the acceptance-stage refusal, the rework route and the acceptance-time refresh", () => {
     // Canary: restore any of the four descriptions from before S15.
     const defs = build(withPolicy(uniform("direct"))).tools;

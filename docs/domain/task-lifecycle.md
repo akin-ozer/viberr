@@ -424,7 +424,10 @@ Every writer to the terminal stage goes through one contract:
    `accept_disclosure_stale`. In-process callers (the full-autonomy operator) carry
    their own contract.
 3. **Terminal GitHub fact first**: a closed, unmerged PR refuses acceptance and
-   withdraws force-accept entirely (ruling 37). Lower in the stack, a delivered revision
+   withdraws force-accept entirely (ruling 37), and refuses a new delivery too: a
+   person's close is a decision about the task, recorded as `pr.closure`, and no fresh
+   PR is opened for the branch until a person answers the recovery packet or reopens
+   the PR (ruling 160; `closed_by_human` on every delivery door). Lower in the stack, a delivered revision
    that is not on the pull request refuses with "deliver the branch to push it" (ruling
    135) and outranks a conflicting PR, whose `mergeable` describes the head GitHub has,
    not the one that was reviewed; a conflicting PR refuses after it. Both sentences come

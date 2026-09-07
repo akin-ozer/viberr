@@ -188,9 +188,18 @@ no credential, no repository and an unknown task are standing states and only lo
    branch, PR, revision or commits, with `defaultBranchEvidence.verified === true`,
    sets `noChanges`, mints a `kind: verified` work revision at the default-branch head
    and routes the task to the "Completed, no changes" acceptance path.
-4. **`openTaskPr`**: reuse a cached live PR if GitHub still reports it open; else list
-   open PRs on the branch and apply the adoption rule (§4); a refused adoption is a
-   `branch_collision`. Otherwise `POST /pulls` with title `[KEY] <task title>` and a
+4. **`openTaskPr`**: reuse a cached live PR if GitHub still reports it open. A pull
+   request closed WITHOUT merging is a person's decision (ruling 160, pass 35 F35-11):
+   a cached `closed` PR whose `closure` no person has answered refuses with
+   `closed_by_human` before GitHub is asked, and a cached live PR that GitHub now
+   reports closed and unmerged is handed to `reconcileTask` (the one writer of
+   `pr.state: closed`, the closure record and the R8-6 note, inbox alert and
+   `pr-diverged` wake) and then refused the same way; no fresh PR is opened for the
+   branch until a person answers the recovery packet (rework, archive) or reopens the
+   PR on GitHub. Only a MERGED pull request, cached or discovered live, clears the way
+   for a fresh review PR (DG-1: a reworked branch never resurrects a merged PR). Else
+   list open PRs on the branch and apply the adoption rule (§4); a refused adoption is
+   a `branch_collision`. Otherwise `POST /pulls` with title `[KEY] <task title>` and a
    body composed from the task: a link back to the task when `BETTER_AUTH_URL` is set
    (a relative link would 404 on github.com), the goal, a change summary and evidence
    from the live compare, and a footer stating that review and merge are
@@ -338,7 +347,14 @@ and the note itself, used to assert the reused-key origin alone.)*
 (`rate_limited` is transient; another 403 opens a `repo` violation), the PR (state,
 checks summary, review state, mergeability, the head sha, revision drift when the head
 is ahead of the reviewed revision, the unpushed-revision record when it is not (ruling
-135), human approval), and writes the `pr` and `github` caches into `task.md`. The
+135), human approval), and writes the `pr` and `github` caches into `task.md`. The PR
+is found by branch name, and a closed PR whose branch has since advanced is not
+returned that way (F26); when the listing names nothing and the task's cached PR is
+live, the cached NUMBER is read directly and a settled answer (closed, merged) is
+recorded (ruling 160): this is what lets a close that a push overtook transition at
+all. The transition into `closed` stamps `pr.closure` (`at`, the closer's GitHub login
+from the issue payload or null, `answered: null`); the closure is carried while the PR
+stays closed and dropped when it is live or merged again. The
 operator's branch update runs one such pass right after its push (ruling 132), so the
 drift it caused is measured before the tool answers. The pass writes
 `task.md` (the reconciler never mints a PR link and never downgrades `merged` or

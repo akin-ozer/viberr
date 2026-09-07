@@ -536,3 +536,80 @@ export async function findPrForBranch(
   if (mergeable !== "unknown") facts.mergeable = mergeable;
   return { status: "found", pr: facts };
 }
+
+/**
+ * Ruling 160 (pass 35, F35-11): the SAME pull request the task already
+ * references, read by NUMBER.
+ *
+ * `findPrForBranch` lists by head branch and, for a closed PR whose branch has
+ * since advanced, answers `none` (F26): right for a stranger's stale PR on a
+ * reused branch name, blind for the task's OWN PR when a push landed after a
+ * person closed it. Live (KNC-23) the operator's base refresh moved the branch
+ * eleven seconds after the owner closed PR #10, the reconcile that followed
+ * found nothing under the branch name, and the cache went on saying `review`.
+ * This read exists for that gap: a settled fact about the task's own number is
+ * this task's news whatever the branch listing says. Only a TERMINAL answer is
+ * worth adopting (an open PR the listing missed keeps `none`, unchanged), and a
+ * degraded read is `none` too: the caller keeps its cached facts and the next
+ * pass asks again. Change stats and checks are not read (a settled PR's pills
+ * are dropped by the caller anyway).
+ */
+export async function readTerminalPrByNumber(
+  client: GithubClient,
+  repo: string,
+  number: number,
+): Promise<{ status: "found"; pr: PrFacts } | { status: "none" }> {
+  const detail = await client.request(
+    "GET",
+    `/repos/${repo}/pulls/${number}`,
+    ghPullDetailSchema,
+  );
+  if (!detail.ok) return { status: "none" };
+  const state = mapPrToCacheState(detail.data);
+  if (state !== "closed" && state !== "merged") return { status: "none" };
+  return {
+    status: "found",
+    pr: {
+      number: detail.data.number,
+      title: detail.data.title,
+      state,
+      draft: detail.data.draft ?? false,
+      headSha: detail.data.head?.sha ?? null,
+      changed: null,
+      checks: null,
+    },
+  };
+}
+
+/** The issue payload's read slice: pull requests are issues on GitHub, and the
+ *  ISSUE endpoint is the one that names who closed one (`closed_by`); the pulls
+ *  endpoint never does. Tolerant end to end: this read only ever names a
+ *  person, so drift costs the name and nothing else. */
+const ghIssueCloserSchema = z
+  .object({
+    closed_by: z
+      .object({ login: z.string().optional().catch(undefined) })
+      .nullable()
+      .optional()
+      .catch(undefined),
+  })
+  .catch({});
+
+/**
+ * Ruling 160: the GitHub login of whoever closed the pull request, or null
+ * when GitHub named nobody (a degraded read, a closure GitHub attributes to no
+ * account). One call, on the transition into `closed` only.
+ */
+export async function readPrCloser(
+  client: GithubClient,
+  repo: string,
+  number: number,
+): Promise<string | null> {
+  const issue = await client.request(
+    "GET",
+    `/repos/${repo}/issues/${number}`,
+    ghIssueCloserSchema,
+  );
+  if (!issue.ok) return null;
+  return issue.data.closed_by?.login ?? null;
+}

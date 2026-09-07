@@ -51,7 +51,13 @@ import {
 } from "./github-context.server";
 import { branchCleanupOnMerge } from "./branch-cleanup.server";
 import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
-import { deriveMergeable, findPrForBranch, type PrFacts } from "./pr-linker.server";
+import {
+  deriveMergeable,
+  findPrForBranch,
+  readPrCloser,
+  readTerminalPrByNumber,
+  type PrFacts,
+} from "./pr-linker.server";
 import {
   derivePrHumanApproval,
   readPrHumanApproval,
@@ -384,7 +390,19 @@ async function reconcileTaskUnlocked(
     compareResult.status === "ok" ? compareResult.compare : null;
 
   // 2. PR lookup (state/draft/merged + checks + change stats).
-  const prResult = await findPrForBranch(gh.client, gh.repo, branch);
+  let prResult = await findPrForBranch(gh.client, gh.repo, branch);
+  // Ruling 160 (pass 35, F35-11): the branch listing answers `none` for a
+  // closed PR whose branch has since advanced (F26), which is exactly what a
+  // push landing after a person's close looks like. The task's OWN cached
+  // number is then read directly, and a settled answer (closed, merged) is
+  // this task's news: it is what lets the transition below fire at all.
+  if (
+    prResult.status === "none" &&
+    fm.pr &&
+    (fm.pr.state === "review" || fm.pr.state === "accepted")
+  ) {
+    prResult = await readTerminalPrByNumber(gh.client, gh.repo, fm.pr.number);
+  }
   if (prResult.status === "network_unavailable") {
     return { status: "network_unavailable", message: prResult.message };
   }
@@ -597,6 +615,22 @@ async function reconcileTaskUnlocked(
       : (cachedPr?.unpushedRevision ?? null);
     if (carriedUnpushed) owned.unpushedRevision = carriedUnpushed;
     if (humanApproval) owned[PR_HUMAN_APPROVAL_KEY] = humanApproval;
+    // Ruling 160 (pass 35, F35-11): a PR that just went `closed` without
+    // merging was closed by a person. The closure is stamped on the
+    // TRANSITION (with the closer's login when GitHub names one), carried
+    // forward for the same number while it stays closed, and dropped the
+    // moment the PR is live or merged again: a stale closure would refuse a
+    // delivery over a PR nobody closed.
+    if (owned.state === "closed") {
+      owned.closure =
+        cachedPr?.state === "closed" && cachedPr.closure
+          ? cachedPr.closure
+          : {
+              at: new Date().toISOString(),
+              by: await readPrCloser(gh.client, gh.repo, pr.number),
+              answered: null,
+            };
+    }
     newPr = owned;
   }
 
@@ -820,6 +854,9 @@ async function reconcileTaskUnlocked(
             (current.state === "accepted" && applied.pr.state === "review");
           if (keepCurrent) {
             applied.pr = { ...applied.pr, state: current.state };
+            // Ruling 160: a closure travels with `closed` alone. A concurrent
+            // merge that wins here must not leave the merged PR carrying it.
+            if (applied.pr.state !== "closed") delete applied.pr.closure;
           }
         }
       }

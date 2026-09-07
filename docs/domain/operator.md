@@ -268,7 +268,12 @@ Details that matter:
   when the operator recorded none (ruling 58); a full-autonomy delivery whose PR is
   new or whose head moved re-queues the operator with the `delivered` trigger (rulings
   48 and 134). The doctrine and the seeded persona say that pushing is never a
-  person's job and never an agent's.
+  person's job and never an agent's. A pull request a person closed without merging is
+  that person's decision (ruling 160): the tool answers `closed_by_human` with the
+  sentence naming the PR and the closer, opens no new PR for the branch, and the reply
+  points at the closed-PR recovery packet (open one when none covers the PR; never
+  deliver again, never ask an agent to push); a person's answer to that packet, or a
+  reopen on GitHub, is what lets the next `deliver_for_review` open a fresh PR.
 - **Branch update.** `update_branch_from_base` merges the base into the task branch in
   the delivering workspace (`--no-ff`, never rebase, never force) and pushes. Ruling 162
   / G35-5(d) (pass 35): it refuses at the acceptance-boundary stage and past it, because
@@ -330,7 +335,9 @@ deliverer is offered only when that deliverer is deployed with repo-write, else 
 by hand is recommended and the body says why); and the
 `pr-diverged` recovery (closed PR → rework, `archive_task`, `archive_task` +
 `deleteBranch`; merged → no packet, accept instead; reopened → withdraw the moot
-packet).
+packet). A person resolving any packet while the PR stands closed stamps
+`pr.closure.answered` (ruling 160), which is what lets a later delivery open a fresh
+PR; the operator's own withdrawal stamps nothing.
 
 Every packet writer (the operator's `operatorOpenPacket`, an agent's `ask_human`, the Codex
 completion envelope's question) withdraws the task's standing acceptance offers inside the
