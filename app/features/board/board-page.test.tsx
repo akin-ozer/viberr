@@ -2159,6 +2159,52 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     expect(text).toContain("2 authored commits since review merge unreviewed");
     expect(text).toContain("awaiting verdict"); // the ValidationPill verdict row
   });
+
+  it("discloses a refusal without dead-ending the drop: the server still answers", async () => {
+    // Ruling 162's interlock (a standing refusal disables the confirm) belongs
+    // to the dialog quoting the refusal the SERVER re-decides. The board's is
+    // composed from a projection summary on purpose (`boardAcceptRefusal`,
+    // belt-and-braces so a stale row fails closed) and the board has no
+    // force-accept, so disabling it here turns the disclose-then-let-the-server
+    // -answer flow into a dialog with no way forward — and a stale row would
+    // block a move the server would take. The refusal is still disclosed.
+    // CANARY: drop `blockedReasonAuthoritative={false}` from
+    // AcceptOnBoardConfirm — the confirm renders disabled, the click does
+    // nothing and this POST never happens.
+    const refusal = "Waiting on 1 required reviewer approval of the current revision.";
+    const submitted: Record<string, string>[] = [];
+    const r = renderBoard(
+      [
+        task({
+          key: "VIB-1",
+          stage: "impl",
+          validation: "changed",
+          blockReason: refusal,
+          pr: { number: 124, state: "review", title: "t" },
+        }),
+      ],
+      {
+        action: async ({ request }) => {
+          const fd = await request.formData();
+          const row: Record<string, string> = {};
+          for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
+          submitted.push(row);
+          return { ok: false as const, toast: refusal };
+        },
+      },
+    );
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    const dialog = r.container.querySelector("dialog")!;
+    expect(dialog.textContent).toContain(refusal);
+    const confirm = Array.from(dialog.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Move → Done"),
+    )!;
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("reorder");
+  });
 });
 
 /**

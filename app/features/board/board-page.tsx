@@ -1150,6 +1150,12 @@ function AcceptOnBoardConfirm({
       }}
       verdictSatisfiedBy={null}
       blockedReason={boardAcceptRefusal(task, fromStageName, terminalName)}
+      // Ruling 162's interlock is for the refusal the server re-decides. This
+      // one is composed from a projection SUMMARY on purpose (see
+      // `boardAcceptRefusal`), so it is a disclosure, not a verdict: the board
+      // discloses it and lets the confirmed move be answered by the server,
+      // which is also the only door here — the board has no force-accept.
+      blockedReasonAuthoritative={false}
       busy={busy}
       onCancel={onCancel}
       onConfirm={onConfirm}
