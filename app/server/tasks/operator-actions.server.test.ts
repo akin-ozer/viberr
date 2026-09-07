@@ -2833,6 +2833,21 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(stray.outcome).toBe("noop");
     expect(stray.message).toContain("toStage only fits a move_stage option");
 
+    // Pass-35 cluster review: `move_stage` carries BOTH a free-text title and a
+    // target, and the card renders only the words — so a title naming another
+    // stage is the ruling's own broken promise, invisible to the person
+    // confirming it. Canary: drop the `moveStagePromiseMismatch` call.
+    const mismatched = await open({
+      kind: "move_stage",
+      title: "Move VIB-1 back to Review so the reviewer can verdict",
+      toStage: "triage",
+      recommended: true,
+    });
+    expect(mismatched.outcome).toBe("noop");
+    expect(mismatched.message).toContain("says Review");
+    expect(mismatched.message).toContain("toStage is 'triage'");
+    expect(task().packet).toBeNull();
+
     const good = await open({
       kind: "move_stage",
       title: "Show it at Review while the reviewer runs",

@@ -6,6 +6,7 @@ import { resolveDependencies } from "~/server/projections/dependencies.server";
 import {
   misdirectedOptionPromise,
   misdirectedPromiseRefusal,
+  moveStagePromiseMismatch,
   moveStageTarget,
 } from "~/shared/workflow/packet-options";
 import { setTaskDependencies } from "./dependencies.server";
@@ -1243,6 +1244,12 @@ export async function operatorOpenPacket(
             "nothing. Offer the stage the work should be shown at, or a kind that acts on the task.",
         };
       }
+      // Ruling 164 again, on the kind that carries BOTH a title and a target:
+      // the card shows the words and the resolution reads the id, so a title
+      // naming another stage is the same broken promise the send-back guard
+      // above refuses — invisible to the person confirming it.
+      const mismatch = moveStagePromiseMismatch(o, target.stage, projectStages, input.taskKey);
+      if (mismatch) return { outcome: "noop", message: mismatch };
     }
     // `force_accept` is the admin override of a WEDGED gate. A pull request a
     // person closed unmerged is not wedged, it is decided (R16-3), and the

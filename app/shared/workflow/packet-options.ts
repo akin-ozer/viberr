@@ -55,9 +55,20 @@ export type MisdirectedPromise =
 /** A stage-move promise: a movement verb (or a bare "back to") binding
  *  directly to one of the project's own stage names. The preposition has to sit
  *  immediately before the stage word, which is what keeps "send it back to the
- *  specialist to fix the merge conflict" out of the net. */
+ *  specialist to fix the merge conflict" out of the net.
+ *
+ *  `send` and `advance` are deliberately NOT here. They are the DELIVERY
+ *  idioms, and a redirect is exactly the option that asks an agent to do work
+ *  and let the delivery carry it onward: "have the developer send the fix to
+ *  review", "advance the work to review after the fix" describe what the agent
+ *  and the server do next, not what the resolution does. Reading them as
+ *  misdirection refused an operator's ordinary vocabulary and prescribed
+ *  `move_stage`, which moves the card and builds nothing. Every phrasing that
+ *  really promises the move keeps a verb that is here (move / return /
+ *  transition / reopen / promote / demote), or the bare "back to <stage>"
+ *  alternative below. */
 const MOVE_VERBS =
-  "move|moves|moved|moving|return|returns|returned|returning|send|sends|put|puts|transition|transitions|transitioned|reopen|reopens|promote|promotes|demote|demotes|advance|advances";
+  "move|moves|moved|moving|return|returns|returned|returning|put|puts|transition|transitions|transitioned|reopen|reopens|promote|promotes|demote|demotes";
 
 /** An agent-profile edit: an edit verb binding to an AGENT's profile. The
  *  qualifier is required so a task about the product's own profile screen is
@@ -198,4 +209,32 @@ export function moveStageTarget(
     };
   }
   return { ok: true, stage };
+}
+
+/**
+ * Ruling 164, the half `misdirectedOptionPromise` cannot cover: a `move_stage`
+ * option does NOT describe itself. It carries a free-text title AND a separate
+ * `toStage`, the card renders only the words, and the resolution reads only the
+ * id — so "Move VIB-1 back to Review so the reviewer can verdict" with
+ * `toStage: 'triage'` is authored, read and confirmed with the mismatch
+ * invisible, and the task lands at Triage. Returns the refusal when the
+ * option's own words name a stage of this project other than the one it moves
+ * to, or null when they name that stage or none at all.
+ */
+export function moveStagePromiseMismatch(
+  option: { readonly title: string; readonly detail?: string },
+  target: PacketStage,
+  stages: readonly PacketStage[],
+  taskKey: string,
+): string | null {
+  const text = `${option.title} ${option.detail ?? ""}`;
+  // The words name the target: the promise is kept, whatever else they say.
+  if (promisesMoveTo(text, target)) return null;
+  const named = stages.find((s) => s.id !== target.id && promisesMoveTo(text, s));
+  if (!named) return null;
+  return (
+    `"${option.title}" says ${named.name}, but toStage is '${target.id}', so confirming it ` +
+    `would move ${taskKey} to ${target.name}. An option title is a promise the resolution ` +
+    `keeps: set toStage to '${named.id}', or write the words for the stage you mean.`
+  );
 }
