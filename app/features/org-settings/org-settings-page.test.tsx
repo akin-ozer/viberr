@@ -237,25 +237,25 @@ describe("ConnectionsPanel", () => {
 const ME: OrgUserView = {
   id: "u_arda", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK",
   tone: "", role: "admin", status: "active", idp: "local", pwreset: false,
-  disabled: false,
+  disabled: false, githubHandle: null,
 };
 const USERS: OrgUserView[] = [
   ME,
   {
     id: "u_gh", name: "@octocat", email: "github.com/octocat", initials: "O",
     tone: "teal", role: "member", status: "whitelisted", idp: "github",
-    pwreset: false, disabled: false,
+    pwreset: false, disabled: false, githubHandle: "octocat",
   },
   {
     id: "u_selin", name: "Selin Aksoy", email: "selin@viberr.dev", initials: "SA",
     tone: "violet", role: "member", status: "active", idp: "local",
-    pwreset: true, disabled: false,
+    pwreset: true, disabled: false, githubHandle: null,
   },
 ];
 const DISABLED_USER: OrgUserView = {
   id: "u_dz", name: "Deniz Yıldız", email: "deniz@viberr.dev", initials: "DY",
   tone: "", role: "member", status: "active", idp: "local", pwreset: false,
-  disabled: true,
+  disabled: true, githubHandle: null,
 };
 const DOMAINS: DomainRecord[] = [
   { id: "d1", domain: "@viberr.dev", role: "member", createdAt: "2026-07-01T09:00:00.000Z" },

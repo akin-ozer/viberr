@@ -26,6 +26,7 @@ const ME: OrgUserView = {
   idp: "local",
   pwreset: false,
   disabled: false,
+  githubHandle: null,
 };
 const DOMAINS: DomainRecord[] = [];
 
@@ -182,6 +183,91 @@ describe("LV-F1: a pending reset never hides the re-issue action", () => {
     openEdit(getByLabelText);
     expect(container.textContent).not.toContain("Reset pending");
     expect(getByText("Reset password")).toBeTruthy();
+  });
+});
+
+/**
+ * Ruling 154 (pass 35, G35-3): the Edit-user modal is the org admin's door to
+ * `users.github_handle` for a local or Google account. A GitHub account's
+ * handle syncs from the provider, so that modal carries no field.
+ */
+describe("ruling 154: the Edit-user modal links a GitHub handle", () => {
+  const OTHER = (over: Partial<OrgUserView> = {}): OrgUserView => ({
+    ...ME,
+    id: "u_maya",
+    name: "Maya Lin",
+    email: "maya@viberr.dev",
+    initials: "ML",
+    role: "member",
+    ...over,
+  });
+
+  function renderEditing(user: OrgUserView) {
+    let submitted: Record<string, string> | null = null;
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <UsersPanel
+              users={[ME, user]}
+              domains={DOMAINS}
+              meId="u_arda"
+              providers={{ github: false, google: false }}
+            />
+          </ToastProvider>
+        ),
+        action: async ({ request }) => {
+          submitted = Object.fromEntries(
+            [...(await request.formData()).entries()].map(([k, v]) => [k, String(v)]),
+          );
+          return { ok: true, toast: "stub done" };
+        },
+      },
+    ]);
+    const rendered = render(<Stub initialEntries={["/org/settings"]} />);
+    fireEvent.click(rendered.getByLabelText("Edit Maya Lin"));
+    return { ...rendered, submitted: () => submitted };
+  }
+
+  it("a local account gets a GitHub handle field whose value rides the save", async () => {
+    const { getByLabelText, getByText, submitted } = renderEditing(OTHER());
+    const field = getByLabelText("GitHub handle");
+    expect(field.tagName).toBe("INPUT");
+    expect(field.getAttribute("placeholder")).toBe("octocat");
+    expect(getByText(/Counts this person's GitHub approval/)).toBeTruthy();
+    fireEvent.change(field, { target: { value: "@OctoCat" } });
+    fireEvent.click(getByText("Save changes"));
+    await waitFor(() => expect(submitted()).not.toBeNull());
+    expect(submitted()).toMatchObject({
+      intent: "user-edit",
+      userId: "u_maya",
+      githubHandle: "octocat",
+    });
+  });
+
+  it("a stored handle is shown, and a malformed one is refused at Save with its rule", () => {
+    const { getByLabelText, getByText, getByRole, submitted } = renderEditing(
+      OTHER({ githubHandle: "mayalin" }),
+    );
+    const field = getByLabelText("GitHub handle");
+    expect(field).toHaveProperty("value", "mayalin");
+    fireEvent.change(field, { target: { value: "not a handle!" } });
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.click(getByText("Save changes"));
+    expect(getByRole("alert").textContent).toContain("Enter a GitHub username");
+    expect(document.activeElement).toBe(field);
+    expect(submitted()).toBeNull();
+  });
+
+  it("a GitHub-signed-in account carries no handle field and sends none", async () => {
+    const { queryByLabelText, getByText, submitted } = renderEditing(
+      OTHER({ idp: "github", githubHandle: "mayalin", status: "whitelisted" }),
+    );
+    expect(queryByLabelText("GitHub handle")).toBeNull();
+    fireEvent.click(getByText("Save changes"));
+    await waitFor(() => expect(submitted()).not.toBeNull());
+    expect(submitted()).not.toHaveProperty("githubHandle");
   });
 });
 

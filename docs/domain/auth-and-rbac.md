@@ -151,7 +151,12 @@ the tabs sit the Audit log card and the run-concurrency control.
   its PAT and cascades every project binding. A `valid` verdict older than 24 hours is
   re-proven before use. Audit `org.connection.*`, `github.pat.*`.
 - **Users & access**: allow access by local account (temp password shown once, reset
-  forced), Google account, Google domain, or GitHub handle; edit name/email; change org
+  forced), Google account, Google domain, or GitHub handle; edit name/email; link the
+  GitHub handle of a local or Google account (ruling 154: the handle whose PR approval
+  counts as that person's review verdict under ruling 68; normalized to lower case,
+  unique among enabled accounts, refused on a GitHub-signed-in account whose handle
+  syncs from the provider; audit `org.user.github_handle.set` / `.cleared` with the
+  previous value); change org
   role; reset password (revokes all sessions); disable/enable (disable revokes
   sessions); remove (prunes memberships, releases tasks, retires the person's agent
   accounts, deletes the identity). Removal runs the vendor's own logout and deletes the
@@ -281,7 +286,10 @@ dependencies (ruling 131) and ownership; enforced inside `createNotification`), 
 setting was removed by ruling 148(c), the OS preference is the one signal),
 a read-only "Your access" table rendered from the same RBAC rows, **Agent accounts**
 (below), GitHub identity (disconnect flips `idp` back to `local`, refused without a
-password), and a self-service password change (ruling 148(b): a "Password" row on the Profile card whose
+password; on a deployment without GitHub sign-in the card shows an admin-linked handle
+as `@handle · linked by an org admin` and says what the link does, ruling 154: the
+person cannot set their own handle because the verdict path counts approvals by it),
+and a self-service password change (ruling 148(b): a "Password" row on the Profile card whose
 button opens a modal) that keeps the current session and revokes every other one (audit
 `auth.password.changed`). Preferences other than theme
 live in `user_prefs`.

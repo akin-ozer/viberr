@@ -2978,6 +2978,20 @@ by rewriting those paragraphs:*
     or control characters is refused. (`controller-toolkit.server.ts`,
     `gagents.server.ts`, `agent-profile-actions.server.ts`, `shared/names.ts`.)
 
+154. **An org admin may link a GitHub handle (pass 35, G35-3).** On a deployment without
+    GitHub sign-in the only writer of `users.github_handle` was OAuth, so ruling 68 was
+    unreachable: every GitHub approval landed as `unlinked_handle` and the refusal sent
+    people to a profile card that offered nothing to connect. The Edit-user modal under
+    Users & access takes a handle for local and Google accounts (`updateOrgUser`, one
+    normalizer in `shared/github-handle.ts` shared with the OAuth provisioning); a
+    GitHub-signed-in account keeps syncing it from the provider and refuses a typed one.
+    The handle is lowered, must be a GitHub username, is unique among enabled accounts
+    (a duplicate is refused naming its holder, since the verdict path fails closed on
+    one) and the change is audited (`org.user.github_handle.set` / `.cleared` with the
+    previous value). A person cannot set their own handle, because the verdict path
+    counts approvals by it; their profile shows an admin-linked handle as
+    `@handle · linked by an org admin`. The `unlinked_handle` refusal names both doors.
+
 156. **A template edit says where it did not land (pass 35, F35-7; owner, Q35-7,
     Q35-8, Q35-11).** A project's deployment is its own copy of the template's grants,
     taken at deploy time, and the template's writer does not reach into it. So every

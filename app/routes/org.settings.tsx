@@ -365,6 +365,9 @@ export async function action({ request }: Route.ActionArgs) {
             name: field("name"),
             email: field("email"),
             role,
+            // Ruling 154: the modal sends the handle for a local or Google
+            // account; blank clears it. A GitHub account's modal sends none.
+            githubHandle: field("githubHandle"),
           },
           actor,
         );
