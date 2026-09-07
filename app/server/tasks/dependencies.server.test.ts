@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -9,7 +10,7 @@ import {
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { createGoalFile } from "~/server/files/goal-writer.server";
+import { createGoalFile, readGoalFile } from "~/server/files/goal-writer.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import type { DatabaseSync } from "node:sqlite";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
@@ -624,5 +625,107 @@ describe("the archive hook and the convergent sweep state the same fact once", (
     await releaseDependents(store.db, ctxWith, store.slug);
     await noteDeadDependency(store.db, ctxWith, store.slug, null);
     expect(notes(), "the sweep must not restate what the hooks said").toHaveLength(2);
+  });
+});
+
+/**
+ * Ruling 155 (pass 35, F35-3; amends 131(c)): once a link has started a task,
+ * the task's list is the wait and the goal file's `links[].blockedBy` follows
+ * it on every change, so the Goals panel and a retried link read the list
+ * the task last held.
+ */
+describe("ruling 155: an active link's wait mirrors its task's list", () => {
+  it("a person clearing the task's list clears the link's declared wait and the goal timeline names the task; a new list mirrors too; the engine's release mirrors under its own name", async () => {
+    // Canary: remove the `mirrorLinkWait` calls from `setTaskDependencies`
+    // and `releaseTask`; goal-3 link 1 keeps reading ["goal-1 link 2"].
+    const store = setupTestStore(ctx);
+    await seed(store);
+    // goal-3 link 1 is ACTIVE, carried by VIB-7, and still records the wait
+    // the task was born with (KNC-3's shape on 2026-09-06).
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-7", {
+        stage: "impl",
+        waiting: "none",
+        blockedBy: ["goal-1 link 2"],
+        goalRef: { goalId: "goal-3", linkIndex: 1 },
+      }),
+    });
+    await createGoalFile(
+      { projectSlug: store.slug, goalId: "goal-3", dataRoot: store.dataRoot },
+      {
+        frontmatter: {
+          id: "goal-3",
+          title: "goal-3",
+          status: "active",
+          createdBy: store.users.arda.id,
+          createdByLabel: store.users.arda.email,
+          onFailure: "pause",
+          links: [
+            { index: 1, title: "Log view", goal: "g", taskKey: "VIB-7", status: "active", note: null, blockedBy: ["goal-1 link 2"] },
+            { index: 2, title: "Filters", goal: "g", taskKey: null, status: "pending", note: null, blockedBy: [] },
+          ],
+          createdAt: null,
+          updatedAt: null,
+        },
+        description: "",
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const goal = () => readGoalFile({ projectSlug: store.slug, goalId: "goal-3", dataRoot: store.dataRoot })!.parsed;
+    const projected = () => {
+      // SAFETY: `links_json` is TEXT NOT NULL on `goal_projections`.
+      const row = store.db
+        .prepare(`SELECT links_json FROM goal_projections WHERE project_slug = ? AND goal_id = ?`)
+        .get(store.slug, "goal-3") as { links_json: string };
+      return z.array(z.object({ blockedBy: z.array(z.string()) }).loose()).parse(JSON.parse(row.links_json));
+    };
+    expect(goal().frontmatter.links[0]!.blockedBy).toEqual(["goal-1 link 2"]);
+    const ctxWith = { dataRoot: store.dataRoot, deps: { runOperator: runOperatorStub() } };
+
+    // A person empties the task's list: the release, and the mirror.
+    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: [] }, actor(store, "arda"), ctxWith);
+    expect(file(store, "VIB-7").frontmatter.blockedBy).toEqual([]);
+    expect(goal().frontmatter.links[0]!.blockedBy).toEqual([]);
+    expect(goal().timeline[0]!.text).toBe(
+      `Link 1 (Log view) now waits on nothing: VIB-7's list was changed by ${store.users.arda.email}.`,
+    );
+    // The panel reads the projection, which the mirror rebuilt.
+    expect(projected()[0]!.blockedBy).toEqual([]);
+    // Link 2 (pending, no task) is not touched.
+    expect(goal().frontmatter.links[1]!.blockedBy).toEqual([]);
+
+    // A new list on the task lands on the link too.
+    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: ["VIB-2"] }, actor(store, "arda"), ctxWith);
+    expect(goal().frontmatter.links[0]!.blockedBy).toEqual(["VIB-2"]);
+    expect(goal().timeline[0]!.text).toMatch(/^Link 1 \(Log view\) now waits on VIB-2: VIB-7's list was changed by /);
+
+    // VIB-2 is done: the engine releases VIB-7 and the link follows, under
+    // the engine's own name.
+    expect(await releaseTask(store.db, ctxWith, store.slug, "VIB-7")).toBe(true);
+    expect(file(store, "VIB-7").frontmatter.blockedBy).toEqual([]);
+    expect(goal().frontmatter.links[0]!.blockedBy).toEqual([]);
+    expect(goal().timeline[0]!.text).toBe("Link 1 (Log view) now waits on nothing: VIB-7's list was changed by Viberr (release).");
+    expect(projected()[0]!.blockedBy).toEqual([]);
+
+    // Convergent: the same list again writes no second timeline line.
+    const lines = goal().timeline.length;
+    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: [] }, actor(store, "arda"), ctxWith);
+    expect(goal().timeline.length).toBe(lines);
+  });
+
+  it("a task outside a chain, and a link no longer carried by the task, leave every goal file alone", async () => {
+    const store = setupTestStore(ctx);
+    await seed(store);
+    // VIB-8 names goal-2 link 1 as its position, but that link is PENDING with
+    // no task: the record is not this task's to write.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-8", { stage: "impl", waiting: "none", blockedBy: ["VIB-5"], goalRef: { goalId: "goal-2", linkIndex: 1 } }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const goal2 = () => readGoalFile({ projectSlug: store.slug, goalId: "goal-2", dataRoot: store.dataRoot })!;
+    const before = goal2().raw;
+    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-8", blockedBy: [] }, actor(store, "arda"), { dataRoot: store.dataRoot, deps: { runOperator: runOperatorStub() } });
+    expect(goal2().raw).toBe(before);
+    expect(goal2().parsed.frontmatter.links[0]!.blockedBy).toEqual(["goal-1 link 2"]);
   });
 });

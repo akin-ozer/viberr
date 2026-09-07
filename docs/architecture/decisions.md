@@ -2992,6 +2992,21 @@ by rewriting those paragraphs:*
     counts approvals by it; their profile shows an admin-linked handle as
     `@handle · linked by an org admin`. The `unlinked_handle` refusal names both doors.
 
+155. **An active link's wait is its task's list (pass 35, F35-3; amends 131(c)).** Once a
+    goal link has started a task, the task's `blockedBy` is the wait and the goal file's
+    `links[].blockedBy` mirrors it on every change (human, controller, operator or engine
+    release), so a retried link is born on the wait the record last held. `edit_link` on an
+    active link may change `blockedBy` only, forwarded to the task's writer. Live, a
+    controller `update_task {blockedBy: []}` released KNC-3 while `goal-3` link 1 kept its
+    declared `goal-2 link 6` and the Goals panel printed "waits on" for a task that was
+    running; the controller saw the stale record and `edit_link` refused it as active.
+    (`mirrorLinkWait` in `app/server/tasks/dependencies.server.ts`, called by
+    `setTaskDependencies` and `releaseTask`, convergent: it writes only while the link is
+    `active` and carried by that task and the lists differ, with the goal timeline line
+    "Link 1 (Log view) now waits on nothing: KNC-3's list was changed by arda@viberr.dev.";
+    the `edit_link` arm in `goal-actions.server.ts` forwards after the goal-file lock and
+    refuses a title or goal on an active link by naming the task.)
+
 156. **A template edit says where it did not land (pass 35, F35-7; owner, Q35-7,
     Q35-8, Q35-11).** A project's deployment is its own copy of the template's grants,
     taken at deploy time, and the template's writer does not reach into it. So every

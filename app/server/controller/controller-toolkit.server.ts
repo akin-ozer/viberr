@@ -2237,7 +2237,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_goal",
-      "Redirect a goal chain: pause, resume, cancel, skip a link, retry a failed link (a fresh task), edit a pending or failed link, add a link, or remove a pending link. The creator or a maintainer+. Completed and cancelled chains stay readable; nothing is deleted.",
+      "Redirect a goal chain: pause, resume, cancel, skip a link, retry a failed link (a fresh task), edit a pending or failed link (an active link takes blockedBy only, written on its task), add a link, or remove a pending link. The creator or a maintainer+. Completed and cancelled chains stay readable; nothing is deleted.",
       {
         projectSlug: z.string().optional(),
         goalId: z.string(),
@@ -2258,7 +2258,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         blockedBy: z
           .array(z.string())
           .optional()
-          .describe("edit_link / add_link: what the link's task waits on (the full list; [] clears; omit on edit_link to leave it)."),
+          .describe("edit_link / add_link: what the link's task waits on (the full list; [] clears; omit on edit_link to leave it). On an active link this is the only editable field: it is written on the link's task, and the link mirrors it."),
       },
       runWith(
         async (args: {
@@ -2314,6 +2314,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               if (args.title) edit.title = args.title;
               if (args.goal) edit.goal = prose(args.goal);
               // Ruling 131(c): absent leaves the link's wait; [] clears it.
+              // Ruling 155: on an active link the writer is the task's.
               if (args.blockedBy !== undefined) edit.blockedBy = args.blockedBy;
               action = edit;
               break;

@@ -292,7 +292,7 @@ must name its task, or it is refused. `whoami` reports both bindings):
 | Project creation | `create_project` (any shape: stages, boundaries, members, description) | any signed-in user; the asker is seeded project admin (FR5) |
 | Board reads | `get_project` (each deployment with its `resources` copy and `templateDrift`, ruling 156), `list_tasks`, `get_task` (events 12, max 50; `schedules` lists the pending entries, ruling 153), `get_github_state`, `list_goals`, `get_goal` | `requireVisible` |
 | Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier; ruling 140(b): the person whose seat changed is notified, and the audit row says whether they were told), `update_task` (ruling 121: the goal under `update-goal`, priority / labels / due date under `edit-task-meta` as a full replace — the task page's two writers and gates, each part reported on its own, and an axis already holding the asked-for value answers `[noop]` rather than claiming a write nobody made; ruling 131: `blockedBy` is the FULL list of what the task waits on through `setTaskDependencies`, reported on its own arm, a refusal in the validator's words, `[]` clearing it and releasing the task), `create_task` also takes `blockedBy` (validated before a key is allocated; the task is born held) and, ruling 140(a), `owner` (a member email or `me`; seated in the creating write before the first operator run, checked by the hand-off rule; the release word is refused by name) and `dueDate`, with `priority: urgent` as the urgent flag itself, `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `terminal-stage` / queued honestly, else `startAgentRun`), `schedule_task_action` and `cancel_task_schedule` (ruling 153; `run-agents`: the task page's schedule form through the controller, `agent: "operator"` or a deployed profile id, `delayMinutes` 1 to 40320 or an ISO `dueAt` with the same bounds and sentences, the entry on `task.md` with the `<email> · via controller` label; a cancel answers `[noop]` when the entry is not pending), `update_project_settings`, `update_stages`, `set_transition_boundary` (`edit-policy`), `invite_member` (C4: takes the `role` the member joins in, seated in ONE write with one audit row; omitted is viewer, and an unknown role is refused by name with nothing written), `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
-| Goals | `create_goal` (`create-task`, 1..20 links, each with an optional `blockedBy`), `update_goal` (creator or `run-agents`; `edit_link` without `blockedBy` leaves the link's list, `[]` clears it; `add_link` takes one) | `requireVisible` then the goal gate (§7) |
+| Goals | `create_goal` (`create-task`, 1..20 links, each with an optional `blockedBy`), `update_goal` (creator or `run-agents`; `edit_link` without `blockedBy` leaves the link's list, `[]` clears it; on an ACTIVE link `blockedBy` is the only editable field and is written on the link's task through `setTaskDependencies`, under that writer's own gate, the link mirroring it back (ruling 155); `add_link` takes one) | `requireVisible` then the goal gate (§7) |
 
 Invariants pinned by tests: there is **no** tool for merge, acceptance,
 force-accept, packet resolution or a move into the terminal stage (ruling 88's
@@ -512,7 +512,16 @@ pass reads every linked task's state from its canonical file and applies:
   born held (`waiting: none`, readiness floored at `blocked`) and the link history says
   what it waits on; a wait that can no longer be satisfied (its task archived since the
   declaration) refuses the create and parks the chain in `attention` with the
-  validator's sentence.
+  validator's sentence. From that moment the task's list IS the wait (ruling 155,
+  pass 35): every change to it, whoever makes it (the task page, the controller's
+  `update_task`, the operator's `set_dependencies`, the release engine), is mirrored
+  onto `links[].blockedBy` by `mirrorLinkWait` (`dependencies.server.ts`) with a goal
+  timeline line, "Link 1 (Log view) now waits on nothing: KNC-3's list was changed by
+  arda@viberr.dev." (the engine signs as "Viberr (release)"), and the goal projection
+  is rebuilt so the Goals panel's "waits on" reads the task's list. The mirror is
+  convergent and quiet: it writes only while the link is `active` and carried by that
+  task, and only when the two lists differ; a retried link is therefore born on the
+  wait the record last held, not on the one it was declared with.
 
 ### 7.4 Redirecting
 
@@ -521,8 +530,15 @@ membership) **or** a member holding `run-agents`. Operations (terminal chains re
 all of them): `pause`, `resume`, `cancel`, `skip_link`, `retry_link` (failed links
 only; a fresh task under the present caller), `edit_link` (pending or failed; ruling
 131(c): `blockedBy` absent leaves the link's declared wait, `[]` clears it, any list is
-validated at declaration time, this chain's own links included),
-`add_link` (≤ 20), `remove_pending_link` (re-indexes). Audit `goal.updated {op}`.
+validated at declaration time, this chain's own links included; on an ACTIVE link,
+ruling 155, `blockedBy` is the only field that may change and it is forwarded to
+`setTaskDependencies` on the link's task after the goal-file lock is released, the
+task's writer validating and gating it and mirroring it back, the reply reading "Link
+1 waits on nothing, through KNC-3."; a title or goal on an active link, or an edit
+with nothing to forward, is refused with "Only a pending or failed link's title or
+goal can be edited; link 1 is active. Its wait follows KNC-3: pass blockedBy here or
+edit it on the task."), `add_link` (≤ 20), `remove_pending_link` (re-indexes). Audit
+`goal.updated {op}`.
 The project route's `goal-op` intent and the Goals panel expose only the first five;
 `edit_link`, `add_link` and `remove_pending_link` are controller-tool-only today.
 

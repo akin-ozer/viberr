@@ -503,7 +503,12 @@ links:
     blockedBy: []                 # ruling 131(c): what this link's task waits on
                                   # (task keys / `goal-2 link 1`); copied onto the
                                   # task the chain creates for the link, validated
-                                  # then, so the task is born held
+                                  # then, so the task is born held. Ruling 155:
+                                  # once the link is active the TASK's list is the
+                                  # wait and this mirrors it on every change (a
+                                  # person, the controller, the operator, the
+                                  # release engine), so a retry is born on the
+                                  # list the record last held
 createdAt: 2026-08-30T10:00:00.000Z
 updatedAt: 2026-08-30T12:00:00.000Z
 ---

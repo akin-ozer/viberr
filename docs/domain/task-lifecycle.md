@@ -103,7 +103,8 @@ task leaves the entry stage.
 no counter value). The task is written with the list, `waiting: none`, a "Waits on
 other work" note, and its stored readiness at the birth value `input_required`; the
 `blocked` it shows is the derived floor. The controller's `create_task` and a goal
-link's declared `blockedBy` both come in through this door.
+link's declared `blockedBy` both come in through this door; from then on the link's
+record follows the task's list (ruling 155, §6).
 
 
 ## 4. Stages and the workflow graph
@@ -215,7 +216,13 @@ NEVER complete is noticed by the same sweep, whatever killed it (an archived tas
 cancelled goal, a removed link, a reference to nothing): ONE "Waiting on work that cannot
 complete" note, one notification, `waiting: human`, and the list left for a person to
 edit. A task that already reached the terminal stage has its list cleared quietly — no
-note, no operator turn.
+note, no operator turn. When the task carries a goal link (`goalRef`) and that link is
+`active` on it, every one of these writes, the quiet terminal clear included, mirrors
+the task's list onto the goal file's `links[].blockedBy` (ruling 155, `mirrorLinkWait`)
+with a goal timeline line naming the task and who changed it (the engine as "Viberr
+(release)"), and rebuilds the goal projection: the Goals panel's "waits on" and a later
+retry of the link read the list the task last held. The link's `edit_link` accepts
+`blockedBy` alone on an active link and forwards it to this same writer.
 
 ## 7. Ownership, comments, mentions
 
