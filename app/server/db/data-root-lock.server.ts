@@ -231,7 +231,9 @@ export function forceDataRootTakeover(env: Pick<Env, "VIBERR_FORCE_DATA_ROOT_LOC
 
 /** Signal 0 probes existence without delivering anything. EPERM = alive but
  *  owned by another user, which still means "do not touch this root". */
-function isProcessAlive(pid: number): boolean {
+/** Is a process with this pid alive (or at least present, `EPERM` counting as
+ *  alive)? Exported for the reader-side snapshot sweep (ruling 158). */
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -294,11 +296,20 @@ const lockFileSchema = z
     return holder;
   });
 
-function readHolder(lockPath: string): LockHolder | null {
+/** The lock file's text as a holder, or null when it is not one. */
+function parseHolder(text: string): LockHolder | null {
   try {
-    const raw: unknown = JSON.parse(readFileSync(lockPath, "utf8"));
+    const raw: unknown = JSON.parse(text);
     const parsed = lockFileSchema.safeParse(raw);
     return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function readHolder(lockPath: string): LockHolder | null {
+  try {
+    return parseHolder(readFileSync(lockPath, "utf8"));
   } catch {
     return null;
   }
@@ -343,6 +354,44 @@ export function classifyLock(
     }
   }
   return isAlive(holder.pid) ? "held" : "stale";
+}
+
+/**
+ * The writer lock as a READER judges it (ruling 158). `absent` = no lock file at
+ * all; otherwise {@link classifyLock}'s verdict for THIS process against the
+ * file, with the holder it named (null when the file could not be read as a
+ * holder, which is `unknown-holder`).
+ */
+export type DataRootLockJudgement =
+  | { verdict: "absent"; holder: null }
+  | { verdict: LockVerdict; holder: LockHolder | null };
+
+/**
+ * Ruling 158: no process but the server opens a live root's `projection.sqlite`.
+ * A read-only CLI (`keys status`, `backup`) asks this BEFORE it opens anything:
+ * `held` and `unknown-holder` mean a writer may be mapping the WAL index right
+ * now, so the reader copies the database first and opens the copy; `absent`
+ * and `stale` mean the root is just files and the reader may open the file
+ * itself. Same judgement the boot takes, so the two never disagree about who
+ * holds the root: same host + dead pid is stale, a different hostname is never
+ * probed and always held (the host-side reader against a container is exactly
+ * that case), and the reader's own identity plays `self` so a lock left by
+ * this very process reads as stale.
+ */
+export function judgeDataRootLock(
+  stateDir: string,
+  isAlive: (pid: number) => boolean = isProcessAlive,
+): DataRootLockJudgement {
+  const lockPath = path.join(stateDir, DATA_ROOT_LOCK_FILENAME);
+  let raw: string;
+  try {
+    raw = readFileSync(lockPath, "utf8");
+  } catch {
+    return { verdict: "absent", holder: null };
+  }
+  const holder = parseHolder(raw);
+  const self = bootingHolder(readProcessStartTicks(process.pid));
+  return { verdict: classifyLock(holder, self, isAlive), holder };
 }
 
 const DEFAULT_OWNERSHIP_PROBES: LockOwnershipProbes = {

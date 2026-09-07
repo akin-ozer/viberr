@@ -12,9 +12,12 @@
  * main file whose newest transactions are still in the `-wal` beside it. This
  * uses SQLite's own online snapshot (`VACUUM INTO`) instead.
  *
- * It takes NO writer lock, deliberately: it opens the projection read-only, so
- * it is a reader rather than the second writer B-FD1 refuses, and a backup that
- * would not run against a live instance would be no backup at all.
+ * It takes NO writer lock, deliberately: it is a reader rather than the second
+ * writer B-FD1 refuses, and a backup that would not run against a live instance
+ * would be no backup at all. It is not a second CONNECTION to a live root either
+ * (ruling 158): while the app holds the writer lock the projection and its WAL
+ * are copied next to the store and the snapshot is taken from the copy; the
+ * artefact's manifest says which it was.
  */
 import { createBackup } from "../app/server/db/backup.server";
 import { getEnv } from "../app/server/config/env.server";

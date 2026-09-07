@@ -241,7 +241,8 @@ runtimes/       raw NDJSON run logs per backend; users/<userId>/{claude-home,cod
                 uv-cache/ and uv-python/ in the container
 audit-exports/  audit-events-<date>.jsonl written before each 90-day purge
 state/          projection.sqlite (users, sessions, projections, audit, PATs, notifications,
-                sealed personal backend keys), writer.lock, shipped-assets.json
+                sealed personal backend keys), writer.lock, shipped-assets.json;
+                tmp/reader-<pid>/ only while a read-only CLI holds its copy (ruling 158)
 ```
 
 Boot creates the nine `DATA_ROOT_SUBDIRS` (`projects`, `agents`, `agents/profiles`,
@@ -258,8 +259,8 @@ logs are structured JSON on stdout. Full layout with retention:
 *(Corrected 2026-09-01.)*
 
 - **Backup** = `npm run backup` (add `--out <dir>`). It writes a timestamped artefact
-  containing a genuine point-in-time `projection.sqlite` — taken with `VACUUM INTO` from a
-  read-only connection, so it folds in WAL content and lands as ONE file with no sidecars —
+  containing a genuine point-in-time `projection.sqlite` — taken with `VACUUM INTO`, so it
+  folds in WAL content and lands as ONE file with no sidecars —
   plus the canonical markdown tree — `projects/`, `agents/`, `kb/`, `skills/` and
   `audit-exports/` (`BACKED_UP_STORE_DIRS`; a directory that does not exist yet is
   skipped) — and a `MANIFEST.json` recording byte size, sha256 and the row counts read
@@ -269,15 +270,22 @@ logs are structured JSON on stdout. Full layout with retention:
   2026-09-02, pass 32 — C01-A3.)* It does **not** take the writer lock: a
   backup that refused to run on a live instance would be no backup at all.
 
-  **Where it runs.** On this deployment a backup of the LIVE root runs inside the
-  container, never from the host: it opens the database (read-only, but a host-side
-  reader of a file the container writes, over the bind mount, maps the same WAL index
-  and is the dual-writer hazard by another name; the runbook's
+  **How it reads a live root.** Never through a second connection: while
+  `state/writer.lock` names a live holder the CLI copies `projection.sqlite` and its
+  `-wal` to `state/tmp/reader-<pid>/`, runs the `VACUUM INTO` on the copy and removes it
+  (ruling 158; the manifest's first `contains` line then says "read from a copy of the
+  file and its WAL taken while the app held the root"). With the lock absent or stale the
+  root is just files and it opens the file in place, read-only. That is the rule for
+  every reader, on either side of the container boundary: copy first, never a second
+  connection to a live database, because the second mapping of the WAL index is what
+  produced the SIGBUS in pass 34 (a host-side reader over the bind mount) and again in
+  pass 35 (an in-container `readOnly: true` reader); the runbook's
   [Readers, and where they must run](./runbook.md#readers-and-where-they-must-run) has
-  the SIGBUS it produced). It needs an explicit `--out`, because the default
-  `./backups` is `/app/backups` inside the container and is lost with it, and
-  `createBackup` refuses a destination under the data root it is backing up, so the
-  artefact goes to a container-local directory and is copied out at once:
+  both. **Where it runs.** Inside the container is still the worked form, because the
+  backup needs an explicit `--out`: the default `./backups` is `/app/backups` inside the
+  container and is lost with it, and `createBackup` refuses a destination under the data
+  root it is backing up, so the artefact goes to a container-local directory and is
+  copied out at once:
 
   ```bash
   docker compose exec -T app npm run backup -- --out /tmp/viberr-backups
@@ -286,7 +294,9 @@ logs are structured JSON on stdout. Full layout with retention:
 
   With the container down the root is plain files, and `npm run backup -- --out ./backups`
   from the repo root is fine (`.env`'s `VIBERR_DATA_ROOT` must name the mounted directory,
-  `./docker-data` as in `.env.example`). *(Corrected 2026-09-04, pass 34 — D34-1.)*
+  `./docker-data` as in `.env.example`). *(Corrected 2026-09-04, pass 34 — D34-1;
+  corrected again 2026-09-06, pass 35 — F35-9, ruling 158: this said the in-container
+  read-only form was the safe one, and it died the same way the host-side one had.)*
 
   Read the artefact's own README for what it excludes. Three exclusions matter most:
   `runtimes/` (live agent logins, now one set per person under `runtimes/users/` — opt in
@@ -373,13 +383,15 @@ rm ./docker-data/state/projection.sqlite*   # -wal and -shm too
 docker compose up -d                 # migrations re-apply, projections rebuild from projects/
 ```
 
-The backup sits below the `down` on purpose. Taken from the host while the container ran,
-it opened the live database across the bind mount (`.env.example` points
-`VIBERR_DATA_ROOT` at `./docker-data`, the very directory compose mounts), which is the
-reader-side hazard under the runbook's
-[Readers, and where they must run](./runbook.md#readers-and-where-they-must-run). To take
-it without stopping first, use the in-container form under *Persistence, backup &
-restore*. *(Corrected 2026-09-04, pass 34 — D34-1.)*
+The backup sits below the `down` on purpose: with nothing writing the root the CLI reads
+the file itself, and the artefact is the database exactly as it will be restored. Taken
+while the container ran it would read a copy of a root still changing under it (ruling
+158; before pass 35 it opened the live database across the bind mount, `.env.example`
+pointing `VIBERR_DATA_ROOT` at `./docker-data`, the very directory compose mounts, which
+is the reader-side hazard under the runbook's
+[Readers, and where they must run](./runbook.md#readers-and-where-they-must-run)). To take
+one without stopping first, use the in-container form under *Persistence, backup &
+restore*. *(Corrected 2026-09-04, pass 34 — D34-1; 2026-09-06, pass 35 — ruling 158.)*
 
 **Name the cost before you run it.** The projection *tables* are derived and rebuild from
 `projects/` at boot — but they share the file with rows that exist nowhere else: users and
@@ -449,5 +461,8 @@ always refused (which is why `compose.yml` pins `hostname: viberr`, so a recreat
 matches its predecessor). If the holder really is dead and the lock was not reclaimed, boot
 once with `VIBERR_FORCE_DATA_ROOT_LOCK=1`. The writing CLIs (`seed`, `seed:demo`, `rescan`,
 `restore`, `keys -- reseal`) take the same lock and refuse against a running app;
-`backup`, `store:check` and `keys -- status` are readers and need none. *(Added
-2026-09-01; see [`runbook.md`](runbook.md#the-single-writer-lock-and-cli-refusals).)*
+`backup`, `store:check` and `keys -- status` are readers and need none; the two that read
+the database judge the same lock and, while it names a live holder, copy the database
+first rather than open it, since a second connection to a live root is a hazard of its own
+(ruling 158). *(Added 2026-09-01; see
+[`runbook.md`](runbook.md#the-single-writer-lock-and-cli-refusals).)*

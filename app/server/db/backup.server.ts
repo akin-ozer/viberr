@@ -18,7 +18,7 @@ import { writeFileAtomic } from "~/server/files/atomic-file.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import { DATA_ROOT_LOCK_FILENAME } from "./data-root-lock.server";
-import { openDatabase } from "./sqlite.server";
+import { openDatabase, openDatabaseReadOnly } from "./sqlite.server";
 
 /**
  * Backup and restore for the data root (gap 14).
@@ -40,11 +40,15 @@ import { openDatabase } from "./sqlite.server";
  * `VACUUM INTO` is SQLite's own online snapshot: it runs inside a read
  * transaction, so the artefact is the database as of one instant — WAL content
  * included — written to a single file with no sidecars. The source is opened
- * READ-ONLY, so this is not a second writer and needs no data-root lock (a
- * backup that refused to run while the app was up would defeat the point).
- * Proven by test: a row committed but not yet checkpointed is present in the
- * artefact and absent from a raw `cp` of the main file taken at the same
- * moment.
+ * through `openDatabaseReadOnly`, so this is never the second connection to a
+ * live root (ruling 158): while the writer lock names a live holder the reader
+ * copies `projection.sqlite` and its `-wal` next to the store and the VACUUM
+ * runs on the copy; with nothing holding the root it runs on the file itself.
+ * Either way it takes no data-root lock (a backup that refused to run while the
+ * app was up would defeat the point). Proven by test: a row committed but not
+ * yet checkpointed is present in the artefact and absent from a raw `cp` of the
+ * main file taken at the same moment, and under a live lock the artefact is
+ * produced without the live file being opened at all.
  *
  * The markdown side is copied file by file. Every store write is atomic
  * (tmp + rename), so no individual file is ever captured half-written; the
@@ -200,16 +204,20 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
   // ---------------------------------------------------------- the database
   const source = projectionPathIn(dataRoot);
   let projection: BackupManifest["projection"] = null;
+  let readFrom: ProjectionSource = "live";
   if (existsSync(source)) {
     const target = path.join(dir, PROJECTION_NAME);
-    // READ-ONLY: a backup is a reader, never the second writer that B-FD1
-    // exists to prevent. VACUUM INTO runs in a read transaction, so the
+    // A reader, never the second writer that B-FD1 exists to prevent, and
+    // never the second CONNECTION to a live root either (ruling 158): while the
+    // app holds the writer lock this opens a copy taken next to the store, and
+    // the VACUUM INTO runs on that copy. It runs in a read transaction, so the
     // artefact includes everything committed to the WAL at that instant.
-    const db = new DatabaseSync(source, { readOnly: true });
+    const reader = openDatabaseReadOnly(source);
     try {
-      db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
+      readFrom = reader.snapshot ? "snapshot" : "live";
+      reader.db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
     } finally {
-      db.close();
+      reader.close();
     }
     projection = {
       file: PROJECTION_NAME,
@@ -260,7 +268,7 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
     dataRoot,
     projection,
     store,
-    contains: contains(projection !== null, copied),
+    contains: contains(projection !== null ? readFrom : null, copied),
     excludes: excludes(options.includeRuntimes ?? false),
   };
   writeFileAtomic(
@@ -303,11 +311,21 @@ function countRows(dbPath: string): TableRowCounts {
   }
 }
 
-function contains(hasProjection: boolean, dirs: string[]): string[] {
+/** How the projection was read: the live file with nothing holding the root, or
+ *  a copy taken beside the store while the app held the writer lock (ruling 158). */
+type ProjectionSource = "live" | "snapshot";
+
+function projectionProvenance(source: ProjectionSource): string {
+  return source === "snapshot"
+    ? "read from a copy of the file and its WAL taken while the app held the root, so the live database was never opened"
+    : "read from the file itself; nothing held the root";
+}
+
+function contains(projection: ProjectionSource | null, dirs: string[]): string[] {
   const list = [
-    ...(hasProjection
+    ...(projection !== null
       ? [
-          "state/projection.sqlite — users, better-auth credentials and sessions, AES-sealed GitHub PATs, MCP credentials and personal agent-backend API keys (ruling 127), audit events, notifications, and every projection (a consistent point-in-time copy, WAL included)",
+          `state/projection.sqlite — users, better-auth credentials and sessions, AES-sealed GitHub PATs, MCP credentials and personal agent-backend API keys (ruling 127), audit events, notifications, and every projection (a consistent point-in-time copy, WAL included; ${projectionProvenance(projection)})`,
         ]
       : []),
     ...dirs.map((dir) => `${dir}/ — the canonical files, copied verbatim`),

@@ -45,7 +45,8 @@ ${VIBERR_DATA_ROOT}/
   kb/                            knowledge-base folders (store://kb/<dir>/)
   skills/                        skill folders (store://skills/<name>/SKILL.md)
   audit-exports/                 rows the 90-day audit purge exported before deleting
-  state/                         projection.sqlite (+ -wal/-shm) and writer.lock
+  state/                         projection.sqlite (+ -wal/-shm) and writer.lock;
+                                 tmp/reader-<pid>/ while a read-only CLI holds its copy (ruling 158)
 ```
 
 *(Corrected 2026-09-02 — `audit-exports` was already in `DATA_ROOT_SUBDIRS` and missing

@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -9,6 +10,7 @@ import {
   classifyLock,
   forceDataRootTakeover,
   heldDataRootLock,
+  judgeDataRootLock,
   releaseDataRootLock,
   startDataRootLockGuard,
   stopDataRootLockGuard,
@@ -252,6 +254,57 @@ describe("classifyLock — container self-lockout (F20-8b)", () => {
     };
     expect(classifyLock(CRASHED_PID1, other, dead, throwingReader)).toBe("stale");
     expect(classifyLock(CRASHED_PID1, other, alive, throwingReader)).toBe("held");
+  });
+});
+
+/**
+ * Ruling 158: the reader-side judgement `openDatabaseReadOnly` asks before it
+ * opens anything. It must agree with the boot's own verdicts: absent and stale
+ * mean "just files", held and an unreadable holder mean "copy first".
+ */
+describe("judgeDataRootLock (ruling 158, the reader's question)", () => {
+  function stateDir(): string {
+    const dir = path.join(ctx.makeTempDir(), "state");
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  it("is absent when there is no lock file", () => {
+    expect(judgeDataRootLock(stateDir())).toEqual({ verdict: "absent", holder: null });
+  });
+
+  it("is held when the file names a live process on this host, and returns the holder", () => {
+    const dir = stateDir();
+    const holder = { pid: process.pid, hostname: hostname(), startedAt: "2026-09-06T18:00:00.000Z" };
+    writeFileSync(path.join(dir, DATA_ROOT_LOCK_FILENAME), JSON.stringify(holder));
+    expect(judgeDataRootLock(dir)).toEqual({ verdict: "held", holder });
+  });
+
+  it("is stale when the named process is gone from this host", () => {
+    const dir = stateDir();
+    const holder = { pid: 4_194_303, hostname: hostname(), startedAt: "2026-09-06T18:00:00.000Z" };
+    writeFileSync(path.join(dir, DATA_ROOT_LOCK_FILENAME), JSON.stringify(holder));
+    expect(judgeDataRootLock(dir, () => false)).toEqual({ verdict: "stale", holder });
+  });
+
+  it("is held for a different hostname without probing it: the host-side reader against a container", () => {
+    const dir = stateDir();
+    const holder = { pid: 1, hostname: "viberr", startedAt: "2026-09-06T18:00:00.000Z" };
+    writeFileSync(path.join(dir, DATA_ROOT_LOCK_FILENAME), JSON.stringify(holder));
+    const probed: number[] = [];
+    expect(
+      judgeDataRootLock(dir, (pid) => {
+        probed.push(pid);
+        return false;
+      }),
+    ).toEqual({ verdict: "held", holder });
+    expect(probed).toEqual([]);
+  });
+
+  it("is unknown-holder with a null holder when the file is not a lock", () => {
+    const dir = stateDir();
+    writeFileSync(path.join(dir, DATA_ROOT_LOCK_FILENAME), "{\"pid\": \"one\"}");
+    expect(judgeDataRootLock(dir)).toEqual({ verdict: "unknown-holder", holder: null });
   });
 });
 

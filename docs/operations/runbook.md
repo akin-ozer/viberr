@@ -270,26 +270,37 @@ recommendation is open. Nothing is owed by anyone while it waits.
   # {"claude":{"connectedUsers":3},"codex":{"connectedUsers":1}}
   ```
 
-  The per-person rows are in the database, and on the Docker deployment a live database
-  is read INSIDE the container and read-only, never from the host (why: [Readers, and
-  where they must run](#readers-and-where-they-must-run)). `node:sqlite` is the driver
-  the app itself uses, so nothing has to be installed:
+  The per-person rows are in the database, and a live database is never opened by a
+  second program, on either side of the container boundary: copy it first and query the
+  copy (why: [Readers, and where they must run](#readers-and-where-they-must-run)).
+  `node:sqlite` is the driver the app itself uses, so nothing has to be installed:
 
   ```bash
+  # 1. copy the database and its WAL (never the -shm) to a scratch directory in the container
+  docker compose exec -T app sh -c '
+    mkdir -p /tmp/viberr-snap &&
+    cp "$VIBERR_DATA_ROOT/state/projection.sqlite" /tmp/viberr-snap/ &&
+    { [ ! -f "$VIBERR_DATA_ROOT/state/projection.sqlite-wal" ] || cp "$VIBERR_DATA_ROOT/state/projection.sqlite-wal" /tmp/viberr-snap/; }
+  '
+  # 2. open the COPY, read-write so SQLite folds the copied WAL in; it is your copy
   docker compose exec -T app node -e '
     const { DatabaseSync } = require("node:sqlite");
-    const db = new DatabaseSync(process.env.VIBERR_DATA_ROOT + "/state/projection.sqlite", { readOnly: true });
+    const db = new DatabaseSync("/tmp/viberr-snap/projection.sqlite");
     console.table(db.prepare(`
       SELECT u.email, c.backend, c.kind, c.method, c.verified_at, c.created_at
         FROM user_backend_credentials c JOIN users u ON u.id = c.user_id
        ORDER BY u.email, c.backend`).all());
     db.close();
   '
+  # 3. throw the copy away
+  docker compose exec -T app rm -rf /tmp/viberr-snap
   ```
 
-  On bare metal (one host, one app process, a local `VIBERR_DATA_ROOT`) the same query
-  may run from the host, still read-only:
-  `sqlite3 "file:$VIBERR_DATA_ROOT/state/projection.sqlite?mode=ro" "SELECT …"`.
+  On bare metal (one host, one app process, a local `VIBERR_DATA_ROOT`) the rule is the
+  same: copy `$VIBERR_DATA_ROOT/state/projection.sqlite` and `projection.sqlite-wal` to a
+  scratch directory and run `sqlite3 /tmp/viberr-snap/projection.sqlite "SELECT …"` on
+  the copy. Only with the app stopped is the root just files that any program may open
+  in place.
 
   One row per `(user, backend)`; connecting a new method REPLACES the previous row.
   `kind = 'login'` carries no secret at all (the vendor binary holds it), `api_key` /
@@ -420,7 +431,7 @@ pid is reclaimed automatically; a different hostname is never probed and always 
 | CLI | Lock | Where it runs on the Docker deployment |
 |---|---|---|
 | `npm run seed`, `seed:demo`, `rescan`, `restore` (whole root), `keys -- reseal` | **takes the writer lock**; against a running app prints `refused to run: it would be a SECOND writer on this data root` and exits 1 | from the host, before the container starts or after `docker compose down`; the lock refuses anything else |
-| `npm run backup`, `keys -- status` | reader; no lock | INSIDE the container while it runs (`docker compose exec -T app …`); from the host only once it is down. Both open the database, and a host-side reader of a live root is the hazard below |
+| `npm run backup`, `keys -- status` | reader; no lock. While the lock names a live holder they copy `projection.sqlite` and its `-wal` to `state/tmp/reader-<pid>/` and open the copy, never the live file (ruling 158); with the lock absent or stale the root is just files and they open it in place, read-only | either side of the container boundary, since neither opens a live database. The in-container form (`docker compose exec -T app …`) stays the worked example for the backup, whose artefact must land outside `/data` and be copied out |
 | `npm run store:check`, `restore --file` | no lock, no database | either side: they read and write the markdown tree only |
 
 So `docker compose exec app npm run seed` is refused. Seed before the container starts, or
@@ -428,38 +439,48 @@ stop it first. Do **not** wipe `state/` while the app runs.
 
 ### Readers, and where they must run
 
-The writer lock stops a second WRITER. Nothing stops a second READER, and on the shipped
-Docker deployment a reader on the wrong side of the container boundary is the hazard:
-`./docker-data` is a bind mount, so a process on the HOST that opens
-`state/projection.sqlite` (`sqlite3`, a host-side `npm run backup`, a desktop SQLite
-browser) maps the WAL index (`-shm`) of a file the GUEST process is writing, across
-VirtioFS. A stale shared mapping in the guest is what a SIGBUS looks like. The rules:
+The writer lock stops a second WRITER. Nothing stops a second READER, and a second reader
+is the hazard: any process that opens `state/projection.sqlite` while the app holds it
+(`sqlite3`, a desktop SQLite browser, `node -e` with `readOnly: true`) maps the WAL index
+(`-shm`) the server has memory-mapped, and on the shipped Docker deployment
+(`./docker-data` is a bind mount over VirtioFS) the open path's lock probe on that file
+is unreliable, so a reader can truncate the index under the server. A stale shared
+mapping in the guest is what a SIGBUS looks like. `readOnly` is no protection and neither
+is being inside the container: pass 34 saw exit 135 one second after a host-side reader,
+pass 35 one second after an in-container `readOnly: true` reader. The rule (ruling 158):
 
-- **Every read of a live database runs inside the container, and always read-only.**
-  The form is `docker compose exec -T app node -e '…'` opening the file with
-  `new DatabaseSync(path, { readOnly: true })`, the option `openDatabaseReadOnly` in
-  `app/server/db/sqlite.server.ts` uses for the read-only CLIs; the worked example is
-  under [Agent runtimes](#agent-runtimes). The same goes for `npm run keys -- status`
-  (`docker compose exec -T app npm run keys -- status`) and for `npm run backup`, which
-  open the database themselves; the backup is the two-step form under
-  [Backup / restore](#backup--restore), because its artefact may not land under `/data`
-  and anywhere else in the container is gone with it.
+- **No process but the server opens a live root's database. Copy first, never a second
+  connection, on either side of the container boundary.** Copy `projection.sqlite` and
+  `projection.sqlite-wal` (never the `-shm`: that IS the shared index, and a copy
+  rebuilds its own) to a scratch directory, open the copy, throw it away; the worked
+  example is under [Agent runtimes](#agent-runtimes). The read-only CLIs do exactly this
+  on their own: `npm run backup` and `npm run keys -- status` read `state/writer.lock`
+  with the boot's own judgement, and while it names a live holder they copy both files
+  to `state/tmp/reader-<pid>/`, open the copy and remove it when they close
+  (`openDatabaseReadOnly` in `app/server/db/sqlite.server.ts`); with the lock absent or
+  stale the root is just files and they open it in place, read-only. `keys -- status`
+  says which it did on stdout; the backup manifest records it. The backup is still the
+  two-step form under [Backup / restore](#backup--restore), because its artefact may not
+  land under `/data` and anywhere else in the container is gone with it.
+- **Ask the server before copying anything.** `/resources/health` answers the health,
+  lock-holder and connected-backend questions in-process, and the controller reads
+  through the server's own handle: its `viberr_ops` tools (`instance_health` for the
+  same snapshot, `read_run_log` for a run's console, `read_store_doc` for a knowledge-base
+  or skill file) and its `viberr_controller` tools (`inspect_audit_log`, `get_task` and the
+  rest) need no copy at all, and are the reader to reach for first.
 - **`npm run store:check` needs no database** (it parses the markdown tree) and may run
   from either side; so may `restore --file`, which writes one markdown file and touches
   no SQLite.
-- **On bare metal** (one host, one app process, a local `VIBERR_DATA_ROOT`) a host reader
-  shares the kernel with the writer and is fine, and must still open read-only:
-  `sqlite3 "file:$VIBERR_DATA_ROOT/state/projection.sqlite?mode=ro"`.
-- **Once the container is down** the root is just files, and the host may read it.
+- **Once the app is down** the root is just files, and any program may open it in place.
 
-*(Added 2026-09-04, pass 34 — D34-1. This page told an operator to run `sqlite3` against
-`$VIBERR_DATA_ROOT/state/projection.sqlite` from the host, and the table above said
-nothing about which side of the boundary a reader runs on. Done exactly that way during
-the pass, host-side `sqlite3 -readonly` polling over VirtioFS every few seconds from
-09:01Z preceded the container's SIGBUS at 09:12:46Z, exit 135; compose restarted it and
-boot recovery finalized the two live runs as `interruptedBy: restart`. `-readonly` was no
-protection: the shared mapping is the problem, not the write. The read block, the table
-and `deployment.md`'s backup recipes now say where a reader runs, and
+*(Rewritten 2026-09-06, pass 35 — F35-9, ruling 158. Added on 2026-09-04 (pass 34, D34-1)
+after a host-side `sqlite3 -readonly` polling over VirtioFS preceded the container's SIGBUS
+at 09:12:46Z, this section called the same read INSIDE the container with `readOnly: true`
+the safe form, and `openDatabaseReadOnly` used it for the read-only CLIs. On 2026-09-06 at
+18:40:29Z the container died with exit 135 one second after exactly that in-container
+reader, and boot recovery interrupted 23 runs and re-fired 23 operator turns. The side of
+the boundary was never the point; the second mapping was. This section, the table above
+and `deployment.md`'s backup recipes now say copy first, and
 `app/shared/docs/runbook-db-read.test.ts` keeps them saying it.)*
 
 ## Self-heal and disk
@@ -477,14 +498,17 @@ and `deployment.md`'s backup recipes now say where a reader runs, and
 ## Backup / restore
 
 `npm run backup [-- --out <dir>]` writes a consistent point-in-time artefact (`VACUUM
-INTO` from a read-only connection plus the store tree — `projects/`, `agents/`, `kb/`,
-`skills/` and `audit-exports/` — and a manifest) **without** taking the lock, so it works
-on a live instance. On the Docker deployment "on a live instance" means INSIDE the
-container ([Readers, and where they must run](#readers-and-where-they-must-run)), with an
-explicit `--out`: the default `./backups` is `/app/backups` in the container and vanishes
-with it, and `createBackup` refuses a destination under the data root it is backing up, so
-`/data/…` is not an option either. Write it to a container-local directory and copy it out
-in the same breath:
+INTO` plus the store tree — `projects/`, `agents/`, `kb/`, `skills/` and
+`audit-exports/` — and a manifest) **without** taking the lock, so it works on a live
+instance, and without opening the live database: while `state/writer.lock` names a live
+holder it copies `projection.sqlite` and its `-wal` to `state/tmp/reader-<pid>/`, runs the
+`VACUUM INTO` on the copy and removes it, so the artefact stays one self-contained file
+and the manifest's first `contains` line says it was read from a copy ([Readers, and
+where they must run](#readers-and-where-they-must-run)). On the Docker deployment run it
+INSIDE the container with an explicit `--out`: the default `./backups` is `/app/backups`
+in the container and vanishes with it, and `createBackup` refuses a destination under the
+data root it is backing up, so `/data/…` is not an option either. Write it to a
+container-local directory and copy it out in the same breath:
 
 ```bash
 docker compose exec -T app npm run backup -- --out /tmp/viberr-backups

@@ -1,8 +1,13 @@
-import { mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, rmdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { getEnv } from "../config/env.server";
 import { logger } from "../logging/logger.server";
+import {
+  isProcessAlive,
+  judgeDataRootLock,
+  type LockHolder,
+} from "./data-root-lock.server";
 import { runMigrations } from "./migration-runner.server";
 
 /**
@@ -18,16 +23,142 @@ export function openDatabase(dbPath: string): DatabaseSync {
   return db;
 }
 
+/** Where a reader's copy lives, relative to `state/`: `state/tmp/reader-<pid>/`. */
+export const READER_SNAPSHOT_DIR = "tmp";
+
 /**
- * Opens the database READ-ONLY: a reader, never the second writer B-FD1
- * refuses. Used by the read-only maintenance CLIs (`npm run backup`,
- * `npm run keys -- status`), which must work against a LIVE instance and
- * therefore cannot take the writer lock. No migrations are run — a read-only
- * handle could not apply them, and a reporting command has no business
- * changing a schema.
+ * A read-only handle on the projection database (ruling 158). `db` is either
+ * the live file itself or a private copy of it; `close` releases the handle and
+ * removes the copy. Callers never hold a bare `DatabaseSync` here, so the copy
+ * cannot be left behind by a caller that closed the handle and forgot the
+ * directory.
  */
-export function openDatabaseReadOnly(dbPath: string): DatabaseSync {
-  return new DatabaseSync(dbPath, { readOnly: true });
+export interface ReadOnlyDatabase {
+  db: DatabaseSync;
+  /** The file `db` opened: the live projection, or the copy under `state/tmp/`. */
+  path: string;
+  /**
+   * Set when the writer lock named a live (or unreadable) holder and the reader
+   * copied the database before opening it; null when the root was just files and
+   * `db` is the live file, opened read-only.
+   */
+  snapshot: { dir: string; holder: LockHolder | null } | null;
+  /** Idempotent: closes `db` and, for a snapshot, removes its directory. */
+  close(): void;
+}
+
+/**
+ * Opens the database for READING, never as the second connection to a live root
+ * (ruling 158). Used by the read-only maintenance CLIs (`npm run backup`,
+ * `npm run keys -- status`), which must work against a LIVE instance and
+ * therefore cannot take the writer lock.
+ *
+ * Until pass 35 this opened the file with `readOnly: true` and called that a
+ * reader. It is not one, on either side of the container boundary: a second
+ * connection maps the WAL index (`-shm`) the server has memory-mapped, and on
+ * the shipped deployment (a bind mount over VirtioFS) the open path's lock probe
+ * on that file is unreliable, so a reader can truncate the index under the
+ * server. Pass 34 saw the server die with SIGBUS (exit 135) one second after a
+ * host-side reader; pass 35 saw the same exit one second after an IN-CONTAINER
+ * `readOnly: true` reader, and boot recovery then interrupted 23 runs. "Read
+ * only" was never the protection; not sharing the mapping is.
+ *
+ * So the writer lock decides which case this is:
+ *  - `absent` / `stale` (F20-8's own judgement): nothing holds the root, the
+ *    database is just a file, and it is opened read-only in place, as before;
+ *  - `held` / `unknown-holder`: the server may be writing, so `projection.sqlite`
+ *    and `projection.sqlite-wal` (when present) are copied to a fresh directory
+ *    next to the store (`state/tmp/reader-<pid>/`), the COPY is opened
+ *    read-write so SQLite recovers the copied WAL into it, and `close` removes
+ *    the directory. The `-shm` is never copied: it is the wal-index the copy
+ *    rebuilds for itself, and sharing it is the hazard. The copy is a moment's
+ *    snapshot (the main file first, then the WAL; a torn WAL tail fails its
+ *    frame checksum and is dropped by recovery), which is what a reader against
+ *    a live writer can honestly have, and `backup`'s `VACUUM INTO` then runs on
+ *    it and stays a single-file artefact.
+ *
+ * No migrations are run either way: a reporting command has no business
+ * changing a schema, and on the copy a change would be thrown away with it.
+ */
+export function openDatabaseReadOnly(dbPath: string): ReadOnlyDatabase {
+  const stateDir = path.dirname(dbPath);
+  const lock = judgeDataRootLock(stateDir);
+  const holderMayBeLive = lock.verdict === "held" || lock.verdict === "unknown-holder";
+  if (!holderMayBeLive || !existsSync(dbPath)) {
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    return {
+      db,
+      path: dbPath,
+      snapshot: null,
+      close() {
+        if (db.isOpen) db.close();
+      },
+    };
+  }
+  const tmpRoot = path.join(stateDir, READER_SNAPSHOT_DIR);
+  sweepStaleReaderSnapshots(tmpRoot);
+  const dir = path.join(tmpRoot, `reader-${process.pid}`);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const copy = path.join(dir, path.basename(dbPath));
+  let db: DatabaseSync;
+  try {
+    copyFileSync(dbPath, copy);
+    const wal = `${dbPath}-wal`;
+    if (existsSync(wal)) copyFileSync(wal, `${copy}-wal`);
+    db = new DatabaseSync(copy);
+  } catch (error) {
+    // A copy that failed to open is not a snapshot anybody will close: remove
+    // it now rather than leave it for the next reader's sweep.
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
+  }
+  return {
+    db,
+    path: copy,
+    snapshot: { dir, holder: lock.holder },
+    close() {
+      if (db.isOpen) db.close();
+      rmSync(dir, { recursive: true, force: true });
+      // `state/tmp/` exists only while a reader holds a copy: gone when the
+      // last one leaves, left alone while a sibling still reads.
+      try {
+        rmdirSync(tmpRoot);
+      } catch {
+        // Not empty (another reader), or already gone: both fine.
+      }
+    },
+  };
+}
+
+/**
+ * A reader that died mid-read leaves `state/tmp/reader-<pid>/` behind. The next
+ * reader removes every sibling whose pid is gone; a directory whose pid is alive
+ * (another reader, or a pid this side of a container boundary cannot judge) is
+ * left alone. Best effort: a directory this process may not remove is not a
+ * reason to refuse the read.
+ */
+function sweepStaleReaderSnapshots(tmpRoot: string): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(tmpRoot);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const match = /^reader-(\d+)$/.exec(entry);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    if (pid === process.pid || isProcessAlive(pid)) continue;
+    try {
+      rmSync(path.join(tmpRoot, entry), { recursive: true, force: true });
+    } catch (error) {
+      logger.warn("a dead reader's snapshot directory could not be removed", {
+        dir: path.join(tmpRoot, entry),
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
 }
 
 /** Resolves the projection database path under the configured data root. */

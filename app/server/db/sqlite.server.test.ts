@@ -1,8 +1,17 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetEnvCacheForTests } from "~/server/config/env.server";
+import { DATA_ROOT_LOCK_FILENAME, isProcessAlive } from "./data-root-lock.server";
 import {
   closeDb,
   ensureBaselineColumns,
@@ -10,6 +19,8 @@ import {
   getProjectionDbPath,
   isDatabaseShuttingDown,
   openDatabase,
+  openDatabaseReadOnly,
+  READER_SNAPSHOT_DIR,
   shutdownDatabase,
 } from "./sqlite.server";
 
@@ -271,6 +282,186 @@ describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", 
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * Ruling 158 (pass 35 F35-9): no process but the server opens a live root's
+ * `projection.sqlite`. Until this, `openDatabaseReadOnly` opened the live file
+ * with `readOnly: true` and the runbook called that the safe form. Live it was
+ * not: an in-container `readOnly: true` reader preceded the server's SIGBUS
+ * (exit 135) by one second (NOTES 18:40Z), the same exit a host-side reader had
+ * produced in pass 34. The mapping of the WAL index is the hazard, not the
+ * write, so the reader now copies the database and its WAL beside the store
+ * whenever the writer lock names a live holder and opens the COPY. Canary:
+ * make `openDatabaseReadOnly` open `dbPath` in place under a live lock and both
+ * assertions in the first case fail (the file is the live path, the later row
+ * is visible).
+ */
+describe("openDatabaseReadOnly (ruling 158): a reader never opens a live root", () => {
+  interface Root {
+    dir: string;
+    stateDir: string;
+    dbPath: string;
+  }
+
+  function root(): Root {
+    // Resolved, so SQLite's own report of the opened file compares equal on a
+    // macOS temp dir (`/var` is a link to `/private/var`).
+    const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "viberr-reader-")));
+    const stateDir = path.join(dir, "state");
+    mkdirSync(stateDir, { recursive: true });
+    const dbPath = path.join(stateDir, "projection.sqlite");
+    return { dir, stateDir, dbPath };
+  }
+
+  /** A writer that is alive by every probe: this very process, on this host. */
+  function liveLock(r: Root, pid = process.pid): void {
+    writeFileSync(
+      path.join(r.stateDir, DATA_ROOT_LOCK_FILENAME),
+      JSON.stringify({ pid, hostname: hostname(), startedAt: "2026-09-06T18:00:00.000Z" }),
+    );
+  }
+
+  /** A pid nothing occupies, so a lock naming it is stale by the boot's own rule. */
+  function deadPid(): number {
+    for (let pid = 4_194_303; pid > 1; pid -= 1) {
+      if (!isProcessAlive(pid)) return pid;
+    }
+    throw new Error("every pid is alive");
+  }
+
+  /** The file the handle really opened, as SQLite reports it. */
+  function openedFile(reader: ReturnType<typeof openDatabaseReadOnly>): string {
+    // SAFETY: `PRAGMA database_list` yields one row per attached database with
+    // a TEXT `file`; the main database is always the first row.
+    const rows = reader.db.prepare(`PRAGMA database_list`).all() as { file: string }[];
+    return rows[0]!.file;
+  }
+
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function seeded(): Root & { live: ReturnType<typeof openDatabase> } {
+    const r = root();
+    roots.push(r.dir);
+    const live = openDatabase(r.dbPath);
+    live.exec(`CREATE TABLE users (id TEXT PRIMARY KEY)`);
+    live.prepare(`INSERT INTO users (id) VALUES ('u_before')`).run();
+    return { ...r, live };
+  }
+
+  it("with a live writer lock, opens a copy under state/tmp/ and never sees a row written after the open", () => {
+    const r = seeded();
+    liveLock(r);
+    // Committed, not checkpointed: the row lives in the -wal beside the file, so
+    // a reader that copied only the main file would miss it.
+    expect(existsSync(`${r.dbPath}-wal`)).toBe(true);
+
+    const reader = openDatabaseReadOnly(r.dbPath);
+    try {
+      const file = openedFile(reader);
+      expect(file).not.toBe(r.dbPath);
+      expect(path.dirname(path.dirname(file))).toBe(path.join(r.stateDir, READER_SNAPSHOT_DIR));
+      expect(path.basename(path.dirname(file))).toBe(`reader-${process.pid}`);
+      expect(reader.snapshot).not.toBeNull();
+      expect(reader.snapshot?.holder?.pid).toBe(process.pid);
+
+      // The copy carries the WAL: what was committed before the open is there.
+      expect(reader.db.prepare(`SELECT id FROM users ORDER BY id`).all()).toEqual([
+        { id: "u_before" },
+      ]);
+      // Snapshot semantics: a row the server writes after the open is invisible.
+      r.live.prepare(`INSERT INTO users (id) VALUES ('u_after')`).run();
+      expect(reader.db.prepare(`SELECT id FROM users ORDER BY id`).all()).toEqual([
+        { id: "u_before" },
+      ]);
+      reader.close();
+      // Close removes the copy and, it being the last reader, `state/tmp/`
+      // itself: nothing of the reader is left beside the store.
+      expect(existsSync(path.join(r.stateDir, READER_SNAPSHOT_DIR))).toBe(false);
+      // The reader never touched the live database's own sidecars (the live
+      // handle is still open here; its own clean close is what removes them).
+      expect(existsSync(`${r.dbPath}-wal`)).toBe(true);
+    } finally {
+      reader.close();
+      r.live.close();
+    }
+  });
+
+  it("with no lock at all, opens the live file itself, read-only", () => {
+    const r = seeded();
+    r.live.close();
+    const reader = openDatabaseReadOnly(r.dbPath);
+    try {
+      expect(openedFile(reader)).toBe(r.dbPath);
+      expect(reader.path).toBe(r.dbPath);
+      expect(reader.snapshot).toBeNull();
+      expect(() => reader.db.prepare(`INSERT INTO users (id) VALUES ('x')`).run()).toThrow(
+        /readonly/i,
+      );
+    } finally {
+      reader.close();
+    }
+    expect(existsSync(path.join(r.stateDir, READER_SNAPSHOT_DIR))).toBe(false);
+  });
+
+  it("with a lock left by a dead process on this host, opens the live file itself (the boot's own stale verdict)", () => {
+    const r = seeded();
+    r.live.close();
+    liveLock(r, deadPid());
+    const reader = openDatabaseReadOnly(r.dbPath);
+    try {
+      expect(openedFile(reader)).toBe(r.dbPath);
+      expect(reader.snapshot).toBeNull();
+    } finally {
+      reader.close();
+    }
+  });
+
+  it("with a lock file it cannot read as a holder, copies first: an unknown holder may be live", () => {
+    const r = seeded();
+    writeFileSync(path.join(r.stateDir, DATA_ROOT_LOCK_FILENAME), "not json");
+    const reader = openDatabaseReadOnly(r.dbPath);
+    try {
+      expect(openedFile(reader)).not.toBe(r.dbPath);
+      expect(reader.snapshot).toEqual({
+        dir: path.join(r.stateDir, READER_SNAPSHOT_DIR, `reader-${process.pid}`),
+        holder: null,
+      });
+    } finally {
+      reader.close();
+      r.live.close();
+    }
+  });
+
+  it("removes the copy a reader that died mid-read left behind, and leaves a live reader's alone", () => {
+    const r = seeded();
+    liveLock(r);
+    const tmpRoot = path.join(r.stateDir, READER_SNAPSHOT_DIR);
+    const dead = path.join(tmpRoot, `reader-${deadPid()}`);
+    mkdirSync(dead, { recursive: true });
+    writeFileSync(path.join(dead, "projection.sqlite"), "left behind");
+    // A directory named for a live pid (a sibling reader mid-read) is not ours to remove.
+    const alive = path.join(tmpRoot, "reader-1");
+    mkdirSync(alive, { recursive: true });
+    const unrelated = path.join(tmpRoot, "not-a-reader");
+    mkdirSync(unrelated, { recursive: true });
+
+    const reader = openDatabaseReadOnly(r.dbPath);
+    try {
+      expect(existsSync(dead)).toBe(false);
+      expect(existsSync(alive)).toBe(true);
+      expect(existsSync(unrelated)).toBe(true);
+      expect(readdirSync(tmpRoot).sort()).toEqual(
+        ["not-a-reader", "reader-1", `reader-${process.pid}`].sort(),
+      );
+    } finally {
+      reader.close();
+      r.live.close();
     }
   });
 });

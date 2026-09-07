@@ -2966,6 +2966,41 @@ CALLER's own live sign-in session plus the public half of their `userBackendHeal
 `verification` verdict, no ids), so the Profile poller stops when the backend flips to
 available. It reads nobody else's session.)*
 
+158. **No process but the server opens a live root's `projection.sqlite`; every other
+    reader copies first (owner, 2026-09-06, Q35-14; pass 35 F35-9).** The writer lock
+    decides which case applies. Pass 34 saw the server die with SIGBUS (exit 135) one
+    second after a host-side `sqlite3 -readonly` over the bind mount and wrote the rule
+    "inside the container, read-only"; on 2026-09-06 at 18:40:29Z the same exit followed
+    an in-container `readOnly: true` reader by one second, and boot recovery interrupted
+    23 runs and re-fired 23 operator turns. The side of the boundary was never the point:
+    a second connection maps the WAL index (`-shm`) the server has memory-mapped, and over
+    VirtioFS the open path's lock probe on that file is unreliable, so a reader can
+    truncate it under the server. **(a)** `openDatabaseReadOnly` reads `state/writer.lock`
+    with the boot's own judgement (`judgeDataRootLock`: same host and a dead pid is stale,
+    a different hostname is never probed and always held, an unreadable holder counts as
+    live). With a holder that may be live it copies `projection.sqlite` and
+    `projection.sqlite-wal` (never the `-shm`) to `state/tmp/reader-<pid>/`, opens the
+    COPY read-write so SQLite recovers the copied WAL into it, and removes the directory
+    on close; a dead reader's directory is swept by the next reader. With the lock absent
+    or stale it opens the file in place, read-only. It returns a `ReadOnlyDatabase`
+    handle (`db`, `path`, `snapshot`, `close`), never a bare connection, so the copy
+    cannot outlive its reader. `npm run backup` runs its `VACUUM INTO` on that handle,
+    the artefact stays one self-contained file, and the manifest's first `contains` line
+    says which way the projection was read; `npm run keys -- status` says so on stdout.
+    **(b)** The runbook and `deployment.md` state the rule in words ("copy first, never a
+    second connection to a live database, on either side of the container boundary"),
+    replace the pass-34 in-container `readOnly: true` example with the copy recipe (`cp`
+    the file and its `-wal`, open the copy, throw it away), and name `/resources/health`
+    and the controller's in-process readers (`viberr_ops`: `instance_health`,
+    `read_run_log`, `read_store_doc`; `viberr_controller`: `inspect_audit_log`, `get_task`)
+    as the reader to ask before copying anything. `app/shared/docs/runbook-db-read.test.ts`
+    pins both pages: no `sqlite3` invocation and no fenced `DatabaseSync(` opens
+    `state/projection.sqlite`. Amends D34-1's rule; the writer-lock rulings (B-FD1, F18-5,
+    F20-8) are unchanged, their verdicts are now read by readers too. (`judgeDataRootLock`
+    in `app/server/db/data-root-lock.server.ts`; `openDatabaseReadOnly` and
+    `ReadOnlyDatabase` in `app/server/db/sqlite.server.ts`; `createBackup` in
+    `app/server/db/backup.server.ts`; `scripts/secret-keys.ts`.)
+
 159. **Every path Viberr hands an agent is absolute, and a delivery that would publish
     the store's layout is refused (2026-09-06, pass 35 F35-10).** A store-relative path
     (`projects/<slug>/tasks/<key>/attachments`) is a display form for humans, never an
