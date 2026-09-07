@@ -139,9 +139,9 @@ describe("createBackup", () => {
 
     expect(backup.manifest.projection?.rows.users).toBe(2);
     expect(backup.manifest.contains[0]).toContain(
-      "read from a copy of the file and its WAL taken while the app held the root",
+      "read from a copy of the file and its WAL taken while state/writer.lock named a holder",
     );
-    expect(backup.text).toContain("taken while the app held the root");
+    expect(backup.text).toContain("taken while state/writer.lock named a holder");
     // The copy is removed with the handle; the store carries nothing of it.
     expect(existsSync(path.join(f.dataRoot, "state", "tmp", `reader-${process.pid}`))).toBe(false);
     // …and the live database's own sidecar was left alone.
@@ -151,7 +151,9 @@ describe("createBackup", () => {
   it("with nothing holding the root, reads the file itself and says that instead", () => {
     const f = fixture();
     const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
-    expect(backup.manifest.contains[0]).toContain("read from the file itself; nothing held the root");
+    expect(backup.manifest.contains[0]).toContain(
+      "read from the file itself; the root carried no writer lock",
+    );
     expect(existsSync(path.join(f.dataRoot, "state", "tmp"))).toBe(false);
   });
 

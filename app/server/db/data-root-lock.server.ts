@@ -357,31 +357,39 @@ export function classifyLock(
 }
 
 /**
- * The writer lock as a READER judges it (ruling 158). `absent` = no lock file at
- * all; otherwise {@link classifyLock}'s verdict for THIS process against the
- * file, with the holder it named (null when the file could not be read as a
- * holder, which is `unknown-holder`).
+ * The writer lock as a READER sees it (ruling 158). `absent` = no lock file at
+ * all; `present` = there is one, carrying the holder it names (null when the
+ * file could not be read as a holder).
  */
 export type DataRootLockJudgement =
   | { verdict: "absent"; holder: null }
-  | { verdict: LockVerdict; holder: LockHolder | null };
+  | { verdict: "present"; holder: LockHolder | null };
 
 /**
  * Ruling 158: no process but the server opens a live root's `projection.sqlite`.
- * A read-only CLI (`keys status`, `backup`) asks this BEFORE it opens anything:
- * `held` and `unknown-holder` mean a writer may be mapping the WAL index right
- * now, so the reader copies the database first and opens the copy; `absent`
- * and `stale` mean the root is just files and the reader may open the file
- * itself. Same judgement the boot takes, so the two never disagree about who
- * holds the root: same host + dead pid is stale, a different hostname is never
- * probed and always held (the host-side reader against a container is exactly
- * that case), and the reader's own identity plays `self` so a lock left by
- * this very process reads as stale.
+ * A read-only CLI (`keys status`, `backup`) asks this BEFORE it opens anything,
+ * and the answer is the lock file's PRESENCE, not the boot's verdict on it: a
+ * reader that finds a lock copies the database and opens the copy, and only a
+ * root with no lock at all is just files it may open in place.
+ *
+ * Deliberately NOT {@link classifyLock}. That verdict is the boot's, and its two
+ * staleness tests are both pid-namespace-local: `isAlive(holder.pid)` probes the
+ * READER's namespace, and the self-pid branch compares `/proc/<self.pid>` start
+ * ticks, which in another namespace are never the holder's. The hostname test
+ * does not separate the container boundary either, because `compose.yml` pins
+ * `hostname: viberr` for every container built from it and two containers over
+ * one data root routinely land on the same low pid (see {@link LockHolder}'s
+ * `bootId`). So a reader in a SECOND container from that file (`docker compose
+ * run --rm app npm run backup -- --out …`) would call a genuinely live holder
+ * stale and open the live database: the second `-shm` mapping ruling 158 exists
+ * to prevent. The boot survives the same ambiguity only because it has two
+ * backstops a reader has not, its own `bootId` and F18-5's ownership re-check,
+ * which fails the loser closed.
+ *
+ * A needless copy costs disk. A wrong "stale" costs the server, twice measured
+ * (exit 135, one second after the reader). So presence is the whole question.
  */
-export function judgeDataRootLock(
-  stateDir: string,
-  isAlive: (pid: number) => boolean = isProcessAlive,
-): DataRootLockJudgement {
+export function judgeDataRootLock(stateDir: string): DataRootLockJudgement {
   const lockPath = path.join(stateDir, DATA_ROOT_LOCK_FILENAME);
   let raw: string;
   try {
@@ -389,9 +397,7 @@ export function judgeDataRootLock(
   } catch {
     return { verdict: "absent", holder: null };
   }
-  const holder = parseHolder(raw);
-  const self = bootingHolder(readProcessStartTicks(process.pid));
-  return { verdict: classifyLock(holder, self, isAlive), holder };
+  return { verdict: "present", holder: parseHolder(raw) };
 }
 
 const DEFAULT_OWNERSHIP_PROBES: LockOwnershipProbes = {

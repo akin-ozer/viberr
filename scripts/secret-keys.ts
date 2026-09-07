@@ -53,7 +53,7 @@ if (command === "status") {
       const holder = reader.snapshot.holder;
       console.log(
         holder
-          ? `Read from a copy of the database: the app holds this data root (pid ${holder.pid} on ${holder.hostname}).`
+          ? `Read from a copy of the database: state/writer.lock names a holder for this data root (pid ${holder.pid} on ${holder.hostname}), and only the app itself may open the live file.`
           : "Read from a copy of the database: state/writer.lock names a holder this command cannot read.",
       );
       console.log("");

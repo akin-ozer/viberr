@@ -273,38 +273,48 @@ describe("judgeDataRootLock (ruling 158, the reader's question)", () => {
     expect(judgeDataRootLock(stateDir())).toEqual({ verdict: "absent", holder: null });
   });
 
-  it("is held when the file names a live process on this host, and returns the holder", () => {
+  it("is present, with the holder, for a lock naming a live process on this host", () => {
     const dir = stateDir();
     const holder = { pid: process.pid, hostname: hostname(), startedAt: "2026-09-06T18:00:00.000Z" };
     writeFileSync(path.join(dir, DATA_ROOT_LOCK_FILENAME), JSON.stringify(holder));
-    expect(judgeDataRootLock(dir)).toEqual({ verdict: "held", holder });
+    expect(judgeDataRootLock(dir)).toEqual({ verdict: "present", holder });
   });
 
-  it("is stale when the named process is gone from this host", () => {
+  it("is present for a pid nothing occupies here: a reader never answers 'stale'", () => {
+    // The boot's verdict for this file is stale (same host, dead pid). A reader
+    // must not reuse it: `isAlive` probes the READER's pid namespace, and
+    // `compose.yml` pins the hostname, so a live holder in a second container
+    // reads as a dead pid on the same host — and a reader that believes it
+    // opens the live database. Presence is the whole question.
     const dir = stateDir();
     const holder = { pid: 4_194_303, hostname: hostname(), startedAt: "2026-09-06T18:00:00.000Z" };
     writeFileSync(path.join(dir, DATA_ROOT_LOCK_FILENAME), JSON.stringify(holder));
-    expect(judgeDataRootLock(dir, () => false)).toEqual({ verdict: "stale", holder });
+    expect(judgeDataRootLock(dir)).toEqual({ verdict: "present", holder });
   });
 
-  it("is held for a different hostname without probing it: the host-side reader against a container", () => {
+  it("is present for THIS pid recorded at another start time, the boot's other stale branch", () => {
+    const dir = stateDir();
+    const holder = {
+      pid: process.pid,
+      hostname: hostname(),
+      startedAt: "2026-09-06T18:00:00.000Z",
+      procStartedAt: 1,
+    };
+    writeFileSync(path.join(dir, DATA_ROOT_LOCK_FILENAME), JSON.stringify(holder));
+    expect(judgeDataRootLock(dir)).toEqual({ verdict: "present", holder });
+  });
+
+  it("is present for a different hostname, the host-side reader against a container", () => {
     const dir = stateDir();
     const holder = { pid: 1, hostname: "viberr", startedAt: "2026-09-06T18:00:00.000Z" };
     writeFileSync(path.join(dir, DATA_ROOT_LOCK_FILENAME), JSON.stringify(holder));
-    const probed: number[] = [];
-    expect(
-      judgeDataRootLock(dir, (pid) => {
-        probed.push(pid);
-        return false;
-      }),
-    ).toEqual({ verdict: "held", holder });
-    expect(probed).toEqual([]);
+    expect(judgeDataRootLock(dir)).toEqual({ verdict: "present", holder });
   });
 
-  it("is unknown-holder with a null holder when the file is not a lock", () => {
+  it("is present with a null holder when the file is not a lock", () => {
     const dir = stateDir();
     writeFileSync(path.join(dir, DATA_ROOT_LOCK_FILENAME), "{\"pid\": \"one\"}");
-    expect(judgeDataRootLock(dir)).toEqual({ verdict: "unknown-holder", holder: null });
+    expect(judgeDataRootLock(dir)).toEqual({ verdict: "present", holder: null });
   });
 });
 

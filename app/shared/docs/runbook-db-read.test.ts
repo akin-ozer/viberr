@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
  * `-wal` are copied to a scratch directory and the COPY is opened, which is
  * what `openDatabaseReadOnly` (`app/server/db/sqlite.server.ts`) does for
  * `npm run backup` and `npm run keys -- status` whenever `state/writer.lock`
- * names a live holder.
+ * is there at all.
  *
  * Mechanical pins over BOTH pages, so the next rewrite cannot quietly put a
  * live-file form back:
@@ -209,3 +209,4 @@ describe("ruling 158: the operations docs never open a live projection database,
     },
   );
 });
+

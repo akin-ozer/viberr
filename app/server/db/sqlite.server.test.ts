@@ -445,10 +445,14 @@ describe("copyStorePair (ruling 158): the copied pair comes from one moment", ()
  * (exit 135) by one second (NOTES 18:40Z), the same exit a host-side reader had
  * produced in pass 34. The mapping of the WAL index is the hazard, not the
  * write, so the reader now copies the database and its WAL beside the store
- * whenever the writer lock names a live holder and opens the COPY. Canary:
- * make `openDatabaseReadOnly` open `dbPath` in place under a live lock and both
- * assertions in the first case fail (the file is the live path, the later row
- * is visible).
+ * whenever `state/writer.lock` is there AT ALL and opens the COPY. Presence is
+ * the whole question (amended in this pass's review): the boot's staleness
+ * tests are pid-namespace-local and `compose.yml` pins the hostname, so a
+ * reader that reused them would call a live holder in a second container stale
+ * and open the live file. Canary: make `openDatabaseReadOnly` open `dbPath` in
+ * place under a live lock and both assertions in the first case fail (the file
+ * is the live path, the later row is visible); restore the boot's verdict as
+ * the reader's rule and the dead-pid case opens the live file too.
  */
 describe("openDatabaseReadOnly (ruling 158): a reader never opens a live root", () => {
   interface Root {
@@ -560,16 +564,48 @@ describe("openDatabaseReadOnly (ruling 158): a reader never opens a live root", 
     expect(existsSync(path.join(r.stateDir, READER_SNAPSHOT_DIR))).toBe(false);
   });
 
-  it("with a lock left by a dead process on this host, opens the live file itself (the boot's own stale verdict)", () => {
+  it("with a lock naming a pid nothing occupies here, still copies: a reader cannot judge liveness across a pid namespace", () => {
+    // The boot would call this stale (same host, dead pid) and reclaim it. A
+    // READER must not: `compose.yml` pins `hostname: viberr`, so a second
+    // container from that file (`docker compose run --rm app npm run backup`)
+    // has the app's own hostname and its OWN pid namespace, where the live
+    // holder's pid is simply unoccupied. Answering "stale" there opens the live
+    // database beside the running server: the second `-shm` mapping ruling 158
+    // exists to prevent. A needless copy costs disk; this costs the server.
     const r = seeded();
-    r.live.close();
-    liveLock(r, deadPid());
+    const gone = deadPid();
+    liveLock(r, gone);
     const reader = openDatabaseReadOnly(r.dbPath);
     try {
-      expect(openedFile(reader)).toBe(r.dbPath);
-      expect(reader.snapshot).toBeNull();
+      expect(openedFile(reader)).not.toBe(r.dbPath);
+      expect(reader.snapshot?.holder?.pid).toBe(gone);
     } finally {
       reader.close();
+      r.live.close();
+    }
+  });
+
+  it("with a lock naming THIS pid at another start time, still copies: the self-pid tie-break is namespace-local too", () => {
+    // `classifyLock`'s other staleness test compares `/proc/<self.pid>` start
+    // ticks, which across a namespace are never the holder's — two containers
+    // over one data root routinely land on the same low pid. Same answer: copy.
+    const r = seeded();
+    writeFileSync(
+      path.join(r.stateDir, DATA_ROOT_LOCK_FILENAME),
+      JSON.stringify({
+        pid: process.pid,
+        hostname: hostname(),
+        startedAt: "2026-09-06T18:00:00.000Z",
+        procStartedAt: 1,
+      }),
+    );
+    const reader = openDatabaseReadOnly(r.dbPath);
+    try {
+      expect(openedFile(reader)).not.toBe(r.dbPath);
+      expect(reader.snapshot).not.toBeNull();
+    } finally {
+      reader.close();
+      r.live.close();
     }
   });
 

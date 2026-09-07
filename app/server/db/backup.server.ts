@@ -41,9 +41,9 @@ import { openDatabase, openDatabaseReadOnly } from "./sqlite.server";
  * transaction, so the artefact is the database as of one instant — WAL content
  * included — written to a single file with no sidecars. The source is opened
  * through `openDatabaseReadOnly`, so this is never the second connection to a
- * live root (ruling 158): while the writer lock names a live holder the reader
- * copies `projection.sqlite` and its `-wal` next to the store and the VACUUM
- * runs on the copy; with nothing holding the root it runs on the file itself.
+ * live root (ruling 158): while a writer lock is there at all the reader copies
+ * `projection.sqlite` and its `-wal` next to the store and the VACUUM runs on
+ * the copy; on a root with no lock it runs on the file itself.
  * Either way it takes no data-root lock (a backup that refused to run while the
  * app was up would defeat the point). Proven by test: a row committed but not
  * yet checkpointed is present in the artefact and absent from a raw `cp` of the
@@ -208,9 +208,9 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
   if (existsSync(source)) {
     const target = path.join(dir, PROJECTION_NAME);
     // A reader, never the second writer that B-FD1 exists to prevent, and
-    // never the second CONNECTION to a live root either (ruling 158): while the
-    // app holds the writer lock this opens a copy taken next to the store, and
-    // the VACUUM INTO runs on that copy. It runs in a read transaction, so the
+    // never the second CONNECTION to a live root either (ruling 158): with a
+    // writer lock present this opens a copy taken next to the store, and the
+    // VACUUM INTO runs on that copy. It runs in a read transaction, so the
     // artefact includes everything committed to the WAL at that instant.
     const reader = openDatabaseReadOnly(source);
     try {
@@ -311,14 +311,14 @@ function countRows(dbPath: string): TableRowCounts {
   }
 }
 
-/** How the projection was read: the live file with nothing holding the root, or
- *  a copy taken beside the store while the app held the writer lock (ruling 158). */
+/** How the projection was read: the live file on a root carrying no writer lock,
+ *  or a copy taken beside the store because one was there (ruling 158). */
 type ProjectionSource = "live" | "snapshot";
 
 function projectionProvenance(source: ProjectionSource): string {
   return source === "snapshot"
-    ? "read from a copy of the file and its WAL taken while the app held the root, so the live database was never opened"
-    : "read from the file itself; nothing held the root";
+    ? "read from a copy of the file and its WAL taken while state/writer.lock named a holder, so the live database was never opened"
+    : "read from the file itself; the root carried no writer lock";
 }
 
 function contains(projection: ProjectionSource | null, dirs: string[]): string[] {

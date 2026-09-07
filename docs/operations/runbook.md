@@ -441,7 +441,7 @@ pid is reclaimed automatically; a different hostname is never probed and always 
 | CLI | Lock | Where it runs on the Docker deployment |
 |---|---|---|
 | `npm run seed`, `seed:demo`, `rescan`, `restore` (whole root), `keys -- reseal` | **takes the writer lock**; against a running app prints `refused to run: it would be a SECOND writer on this data root` and exits 1 | from the host, before the container starts or after `docker compose down`; the lock refuses anything else |
-| `npm run backup`, `keys -- status` | reader; no lock. While the lock names a live holder they copy `projection.sqlite` and its `-wal` to `state/tmp/reader-<pid>/` and open the copy, never the live file (ruling 158); with the lock absent or stale the root is just files and they open it in place, read-only | either side of the container boundary, since neither opens a live database. The in-container form (`docker compose exec -T app …`) stays the worked example for the backup, whose artefact must land outside `/data` and be copied out |
+| `npm run backup`, `keys -- status` | reader; no lock. A `state/writer.lock` of any age means they copy `projection.sqlite` and its `-wal` to `state/tmp/reader-<pid>/` and open the copy, never the live file (ruling 158); only a root with no lock file at all is just files, which they open in place, read-only | either side of the container boundary, since neither opens a live database. The in-container form (`docker compose exec -T app …`) stays the worked example for the backup, whose artefact must land outside `/data` and be copied out |
 | `npm run store:check`, `restore --file` | no lock, no database | either side: they read and write the markdown tree only |
 
 So `docker compose exec app npm run seed` is refused. Seed before the container starts, or
@@ -464,11 +464,15 @@ pass 35 one second after an in-container `readOnly: true` reader. The rule (ruli
   `projection.sqlite-wal` (never the `-shm`: that IS the shared index, and a copy
   rebuilds its own) to a scratch directory, open the copy, throw it away; the worked
   example is under [Agent runtimes](#agent-runtimes). The read-only CLIs do exactly this
-  on their own: `npm run backup` and `npm run keys -- status` read `state/writer.lock`
-  with the boot's own judgement, and while it names a live holder they copy both files
-  to `state/tmp/reader-<pid>/`, open the copy and remove it when they close
-  (`openDatabaseReadOnly` in `app/server/db/sqlite.server.ts`); with the lock absent or
-  stale the root is just files and they open it in place, read-only. `keys -- status`
+  on their own: `npm run backup` and `npm run keys -- status` look for
+  `state/writer.lock`, and if one is there at all they copy both files to
+  `state/tmp/reader-<pid>/`, open the copy and remove it when they close
+  (`openDatabaseReadOnly` in `app/server/db/sqlite.server.ts`); only a root carrying no
+  lock file is just files they open in place, read-only. They deliberately do NOT reuse
+  the boot's `stale` verdict: liveness is probed inside ONE pid namespace and
+  `compose.yml` pins `hostname: viberr`, so a live holder in a second container from that
+  file reads as a dead pid on the same host, and believing it would open the live
+  database. A needless copy costs disk; that mistake costs the server. `keys -- status`
   says which it did on stdout; the backup manifest records it. The backup is still the
   two-step form under [Backup / restore](#backup--restore), because its artefact may not
   land under `/data` and anywhere else in the container is gone with it.
@@ -510,8 +514,8 @@ and `deployment.md`'s backup recipes now say copy first, and
 `npm run backup [-- --out <dir>]` writes a consistent point-in-time artefact (`VACUUM
 INTO` plus the store tree — `projects/`, `agents/`, `kb/`, `skills/` and
 `audit-exports/` — and a manifest) **without** taking the lock, so it works on a live
-instance, and without opening the live database: while `state/writer.lock` names a live
-holder it copies `projection.sqlite` and its `-wal` to `state/tmp/reader-<pid>/`, runs the
+instance, and without opening the live database: with a `state/writer.lock` present at
+all it copies `projection.sqlite` and its `-wal` to `state/tmp/reader-<pid>/`, runs the
 `VACUUM INTO` on the copy and removes it, so the artefact stays one self-contained file
 and the manifest's first `contains` line says it was read from a copy ([Readers, and
 where they must run](#readers-and-where-they-must-run)). On the Docker deployment run it

@@ -270,12 +270,14 @@ logs are structured JSON on stdout. Full layout with retention:
   2026-09-02, pass 32 — C01-A3.)* It does **not** take the writer lock: a
   backup that refused to run on a live instance would be no backup at all.
 
-  **How it reads a live root.** Never through a second connection: while
-  `state/writer.lock` names a live holder the CLI copies `projection.sqlite` and its
+  **How it reads a live root.** Never through a second connection: whenever
+  `state/writer.lock` is there at all the CLI copies `projection.sqlite` and its
   `-wal` to `state/tmp/reader-<pid>/`, runs the `VACUUM INTO` on the copy and removes it
   (ruling 158; the manifest's first `contains` line then says "read from a copy of the
-  file and its WAL taken while the app held the root"). With the lock absent or stale the
-  root is just files and it opens the file in place, read-only. That is the rule for
+  file and its WAL taken while state/writer.lock named a holder"). Only a root with no
+  lock file is just files it opens in place, read-only: a reader cannot tell a dead
+  holder from a live one in another pid namespace, and a copy it did not need costs
+  nothing but disk. That is the rule for
   every reader, on either side of the container boundary: copy first, never a second
   connection to a live database, because the second mapping of the WAL index is what
   produced the SIGBUS in pass 34 (a host-side reader over the bind mount) and again in
@@ -467,7 +469,8 @@ matches its predecessor). If the holder really is dead and the lock was not recl
 once with `VIBERR_FORCE_DATA_ROOT_LOCK=1`. The writing CLIs (`seed`, `seed:demo`, `rescan`,
 `restore`, `keys -- reseal`) take the same lock and refuse against a running app;
 `backup`, `store:check` and `keys -- status` are readers and need none; the two that read
-the database judge the same lock and, while it names a live holder, copy the database
-first rather than open it, since a second connection to a live root is a hazard of its own
+the database copy it first rather than open it whenever that lock file exists at all
+(they judge its PRESENCE, never its holder's liveness, which cannot be probed from
+another pid namespace), since a second connection to a live root is a hazard of its own
 (ruling 158). *(Added 2026-09-01; see
 [`runbook.md`](runbook.md#the-single-writer-lock-and-cli-refusals).)*

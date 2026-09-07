@@ -3112,14 +3112,20 @@ available. It reads nobody else's session.)*
     23 runs and re-fired 23 operator turns. The side of the boundary was never the point:
     a second connection maps the WAL index (`-shm`) the server has memory-mapped, and over
     VirtioFS the open path's lock probe on that file is unreliable, so a reader can
-    truncate it under the server. **(a)** `openDatabaseReadOnly` reads `state/writer.lock`
-    with the boot's own judgement (`judgeDataRootLock`: same host and a dead pid is stale,
-    a different hostname is never probed and always held, an unreadable holder counts as
-    live). With a holder that may be live it copies `projection.sqlite` and
+    truncate it under the server. **(a)** `openDatabaseReadOnly` asks `judgeDataRootLock`
+    for the PRESENCE of `state/writer.lock`, and nothing else: with a lock file there at
+    all, whatever it names, it copies `projection.sqlite` and
     `projection.sqlite-wal` (never the `-shm`) to `state/tmp/reader-<pid>/`, opens the
     COPY read-write so SQLite recovers the copied WAL into it, and removes the directory
-    on close; a dead reader's directory is swept by the next reader. With the lock absent
-    or stale it opens the file in place, read-only. It returns a `ReadOnlyDatabase`
+    on close; a dead reader's directory is swept by the next reader. Only a root with no
+    lock file at all is opened in place, read-only. Deliberately NOT the boot's verdict
+    (amended in review, same pass): `classifyLock`'s two staleness tests are both
+    pid-namespace-local, and `compose.yml` pins `hostname: viberr` for every container
+    built from it, so a reader in a SECOND container over one data root would call a
+    genuinely live holder stale and open the live file. The boot survives that ambiguity
+    on two backstops a reader has not, its own `bootId` and F18-5's ownership re-check;
+    a reader has only the cheap direction, and a copy it did not need costs disk where
+    a wrong "stale" costs the server. It returns a `ReadOnlyDatabase`
     handle (`db`, `path`, `snapshot`, `close`), never a bare connection, so the copy
     cannot outlive its reader. `npm run backup` runs its `VACUUM INTO` on that handle,
     the artefact stays one self-contained file, and the manifest's first `contains` line

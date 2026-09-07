@@ -48,9 +48,10 @@ export interface ReadOnlyDatabase {
   /** The file `db` opened: the live projection, or the copy under `state/tmp/`. */
   path: string;
   /**
-   * Set when the writer lock named a live (or unreadable) holder and the reader
-   * copied the database before opening it; null when the root was just files and
-   * `db` is the live file, opened read-only.
+   * Set when a `writer.lock` was there at all and the reader copied the database
+   * before opening it, with the holder that file named (null when it could not
+   * be read as one); null when the root carried no lock, so it was just files
+   * and `db` is the live file, opened read-only.
    */
   snapshot: { dir: string; holder: LockHolder | null } | null;
   /** Idempotent: closes `db` and, for a snapshot, removes its directory. */
@@ -134,10 +135,13 @@ export function copyStorePair(dbPath: string, copyPath: string): void {
  * `readOnly: true` reader, and boot recovery then interrupted 23 runs. "Read
  * only" was never the protection; not sharing the mapping is.
  *
- * So the writer lock decides which case this is:
- *  - `absent` / `stale` (F20-8's own judgement): nothing holds the root, the
- *    database is just a file, and it is opened read-only in place, as before;
- *  - `held` / `unknown-holder`: the server may be writing, so `projection.sqlite`
+ * So the writer lock decides which case this is, by its PRESENCE and nothing
+ * else (`judgeDataRootLock`; a reader cannot judge a holder's liveness across a
+ * pid namespace, and the boot's `stale` verdict answered for a live holder in a
+ * second container would open the live file, which is the whole hazard):
+ *  - `absent`: no lock file, so nothing holds the root, the database is just a
+ *    file, and it is opened read-only in place, as before;
+ *  - `present`: the server may be writing, so `projection.sqlite`
  *    and `projection.sqlite-wal` (when present) are copied to a fresh directory
  *    next to the store (`state/tmp/reader-<pid>/`), the COPY is opened
  *    read-write so SQLite recovers the copied WAL into it, and `close` removes
@@ -165,8 +169,7 @@ export function copyStorePair(dbPath: string, copyPath: string): void {
 export function openDatabaseReadOnly(dbPath: string): ReadOnlyDatabase {
   const stateDir = path.dirname(dbPath);
   const lock = judgeDataRootLock(stateDir);
-  const holderMayBeLive = lock.verdict === "held" || lock.verdict === "unknown-holder";
-  if (!holderMayBeLive || !existsSync(dbPath)) {
+  if (lock.verdict === "absent" || !existsSync(dbPath)) {
     const db = new DatabaseSync(dbPath, { readOnly: true });
     return {
       db,
