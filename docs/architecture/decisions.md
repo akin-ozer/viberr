@@ -2937,6 +2937,21 @@ by rewriting those paragraphs:*
     `features/runtime/runs-panels.tsx`; `features/org-settings/users-panel.tsx`;
     `features/project-settings/settings-page.tsx`.)
 
+151. **Boundary always wins (owner, 2026-09-06, Q35-1; pass 35 F35-2).** A workflow
+    boundary the project author declared is the contract every human reads on the
+    Policy page and in `project.md`, and an operator grant cannot void it. `auto` is
+    the only boundary `stage-transitions: direct` crosses; a declared `approval`
+    boundary always routes to a recommendation a human applies, under either autonomy
+    and either grant mode; a declared `human` boundary is refused to the operator with
+    a sentence, and the terminal stage stays reachable only through acceptance
+    (`operatorAcceptCompletion` answers a move into it under either gate). Rework
+    moves on a failing task (R7-4) are unchanged. `transitionStage` enforces the same
+    rule for any operator-authorized caller, so a `task.transition` row with `by:
+    operator` and `boundary: approval` can never be written again. The full-autonomy
+    notice, the profile modal hint and the `transition_stage` tool text say so.
+    (`task-actions.server.ts` `transitionStage`, `operator-actions.server.ts`
+    `operatorTransitionStage`, `operator-toolkit.server.ts`, `create-profile-modal.tsx`.)
+
 152. **Coordination cost is a product cost (owner, 2026-09-06, Q35-5 and Q35-15; G35-4,
     G35-5).** **(a)** An operator turn may cross consecutive `auto` boundaries in one turn:
     the transition reply names the next boundary, and a transition made by a live operator
