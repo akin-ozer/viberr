@@ -129,3 +129,24 @@ describe("ruling 164: the persona says an option title is a promise", () => {
     expect(operatorDefinitionMd).not.toMatch(/offer it beside any workaround/i);
   });
 });
+
+/**
+ * Pass-35 cluster review of ruling 162: `notAcceptableReason` is the FIRST of
+ * every acceptance gate, and one of them is "this task has not reached the
+ * boundary yet". The doctrine forbade the move into the acceptance stage while
+ * the field was set, which is every task short of that stage, by a sentence
+ * whose own remedy is that exact move. `mergeStageEntryRefusal` reads the pull
+ * request instead, which is what the doctrine now says.
+ */
+describe("the acceptance-stage move reads the pull request, not the whole gate", () => {
+  it("keeps notAcceptableReason for the acceptance verbs and keys the move on the pull request", () => {
+    // Canary: restore "never move the task into the acceptance stage" keyed on
+    // `notAcceptableReason`.
+    expect(operatorDefinitionMd).toContain("never recommend or accept completion");
+    expect(operatorDefinitionMd).not.toMatch(
+      /never move the task into the acceptance stage/,
+    );
+    expect(operatorDefinitionMd).toContain("`pr.unpushedRevision`");
+    expect(operatorDefinitionMd).toContain("not reached the boundary yet");
+  });
+});

@@ -4670,8 +4670,21 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     expect(r.message).toContain("Open the conflict packet (update_branch_from_base)");
     expect(task().frontmatter.stage).toBe("impl");
     expect(task().frontmatter.recommendations).toEqual([]);
-    // A clean PR crosses the same boundary as before (a recommendation card).
+    // A clean PR crosses the same boundary as before (a recommendation card) —
+    // and it crosses it WITH `notAcceptableReason` standing. Pass-35 cluster
+    // review: the field is `acceptanceRefusalFor`, whose third gate is "this
+    // task is not at the boundary yet", so it is set on every task short of the
+    // acceptance stage and its own remedy is this move. The shipped tool and
+    // persona texts keyed the refusal on it; only `mergeReadinessRefusal` may.
     seedReviewedWithPr("impl", "clean");
+    const standing = operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    );
+    expect(standing.notAcceptableReason).toContain("Move the task through the workflow first.");
     const ok = await operatorTransitionStage(
       store.db,
       { dataRoot: store.dataRoot },

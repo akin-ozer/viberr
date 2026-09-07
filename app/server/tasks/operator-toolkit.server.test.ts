@@ -615,3 +615,52 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(def.description).not.toMatch(/offer it (as an option )?beside any workaround/i);
   });
 });
+
+/**
+ * Pass-35 cluster review of ruling 162. `notAcceptableReason` is
+ * `acceptanceRefusalFor`, i.e. the FIRST of EVERY acceptance gate, and its
+ * third is `acceptanceStageBlockedReason` — "KNC-x is at Review, not Merge ...
+ * Move the task through the workflow first." So the field stands on every task
+ * short of the boundary, and the shipped texts keyed the MOVE into that stage
+ * on it: the operator was told a legal, required move would be refused for
+ * every task, by a sentence whose own remedy is that move.
+ *
+ * `mergeStageEntryRefusal` never read that field. It reads
+ * `mergeReadinessRefusal` — a conflicting pull request or an unpushed
+ * delivered revision — which is what F35-12(b) asked for, so the texts are what
+ * was wrong.
+ */
+describe("buildOperatorToolkit — the acceptance-stage move reads the pull request, not the whole gate", () => {
+  const toolkitFor = () =>
+    buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("stage-transitions", "direct");
+        return auth;
+      })(),
+    });
+
+  it("transition_stage names the pull request facts and does not key the move on notAcceptableReason", () => {
+    // Canary: restore "refused while get_task shows `notAcceptableReason`".
+    const def = toolkitFor().tools.find((t) => t.name === "transition_stage")!;
+    expect(def.description).toContain("Merge means mergeable");
+    expect(def.description).toContain("`pr.unpushedRevision`");
+    expect(def.description).not.toMatch(
+      /refused while get_task shows `notAcceptableReason`/,
+    );
+    // And it says outright that the field is not a reason to hold the task.
+    expect(def.description).toContain("never read it as a refusal to advance");
+  });
+
+  it("get_task keeps notAcceptableReason for the acceptance verbs and says what else it covers", () => {
+    // Canary: restore "the task cannot be moved into the acceptance stage".
+    const def = toolkitFor().tools.find((t) => t.name === "get_task")!;
+    expect(def.description).toContain("`notAcceptableReason`");
+    expect(def.description).not.toMatch(/cannot be moved into the\s+acceptance stage/);
+    expect(def.description).toContain("has simply not reached the boundary yet");
+  });
+});
