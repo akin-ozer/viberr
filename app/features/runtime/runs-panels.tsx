@@ -242,16 +242,18 @@ export function LiveRunPanel({
           </div>
           <div className="run-cell">
             <div className="lbl">Tokens</div>
-            {/* F35-1: an estimate is marked as one. The live figure used to be
-                the SDK's placeholder output (a few tokens per API message)
-                and read "49" for twelve minutes of writing; now it is a text
-                estimate that the provider's total replaces at the result. */}
+            {/* F35-1: an estimate is marked as one, for as long as it is one.
+                The live figure used to be the SDK's placeholder output (a few
+                tokens per API message) and read "49" for twelve minutes of
+                writing; now it is a text estimate the provider's total
+                replaces at the result. A stopped run has no result, so its
+                estimate keeps the tilde after it ends. */}
             {run.tokens === null ? (
               <div className="val mono">pending</div>
             ) : run.tokensEstimated ? (
               <div
                 className="val mono"
-                title="Estimated from the streamed text; the provider's total replaces it when the run ends"
+                title="Estimated from the streamed text. The provider's own total replaces it when one lands; a run that was stopped never gets one"
               >
                 ~{fmtTok(run.tokens)}
               </div>

@@ -28,11 +28,16 @@ export interface InsightsTotals {
   costedRuns: number;
   cost: number;
   /** F35-1: the three token sums cover only rows whose provider total landed
-   *  (`agent_runs.usage_final = 1`); a running run's live estimate is not in
-   *  them, which the card says whenever a run is running. */
+   *  (`agent_runs.usage_final = 1`); a live estimate is not a total and is not
+   *  in them. */
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
+  /** Runs the three sums above leave out (`usage_final = 0`): a run still in
+   *  flight, one that was stopped or errored before a provider figure landed,
+   *  and every row a root carried before the column existed. The card names
+   *  this count, so an understated token headline is never silent. */
+  tokenlessRuns: number;
   turns: number;
 }
 
@@ -162,6 +167,7 @@ const totalsSchema = z.object({
   input_tokens: z.number().nullable(),
   cached_input_tokens: z.number().nullable(),
   output_tokens: z.number().nullable(),
+  tokenless_runs: z.number().nullable(),
   turns: z.number().nullable(),
 });
 
@@ -482,6 +488,10 @@ export function getInsightsSummary(
         // landed (`usage_final = 1`). A running Claude row holds the adapter's
         // live estimate and a running Codex row holds nothing; neither is a
         // total. Cost is untouched: only the result envelope ever writes it.
+        // The rows left out are COUNTED in the same pass (`tokenless_runs`), so
+        // the card can name them: an interrupted run and an errored one whose
+        // usage was empty never get a provider figure, so their exclusion is
+        // permanent and would otherwise understate the headline in silence.
         `SELECT count(*) AS runs,
                 count(total_cost_usd) AS costed_runs,
                 COALESCE(SUM(total_cost_usd), 0) AS cost,
@@ -490,6 +500,7 @@ export function getInsightsSummary(
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN input_tokens END), 0) AS input_tokens,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN cached_input_tokens END), 0) AS cached_input_tokens,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN output_tokens END), 0) AS output_tokens,
+                COALESCE(SUM(CASE WHEN usage_final = 0 THEN 1 ELSE 0 END), 0) AS tokenless_runs,
                 COALESCE(SUM(turns), 0) AS turns
          FROM agent_runs ${clause}`,
       )
@@ -641,6 +652,7 @@ export function getInsightsSummary(
       inputTokens: totals.input_tokens ?? 0,
       cachedInputTokens: totals.cached_input_tokens ?? 0,
       outputTokens: totals.output_tokens ?? 0,
+      tokenlessRuns: totals.tokenless_runs ?? 0,
       turns: totals.turns ?? 0,
     },
     outcomes: {

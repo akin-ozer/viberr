@@ -90,12 +90,16 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
               icon="memory"
               // `in` is the whole prompt of every call on both backends and
               // `cached` the subset of it served from the prompt cache.
-              // F35-1: the sums cover provider totals only, so while a run is
-              // running the card says its live estimate is not in them.
+              // F35-1: the sums cover provider totals only, so the card names
+              // how many runs are outside them, in the shape the Cost card
+              // uses for the runs that reported no cost. The count is the
+              // sums' own (`tokenlessRuns`), not "runs in flight": a stopped
+              // run and one that errored before the provider answered never
+              // get a total either, and the reader has to be told.
               sub={
                 `${fmtTokens(totals.inputTokens)} in (${fmtTokens(totals.cachedInputTokens)} cached)` +
-                (outcomes.running > 0
-                  ? " · Running runs are not counted until their provider total lands."
+                (totals.tokenlessRuns > 0
+                  ? ` · ${fmtCount(totals.tokenlessRuns)} of ${fmtCount(totals.runs)} runs report no provider token total`
                   : "")
               }
             />

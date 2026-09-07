@@ -370,9 +370,17 @@ describe("F35-1: tokens are marked estimated until the provider's total lands", 
     expect(projectRunsForTask(db, SLUG, TASK)[0]).toMatchObject({ tokens: 1900, tokensEstimated: false });
   });
 
-  it("a finished row that never got a provider total prints its figure plain, never pending", () => {
+  /**
+   * A run somebody stopped never receives a Claude `result` or a Codex
+   * `turn.completed`, so its row keeps the adapter's estimate for good. The
+   * figure is the best one that will ever exist for the run (never "pending"),
+   * and it is still an estimate, so it keeps the tilde. Canary: put `&&
+   * !finished` back on `tokensEstimated` and the panel prints the estimate as
+   * the provider's total on exactly the rows Insights leaves out of its sums.
+   */
+  it("an interrupted row that never got a provider total keeps its figure AND its estimate mark", () => {
     insert({ id: "run_cut", threadId: "primary", state: "interrupted", finishedAt: "2026-09-06T10:00:00.000Z", inputTokens: 300, outputTokens: 40 });
-    expect(projectRunsForTask(db, SLUG, TASK)[0]).toMatchObject({ tokens: 340, tokensEstimated: false });
+    expect(projectRunsForTask(db, SLUG, TASK)[0]).toMatchObject({ tokens: 340, tokensEstimated: true });
   });
 });
 

@@ -339,9 +339,10 @@ export interface RunView {
   tokens: number | null;
   /** F35-1: the figure is the Claude adapter's live ESTIMATE (the prompt sum
    *  is exact; the output is estimated from the streamed text at ~4 characters
-   *  per token) and the provider's total will replace it when the run ends.
-   *  False once a provider figure landed (`agent_runs.usage_final`) or the run
-   *  is over. The cell prints `~1.2M` with a tooltip while true. */
+   *  per token). False once a provider figure landed
+   *  (`agent_runs.usage_final = 1`), and only then: a run that was stopped, or
+   *  that errored before the provider replied, keeps its estimate after it
+   *  ends. The cell prints `~1.2M` with a tooltip while true. */
   tokensEstimated: boolean;
   /** The projected log lines for the group's bounded window (newest last),
    * with UI-53's synthetic `── resumed · run N of M ──` boundaries between

@@ -296,7 +296,14 @@ stated as the last refusal Viberr observed, retired by any completed run.
   `usage_final` is 0 the row is not a total: the Live run panel prints it as `~n`
   with a tooltip, a Codex run whose turn has not ended prints "pending", and Insights
   leaves the row out of its token sums. An errored result carrying an empty usage
-  reports nothing and leaves the estimate and the flag alone. Claude `result.usage`
+  reports nothing and leaves the estimate and the flag alone. Ending does not settle
+  the question: a run somebody stopped, and one that errored before the provider
+  replied, keep `usage_final = 0` for good, so the panel keeps the `~` on them and the
+  Insights card names them ("N of M runs report no provider token total") instead of
+  quietly understating its sums. Adding the column to a root that predates it heals the
+  rows it already holds: a `finished` row's token columns were the provider's own
+  figures before the estimate existed, so the boot healer stamps those 1; a stopped or
+  errored row held the old placeholder and stays 0. Claude `result.usage`
   covers the main loop only while `total_cost_usd` also covers side-model calls, so
   tokens and cost sit on slightly different bases; a resumed Codex thread reports the
   thread's cumulative total. Claude rows written before this normalization hold the
@@ -474,10 +481,11 @@ per-backend health), so a disabled Run names the person, never a deployment cred
 Telemetry tags are collapsed by `log-noise.ts`, and the console shows the redacted
 `run·inputs` line so a human can see exactly what the agent was given. The strip's
 **Tokens** cell (F35-1) reads `RunView.tokens` and `tokensEstimated`: `~1.2M` with the
-tooltip "Estimated from the streamed text; the provider's total replaces it when the run
-ends" while the row's `usage_final` is 0 and the run is live, "pending" while no usage
-envelope has landed at all (a Codex run before its turn ends), and the plain figure once
-the provider's total landed or the run is over.
+tooltip "Estimated from the streamed text. The provider's own total replaces it when one
+lands; a run that was stopped never gets one" whenever the row's `usage_final` is 0
+(while the run is live and after it ends), "pending" while no usage envelope has landed
+at all and the run is still live (a Codex run before its turn ends), and the plain figure
+once the provider's total landed.
 
 ## 4. Specialist runs
 

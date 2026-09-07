@@ -269,14 +269,20 @@ function projectRow(
     finished,
     turns: row.turns,
     // F35-1: null until a usage envelope has landed (a Codex run before its
-    // turn ends, a Claude run before its first API message), an ESTIMATE
-    // while the row is live and no provider figure has replaced it, plain
-    // once one has or the run is over.
+    // turn ends, a Claude run before its first API message) and the run is
+    // still live; a terminal row prints the figure it has rather than
+    // "pending" for ever.
     tokens:
       row.usage_final === 0 && row.input_tokens + row.output_tokens === 0 && !finished
         ? null
         : row.input_tokens + row.output_tokens,
-    tokensEstimated: row.usage_final === 0 && !finished,
+    // Whether the figure is an estimate is the column's own question, and the
+    // run ending does not answer it: a run somebody stopped, and one that
+    // errored before the provider replied, keep the adapter's estimate for
+    // good. Dropping the tilde there would print an estimate as the
+    // provider's total, which is the dishonesty F35-1 exists to remove, and
+    // would disagree with the Insights sums, which leave that same row out.
+    tokensEstimated: row.usage_final === 0,
     lines,
     raw,
     // P13-D-11: the count of lines that EXIST, not of the ones this payload

@@ -22,6 +22,7 @@ const FULL: InsightsSummary = {
     inputTokens: 120_000,
     cachedInputTokens: 40_000,
     outputTokens: 2_400_000,
+    tokenlessRuns: 2,
     turns: 130,
   },
   outcomes: {
@@ -92,7 +93,7 @@ describe("InsightsPage", () => {
   it("carries the Insights screen label", () => {
     const noRuns: InsightsSummary = {
       ...FULL,
-      totals: { runs: 0, costedRuns: 0, cost: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, turns: 0 },
+      totals: { runs: 0, costedRuns: 0, cost: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, tokenlessRuns: 0, turns: 0 },
     };
     for (const summary of [FULL, noRuns]) {
       const { container } = renderPage(summary);
@@ -118,20 +119,29 @@ describe("InsightsPage", () => {
     expect(getByText("3m 5s")).toBeTruthy(); // avg duration 185s
   });
 
-  // F35-1: the token sums cover provider totals only, and the card says so
-  // while a run is running (FULL has two). Canary: drop the `outcomes.running`
-  // clause on the card and the sentence is gone.
-  it("F35-1: the token card says running runs are not counted while one is running", () => {
-    const { container } = renderPage(FULL);
-    const note = "Running runs are not counted until their provider total lands.";
-    expect(container.textContent).toContain(note);
-    cleanup();
-    const quiet = renderPage(structuredClone(FULL));
-    expect(quiet.container.textContent).toContain(note);
-    cleanup();
+  /**
+   * F35-1: the token sums cover provider totals only, so the card names the
+   * runs they leave out, off the sums' OWN count and with nothing running.
+   * The old note was gated on a run being in flight and spoke only of running
+   * runs, so on the common screen (nothing running, some stopped or errored
+   * rows outside the sums) the page showed an understated headline and said
+   * nothing. Canary: gate the sub on `outcomes.running` again and the first
+   * assertion fails.
+   */
+  it("F35-1: the token card names the runs outside its sums, with nothing running", () => {
     const idle = structuredClone(FULL);
     idle.outcomes.running = 0;
-    expect(renderPage(idle).container.textContent).not.toContain(note);
+    idle.totals.tokenlessRuns = 3;
+    expect(renderPage(idle).container.textContent).toContain(
+      "3 of 42 runs report no provider token total",
+    );
+    cleanup();
+    // Every run reported a provider total: no qualifier at all.
+    const clean = structuredClone(FULL);
+    clean.totals.tokenlessRuns = 0;
+    expect(renderPage(clean).container.textContent).not.toContain(
+      "report no provider token total",
+    );
   });
 
   it("renders the breakdown bars and the daily chart", () => {
@@ -432,7 +442,7 @@ describe("InsightsPage", () => {
   it("shows an empty state when there are no runs", () => {
     const { getByText, container } = renderPage({
       ...FULL,
-      totals: { runs: 0, costedRuns: 0, cost: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, turns: 0 },
+      totals: { runs: 0, costedRuns: 0, cost: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, tokenlessRuns: 0, turns: 0 },
     });
     expect(getByText(/No agent runs yet/)).toBeTruthy();
     expect(container.querySelector(".stat-grid")).toBeNull();

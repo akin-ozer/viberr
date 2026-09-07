@@ -66,7 +66,7 @@ describe("LiveRunPanel", () => {
     };
     expect(cell(mkRun({ tokens: 1500, tokensEstimated: true }))).toEqual({
       text: "~1.5k",
-      title: "Estimated from the streamed text; the provider's total replaces it when the run ends",
+      title: "Estimated from the streamed text. The provider's own total replaces it when one lands; a run that was stopped never gets one",
     });
     expect(cell(mkRun({ tokens: null, tokensEstimated: true }))).toEqual({ text: "pending", title: null });
     expect(cell(mkRun({ tokens: 1500, tokensEstimated: false }))).toEqual({ text: "1.5k", title: null });

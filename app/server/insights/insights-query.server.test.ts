@@ -104,6 +104,35 @@ describe("getInsightsSummary", () => {
     expect(s.totals.cachedInputTokens).toBe(20);
   });
 
+  /**
+   * The rows the sums drop are not only the ones in flight: a run somebody
+   * stopped, and one that errored before the provider answered, never get a
+   * provider figure, so they are out of the token sums for good while they
+   * still count in Total runs and Turns. The totals therefore report HOW MANY
+   * runs they leave out, so the card can name them (the sums cannot be read
+   * honestly without that number). Canary: drop `tokenless_runs` from the
+   * SELECT and the count is 0.
+   */
+  it("F35-1: the totals count the runs their token sums leave out, whatever state those runs are in", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { state: "finished", outTok: 100, inTok: 50, cachedTok: 20, turns: 2 });
+    insertRun(db, {
+      state: "interrupted",
+      outTok: 5000,
+      inTok: 1000,
+      cachedTok: 400,
+      turns: 3,
+      usageFinal: 0,
+      startedAt: "2026-08-22T09:00:00.000Z",
+      finishedAt: "2026-08-22T09:12:00.000Z",
+    });
+    insertRun(db, { state: "running", outTok: 20, inTok: 10, usageFinal: 0 });
+    const s = getInsightsSummary(db, NOW);
+    expect(s.totals.runs).toBe(3);
+    expect(s.totals.outputTokens).toBe(100);
+    expect(s.totals.tokenlessRuns).toBe(2);
+  });
+
   it("a day whose runs all report no cost shows null, not $0, in the daily series (bug-sweep #15)", () => {
     const db = ctx.makeDb();
     const day = "2026-08-22";
