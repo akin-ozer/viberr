@@ -4,6 +4,7 @@ import type {
   CollisionServerOutcome,
   ResolvedPacketOption,
 } from "~/shared/packet-server-outcome";
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { isMissingRefAnswer } from "~/server/github/github-client.server";
@@ -136,7 +137,11 @@ import {
   allocateTaskKey,
   readProjectFile,
 } from "~/server/files/project-writer.server";
-import { projectFilePath } from "~/server/files/file-store-root.server";
+import {
+  projectFilePath,
+  taskAttachmentsDir,
+  taskDir,
+} from "~/server/files/file-store-root.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
@@ -3541,6 +3546,73 @@ export async function registerAgentCompletion(
 }
 
 /**
+ * Ruling 159 (pass 35, F35-10): the evidence stamp above claims only files that
+ * reached the task's real `attachments/` dir. An agent under an older prompt
+ * created `projects/<slug>/tasks/<key>/attachments` INSIDE its repository
+ * checkout instead, so its file never reached the task page and a delivery
+ * would have carried Viberr's store layout into the repository. Scan the run's
+ * workspace candidates for that folder and post one warning line naming it and
+ * what it holds, so a person learns why the attachment is missing. Best-effort:
+ * a warning that cannot be written never fails the completion.
+ */
+async function warnStrayAttachmentsFolder(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; workdir: string | null },
+  runId: string,
+): Promise<void> {
+  const { findStrayAttachmentsFolder } = await import(
+    "~/server/files/task-attachments.server"
+  );
+  const wsRoot = path.join(taskDir(input.projectSlug, input.taskKey, ctx.dataRoot), "workspace");
+  const repo = projectRepoFor(ctx, input.projectSlug);
+  const repoName = repo ? (repo.split("/").pop() ?? repo) : null;
+  const candidates = [
+    ...(input.workdir ? [input.workdir] : []),
+    ...(repoName ? [path.join(wsRoot, repoName)] : []),
+    path.join(wsRoot, "repo"),
+    wsRoot,
+  ];
+  const stray = findStrayAttachmentsFolder(candidates, input.projectSlug, input.taskKey);
+  if (!stray) return;
+  const realDir = taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot);
+  const held =
+    stray.files.length > 0
+      ? `It holds ${stray.files.map((f) => `\`${f}\``).join(", ")}; those files were NOT posted on this task.`
+      : "It is empty.";
+  const text =
+    `A folder named \`${stray.rel}\` exists inside the run's repository checkout (\`${stray.dir}\`). ` +
+    `That is Viberr's own store layout, not the task's attachments folder, which is \`${realDir}\`. ` +
+    `${held} A delivery that carries the folder is refused; remove it from the branch and move the files to the real folder.`;
+  logger.warn("stray store-layout attachments folder inside the workspace checkout", {
+    taskKey: input.taskKey,
+    runId,
+    dir: stray.dir,
+    files: stray.files,
+  });
+  try {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "policy",
+        actor: { kind: "system", systemId: "delivery" },
+        title: null,
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  } catch (err) {
+    logger.warn("failed to post the stray attachments folder warning", {
+      taskKey: input.taskKey,
+      runId,
+      err: err instanceof Error ? err : new Error(String(err)),
+    });
+  }
+}
+
+/**
  * The completion EFFECTS (reply → reconcile → verdict → react/stuck-packet/
  * waiting-flip) — shared by the live callback above and the boot-recovery
  * reconciler, so a run recovered after a restart behaves byte-for-byte like one
@@ -3863,6 +3935,7 @@ export async function applyAgentCompletionEffects(
       evidence,
       attachments: runAttachments,
     });
+    await warnStrayAttachmentsFolder(db, ctx, input, finished.id);
     // C5 (pass 23): a verdict-GRANTED reviewer finished but produced NO readable
     // verdict (no envelope, no classifiable prose). Validation is left unchanged
     // — fail-safe, correct — but the human saw a completed review run with no
@@ -5580,6 +5653,10 @@ export type DeliveryOutcome =
   /** Ruling 144: a workflow-file push refused for the `workflow` scope; the
    *  violation is open on the task and the remedy is a human's. */
   | { status: "scope_violation"; scope: string; message: string }
+  /** Ruling 159: the revision's tree carries Viberr's own store layout
+   *  (`projects/<slug>/tasks/...`); nothing was pushed and `files` names the
+   *  offending paths. The remedy is to remove them from the branch. */
+  | { status: "store_layout"; files: string[]; message: string }
   | { status: "nothing_to_review"; message: string }
   | { status: "failed"; message: string };
 
@@ -5717,6 +5794,28 @@ export async function performDelivery(
         message,
       );
       return { status: "scope_violation", scope: push.scope, message };
+    }
+
+    // Ruling 159 (F35-10): the same shape as the scope refusal above, with the
+    // offending paths named. Viberr must never publish its own store layout
+    // into a customer repository, whatever an agent did.
+    if (push.status === "push_refused_store_layout") {
+      const files = push.files.map((f) => `\`${f}\``).join(", ");
+      const message =
+        `${taskKey}'s branch \`${push.branch}\` carries ${files}: that is Viberr's own store layout ` +
+        `(\`projects/${projectSlug}/tasks/\`), created inside the repository checkout, not part of the repository. ` +
+        `Nothing was pushed and no review PR was opened. Files placed there were never posted on this task; ` +
+        `the task's real attachments folder is outside the checkout (the agent's prompt names its absolute path). ` +
+        `Remove the folder from the branch, then deliver again.`;
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Delivery push refused: store layout in the branch",
+        message,
+      );
+      return { status: "store_layout", files: push.files, message };
     }
 
     if (push.status === "push_failed" || push.status === "no_pat") {

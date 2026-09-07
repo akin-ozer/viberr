@@ -1931,6 +1931,50 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   });
 
   /**
+   * Ruling 159 (pass 35, F35-10): the persona input of a fresh run carries the
+   * ABSOLUTE attachments dir, so the "Posting files" section names a path the
+   * agent can reach from its checkout. The store-relative form it used to
+   * print was created inside the clone and pushed (KNC-9).
+   */
+  it("ruling 159: a fresh evidence-granted run's persona names the ABSOLUTE attachments dir", async () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "attach-evidence-references", mode: "direct" }],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const sys = specs.at(-1)!.systemPrompt ?? "";
+    const attachments = path.join(
+      store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "attachments",
+    );
+    expect(path.isAbsolute(attachments)).toBe(true);
+    expect(sys).toContain("Posting files on the task thread");
+    expect(sys).toContain(`\`${attachments}\``);
+    expect(sys).not.toContain(`\`projects/${store.slug}/tasks/VIB-1/attachments\``);
+    expect(sys).not.toContain("reachable from your working directory");
+  });
+
+  /**
    * F20-32: on Codex the ask-human capability IS the envelope `question` field —
    * there is no callable `ask_human` tool. A Codex developer, told its goal to
    * "ask the human via your ask-human capability", went hunting for a tool,
@@ -2342,10 +2386,14 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     };
     const withDrop = buildAnalyzePrompt({
       ...base,
-      attachmentsDropRel: "projects/p/tasks/VIB-2/attachments",
+      attachmentsDropDir: "/data/projects/p/tasks/VIB-2/attachments",
     });
     expect(withDrop).toContain("One deliberate exception");
-    expect(withDrop).toContain("projects/p/tasks/VIB-2/attachments");
+    expect(withDrop).toContain("`/data/projects/p/tasks/VIB-2/attachments`");
+    // Ruling 159: the exception names an absolute path outside the checkout
+    // and forbids creating it inside the working directory.
+    expect(withDrop).toContain("never create it inside the working directory");
+    expect(withDrop).toContain("never commit it");
     // The exception sits INSIDE the contract, after the confinement rule.
     expect(withDrop.indexOf("One deliberate exception")).toBeGreaterThan(
       withDrop.indexOf("Work ONLY inside the current working directory"),
@@ -2363,11 +2411,14 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     const withDrop = buildSpecialistPersona({
       profileId: "dev",
       skills: [],
-      attachmentsDrop: { attachmentsRel: "projects/p/tasks/T-1/attachments" },
+      attachmentsDrop: { attachmentsDir: "/data/projects/p/tasks/T-1/attachments" },
     });
     expect(withDrop).toContain("Posting files on the task thread");
-    expect(withDrop).toContain("projects/p/tasks/T-1/attachments");
+    expect(withDrop).toContain("`/data/projects/p/tasks/T-1/attachments`");
     expect(withDrop).toContain("posted on your reply");
+    // Ruling 159: an absolute path, outside the checkout, never committed.
+    expect(withDrop).toContain("outside the repository checkout");
+    expect(withDrop).not.toContain("reachable from your working directory");
     // Without the evidence grant the section must not appear — the completion
     // pipeline would still stamp the files, but the prompt must not invite a
     // mechanic the capability matrix withholds.
@@ -3431,8 +3482,13 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     );
     expect(confinement.attachmentsWritableDir).toBe(attachments);
     expect(existsSync(attachments)).toBe(true);
-    // The persona carries the same drop section the fresh run gets.
+    // The persona carries the same drop section the fresh run gets, and
+    // (ruling 159) it names the ABSOLUTE dir, never the store-relative form.
     expect(confinement.systemPrompt ?? "").toContain("Posting files on the task thread");
+    expect(confinement.systemPrompt ?? "").toContain(`\`${attachments}\``);
+    expect(confinement.systemPrompt ?? "").not.toContain(
+      `\`projects/${store.slug}/tasks/VIB-1/attachments\``,
+    );
     // …and the disclosure names the sandbox this confinement yields on Codex:
     // withheld write family + evidence ⇒ the carve-out, honestly labeled.
     expect(confinement.runInputs.sandbox).toEqual({

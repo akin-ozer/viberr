@@ -382,7 +382,9 @@ by the server (ruling 21); humans trigger it with the `deliver-review` intent
 (`run-agents` or the owner). `performDelivery` makes sure the repository's default
 branch exists first (ruling 128: an empty repository is bootstrapped, never
 misreported as unreachable), pushes the workspace branch (auto-committing a dirty
-tree, refusing a non-fast-forward as a `push_conflict`; reading origin's head first
+tree, refusing a non-fast-forward as a `push_conflict`; refusing a tree that carries
+Viberr's own store layout under `projects/<slug>/tasks/` as `store_layout` with the
+paths named, ruling 159; reading origin's head first
 and answering `up_to_date` when there is nothing to push, ruling 134), detects a
 verified empty branch as a no-change outcome, opens or adopts the PR (adoption only
 when the PR is open **and** its head is the delivered revision; anything else is a

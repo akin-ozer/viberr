@@ -2816,6 +2816,17 @@ export async function operatorDeliverForReview(
           `A scope violation is open on the task; do not retry until the credential card shows the scope. ` +
           `Do not ask an agent to push.`,
       };
+    case "store_layout":
+      // Ruling 159: Viberr never publishes its own store layout into the
+      // repository; the folder is a person's or the agent's to remove.
+      return {
+        outcome: "noop",
+        message:
+          `Delivery was refused: ${outcome.message} ` +
+          `Nothing was pushed and no PR was opened. Re-prompt the delivering agent to remove ` +
+          `${outcome.files.map((f) => `\`${f}\``).join(", ")} from the branch (the task's real ` +
+          `attachments folder is outside the checkout; its prompt names the absolute path), then deliver again.`,
+      };
     case "grant_withheld":
     case "push_failed":
     case "nothing_to_review":

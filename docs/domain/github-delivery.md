@@ -163,6 +163,16 @@ no credential, no repository and an unknown task are standing states and only lo
    it replaced. A non-fast-forward is a `push_conflict` (a branch collision, never a
    credential error); other failures surface git's redacted words in a fenced "What
    the push reported" block. An unreadable `ls-remote` never blocks the push. Ruling
+   159 (pass 35, F35-10): after the auto-commit and before anything else, the tree at
+   HEAD is read under the store's own prefix (`git ls-tree -r --name-only HEAD --
+   projects/<slug>/tasks/`); a branch that carries any such path is refused
+   (`push_refused_store_layout`, the paths named), because Viberr never publishes its
+   store layout into a customer repository, whatever an agent did. `performDelivery`
+   reports it on the task as "Delivery push refused: store layout in the branch"
+   (`store_layout`, the same shape as the scope refusal: no PR, a `github` timeline
+   line, a policy notification), and the operator's `deliver_for_review` reply says to
+   re-prompt the delivering agent to remove the folder. An unreadable tree is not a
+   measurement and the push answers for itself. Ruling
    144(b): before pushing, delivery lists the files under `.github/workflows/` the push
    changes as GitHub measures them (`git log --format= --name-only <origin head>..HEAD`,
    falling back to the base only on a first push, so a workflow file already on origin

@@ -436,7 +436,11 @@ Telemetry tags are collapsed by `log-noise.ts`, and the console shows the redact
   continues from the workspace root and says so.
 - Then: mount granted skills (Claude), resolve the browser MCP, build the persona and
   the analyze prompt (task text, comments and repo content are **data**, never
-  authority), resolve delivery permissions, compute the denylist (or the "everything
+  authority; ruling 159: every path the prompt hands the agent is ABSOLUTE, so the
+  "Posting files on the task thread" section, the browser section and the workspace
+  contract's one exception all name `taskAttachmentsDir` in full and say it is outside
+  the checkout and never committed, because the store-relative form was created inside
+  a clone and pushed), resolve delivery permissions, compute the denylist (or the "everything
   off" list when the profile vanished, ruling 26), write the redacted `run·inputs`
   line, audit `task.agent.run_started`, lift a packet-less hold (`liftHoldForRun`:
   `readiness: ready`, a "Hold lifted" note naming the dispatched agent,
@@ -531,7 +535,11 @@ lane: a stored `recommend` is coerced to `off` on read (ruling 81). Delivery per
    stage a "no verdict" note unless a human directive dispatched the run.
    `verdictAuthorized = engagement.verdictCapable ?? live verdict grant`.
 4. Question → packet using the live ask grant; evidence rows are written; browser
-   working artifacts not cited are pruned (ruling 105).
+   working artifacts not cited are pruned (ruling 105). Ruling 159: the run's workspace
+   candidates (its `workdir`, `workspace/<repoName>`, `workspace/repo`, `workspace`) are
+   scanned for a stray `projects/<slug>/tasks/<KEY>/attachments` folder an older prompt
+   caused; when one exists a `policy` line by `system:delivery` names the folder, the
+   files it holds ("NOT posted on this task") and the real attachments dir.
 5. Error runs: `blocked` timeline event (worded by `describeRunFailure` for a
    classified refusal), model-availability note, stuck-loop packet whose options come
    from the same module (`retry_other_backend` only when the owner has the other
@@ -662,7 +670,10 @@ above is the create-seed value and never the runtime's answer for a missing gran
 
 - Layout: `projects/<slug>/tasks/<KEY>/workspace/<repoName>` (deliverer and operator,
   shared), `…/workspace/support/<profileId>/<repoName>`, Codex operator scratch
-  `<taskDir>/.operator-scratch`, attachments `<taskDir>/attachments/`.
+  `<taskDir>/.operator-scratch`, attachments `<taskDir>/attachments/`. The
+  store-relative spelling here is a display form (ruling 159); an agent is only ever
+  handed the absolute path, and a delivery whose tree carries `projects/<slug>/tasks/`
+  is refused.
 - Mirror (ruling 87): bare `projects/<slug>/.repo-mirror/<owner>__<repo>.git`, `fetch
   --prune` with a heads-to-heads refspec before each clone (timeout 120 s, rebuilt after
   2 consecutive failures), then a local hardlinked clone with `origin` rewritten to the

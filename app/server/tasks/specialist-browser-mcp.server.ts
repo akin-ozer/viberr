@@ -227,12 +227,22 @@ export function resolveBrowserMcp(input: {
  * backend that can write files can use it, and the completion pipeline stamps
  * whatever lands there during the run onto the agent's reply — where images
  * render inline (timeline thumbnails).
+ *
+ * Ruling 159 (pass 35, F35-10): the path is the ABSOLUTE attachments dir. The
+ * store-relative form (`projects/<slug>/tasks/<key>/attachments`) was handed
+ * to an agent whose cwd is the repo checkout two levels below it, and the
+ * agent did the only thing the sentence allowed: it created the path inside
+ * the clone, committed it, and the delivery pushed Viberr's store layout into
+ * the customer's repository. A store-relative path is a display form, never
+ * an instruction.
  */
-export function attachmentsDropSection(attachmentsRel: string): string {
+export function attachmentsDropSection(attachmentsDir: string): string {
   return (
     "\n\n---\n# Posting files on the task thread\n\n" +
-    `To put a file in front of the humans on this task, copy it into \`${attachmentsRel}\` ` +
-    "(a real directory reachable from your working directory) during your run. " +
+    `To put a file in front of the humans on this task, copy it into \`${attachmentsDir}\` ` +
+    "during your run. That is an ABSOLUTE path to a real directory outside the " +
+    "repository checkout: do not create a folder of that name inside your working " +
+    "directory, and never commit it. " +
     "Every file that appears there is posted on your reply on the task page, " +
     "and images render inline. Cite the exact filename in your reply and " +
     "evidence references. Use it for things humans need to SEE — screenshots, " +
@@ -245,7 +255,7 @@ export function attachmentsDropSection(attachmentsRel: string): string {
 }
 
 export function browserPersonaSection(
-  attachmentsRel: string,
+  attachmentsDir: string,
   backend?: RealBackend,
 ): string {
   // F-P4 (pass 25): a screenshot's image comes back to the MODEL on Claude (the
@@ -275,7 +285,8 @@ export function browserPersonaSection(
     "withholds stays withheld; do not use the browser to work around a denied " +
     "tool or to submit forms that change external systems.\n" +
     "- **Screenshots: call `browser_take_screenshot` WITHOUT a `filename` " +
-    `argument.** Default-named screenshots save into \`${attachmentsRel}\`, ` +
+    `argument.** Default-named screenshots save into \`${attachmentsDir}\` ` +
+    "(an absolute path outside the repository checkout; never commit it), " +
     "where humans see them on the task page — cite the exact generated " +
     "filename (e.g. `page-….png`, shown in the tool result) in your evidence " +
     "references when a screenshot backs a claim. A screenshot you NAME " +

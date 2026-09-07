@@ -3730,6 +3730,42 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
     expect(listScopeViolations(store.db, store.slug, { status: "open" })).toEqual([]);
   });
 
+  /**
+   * Ruling 159 (pass 35, F35-10): a push refused for the store layout is a
+   * delivery refusal on the task with the offending paths named, the same
+   * shape as the scope refusal above: no PR, a timeline line, a typed outcome
+   * the operator and the Deliver button render. Canary: route
+   * `push_refused_store_layout` into the `push_failed` arm (the typed outcome
+   * and the paths vanish).
+   */
+  it("ruling 159: a push refused for the store layout names the paths, opens no PR", async () => {
+    pushMock.mockClear();
+    const store = prepared();
+    seedDeliverable(store);
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { body: { object: { sha: ROOT } } },
+      [`POST ${REPO_PATH}/pulls`]: { status: 201, body: { number: 1, html_url: "https://x/pull/1", title: "t", state: "open" } },
+    });
+    const stray = `projects/${store.slug}/tasks/VIB-1/attachments/knc-9-licence-verification.txt`;
+    pushMock.mockResolvedValueOnce({
+      status: "push_refused_store_layout",
+      branch: "vib-1",
+      files: [stray],
+      reason: `the branch carries \`${stray}\`, which is Viberr's own store layout`,
+    });
+    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    expect(outcome).toMatchObject({ status: "store_layout", files: [stray] });
+    const message = outcome.status === "store_layout" ? outcome.message : "";
+    expect(message).toContain(`\`${stray}\``);
+    expect(message).toContain("Nothing was pushed and no review PR was opened");
+    expect(message).toContain("Remove the folder from the branch");
+    expect(github.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
+    const timeline = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline;
+    expect(timeline.some((e) => e.text.includes(`\`${stray}\``) && e.text.includes("store layout"))).toBe(true);
+    // No scope violation: the credential is not the problem.
+    expect(listScopeViolations(store.db, store.slug, { status: "open" })).toEqual([]);
+  });
+
   const REPO_PATH = "/repos/akin-ozer/viberr";
   const ROOT = "d2e0fb0".padEnd(40, "0");
 

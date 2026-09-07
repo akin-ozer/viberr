@@ -2966,6 +2966,34 @@ CALLER's own live sign-in session plus the public half of their `userBackendHeal
 `verification` verdict, no ids), so the Profile poller stops when the backend flips to
 available. It reads nobody else's session.)*
 
+159. **Every path Viberr hands an agent is absolute, and a delivery that would publish
+    the store's layout is refused (2026-09-06, pass 35 F35-10).** A store-relative path
+    (`projects/<slug>/tasks/<key>/attachments`) is a display form for humans, never an
+    instruction: the run's cwd is the repository checkout two levels below that folder,
+    and an agent told the folder was "reachable from your working directory" created it
+    inside the clone, committed it, and the delivery pushed Viberr's store layout into
+    the customer's repository (KNC-9, GitHub tree bf52bba). **(a)** The "Posting files
+    on the task thread" section, the browser section and the workspace contract's one
+    exception print the ABSOLUTE `taskAttachmentsDir` (inside the container `/data/...`
+    is real; on bare metal it is the data root's own absolute path) and say it is
+    outside the repository checkout and never committed; `SpecialistPersonaInput.browser`
+    and `.attachmentsDrop` carry `attachmentsDir`, and `AnalyzePromptInput` carries
+    `attachmentsDropDir`. Amends 96's `attachmentsDropRel`. **(b)** `pushWorkspaceBranch`
+    reads HEAD's tree under `projects/<slug>/tasks/` after the delivery auto-commit and
+    refuses a branch that carries any such path (`push_refused_store_layout`, the paths
+    named); `performDelivery` reports it on the task as a delivery refusal in the scope
+    refusal's shape (`store_layout`, no PR opened) and the operator's reply names the
+    remedy (re-prompt the agent to remove the folder). A branch that published the
+    layout under an older prompt is refused too, until a person removes it. **(c)** The
+    completion pipeline scans the run's workspace for a stray
+    `projects/<slug>/tasks/<key>/attachments` folder and posts a `policy` line naming
+    it, the files it holds and the real folder, so a person learns why an attachment is
+    missing. (`attachmentsDropSection` / `browserPersonaSection` in
+    `app/server/tasks/specialist-browser-mcp.server.ts`; `storeLayoutFilesInTree` in
+    `app/server/github/push-workspace.server.ts`; `warnStrayAttachmentsFolder` and the
+    `store_layout` arm of `performDelivery` in `app/server/tasks/task-actions.server.ts`;
+    `findStrayAttachmentsFolder` in `app/server/files/task-attachments.server.ts`.)
+
 162. **The acceptance gate's verdict is computed once and read everywhere a person or the
     operator is invited to accept (owner, 2026-09-06, Q35-17 and Q35-18; F35-12, G35-5
     addendum (d) and (e)).** No surface offers an acceptance the gate will refuse. The

@@ -207,6 +207,56 @@ export function pruneBrowserWorkingArtifacts(
   return { kept, pruned };
 }
 
+/** What a stray store-layout folder in a workspace holds (ruling 159). */
+export interface StrayAttachmentsFolder {
+  /** The absolute path of the folder inside the workspace checkout. */
+  dir: string;
+  /** The store-relative form the older prompt named, for the sentence. */
+  rel: string;
+  /** The plain files the agent put there, newest first by name order. */
+  files: string[];
+}
+
+/**
+ * Ruling 159 (pass 35, F35-10): an older prompt named the attachments folder
+ * by its STORE-relative path (`projects/<slug>/tasks/<key>/attachments`) and
+ * called it reachable from the working directory; an agent whose cwd is the
+ * repository checkout created exactly that tree inside the clone, and the
+ * file never reached the task page. The completion pipeline scans the run's
+ * workspace candidates for that folder so a person learns why the attachment
+ * is missing. The first candidate that holds the folder wins; a missing or
+ * unreadable candidate is simply not it.
+ */
+export function findStrayAttachmentsFolder(
+  candidates: readonly string[],
+  slug: string,
+  key: string,
+): StrayAttachmentsFolder | null {
+  const rel = `projects/${slug}/tasks/${key}/attachments`;
+  for (const candidate of candidates) {
+    const dir = path.join(candidate, "projects", slug, "tasks", key, "attachments");
+    let names: string[];
+    try {
+      if (!statSync(dir).isDirectory()) continue;
+      names = readdirSync(dir);
+    } catch {
+      continue; // not there, or unreadable: not this candidate
+    }
+    const files = names
+      .filter((name) => !name.startsWith("."))
+      .filter((name) => {
+        try {
+          return statSync(path.join(dir, name)).isFile();
+        } catch {
+          return false;
+        }
+      })
+      .sort((a, b) => a.localeCompare(b));
+    return { dir, rel, files };
+  }
+  return null;
+}
+
 /** Absolute path of one attachment, traversal-contained. Throws on an unsafe
  *  name (the route maps that to 404). */
 export function resolveTaskAttachment(

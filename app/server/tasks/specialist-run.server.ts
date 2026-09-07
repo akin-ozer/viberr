@@ -53,7 +53,6 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import {
-  storeRelativePath,
   taskAttachmentsDir,
   taskDir,
 } from "~/server/files/file-store-root.server";
@@ -1766,15 +1765,16 @@ async function dispatchAgentRun(
     ],
     unresolvedMcps: resolvedMcps.unresolved,
     unhealthyMcps: resolvedMcps.unhealthy,
+    // Ruling 159: the agent is handed the ABSOLUTE directory (inside the
+    // container `/data/...` is real; on bare metal it is the data root's own
+    // absolute path). The store-relative form is a display form for humans.
     browser: browser.server
-      ? { attachmentsRel: storeRelativePath(attachmentsDir, ctx.dataRoot) }
+      ? { attachmentsDir }
       : browser.refused
         ? { refusedReason: browser.refused.reason }
         : null,
     attachmentsDrop:
-      collab.evidence && realBackend
-        ? { attachmentsRel: storeRelativePath(attachmentsDir, ctx.dataRoot) }
-        : null,
+      collab.evidence && realBackend ? { attachmentsDir } : null,
     // F4: the persona section rides the same predicate the tool mount does.
     githubRead: githubReadForRun({
       githubRead: collab.githubRead,
@@ -1833,10 +1833,7 @@ async function dispatchAgentRun(
   if (clone?.refreshed) promptInput.workspaceRefresh = clone.refreshed;
   if (anchor) promptInput.anchor = anchor;
   if (collab.evidence && realBackend) {
-    promptInput.attachmentsDropRel = storeRelativePath(
-      attachmentsDir,
-      ctx.dataRoot,
-    );
+    promptInput.attachmentsDropDir = attachmentsDir;
   }
   if (cloneFailure) {
     const promptFailure: PromptCloneFailure = {
@@ -2279,15 +2276,16 @@ export interface SpecialistPersonaInput {
   unresolvedMcps?: string[];
   /** Mounted, but the last health check failed (P14-LV-09b). */
   unhealthyMcps?: string[];
-  /** R19-19: browser state — mounted (with the store-relative attachments path
-   *  for the guardrail text) or granted-but-refused (with the reason). The
-   *  section renders only when the server actually mounted, so prompt and tool
-   *  surface tell the same story (XS-4). */
-  browser?: { attachmentsRel: string } | { refusedReason: string } | null;
+  /** R19-19: browser state — mounted (with the ABSOLUTE attachments dir for
+   *  the guardrail text, ruling 159) or granted-but-refused (with the reason).
+   *  The section renders only when the server actually mounted, so prompt and
+   *  tool surface tell the same story (XS-4). */
+  browser?: { attachmentsDir: string } | { refusedReason: string } | null;
   /** Owner ask 2026-08-20: the "posting files on the task thread" section —
    *  set when the profile holds `attach-evidence-references` (any backend;
-   *  the drop is a plain directory, not a tool). */
-  attachmentsDrop?: { attachmentsRel: string } | null;
+   *  the drop is a plain directory, not a tool). Ruling 159: the dir is
+   *  absolute; a store-relative path is never handed to an agent. */
+  attachmentsDrop?: { attachmentsDir: string } | null;
   /** F4: the `github_read` guardrail section — set (with the "owner/name" repo
    *  for the copy) only when the tool actually mounted: Claude, real backend,
    *  `read-github-api` granted, and a repo configured. */
@@ -2508,13 +2506,13 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   // it is the general mechanic (copy a file, it lands on your reply) that the
   // browser's default-named-screenshot behavior is a special case of.
   if (input.attachmentsDrop) {
-    parts.push(attachmentsDropSection(input.attachmentsDrop.attachmentsRel));
+    parts.push(attachmentsDropSection(input.attachmentsDrop.attachmentsDir));
   }
   if (input.githubRead) {
     parts.push(githubReadPersonaSection(input.githubRead.repo));
   }
-  if (input.browser && "attachmentsRel" in input.browser) {
-    parts.push(browserPersonaSection(input.browser.attachmentsRel, input.backend));
+  if (input.browser && "attachmentsDir" in input.browser) {
+    parts.push(browserPersonaSection(input.browser.attachmentsDir, input.backend));
   } else if (input.browser && "refusedReason" in input.browser) {
     parts.push(
       "\n\n---\n# Browser not mounted\n\n" +
@@ -2592,13 +2590,13 @@ export interface AnalyzePromptInput {
    *  so a write-granted supporting run may edit and commit in its own checkout
    *  and the prompt says so (C02-R4). */
   delivers: boolean;
-  /** Owner ask 2026-08-20: the task's attachments folder (store-relative),
+  /** Owner ask 2026-08-20: the task's attachments folder (ABSOLUTE, ruling 159),
    *  when the profile holds `attach-evidence-references`. Rendered as the ONE
    *  named exception inside the workspace contract — without it the contract's
    *  "never touch anything outside the working directory" outranks the
    *  persona's posting-files section, and a live agent (VIB-2) correctly
    *  refused the copy twice. */
-  attachmentsDropRel?: string;
+  attachmentsDropDir?: string;
   /** An operator directive that becomes the run's turn focus (when present). */
   directive?: string;
   /** The human who wrote `directive`, when it is a person's comment rather than
@@ -2641,12 +2639,13 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       `- Work ONLY inside the current working directory — it is the dedicated ` +
       `workspace for this task. Never \`cd\` to a parent directory or touch any ` +
       `repository outside it.\n` +
-      (input.attachmentsDropRel
+      (input.attachmentsDropDir
         ? `- One deliberate exception: you may COPY files INTO the task's ` +
-          `attachments folder, \`${input.attachmentsDropRel}\` — that is how a ` +
-          `file is posted on the task thread (see "Posting files on the task ` +
-          `thread"). Everything else outside the working directory stays ` +
-          `off-limits.\n`
+          `attachments folder, \`${input.attachmentsDropDir}\` (an absolute path ` +
+          `outside this checkout; never create it inside the working directory ` +
+          `and never commit it) — that is how a file is posted on the task ` +
+          `thread (see "Posting files on the task thread"). Everything else ` +
+          `outside the working directory stays off-limits.\n`
         : ``) +
       (input.cloned
         ? `- The repository \`${input.repo}\` is already checked out in the current directory.` +
@@ -3062,12 +3061,10 @@ export async function resolveResumeConfinement(
       ],
       unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted).map((u) => u.name),
       unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
+      // Ruling 159: the absolute dir, exactly as the fresh path hands it.
       browser: resumeBrowser.server
         ? {
-            attachmentsRel: storeRelativePath(
-              taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot),
-              ctx.dataRoot,
-            ),
+            attachmentsDir: taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot),
           }
         : resumeBrowser.refused
           ? { refusedReason: resumeBrowser.refused.reason }
@@ -3076,10 +3073,7 @@ export async function resolveResumeConfinement(
       // evidence-granted run used to lose "how to post a file" mid-thread.
       attachmentsDrop: collab.evidence
         ? {
-            attachmentsRel: storeRelativePath(
-              taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot),
-              ctx.dataRoot,
-            ),
+            attachmentsDir: taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot),
           }
         : null,
       // Same predicate as the fresh path. A resume is always a REAL backend
