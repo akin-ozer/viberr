@@ -139,9 +139,19 @@ provider's own sentence names a spent limit (`session | weekly | monthly | usage
 never transient rate-limit wording), with only the PROVIDER half of the line as its
 evidence and a reset instant that is the SDK's exact `resetsAt`, a Claude
 `usage limit reached|<epoch>` (exact), a `resets 11:50am (UTC)` clock resolved to the
-next UTC occurrence (`clock`, retired with the prose grace) or Codex "try again at …"
-prose resolved in UTC (`prose`). Grace 24 h for prose and clock; an undated exhaustion
-expires after 6 h. Ruling 130(d): every record (reading, exhaustion, credential refusal)
+next UTC occurrence (`clock`, retired with the prose grace), Codex "try again at Sep
+18th, 2026 5:20 PM" prose resolved in UTC (`prose`), or the time-only "try again at
+6:18 PM" a five-hour Codex window refuses with (G35-4, pass 35): the Codex CLI prints
+the wall clock of the process that ran it, so the hour is resolved with the process's
+own local setters (never `Date.UTC`) to the next occurrence at or after the
+observation, precision `clock`. Grace 24 h for prose and clock; an undated exhaustion
+expires after 6 h. **The dispatch hold** (ruling 152(c)): `backendDispatchHold(db,
+backend, { credentialUserId })` is the one read a dispatch makes before it spends
+anything; it stands while the stored exhaustion has not passed its reset instant (no
+grace: the hold trusts the provider's instant) or, when none was named, for
+`UNDATED_HOLD_MS` (30 min) after the refusal, and only for the account the record
+names (ruling 146; a record naming nobody holds every dispatch on the backend). See
+§4.1. Ruling 130(d): every record (reading, exhaustion, credential refusal)
 names the account it billed (`credentialUserId`, `credentialLabel`, the run's
 principal under ruling 127); one latest record per backend, and a completed run by
 ANY person retires an exhaustion or refusal. The principal reaches Insights (org
@@ -377,6 +387,19 @@ Agent accounts; the same-backend option asserts only that nothing was changed. T
 footer reads "could not serve this run: the provider was overloaded or failed on its
 side", the pill `provider overloaded`, the controller's note "Say it again in a few
 minutes", and the projection counts it as the backend being unavailable (the retry offer).
+U35-11 (pass 35): the record carries `origin`. `provider` is the case above. `local` is a
+connection that failed BEFORE the provider answered, inside the deployment's own
+environment: the Claude CLI reports a TLS verification error, DNS or a refused socket as
+"API Error: Unable to connect to API (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)" under the
+same `server_error` banner with no HTTP status, and both adapters read the shared
+`LOCAL_NETWORK_FAILURE_RE` (`app/shared/run-failure.ts`) for it; a run the provider did
+answer with a 5xx is never local. Same class, same retry, its own attribution: the
+adapter's line reads "could not be reached from this deployment: the connection failed
+before the provider answered (<code>)", `describeRunFailure` names "this deployment's
+network path (TLS, DNS or a proxy)", the same-backend option says "this deployment could
+not reach the provider", the footer "could not be reached from this deployment", the pill
+`provider unreachable`, the controller's note "could not be reached from this
+deployment"; `RunView.failureOrigin` carries it to the client.
 The completion pipeline writes the `blocked` event, notes model availability, opens the
 stuck-loop packet and clears waiting to human. For `quota` and `auth` the event, the
 packet body and the controller's note are worded by ONE module,
@@ -463,6 +486,25 @@ the provider's total landed or the run is over.
   project mirror; each supporting run gets `workspace/support/<profileId>/<repo>`, a
   fresh `git clone --local` of the delivering checkout. On clone failure the run
   continues from the workspace root and says so.
+- Ruling 152(c) (pass 35, G35-4): after the eligibility gates and the principal
+  resolution, before anything is spent, `backendDispatchHold` is read for the run's
+  backend and the account it bills. A hold makes NO run row, reservation, clone or
+  process: `holdDispatch` schedules the retry (`run-agent`, the same profile and
+  directive, due one minute after the reopen instant, or `UNDATED_HOLD_MS` after the
+  refusal when the provider named none; not scheduled when the profile is no longer
+  deployed or the task refuses a schedule), writes a `note` titled "Dispatch held" by
+  `system:policy-engine` ("**Held:** Codex is out of quota until Sep 6, 2026 · 18:18
+  UTC (the provider said: "…"). Developer's run starts when the window reopens
+  (scheduled for …); nothing was dispatched and no decision is needed."), audits
+  `task.agent.run_held { backend, until, scheduleId, profileId }`, re-projects, and
+  throws `DispatchHeldError` (`ERROR_CODES.DISPATCH_HELD`, 409, `hold` record, user
+  message "Held: Codex is out of quota until …; Developer's run is scheduled for
+  then."). Every door passes through the same read against its own target backend, so
+  a Claude retry proceeds while Codex is held: the Run control toasts the sentence and
+  writes no hand-off comment (`isDispatchHeld`), an @mention returns it as
+  `runNotStarted`, the operator's `run_agent` and the controller's `run_agent_on_task`
+  surface it as the tool's refusal text, and a scheduled occurrence retires
+  `held-quota` (§4.5). A hold is not a decision packet and costs no operator turn.
 - Then: mount granted skills (Claude), resolve the browser MCP, build the persona and
   the analyze prompt (task text, comments and repo content are **data**, never
   authority), resolve delivery permissions, compute the denylist (or the "everything
@@ -590,8 +632,13 @@ scheduled` and `scheduleId`, and audits `task.schedule.fired`. The outcomes a
 decision packet is open, the same refusal a person's Run operator gets), and
 `queued-behind-drive` (the run waits behind a live drive; a refusal at the front of the
 lease queue then writes the final `skipped-*` row with `atDrain: true` and a "Scheduled
-action skipped" note). None of the skips spends a retry. A schedule pins no backend or
-autonomy (ruling 94).
+action skipped" note). A `run-agent` occurrence fired into a backend the instance knows
+is out of quota (ruling 152(c)) retires `fired` with outcome `held-quota` and
+`rescheduledAs: <the hold's own schedule id>`: the dispatcher already wrote the
+"Dispatch held" note and put the retry on the schedule, so the occurrence spends no
+retry and is never deferred as a 409 would be (that would mint a fresh hold and a fresh
+schedule row every tick). None of the skips spends a retry. A schedule pins no backend
+or autonomy (ruling 94).
 
 ## 5. The capability catalog
 

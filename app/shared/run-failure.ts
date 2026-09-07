@@ -80,6 +80,40 @@ export interface RunFailureFacts {
   apiErrorStatus: number | null;
   /** The result envelope's `terminal_reason` (`api_error`, …). */
   terminalReason: string | null;
+  /**
+   * U35-11 (pass 35): WHERE an `overloaded` failure happened. `"provider"`
+   * means the provider answered with its own failure (a 529, a 5xx, its
+   * `overloaded` / `server_error` banner). `"local"` means the request never
+   * got an answer: the connection failed inside Viberr's own environment
+   * (a TLS verification error, DNS, a refused or reset socket, a proxy) and
+   * the CLI reported it under the same `server_error` banner. Live, nine runs
+   * that died on `UNKNOWN_CERTIFICATE_VERIFICATION_ERROR` were narrated as
+   * "the provider failed on its own side" while the container's own fetch was
+   * the thing failing. The retry advice is the same either way; the
+   * attribution is not. Null for every other kind (nothing to attribute).
+   */
+  origin: "provider" | "local" | null;
+}
+
+/**
+ * U35-11: the signatures of a connection that failed BEFORE the provider
+ * answered, in Viberr's own environment. Both adapters read these off the
+ * raw failure text; a run the provider answered with an HTTP status (5xx) is
+ * never local, whatever its prose says. Client-safe (a regex), shared so the
+ * two classifiers cannot drift.
+ */
+export const LOCAL_NETWORK_FAILURE_RE =
+  /unable to connect|could not connect|connection (?:refused|reset|closed|timed out|error)|econnrefused|econnreset|enotfound|eai_again|etimedout|ehostunreach|enetunreach|epipe|certificate|self.signed|\btls\b|\bssl\b|handshake|fetch failed|network error|socket hang up|getaddrinfo|dns/i;
+
+/** The machine code such a failure carries, when it names one
+ *  (`UNKNOWN_CERTIFICATE_VERIFICATION_ERROR`, `ECONNRESET`, `ERR_TLS_...`),
+ *  for the sentence a human reads. Null when the text names none. */
+export function localNetworkFailureCode(text: string): string | null {
+  const match =
+    /\b(UNKNOWN_[A-Z_]+|[A-Z_]*CERT(?:IFICATE)?[A-Z_]*|SELF_SIGNED[A-Z_]*|DEPTH_ZERO[A-Z_]*|UNABLE_TO_[A-Z_]+|ERR_TLS[A-Z_]*|ERR_SSL[A-Z_]*|E(?:CONN(?:REFUSED|RESET|ABORTED)|NOTFOUND|AI_AGAIN|TIMEDOUT|PIPE|HOSTUNREACH|NETUNREACH))\b/.exec(
+      text,
+    );
+  return match ? match[1]! : null;
 }
 
 /** Every fact unknown — what a thrown stream error with no envelope evidence
@@ -93,5 +127,6 @@ export function emptyRunFailureFacts(kind: RunFailureKind): RunFailureFacts {
     apiError: null,
     apiErrorStatus: null,
     terminalReason: null,
+    origin: null,
   };
 }

@@ -306,6 +306,10 @@ export interface RunView {
   /** Ruling 130(a): the classified failure kind of an errored run, for EVERY
    *  run kind; the Agent-logs footer selects its sentence from this. */
   failureKind?: RunFailureKind;
+  /** U35-11: for an `overloaded` failure, where it happened: the provider's
+   *  side, or this deployment's own network path (`local`). The footer and
+   *  the pill attribute the failure from this, never from the prose. */
+  failureOrigin?: "provider" | "local";
   /** The OTHER backend to retry on when this one is unavailable (D4). */
   altBackend?: "claude" | "codex";
   phase: string | null;

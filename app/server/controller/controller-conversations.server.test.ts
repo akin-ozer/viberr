@@ -908,7 +908,7 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
   it("a quota-refused turn names the reset and the account switch, never 'Say it again to retry'", async () => {
     const texts = await settleErrored("run_quota", {
       t: "1", ev: "err", tag: "run·error·quota", text: "The Claude account is over its usage quota.",
-      failure: { kind: "quota", resetsAt: "2026-09-06T19:50:00.000Z", window: "five_hour", windowRejected: true, apiError: null, apiErrorStatus: 429, terminalReason: "api_error" },
+      failure: { kind: "quota", resetsAt: "2026-09-06T19:50:00.000Z", window: "five_hour", windowRejected: true, apiError: null, apiErrorStatus: 429, terminalReason: "api_error", origin: null },
     });
     const note = texts.find((t) => t.startsWith("I could not finish this turn"))!;
     expect(note).toContain("five hour window is spent");
@@ -920,7 +920,7 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
   it("an auth-refused turn names the org restriction; an `unknown` failure keeps the retry sentence", async () => {
     const auth = await settleErrored("run_auth", {
       t: "1", ev: "err", tag: "run·error·auth", text: "refused",
-      failure: { kind: "auth", resetsAt: null, window: null, windowRejected: false, apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error" },
+      failure: { kind: "auth", resetsAt: null, window: null, windowRejected: false, apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error", origin: null },
     });
     const authNote = auth.find((t) => t.startsWith("I could not finish this turn"))!;
     expect(authNote).toContain("oauth_org_not_allowed");
@@ -939,7 +939,7 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
     // that nothing the person can change was involved.
     const texts = await settleErrored("run_overloaded", {
       t: "1", ev: "err", tag: "run·error·overloaded", text: "Claude could not serve this run: the provider was overloaded (HTTP 529).",
-      failure: { kind: "overloaded", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: 529, terminalReason: "api_error" },
+      failure: { kind: "overloaded", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: 529, terminalReason: "api_error", origin: "provider" },
     });
     const note = texts.find((t) => t.startsWith("I could not finish this turn"))!;
     expect(note).toBe(

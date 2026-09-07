@@ -56,7 +56,11 @@ export function runStatePill(run: RunView): RunStateBadge {
     return { kind: "blocked", label: "backend unavailable" };
   }
   if (run.state === "error" && run.failureKind === "overloaded") {
-    return { kind: "blocked", label: "provider overloaded" };
+    // U35-11: a connection that failed in this deployment's own environment
+    // is named as such; the provider is blamed only when it answered.
+    return run.failureOrigin === "local"
+      ? { kind: "blocked", label: "provider unreachable" }
+      : { kind: "blocked", label: "provider overloaded" };
   }
   return RUN_STATE[run.state] ?? RUN_STATE.idle;
 }

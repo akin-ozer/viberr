@@ -541,7 +541,7 @@ export async function fireDueSchedules(
   if (toRun.length > 0) {
     void (async () => {
       const { runOperator } = await import("~/server/runtimes/operator-run.server");
-      const { startAgentRun } = await import("./specialist-run.server");
+      const { isDispatchHeld, startAgentRun } = await import("./specialist-run.server");
       for (const t of toRun) {
         let ok = false;
         /** F19-20: the run was refused at FIRE time (the task reached its
@@ -573,6 +573,14 @@ export async function fireDueSchedules(
          *  no retry spent; the next tick's claim pre-check holds it until the
          *  live run ends. */
         let deferredConflict = false;
+        /** Ruling 152(c) (pass 35, G35-4): the dispatch was HELD because the
+         *  backend is known to be out of quota for the account it bills. The
+         *  dispatcher already put the retry on the schedule and said so on
+         *  the timeline, so this occurrence retires `fired` with outcome
+         *  `held-quota` and spends no retry; a 409 would have deferred it to
+         *  the next tick and minted a fresh hold and a fresh schedule row
+         *  every minute. */
+        let heldQuota: { rescheduledAs: string | null } | null = null;
         // Re-stamp the lease as THIS occurrence's drive begins. `claimedAt` is
         // written when the tick claims the batch, but this drain is sequential
         // and one drive can legitimately sit inside `runOperator` for
@@ -658,7 +666,10 @@ export async function fireDueSchedules(
             ok = true;
           }
         } catch (error) {
-          if (
+          if (t.action === "run-agent" && isDispatchHeld(error)) {
+            heldQuota = { rescheduledAs: error.hold.scheduleId };
+            ok = true; // retired below; the retry is the schedule the hold made
+          } else if (
             t.action === "run-agent" &&
             error instanceof AppError &&
             error.status === 400
@@ -763,7 +774,21 @@ export async function fireDueSchedules(
             },
           );
           reproject(db, ctx, t.projectSlug, t.taskKey);
-          if (refusedTerminal || refusedHeld || refusedPacket) {
+          if (heldQuota) {
+            recordAudit(db, {
+              action: "task.schedule.fired",
+              actor: SYSTEM_ACTOR,
+              subjectKind: "task",
+              subjectId: t.taskKey,
+              projectSlug: t.projectSlug,
+              taskKey: t.taskKey,
+              details: {
+                scheduleId: t.scheduleId,
+                outcome: "held-quota",
+                rescheduledAs: heldQuota.rescheduledAs,
+              },
+            });
+          } else if (refusedTerminal || refusedHeld || refusedPacket) {
             recordAudit(db, {
               action: "task.schedule.fired",
               actor: SYSTEM_ACTOR,

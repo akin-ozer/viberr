@@ -94,6 +94,12 @@ describe("runStatePill (ruling 11 lifecycle mapping)", () => {
       label: "provider overloaded",
     });
   });
+  it("U35-11: an overload whose origin is this deployment's network reads 'provider unreachable', never 'provider overloaded'", () => {
+    expect(runStatePill({ ...base, state: "error", lifecycle: "error", failureKind: "overloaded", failureOrigin: "local" })).toEqual({
+      kind: "blocked",
+      label: "provider unreachable",
+    });
+  });
   it("interrupted → neutral 'interrupted · by <actor>'", () => {
     const p = runStatePill({ ...base, state: "idle", lifecycle: "interrupted", interruptedBy: { userId: "u1", label: "Arda Kaya" } });
     expect(p.kind).toBe("neutral");

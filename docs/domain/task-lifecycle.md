@@ -339,7 +339,17 @@ anything ambiguous fails closed with the reason recorded.
   76 refuses for a person); one that was queued behind a live drive records
   `queued-behind-drive` at fire time and, if the drive leaves a packet open, its final
   `skipped-packet` row (`atDrain: true`) and a "Scheduled action skipped" note when it
-  reaches the front of the lease queue.
+  reaches the front of the lease queue. A dispatch of any kind (the Run control, an
+  @mention, the operator's `run_agent`, a schedule, `retry_other_backend`) into a
+  backend the instance already knows is out of quota for the account the run bills is
+  HELD (ruling 152(c), pass 35): no run, a "Dispatch held" note by the policy engine
+  naming the reopen instant and the provider's own words, a `task.agent.run_held` audit
+  row, and a `run-agent` schedule for one minute after the window reopens (thirty
+  minutes after the refusal when the provider named no instant) carrying the same
+  profile and prompt. The door reads "Held: Codex is out of quota until Sep 6, 2026 ·
+  18:18 UTC; Developer's run is scheduled for then." A hold is not a decision packet and
+  costs no operator turn; a scheduled occurrence that lands on a hold retires
+  `held-quota`.
 
 ## 10. Delivery
 

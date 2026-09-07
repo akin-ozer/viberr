@@ -74,7 +74,9 @@ import {
   startAgentRun,
   buildSpecialistPersona,
   githubReadForRun,
+  isDispatchHeld,
   resolveResumeConfinement,
+  type DispatchHeldError,
 } from "./specialist-run.server";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -4403,5 +4405,153 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
     const rows = listRunsForTaskRows(store.db, store.slug, "VIB-1");
     expect(rows).toHaveLength(1);
     expect(rows[0]!.id).toBe(observed[0]!.runId);
+  });
+});
+
+/**
+ * G35-4 / ruling 152(c) (pass 35): no dispatch into a backend the instance
+ * already knows is out of quota for the account the run bills.
+ *
+ * Live, nine Codex deliveries were dispatched one after another into a window
+ * the health body was already showing as spent; each paid a clone, a refused
+ * run, an operator turn and a "Work stalled" packet. Canary: remove the
+ * `backendDispatchHold` call in `dispatchAgentRun` and a run starts.
+ */
+describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 152(c))", () => {
+  const CODEX_TIME_ONLY =
+    "You've hit your usage limit. To continue using Codex, start a free trial of Plus today, or try again at 6:18 PM.";
+
+  async function exhaustCodex(resetsAt: number | null): Promise<void> {
+    const { recordBackendQuotaExhaustion } = await import("~/server/runtimes/backend-quota.server");
+    recordBackendQuotaExhaustion(store.db, "codex", {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt,
+      resetsAtPrecision: resetsAt === null ? null : "clock",
+      providerText: CODEX_TIME_ONLY,
+      runId: "run_refused",
+      observedAt: new Date().toISOString(),
+    });
+  }
+
+  it("holds a Codex dispatch: no run row, a 'Dispatch held' note, a pending run-agent schedule for the reopen instant, an audit row; the door reads the hold sentence", async () => {
+    deployDevSpecialist(["codex"]);
+    const resetsAt = Math.round(Date.now() / 1000) + 3600;
+    await exhaustCodex(resetsAt);
+    let thrown: DispatchHeldError | null = null;
+    try {
+      await startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", directive: "continue the migration" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+    } catch (error) {
+      if (!isDispatchHeld(error)) throw error;
+      thrown = error;
+    }
+    if (!thrown) throw new Error("expected the dispatch to be held");
+    expect(thrown.status).toBe(409);
+    expect(thrown.userMessage).toMatch(/^Held: Codex is out of quota until .* UTC; dev's run is scheduled for then\.$/);
+    expect(thrown.hold).toMatchObject({ backend: "codex", profileId: "dev", agentName: "dev" });
+    expect(thrown.hold.until).toBe(new Date(resetsAt * 1000).toISOString());
+
+    // Nothing ran and nothing was reserved.
+    expect(listRunsForTaskRows(store.db, store.slug, "VIB-1")).toHaveLength(0);
+    expect(startedRunSpecs()).toHaveLength(0);
+
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const note = file.parsed.timeline.find((e) => e.title === "Dispatch held");
+    expect(note).toBeDefined();
+    expect(note!.type).toBe("note");
+    expect(note!.actor).toEqual({ kind: "system", systemId: "policy-engine" });
+    expect(note!.toAgent).toBe(false);
+    expect(note!.text).toContain("**Held:** Codex is out of quota until");
+    expect(note!.text).toContain(`(the provider said: "${CODEX_TIME_ONLY}")`);
+    expect(note!.text).toContain("dev's run starts when the window reopens");
+    expect(note!.text).toContain("nothing was dispatched and no decision is needed");
+
+    const schedule = file.parsed.frontmatter.schedules.find((x) => x.status === "pending");
+    expect(schedule).toMatchObject({ action: "run-agent", profileId: "dev", prompt: "continue the migration" });
+    expect(thrown.hold.scheduleId).toBe(schedule!.id);
+    // Due one minute after the provider's instant.
+    expect(Date.parse(schedule!.dueAt)).toBe(resetsAt * 1000 + 60_000);
+
+    const held = listAuditEvents(store.db, { action: "task.agent.run_held" });
+    expect(held).toHaveLength(1);
+    expect(held[0]!.details).toMatchObject({
+      backend: "codex",
+      until: new Date(resetsAt * 1000).toISOString(),
+      scheduleId: schedule!.id,
+      profileId: "dev",
+    });
+    expect(listAuditEvents(store.db, { action: "task.agent.run_started" })).toHaveLength(0);
+  });
+
+  it("the same dispatch on Claude starts: the hold is per backend", async () => {
+    deployDevSpecialist(["claude"]);
+    await exhaustCodex(Math.round(Date.now() / 1000) + 3600);
+    const result = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.backend).toBe("claude");
+    expect(listRunsForTaskRows(store.db, store.slug, "VIB-1")).toHaveLength(1);
+    expect(listAuditEvents(store.db, { action: "task.agent.run_held" })).toHaveLength(0);
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
+      actor(store.users.arda),
+    );
+  });
+
+  it("a record with no reset instant holds for thirty minutes and says the reopen time is unknown", async () => {
+    deployDevSpecialist(["codex"]);
+    await exhaustCodex(null);
+    const { UNDATED_HOLD_MS } = await import("~/server/runtimes/backend-quota.server");
+    const before = Date.now();
+    let thrown: DispatchHeldError | null = null;
+    try {
+      await startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+    } catch (error) {
+      if (!isDispatchHeld(error)) throw error;
+      thrown = error;
+    }
+    if (!thrown) throw new Error("expected the dispatch to be held");
+    expect(thrown.userMessage).toMatch(/^Held: Codex is out of quota and the reopen time is unknown; dev's run is retried at .* UTC\.$/);
+    expect(thrown.hold.until).toBeNull();
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const schedule = file.parsed.frontmatter.schedules.find((x) => x.status === "pending")!;
+    const due = Date.parse(schedule.dueAt);
+    expect(due).toBeGreaterThanOrEqual(before + UNDATED_HOLD_MS + 60_000 - 5_000);
+    expect(due).toBeLessThanOrEqual(Date.now() + UNDATED_HOLD_MS + 60_000 + 5_000);
+    const note = file.parsed.timeline.find((e) => e.title === "Dispatch held")!;
+    expect(note.text).toContain("the reopen time is unknown, so dev's run is retried at");
+  });
+
+  it("a hold whose instant has passed no longer holds: the dispatch starts", async () => {
+    deployDevSpecialist(["codex"]);
+    await exhaustCodex(Math.round(Date.now() / 1000) - 60);
+    const result = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.backend).toBe("codex");
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
+      actor(store.users.arda),
+    );
   });
 });

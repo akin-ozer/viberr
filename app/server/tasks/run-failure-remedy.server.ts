@@ -5,6 +5,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { formatClockUTC, utcDayKey,
   formatCalendarDateUTC,
 } from "~/shared/dates/format";
+import { localNetworkFailureCode } from "~/shared/run-failure";
 import type { RunFailure } from "./agent-reply.server";
 import type { OperatorPacketOptionInput } from "./operator-actions.server";
 
@@ -149,6 +150,16 @@ export function describeRunFailure(
       // The provider's side, not the account's: nobody has a move to make on
       // Profile, so the remedy is the one thing that is true — retry, on the
       // same backend once the provider recovers or on the other one now.
+      // U35-11 (pass 35): unless the request never reached the provider. A
+      // connection that failed in this deployment's own environment (TLS,
+      // DNS, a refused socket) keeps the retry but is attributed to where it
+      // happened, never to "the provider's own side".
+      if (facts?.origin === "local") {
+        const networkCode = localNetworkFailureCode(input.failure?.providerText ?? input.failure?.text ?? "");
+        reason = `${backend} could not be reached from this deployment: the connection failed before the provider answered${networkCode ? ` (${networkCode})` : ""}.`;
+        remedy = `Nothing about ${whose} account or the task is wrong; the fault is on this deployment's network path (TLS, DNS or a proxy). Retry in a few minutes${ownerHasOther ? `, or run it on ${BACKEND_NAME[other]} now` : ""}.`;
+        break;
+      }
       const status = facts?.apiErrorStatus ?? null;
       const code = facts?.apiError ?? null;
       const overloaded = status === 529 || code === "overloaded";
@@ -177,7 +188,16 @@ export function describeRunFailure(
 
   const options = input.role === "operator"
     ? operatorOptions(kind, backend, resetLabel)
-    : specialistOptions(kind, backend, other, ownerHasOther, resetLabel, input.agentHandle, input.profileId);
+    : specialistOptions(
+        kind,
+        backend,
+        other,
+        ownerHasOther,
+        resetLabel,
+        input.agentHandle,
+        input.profileId,
+        facts?.origin === "local",
+      );
 
   return { reason, remedy, resetLabel, owner, options };
 }
@@ -247,6 +267,8 @@ function specialistOptions(
   resetLabel: string | null,
   agentHandle: string | undefined,
   profileId: string | undefined,
+  /** U35-11: the `overloaded` failure was this deployment's own network path. */
+  localNetwork = false,
 ): OperatorPacketOptionInput[] {
   const handle = agentHandle ? `@${agentHandle}` : "the agent";
   const redirect: OperatorPacketOptionInput = {
@@ -277,18 +299,24 @@ function specialistOptions(
           : kind === "auth"
             ? `A different ${backend} account or an API key is connected: send ${handle} back to continue`
             : kind === "overloaded"
-              ? `Retry ${handle} on ${backend} now: the provider was overloaded, nothing was changed`
+              ? localNetwork
+                ? `Retry ${handle} on ${backend} now: this deployment could not reach the provider, nothing was changed`
+                : `Retry ${handle} on ${backend} now: the provider was overloaded, nothing was changed`
               : `${backend} is connected now: send ${handle} back to continue`,
       detail:
         kind === "overloaded"
-          ? "Closes this decision and re-runs the agent on the same account with the same directive. If the provider is still overloaded you get a new decision packet."
+          ? localNetwork
+            ? "Closes this decision and re-runs the agent on the same account with the same directive. If the deployment still cannot reach the provider you get a new decision packet."
+            : "Closes this decision and re-runs the agent on the same account with the same directive. If the provider is still overloaded you get a new decision packet."
           : "Closes this decision and re-runs the agent on the owner's current account with the same directive.",
       recommended: !ownerHasOther,
       ev:
         kind === "quota"
           ? "**Decision:** the usage window has reset or the account was switched; the agent continues. No project policy was changed."
           : kind === "overloaded"
-            ? `**Decision:** ${backend} was overloaded; the agent is retried as it was. No account or project policy was changed.`
+            ? localNetwork
+              ? `**Decision:** this deployment could not reach ${backend}; the agent is retried as it was. No account or project policy was changed.`
+              : `**Decision:** ${backend} was overloaded; the agent is retried as it was. No account or project policy was changed.`
             : `**Decision:** the ${backend} credential was changed on the owner's profile; the agent continues.`,
     });
     options.push(redirect);

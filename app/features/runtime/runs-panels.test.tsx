@@ -1095,4 +1095,18 @@ describe("ruling 130(a): the classified footer", () => {
     expect(queryByText(/quota, rate limit/)).toBeNull();
     expect(queryByText(/continuity error/)).toBeNull();
   });
+
+  it("U35-11: an overload whose origin is this deployment's own network path says 'could not be reached from this deployment'; the pill reads 'provider unreachable'", () => {
+    // Canary: drop the `failureOrigin === "local"` branch and the footer
+    // blames the provider for a TLS failure inside the container.
+    const run = mkRun({ state: "error", lifecycle: "error", failureKind: "overloaded", failureOrigin: "local", failedBackendUnavailable: true });
+    const { getByText, queryByText } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(
+      getByText(/Claude could not be reached from this deployment: the connection failed before the provider answered; nothing about the account is wrong, check the network path and retry in a few minutes/),
+    ).toBeTruthy();
+    expect(getByText("provider unreachable")).toBeTruthy();
+    expect(queryByText(/provider was overloaded/)).toBeNull();
+  });
 });

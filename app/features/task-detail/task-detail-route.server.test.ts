@@ -1034,6 +1034,50 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
     );
   });
 
+  it("ruling 152(c) (pass 35, G35-4): a dispatch into a backend the instance knows is out of quota is HELD: the toast names the hold, no run starts, no hand-off comment is written, and the retry is on the schedule", async () => {
+    // Canary: remove the `isDispatchHeld` catch in the run-agent arm and the
+    // route answers the 409 as an error instead of the hold toast.
+    const { recordBackendQuotaExhaustion, clearBackendQuotaExhaustion } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    const resetsAt = Math.round(Date.now() / 1000) + 3600;
+    recordBackendQuotaExhaustion(app.db, "codex", {
+      credentialUserId: ids.arda,
+      credentialLabel: "Arda",
+      resetsAt,
+      resetsAtPrecision: "clock",
+      providerText: "try again at 6:18 PM",
+      runId: "run_refused",
+      observedAt: new Date().toISOString(),
+    });
+    try {
+      const before = await runLoader("VIB-166", ids.arda);
+      const runsBefore = before.runtime.length;
+      // SAFETY: the developer is engaged on VIB-166 and no run is live, so the
+      // only thing between the dispatch and a run is the hold.
+      const result = (await postIntent("VIB-166", ids.arda, {
+        intent: "run-agent", profileId: "developer", prompt: "Pick up the lint debt",
+      })) as { ok: true; toast: string };
+      expect(result.ok).toBe(true);
+      expect(result.toast).toMatch(/^Held: Codex is out of quota until .* UTC; Developer's run is scheduled for then\.$/);
+
+      const after = await runLoader("VIB-166", ids.arda);
+      expect(after.runtime.length).toBe(runsBefore);
+      expect(after.activeAgentProfileIds).toEqual([]);
+      const held = after.task.timeline.find((e) => e.title === "Dispatch held");
+      expect(held?.text).toContain("**Held:** Codex is out of quota until");
+      expect(held?.text).toContain("Developer's run starts when the window reopens");
+      expect(
+        after.task.timeline.find((e) => e.type === "comment" && e.text === "@Developer Pick up the lint debt"),
+        "no hand-off comment for a run that has not started",
+      ).toBeUndefined();
+      const schedule = after.schedules.find((x) => x.status === "pending" && x.action === "run-agent");
+      expect(schedule).toMatchObject({ profileId: "developer", prompt: "Pick up the lint debt" });
+    } finally {
+      clearBackendQuotaExhaustion(app.db, "codex");
+    }
+  });
+
   it("a contributor is denied run-agent (admin|maintainer only)", async () => {
     // SAFETY: dispatching agents is admin|maintainer, so selin's attempt is
     // denied through `appErrorResponse`.

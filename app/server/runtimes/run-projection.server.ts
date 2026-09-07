@@ -200,6 +200,12 @@ function projectRow(
       ? undefined
       : (terminal?.failure?.kind ??
         TAGGED_FAILURE_KINDS.find((k) => (terminal?.tag ?? "").endsWith(`·${k}`)));
+  // U35-11: the origin travels with the kind, so the footer can say "could
+  // not be reached from this deployment" instead of blaming the provider.
+  const failureOrigin: "provider" | "local" | undefined =
+    failureKind === "overloaded" && terminal?.failure?.origin
+      ? terminal.failure.origin
+      : undefined;
   const classifiedUnavailable =
     failureKind === "quota" ||
     failureKind === "auth" ||
@@ -274,6 +280,7 @@ function projectRow(
     logWindow,
   };
   if (failureKind) view.failureKind = failureKind;
+  if (failureOrigin) view.failureOrigin = failureOrigin;
   // Absent entirely on a run that failed for any other reason. `altBackend` is
   // the D4 offer and rides only when there is a person for the retry to bill
   // (ruling 127): without it the panel states the failure and offers nothing,

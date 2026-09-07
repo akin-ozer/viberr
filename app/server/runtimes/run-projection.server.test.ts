@@ -249,6 +249,7 @@ describe("projectRunsForTask grouping", () => {
           apiError: null,
           apiErrorStatus: null,
           terminalReason: null,
+          origin: null,
         },
       },
     });
@@ -293,6 +294,7 @@ describe("projectRunsForTask grouping", () => {
           apiError: null,
           apiErrorStatus: 529,
           terminalReason: "api_error",
+          origin: "provider",
         },
       },
     });
@@ -300,6 +302,24 @@ describe("projectRunsForTask grouping", () => {
     expect(view!.failureKind).toBe("overloaded");
     expect(view!.failedBackendUnavailable).toBe(true);
     expect(view!.altBackend).toBe("codex");
+    expect(view!.failureOrigin).toBe("provider");
+  });
+
+  it("U35-11: the origin of an overload rides the view (`local` for a connection that failed in this deployment), and only for that kind", () => {
+    // Canary: drop the `failureOrigin` assignment in `projectRunsForTask`.
+    insert({ id: "run_net", threadId: "primary", kind: "primary", backend: "claude", state: "error", credentialUserId: "u_owner" });
+    insertRunLine(db, {
+      runId: "run_net", seq: 0, occurredAt: "2026-09-06T21:41:00.000Z", raw: "",
+      display: {
+        t: "21:41:00", ev: "err", tag: "run·error·overloaded",
+        text: "Claude could not be reached from this deployment: the connection failed before the provider answered (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR).",
+        failure: { kind: "overloaded", resetsAt: null, window: null, windowRejected: false, apiError: "server_error", apiErrorStatus: null, terminalReason: "api_error", origin: "local" },
+      },
+    });
+    const view = projectRunsForTask(db, SLUG, TASK).find((v) => v.serverRunId === "run_net")!;
+    expect(view.failureKind).toBe("overloaded");
+    expect(view.failureOrigin).toBe("local");
+    expect(view.failedBackendUnavailable, "the retry offer is unchanged").toBe(true);
   });
 
   it("does NOT flag a genuine task failure as backend-unavailable", () => {
@@ -529,7 +549,7 @@ describe("ruling 130(a): the classified failure reaches the view for every run k
       runId: "run_auth", seq: 0, occurredAt: "2026-09-04T00:00:00.000Z", raw: JSON.stringify({ type: "result" }),
       display: {
         t: "00:00:00", ev: "err", tag: "run·error·auth", text: "refused",
-        failure: { kind: "auth", resetsAt: null, window: null, windowRejected: false, apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error" },
+        failure: { kind: "auth", resetsAt: null, window: null, windowRejected: false, apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error", origin: null },
       },
     });
     insert({ id: "run_op", threadId: "operator", kind: "operator", backend: "claude", state: "error", credentialUserId: "u_owner" });

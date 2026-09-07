@@ -183,7 +183,12 @@ Details that matter:
   the task has no deliverer and the profile holds repo-write, otherwise supports. Two
   contradictory hints are refused as `noop`. Every selection writes
   `task.operator.agent_selected` listing each candidate with eligibility and the
-  choice.
+  choice. A dispatch into a backend the instance already knows is out of quota for the
+  task owner's account is held by `startAgentRun` itself (ruling 152(c), pass 35): the
+  tool call fails with the hold sentence ("Held: Codex is out of quota until …;
+  Developer's run is scheduled for then."), the retry is already on the task's
+  schedule and the timeline carries the "Dispatch held" note; the operator opens no
+  packet for it and picks the other backend only when the work cannot wait.
 - **Transitions.** An `auto` boundary is crossed directly even when supervised; a
   backward move on a `failing` task is a rework move performed directly; a supervised
   move into the terminal stage is rerouted to `operatorAcceptCompletion` so the

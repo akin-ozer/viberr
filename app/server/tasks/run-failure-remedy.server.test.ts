@@ -195,6 +195,38 @@ describe("describeRunFailure", () => {
     expect(withOther.remedy).toContain("or run it on Codex now");
   });
 
+  /**
+   * U35-11 (pass 35): a local TLS or connection failure keeps the overload
+   * class and its retry, but is attributed to this deployment's own network
+   * path, never to "the provider's own side". Canary: drop the `origin ===
+   * "local"` branch and the reason reads "failed on its own side".
+   */
+  it("overloaded with origin local (operator + specialist): names this deployment's network path, keeps the retry, and the same-backend option says the deployment could not reach the provider", async () => {
+    const store = setupTestStore(ctx);
+    await connectFakeBackend(store.db, store.users.arda.id, "codex");
+    const local = (): RunFailure => ({
+      ...failure("overloaded", { apiError: "server_error", apiErrorStatus: null, origin: "local" }),
+      providerText: "API Error: Unable to connect to API (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)",
+    });
+    const op = describe_(store, { failure: local() });
+    expect(op.reason).toBe(
+      "Claude could not be reached from this deployment: the connection failed before the provider answered (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR).",
+    );
+    expect(op.reason).not.toContain("provider failed on its own side");
+    expect(op.remedy).toBe(
+      "Nothing about Arda Test's account or the task is wrong; the fault is on this deployment's network path (TLS, DNS or a proxy). Retry in a few minutes, or run it on Codex now.",
+    );
+    expect(op.options[0]).toMatchObject({ kind: "block_on_policy", title: "Re-run the operator now", recommended: true });
+
+    const sp = describe_(store, { failure: local(), role: "specialist", agentHandle: "jc-developer", profileId: "jc-developer" });
+    expect(sp.options[0]).toMatchObject({ kind: "retry_other_backend", backend: "codex", recommended: true });
+    expect(sp.options[1]).toMatchObject({
+      kind: "request_edit",
+      title: "Retry @jc-developer on Claude now: this deployment could not reach the provider, nothing was changed",
+    });
+    expect(sp.options[1]!.ev).toContain("this deployment could not reach Claude; the agent is retried as it was");
+  });
+
   it("an unowned task yields no owner sentence and no retry option", () => {
     const store = setupTestStore(ctx);
     const d = describe_(store, {

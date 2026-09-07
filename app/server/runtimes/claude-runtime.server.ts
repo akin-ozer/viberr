@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { withProviderText } from "~/shared/provider-marker";
-import { emptyRunFailureFacts, type RunFailureFacts, type RunFailureKind } from "~/shared/run-failure";
+import {
+  LOCAL_NETWORK_FAILURE_RE,
+  emptyRunFailureFacts,
+  localNetworkFailureCode,
+  type RunFailureFacts,
+  type RunFailureKind,
+} from "~/shared/run-failure";
 import { splitClaudeVariant } from "~/shared/model-ids";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
@@ -866,6 +872,26 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
       facts,
     };
   }
+  // U35-11 (pass 35): a connection that failed BEFORE the provider answered.
+  // The CLI reports a TLS verification error, a refused socket or a DNS
+  // failure as "API Error: Unable to connect to API (<code>)" under the same
+  // `server_error` banner an overload uses, with NO HTTP status (nothing
+  // answered), so the overload arm below narrated it as "the provider failed
+  // on its own side" while the deployment's own network path was the fault.
+  // Same class (the remedy is the same retry; nothing about the account or
+  // the task is wrong), its own origin and its own sentence. A run the
+  // provider DID answer with a 5xx is never read as local, whatever its prose.
+  if (!providerSide && LOCAL_NETWORK_FAILURE_RE.test(raw)) {
+    const facts = failureFacts("overloaded", evidence);
+    facts.origin = "local";
+    const code = localNetworkFailureCode(raw);
+    return {
+      kind: "overloaded",
+      message: `Claude could not be reached from this deployment: the connection failed before the provider answered${code ? ` (${code})` : ""}. Nothing about the account or the task is wrong; check this deployment's network path (TLS, DNS, proxy) and retry in a few minutes.`,
+      providerText,
+      facts,
+    };
+  }
   // The provider's side, not the account's: the SDK gave up after repeated
   // 529s (`api_error_status: 529`, structural since SDK 0.3.223) or another
   // 5xx, or the banner said `overloaded` / `server_error`. Prose covers the
@@ -881,6 +907,7 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
     )
   ) {
     const facts = failureFacts("overloaded", evidence);
+    facts.origin = "provider";
     const status = evidence.apiErrorStatus;
     const overloaded =
       status === 529 || evidence.apiError === "overloaded" || /overloaded|\b529\b/i.test(raw);

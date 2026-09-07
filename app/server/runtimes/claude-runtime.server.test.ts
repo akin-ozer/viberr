@@ -1188,7 +1188,7 @@ describe("ruling 130(a): structured classification", () => {
     expect(terminal?.display?.text).toContain("Profile → Agent accounts");
     expect(terminal?.display?.failure).toEqual({
       kind: "auth", resetsAt: null, window: null, windowRejected: false,
-      apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error",
+      apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error", origin: null,
     });
     // The banner is an error line, never the reply.
     expect(lines.find((l) => l.display?.tag === "assistant·oauth_org_not_allowed")?.display?.ev).toBe("err");
@@ -1258,8 +1258,50 @@ describe("ruling 130(a): structured classification", () => {
     expect(terminal?.display?.text).not.toContain("Profile → Agent accounts");
     expect(terminal?.display?.failure).toEqual({
       kind: "overloaded", resetsAt: null, window: null, windowRejected: false,
-      apiError: null, apiErrorStatus: 529, terminalReason: "api_error",
+      apiError: null, apiErrorStatus: 529, terminalReason: "api_error", origin: "provider",
     });
+  });
+
+  /**
+   * U35-11 (pass 35): live, nine runs died on the CLI's "API Error: Unable to
+   * connect to API (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)" under a
+   * `server_error` banner with no HTTP status, while the container's own
+   * fetch was the thing failing; the overload arm narrated it as "the
+   * provider failed on its own side". Same class and retry, its own origin
+   * and sentence. Canary: delete the local-network arm and the first case
+   * falls to the overload arm's "failed on its own side".
+   */
+  it("a connection that failed before the provider answered classifies `overloaded` with origin `local` and names this deployment, not the provider", async () => {
+    const tls = await run([
+      { type: "assistant", error: "server_error", message: { content: [{ type: "text", text: "API Error: Unable to connect to API (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)" }], usage: {} } },
+      { type: "result", subtype: "success", is_error: true, num_turns: 1, usage: {}, api_error_status: null, terminal_reason: "api_error", result: "API Error: Unable to connect to API (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)" },
+    ]);
+    expect(tls.terminal?.display?.tag).toBe("run·error·overloaded");
+    expect(tls.terminal?.display?.text).toContain(
+      "Claude could not be reached from this deployment: the connection failed before the provider answered (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR). Nothing about the account or the task is wrong; check this deployment's network path (TLS, DNS, proxy) and retry in a few minutes.",
+    );
+    expect(tls.terminal?.display?.text).not.toContain("failed on its own side");
+    expect(tls.terminal?.display?.failure).toMatchObject({ kind: "overloaded", origin: "local", apiError: "server_error", apiErrorStatus: null });
+
+    // A thrown stream error with the same shape, no envelope evidence at all.
+    for (const text of ["fetch failed", "connect ECONNREFUSED 10.0.0.1:443", "getaddrinfo ENOTFOUND api.anthropic.com"]) {
+      const { q } = fakeQuery([], { rejectWith: new Error(text) });
+      const adapter = createClaudeAdapter({ queryFn: () => q });
+      const lines: EmittedLine[] = [];
+      adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
+      await drain();
+      const terminal = lines.find((l) => (l.display?.tag ?? "").startsWith("run·error·"));
+      expect(terminal?.display?.tag, text).toBe("run·error·overloaded");
+      expect(terminal?.display?.failure?.origin, text).toBe("local");
+    }
+
+    // The provider DID answer with a 5xx: never local, whatever the prose says.
+    const answered = await run([
+      { type: "assistant", error: "server_error", message: { content: [{ type: "text", text: "connection error upstream" }], usage: {} } },
+      { type: "result", subtype: "success", is_error: true, num_turns: 1, usage: {}, api_error_status: 502, terminal_reason: "api_error", result: "" },
+    ]);
+    expect(answered.terminal?.display?.failure).toMatchObject({ kind: "overloaded", origin: "provider", apiErrorStatus: 502 });
+    expect(answered.terminal?.display?.text).toContain("failed on its own side (HTTP 502)");
   });
 
   it("the assistant banner's `overloaded` / `server_error` codes classify the same class; a plain 5xx reads as the provider's own failure", async () => {

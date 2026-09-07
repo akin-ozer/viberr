@@ -788,7 +788,7 @@ describe("runFailureReason (F7-RUN1)", () => {
     // still comes from the tag).
     const facts = {
       kind: "quota" as const, resetsAt: "2026-09-06T19:50:00.000Z", window: "five_hour", windowRejected: true,
-      apiError: null, apiErrorStatus: 429, terminalReason: "api_error",
+      apiError: null, apiErrorStatus: 429, terminalReason: "api_error", origin: null,
     };
     const structured = classify([errLine({ tag: "run·error·quota", text: "The Claude account is over its usage quota.", failure: facts })]);
     expect(structured).toMatchObject({ kind: "quota", facts });

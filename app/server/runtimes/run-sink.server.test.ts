@@ -933,7 +933,7 @@ describe("quota exhaustion from a refused run (D5)", () => {
  */
 describe("ruling 130(d): structured refusals and the principal", () => {
   const facts = (over: Partial<RunFailureFacts>): RunFailureFacts => ({
-    kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, ...over,
+    kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, origin: null, ...over,
   });
   function principalSink(runId: string) {
     upsertRun(store.db, {

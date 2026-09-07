@@ -520,6 +520,15 @@ function failedTurnNote(failure: RunFailure | null): string {
       (failure.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "")
     );
   }
+  if (failure?.kind === "overloaded" && facts?.origin === "local") {
+    // U35-11: the request never reached the provider; the deployment's own
+    // network path failed. Same retry, honest attribution.
+    return (
+      "I could not finish this turn: Claude could not be reached from this deployment (the connection failed before the provider answered). " +
+      "Nothing about your account is wrong. Say it again in a few minutes." +
+      (failure.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "")
+    );
+  }
   if (failure?.kind === "overloaded") {
     // The provider's side: a retry IS the remedy here, so the sentence says so
     // and names what is NOT wrong (the account), where quota/auth send the
