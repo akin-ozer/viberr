@@ -7,6 +7,7 @@ import {
   RUN_LOG_WINDOW_LINES,
   projectRunsForTask,
 } from "./run-projection.server";
+import { runStatePill } from "~/features/runtime/runs-helpers";
 
 /**
  * Run projection GROUPING (BUG 2): one Agent-logs entry PER AGENT, not per run
@@ -507,5 +508,44 @@ describe("ruling 130(a): the classified failure reaches the view for every run k
     const operator = views.find((v) => v.id === "operator")!;
     expect(operator.failedBackendUnavailable).toBe(true);
     expect(operator.failureKind).toBe("quota");
+  });
+});
+
+describe("pass 35 U35-7: a restart is a reason, not an actor", () => {
+  /**
+   * Boot recovery used to store the literal "restart" in `interrupted_by`, so
+   * this projection called `findUserById(db, "restart")` and the pill named a
+   * pseudo-user. Canary: drop `interruptedReason` from the view and the first
+   * two assertions fail; the pill assertion fails with it.
+   */
+  it("projects interrupted_reason as interruptedReason with no interrupter, and the pill says so", () => {
+    insert({
+      id: "run_restart",
+      threadId: "primary",
+      state: "interrupted",
+      interruptedReason: "restart",
+      startedAt: "2026-09-06T18:30:00.000Z",
+      finishedAt: "2026-09-06T18:40:30.963Z",
+    });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.lifecycle).toBe("interrupted");
+    expect(view!.interruptedReason).toBe("restart");
+    expect(view!.interruptedBy).toBeNull();
+    // Idle-shaped, never an error: no continuity was lost, a process was.
+    expect(view!.state).toBe("idle");
+    expect(view!.failureKind).toBeUndefined();
+    expect(runStatePill(view!)).toEqual({ kind: "neutral", label: "interrupted · by a restart" });
+  });
+
+  it("a person's interrupt still names the person and carries no reason", () => {
+    insert({
+      id: "run_human",
+      threadId: "primary",
+      state: "interrupted",
+      interruptedBy: "u-nobody",
+    });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.interruptedReason).toBeNull();
+    expect(view!.interruptedBy).toEqual({ userId: "u-nobody", label: "u-nobody" });
   });
 });

@@ -3001,6 +3001,33 @@ available. It reads nobody else's session.)*
     `ReadOnlyDatabase` in `app/server/db/sqlite.server.ts`; `createBackup` in
     `app/server/db/backup.server.ts`; `scripts/secret-keys.ts`.)
 
+    *(Addendum, owner 2026-09-06, Q35-16; pass 35 U35-7: **a restart is a reason, not an
+    actor, and the store says which.** The same 18:40:29Z restart's boot recovery wrote
+    every orphaned run as `state: error` with the literal `"restart"` in `interrupted_by`,
+    so the run projection looked "restart" up as a user, the Agent-logs pill read
+    "continuity error", and Insights counted all 23 as failures although 17 were queued
+    runs that never executed a turn. A human interrupt already wrote `interrupted`.
+    **(a)** `finalizeOrphanedRuns` and the operator drive's own orphan sweep write
+    `state: interrupted` with the new nullable `agent_runs.interrupted_reason`
+    (`'restart'`, CHECK-constrained; baseline edit, no migration); `interrupted_by` is a
+    `users.id` or null and nothing else, and a person who interrupted a run the restart
+    then finalized keeps their id beside the reason. **(b)** The run projection carries
+    `interruptedReason`; the pill reads "interrupted · by a restart" and the footer
+    "interrupted by a restart; the operator was re-invoked" (a controller turn: "the
+    conversation carries a note"). **(c)** Insights keeps such runs in `interrupted`, never
+    in `error`, and drops an interrupted run that never started (`turns = 0`, no
+    `started_at`, a person's stop of a queued run included) from the completion-rate
+    denominator; the card's stopped count names how many a restart stopped and how many
+    never started, so the five counts still reconcile with the total. **(d)** The
+    engaged-agent card on the task page says "queued" for an engagement whose live run is
+    still waiting for a slot and "running…" only once it executes; the loader ships
+    `liveAgentRuns` (profile id plus lifecycle) instead of bare profile ids.
+    (`finalizeOrphanedRuns` in `app/server/runtimes/run-recovery.server.ts`; the
+    `restartOrphan` arm of `runOperator` in `operator-run.server.ts`; `interruptedByClause`
+    in `app/features/runtime/runs-helpers.ts`; `getInsightsSummary` in
+    `app/server/insights/insights-query.server.ts`; `liveAgentRunLabel` in
+    `app/features/task-detail/execution-profile.tsx`.)*
+
 159. **Every path Viberr hands an agent is absolute, and a delivery that would publish
     the store's layout is refused (2026-09-06, pass 35 F35-10).** A store-relative path
     (`projects/<slug>/tasks/<key>/attachments`) is a display form for humans, never an

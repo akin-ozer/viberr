@@ -324,7 +324,7 @@ const BASE_PROPS: Omit<PageProps, "task" | "runtime"> = {
     claude: { available: true, detail: null },
     codex: { available: true, detail: null },
   },
-  activeAgentProfileIds: [],
+  liveAgentRuns: [],
   runsVisible: true,
   timelineHasMore: true,
   timelineRemaining: 12,
@@ -359,7 +359,7 @@ function duringLiveRun(): PageProps {
     ...BASE_PROPS,
     task: detail({ waiting: "agent", displayReadiness: "agent_working" }),
     runtime: [run({}), FINISHED_OPERATOR],
-    activeAgentProfileIds: ["developer"],
+    liveAgentRuns: [{ profileId: "developer", lifecycle: "running" }],
   };
 }
 

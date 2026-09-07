@@ -34,14 +34,13 @@ export const RUN_STATE = {
 /**
  * The logs pill for a run: uses RUN_STATE, but a run interrupted by a human
  * shows a neutral "interrupted · by <actor>" footer/pill (ruling 11) — the
- * render state of an interrupted run is idle-shaped.
+ * render state of an interrupted run is idle-shaped. Pass 35 U35-7: a run boot
+ * recovery interrupted names its REASON ("by a restart") the same way; it is
+ * not a continuity error and no person did it.
  */
 export function runStatePill(run: RunView): RunStateBadge {
   if (run.lifecycle === "interrupted") {
-    return {
-      kind: "neutral",
-      label: run.interruptedBy ? `interrupted · by ${run.interruptedBy.label.split(" ")[0]}` : "interrupted",
-    };
+    return { kind: "neutral", label: `interrupted${interruptedByClause(run)}` };
   }
   if (run.lifecycle === "queued") return { kind: "neutral", label: "queued" };
   // Ruling 130(a): the pill is a reader of the failure too. A classified
@@ -59,6 +58,17 @@ export function runStatePill(run: RunView): RunStateBadge {
     return { kind: "blocked", label: "provider overloaded" };
   }
   return RUN_STATE[run.state] ?? RUN_STATE.idle;
+}
+
+/**
+ * Who or what stopped an interrupted run, as the pill's " · by X" suffix: the
+ * person's first name, "a restart" for boot recovery, nothing when the run
+ * carries neither (a stored row from before either was recorded).
+ */
+export function interruptedByClause(run: RunView): string {
+  if (run.interruptedBy) return ` · by ${run.interruptedBy.label.split(" ")[0]}`;
+  if (run.interruptedReason === "restart") return " · by a restart";
+  return "";
 }
 
 export function runLabel(run: RunView): string {

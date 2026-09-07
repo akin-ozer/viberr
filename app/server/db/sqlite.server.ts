@@ -294,6 +294,12 @@ const BASELINE_COLUMNS: readonly {
       // every run start rather than degrade — the exact failure this healer
       // exists for.
       { name: "credential_user_id", ddl: "credential_user_id TEXT" },
+      // Pass 35 U35-7: the reason an `interrupted` run stopped ('restart' from
+      // boot recovery, NULL for a person's interrupt). `patchRun` names it on
+      // every orphan sweep and the run projection reads it on every task page.
+      // ALTER TABLE cannot carry the baseline's CHECK; the two writers only
+      // ever store 'restart', which is the enforcement on an upgraded root.
+      { name: "interrupted_reason", ddl: "interrupted_reason TEXT" },
     ],
   },
   {

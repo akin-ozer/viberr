@@ -511,7 +511,7 @@ function renderPage(task: Partial<TaskDetail> = {}, runtime: RunView[] = [broken
             operatorBackend="claude"
             operatorAutonomy="supervised"
             runPrincipal={CONNECTED_PRINCIPAL}
-            activeAgentProfileIds={[]}
+            liveAgentRuns={[]}
             timelineHasMore={false}
             timelineRemaining={0}
             timelineNextLimit={50}

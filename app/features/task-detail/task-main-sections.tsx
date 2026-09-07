@@ -12,6 +12,7 @@ import { Markdown } from "~/ui/markdown";
 import {
   ExecutionProfile,
   type DeployedSpecialistView,
+  type LiveAgentRun,
   type OwnerAction,
   type TaskMemberView,
 } from "./execution-profile";
@@ -362,7 +363,7 @@ export function ExecutionSection({
   operatorAutonomy,
   runPrincipal,
   canRunAgents,
-  activeAgentProfileIds,
+  liveAgentRuns,
   operatorRunActive,
   schedules,
 }: {
@@ -380,7 +381,7 @@ export function ExecutionSection({
   runPrincipal: TaskRunPrincipalView | null;
   canRunAgents: boolean;
   /** Profile ids of engagements with a live (queued/running) run. */
-  activeAgentProfileIds: string[];
+  liveAgentRuns: LiveAgentRun[];
   /** A live (queued/running) OPERATOR run exists (F7-UI1 pill honesty). */
   operatorRunActive: boolean;
   /** PENDING scheduled runs (both kinds; the profile splits them per control). */
@@ -479,7 +480,7 @@ export function ExecutionSection({
       operatorAutonomy={operatorAutonomy}
       runPrincipal={runPrincipal}
       canRunAgents={canRunAgents}
-      activeAgentProfileIds={activeAgentProfileIds}
+      liveAgentRuns={liveAgentRuns}
       operatorRunActive={operatorRunActive}
       runBusy={agentBusy}
       onRunAgent={onRunAgent}

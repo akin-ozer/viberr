@@ -5,6 +5,7 @@ import { MemoryRouter, createRoutesStub } from "react-router";
 import {
   ExecutionProfile,
   type DeployedSpecialistView,
+  type LiveAgentRun,
 } from "./execution-profile";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type {
@@ -129,7 +130,7 @@ function renderPage(props: {
   schedules?: TaskSchedule[];
   runtime?: RunView[];
   deployedSpecialists?: DeployedSpecialistView[];
-  activeAgentProfileIds?: string[];
+  liveAgentRuns?: LiveAgentRun[];
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -144,7 +145,7 @@ function renderPage(props: {
             operatorBackend="claude"
             operatorAutonomy="supervised"
             runPrincipal={CONNECTED_PRINCIPAL}
-            activeAgentProfileIds={props.activeAgentProfileIds ?? []}
+            liveAgentRuns={props.liveAgentRuns ?? []}
             timelineHasMore={false}
             timelineRemaining={0}
             timelineNextLimit={50}
@@ -1845,7 +1846,7 @@ interface RecordedExecCalls {
 function renderExec(opts: {
   task?: Partial<TaskDetail>;
   deployedSpecialists?: DeployedSpecialistView[];
-  activeAgentProfileIds?: string[];
+  liveAgentRuns?: LiveAgentRun[];
   schedules?: TaskSchedule[];
   canRunAgents?: boolean;
 } = {}) {
@@ -1869,7 +1870,7 @@ function renderExec(opts: {
         operatorAutonomy="supervised"
         runPrincipal={CONNECTED_PRINCIPAL}
         canRunAgents={opts.canRunAgents ?? true}
-        activeAgentProfileIds={opts.activeAgentProfileIds ?? []}
+        liveAgentRuns={opts.liveAgentRuns ?? []}
         operatorRunActive={false}
         runBusy={false}
         onRunAgent={(profileId, prompt, delayMinutes) =>
@@ -1979,7 +1980,7 @@ describe("the Engaged agents ledger marks authority per row", () => {
     const { container } = renderExec({
       task: { specialist: engagement("developer", "Implementation") },
       deployedSpecialists: [dev],
-      activeAgentProfileIds: ["developer"],
+      liveAgentRuns: [{ profileId: "developer", lifecycle: "running" }],
     });
     expect(rowFor(container, "Developer").querySelector(".sub")!.textContent).toContain(
       "· running…",

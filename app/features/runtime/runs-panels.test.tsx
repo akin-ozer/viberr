@@ -1071,3 +1071,51 @@ describe("ruling 130(a): the classified footer", () => {
     expect(queryByText(/continuity error/)).toBeNull();
   });
 });
+
+/**
+ * Pass 35 U35-7: boot recovery finalizes an orphaned run as interrupted by a
+ * RESTART; the panel used to read it as "continuity error" with the user
+ * "restart". Canary: drop the `interruptedReason` arm from the footer and the
+ * pill/footer assertions fail.
+ */
+describe("a run interrupted by a restart", () => {
+  const restartedDev = (patch: Partial<RunView> = {}) =>
+    mkRun({
+      id: "primary",
+      kind: "primary",
+      who: { kind: "agent", backend: "claude", name: "dev", role: "Developer" },
+      state: "idle",
+      lifecycle: "interrupted",
+      interruptedBy: null,
+      interruptedReason: "restart",
+      ...patch,
+    });
+
+  it("the pill and the footer name the restart and what recovery did for a task run", () => {
+    const { container } = render(
+      <AgentLogsPanel runtime={[restartedDev()]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(container.querySelector(".logs-bar .pill")!.textContent).toBe(
+      "interrupted · by a restart",
+    );
+    expect(container.textContent).toContain(
+      "interrupted by a restart; the operator was re-invoked",
+    );
+    expect(container.textContent).not.toContain("continuity error");
+  });
+
+  it("a controller turn names its own recovery: the conversation carries a note", () => {
+    const { container } = render(
+      <AgentLogsPanel
+        runtime={[restartedDev({ kind: "controller", who: { kind: "agent", name: "Controller" } })]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: [] }}
+      />,
+    );
+    expect(container.textContent).toContain(
+      "interrupted by a restart; the conversation carries a note",
+    );
+    expect(container.textContent).not.toContain("the operator was re-invoked");
+  });
+});

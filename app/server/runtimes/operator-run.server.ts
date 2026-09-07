@@ -1593,9 +1593,11 @@ export async function runOperator(
       trigger: input.trigger ?? "manual",
     });
     patchRun(db, inflight.id, {
-      state: "error",
+      state: "interrupted",
       finishedAt: new Date().toISOString(),
-      interruptedBy: "restart",
+      interruptedReason: "restart",
+      phase: null,
+      step: null,
     });
   } else if (inflight) {
     for (const drop of queueOperatorTrigger(leaseKey, input)) {

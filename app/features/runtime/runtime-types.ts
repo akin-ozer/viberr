@@ -21,6 +21,13 @@ export type RunState =
   | "error"
   | "interrupted";
 
+/**
+ * Pass 35 U35-7 (ruling 158 addendum): the stored reason an `interrupted` run
+ * stopped when no person interrupted it. A restart is a reason, not an actor;
+ * `interrupted_by` stays a user id or null.
+ */
+export type RunInterruptedReason = "restart";
+
 export type RunBackend = "claude" | "codex";
 
 /**
@@ -298,8 +305,12 @@ export interface RunView {
   state: "running" | "idle" | "done" | "error";
   /** Real lifecycle state (queued/running/finished/error/interrupted). */
   lifecycle: RunState;
-  /** User id + label of an interrupter, else null. */
+  /** User id + label of the PERSON who interrupted the run, else null. */
   interruptedBy?: { userId: string; label: string } | null;
+  /** Pass 35 U35-7: why an `interrupted` run stopped when no person did it.
+   *  `"restart"` = boot recovery found it queued/running with no process
+   *  behind it. Null on a human interrupt (which names the person above). */
+  interruptedReason?: RunInterruptedReason | null;
   /** The run failed because its backend was unavailable / quota-limited (not a
    *  genuine task failure). The UI offers a one-click retry on `altBackend`. */
   failedBackendUnavailable?: boolean;

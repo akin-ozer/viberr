@@ -252,7 +252,9 @@ stated as the last refusal Viberr observed, retired by any completed run.
   session_id, sdk, state (queued|running|finished|error|interrupted), phase, step,
   started_at, finished_at, turns, input_tokens, cached_input_tokens, output_tokens,
   total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key,
-  credential_user_id`.
+  credential_user_id, interrupted_reason`. `interrupted_by` is the person who stopped
+  the run (a `users.id`) or null; `interrupted_reason` (`restart` or null) says why an
+  `interrupted` run stopped when nobody did (ruling 158 addendum, pass 35 U35-7).
 - **Token columns mean the same thing on both backends.** `input_tokens` is the total
   input the provider processed for the run, cache reads and cache writes included: Codex
   `usage.input_tokens` verbatim (its cache figures are subsets of it); Claude
@@ -692,10 +694,12 @@ above is the create-seed value and never the runtime's answer for a missing gran
 
 `reconcileRestartedWork` (fire-and-forget after the watchers start):
 
-0. `finalizeOrphanedRuns`: `running|queued` rows → `error` with `interruptedBy:
-   "restart"` (controller runs skipped); one `runOperator({ trigger: "manual" })` per
-   affected task, capped at 3 per task per 30 min via `run.recovery.reinvoked` audit
-   rows.
+0. `finalizeOrphanedRuns`: `running|queued` rows → `interrupted` with
+   `interrupted_reason: "restart"` (`interrupted_by` untouched: a person or null; the
+   pill and footer say "interrupted by a restart", Insights counts the run as stopped and
+   leaves a never-started one out of the completion rate); one `runOperator({ trigger:
+   "manual" })` per affected task (controller turns get a conversation note instead),
+   capped at 3 per task per 30 min via `run.recovery.reinvoked` audit rows.
 1. `recoverUnreactedAgentRuns`: finished specialist runs on tasks still `waiting: agent`
    with no `task.agent.replied` audit row carrying their run id are replayed through the
    completion pipeline using the persisted `outcome_key` (audit

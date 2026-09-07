@@ -37,7 +37,7 @@ const STRANDED_PLAN_MAX_AGE_MS = 60 * 60 * 1000;
 
 /** What one boot's orphan sweep did. */
 export interface OrphanFinalization {
-  /** Non-terminal run rows moved to `error` (interrupted-by-restart). */
+  /** Non-terminal run rows moved to `interrupted` with reason `restart`. */
   finalized: number;
   /** Orphaned tasks for which the operator was re-invoked this boot. */
   reinvoked: number;
@@ -62,9 +62,14 @@ export interface OrphanFinalization {
  * process. On a fresh boot there is by definition no live handle for any prior
  * run, so a run still in a non-terminal state has no process behind it — a
  * ticking ELAPSED and an "agent working" badge with nothing real running,
- * indistinguishable from live work. Every orphan becomes `error`
- * (interrupted-by-restart), and the operator is re-invoked for each affected
- * task so it can recover instead of stalling forever.
+ * indistinguishable from live work. Every orphan becomes `interrupted` with
+ * `interrupted_reason: 'restart'` (pass 35 U35-7: the state the human-interrupt
+ * path already uses, and a reason rather than a pseudo-user in
+ * `interrupted_by`, which stays a user id or null), and the operator is
+ * re-invoked for each affected task so it can recover instead of stalling
+ * forever. The run projection reads the reason as "interrupted by a restart";
+ * Insights keeps such a run out of the error count, and a queued one that never
+ * executed a turn out of the completion denominator.
  *
  * Idempotent: a second boot finds nothing non-terminal.
  */
@@ -91,9 +96,11 @@ export function finalizeOrphanedRuns(db: DatabaseSync): OrphanFinalization {
   const realTasks = new Map<string, { projectSlug: string; taskKey: string }>();
   for (const run of orphans) {
     patchRun(db, run.id, {
-      state: "error",
+      state: "interrupted",
       finishedAt: now,
-      interruptedBy: "restart",
+      interruptedReason: "restart",
+      phase: null,
+      step: null,
     });
     // Ruling 99: a controller conversation turn carries no task — there is no
     // operator to re-invoke for it. Its own recovery (an honest "interrupted

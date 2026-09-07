@@ -14,6 +14,7 @@ import { ContinuityRecoveryPanel } from "./continuity-recovery";
 import { DecisionPacket } from "./decision-packet";
 import type {
   DeployedSpecialistView,
+  LiveAgentRun,
   OwnerAction,
   TaskMemberView,
 } from "./execution-profile";
@@ -111,7 +112,7 @@ export function TaskDetailPage({
   operatorBackend,
   operatorAutonomy,
   runPrincipal,
-  activeAgentProfileIds,
+  liveAgentRuns,
   runsVisible = true,
   timelineHasMore,
   timelineRemaining,
@@ -164,8 +165,9 @@ export function TaskDetailPage({
    *  what those accounts can run. `null` = unowned, so nothing runs here.
    *  P11-41's "would fail fast" gate, answered per person. */
   runPrincipal: TaskRunPrincipalView | null;
-  /** Profile ids of engagements with a live run (per-agent gating). */
-  activeAgentProfileIds: string[];
+  /** The engagements' live (queued/running) runs (per-agent gating, and the
+   *  engaged-agent card's "queued"/"running…" word). */
+  liveAgentRuns: LiveAgentRun[];
   /** UI-30: false → the viewer is not a project member, so `lines`/`raw`/`sid`
    *  were withheld by the loader and the console renders an honest gate notice
    *  instead of an empty panel. */
@@ -795,7 +797,7 @@ export function TaskDetailPage({
           operatorAutonomy={operatorAutonomy}
           runPrincipal={runPrincipal}
           canRunAgents={canRunAgents}
-          activeAgentProfileIds={activeAgentProfileIds}
+          liveAgentRuns={liveAgentRuns}
           operatorRunActive={operatorRunActive}
           schedules={schedules}
         />

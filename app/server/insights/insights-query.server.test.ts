@@ -23,6 +23,8 @@ function insertRun(
     turns?: number;
     startedAt?: string | null;
     finishedAt?: string | null;
+    /** Pass 35 U35-7: the stored reason an interrupted run stopped. */
+    interruptedReason?: "restart" | null;
   },
 ) {
   seq += 1;
@@ -30,9 +32,10 @@ function insertRun(
     `INSERT INTO agent_runs
        (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
         started_at, finished_at, turns, input_tokens, cached_input_tokens,
-        output_tokens, total_cost_usd, created_at, updated_at, agent_profile_id)
+        output_tokens, total_cost_usd, created_at, updated_at, agent_profile_id,
+        interrupted_reason)
      VALUES (?, ?, ?, ?, 'Dev', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', 'developer')`,
+             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', 'developer', ?)`,
   ).run(
     `run_${seq}`,
     `VIB-${seq}`,
@@ -49,6 +52,7 @@ function insertRun(
     r.cachedTok ?? 0,
     r.outTok ?? 0,
     r.cost ?? null,
+    r.interruptedReason ?? null,
   );
 }
 
@@ -60,7 +64,8 @@ describe("getInsightsSummary", () => {
     insertRun(db, { state: "finished", cost: 0.1, outTok: 100, inTok: 50, turns: 2 });
     insertRun(db, { state: "finished", cost: 0.2, outTok: 200, inTok: 60, turns: 3 });
     insertRun(db, { state: "error", cost: 0.05, outTok: 10 });
-    insertRun(db, { state: "interrupted", cost: null, outTok: 5 });
+    // A person stopped this one mid-run: it started, so it stays in the rate.
+    insertRun(db, { state: "interrupted", cost: null, outTok: 5, startedAt: "2026-08-22T09:00:00.000Z" });
     insertRun(db, { state: "running", cost: null });
 
     const s = getInsightsSummary(db, NOW);
@@ -90,6 +95,62 @@ describe("getInsightsSummary", () => {
     expect(point.cost).toBeNull();
     // A gap-filled quiet day (no runs) is still a real 0, not "not reported".
     expect(s.daily.find((d) => d.runs === 0)!.cost).toBe(0);
+  });
+
+  /**
+   * Pass 35 U35-7 (owner, Q35-16: "interrupted state, honest counts"). Boot
+   * recovery interrupts every row a restart orphaned; live that was 23 runs,
+   * 17 of them queued runs that never executed a turn, and every one used to
+   * land in `error` and pull the completion rate down. Canary: drop the
+   * `interruptedNeverStarted` subtraction from the denominator and the rate
+   * assertion fails (2/3 becomes 1/2); drop the by-restart count and its
+   * assertion fails.
+   */
+  it("two restart-interrupted orphans (one started, one queued) count as stopped, never as errors, and the queued one leaves the denominator", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { state: "finished", cost: 0.1, turns: 3, startedAt: "2026-08-22T09:00:00.000Z" });
+    // The primary a restart cut mid-step: it ran, so its interruption is an outcome.
+    insertRun(db, {
+      state: "interrupted",
+      interruptedReason: "restart",
+      turns: 4,
+      startedAt: "2026-08-22T10:00:00.000Z",
+      finishedAt: "2026-08-22T10:40:30.000Z",
+    });
+    // The queued run the same boot finalized: no started_at, no turn, nothing ran.
+    insertRun(db, {
+      state: "interrupted",
+      interruptedReason: "restart",
+      turns: 0,
+      startedAt: null,
+      finishedAt: "2026-08-22T10:40:30.000Z",
+    });
+    const s = getInsightsSummary(db, NOW).outcomes;
+    expect(s.error).toBe(0);
+    expect(s.interrupted).toBe(2);
+    expect(s.interruptedByRestart).toBe(2);
+    expect(s.interruptedNeverStarted).toBe(1);
+    // 1 finished of (1 finished + 1 interrupted that ran) = 0.5; the
+    // never-started run is out of the denominator.
+    expect(s.successRate).toBeCloseTo(0.5, 5);
+    // The counts still reconcile with the total (F26-5).
+    expect(s.finished + s.error + s.interrupted + s.running + s.queued).toBe(3);
+  });
+
+  it("a person's stop of a still-queued run leaves the denominator too, with no restart counted", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { state: "finished", turns: 2, startedAt: "2026-08-22T09:00:00.000Z" });
+    insertRun(db, { state: "interrupted", turns: 0, startedAt: null });
+    const s = getInsightsSummary(db, NOW).outcomes;
+    expect(s.interruptedNeverStarted).toBe(1);
+    expect(s.interruptedByRestart).toBe(0);
+    expect(s.successRate).toBe(1);
+  });
+
+  it("successRate is null when every terminal run never started", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { state: "interrupted", interruptedReason: "restart", turns: 0, startedAt: null });
+    expect(getInsightsSummary(db, NOW).outcomes.successRate).toBeNull();
   });
 
   it("successRate is null with no terminal runs", () => {

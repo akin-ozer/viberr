@@ -28,6 +28,8 @@ const FULL: InsightsSummary = {
     finished: 30,
     error: 6,
     interrupted: 4,
+    interruptedNeverStarted: 0,
+    interruptedByRestart: 0,
     running: 2,
     queued: 0,
     successRate: 30 / 40,
@@ -478,5 +480,28 @@ describe("ruling 130(d): whose account, and the hour", () => {
       ],
     });
     expect(getByText(/credential refused · Arda Kaya's account/)).toBeTruthy();
+  });
+});
+
+/**
+ * Pass 35 U35-7: the stopped count says how many a restart stopped and how
+ * many never started, so a boot's toll reads as what it was and the rate's
+ * smaller denominator is explained on the card. Canary: return the bare
+ * `${outcomes.interrupted} stopped` from `stoppedLabel` and this fails.
+ */
+describe("Completion rate names restart-stopped and never-started runs", () => {
+  it("renders the detail when either count is non-zero", () => {
+    const { getByText } = renderPage({
+      ...FULL,
+      outcomes: { ...FULL.outcomes, interrupted: 23, interruptedByRestart: 23, interruptedNeverStarted: 17 },
+    });
+    expect(
+      getByText("30 finished · 6 error · 23 stopped (23 by a restart, 17 never started) · 2 running"),
+    ).toBeTruthy();
+  });
+
+  it("stays the plain count when neither applies", () => {
+    const { getByText } = renderPage(FULL);
+    expect(getByText("30 finished · 6 error · 4 stopped · 2 running")).toBeTruthy();
   });
 });

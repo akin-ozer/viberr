@@ -97,14 +97,16 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
               // measures runs that RAN to completion (finished vs errored/stopped),
               // which is not the same as work that was accepted on review. F26-5:
               // running/queued join the sub-label when present, so the outcome
-              // counts always reconcile with "Total runs".
+              // counts always reconcile with "Total runs". Pass 35 U35-7: the
+              // stopped count names how many a restart stopped and how many
+              // never started; the latter are out of the rate's denominator.
               label="Completion rate"
               value={fmtPercent(outcomes.successRate)}
               icon="check"
               sub={[
                 `${outcomes.finished} finished`,
                 `${outcomes.error} error`,
-                `${outcomes.interrupted} stopped`,
+                stoppedLabel(outcomes),
                 ...(outcomes.running ? [`${outcomes.running} running`] : []),
                 ...(outcomes.queued ? [`${outcomes.queued} queued`] : []),
               ].join(" · ")}
@@ -134,6 +136,23 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
       )}
     </main>
   );
+}
+
+/**
+ * Pass 35 U35-7: "4 stopped (3 by a restart, 2 never started)". A restart's
+ * toll reads as what it was, and the never-started share says why the rate's
+ * denominator is smaller than the terminal count.
+ */
+function stoppedLabel(outcomes: InsightsSummary["outcomes"]): string {
+  const detail = [
+    ...(outcomes.interruptedByRestart
+      ? [`${outcomes.interruptedByRestart} by a restart`]
+      : []),
+    ...(outcomes.interruptedNeverStarted
+      ? [`${outcomes.interruptedNeverStarted} never started`]
+      : []),
+  ];
+  return `${outcomes.interrupted} stopped${detail.length ? ` (${detail.join(", ")})` : ""}`;
 }
 
 /**

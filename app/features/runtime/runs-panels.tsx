@@ -634,7 +634,17 @@ export function AgentLogsPanel({
           // footer "thread alive — no run executing", which contradicted it.
           "queued: waiting for a runtime slot; output appears once it starts"
         : cur!.lifecycle === "interrupted"
-          ? `interrupted${cur!.interruptedBy ? " by " + cur!.interruptedBy.label.split(" ")[0] : ""}; the thread stays resumable`
+          ? // Pass 35 U35-7: a restart is a reason, not a person. Boot
+            // recovery re-invokes the operator for a task run it interrupted
+            // (a controller turn gets a note on its conversation instead), so
+            // the footer says what already happened rather than "resumable".
+            cur!.interruptedBy
+            ? `interrupted by ${cur!.interruptedBy.label.split(" ")[0]}; the thread stays resumable`
+            : cur!.interruptedReason === "restart"
+              ? cur!.kind === "controller"
+                ? "interrupted by a restart; the conversation carries a note"
+                : "interrupted by a restart; the operator was re-invoked"
+              : "interrupted; the thread stays resumable"
           : cur!.state === "done"
             ? // Ruling 148: a missing timestamp is said by leaving the clause
               // out, not by a "−" mid-sentence — "run finished at −;" read as a

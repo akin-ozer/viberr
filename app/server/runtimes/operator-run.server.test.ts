@@ -3300,9 +3300,12 @@ describe("runOperator — authority, ordering, orphans", () => {
     expect(started.runId).not.toBe("run_prev_boot");
     // A real run started instead of the trigger sitting in `pending` forever…
     expect(adapter5.pending).not.toBeNull();
-    // …and the orphan row no longer reads as live work on the board.
-    const orphan = operatorRuns().find((r) => r.id === "run_prev_boot")!;
-    expect(orphan.state).toBe("error");
+    // …and the orphan row no longer reads as live work on the board. Pass 35
+    // U35-7: the same shape boot recovery writes, interrupted by a restart.
+    const orphan = getRun(store5.db, "run_prev_boot")!;
+    expect(orphan.state).toBe("interrupted");
+    expect(orphan.interrupted_reason).toBe("restart");
+    expect(orphan.interrupted_by).toBeNull();
   });
 
   it("B10: a run row from THIS process still coalesces (the backstop is not a free-for-all)", async () => {

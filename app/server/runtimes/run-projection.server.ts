@@ -157,6 +157,10 @@ function projectRow(
         role: row.role,
       };
 
+  // `interrupted_by` is a PERSON (a users.id) or null; a restart is not a
+  // person, it is the row's `interrupted_reason` (pass 35 U35-7: boot recovery
+  // used to store the literal "restart" here, so this looked it up as a user
+  // and the pill named it like one).
   let interruptedBy: RunView["interruptedBy"] = null;
   if (row.interrupted_by) {
     const user = findUserById(db, row.interrupted_by);
@@ -165,6 +169,7 @@ function projectRow(
       label: user?.name ?? row.interrupted_by,
     };
   }
+  const interruptedReason: RunView["interruptedReason"] = row.interrupted_reason;
 
   const finished = finishedLabel(row.finished_at);
   // A run can end in `error` because its BACKEND was unavailable / quota-limited
@@ -251,6 +256,7 @@ function projectRow(
     state: renderStateOf(row.state, finished),
     lifecycle: row.state,
     interruptedBy,
+    interruptedReason,
     phase: row.phase,
     step: row.step,
     startedAt: row.started_at,

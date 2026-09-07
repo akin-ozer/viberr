@@ -70,23 +70,62 @@ describe("outcome_key lives in the run store (C1, pass 31)", () => {
     patchRun(store.db, "run_oc", { phase: "working" });
     expect(getRun(store.db, "run_oc")!.outcome_key).toBe("oc_2");
   });
+
+  it("patchRun writes interrupted_reason and getRun reads it back (pass 35 U35-7)", () => {
+    seedRun("run_ir");
+    expect(getRun(store.db, "run_ir")!.interrupted_reason).toBeNull();
+    patchRun(store.db, "run_ir", { interruptedReason: "restart" });
+    expect(getRun(store.db, "run_ir")!.interrupted_reason).toBe("restart");
+    patchRun(store.db, "run_ir", { phase: "working" });
+    expect(getRun(store.db, "run_ir")!.interrupted_reason).toBe("restart");
+    patchRun(store.db, "run_ir", { interruptedReason: null });
+    expect(getRun(store.db, "run_ir")!.interrupted_reason).toBeNull();
+  });
 });
 
 describe("finalizeOrphanedRuns (F-RUN1)", () => {
-  it("flips a running run to error with interrupted_by=restart", () => {
-    seedRun("run_orphan", { state: "running" });
+  /**
+   * Pass 35 U35-7: a restart is a REASON, not an actor. The sweep used to write
+   * `state: error` with the literal "restart" in `interrupted_by`, so the run
+   * projection looked "restart" up as a user, the pill read "continuity error"
+   * and Insights counted every orphan (17 of the live 23 had never executed a
+   * turn) as a failure. Canary: put `state: "error", interruptedBy: "restart"`
+   * back in `finalizeOrphanedRuns` and all three assertions fail.
+   */
+  it("flips a running run to interrupted with interrupted_reason=restart and no interrupter", () => {
+    seedRun("run_orphan", { state: "running", phase: "Working", step: "Bash · npm test" });
     const { finalized } = finalizeOrphanedRuns(store.db);
     expect(finalized).toBe(1);
     const row = getRun(store.db, "run_orphan")!;
-    expect(row.state).toBe("error");
-    expect(row.interrupted_by).toBe("restart");
+    expect(row.state).toBe("interrupted");
+    expect(row.interrupted_reason).toBe("restart");
+    expect(row.interrupted_by).toBeNull();
     expect(row.finished_at).toBeTruthy();
+    // A finalized row is not mid-step any more (the human-interrupt path
+    // clears the same two columns).
+    expect(row.phase).toBeNull();
+    expect(row.step).toBeNull();
   });
 
-  it("also finalizes a queued run", () => {
-    seedRun("run_queued", { state: "queued" });
+  it("also finalizes a queued run, as interrupted by a restart", () => {
+    seedRun("run_queued", { state: "queued", startedAt: null });
     expect(finalizeOrphanedRuns(store.db).finalized).toBe(1);
-    expect(getRun(store.db, "run_queued")!.state).toBe("error");
+    const row = getRun(store.db, "run_queued")!;
+    expect(row.state).toBe("interrupted");
+    expect(row.interrupted_reason).toBe("restart");
+    expect(row.interrupted_by).toBeNull();
+  });
+
+  it("keeps the person who interrupted a run the restart then finalized", () => {
+    // The live-handle interrupt stamps `interrupted_by` at once and leaves the
+    // state to the adapter's exit; a restart in that window finalizes the row.
+    // The person is a fact, the restart is the reason: both stay.
+    seedRun("run_half", { state: "running", interruptedBy: "u-arda" });
+    finalizeOrphanedRuns(store.db);
+    const row = getRun(store.db, "run_half")!;
+    expect(row.state).toBe("interrupted");
+    expect(row.interrupted_by).toBe("u-arda");
+    expect(row.interrupted_reason).toBe("restart");
   });
 
   it("re-invokes the operator for an orphan under the crash-loop cap", () => {
@@ -113,11 +152,11 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     }
     seedRun("run_orphan_loop", { state: "running" });
     const res = finalizeOrphanedRuns(store.db);
-    // The orphan row is still finalized to error…
+    // The orphan row is still finalized as interrupted by the restart…
     expect(res.finalized).toBe(1);
     const row = getRun(store.db, "run_orphan_loop")!;
-    expect(row.state).toBe("error");
-    expect(row.interrupted_by).toBe("restart");
+    expect(row.state).toBe("interrupted");
+    expect(row.interrupted_reason).toBe("restart");
     // …but the operator is NOT re-invoked (capped).
     expect(res.reinvoked).toBe(0);
     expect(res.capped).toBe(1);

@@ -87,7 +87,7 @@
 
 **Ruling** — a numbered owner decision recorded in [decisions.md](../architecture/decisions.md). Code comments cite them as "ruling N"; superseded rulings are kept and marked, never deleted.
 
-**Run** — one execution of an agent through a backend: `agent_runs` row + raw NDJSON transcript. `kind` is a delivery axis (`operator | primary | reviewer | controller`); `state` is `queued | running | finished | error | interrupted`.
+**Run** — one execution of an agent through a backend: `agent_runs` row + raw NDJSON transcript. `kind` is a delivery axis (`operator | primary | reviewer | controller`); `state` is `queued | running | finished | error | interrupted`. An `interrupted` run names who stopped it (`interrupted_by`, a person) or why (`interrupted_reason: restart`, boot recovery); a restart is never an error.
 
 **Schedule** — a future run recorded in `task.md` `schedules[]`: `run-operator` (optional steer) or `run-agent` (a profile id + prompt). Statuses `pending | claimed | fired | failed | cancelled`. Resolves the live deployment at fire time; never fires on a terminal task.
 

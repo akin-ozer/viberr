@@ -546,6 +546,8 @@ CREATE TABLE "agent_runs" (
   cached_input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
   total_cost_usd REAL,
+  -- The PERSON who interrupted the run (a users.id), or NULL. Never a
+  -- pseudo-actor: a restart is a reason, not a person (pass 35 U35-7).
   interrupted_by TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -570,7 +572,15 @@ CREATE TABLE "agent_runs" (
   -- non-null principal. A run refused because the owner has not connected THAT
   -- backend still records the owner (refusedPrincipalUserId). Also the key the
   -- transcript lookup uses — a run's session lives in that person's runtime home.
-  credential_user_id TEXT
+  credential_user_id TEXT,
+  -- Pass 35 U35-7 (ruling 158 addendum): WHY an `interrupted` run stopped when
+  -- no person did it. 'restart' = boot recovery (finalizeOrphanedRuns, and the
+  -- operator drive's own orphan sweep) found the row still queued/running with
+  -- no process behind it. A human interrupt leaves this NULL and stamps
+  -- interrupted_by instead. Readers: run-projection (the pill and footer say
+  -- "interrupted by a restart") and Insights (a restart-interrupted run is not
+  -- an error; one that never started is out of the completion denominator).
+  interrupted_reason TEXT CHECK (interrupted_reason IN ('restart'))
 );
 CREATE TABLE run_log_lines (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

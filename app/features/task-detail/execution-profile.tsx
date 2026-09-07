@@ -16,6 +16,32 @@ import {
   type TaskRunPrincipalView,
 } from "./run-principal-view";
 
+/**
+ * One engagement's LIVE run, as the task loader ships it: which profile, and
+ * whether the run is waiting for a runtime slot or executing. Pass 35 U35-7:
+ * the engaged-agent card used to see only the profile ids and said "running…"
+ * over a run that was still queued (screenshot 65), so the lifecycle travels
+ * with the id. A profile appears once per live run it holds.
+ */
+export interface LiveAgentRun {
+  profileId: string;
+  lifecycle: "queued" | "running";
+}
+
+/**
+ * The card's word for an engagement's live run: "running…" when any of its
+ * live runs executes, "queued" when every one is still waiting for a slot,
+ * null with no live run.
+ */
+export function liveAgentRunLabel(
+  liveAgentRuns: readonly LiveAgentRun[],
+  profileId: string,
+): "running…" | "queued" | null {
+  const own = liveAgentRuns.filter((r) => r.profileId === profileId);
+  if (own.length === 0) return null;
+  return own.some((r) => r.lifecycle === "running") ? "running…" : "queued";
+}
+
 /** Client-safe view of a deployed specialist the run-agent selector offers
  * (mirrors the loader's DeployedSpecialistView — kept here to avoid a server
  * import). */
@@ -734,7 +760,7 @@ function AgentRunControl({
 function EngagedAgents({
   task,
   deployedById,
-  activeProfileIds,
+  liveAgentRuns,
   canRunAgents,
   closed,
   releaseBusy,
@@ -742,7 +768,7 @@ function EngagedAgents({
 }: {
   task: TaskSummary;
   deployedById: Map<string, DeployedSpecialistView>;
-  activeProfileIds: string[];
+  liveAgentRuns: readonly LiveAgentRun[];
   canRunAgents: boolean;
   /** F33-10: the panel's OWN closed fact (terminal stage or archived), passed
    *  down rather than re-derived — the ledger and the run controls must not be
@@ -769,7 +795,9 @@ function EngagedAgents({
       {rows.map(({ agent, delivers }) => {
         const deployed = deployedById.get(agent.profileId);
         const ghost = !deployed;
-        const running = activeProfileIds.includes(agent.profileId);
+        // Pass 35 U35-7: "queued" for a run still waiting for a slot,
+        // "running…" only once it executes.
+        const liveLabel = liveAgentRunLabel(liveAgentRuns, agent.profileId);
         // F28-P2: `modelUnavailable` describes the LIVE deployment's model.
         // When a retry PIN (F27-B1) runs this engagement on the OTHER backend,
         // the flag describes a model this run won't use — suppress it.
@@ -790,7 +818,7 @@ function EngagedAgents({
                 {!delivers && deployed?.capabilities?.verdict
                   ? " · gates acceptance"
                   : ""}
-                {running ? " · running…" : ""}
+                {liveLabel ? ` · ${liveLabel}` : ""}
               </div>
               {/* UX19-12: the row that holds the engagement names the state —
                   and its RECOVERY must be one the row actually offers. */}
@@ -854,7 +882,7 @@ export function ExecutionProfile({
   operatorAutonomy,
   runPrincipal,
   canRunAgents,
-  activeAgentProfileIds,
+  liveAgentRuns,
   runBusy,
   onRunAgent,
   releaseBusy,
@@ -884,8 +912,8 @@ export function ExecutionProfile({
   runPrincipal: TaskRunPrincipalView | null;
   /** admin|maintainer — gates the run/schedule affordances (server re-checks). */
   canRunAgents: boolean;
-  /** Profile ids of engagements with a live (queued/running) run. */
-  activeAgentProfileIds: string[];
+  /** The engagements' live (queued/running) runs, one entry per run. */
+  liveAgentRuns: LiveAgentRun[];
   /** A LIVE operator run (queued/running) exists — the only state honest
    * enough for the "operator active" pill (F7-UI1: attachment ≠ activity). */
   operatorRunActive: boolean;
@@ -911,6 +939,9 @@ export function ExecutionProfile({
   onCancelSchedule: (scheduleId: string) => void;
 }) {
   const deployedById = new Map(deployedSpecialists.map((s) => [s.id, s]));
+  // The run control gates on "has a live run at all" (F10-04); queued or
+  // running makes no difference to a duplicate Now-run refusal.
+  const activeAgentProfileIds = liveAgentRuns.map((r) => r.profileId);
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
   // G9: a task at the terminal (Done) stage is closed — its runtime action
@@ -1027,7 +1058,7 @@ export function ExecutionProfile({
             <EngagedAgents
               task={task}
               deployedById={deployedById}
-              activeProfileIds={activeAgentProfileIds}
+              liveAgentRuns={liveAgentRuns}
               canRunAgents={canRunAgents}
               closed={closed}
               releaseBusy={releaseBusy}

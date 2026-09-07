@@ -644,7 +644,7 @@ function renderExec(
         operatorAutonomy="supervised"
         runPrincipal={connectedPrincipal()}
         canRunAgents
-        activeAgentProfileIds={[]}
+        liveAgentRuns={[]}
         operatorRunActive={false}
         runBusy={false}
         onRunAgent={onRunAgent}
@@ -801,7 +801,7 @@ describe("ExecutionProfile — the AgentSelect combobox", () => {
     ];
     const { container } = renderExec(execTask(), {
       deployedSpecialists: marked,
-      activeAgentProfileIds: ["developer"],
+      liveAgentRuns: [{ profileId: "developer", lifecycle: "running" }],
     });
     fireEvent.focus(agentInput(container)!);
     const rows = agentOptions(container);
@@ -885,7 +885,7 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
 
   it("a live run on the SELECTED profile disables Run-now, but scheduling stays open", () => {
     const { container, onRunAgent } = renderExec(execTask(), {
-      activeAgentProfileIds: ["developer"],
+      liveAgentRuns: [{ profileId: "developer", lifecycle: "running" }],
     });
     pickAgent(container, "Developer");
     expect(agentRunBtn(container).disabled).toBe(true);
@@ -1289,7 +1289,7 @@ describe("ExecutionProfile — engaged agents ledger", () => {
 
   it("a live run marks its own row 'running…' and no other", () => {
     const { container } = renderExec(engagedTask(), {
-      activeAgentProfileIds: ["reviewer"],
+      liveAgentRuns: [{ profileId: "reviewer", lifecycle: "running" }],
     });
     const rows = [...container.querySelectorAll(".rev-agent")];
     expect(rows[1]!.textContent).toContain("running…");

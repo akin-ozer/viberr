@@ -99,6 +99,13 @@ describe("runStatePill (ruling 11 lifecycle mapping)", () => {
     expect(p.kind).toBe("neutral");
     expect(p.label).toBe("interrupted · by Arda");
   });
+  it("pass 35 U35-7: interrupted by a restart → neutral 'interrupted · by a restart', never a continuity error", () => {
+    const p = runStatePill({ ...base, state: "idle", lifecycle: "interrupted", interruptedReason: "restart" });
+    expect(p.kind).toBe("neutral");
+    expect(p.label).toBe("interrupted · by a restart");
+    // A stored row with neither a person nor a reason still reads as interrupted.
+    expect(runStatePill({ ...base, state: "idle", lifecycle: "interrupted" }).label).toBe("interrupted");
+  });
 });
 
 // ------------------------------------------------------------------- P19-G11

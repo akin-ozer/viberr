@@ -917,7 +917,7 @@ describe("loader — deployed specialists", () => {
     expect(dev.backend === "codex" || dev.backend === "claude").toBe(true);
     // Dynamic-dispatch rework: ONE per-profile live-run set replaced the
     // deliveringActive/activeReviewerIds split — no live run on VIB-166 yet.
-    expect(result.activeAgentProfileIds).toEqual([]);
+    expect(result.liveAgentRuns).toEqual([]);
   });
 });
 
@@ -982,7 +982,7 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
     // A primary run now exists, and the loader's live-run set names its profile.
     const primary = after.runtime.find((r) => r.kind === "primary");
     expect(primary).toBeDefined();
-    expect(after.activeAgentProfileIds).toContain("developer");
+    expect(after.liveAgentRuns.map((r) => r.profileId)).toContain("developer");
 
     // Stop the run's realistic-cadence timer so it does not outlive the suite
     // and write to the DB after afterAll() closes it (the sink guards this,

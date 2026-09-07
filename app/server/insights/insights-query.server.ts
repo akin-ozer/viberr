@@ -115,10 +115,22 @@ export interface InsightsSummary {
   outcomes: {
     finished: number;
     error: number;
+    /** Every `interrupted` run, a person's stop and a restart's alike, so the
+     *  five counts still reconcile with `totals.runs` (F26-5). */
     interrupted: number;
+    /** Pass 35 U35-7: the subset of `interrupted` that never executed a turn
+     *  (`turns = 0` and no `started_at`): a queued run a restart or a person
+     *  stopped before any runtime slot opened. Out of the completion
+     *  denominator, because nothing ran to complete or fail. */
+    interruptedNeverStarted: number;
+    /** Pass 35 U35-7: the subset of `interrupted` whose stored reason is a
+     *  restart (boot recovery). Named on the card so a boot's toll reads as
+     *  what it was, not as failures. */
+    interruptedByRestart: number;
     running: number;
     queued: number;
-    /** finished / (finished+error+interrupted); null when no terminal runs. */
+    /** finished / (finished + error + interrupted - interruptedNeverStarted);
+     *  null when that denominator is zero. */
     successRate: number | null;
   };
   byBackend: CountRow[];
@@ -157,6 +169,13 @@ const groupSchema = z.object({
 });
 
 const outcomeSchema = z.object({ state: z.string(), runs: z.number() });
+
+/** Pass 35 U35-7: the two facts about `interrupted` runs the completion rate
+ *  needs. `SUM` over no rows is NULL, hence nullable. */
+const interruptedSchema = z.object({
+  never_started: z.number().nullable(),
+  by_restart: z.number().nullable(),
+});
 
 const durationSchema = z.object({ avg_ms: z.number().nullable() });
 
@@ -491,7 +510,25 @@ export function getInsightsSummary(
   const finished = byState("finished");
   const errored = byState("error");
   const interrupted = byState("interrupted");
-  const terminal = finished + errored + interrupted;
+  // Pass 35 U35-7: boot recovery interrupts every queued/running row a restart
+  // orphaned. Live (2026-09-06 18:40Z) that was 23 rows, 17 of them queued runs
+  // that never executed a turn, and every one counted as an error that lowered
+  // this rate. An interrupted run is not a failure, and one that never started
+  // is not an outcome at all: it leaves the denominator.
+  const interruptedFacts = interruptedSchema.parse(
+    db
+      .prepare(
+        `SELECT SUM(CASE WHEN turns = 0 AND started_at IS NULL THEN 1 ELSE 0 END)
+                  AS never_started,
+                SUM(CASE WHEN interrupted_reason = 'restart' THEN 1 ELSE 0 END)
+                  AS by_restart
+           FROM agent_runs ${and("state = 'interrupted'")}`,
+      )
+      .get(...params),
+  );
+  const interruptedNeverStarted = interruptedFacts.never_started ?? 0;
+  const interruptedByRestart = interruptedFacts.by_restart ?? 0;
+  const terminal = finished + errored + interrupted - interruptedNeverStarted;
 
   // F26-4: order by COST first, then runs. This is a cost dashboard, and the
   // breakdown is capped at TOP_N — a run-first order could truncate away a rare
@@ -603,6 +640,8 @@ export function getInsightsSummary(
       finished,
       error: errored,
       interrupted,
+      interruptedNeverStarted,
+      interruptedByRestart,
       running: byState("running"),
       queued: byState("queued"),
       successRate: terminal > 0 ? finished / terminal : null,

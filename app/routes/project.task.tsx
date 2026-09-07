@@ -95,7 +95,10 @@ import {
 } from "~/server/tasks/schedule.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
 import type { TaskRunPrincipalView } from "~/features/task-detail/run-principal-view";
-import type { TaskMemberView } from "~/features/task-detail/execution-profile";
+import type {
+  LiveAgentRun,
+  TaskMemberView,
+} from "~/features/task-detail/execution-profile";
 import type { TimelineFilterId } from "~/features/task-detail/timeline";
 import {
   clampTimelineLimit,
@@ -259,12 +262,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // F10-04: per-engagement run gating. The server single-flights only the
   // DELIVERING run; supporting/reviewing runs are read-only and may run
   // concurrently. The run-agent control mirrors this: it warns/disables per
-  // profile, from the live run set.
-  const activeRuns = runtime.filter(
-    (r) => r.lifecycle === "running" || r.lifecycle === "queued",
-  );
-  const activeAgentProfileIds = activeRuns.flatMap((r) =>
-    !r.op && r.profileId ? [r.profileId] : [],
+  // profile, from the live run set. Pass 35 U35-7: the lifecycle rides along,
+  // so the engaged-agent card can say "queued" for a run that has not started.
+  const liveAgentRuns: LiveAgentRun[] = runtime.flatMap((r) =>
+    !r.op && r.profileId && (r.lifecycle === "running" || r.lifecycle === "queued")
+      ? [{ profileId: r.profileId, lifecycle: r.lifecycle }]
+      : [],
   );
 
   // @-mention autocomplete directory for the comment composer: deployed
@@ -369,7 +372,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       db,
       taskFile?.parsed.frontmatter.ownerUserId ?? null,
     ),
-    activeAgentProfileIds,
+    liveAgentRuns,
     /** UI-30: false → the console content above was withheld (non-member). */
     runsVisible,
     mentionables,
@@ -1184,7 +1187,7 @@ export default function TaskDetailRoute({
       // so the whole principal travels, not a pair of booleans that could only
       // ever say "no" without saying whose "no" it is.
       runPrincipal={loaderData.runPrincipal}
-      activeAgentProfileIds={loaderData.activeAgentProfileIds}
+      liveAgentRuns={loaderData.liveAgentRuns}
       runsVisible={loaderData.runsVisible}
       timelineHasMore={loaderData.timelineHasMore}
       timelineRemaining={loaderData.timelineRemaining}

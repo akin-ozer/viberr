@@ -327,8 +327,11 @@ recommendation is open. Nothing is owed by anyone while it waits.
   task never offers in one surface what the other withholds.
 - Concurrency: Org settings → runtime sets `maxConcurrentRuns` (0 = unlimited, ceiling
   64); excess runs wait in a `pending` queue that drains on every completion.
-- After a restart, orphaned `running|queued` rows are finalized as `error`
-  (`interruptedBy: restart`) and the operator is re-invoked once per affected task
+- After a restart, orphaned `running|queued` rows are finalized as `interrupted` with
+  `interrupted_reason: restart` (`interrupted_by` stays a person or null; the task page
+  reads "interrupted by a restart", and Insights counts them as stopped, not as errors,
+  with a never-started queued run out of the completion rate; ruling 158 addendum) and
+  the operator is re-invoked once per affected task
   (capped 3 per 30 min); finished runs whose completion never posted are replayed. This
   is why `task.agent.replied` and `runtime.operator.plan_executed` audit rows are exempt
   from retention.

@@ -143,7 +143,7 @@ files) · **C** cache/operational (safe to lose).
 
 | Table | Kind | What it holds |
 |---|---|---|
-| `agent_runs` | P | One row per run: `kind` (`operator \| primary \| reviewer \| controller`, a **delivery axis**: `primary` = delivering, `reviewer` = any supporting run), `backend`, `model`, `session_id`, `state` (`queued \| running \| finished \| error \| interrupted`), `phase`/`step`, token and cost counters, `interrupted_by`, `agent_profile_id`, `outcome_key`, `credential_user_id`. Controller turns use `project_slug = ''` and `task_key = <conversation id>`. |
+| `agent_runs` | P | One row per run: `kind` (`operator \| primary \| reviewer \| controller`, a **delivery axis**: `primary` = delivering, `reviewer` = any supporting run), `backend`, `model`, `session_id`, `state` (`queued \| running \| finished \| error \| interrupted`), `phase`/`step`, token and cost counters, `interrupted_by` (the person, or null) and `interrupted_reason` (`restart` when boot recovery stopped it, else null), `agent_profile_id`, `outcome_key`, `credential_user_id`. Controller turns use `project_slug = ''` and `task_key = <conversation id>`. |
 | `run_log_lines` | C | Projected console lines per run (`raw_json`, `display_json`, `seq`). Retained 30 days; the `.jsonl` file is the truth. |
 | `staged_outcomes` | C | A Claude `report_outcome` envelope staged mid-run until the completion callback consumes it; orphans pruned after 24 h. |
 
