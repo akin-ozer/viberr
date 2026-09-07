@@ -22,6 +22,7 @@ import {
   resolveUserRunPrincipal,
   type RunPrincipalRefusal,
 } from "~/server/runtimes/run-principal.server";
+import type { UserBackendHealth } from "~/server/runtimes/backend-credentials.server";
 import type { RunMcpServers } from "~/server/runtimes/adapter.server";
 import {
   interruptRun,
@@ -309,23 +310,30 @@ export const CONTROLLER_NOT_CONNECTED_NOTE =
   "The controller runs on your own Claude account, and Claude isn't connected for you yet. " +
   "Connect it on your Profile → Agent accounts, then send your message again.";
 
-function controllerRefusalNote(refusal: RunPrincipalRefusal): string {
-  // The discriminator is the ROW, not the verification: every unavailable
-  // health has `verification: "none"` (that is what unavailable means), so
-  // testing it here skipped this branch on every refusal and the wiped-volume
-  // case got the generic "isn't connected yet" copy. `kind !== null` is what
-  // `principalRefusalMessage` uses for the same choice — a login row whose
-  // credential file vanished has a kind, and the detail that goes with it.
-  if (
-    refusal.kind === "no-credential" &&
-    refusal.health.kind !== null &&
-    refusal.health.detail
-  ) {
-    // The health detail is the specific case ("your sign-in file is missing…")
-    // and it is already addressed to the person themselves.
-    return `${refusal.health.detail} The controller runs on your own Claude account, so I cannot answer until it is connected.`;
+/**
+ * The sentence an unavailable Claude gets, from the health alone: one home for
+ * the choice, so the HTTP send door (U35-4) and this engine cannot drift apart.
+ *
+ * The discriminator is the ROW, not the verification: every unavailable health
+ * has `verification: "none"` (that is what unavailable means), so testing it
+ * here skipped this branch on every refusal and the wiped-volume case got the
+ * generic "isn't connected yet" copy. `kind !== null` is what
+ * `principalRefusalMessage` uses for the same choice — a login row whose
+ * credential file vanished has a kind, and the detail that goes with it.
+ */
+export function controllerNotConnectedSentence(health: UserBackendHealth): string {
+  // The health detail is the specific case ("your sign-in file is missing…")
+  // and it is already addressed to the person themselves.
+  if (health.kind !== null && health.detail) {
+    return `${health.detail} The controller runs on your own Claude account, so I cannot answer until it is connected.`;
   }
-  if (refusal.kind === "no-credential") return CONTROLLER_NOT_CONNECTED_NOTE;
+  return CONTROLLER_NOT_CONNECTED_NOTE;
+}
+
+function controllerRefusalNote(refusal: RunPrincipalRefusal): string {
+  if (refusal.kind === "no-credential") {
+    return controllerNotConnectedSentence(refusal.health);
+  }
   // The asker IS the signed-in user, so the remaining refusals can only mean
   // their own account was disabled or deleted mid-session (a live session
   // outliving the account). `principalRefusalMessage` would say "this task's

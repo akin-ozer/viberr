@@ -10,10 +10,10 @@ import {
   requireConversation,
 } from "~/server/controller/controller-conversations.server";
 import {
-  CONTROLLER_NOT_CONNECTED_NOTE,
+  controllerNotConnectedSentence,
   runControllerTurn,
 } from "~/server/controller/controller-run.server";
-import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
+import { userBackendHealth } from "~/server/runtimes/backend-credentials.server";
 import {
   conversationMatchesScope,
   DOCK_NEW_CONVERSATION,
@@ -133,9 +133,17 @@ export async function action({ request }: Route.ActionArgs) {
       // Claude connected (ruling 127), and this door used to answer 200 anyway,
       // creating a thread whose only reply was the refusal. Refuse here, with
       // the same sentence, before any thread exists.
-      if (!isBackendAvailableFor(db, auth.user.id, "claude")) {
+      //
+      // Pass-35 review: "unavailable" is two different states — no credential
+      // row at all, and a `login` row whose sign-in file is gone from this
+      // server. Refusing before `createConversation` means there is no
+      // transcript to read the accurate sentence in, so this door reads the
+      // health and answers the SAME sentence the engine would, from the one
+      // home that makes that choice.
+      const health = userBackendHealth(db, auth.user.id, "claude");
+      if (!health.available) {
         return data(
-          { ok: false as const, error: CONTROLLER_NOT_CONNECTED_NOTE },
+          { ok: false as const, error: controllerNotConnectedSentence(health) },
           { status: 409 },
         );
       }
