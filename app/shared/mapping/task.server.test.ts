@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PrRef } from "~/schemas/task-file.schema";
+import type { DependencyRender } from "~/shared/dependencies";
 import {
   isAtAcceptanceBoundary,
   mapOperatorRef,
@@ -75,15 +76,20 @@ function summarize(
   r: TaskProjectionRow,
   accepted: boolean,
   workflow: { from: string; to: string }[] = WORKFLOW,
+  blockedBy: DependencyRender[] = [],
 ) {
   return mapTaskProjectionRow(r, {
     stages: STAGES,
     workflow,
     owner: null,
     accepted,
-    blockedBy: [],
+    blockedBy,
   });
 }
+
+const WAITS_ON_VIB_2: DependencyRender[] = [
+  { ref: "VIB-2", label: "VIB-2", state: "open", taskKey: "VIB-2", goalId: null },
+];
 
 describe("ruling 131: the summary carries the caller's resolved dependency list", () => {
   it("passes the resolved entries through verbatim (the mapper resolves nothing itself)", () => {
@@ -211,12 +217,108 @@ describe("displayReadiness derivation (F7-UI3)", () => {
     expect(s.packet?.decided?.optionIndex).toBe(0);
   });
 
+  it("F35-6: a decided edit_goal packet carries the ONE goal draft every editor door opens with", () => {
+    // Canary: drop the `goalDraft` derivation in `mapPacket` and the first
+    // assert is red (the card, its button and the hero's Edit all read this).
+    const withDraft = JSON.stringify({
+      id: "pkt_3",
+      type: "blocked",
+      kind: "Blocked decision",
+      from: "operator",
+      title: "Scope needed",
+      body: "",
+      options: [
+        { kind: "redirect", t: "Redirect", d: "", rec: false },
+        {
+          kind: "edit_goal",
+          t: "Align the goal",
+          d: "to the merged spec",
+          rec: true,
+          goalDraft: "Deliverable: the search page.\n\nAcceptance: results render.",
+        },
+      ],
+      awaiting: "goal_edit",
+      decided: { optionIndex: 1, at: "2026-09-06T10:00:00.000Z", byUserId: "u-arda" },
+    });
+    expect(summarize(row({ packet_json: withDraft }), false).packet?.goalDraft).toBe(
+      "Deliverable: the search page.\n\nAcceptance: results render.",
+    );
+    // Without an explicit draft the composition is the option's title and
+    // detail, the same `goalDraftForOption` the confirm response uses.
+    const titled = JSON.parse(withDraft);
+    delete titled.options[1].goalDraft;
+    expect(summarize(row({ packet_json: JSON.stringify(titled) }), false).packet?.goalDraft).toBe(
+      "Align the goal\n\nto the merged spec",
+    );
+    // An undecided packet, or one stamped awaiting with no decision, carries none.
+    const undecided = JSON.parse(withDraft);
+    delete undecided.decided;
+    expect(summarize(row({ packet_json: JSON.stringify(undecided) }), false).packet?.goalDraft).toBeUndefined();
+    expect(summarize(row({ packet_json: inputPacket }), false).packet?.goalDraft).toBeUndefined();
+  });
+
   it("an input packet on the agent's turn does not raise 'input required'", () => {
     // The packet lift is for a HUMAN who owes an answer. On the agent's turn
     // the agent-working lift below owns the slot instead — what this must never
     // do is claim a human is needed.
     const r = row({ readiness: "ready", waiting: "agent", packet_json: inputPacket });
     expect(summarize(r, false).displayReadiness).not.toBe("input_required");
+  });
+});
+
+/**
+ * Ruling 157 (pass 35, F35-8). A stored `blocked` with no open packet and no
+ * dependency list is a HOLD (`hold_runtime_debug`, the refused arm of a
+ * collision ceremony), and the server lifts it on the record when a person
+ * starts the operator or any dispatch starts a run. The display says the same
+ * thing: while an agent carries such a hold the card reads "agent working",
+ * never "blocked" and "agent working" on one line (KNC-25 live, 15:12Z). A
+ * diagnostics floor (derived `blocked` over a stored `ready`), a dependency
+ * hold (ruling 131's floor) and an open `blocked` packet all keep reading
+ * `blocked`: a run outranks none of those.
+ *
+ * Canary: drop the first-priority branch in `deriveDisplayReadiness` and the
+ * first assert is red.
+ */
+describe("ruling 157: a packet-less, list-less stored block carried by an agent reads 'agent working'", () => {
+  it("lifts a hold on the display while an agent carries it", () => {
+    const held = row({ readiness: "blocked", stored_readiness: "blocked", waiting: "agent" });
+    expect(summarize(held, false).displayReadiness).toBe("agent_working");
+    // The stored value is untouched: the acceptance gate and the attention
+    // filter still read `blocked` until the server's lift lands.
+    expect(summarize(held, false).readiness).toBe("blocked");
+  });
+
+  it("keeps 'blocked' for a dependency hold, a diagnostics floor, an open packet and a human's turn", () => {
+    const held = row({ readiness: "blocked", stored_readiness: "blocked", waiting: "agent" });
+    const blockedPacket = JSON.stringify({
+      id: "pkt_4",
+      type: "blocked",
+      kind: "Blocked decision",
+      from: "operator",
+      title: "Work stalled",
+      body: "",
+      options: [{ kind: "hold_runtime_debug", t: "Hold", d: "", rec: false }],
+    });
+    // Ruling 131's floor: the list is the block, and a run does not answer it.
+    expect(summarize(held, false, WORKFLOW, WAITS_ON_VIB_2).displayReadiness).toBe("blocked");
+    // A diagnostic floored the derived value over a stored `ready`: not a hold.
+    expect(
+      summarize(row({ readiness: "blocked", stored_readiness: "ready", waiting: "agent" }), false)
+        .displayReadiness,
+    ).toBe("blocked");
+    // An open blocked packet keeps the withdrawal paths as its only lift.
+    expect(
+      summarize(
+        row({ readiness: "blocked", stored_readiness: "blocked", waiting: "agent", packet_json: blockedPacket }),
+        false,
+      ).displayReadiness,
+    ).toBe("blocked");
+    // Nobody is carrying it: a held task waiting on a human is held.
+    expect(
+      summarize(row({ readiness: "blocked", stored_readiness: "blocked", waiting: "human" }), false)
+        .displayReadiness,
+    ).toBe("blocked");
   });
 });
 

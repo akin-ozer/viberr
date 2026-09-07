@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { listAuditEvents } from "../../../test-support/audit-log";
+import { resolveGithubHandle } from "~/server/github/pr-human-approval.server";
 import { verifyPassword } from "~/server/auth/password.server";
 import { credentialPasswordHash } from "~/server/auth/identity.server";
 import {
   findUserByEmail,
   insertUser,
   recordUserLogin,
+  updateUserFields,
 } from "~/server/auth/user-store.server";
 import {
   addDomain,
@@ -380,6 +383,114 @@ describe("edit / role / reset / remove", () => {
     expect(details.connectionsLost).toEqual(["acme"]);
     expect(details.defaultConnectionLost).toBe("acme");
     expect(details.projectsUnbound).toEqual(["viberr-core"]);
+  });
+});
+
+/**
+ * Ruling 154 (pass 35, G35-3): `users.github_handle` had one writer, GitHub
+ * OAuth sign-in, so on a deployment without GitHub sign-in a member's PR
+ * approval could only ever land as `unlinked_handle` and ruling 68 was
+ * unreachable. The Edit-user save is now the org admin's door to the column,
+ * and the verdict resolver must see what it wrote.
+ */
+describe("ruling 154: an org admin links a GitHub handle", () => {
+  async function localUser(db: ReturnType<typeof makeDb>, name: string, email: string) {
+    const { user } = await createLocalAccount(
+      db,
+      { name, email, role: "member" },
+      ACTOR,
+    );
+    return user;
+  }
+
+  it("a handle set on a local account resolves for the verdict path, normalized and audited", async () => {
+    const db = makeDb();
+    const user = await localUser(db, "Maya Lin", "maya@test.dev");
+    const updated = updateOrgUser(
+      db,
+      {
+        userId: user.id,
+        name: user.name,
+        email: user.email,
+        role: "member",
+        githubHandle: " @OctoCat ",
+      },
+      ACTOR,
+    );
+    expect(updated.githubHandle).toBe("octocat");
+    expect(resolveGithubHandle(db, "OctoCat")).toEqual({
+      kind: "found",
+      userId: user.id,
+      name: "Maya Lin",
+    });
+    const [row] = listAuditEvents(db, { action: "org.user.github_handle.set" });
+    expect(row).toMatchObject({
+      subjectKind: "user",
+      subjectId: user.id,
+      details: { handle: "octocat", previous: null },
+    });
+  });
+
+  it("refuses a handle another enabled account already carries, naming them", async () => {
+    const db = makeDb();
+    const maya = await localUser(db, "Maya Lin", "maya@test.dev");
+    const omar = await localUser(db, "Omar Reyes", "omar@test.dev");
+    updateOrgUser(
+      db,
+      { userId: maya.id, name: maya.name, email: maya.email, role: "member", githubHandle: "octocat" },
+      ACTOR,
+    );
+    expect(() =>
+      updateOrgUser(
+        db,
+        { userId: omar.id, name: omar.name, email: omar.email, role: "member", githubHandle: "OCTOCAT" },
+        ACTOR,
+      ),
+    ).toThrowError("@octocat is already linked to Maya Lin.");
+    // Nothing was written for the refused edit: the resolver still finds one.
+    expect(resolveGithubHandle(db, "octocat")).toMatchObject({ kind: "found", userId: maya.id });
+  });
+
+  it("refuses a handle on a GitHub-signed-in account; a blank leaves its synced handle alone", () => {
+    const db = makeDb();
+    const { user } = whitelistGithubUser(db, { handle: "hubber", role: "member" }, ACTOR);
+    expect(() =>
+      updateOrgUser(
+        db,
+        { userId: user.id, name: user.name, email: user.email, role: "member", githubHandle: "other" },
+        ACTOR,
+      ),
+    ).toThrowError(/signs in with GitHub; its handle syncs at each sign-in/);
+    // The modal for a GitHub account sends no handle; the route still passes
+    // the empty field, which must not clear what OAuth recorded.
+    updateUserFields(db, user.id, { githubHandle: "hubber" });
+    updateOrgUser(
+      db,
+      { userId: user.id, name: user.name, email: user.email, role: "member", githubHandle: "" },
+      ACTOR,
+    );
+    expect(resolveGithubHandle(db, "hubber")).toMatchObject({ kind: "found", userId: user.id });
+  });
+
+  it("a blank clears the link with its own audit row; an omitted field changes nothing", async () => {
+    const db = makeDb();
+    const user = await localUser(db, "Maya Lin", "maya@test.dev");
+    const edit = (githubHandle?: string | null) =>
+      updateOrgUser(
+        db,
+        { userId: user.id, name: user.name, email: user.email, role: "member", githubHandle },
+        ACTOR,
+      );
+    edit("octocat");
+    expect(edit().githubHandle).toBe("octocat");
+    expect(edit("").githubHandle).toBeNull();
+    expect(resolveGithubHandle(db, "octocat")).toEqual({ kind: "none" });
+    const [row] = listAuditEvents(db, { action: "org.user.github_handle.cleared" });
+    expect(row).toMatchObject({
+      subjectId: user.id,
+      details: { handle: null, previous: "octocat" },
+    });
+    expect(() => edit("not a handle!")).toThrowError("Enter a GitHub username.");
   });
 });
 

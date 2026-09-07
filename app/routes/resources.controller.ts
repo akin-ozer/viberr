@@ -9,7 +9,11 @@ import {
   createConversation,
   requireConversation,
 } from "~/server/controller/controller-conversations.server";
-import { runControllerTurn } from "~/server/controller/controller-run.server";
+import {
+  CONTROLLER_NOT_CONNECTED_NOTE,
+  runControllerTurn,
+} from "~/server/controller/controller-run.server";
+import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import {
   conversationMatchesScope,
   DOCK_NEW_CONVERSATION,
@@ -25,7 +29,10 @@ import { assertProjectAction } from "~/server/auth/project-authority.server";
  *
  *   GET  ?project=&task=&c=   → { view } for the scope the person is standing in
  *   POST intent=send          → records the message, runs the turn, answers
- *                               { ok, conversationId }
+ *                               { ok, conversationId }; a refused turn (no
+ *                               Claude connected for the asker, ruling 127)
+ *                               answers 409 { ok:false, error } and creates no
+ *                               thread for a new conversation (U35-4)
  *
  * The scope is authorized HERE, in the route, through the same chokepoint the
  * page routes use (`assertProjectAction` "any-member", so the org-admin
@@ -122,6 +129,16 @@ export async function action({ request }: Route.ActionArgs) {
     const surface = textField.parse(formData.get("surface")) || null;
     let conversationId = textField.parse(formData.get("conversationId")).trim();
     if (!conversationId || conversationId === DOCK_NEW_CONVERSATION) {
+      // U35-4 (pass 35): the dock disables its composer for a person with no
+      // Claude connected (ruling 127), and this door used to answer 200 anyway,
+      // creating a thread whose only reply was the refusal. Refuse here, with
+      // the same sentence, before any thread exists.
+      if (!isBackendAvailableFor(db, auth.user.id, "claude")) {
+        return data(
+          { ok: false as const, error: CONTROLLER_NOT_CONNECTED_NOTE },
+          { status: 409 },
+        );
+      }
       conversationId = createConversation(db, {
         userId: auth.user.id,
         userLabel: auth.user.email,
@@ -139,7 +156,7 @@ export async function action({ request }: Route.ActionArgs) {
         return data({ ok: false as const, error: "Conversation not found." }, { status: 404 });
       }
     }
-    await runControllerTurn(db, {
+    const result = await runControllerTurn(db, {
       conversationId,
       text,
       user: {
@@ -150,6 +167,14 @@ export async function action({ request }: Route.ActionArgs) {
       },
       surface,
     });
+    if (result.state === "refused") {
+      // The refusal note is in the transcript (a reload still shows it); the
+      // door itself no longer says yes to a message nothing will answer.
+      return data(
+        { ok: false as const, error: result.reason, conversationId },
+        { status: 409 },
+      );
+    }
     return { ok: true as const, conversationId };
   } catch (cause) {
     return appErrorResponse(cause);

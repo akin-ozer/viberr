@@ -292,7 +292,12 @@ and the note itself, used to assert the reused-key origin alone.)*
   exactly one non-disabled member through `users.github_handle`; the reconciler stores
   `pr.humanApproval` with a status (`counted`, `unlinked_handle`, `ambiguous_handle`,
   `not_a_member`, `stale_revision`) and the binding is re-checked on every read.
-  GitHub's own review-state pill is informational, not a gate.
+  GitHub's own review-state pill is informational, not a gate. `users.github_handle`
+  has two writers (ruling 154): GitHub OAuth sign-in syncs it from the provider's
+  login for a GitHub account, and an org admin links it under Org settings, Users &
+  access for a local or Google account (`updateOrgUser`, audit
+  `org.user.github_handle.set`); the person cannot set their own. The `unlinked_handle`
+  refusal names both doors.
 - **Acceptance gate order**: archived → closed PR (terminal, withdraws force-accept)
   → stage boundary → required reviewers → live no-change probe → verdict gate → open
   blocked packet → **unpushed delivered revision** (ruling 135) → conflicting PR. Human
@@ -438,3 +443,8 @@ never gets the tool because a Codex mount would hand the child the credential.
 - Ruling 18 promised that "a refused workflow-file push surfaces as a scope violation";
   until pass 34 nothing implemented it (git push rejections never reached the violation
   path). Ruling 144 implements the promise and adds the advisory and the pre-push refusal.
+- Until pass 35 (2026-09-06) this page, `task-lifecycle.md` and ruling 68 never said that
+  `users.github_handle` was written only by GitHub OAuth sign-in, so on a deployment
+  signing in locally every GitHub approval landed as `unlinked_handle` and the refusal
+  sent people to a profile card that offered nothing to connect. Ruling 154 adds the org
+  admin's field and rewrites the refusal.

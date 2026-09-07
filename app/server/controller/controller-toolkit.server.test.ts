@@ -133,6 +133,120 @@ describe("the tool surface itself encodes the invariants", () => {
     }
     // The whole surface is enumerated so a new tool is a deliberate decision.
     expect(names.length).toBeGreaterThanOrEqual(25);
+    // Ruling 153 (pass 35, G35-1): the wall-clock half of setting a project
+    // up. Canary: remove either `add(` registration.
+    expect(names).toContain("schedule_task_action");
+    expect(names).toContain("cancel_task_schedule");
+  });
+});
+
+/**
+ * Ruling 153 (pass 35, G35-1): the controller had no schedule tool at all, so
+ * the one agent meant to set a project up could not do the wall-clock half of
+ * it ("There is no scheduling tool in my set"). Both tools take the tier the
+ * task page's schedule form needs (`run-agents`, maintainer+).
+ */
+describe("schedule_task_action and cancel_task_schedule (ruling 153)", () => {
+  interface TaskRead {
+    schedules: { id: string; action: string; status: string; profileId: string | null }[];
+  }
+
+  it("a maintainer schedules an operator re-run; the entry is on task.md with the controller label; a viewer is refused", async () => {
+    const denied = await call(ids.viewer, "schedule_task_action", {
+      taskKey: "VIB-142",
+      agent: "operator",
+      delayMinutes: 5,
+    });
+    expect(denied).toBe(
+      "[denied] Scheduling a run needs the maintainer role (or project admin) in this project.",
+    );
+
+    const reply = await call(ids.maintainer, "schedule_task_action", {
+      taskKey: "VIB-142",
+      agent: "operator",
+      delayMinutes: 5,
+      prompt: "Re-check the review.",
+    });
+    expect(reply).toMatch(
+      // The id's alphabet is base64url (`newId`), so `-` and `_` are legal.
+      /^\[done\] Scheduled: an operator re-run on VIB-142 at \d{4}-\d{2}-\d{2}T[^ ]+ \(sch_[A-Za-z0-9_-]+\)\. It runs on the profile deployed when it fires\.$/,
+    );
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const file = readTaskFile({ projectSlug: SLUG, taskKey: "VIB-142", dataRoot: app.dataRoot })!;
+    const entry = file.parsed.frontmatter.schedules.find((s) => s.status === "pending")!;
+    expect(entry).toMatchObject({
+      action: "run-operator",
+      status: "pending",
+      profileId: null,
+      prompt: "Re-check the review.",
+    });
+    expect(entry.createdByLabel).toContain("via controller");
+    const audit = listAuditEvents(app.db, { action: "task.schedule.created" })[0]!;
+    expect(audit).toMatchObject({ taskKey: "VIB-142", details: { scheduleId: entry.id } });
+    expect(audit.actorLabel).toContain("via controller");
+
+    // get_task lists the pending entry (ruling 153).
+    // SAFETY: the tool answers the JSON it built; `schedules` is its own field.
+    const read = JSON.parse(await call(ids.maintainer, "get_task", { taskKey: "VIB-142" })) as TaskRead;
+    expect(read.schedules.map((s) => s.id)).toContain(entry.id);
+
+    // Cancel: done once, noop after.
+    expect(
+      await call(ids.maintainer, "cancel_task_schedule", { taskKey: "VIB-142", scheduleId: entry.id }),
+    ).toBe(`[done] Schedule ${entry.id} on VIB-142 cancelled.`);
+    expect(
+      await call(ids.maintainer, "cancel_task_schedule", { taskKey: "VIB-142", scheduleId: entry.id }),
+    ).toBe(`[noop] ${entry.id} is not pending on VIB-142.`);
+    expect(listAuditEvents(app.db, { action: "task.schedule.cancelled" })[0]).toMatchObject({
+      taskKey: "VIB-142",
+      details: { scheduleId: entry.id },
+    });
+    // SAFETY: the same tool, the same `schedules` field it built.
+    const after = JSON.parse(await call(ids.maintainer, "get_task", { taskKey: "VIB-142" })) as TaskRead;
+    expect(after.schedules.map((s) => s.id)).not.toContain(entry.id);
+  });
+
+  it("keeps the task page's bounds and schedules a deployed agent by name", async () => {
+    expect(
+      await call(ids.maintainer, "schedule_task_action", { taskKey: "VIB-142", agent: "operator" }),
+    ).toBe("[error] Schedule between 1 minute and 28 days out.");
+    expect(
+      await call(ids.maintainer, "schedule_task_action", {
+        taskKey: "VIB-142",
+        agent: "operator",
+        delayMinutes: 1e15,
+      }),
+    ).toBe("[error] Schedule between 1 minute and 28 days out.");
+    expect(
+      await call(ids.maintainer, "schedule_task_action", {
+        taskKey: "VIB-142",
+        agent: "operator",
+        dueAt: new Date(Date.now() + 2 * 60_000).toISOString(),
+        prompt: "x".repeat(4001),
+      }),
+    ).toBe("[error] Keep the run prompt under 4000 characters.");
+    const agent = await call(ids.maintainer, "schedule_task_action", {
+      taskKey: "VIB-142",
+      agent: "developer",
+      dueAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+      prompt: "Implement the change.",
+    });
+    expect(agent).toMatch(/^\[done\] Scheduled: a Developer run on VIB-142 at /);
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const file = readTaskFile({ projectSlug: SLUG, taskKey: "VIB-142", dataRoot: app.dataRoot })!;
+    const entry = file.parsed.frontmatter.schedules.find(
+      (s) => s.status === "pending" && s.action === "run-agent",
+    )!;
+    expect(entry.profileId).toBe("developer");
+    await call(ids.maintainer, "cancel_task_schedule", { taskKey: "VIB-142", scheduleId: entry.id });
+    // A profile nobody deployed is refused by the writer's own sentence.
+    expect(
+      await call(ids.maintainer, "schedule_task_action", {
+        taskKey: "VIB-142",
+        agent: "ghost-profile",
+        delayMinutes: 5,
+      }),
+    ).toContain('"ghost-profile" is not deployed on this project.');
   });
 });
 
@@ -1034,6 +1148,110 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
       mcps: [],
       kbs: ["grant-probe-handbook"],
     });
+  });
+
+  /**
+   * Ruling 153 (pass 35, G35-2): the template's default model and effort are
+   * settable here, checked by name (ruling 139), and the reply states what a
+   * deploy will take. U35-1: the name is stored as the person meant it.
+   * Canary: drop `model`/`effort` from the `SaveGagentInput` the tool builds.
+   */
+  it("ruling 153 / U35-1: sets the template's model and effort by name, and decodes the name", async () => {
+    const created = await call(ids.orgAdmin, "save_global_agent", {
+      name: "Test &amp; CI Engineer",
+      backend: "codex",
+      summary: "Runs the suite on Astra.",
+      stages: ["impl"],
+      model: "gpt-6-astra",
+      effort: "medium",
+    });
+    expect(created).toContain("[done] Test & CI Engineer created.");
+    expect(created).toContain("Template defaults: Codex, model gpt-6-astra, effort medium.");
+    const rows = await listJson<{ id: string; name: string; model: string; effort: string }>(
+      "list_global_agents",
+    );
+    expect(rows.find((r) => r.id === "test-ci-engineer")).toMatchObject({
+      name: "Test & CI Engineer",
+      model: "gpt-6-astra",
+      effort: "medium",
+    });
+    const refused = await call(ids.orgAdmin, "save_global_agent", {
+      id: "test-ci-engineer",
+      name: "Test & CI Engineer",
+      backend: "codex",
+      summary: "Runs the suite on Astra.",
+      stages: ["impl"],
+      effort: "ultra",
+    });
+    expect(refused).toContain('[error] "ultra" is not an effort tier Codex offers');
+    expect(
+      await call(ids.orgAdmin, "save_global_agent", {
+        name: "<b>Bold</b>",
+        backend: "codex",
+        summary: "s",
+        stages: ["impl"],
+      }),
+    ).toBe("[error] Names cannot contain < or > or control characters.");
+  });
+
+  /**
+   * Ruling 156 (pass 35, F35-7): a library deploy COPIES the template's grants
+   * onto `project.md` and a run mounts that copy, so a template grant never
+   * reached a deployed project and the tool answered a bare `[done]`. The reply
+   * is built from the result now: it names every copy that differs, what it
+   * lacks, and the two doors. Canary: return the bare toast from the tool.
+   */
+  it("ruling 156: names the diverged copy and how to update it, then copies the grants with propagate: true", async () => {
+    interface ProjectRead {
+      agents: {
+        profileId: string;
+        resources: { skills: string[]; mcps: string[]; kb: string[] };
+        templateDrift: { missing: { mcps: string[] } } | null;
+      }[];
+    }
+    const deployed = await call(ids.projectAdmin, "deploy_agent", { profileId: AGENT_ID });
+    expect(deployed).toContain("[done] Grant Probe Writer deployed");
+    const base = {
+      id: AGENT_ID,
+      name: "Grant Probe Writer",
+      backend: "claude",
+      summary: "Writes and edits documentation files only.",
+      stages: ["impl"],
+    };
+    const edited = await call(ids.orgAdmin, "save_global_agent", { ...base, mcps: [catalog.mcp.key] });
+    expect(edited).toMatch(
+      /^\[done\] Grant Probe Writer updated\. 1 project copy does not carry this change: viberr-core is missing MCP server grant-probe-server\. Call save_global_agent again with propagate: true/,
+    );
+    expect(edited).toContain("an org admin takes the template's grants on that project's Agents page");
+    // SAFETY: the tool answers the JSON it built; the fields asserted are its own.
+    const before = JSON.parse(await call(ids.projectAdmin, "get_project")) as ProjectRead;
+    const copyBefore = before.agents.find((a) => a.profileId === AGENT_ID)!;
+    expect(copyBefore.resources.mcps).toEqual([]);
+    expect(copyBefore.templateDrift).toMatchObject({ missing: { mcps: ["grant-probe-server"] } });
+    const listed = await listJson<{ id: string; copiesDiffering: string[] }>("list_global_agents");
+    expect(listed.find((r) => r.id === AGENT_ID)?.copiesDiffering).toEqual(["viberr-core"]);
+
+    const propagated = await call(ids.orgAdmin, "save_global_agent", {
+      ...base,
+      mcps: [catalog.mcp.key],
+      propagate: true,
+    });
+    expect(propagated).toContain(
+      "Grants copied to 1 project: viberr-core (added MCP server grant-probe-server).",
+    );
+    // SAFETY: the same tool answer, read after the propagation.
+    const after = JSON.parse(await call(ids.projectAdmin, "get_project")) as ProjectRead;
+    const copyAfter = after.agents.find((a) => a.profileId === AGENT_ID)!;
+    expect(copyAfter.resources.mcps).toEqual(["grant-probe-server"]);
+    expect(copyAfter.templateDrift).toBeNull();
+    const listedAfter = await listJson<{ id: string; copiesDiffering: string[] }>("list_global_agents");
+    expect(listedAfter.find((r) => r.id === AGENT_ID)?.copiesDiffering).toEqual([]);
+    expect(await call(ids.orgAdmin, "save_global_agent", base)).toContain(
+      "Every project copy carries the template's grants.",
+    );
+    const audit = listAuditEvents(app.db, { action: "project.agent_profile.resources_synced" })[0]!;
+    expect(audit).toMatchObject({ projectSlug: SLUG, subjectId: AGENT_ID });
+    expect(audit.actorLabel).toContain("via controller");
   });
 });
 

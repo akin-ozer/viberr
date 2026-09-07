@@ -599,7 +599,9 @@ function ProfileGithub({
                 ? user.githubHandle
                   ? `@${user.githubHandle} · GitHub sign-in`
                   : "linked · GitHub sign-in"
-                : "not connected"}
+                : user.githubHandle
+                  ? `@${user.githubHandle} · linked by an org admin`
+                  : "not connected"}
             </span>
           </span>
         </div>
@@ -607,12 +609,15 @@ function ProfileGithub({
       {!showConnectAffordance ? (
         // Unconfigured + unconnected: a quiet, honest one-liner — no warn chips,
         // no Connect that could only produce "GitHub sign-in couldn't start".
+        // Ruling 154: with an admin-linked handle the line says what that
+        // link does; the person cannot change it here (the verdict path
+        // counts approvals by it), so there is no field.
         <div className="pol-note">
-          <Icon name="lock" />
+          <Icon name={user.githubHandle ? "github" : "lock"} />
           <span>
-            GitHub sign-in isn't configured on this deployment, so there's no
-            personal GitHub identity to connect. Your actions record under your
-            workspace identity above.
+            {user.githubHandle
+              ? "An org admin linked your GitHub handle, so your approvals on review pull requests count as the review verdict."
+              : "GitHub sign-in isn't configured on this deployment, so there's no personal GitHub identity to connect. Your actions record under your workspace identity above."}
           </span>
         </div>
       ) : (

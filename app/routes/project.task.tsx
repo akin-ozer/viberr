@@ -59,6 +59,7 @@ import {
 import {
   listDeployedSpecialists,
   removeReviewer,
+  isDispatchHeld,
   startAgentRun,
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
@@ -894,7 +895,20 @@ export async function action({ request, params }: Route.ActionArgs) {
           dispatch.directive = prompt;
           dispatch.directiveFrom = dispatcherName;
         }
-        const result = await startAgentRun(db, dispatch, actor);
+        let result: Awaited<ReturnType<typeof startAgentRun>>;
+        try {
+          result = await startAgentRun(db, dispatch, actor);
+        } catch (error) {
+          // Ruling 152(c) (pass 35, G35-4): a hold is not a refusal. The
+          // dispatcher already scheduled the retry for the reopen instant and
+          // put the prompt on that schedule, so the person reads the hold as
+          // the outcome and no hand-off comment is written for a run that
+          // has not started.
+          if (isDispatchHeld(error)) {
+            return { ok: true as const, intent, toast: error.userMessage };
+          }
+          throw error;
+        }
         // R21-9's law, applied to the dispatch prompt: a directive that reaches
         // an agent off the record is invisible to supervision — record it as the
         // human's own timeline comment addressed to the agent. After the start,

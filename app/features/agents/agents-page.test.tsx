@@ -158,6 +158,8 @@ function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
     // OBS-7: the default fixture is a deployment that still tracks its global
     // base; the fork case sets this explicitly.
     customized: false,
+    // Ruling 156: the grants signal beside it; the drift case sets it.
+    templateDrift: null,
     desc: "Implements stage work on the task-key branch.",
     definition: "",
     stages: ["ready", "impl"],
@@ -337,6 +339,130 @@ describe("ProfileDetail", () => {
     expect(
       scopeLine({ scope: "Created in Viberr Core", customized: false }),
     ).toBe("Created in Viberr Core");
+  });
+
+  /**
+   * Ruling 156 (pass 35, F35-7): a library deploy COPIES the template's grants,
+   * and a run mounts that copy, so a template grant never reached this project
+   * while the card read "MCP servers: None" with no divergence marker. The
+   * card names the exact difference under each list and on the scope line;
+   * only an org admin gets the button (owner, Q35-8). Canary: drop the `drift`
+   * prop from the MCP `ResGroup`.
+   */
+  it("ruling 156: a copy whose grants differ says so, and only an org admin gets the button", () => {
+    const templateDrift = {
+      missing: { skills: [], mcps: ["context7"], kb: [] },
+      extra: { skills: ["k8s-notes"], mcps: [], kb: [] },
+      templateResources: { skills: [], mcps: ["context7"], kb: [] },
+    };
+    const onSync = vi.fn();
+    const detail = (canSyncTemplate: boolean) => (
+      <ProfileDetail
+        a={mkProfile({
+          templateDrift,
+          resources: { skills: ["k8s-notes"], mcps: [], kb: [] },
+        })}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        canSyncTemplate={canSyncTemplate}
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+        onSyncResources={onSync}
+      />
+    );
+    const { container, getByText } = render(detail(true));
+    expect(container.querySelector(".ag-scope")!.textContent).toBe(
+      "Global base · grants differ from the template",
+    );
+    expect(
+      getByText("Differs from the template: context7 is granted there, not here."),
+    ).toBeTruthy();
+    expect(
+      getByText("Differs from the template: k8s-notes is granted here, not on the template."),
+    ).toBeTruthy();
+    fireEvent.click(getByText("Use the template's grants"));
+    expect(onSync).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    // A project admin who is not an org admin: the marker, never the button.
+    const { queryByText, container: again } = render(detail(false));
+    expect(queryByText("Use the template's grants")).toBeNull();
+    expect(again.querySelector(".ag-scope")!.textContent).toContain(
+      "grants differ from the template",
+    );
+    cleanup();
+
+    // A copy that matches its template says nothing about grants.
+    const { container: clean, queryByText: none } = render(
+      <ProfileDetail
+        a={mkProfile({})}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        canSyncTemplate
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(clean.querySelector(".ag-scope")!.textContent).toBe("Global base");
+    expect(none(/Differs from the template/)).toBeNull();
+    expect(none("Use the template's grants")).toBeNull();
+  });
+
+  it("ruling 156: the page's button submits sync-profile-resources with the record it rendered", async () => {
+    let posted: Record<string, string> | null = null;
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/agents",
+        Component: () => (
+          <ToastProvider>
+            <AgentsPage
+              profiles={[
+                mkProfile({
+                  fingerprint: "fp-live",
+                  templateDrift: {
+                    missing: { skills: [], mcps: ["context7"], kb: [] },
+                    extra: { skills: [], mcps: [], kb: [] },
+                    templateResources: { skills: [], mcps: ["context7"], kb: [] },
+                  },
+                }),
+              ]}
+              deployments={[]}
+              stages={STAGES}
+              workflow={WORKFLOW}
+              projectSlug="viberr-core"
+              projectName="Viberr Core"
+              myRole="admin"
+              viewerIsOrgAdmin
+            />
+          </ToastProvider>
+        ),
+        action: async ({ request }) => {
+          const fd = await request.formData();
+          posted = {};
+          for (const [k, v] of fd.entries()) posted[k] = String(v);
+          return { ok: true, toast: "stub done", profileId: "developer" };
+        },
+      },
+    ]);
+    const { getByText } = render(
+      <Stub initialEntries={["/projects/viberr-core/agents?profile=developer"]} />,
+    );
+    fireEvent.click(getByText("Use the template's grants"));
+    await waitFor(() =>
+      expect(posted).toMatchObject({
+        intent: "sync-profile-resources",
+        profileId: "developer",
+        fingerprint: "fp-live",
+      }),
+    );
   });
 
   /**

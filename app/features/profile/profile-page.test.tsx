@@ -297,6 +297,23 @@ describe("ProfilePage", () => {
     expect(getByText(/GitHub sign-in isn't configured on this deployment/)).toBeTruthy();
   });
 
+  it("ruling 154: an admin-linked handle reads as such on an OAuth-less deployment, with no Connect", () => {
+    const { getByText } = renderProfile({
+      ...BASE,
+      githubConfigured: false,
+      user: { ...BASE.user, githubConnected: false, githubHandle: "arda-kaya" },
+    });
+    const github = githubPanel(getByText);
+    expect(github.textContent).toContain("@arda-kaya · linked by an org admin");
+    expect(github.textContent).toContain(
+      "An org admin linked your GitHub handle, so your approvals on review pull requests count as the review verdict.",
+    );
+    expect(github.textContent).not.toContain("isn't configured on this deployment");
+    // The person cannot change it here: no field, no Connect, no warn chips.
+    expect(github.querySelector("input")).toBeNull();
+    expect(github.querySelector(".cred-warn")).toBeNull();
+  });
+
   it("GitHub identity: connected card offers Disconnect", () => {
     const { container } = renderProfile({
       ...BASE,

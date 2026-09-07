@@ -907,30 +907,40 @@ describe("app.css breakpoints (P16-F8)", () => {
   });
 
   /**
-   * U7 — the task detail's two columns are ordered in the MARKUP
-   * (task-detail-page.tsx: `.detail-side` first, asserted there) and placed by
-   * grid cell here, so the sighted stack and the screen-reader/focus order are
-   * the same order at every width.
+   * U7 / U35-2 — the task detail's three regions are ordered in the MARKUP
+   * (task-detail-page.tsx: `.detail-head`, then `.detail-side`, then
+   * `.detail-main`, asserted in task-disposition.test.tsx) and placed by grid
+   * cell here, so the sighted stack and the screen-reader/focus order are the
+   * same order at every width.
    *
    * Pass 20 did it with `order: -1` in the 1100px block instead, which fixed the
    * paint and left a keyboard user tabbing to "Accept completion → Done" LAST,
    * after every timeline entry (WCAG 2.2 SC 1.3.2 / 2.4.3). Re-adding `order`
-   * to either column would silently reopen that split, so the sheet is pinned
+   * to any region would silently reopen that split, so the sheet is pinned
    * against it: the desktop arrangement must come from placement, and the
-   * stacked one from source order.
+   * stacked one from source order. Pass 35 (U35-2) added the head region: the
+   * title, goal and open packet span both columns on row 1, so a phone reads
+   * them before the metadata panels instead of two screens after them.
    */
-  it("U7: the detail columns are placed by grid cell — never by `order`", () => {
-    const rules = CODE.match(/\.detail-(main|side)[^{]*\{[^}]*\}/g) ?? [];
-    expect(rules.length, "both columns must still be styled").toBeGreaterThan(1);
+  it("U7 / U35-2: the detail regions are placed by grid cell — never by `order`", () => {
+    const rules = CODE.match(/\.detail-(head|main|side)[^{]*\{[^}]*\}/g) ?? [];
+    expect(rules.length, "all three regions must still be styled").toBeGreaterThan(2);
     for (const rule of rules) {
-      expect(rule, `\`order\` is banned on the detail columns:\n${rule}`).not.toMatch(
+      expect(rule, `\`order\` is banned on the detail regions:\n${rule}`).not.toMatch(
         /(^|[\s;{])order\s*:/,
       );
     }
-    // The desktop two-column arrangement, stated explicitly so source order
-    // cannot decide which side of the page a column lands on.
-    expect(CODE).toMatch(/\.detail-main\s*\{[^}]*grid-column:\s*1[^}]*grid-row:\s*1/);
-    expect(CODE).toMatch(/\.detail-side\s*\{[^}]*grid-column:\s*2[^}]*grid-row:\s*1/);
+    // The desktop arrangement, stated explicitly so source order cannot decide
+    // which side of the page a region lands on: the head across both columns
+    // on the first row, main left and side right on the second.
+    expect(CODE).toMatch(/\.detail-head\s*\{[^}]*grid-column:\s*1 \/ -1[^}]*grid-row:\s*1/);
+    expect(CODE).toMatch(/\.detail-main\s*\{[^}]*grid-column:\s*1[^}]*grid-row:\s*2/);
+    expect(CODE).toMatch(/\.detail-side\s*\{[^}]*grid-column:\s*2[^}]*grid-row:\s*2/);
+    // And the 1100px collapse releases all three into the single column.
+    const collapse = CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/)![1];
+    expect(collapse).toMatch(
+      /\.detail-head,\s*\.detail-main,\s*\.detail-side\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*auto/,
+    );
   });
 });
 

@@ -57,14 +57,26 @@ describe("/projects/:slug/review", () => {
     const { cookie } = await app.cookieFor(ardaId);
     const result = await runLoader("viberr-core", cookie);
 
-    expect(result.total).toBe(2);
+    // U35-5 (pass 35): three, not two. The seeded VIB-160 sits at In Progress
+    // with a verdict-capable reviewer whose verdict on the current revision is
+    // request_changes (validation "failing"), which is review work in flight
+    // wherever the stage is, so it is listed under "Still in review" naming
+    // its stage. It was invisible while the queue keyed on the review stage.
+    expect(result.total).toBe(3);
     // F10-11/F10-15: acceptance readiness is revision-bound now. VIB-142 has a
     // verdict-capable reviewer engaged but no approving verdict on its current
     // revision (validation "changed"), so it is NOT acceptance-ready — it sits
     // in "Still in review" with an honest block reason, not the acceptance
     // panel. VIB-145 waits on agents.
     expect(result.ready.map((t) => t.key)).toEqual([]);
-    expect(result.working.map((t) => t.key)).toEqual(["VIB-142", "VIB-145"]);
+    expect(result.working.map((t) => t.key)).toEqual(["VIB-142", "VIB-145", "VIB-160"]);
+
+    const vib160 = result.working.find((t) => t.key === "VIB-160")!;
+    expect(vib160.atReviewStage).toBe(false);
+    expect(vib160.stageName).toBe("In Progress");
+    expect(reviewRowSub(vib160)).toBe(
+      "Review in progress at In Progress · changes requested",
+    );
 
     const vib142 = result.working.find((t) => t.key === "VIB-142")!;
     expect(vib142.packet?.kind).toBe("Completion report");
@@ -113,6 +125,8 @@ describe("/projects/:slug/review", () => {
     const bare: ReviewRowView = {
       key: "VIB-999",
       title: "t",
+      stageName: "Review",
+      atReviewStage: true,
       priority: "normal",
       labels: [],
       dueDate: null,

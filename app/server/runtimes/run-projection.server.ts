@@ -205,6 +205,12 @@ function projectRow(
       ? undefined
       : (terminal?.failure?.kind ??
         TAGGED_FAILURE_KINDS.find((k) => (terminal?.tag ?? "").endsWith(`·${k}`)));
+  // U35-11: the origin travels with the kind, so the footer can say "could
+  // not be reached from this deployment" instead of blaming the provider.
+  const failureOrigin: "provider" | "local" | undefined =
+    failureKind === "overloaded" && terminal?.failure?.origin
+      ? terminal.failure.origin
+      : undefined;
   const classifiedUnavailable =
     failureKind === "quota" ||
     failureKind === "auth" ||
@@ -262,7 +268,15 @@ function projectRow(
     startedAt: row.started_at,
     finished,
     turns: row.turns,
-    tokens: row.input_tokens + row.output_tokens,
+    // F35-1: null until a usage envelope has landed (a Codex run before its
+    // turn ends, a Claude run before its first API message), an ESTIMATE
+    // while the row is live and no provider figure has replaced it, plain
+    // once one has or the run is over.
+    tokens:
+      row.usage_final === 0 && row.input_tokens + row.output_tokens === 0 && !finished
+        ? null
+        : row.input_tokens + row.output_tokens,
+    tokensEstimated: row.usage_final === 0 && !finished,
     lines,
     raw,
     // P13-D-11: the count of lines that EXIST, not of the ones this payload
@@ -272,6 +286,7 @@ function projectRow(
     logWindow,
   };
   if (failureKind) view.failureKind = failureKind;
+  if (failureOrigin) view.failureOrigin = failureOrigin;
   // Absent entirely on a run that failed for any other reason. `altBackend` is
   // the D4 offer and rides only when there is a person for the retry to bill
   // (ruling 127): without it the panel states the failure and offers nothing,

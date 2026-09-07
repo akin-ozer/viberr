@@ -103,7 +103,8 @@ task leaves the entry stage.
 no counter value). The task is written with the list, `waiting: none`, a "Waits on
 other work" note, and its stored readiness at the birth value `input_required`; the
 `blocked` it shows is the derived floor. The controller's `create_task` and a goal
-link's declared `blockedBy` both come in through this door.
+link's declared `blockedBy` both come in through this door; from then on the link's
+record follows the task's list (ruling 155, §6).
 
 
 ## 4. Stages and the workflow graph
@@ -186,6 +187,12 @@ profile's stages.
   (`deriveDisplayReadiness`, ruling 91), `goal_edit_pending` while a decided `edit_goal`
   packet waits for the edited goal (ruling 138: below `agent_working`, above
   `input_required` and a stored `blocked`), and "accepted" for terminal-stage tasks.
+  A stored `blocked` never yields to a run, with one exception (ruling 157): a
+  stored block with no open packet and no dependency list is a hold, and while an
+  agent carries such a hold the display reads `agent_working`, exactly as the server
+  lifts it on the record; a diagnostics floor (derived `blocked` over a stored
+  `ready`), a dependency hold and an open `blocked` packet keep reading `blocked`
+  (`deriveDisplayReadiness`, fourth argument from `stored_readiness` and the list).
 - **Waiting**: `human | agent | none`. Raising a packet or a recommendation flips it
   to `human`; dispatching an agent sets `agent`; terminal forces `none`. It is a
   display flag: `liveRuns` is the only proof a run is in flight.
@@ -228,7 +235,13 @@ NEVER complete is noticed by the same sweep, whatever killed it (an archived tas
 cancelled goal, a removed link, a reference to nothing): ONE "Waiting on work that cannot
 complete" note, one notification, `waiting: human`, and the list left for a person to
 edit. A task that already reached the terminal stage has its list cleared quietly — no
-note, no operator turn.
+note, no operator turn. When the task carries a goal link (`goalRef`) and that link is
+`active` on it, every one of these writes, the quiet terminal clear included, mirrors
+the task's list onto the goal file's `links[].blockedBy` (ruling 155, `mirrorLinkWait`)
+with a goal timeline line naming the task and who changed it (the engine as "Viberr
+(release)"), and rebuilds the goal projection: the Goals panel's "waits on" and a later
+retry of the link read the list the task last held. The link's `edit_link` accepts
+`blockedBy` alone on an active link and forwards it to this same writer.
 
 ## 7. Ownership, comments, mentions
 
@@ -343,6 +356,11 @@ anything ambiguous fails closed with the reason recorded.
   `awaiting`, so the card, the hero, the queue and the rail all read the packet as decided
   after a reload, and the editor prefill is `goalDraftForOption` (the option's `goalDraft`,
   else its title and detail) on both the confirm and the reload path (ruling 138).
+  The mapping composes it once as `packet.goalDraft` (pass 35, F35-6): the decided
+  card prints it under the decision line as "Requested goal (opens in the editor)",
+  its "Edit the goal" opens it, and the hero's own Edit under the goal seeds it too
+  while the packet waits, so a reload never hides the requested text or hands the
+  nearest door the goal the decision asked to replace.
   Saving the goal UNCHANGED while the packet awaits the edit is refused (F35-6, pass 35:
   "The goal reads exactly as before, so the requested edit has not landed. Open the
   requested goal from the decision card, or write the edit."); an unchanged save with
@@ -363,8 +381,10 @@ anything ambiguous fails closed with the reason recorded.
   all three, and the "Waiting on you" bell is marked read only when no card survives.
 - **Schedules** live in `task.md` `schedules[]`: `run-operator` (optional steer) or
   `run-agent` (a profile id and prompt; the profile must be deployed when the entry is
-  created). Creating one needs `run-agents`. Each run control carries a when-picker
-  (now, 5m, 1h, 6h, 24h). The runner ticks every 60 seconds, claims an occurrence
+  created). Creating one needs `run-agents`, through the task page's run controls or
+  the controller's `schedule_task_action` / `cancel_task_schedule` (ruling 153, pass
+  35: the entry carries the `<email> · via controller` label). Each run control
+  carries a when-picker (now, 5m, 1h, 6h, 24h). The runner ticks every 60 seconds, claims an occurrence
   before enqueuing (`pending → claimed → fired | failed`, `cancelled` by a human),
   never fires on a terminal or archived task, and resolves the **live** deployment at
   fire time (ruling 94). A fire-time refusal no retry can cure (profile undeployed,
@@ -379,7 +399,17 @@ anything ambiguous fails closed with the reason recorded.
   76 refuses for a person); one that was queued behind a live drive records
   `queued-behind-drive` at fire time and, if the drive leaves a packet open, its final
   `skipped-packet` row (`atDrain: true`) and a "Scheduled action skipped" note when it
-  reaches the front of the lease queue.
+  reaches the front of the lease queue. A dispatch of any kind (the Run control, an
+  @mention, the operator's `run_agent`, a schedule, `retry_other_backend`) into a
+  backend the instance already knows is out of quota for the account the run bills is
+  HELD (ruling 152(c), pass 35): no run, a "Dispatch held" note by the policy engine
+  naming the reopen instant and the provider's own words, a `task.agent.run_held` audit
+  row, and a `run-agent` schedule for one minute after the window reopens (thirty
+  minutes after the refusal when the provider named no instant) carrying the same
+  profile and prompt. The door reads "Held: Codex is out of quota until Sep 6, 2026 ·
+  18:18 UTC; Developer's run is scheduled for then." A hold is not a decision packet and
+  costs no operator turn; a scheduled occurrence that lands on a hold retires
+  `held-quota`.
 
 ## 10. Delivery
 
@@ -498,6 +528,22 @@ Every writer to the terminal stage goes through one contract:
 Post-acceptance: the task workspace is reclaimed once no run is live, goal chains
 reconcile, held dependents are swept (ruling 131(e): a task whose every `blockedBy`
 entry is now done is released), and the board renders "accepted".
+
+**The review queue's membership** (`review-queue.server.ts`, U35-5, pass 35) has two
+halves with two rules. "Waiting on your acceptance" is about the boundary: a
+non-archived task at the resolved review stage (the stage with the edge into the
+terminal stage) that waits on a human, whose acceptance nothing in the stack above
+refuses, for a viewer who may accept it (maintainer+, or the owner). "Still in review"
+is about review work, which the board defines by engagements and verdicts rather than
+by one stage id: every other non-archived, non-terminal task that sits at the review
+stage, or carries a pull request open for review (`pr.state: review`), or has a
+required reviewer (`verdictCapable`) whose verdict on the current revision is missing
+(`validation: changed`) or is request_changes (`failing`). On the default board the two
+rules coincide at Review; on a board whose reviews happen at Validation and Review while
+the edge into Done leaves Merge, the second rule is what lists the work. The row names
+its stage ("Review in progress at Validation · PR #8 · awaiting verdict"), the header
+reads "N in review · M waiting on your acceptance", and the workspace rail badge is the
+queue's `total`. Nothing before the boundary is ever offered for acceptance.
 
 ## 12. Archive and restore
 

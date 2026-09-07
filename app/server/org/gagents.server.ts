@@ -23,6 +23,18 @@ import {
 } from "./resources.server";
 import { conservativeGrantsFor } from "~/shared/capabilities";
 import { slugify } from "~/shared/ids/slugify";
+import { displayNameRefusal, normalizeDisplayName } from "~/shared/names";
+import {
+  assertEffortForBackend,
+  assertModelForBackend,
+  foreignModelBackend,
+} from "~/server/runtimes/model-catalog.server";
+import {
+  listTemplateResourceDrift,
+  propagateTemplateResources,
+  type PropagatedCopy,
+  type TemplateCopyDrift,
+} from "./template-propagation.server";
 
 /**
  * Global agent profile TEMPLATES (org-settings spec §3.7/§4.4) — the org
@@ -61,6 +73,11 @@ export interface GagentView {
   /** The markdown body — the agent's persona / system-prompt material. */
   persona: string;
   stages: string[];
+  /** Ruling 153 (pass 35, G35-2): the template's default model id for its
+   *  backend ("" = the backend default) and effort tier ("" = the backend
+   *  default); `deploy_agent` takes both when no override is given. */
+  model: string;
+  effort: string;
   skills: string[];
   mcps: string[];
   kbs: string[];
@@ -162,6 +179,8 @@ function toView(
     role: fm.role,
     persona: parsed.description,
     stages: fm.stages,
+    model: fm.model,
+    effort: fm.effort ?? "",
     skills: fm.resources.skills,
     mcps: fm.resources.mcps,
     kbs: fm.resources.kb,
@@ -345,6 +364,21 @@ export interface SaveGagentInput {
   skills?: string[];
   mcps?: string[];
   kbs?: string[];
+  /**
+   * Ruling 153 (pass 35, G35-2): the template's default model and effort,
+   * checked by name against `backend` (ruling 139). Both are merge fields on
+   * an edit: omitted keeps the stored value, `""` clears it. A backend switch
+   * whose stored model belongs to the other backend clears the model and the
+   * toast says so.
+   */
+  model?: string;
+  effort?: string;
+  /**
+   * Ruling 156 (pass 35, F35-7): also rewrite the grants of every project copy
+   * that no longer matches this template. Off by default: a project's copy is
+   * its own record. Only org admins reach this writer (owner, Q35-8).
+   */
+  propagate?: boolean;
 }
 
 type ProfileResources = AgentProfileFrontmatter["resources"];
@@ -372,15 +406,84 @@ function mergedResources(
 export interface SaveGagentResult {
   profile: GagentView;
   toast: string;
+  /**
+   * Ruling 156: the non-archived projects whose copy of the grants still
+   * differs from the template AFTER this save (and after any propagation).
+   * Empty on a create, which has no copies yet.
+   */
+  diverged: TemplateCopyDrift[];
+  /** The copies this save rewrote (only with `propagate: true`). */
+  propagated: PropagatedCopy[];
 }
 
-export function saveGlobalAgentProfile(
+/** The product's name for each backend, as the toasts spell it. */
+const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
+
+/**
+ * The model to store after one save (ruling 153): the caller's, checked by
+ * name against the backend; omitted keeps the stored one, `""` clears it. A
+ * stored model the NEW backend cannot run is cleared (it would be substituted
+ * silently at run time, F21-13's class) and the caller is told which backend
+ * it belonged to.
+ */
+interface TemplateModelDecision {
+  model: string;
+  /** The backend the stored model belonged to when the switch cleared it. */
+  clearedFrom: "codex" | "claude" | null;
+}
+
+function nextTemplateModel(
+  backend: "codex" | "claude",
+  stored: string,
+  input: SaveGagentInput,
+): TemplateModelDecision {
+  if (input.model !== undefined) {
+    const model = input.model.trim();
+    if (model) assertModelForBackend(backend, model);
+    return { model, clearedFrom: null };
+  }
+  const foreign = stored ? foreignModelBackend(backend, stored) : null;
+  if (foreign) return { model: "", clearedFrom: foreign };
+  return { model: stored, clearedFrom: null };
+}
+
+/** The effort to store: the caller's, checked by name; omitted keeps the
+ *  stored tier, `""` clears it. */
+function nextTemplateEffort(
+  backend: "codex" | "claude",
+  stored: string | undefined,
+  input: SaveGagentInput,
+): string | undefined {
+  if (input.effort === undefined) return stored;
+  const effort = input.effort.trim();
+  if (!effort) return undefined;
+  assertEffortForBackend(backend, effort);
+  return effort;
+}
+
+/** "1 project copy keeps its own grants" / "grants copied to 2 projects". */
+function copiesClause(diverged: TemplateCopyDrift[], propagated: PropagatedCopy[]): string | null {
+  if (propagated.length > 0) {
+    return `grants copied to ${propagated.length} project${propagated.length === 1 ? "" : "s"}`;
+  }
+  if (diverged.length > 0) {
+    return `${diverged.length} project cop${diverged.length === 1 ? "y keeps" : "ies keep"} ${diverged.length === 1 ? "its" : "their"} own grants`;
+  }
+  return null;
+}
+
+export async function saveGlobalAgentProfile(
   db: DatabaseSync,
   input: SaveGagentInput,
   actor: AuditActor,
   ctx: GagentContext = {},
-): SaveGagentResult {
-  const name = input.name.trim();
+): Promise<SaveGagentResult> {
+  // U35-1 (pass 35): the name as the person meant it, never as markup. The
+  // controller stored `Test &amp; CI Engineer` and every card printed the
+  // entity; the id was slugified from the escaped text.
+  const name = normalizeDisplayName(input.name);
+  const nameRefusal = displayNameRefusal(name);
+  if (nameRefusal) throw AppError.validation(nameRefusal);
   if (name.length < 2) throw AppError.validation("Give the profile a name.");
   if (input.stages.length === 0) {
     throw AppError.validation("Pick at least one eligible stage.");
@@ -393,6 +496,9 @@ export function saveGlobalAgentProfile(
     if (!existing || existing.frontmatter.kind !== "specialist") {
       throw AppError.notFound("No such agent profile.");
     }
+    // Ruling 139/153: both defaults are judged BEFORE anything is written.
+    const model = nextTemplateModel(backend, existing.frontmatter.model, input);
+    const effort = nextTemplateEffort(backend, existing.frontmatter.effort, input);
     // P13-AP-01/AP-02: `desc` (what the operator reads) is now rewritten on
     // edit, and the BODY carries the persona — an edited summary no longer
     // flattens a profile's system prompt, and a blank persona keeps the one
@@ -405,28 +511,69 @@ export function saveGlobalAgentProfile(
         role: input.role?.trim() || existing.frontmatter.role || name,
         desc: input.summary.trim(),
         backends: [backend],
+        model: model.model,
         stages: input.stages,
         resources: mergedResources(existing.frontmatter.resources, input),
       },
       description: persona || existing.description,
     };
+    // `effort` is optional on the file: a cleared tier leaves the key off
+    // rather than writing an empty string the tolerant reader would drop.
+    if (effort === undefined) delete merged.frontmatter.effort;
+    else merged.frontmatter.effort = effort;
     writeFileAtomic(
       agentProfileFilePath(input.id, ctx.dataRoot),
       serializeAgentProfile(merged),
     );
+    // Ruling 156: the copies are read AFTER the template write, so the list
+    // names exactly the projects this save did not reach.
+    let diverged = listTemplateResourceDrift(db, input.id, ctx);
+    let propagated: PropagatedCopy[] = [];
+    if (input.propagate && diverged.length > 0) {
+      propagated = await propagateTemplateResources(
+        db,
+        { profileId: input.id, projectSlugs: diverged.map((d) => d.projectSlug) },
+        actor,
+        ctx,
+      );
+      diverged = listTemplateResourceDrift(db, input.id, ctx);
+    }
     recordAudit(db, {
       action: "org.agent_profile.updated",
       actor,
       subjectKind: "agent_profile",
       subjectId: input.id,
-      details: { name, backend },
+      details: {
+        name,
+        backend,
+        model: model.model,
+        effort: effort ?? "",
+        diverged: diverged.map((d) => d.projectSlug),
+        propagated: propagated.map((p) => p.projectSlug),
+      },
     });
     const used = usedByProject(db)[input.id] ?? 0;
+    // Q35-11: the toast composes its clauses with middle dots, never a dash.
+    const clauses = [`${name} updated`, "running threads re-anchor on the next turn"];
+    if (model.clearedFrom) {
+      clauses.push(
+        `backend is now ${BACKEND_LABEL[backend]}; the stored model belonged to ${BACKEND_LABEL[model.clearedFrom]} and was cleared`,
+      );
+    }
+    const copies = copiesClause(diverged, propagated);
+    if (copies) clauses.push(copies);
     return {
       profile: toView(input.id, merged, used),
-      toast: `${name} updated — running threads re-anchor on next turn`,
+      toast: clauses.join(" · "),
+      diverged,
+      propagated,
     };
   }
+
+  const createModel = input.model?.trim() ?? "";
+  if (createModel) assertModelForBackend(backend, createModel);
+  const createEffort = input.effort?.trim() ?? "";
+  if (createEffort) assertEffortForBackend(backend, createEffort);
 
   const id = slugify(name);
   if (id.length < 2) throw AppError.validation("Give the profile a name.");
@@ -451,7 +598,7 @@ export function saveGlobalAgentProfile(
       desc: input.summary.trim(),
       icon: "cpu",
       backends: [backend],
-      model: "",
+      model: createModel,
       scope: "Global base",
       stages: input.stages,
       spanAll: false,
@@ -473,6 +620,8 @@ export function saveGlobalAgentProfile(
     },
     description: input.persona.trim() || input.summary.trim(),
   };
+  // Ruling 153: the template's default effort, only when the caller set one.
+  if (createEffort) created.frontmatter.effort = createEffort;
   writeFileAtomic(
     agentProfileFilePath(id, ctx.dataRoot),
     serializeAgentProfile(created),
@@ -482,11 +631,13 @@ export function saveGlobalAgentProfile(
     actor,
     subjectKind: "agent_profile",
     subjectId: id,
-    details: { name, backend },
+    details: { name, backend, model: createModel, effort: createEffort },
   });
   return {
     profile: toView(id, created, 0),
-    toast: `${name} created — add it to a project from Agents → Add from library`,
+    toast: `${name} created · add it to a project from Agents → Add from library`,
+    diverged: [],
+    propagated: [],
   };
 }
 

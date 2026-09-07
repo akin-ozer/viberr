@@ -2209,6 +2209,7 @@ describe("D6: consequential actions confirm before they act", () => {
     finished: null,
     turns: 1,
     tokens: 0,
+    tokensEstimated: false,
     lines: [],
     raw: [],
     lineCount: 0,
@@ -2303,7 +2304,7 @@ describe("D6: consequential actions confirm before they act", () => {
 });
 
 /**
- * U7 — D2's other half.
+ * U7 — D2's other half — and U35-2 (pass 35).
  *
  * UX spec §Breakpoint Strategy: *"the task detail's side-by-side regions stack,
  * preserving reading order: current state, latest packet, next action, then the
@@ -2314,26 +2315,58 @@ describe("D6: consequential actions confirm before they act", () => {
  * keyboard user then saw "Accept completion → Done" at the top of the page and
  * reached it LAST, after every timeline entry (WCAG 2.2 SC 1.3.2 / 2.4.3).
  *
- * The columns are ordered in the markup now and placed by grid cell in app.css,
- * so the desktop paint is unchanged while one order serves both. This asserts
- * the order and its CONTENT — a swap that moved empty divs would pass on order
- * alone.
+ * U7 answered by putting the side column first, but the task's name, its goal
+ * and the open decision packet lived in the main column, so a 390px viewport
+ * stacked the GitHub card, Current state, Details and Permissions ABOVE the
+ * title (y=1659 on KNC-6) and the question the packet asked (y=2070). The page
+ * is three regions now: `.detail-head` (title, goal, the open packet), then
+ * `.detail-side` (Current state first, with the next action), then
+ * `.detail-main` (runs and the timeline); placed by grid cell in app.css, so the
+ * desktop paint keeps two columns while one order serves both. This asserts the
+ * order and its CONTENT — a swap that moved empty divs would pass on order
+ * alone. Canary: swap the JSX regions back and the order assert is red.
  */
-describe("U7: the task detail's reading order matches its stacking rule", () => {
-  it("puts the current-state / acceptance column ahead of the timeline in the DOM", () => {
-    const { container } = renderPage({});
+describe("U7 / U35-2: the task detail's reading order matches its stacking rule", () => {
+  it("puts the title and the open packet first, current state next, the timeline last in the DOM", () => {
+    const { container } = renderPage({
+      task: {
+        packet: {
+          type: "blocked",
+          kind: "Blocked decision",
+          from: "Operator",
+          title: "Which spec wins?",
+          body: "The goal and the merged spec disagree.",
+          observations: [],
+          options: [
+            { kind: "edit_goal", t: "Align the goal", d: "", rec: true },
+            { kind: "redirect", t: "Redirect", d: "", rec: false },
+          ],
+        },
+      },
+    });
     const detail = container.querySelector(".detail")!;
-    const columns = Array.from(detail.children)
+    const regions = Array.from(detail.children)
       .map((el) => el.className)
-      .filter((c) => c === "detail-main" || c === "detail-side");
-    expect(columns).toEqual(["detail-side", "detail-main"]);
+      .filter((c) => c === "detail-head" || c === "detail-main" || c === "detail-side");
+    expect(regions).toEqual(["detail-head", "detail-side", "detail-main"]);
 
+    const head = detail.querySelector(".detail-head")!;
     const side = detail.querySelector(".detail-side")!;
     const main = detail.querySelector(".detail-main")!;
-    // The consequential action really is in the column that comes first…
+    // The head carries the task's name and the decision it asks for…
+    expect(head.querySelector(".task-hero h1")?.textContent).toBe("Compress long-running task timelines");
+    expect(head.querySelector(".packet")).not.toBeNull();
+    expect(head.textContent).toContain("Which spec wins?");
+    expect(main.querySelector(".packet")).toBeNull();
+    // …the head precedes the side rail, and the side rail precedes the main column.
+    expect(head.compareDocumentPosition(side) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(side.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The consequential action really is in the region that comes second…
     expect(side.textContent).toContain("Accept completion → Done");
     expect(main.textContent).not.toContain("Accept completion → Done");
-    // …and the timeline really is in the one that follows it.
+    // …Current state leads it (it carries the next action), ahead of GitHub…
+    expect(side.firstElementChild?.textContent).toContain("Accept completion → Done");
+    // …and the timeline really is in the region that follows both.
     expect(main.querySelector(".tl-list, .timeline, .tl-wrap")).not.toBeNull();
   });
 });

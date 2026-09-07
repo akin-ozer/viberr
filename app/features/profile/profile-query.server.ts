@@ -179,7 +179,8 @@ export interface ProfileView {
     avatarTone: string;
     hasPassword: boolean;
     githubConnected: boolean;
-    /** GitHub login captured at OAuth sign-in (Phase 10); null until then. */
+    /** GitHub login captured at OAuth sign-in (Phase 10) or linked by an org
+     *  admin under Users & access (ruling 154); null until either. */
     githubHandle: string | null;
   };
   /** All project memberships, most-active project first. */

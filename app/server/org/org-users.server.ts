@@ -37,6 +37,7 @@ import {
 import { listProjects } from "~/server/projections/board-query.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { releaseTasksOwnedBy } from "~/server/tasks/task-actions.server";
+import { isValidGithubHandle, normalizeHandle } from "~/shared/github-handle";
 import { newId } from "~/shared/ids/new-id.server";
 import { initialsOfName } from "~/shared/mapping/actor.server";
 import type { UserRecord, UserRole } from "~/shared/mapping/user.server";
@@ -80,6 +81,10 @@ export interface OrgUserView {
   /** Password-reset pending (local; distinct from initial "invited"). */
   pwreset: boolean;
   disabled: boolean;
+  /** Ruling 154: the GitHub login whose PR approval counts as this person's
+   *  review verdict (ruling 68). Synced from the provider for a GitHub
+   *  account; linked by an org admin for a local or Google one. */
+  githubHandle: string | null;
 }
 
 function idpOf(user: UserRecord): "github" | "google" | "local" {
@@ -113,6 +118,7 @@ export function toOrgUserView(user: UserRecord): OrgUserView {
     idp: idpOf(user),
     pwreset: user.pwresetRequired && status !== "invited",
     disabled: user.disabled,
+    githubHandle: user.githubHandle,
   };
 }
 
@@ -229,12 +235,90 @@ export interface UpdateOrgUserInput {
   name: string;
   email: string;
   role: UserRole;
+  /** Ruling 154: the GitHub handle to link. Omitted leaves the stored handle
+   *  alone (the controller's `update_user` never sends one); blank or null
+   *  clears it; a value is normalized and must be free among enabled users. A
+   *  GitHub-signed-in account refuses a value, since its handle syncs from the
+   *  provider at each sign-in. */
+  githubHandle?: string | null;
+}
+
+/**
+ * Ruling 154: who else, still enabled, carries this handle. The verdict path
+ * (`resolveGithubHandle`) fails closed on a duplicate, so the writer refuses
+ * to create one; a disabled account's handle is not counted, mirroring the
+ * `disabled = 0` filter the reader applies.
+ */
+function otherHandleHolder(
+  db: DatabaseSync,
+  handle: string,
+  exceptUserId: string,
+): { id: string; name: string } | null {
+  // SAFETY: both selected columns are TEXT NOT NULL on `users`
+  // (0001_baseline.sql), and `get` returns at most one object.
+  const row = db
+    .prepare(
+      `SELECT id, name FROM users
+        WHERE lower(github_handle) = ? AND disabled = 0 AND id <> ?
+        ORDER BY id ASC
+        LIMIT 1`,
+    )
+    .get(handle, exceptUserId) as { id: string; name: string } | undefined;
+  return row ?? null;
+}
+
+/**
+ * Ruling 154: the org admin's door to `users.github_handle`. Before it the
+ * column had one writer, GitHub OAuth sign-in, so on a deployment without
+ * GitHub sign-in a member's PR approval could only ever land as
+ * `unlinked_handle` and ruling 68 was unreachable. Checks first, so a refused
+ * handle writes nothing; the returned closure performs the write and audit
+ * once the rest of the edit has passed its own guards. `null` = no change.
+ */
+function planGithubHandle(
+  db: DatabaseSync,
+  existing: UserRecord,
+  input: string | null,
+  actor: AuditActor,
+): (() => void) | null {
+  const handle = normalizeHandle(input);
+  if (idpOf(existing) === "github") {
+    if (handle === null) return null;
+    throw AppError.validation(
+      "This account signs in with GitHub; its handle syncs at each sign-in and cannot be set here.",
+    );
+  }
+  const previous = existing.githubHandle;
+  if (handle === previous) return null;
+  if (handle !== null) {
+    if (!isValidGithubHandle(handle)) {
+      throw AppError.validation("Enter a GitHub username.");
+    }
+    const holder = otherHandleHolder(db, handle, existing.id);
+    if (holder) {
+      throw AppError.conflict(`@${handle} is already linked to ${holder.name}.`);
+    }
+  }
+  return () => {
+    updateUserFields(db, existing.id, { githubHandle: handle });
+    recordAudit(db, {
+      action:
+        handle === null
+          ? "org.user.github_handle.cleared"
+          : "org.user.github_handle.set",
+      actor,
+      subjectKind: "user",
+      subjectId: existing.id,
+      details: { handle, previous },
+    });
+  };
 }
 
 /**
  * EditUserModal save: local accounts may change name/email; idp accounts
  * sync identity from the provider (role only). Last-admin guard lives in
- * the phase-2 updateUser.
+ * the phase-2 updateUser. Ruling 154: a local or Google account may also
+ * carry an admin-linked GitHub handle.
  */
 export function updateOrgUser(
   db: DatabaseSync,
@@ -244,6 +328,10 @@ export function updateOrgUser(
   const existing = findUserById(db, input.userId);
   if (!existing) throw AppError.notFound("No such user.");
   const isLocal = idpOf(existing) === "local";
+  const writeHandle =
+    input.githubHandle === undefined
+      ? null
+      : planGithubHandle(db, existing, input.githubHandle, actor);
 
   if (isLocal) {
     const email = normalizeEmail(input.email);
@@ -279,7 +367,9 @@ export function updateOrgUser(
   if (isLocal) patch.name = input.name;
   if (input.role !== existing.role) patch.role = input.role;
   const updated = updateUser(db, existing.id, patch, actor);
-  return toOrgUserView(updated);
+  if (!writeHandle) return toOrgUserView(updated);
+  writeHandle();
+  return toOrgUserView(findUserById(db, existing.id) ?? updated);
 }
 
 export function setOrgUserRole(

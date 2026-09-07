@@ -124,12 +124,19 @@ function emit(
 }
 
 function lineFacts(spec: RunSpec, line: LogLine, sessionId: string): EmittedLine["facts"] {
-  const usage = line.usage ??
-    (line.stats
+  const usage = line.usage
+    ? {
+        input_tokens: line.usage.input_tokens,
+        cached_input_tokens: line.usage.cached_input_tokens,
+        output_tokens: line.usage.output_tokens,
+        outputEstimated: false,
+      }
+    : (line.stats
       ? {
           input_tokens: line.stats.in ?? 0,
           cached_input_tokens: line.stats.cached ?? 0,
           output_tokens: line.stats.out ?? 0,
+          outputEstimated: false,
         }
       : undefined);
   // Absence is the signal the fold reads (a fact the envelope did not carry is

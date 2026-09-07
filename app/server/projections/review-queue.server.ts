@@ -11,26 +11,53 @@ import {
   type Validation,
   type Waiting,
 } from "~/schemas/task-file.schema";
+import type { TaskSummary } from "~/shared/mapping/task.server";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
-import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import {
+  isTerminalStage,
+  resolveStageRoles,
+  stageName,
+} from "~/shared/workflow/stage-roles";
 import { getProject, listProjectTasks } from "./board-query.server";
 
 /**
  * Review-queue read model (review-queue.md §1/§3, Phase 9C).
  *
- * Qualification: the project's RESOLVED review stage (the stage with a workflow
- * edge into the terminal stage — `resolveStageRoles().reviewId`), NOT the
- * literal id "review". This is the exact predicate the workspace-layout rail
- * badge uses (routes/project.tsx), so the two counts can never drift — on a
- * board whose review stage is not literally named `review`, a
- * literal-"review" filter left this queue permanently empty while the rail
- * showed a count (pass-4 WI-1). Panel split (R8-3, member-scoped): a
+ * Qualification (U35-5, pass 35). The queue has two halves that answer two
+ * different questions, and they key on different facts:
+ *
+ * - `ready` ("Waiting on your acceptance") is about the ACCEPTANCE boundary:
+ *   a task at the project's RESOLVED review stage (the stage with a workflow
+ *   edge into the terminal stage — `resolveStageRoles().reviewId`, NOT the
+ *   literal id "review") whose acceptance nothing blocks.
+ * - `working` ("Still in review") is about REVIEW WORK, which the board
+ *   defines by engagements and verdicts, not by one stage id. A non-archived,
+ *   non-terminal task is review work when ANY of these holds:
+ *     (a) it sits at `reviewId` and is not `ready`;
+ *     (b) its pull request is open for review (`pr.state === "review"`);
+ *     (c) a verdict-capable engagement (a required reviewer, F10-15) has not
+ *         approved the current work revision: the derived `validation` is
+ *         `changed` (verdict pending) or `failing` (changes requested).
+ *   All three read the projection row (`pr_json`, `reviewers_json`,
+ *   `validation`), so the query stays one pass over `task_projections`.
+ *
+ * The old predicate was `stage === reviewId` for BOTH halves. On the default
+ * board that is Review and the two rules coincide; on a board whose reviews
+ * happen at Validation and Review while the edge into Done leaves Merge
+ * (`triage, design, impl, validation, review, merge, done`), it printed
+ * "0 tasks at the review boundary" and "No review work in flight" while eight
+ * tasks sat at Validation with open PRs and engaged reviewers (FINDINGS U35-5).
+ * `total` counts every row and is what the workspace rail badge shows
+ * (routes/project.tsx reads this queue's `total`), so the two cannot drift —
+ * a literal-"review" filter once left this queue permanently empty while the
+ * rail showed a count (pass-4 WI-1). Panel split (R8-3, member-scoped): a
  * review-stage task waiting on a human lands in "Waiting on your acceptance"
  * ONLY for a viewer who can ACCEPT it — maintainer+ (resolve-packet tier) or
  * the task owner (owner exception, R6-2). Everything else — waiting on an agent,
- * the legal `review + none` combination, OR a human-waiting task another human
- * must accept — lands in "Still in review", where the page labels a human-
- * waiting row "waiting on a human" (never the false "agent working").
+ * the legal `review + none` combination, a human-waiting task another human
+ * must accept, OR review work at an earlier stage — lands in "Still in review",
+ * where the page labels a human-waiting row "waiting on a human" (never the
+ * false "agent working") and an off-boundary row names its stage.
  *
  * E5: `viewerUserId` is REQUIRED. It used to be optional, and the acceptance
  * predicate opened with `if (viewerUserId === undefined) return true` — an
@@ -50,6 +77,16 @@ import { getProject, listProjectTasks } from "./board-query.server";
 export interface ReviewQueueRow {
   key: string;
   title: string;
+  /** U35-5: the DISPLAY name of the stage the task sits at (`stageName`, the
+   *  one spelling every surface shares). An off-boundary row's subline names
+   *  it ("Review in progress at Validation"), because the rows no longer share
+   *  a stage. */
+  stageName: string;
+  /** U35-5: true when the task sits at the project's resolved review stage
+   *  (`reviewId`), the only stage acceptance is legal FROM. `ready` requires
+   *  it; the subline builder picks the boundary sentences for it and the
+   *  "Review in progress at <stage>" sentence otherwise. */
+  atReviewStage: boolean;
   /** F26-14: lightweight triage metadata carried to the acceptance boundary,
    *  the same values the board card reads. */
   priority: TaskPriority;
@@ -116,11 +153,14 @@ export interface ReviewQueueRow {
 }
 
 export interface ReviewQueueData {
-  /** waiting === "human" — panel 1. */
+  /** At the review stage, waiting on a human this viewer can accept for, and
+   *  nothing blocking the acceptance — panel 1. */
   ready: ReviewQueueRow[];
-  /** everything else at the review stage — panel 2. */
+  /** Every other row: review-stage tasks that are not `ready`, and review work
+   *  at any earlier stage (an open review PR, or a required reviewer's verdict
+   *  outstanding on the current revision) — panel 2 (U35-5). */
   working: ReviewQueueRow[];
-  /** All review-stage tasks (header "X of Y" + rail-badge parity). */
+  /** All rows (header "N in review", "X of Y", and rail-badge parity). */
   total: number;
 }
 
@@ -148,9 +188,30 @@ export function getReviewQueue(
     project && !project.archived
       ? resolveStageRoles(project.stages, project.workflow).reviewId
       : null;
+  const stages = project ? project.stages : [];
+  // U35-5: membership is the union of the three rules the header comment
+  // names. `listProjectTasks` already drops archived tasks (R14-3); the
+  // terminal stage is dropped here because a task in Done is an ending, not
+  // review work, whatever its PR or verdict state still says (LV-20 normalises
+  // its `waiting` the same way).
+  const isReviewWork = (t: TaskSummary): boolean => {
+    if (isTerminalStage(t.stage, stages)) return false;
+    if (t.stage === reviewId) return true;
+    // (b) an open pull request under review.
+    if (t.pr !== null && t.pr.state === "review") return true;
+    // (c) a required reviewer's verdict on the current revision is missing
+    // (`changed`) or is request_changes (`failing`). `deriveValidation` yields
+    // `changed` for a revision with NO required reviewer too, so the
+    // engagement check is what makes this "review work" and not merely
+    // "delivered".
+    return (
+      t.reviewers.some((r) => r.verdictCapable === true) &&
+      (t.validation === "changed" || t.validation === "failing")
+    );
+  };
   const inReview = reviewId
     ? listProjectTasks(db, slug, opts.now ? { now: opts.now } : {}).filter(
-        (t) => t.stage === reviewId,
+        isReviewWork,
       )
     : [];
 
@@ -199,6 +260,9 @@ export function getReviewQueue(
     return {
       key: t.key,
       title: t.title,
+      // U35-5: the row names its stage, since the rows no longer share one.
+      stageName: stageName(stages, t.stage),
+      atReviewStage: t.stage === reviewId,
       // F26-14: carry the triage metadata to the review queue (same source the
       // board card reads), so a high/urgent or overdue task is visible at the
       // acceptance boundary too.
@@ -288,7 +352,11 @@ export function getReviewQueue(
   // (closed unmerged) — a rejected-PR task can't be accepted (its work was
   // declined); it needs a rework/reopen/archive decision, so it belongs in
   // "Still in review", not the acceptance panel (NEW-1).
+  // U35-5: only the review stage is a stage acceptance is legal FROM
+  // (`acceptanceStageBlockedReason`, task-actions.server.ts); review work at an
+  // earlier stage is listed, never offered for acceptance.
   const isReady = (r: ReviewQueueRow): boolean =>
+    r.atReviewStage &&
     r.waiting === "human" &&
     canAccept(r.key) &&
     r.blockReason === null &&

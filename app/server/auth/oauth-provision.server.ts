@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { normalizeHandle } from "~/shared/github-handle";
 import type { UserRole } from "~/shared/mapping/user.server";
 import { recordAudit } from "../audit/audit-recorder.server";
 import {
@@ -60,10 +61,6 @@ export interface OAuthUser {
   /** Which provider's callback is creating this user. Required: guessing it
    *  from the presence of `githubHandle` is what produced D-22. */
   provider: OAuthProvider | null;
-}
-
-function normalizeHandle(handle: string | null | undefined): string | null {
-  return handle?.trim().replace(/^@/, "").toLowerCase() || null;
 }
 
 /** create.before gate: is this NEW better-auth OAuth user allowed at all? */

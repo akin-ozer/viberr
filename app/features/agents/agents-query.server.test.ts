@@ -563,6 +563,36 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
     expect(resourcesOnly.resources.skills).toEqual(["developer-expertise"]);
   });
 
+  /**
+   * Ruling 156 (pass 35, F35-7): the grants signal beside the identity one.
+   * A copy whose lists differ from the template's carries the exact drift;
+   * `customized` stays an identity signal. Canary: hard-code
+   * `templateDrift: null` in the view.
+   */
+  it("ruling 156: a copy whose grants differ carries the drift; a definition-less or equal copy carries none", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const drifted = view(
+      developer({ resources: { skills: [], mcps: [], kb: [] } }),
+      dataRoot,
+    );
+    expect(drifted.templateDrift?.missing.skills).toEqual(["developer-expertise"]);
+    expect(drifted.templateDrift?.templateResources.skills).toEqual(["developer-expertise"]);
+    expect(drifted.customized).toBe(false);
+    // No definition: the template resolves live, nothing to drift.
+    expect(view(developer(), dataRoot).templateDrift).toBeNull();
+    // The template's own lists (the shipped template carries no KB grants):
+    // no drift. Order-insensitivity is pinned on `resourceDrift` itself.
+    const equal = view(
+      developer({
+        resources: { skills: ["developer-expertise"], mcps: [], kb: [] },
+      }),
+      dataRoot,
+    );
+    expect(equal.resources.skills).toEqual(["developer-expertise"]);
+    expect(equal.templateDrift).toBeNull();
+  });
+
   it("a snapshot that only echoes the template's own identity is not customized", () => {
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);

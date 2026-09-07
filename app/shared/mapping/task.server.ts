@@ -18,6 +18,7 @@ import type {
 } from "~/schemas/task-file.schema";
 import type { ActorRender } from "./actor.server";
 import type { DependencyRender } from "~/shared/dependencies";
+import { goalDraftForOption } from "~/shared/packet-goal-draft";
 
 /** Pass-25: the stored `labels_json` is a JSON string-array (the write path
  *  normalizes it so). Parse it at this read boundary through the schema — a
@@ -108,6 +109,15 @@ export interface AgentRender {
    *  overlay the live profile backend — the run follows the pin, so the card
    *  must too. */
   pinnedBackend?: "codex" | "claude" | null;
+  /** U35-5 (pass 35): true when this engagement is a REQUIRED reviewer (an
+   *  explicit `report-validation-verdict: direct` grant snapshotted at engage
+   *  time, F10-15). The review queue's "Still in review" membership reads it:
+   *  a task whose required reviewer has not approved the current revision is
+   *  review work wherever its stage is. Optional like `pinnedBackend`:
+   *  `mapAgentRef` always sets it, and a render built by hand without it
+   *  reads as not verdict-capable, which fails CLOSED (the row is not
+   *  claimed as review work on the strength of a missing key). */
+  verdictCapable?: boolean;
 }
 
 /** Operator cell render (ruling 16: stage id stored). */
@@ -137,6 +147,13 @@ export interface PacketRender {
   /** Ruling 138: which option was chosen, by whom and when — what a reload
    *  renders as decided and rebuilds the goal draft from. */
   decided?: TaskPacket["decided"];
+  /** F35-6: the goal text the decided `edit_goal` option asks for, composed
+   *  ONCE here (`goalDraftForOption` on the chosen option) and read by every
+   *  door into the goal editor: the decided card renders it and its "Edit the
+   *  goal" opens with it, and the hero's own Edit seeds from it while the
+   *  packet waits. Present exactly when `awaiting` is `goal_edit` and a
+   *  decision is recorded; absent otherwise. */
+  goalDraft?: string;
 }
 
 /** What a surface renders for readiness: the canonical stored enum plus the
@@ -414,6 +431,10 @@ export function mapAgentRef(ref: AgentRef | null): AgentRender | null {
     name: agentBackendName(ref.backend),
     role: ref.role,
     pinnedBackend: ref.pinnedBackend ?? null,
+    // U35-5: the projection stores the whole engagement (rebuilder
+    // `supportingEngagements`), whose parser defaults the flag to false; an
+    // absent key here is a hand-built ref and reads as not verdict-capable.
+    verdictCapable: ref.verdictCapable === true,
   };
 }
 
@@ -496,7 +517,17 @@ export function mapOperatorRef(
  *        which is exactly when agents start working), left behind because
  *        R21-8 was written against the one value the report happened to show.
  *    Both now read "agent working". `blocked` and `inconsistency_risk_detected`
- *    never yield — a run does not answer those (R21-8, unchanged).
+ *    never yield — a run does not answer those (R21-8, unchanged) — with one
+ *    exception, ruling 157 (F35-8): a stored `blocked` with no open packet and
+ *    no dependency list is a HOLD (the `hold_runtime_debug` decision, the
+ *    refused arm of a collision ceremony), and a hold is what a person's
+ *    operator run or a dispatch lifts on the record. While an agent carries
+ *    such a hold the display reads "agent working", exactly as the server
+ *    lifts it, so a card never says blocked and agent working together. The
+ *    caller decides `carriedHold` from the STORED readiness and the
+ *    dependency list, so a diagnostics floor (derived `blocked` over a stored
+ *    `ready`) and a dependency hold (ruling 131's floor) keep reading
+ *    `blocked`, and a `blocked` packet keeps the withdrawal paths as its lift.
  *
  * 2. A HUMAN OWES AN ANSWER. An `input` packet ("Decision required" / an
  *    agent's ask-human) is a request for human input, but the operator leaves
@@ -521,7 +552,13 @@ export function deriveDisplayReadiness(
   readiness: Readiness,
   waiting: Waiting,
   packet: TaskPacket | null,
+  /** Ruling 157: the stored value is `blocked` and the task waits on no
+   *  dependency, so a stored block with no packet is a hold a run outranks. */
+  carriedHold: boolean,
 ): DisplayReadiness {
+  if (readiness === "blocked" && waiting === "agent" && packet === null && carriedHold) {
+    return "agent_working";
+  }
   if (
     waiting === "agent" &&
     (readiness === "ready" || readiness === "input_required")
@@ -547,6 +584,14 @@ export function mapPacket(packet: TaskPacket | null): PacketRender | null {
   // whatever the loose schema preserved) ride along untouched — only `from` is
   // swapped for its display name.
   const render: PacketRender = { ...rest, from: packetFromDisplay(from) };
+  // F35-6: one draft source. The chosen option's draft is composed here, on
+  // the mapping every surface reads, so the decided card, its "Edit the goal"
+  // and the hero's Edit all open the same text after a reload.
+  const chosen =
+    packet.awaiting === "goal_edit" && packet.decided
+      ? packet.options[packet.decided.optionIndex]
+      : undefined;
+  if (chosen) render.goalDraft = goalDraftForOption(chosen);
   return render;
 }
 
@@ -641,7 +686,15 @@ export function mapTaskProjectionRow(
       ? pr?.state === "merged"
         ? "merged"
         : "accepted"
-      : deriveDisplayReadiness(row.readiness, row.waiting, columns.packet),
+      : deriveDisplayReadiness(
+          row.readiness,
+          row.waiting,
+          columns.packet,
+          // Ruling 157: a hold is a STORED block with no dependency list; the
+          // derived column may say `blocked` over a stored `ready` when a
+          // diagnostic floors it, and that is not a hold a run may outrank.
+          row.stored_readiness === "blocked" && context.blockedBy.length === 0,
+        ),
     waiting: row.waiting,
     urgent: row.urgent === 1,
     priority: row.priority,

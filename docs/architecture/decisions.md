@@ -2608,6 +2608,15 @@ by rewriting those paragraphs:*
     kind; an option without one prefills the option's title and detail verbatim, and the prompts say
     so, so an operator never phrases them as an instruction to the human. Extends R20-1 (a made
     decision is un-re-confirmable) and F17-L3 (the editor prefills with the chosen deliverable).
+    *(Completed 2026-09-07, pass 35, F35-6, not a reversal: the draft was rendered nowhere and
+    only the decided card's own control seeded it, so after a reload the hero's Edit under the
+    goal, the door a person takes, opened with the ORIGINAL goal and an unchanged save read
+    "Goal updated" over a packet still waiting (KNC-4, 14:56Z). The projection's packet render
+    now carries `goalDraft`, composed once in `mapPacket`; the decided card prints it as
+    "Requested goal (opens in the editor)", its "Edit the goal" opens it, and the hero's Edit
+    seeds it while the packet waits. The writer's half, refusing an unchanged save while a
+    `goal_edit` packet is open and reporting "Goal unchanged" without one, lands with the task
+    actions of the same pass.)*
 
 139. **The controller's catalogued writes read first and refuse by name (owner, 2026-09-04, pass 34
     F34-2 / G34-1).** Every `viberr_controller` write that takes a catalogued identifier (a capability
@@ -2927,6 +2936,110 @@ by rewriting those paragraphs:*
     refusal). (`app.css`'s appended ruling-148(d)/149 blocks, pinned in `app.css.test.ts`;
     `features/runtime/runs-panels.tsx`; `features/org-settings/users-panel.tsx`;
     `features/project-settings/settings-page.tsx`.)
+
+152. **Coordination cost is a product cost (owner, 2026-09-06, Q35-5 and Q35-15; G35-4,
+    G35-5).** **(a)** An operator turn may cross consecutive `auto` boundaries in one turn:
+    the transition reply names the next boundary, and a transition made by a live operator
+    run queues no fresh operator turn; the stranded-stage backstop covers a chain the model
+    abandons. **(b)** Under a concurrency cap, coordination has its own lane: operator and
+    controller turns are admitted up to one slot per four of the cap beyond it (minimum
+    one) and are promoted ahead of queued delivery runs. The cap itself bounds the
+    DELIVERY runs (`primary`, `reviewer`) and the instance holds at most cap plus lane runs
+    in all, so a live operator turn never costs a build its slot while an operator turn may
+    borrow a cap slot no build is using; the lane is derived from `maxConcurrentRuns`
+    (`coordinationLane`), not a second setting, and the org-settings control says so under
+    the field ("Cap N: up to N agent runs at once. Operator and controller turns get one
+    extra slot per four so coordination never waits behind delivery."). **(c)** No dispatch
+    starts on a backend the instance already knows is spent: a dispatch aimed at a backend
+    whose exhaustion record has not passed its reset instant (or is younger than 30 minutes
+    when the instant is unknown) is held, recorded on the timeline with an audit row, and
+    re-scheduled for the reopen time; the provider's wall-clock sentence is read in the
+    process's own time zone, the zone the CLI printed it in. A hold is not a decision
+    packet and costs no operator turn. (Pass 35: (b) in `run-service.server.ts`
+    `canAdmit`/`drainRunQueue`, `instance-settings.server.ts` `coordinationLane`,
+    `org-settings-page.tsx` `RunConcurrencyControl`; (a) and (c) in the operator actions
+    and the backend-quota hold of the same pass.)
+
+153. **Controller parity for schedules and template defaults (pass 35, G35-1 and
+    G35-2).** The controller schedules and cancels a task's future run with the tier
+    the task page needs (`run-agents`): `schedule_task_action` takes the operator or a
+    deployed profile id, `delayMinutes` (1 to 40320) or an ISO `dueAt` under the same
+    bounds and sentences as the task page's form, and writes the entry to `task.md`
+    with the `<email> · via controller` label; `cancel_task_schedule` retires a pending
+    entry and answers `[noop]` for one that is not; `get_task` lists the pending
+    entries. `save_global_agent` takes a template's default `model` and `effort`,
+    checked by name against its backend (ruling 139): omitted keeps the stored value,
+    `""` clears it, and a backend switch whose stored model belongs to the other
+    backend clears the model and says so. `deploy_agent` and the library deploy take
+    the template's effort when no override is given and the backend offers the tier;
+    a definition-less deployment resolves it live. Names are stored as the person
+    meant them (U35-1): the five XML entities and numeric references are decoded
+    once, ids derive from the decoded text, and a name still carrying angle brackets
+    or control characters is refused. (`controller-toolkit.server.ts`,
+    `gagents.server.ts`, `agent-profile-actions.server.ts`, `shared/names.ts`.)
+
+154. **An org admin may link a GitHub handle (pass 35, G35-3).** On a deployment without
+    GitHub sign-in the only writer of `users.github_handle` was OAuth, so ruling 68 was
+    unreachable: every GitHub approval landed as `unlinked_handle` and the refusal sent
+    people to a profile card that offered nothing to connect. The Edit-user modal under
+    Users & access takes a handle for local and Google accounts (`updateOrgUser`, one
+    normalizer in `shared/github-handle.ts` shared with the OAuth provisioning); a
+    GitHub-signed-in account keeps syncing it from the provider and refuses a typed one.
+    The handle is lowered, must be a GitHub username, is unique among enabled accounts
+    (a duplicate is refused naming its holder, since the verdict path fails closed on
+    one) and the change is audited (`org.user.github_handle.set` / `.cleared` with the
+    previous value). A person cannot set their own handle, because the verdict path
+    counts approvals by it; their profile shows an admin-linked handle as
+    `@handle · linked by an org admin`. The `unlinked_handle` refusal names both doors.
+
+155. **An active link's wait is its task's list (pass 35, F35-3; amends 131(c)).** Once a
+    goal link has started a task, the task's `blockedBy` is the wait and the goal file's
+    `links[].blockedBy` mirrors it on every change (human, controller, operator or engine
+    release), so a retried link is born on the wait the record last held. `edit_link` on an
+    active link may change `blockedBy` only, forwarded to the task's writer. Live, a
+    controller `update_task {blockedBy: []}` released KNC-3 while `goal-3` link 1 kept its
+    declared `goal-2 link 6` and the Goals panel printed "waits on" for a task that was
+    running; the controller saw the stale record and `edit_link` refused it as active.
+    (`mirrorLinkWait` in `app/server/tasks/dependencies.server.ts`, called by
+    `setTaskDependencies` and `releaseTask`, convergent: it writes only while the link is
+    `active` and carried by that task and the lists differ, with the goal timeline line
+    "Link 1 (Log view) now waits on nothing: KNC-3's list was changed by arda@viberr.dev.";
+    the `edit_link` arm in `goal-actions.server.ts` forwards after the goal-file lock and
+    refuses a title or goal on an active link by naming the task.)
+
+156. **A template edit says where it did not land (pass 35, F35-7; owner, Q35-7,
+    Q35-8, Q35-11).** A project's deployment is its own copy of the template's grants,
+    taken at deploy time, and the template's writer does not reach into it. So every
+    template save names each non-archived project whose copy no longer carries the
+    template's grants and what is missing or extra, and offers the propagation:
+    `propagate` on `save_global_agent`, the "copy these grants" box on the org modal,
+    or "Use the template's grants" on the project's Agents page. Propagation REPLACES
+    the copy's three grant lists (a grant a project added on its own is dropped and
+    the reply says so) and never touches its capability policy, model, backend, stages
+    or persona; it runs through one writer (`template-propagation.server.ts`) and
+    records `project.agent_profile.resources_synced` per project. Only an org admin
+    may propagate, from any of the three doors; a project admin sees the divergence
+    marker with the exact difference and asks. The roster marks a copy whose grants
+    differ from its template (`templateDrift`); the OBS-7 `customized` flag stays an
+    identity signal and is not widened. The org modal's save toast composes its
+    clauses with middle dots, never a dash.
+
+157. **A hold ends when someone starts work (pass 35, F35-8; owner, Q35-9, Q35-10).**
+    A stored `blocked` with no open packet and no dependency list is a hold (the
+    `hold_runtime_debug` decision, the refused arm of a collision ceremony), and a hold
+    is lifted on the record by a person starting the operator (Run operator, an
+    `@operator` comment, the controller, a schedule they set) or by any dispatch that
+    starts a run: `readiness: ready`, a "Hold lifted" note naming who or what started
+    the work, and `task.hold.lifted`. The lift is not a claim that the cause is fixed:
+    the operator re-checks and opens a new packet when the block stands, as
+    `block_on_policy` already promises. Machine triggers and boot recovery lift
+    nothing; an open packet keeps the withdrawal paths as the only lift; a dependency
+    list keeps ruling 131's floor. The display never says blocked and agent working
+    together: a packet-less, list-less stored block carried by an agent renders "agent
+    working". (The record half is implemented by the operator and task actions of the same
+    pass; the display half is `deriveDisplayReadiness`'s fourth argument, `carriedHold`, read
+    from the STORED readiness and the dependency list, so a diagnostics floor and a dependency
+    hold keep reading blocked.)
 
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates

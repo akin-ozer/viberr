@@ -27,6 +27,9 @@ export interface InsightsTotals {
    *  `cost` sum below can say nothing about, because only Claude reports one. */
   costedRuns: number;
   cost: number;
+  /** F35-1: the three token sums cover only rows whose provider total landed
+   *  (`agent_runs.usage_final = 1`); a running run's live estimate is not in
+   *  them, which the card says whenever a run is running. */
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
@@ -475,14 +478,18 @@ export function getInsightsSummary(
         // aggregate: `operator` and `controller` are the coordination kinds
         // (RunKind) — machinery that decides what the working agents do — and
         // both carry real cost.
+        // F35-1: the token columns count only rows whose PROVIDER figure has
+        // landed (`usage_final = 1`). A running Claude row holds the adapter's
+        // live estimate and a running Codex row holds nothing; neither is a
+        // total. Cost is untouched: only the result envelope ever writes it.
         `SELECT count(*) AS runs,
                 count(total_cost_usd) AS costed_runs,
                 COALESCE(SUM(total_cost_usd), 0) AS cost,
                 COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
                                   THEN total_cost_usd END), 0) AS coordination_cost,
-                COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
-                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(CASE WHEN usage_final = 1 THEN input_tokens END), 0) AS input_tokens,
+                COALESCE(SUM(CASE WHEN usage_final = 1 THEN cached_input_tokens END), 0) AS cached_input_tokens,
+                COALESCE(SUM(CASE WHEN usage_final = 1 THEN output_tokens END), 0) AS output_tokens,
                 COALESCE(SUM(turns), 0) AS turns
          FROM agent_runs ${clause}`,
       )

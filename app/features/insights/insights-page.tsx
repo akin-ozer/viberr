@@ -90,7 +90,14 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
               icon="memory"
               // `in` is the whole prompt of every call on both backends and
               // `cached` the subset of it served from the prompt cache.
-              sub={`${fmtTokens(totals.inputTokens)} in (${fmtTokens(totals.cachedInputTokens)} cached)`}
+              // F35-1: the sums cover provider totals only, so while a run is
+              // running the card says its live estimate is not in them.
+              sub={
+                `${fmtTokens(totals.inputTokens)} in (${fmtTokens(totals.cachedInputTokens)} cached)` +
+                (outcomes.running > 0
+                  ? " · Running runs are not counted until their provider total lands."
+                  : "")
+              }
             />
             <StatCard
               // R26-3 (owner ruling): "Completion rate", not "Success rate" — this

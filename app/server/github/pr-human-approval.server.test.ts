@@ -277,6 +277,11 @@ describe("humanApprovalRefusalNote — fail closed, but never silently", () => {
     });
     expect(note).toContain("@octocat");
     expect(note).toContain("no Viberr account carries that GitHub handle");
+    // Ruling 154: the way out is a door that exists on every deployment. The
+    // old sentence sent people to a profile card that, without GitHub OAuth,
+    // said there was nothing to connect.
+    expect(note).toContain("Users & access");
+    expect(note).not.toContain("Link it on their profile");
   });
 
   it("says a non-member approved it", () => {

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
+import { isValidGithubHandle, normalizeHandle } from "~/shared/github-handle";
 import { countLabel } from "~/shared/text/plural";
 import { Avatar } from "~/ui/avatar";
 import { Icon } from "~/ui/icon";
@@ -339,6 +340,10 @@ function EditUserModal({
   const [role, setRole] = useState<"admin" | "member">(
     user.role === "admin" ? "admin" : "member",
   );
+  // Ruling 154: an org admin links the GitHub handle of a local or Google
+  // account here; a GitHub account's handle syncs from the provider instead.
+  const linksHandle = user.idp !== "github";
+  const [githubHandle, setGithubHandle] = useState(user.githubHandle ?? "");
   const [err, setErr] = useState<string | null>(null);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const push = useToast();
@@ -366,7 +371,10 @@ function EditUserModal({
     },
   });
 
-  const canSave = !isLocal || (name.trim().length > 1 && email.includes("@"));
+  const handleInput = normalizeHandle(githubHandle);
+  const handleOk = handleInput === null || isValidGithubHandle(handleInput);
+  const canSave =
+    handleOk && (!isLocal || (name.trim().length > 1 && email.includes("@")));
   const save = () => {
     if (!canSave) return;
     if (isYou && role !== "admin") {
@@ -377,13 +385,17 @@ function EditUserModal({
       return;
     }
     setErr(null);
-    saveAction.submit({
+    const fields = {
       intent: "user-edit",
       userId: user.id,
       name: name.trim(),
       email: email.trim(),
       role,
-    });
+    };
+    // A blank handle clears the link; a GitHub account sends none at all.
+    saveAction.submit(
+      linksHandle ? { ...fields, githubHandle: handleInput ?? "" } : fields,
+    );
   };
 
   return (
@@ -400,6 +412,14 @@ function EditUserModal({
       canSave={canSave}
       saveLabel="Save changes"
       footHint={isYou ? "this is your own account" : undefined}
+      unmetHint={
+        handleOk
+          ? undefined
+          : "Enter a GitHub username: letters, digits and hyphens only."
+      }
+      focusUnmet={
+        handleOk ? undefined : () => document.getElementById("eu-github")?.focus()
+      }
       onSave={save}
     >
       <div className="key-row even">
@@ -435,6 +455,27 @@ function EditUserModal({
           <span>
             Name &amp; email sync from {user.idp === "github" ? "GitHub" : "Google"} at
             each sign-in and can't be edited here.
+          </span>
+        </div>
+      )}
+      {linksHandle && (
+        <div className="field">
+          <label className="flabel" htmlFor="eu-github">
+            GitHub handle
+          </label>
+          <input
+            id="eu-github"
+            type="text"
+            className="mono"
+            placeholder="octocat"
+            value={githubHandle}
+            aria-invalid={!handleOk}
+            aria-describedby="eu-github-hint"
+            onChange={(e) => setGithubHandle(e.target.value)}
+          />
+          <span id="eu-github-hint" className="fhint flush">
+            Counts this person's GitHub approval of a review pull request as
+            the review verdict.
           </span>
         </div>
       )}

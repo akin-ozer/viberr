@@ -300,6 +300,9 @@ const BASELINE_COLUMNS: readonly {
       // ALTER TABLE cannot carry the baseline's CHECK; the two writers only
       // ever store 'restart', which is the enforcement on an upgraded root.
       { name: "interrupted_reason", ddl: "interrupted_reason TEXT" },
+      // F35-1: the sink patches it on every persisted line, so a root that
+      // predates it would fail every run's first line.
+      { name: "usage_final", ddl: "usage_final INTEGER NOT NULL DEFAULT 0" },
     ],
   },
   {

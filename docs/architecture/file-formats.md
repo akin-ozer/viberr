@@ -156,6 +156,11 @@ Notes:
   body). A project's `agents:` list *deploys* templates by `profileId` and
   carries the project-effective capability policy (may override the
   template). Task assignments store `profileId` — never joined by role text.
+  `definition.resources` is a COPY of the template's grants taken at deploy
+  time (ruling 156): it changes only through the project editor,
+  `update_agent_deployment`, the org resource-rename rewriter, or a propagation
+  from the template (`save_global_agent { propagate }`, the org modal's box, the
+  Agents page's "Use the template's grants"), and a run mounts the copy.
 - The three always-human capabilities (`merge-pull-request`,
   `transition-to-done`, `change-project-policy`) are a server invariant list
   (`ALWAYS_HUMAN_CAPABILITY_IDS` in `app/shared/capabilities.ts`) — stored
@@ -385,6 +390,14 @@ decided:                          # ruling 138: WHICH option, so a reload render
   byUserId: u_abc123              # same draft; both clear with the packet
 ```
 
+*(Added 2026-09-07, pass 35, F35-6. `decided` and `goalDraft` stay as above on disk; the
+projection's packet render derives one more field from them, `goalDraft` on the render
+itself (`mapPacket`, `app/shared/mapping/task.server.ts`): `goalDraftForOption` of the
+option `decided.optionIndex` names, present exactly while `awaiting: goal_edit` and a
+decision is recorded. It is never written to the file. Every door into the goal editor
+reads that one field: the decided card prints it and its "Edit the goal" opens it, and the
+hero's own Edit seeds it while the packet waits.)*
+
 ## Timeline
 
 ### 2026-07-04T06:58:00.000Z · comment · user:u_abc123 (Arda Kaya)
@@ -524,7 +537,12 @@ links:
     blockedBy: []                 # ruling 131(c): what this link's task waits on
                                   # (task keys / `goal-2 link 1`); copied onto the
                                   # task the chain creates for the link, validated
-                                  # then, so the task is born held
+                                  # then, so the task is born held. Ruling 155:
+                                  # once the link is active the TASK's list is the
+                                  # wait and this mirrors it on every change (a
+                                  # person, the controller, the operator, the
+                                  # release engine), so a retry is born on the
+                                  # list the record last held
 createdAt: 2026-08-30T10:00:00.000Z
 updatedAt: 2026-08-30T12:00:00.000Z
 ---
@@ -570,8 +588,12 @@ icon: branch                      # ui.jsx Icon name
 backends: [codex, claude]
 model: sonnet                     # ONE catalog id for the first backend (see
                                   # docs/domain/agents-and-runtime.md §2.3);
-effort: high                      # optional reasoning effort (controller today, ruling 106;
-                                  # specialists carry model+effort per deployment)
+                                  # ruling 153: the template's DEFAULT, taken by a
+                                  # library deploy when no override is given
+effort: high                      # optional reasoning effort: the controller (ruling
+                                  # 106) and, ruling 153, a specialist template's
+                                  # default that a library deploy copies onto the
+                                  # deployment when the backend offers the tier
 scope: Global base · customized for Viberr Core
 stages: [ready, impl]             # eligible stages
 spanAll: false                    # operator only

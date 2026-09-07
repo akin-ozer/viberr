@@ -552,6 +552,13 @@ CREATE TABLE "agent_runs" (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   agent_name TEXT,
+  -- F35-1: 1 once a PROVIDER usage figure landed on the row (a Claude result
+  -- envelope, a Codex turn.completed). While 0 the token columns hold the
+  -- Claude adapter's live ESTIMATE of the output (from the streamed text; the
+  -- SDK's per-envelope output_tokens is a placeholder) or nothing at all
+  -- (Codex before its turn ends), so the Live run panel prints the figure as
+  -- an estimate and Insights leaves the row out of its token totals.
+  usage_final INTEGER NOT NULL DEFAULT 0,
   agent_profile_id TEXT NOT NULL,
   -- Staging key for a Claude report_outcome envelope (staged_outcomes). Persisted
   -- so boot recovery (recoverUnreactedAgentRuns) can look the staged outcome up

@@ -380,6 +380,14 @@ describe("unavailableDockView — the benign refusal", () => {
       }).controllerName,
     );
     expect(view.scope.pageHref).toBe(`/projects/${SLUG}/controller`);
+    // F35-4 (pass 35): the refusal names nothing but what was typed. This
+    // view used to spread `describeDockScope`, which reads the project's
+    // display name out of the projection, so a non-member learned "Viberr
+    // Core" from a slug they guessed. Canary: restore the spread.
+    expect(view.scope.projectName).toBeNull();
+    expect(view.scope.label).toBe("Not available here");
+    expect(JSON.stringify(view)).not.toContain("Viberr Core");
+    expect(view.scope.projectSlug).toBe(SLUG);
   });
 
   it("answers the same benign shape for a project and a task that do not exist", () => {

@@ -171,6 +171,12 @@ export function AgentModal({
   );
   const drop = (list: string[], set: (v: string[]) => void, id: string) =>
     set(list.filter((x) => x !== id));
+  // Ruling 156 (pass 35, F35-7): a project's deployment is its own COPY of the
+  // grants, taken at deploy time, so an edit here never reached an adopted
+  // project and the old foot hint pointed at "re-adopt", a door the deploy
+  // refuses ("already deployed in this project"). Unchecked by default: a
+  // copy is its own record, and the org admin decides per save.
+  const [propagate, setPropagate] = useState(false);
   const { action, err, setErr } = useModalAction(() => onClose());
 
   const stageOpts = stages.filter((s) => s.id !== "done");
@@ -196,7 +202,7 @@ export function AgentModal({
             initial.used +
             " project" +
             (initial.used === 1 ? "" : "s") +
-            ". Each keeps its own copy; re-adopt to pick up this edit"
+            ". Each project keeps its own copy of the grants and its own capability policy; the box above updates the grants with this save"
           : "a template: add it to a project from Agents → Add from library"
       }
       onSave={() => {
@@ -213,6 +219,9 @@ export function AgentModal({
           skills: JSON.stringify([...selSkills, ...legacySkills]),
           mcps: JSON.stringify([...selMcps, ...legacyMcps]),
           kbs: JSON.stringify([...selKbs, ...legacyKbs]),
+          // Ruling 156: "1" copies these grants onto every adopted project's
+          // copy that differs; the default leaves each copy its own record.
+          propagate: propagate ? "1" : "0",
         };
         // No `profileId` at all means "create"; an empty one would mean "edit
         // the profile with the empty id", so the field stays absent.
@@ -435,6 +444,25 @@ export function AgentModal({
           </div>
         </div>
       </div>
+      {initial && initial.used > 0 && (
+        <div className="field">
+          <label className="flabel" htmlFor="ga-propagate">
+            <input
+              id="ga-propagate"
+              type="checkbox"
+              checked={propagate}
+              onChange={(e) => setPropagate(e.target.checked)}
+            />{" "}
+            Copy these grants to the {initial.used} project
+            {initial.used === 1 ? "" : "s"} that adopted this profile
+          </label>
+          <span className="fhint">
+            Replaces each copy&apos;s skills, MCP servers and knowledge bases with
+            the lists above; a grant a project added on its own is dropped and the
+            reply says so. Capability policy, model and stages stay the project&apos;s.
+          </span>
+        </div>
+      )}
       {err && (
         <div className="form-err">
           <Icon name="alert" />

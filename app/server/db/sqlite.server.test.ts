@@ -53,6 +53,8 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         "credential_user_id",
         // Pass 35 U35-7: boot recovery writes the reason on every orphan sweep.
         "interrupted_reason",
+        // F35-1: the sink patches it on every persisted line.
+        "usage_final",
       ]);
       // Second boot: nothing to add, nothing thrown.
       ensureBaselineColumns(db);

@@ -9,6 +9,8 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import { readGoalFile, updateGoalFile } from "~/server/files/goal-writer.server";
+import { rebuildGoalFile } from "~/server/projections/rebuilder.server";
 import {
   requireProjectAuthority,
   requireProjectMutable,
@@ -16,6 +18,7 @@ import {
 import { rolesForAction } from "~/shared/rbac";
 import { logger } from "~/server/logging/logger.server";
 import type { ParsedTaskFile, TaskFileEvent } from "~/schemas/task-file.schema";
+import type { GoalLink } from "~/schemas/goal-file.schema";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import {
   DEPENDENCY_GRAMMAR_HINT,
@@ -287,6 +290,10 @@ export async function setTaskDependencies(
   const added = next.filter((r) => !previous.includes(r));
   const removed = previous.filter((r) => !next.includes(r));
   if (JSON.stringify(next) === JSON.stringify(previous)) {
+    // Ruling 155: the record the link carries is brought back in step even
+    // when the task's own list did not move (a stale link heals on the next
+    // write instead of waiting for a different one).
+    await mirrorLinkWait(db, ctx, input.projectSlug, input.taskKey, fm.goalRef, next, changedByOf(actor, ctx));
     return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: false, blockedBy: next, added, removed };
   }
   const releasing = next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized;
@@ -329,6 +336,8 @@ export async function setTaskDependencies(
     taskKey: input.taskKey,
     details: { blockedBy: next, added, removed },
   });
+  // Ruling 155: a link's task owns the wait; the goal file follows it.
+  await mirrorLinkWait(db, ctx, input.projectSlug, input.taskKey, fm.goalRef, next, changedByOf(actor, ctx));
   if (releasing) {
     await announceRelease(db, ctx, input.projectSlug, input.taskKey, {
       entries: previous,
@@ -336,6 +345,79 @@ export async function setTaskDependencies(
     });
   }
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: true, blockedBy: next, added, removed };
+}
+
+// ---------------------------------------------------------------- mirror
+
+/** The chain position a task carries (`task.md` `goalRef`), when it is a
+ *  link's task. */
+export interface LinkWaitRef {
+  goalId: string;
+  linkIndex: number;
+}
+
+/**
+ * Ruling 155 (pass 35, F35-3; amends 131(c)): once a goal link has started a
+ * task, the task's `blockedBy` IS the wait, and the goal file's
+ * `links[].blockedBy` mirrors it on every change, whoever made it (a person,
+ * the controller, the operator, or the engine's release). Live, KNC-3 was
+ * released by a controller `update_task {blockedBy: []}` and the Goals panel
+ * kept printing "waits on goal-2 link 6" off the goal file while the task
+ * ran; a retried link would have been born held on a wait a human had
+ * already removed. Two records of one fact, one of them stale.
+ *
+ * Convergent and quiet: nothing is written unless the task is a link's task,
+ * the link is `active` and carried BY this task, and the two lists differ.
+ * Returns true when the goal file changed. A goal file that cannot be read or
+ * parsed does not fail the task write that already landed; it is logged and
+ * the next write mirrors again.
+ */
+export async function mirrorLinkWait(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  goalRef: LinkWaitRef | null,
+  blockedBy: readonly string[],
+  by: string,
+): Promise<boolean> {
+  if (!goalRef) return false;
+  const ref = { projectSlug, goalId: goalRef.goalId, dataRoot: ctx.dataRoot };
+  const wanted = JSON.stringify(blockedBy);
+  const carries = (link: GoalLink | undefined): link is GoalLink =>
+    link !== undefined && link.status === "active" && link.taskKey === taskKey;
+  const current = readGoalFile(ref)?.parsed.frontmatter.links.find((l) => l.index === goalRef.linkIndex);
+  if (!carries(current) || JSON.stringify(current.blockedBy) === wanted) return false;
+  try {
+    let mirrored = false;
+    await updateGoalFile(ref, (goal) => {
+      // Re-checked under the goal file's own lock: a retry or a completion may
+      // have moved the link between the read above and this write.
+      const link = goal.frontmatter.links.find((l) => l.index === goalRef.linkIndex);
+      if (!carries(link) || JSON.stringify(link.blockedBy) === wanted) return;
+      link.blockedBy = [...blockedBy];
+      mirrored = true;
+      const list = blockedBy.length > 0 ? blockedBy.join(", ") : "nothing";
+      return `Link ${link.index} (${link.title}) now waits on ${list}: ${taskKey}'s list was changed by ${by}.`;
+    });
+    if (!mirrored) return false;
+    rebuildGoalFile(db, projectSlug, goalRef.goalId, { dataRoot: ctx.dataRoot });
+    return true;
+  } catch (error) {
+    logger.error("goal link wait could not mirror the task's list", {
+      projectSlug,
+      taskKey,
+      goalId: goalRef.goalId,
+      linkIndex: goalRef.linkIndex,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return false;
+  }
+}
+
+/** Who a task-list change is attributed to on the goal timeline. */
+function changedByOf(actor: TaskActor, ctx: TaskActionContext): string {
+  return ctx.operatorAuthorized ? "the operator" : actor.label;
 }
 
 // --------------------------------------------------------------- release
@@ -421,6 +503,9 @@ export async function announceRelease(
 
 // ---------------------------------------------------------------- engine
 
+/** The goal timeline's name for the release engine (ruling 155). */
+const RELEASE_BY = "Viberr (release)";
+
 /**
  * Release ONE task when every entry it waits on is done (ruling 131(e)).
  * Idempotent and convergent: an empty list has nothing to release, an
@@ -449,6 +534,7 @@ export async function releaseTask(
       clearDependencies(parsed);
     });
     reprojectTask(db, ctx, projectSlug, taskKey);
+    await mirrorLinkWait(db, ctx, projectSlug, taskKey, fm.goalRef, [], RELEASE_BY);
     return false;
   }
   const entries = resolveDependencies(db, projectSlug, fm.blockedBy);
@@ -463,6 +549,9 @@ export async function releaseTask(
     cleared = clearDependencies(parsed);
   });
   if (cleared.length === 0) return false; // a concurrent write got there first
+  // Ruling 155: the engine's release is a change to the list like any other;
+  // the goal file follows it, so a retried link is born free.
+  await mirrorLinkWait(db, ctx, projectSlug, taskKey, fm.goalRef, [], RELEASE_BY);
   await announceRelease(db, ctx, projectSlug, taskKey, { entries: cleared });
   return true;
 }

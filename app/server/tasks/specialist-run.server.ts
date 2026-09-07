@@ -87,6 +87,12 @@ import {
   resolveTaskRunPrincipal,
 } from "~/server/runtimes/run-principal.server";
 import {
+  backendDispatchHold,
+  UNDATED_HOLD_MS,
+  type BackendDispatchHold,
+} from "~/server/runtimes/backend-quota.server";
+import { formatResetLabel } from "./run-failure-remedy.server";
+import {
   defaultModelFor,
   resolveRunModel,
   resolveRunEffort,
@@ -1543,6 +1549,35 @@ async function dispatchAgentRun(
     input.taskKey,
     backend,
   );
+  // G35-4 / ruling 152(c) (pass 35): the ONE read before anything is spent.
+  // A backend the instance already knows is out of quota for the account this
+  // run bills gets no run row, no clone and no operator turn: the dispatch is
+  // held, said on the timeline, audited, and re-scheduled for the reopen
+  // instant. Live, nine deliveries were dispatched one after another into a
+  // window the health body was already showing as spent, each paying a clone,
+  // a refused run, an operator turn and a "Work stalled" packet. The retry
+  // doors (`retry_other_backend`, the scheduled fire) pass through here
+  // against their OWN target backend, so a Claude retry proceeds while Codex
+  // is held. After the eligibility gates above: an ineligible dispatch is
+  // refused with its own sentence, never parked.
+  if (principal.ok) {
+    const hold = backendDispatchHold(db, backend, {
+      credentialUserId: principal.principal.userId,
+    });
+    if (hold) {
+      throw await holdDispatch(db, ctx, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        backend,
+        hold,
+        profileId: engagement.profileId,
+        agentName,
+        deployed: resolved !== null,
+        directive: input.directive ?? null,
+        actor: auditActor,
+      });
+    }
+  }
   // The clone gate, and every other "will a provider process actually consume
   // this?" gate below. A refused run still becomes a RUN ROW — `startRun`
   // records the refusal as an honest terminal error and the normal completion
@@ -2232,6 +2267,177 @@ async function dispatchAgentRun(
   await registerAgentCompletion(db, ctx, completion);
 
   return { runId, backend, role: engagement.role, name: agentName };
+}
+
+// -------------------------------------------------------------- quota hold
+
+/** The sentence a door shows for a held dispatch (a toast, an @mention's
+ *  `runNotStarted`, the operator's tool reply): what is held, until when, and
+ *  that the retry is already on the schedule. */
+function dispatchHeldSentence(input: {
+  backendLabel: string;
+  agentName: string;
+  untilLabel: string | null;
+  dueLabel: string | null;
+  deployed: boolean;
+}): string {
+  const scheduled = input.dueLabel
+    ? input.untilLabel
+      ? `${input.agentName}'s run is scheduled for then`
+      : `${input.agentName}'s run is retried at ${input.dueLabel}`
+    : input.deployed
+      ? `${input.agentName}'s run was not rescheduled because this task refuses a schedule, run it again once the window reopens`
+      : `${input.agentName}'s run was not rescheduled because it is no longer deployed here`;
+  return input.untilLabel
+    ? `Held: ${input.backendLabel} is out of quota until ${input.untilLabel}; ${scheduled}.`
+    : `Held: ${input.backendLabel} is out of quota and the reopen time is unknown; ${scheduled}.`;
+}
+
+/**
+ * Ruling 152(c): record a held dispatch and hand back the error the door
+ * throws. Nothing here is a run: no row, no reservation, no process. The
+ * schedule is the retry (`run-agent`, the same profile and directive, due one
+ * minute after the reopen instant, or `UNDATED_HOLD_MS` after the refusal
+ * when the provider named none); the note is the human's record; the audit
+ * row is the machine's. A profile that is no longer deployed cannot be
+ * scheduled (the schedule writer refuses a phantom), so the note says the
+ * retry is not scheduled instead of failing the hold on that refusal.
+ */
+async function holdDispatch(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    backend: RealBackend;
+    hold: BackendDispatchHold;
+    profileId: string;
+    agentName: string;
+    deployed: boolean;
+    directive: string | null;
+    actor: AuditActor;
+  },
+): Promise<AppError> {
+  const backendLabel = input.backend === "claude" ? "Claude" : "Codex";
+  const untilIso = input.hold.until != null ? new Date(input.hold.until).toISOString() : null;
+  const untilLabel = formatResetLabel(untilIso);
+  const observedMs = Date.parse(input.hold.observedAt);
+  const reopensMs =
+    input.hold.until ?? (Number.isFinite(observedMs) ? observedMs : Date.now()) + UNDATED_HOLD_MS;
+  const dueAt = new Date(Math.max(reopensMs + 60_000, Date.now() + 60_000)).toISOString();
+  let scheduleId: string | null = null;
+  if (input.deployed) {
+    const { scheduleTaskAction } = await import("./schedule.server");
+    const scheduleInput: Parameters<typeof scheduleTaskAction>[1] = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      dueAt,
+      action: "run-agent",
+      profileId: input.profileId,
+    };
+    if (input.directive) scheduleInput.prompt = input.directive;
+    try {
+      scheduleId = (await scheduleTaskAction(db, scheduleInput, input.actor, ctx)).id;
+    } catch (error) {
+      // A task at its terminal stage refuses a schedule; the hold still
+      // stands and the note says the retry is by hand.
+      logger.warn("held dispatch could not be rescheduled", {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        profileId: input.profileId,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  const dueLabel = scheduleId ? formatResetLabel(dueAt) : null;
+  const quoted = input.hold.providerText.trim();
+  const said = quoted ? ` (the provider said: "${quoted}")` : "";
+  const retry = scheduleId
+    ? untilLabel
+      ? `${input.agentName}'s run starts when the window reopens (scheduled for ${dueLabel}); nothing was dispatched and no decision is needed.`
+      : `the reopen time is unknown, so ${input.agentName}'s run is retried at ${dueLabel}. Nothing was dispatched and no decision is needed.`
+    : `nothing was dispatched and no decision is needed. The retry was not scheduled because ${input.agentName} ${input.deployed ? "cannot be scheduled on this task" : "is no longer deployed on this project"}; run it again once the window reopens.`;
+  const text = untilLabel
+    ? `**Held:** ${backendLabel} is out of quota until ${untilLabel}${said}. ${retry}`
+    : `**Held:** ${backendLabel} is out of quota${said}; ${retry}`;
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: { kind: "system", systemId: "policy-engine" },
+      title: "Dispatch held",
+      text,
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.agent.run_held",
+    actor: input.actor,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      backend: input.backend,
+      until: untilIso,
+      scheduleId,
+      profileId: input.profileId,
+    },
+  });
+  return new DispatchHeldError(
+    dispatchHeldSentence({
+      backendLabel,
+      agentName: input.agentName,
+      untilLabel,
+      dueLabel,
+      deployed: input.deployed,
+    }),
+    {
+      backend: input.backend,
+      until: untilIso,
+      scheduleId,
+      profileId: input.profileId,
+      agentName: input.agentName,
+    },
+  );
+}
+
+/** What a held dispatch recorded, for the door that catches it. */
+export interface DispatchHoldRecord {
+  backend: RealBackend;
+  /** ISO instant the window reopens; null when the provider named none. */
+  until: string | null;
+  /** The `run-agent` schedule the hold made; null when none could be. */
+  scheduleId: string | null;
+  profileId: string;
+  agentName: string;
+}
+
+/** Ruling 152(c): the hold a dispatch door reads as "already rescheduled,
+ *  nothing to retry" rather than as a refusal (400) or a conflict (409). A
+ *  typed subclass so the record travels as itself, not as a details bag. */
+export class DispatchHeldError extends AppError {
+  readonly hold: DispatchHoldRecord;
+  constructor(userMessage: string, hold: DispatchHoldRecord) {
+    super({
+      code: ERROR_CODES.DISPATCH_HELD,
+      status: 409,
+      userMessage,
+      details: {
+        backend: hold.backend,
+        until: hold.until,
+        scheduleId: hold.scheduleId,
+        profileId: hold.profileId,
+      },
+    });
+    this.hold = hold;
+  }
+}
+
+export function isDispatchHeld(cause: unknown): cause is DispatchHeldError {
+  return cause instanceof DispatchHeldError;
 }
 
 // ----------------------------------------------------------------- persona

@@ -30,6 +30,12 @@ import {
   assembleAgentRoster,
   listLibraryProfiles,
 } from "~/features/agents/agents-query.server";
+import { propagateTemplateResources } from "~/server/org/template-propagation.server";
+import {
+  assertProjectAction,
+  isOrgAdmin,
+} from "~/server/auth/project-authority.server";
+import { AppError } from "~/server/errors/app-error.server";
 import { AgentsPage } from "~/features/agents/agents-page";
 
 /**
@@ -121,6 +127,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // profile is not running one (a run bills the TASK OWNER), so nothing on
     // this page gates the form on the author's own credential.
     backendHealth,
+    // Ruling 156 (owner, Q35-8): only an org admin may copy a template's
+    // grants onto this project's copy; the page renders the button for them
+    // and the divergence marker for everyone.
+    viewerIsOrgAdmin: user.role === "admin",
   };
 }
 
@@ -225,6 +235,38 @@ export async function action({ request, params }: Route.ActionArgs) {
         updated.governanceNotice = result.governanceNotice;
       return updated;
     }
+    if (intent === "sync-profile-resources") {
+      // Ruling 156 (owner, Q35-8): the project's own `manage-agents` gate
+      // first (audited like every other profile write), then the org role: a
+      // project admin who is not an org admin sees the marker and asks.
+      assertProjectAction(
+        db,
+        "manage-agents",
+        params.slug,
+        actor,
+        "change agent capability policy",
+      );
+      if (!isOrgAdmin(db, actor.userId)) {
+        throw AppError.forbidden(
+          "Only an org admin can copy the template's grants onto this project. A project admin sees the difference on the profile and asks.",
+        );
+      }
+      const profileId = String(formData.get("profileId") ?? "");
+      const fingerprint = String(formData.get("fingerprint") ?? "");
+      const propagateInput: Parameters<typeof propagateTemplateResources>[1] = {
+        profileId,
+        projectSlugs: [params.slug],
+      };
+      if (fingerprint) propagateInput.expectFingerprint = fingerprint;
+      const copies = await propagateTemplateResources(db, propagateInput, actor);
+      const name = copies[0]?.name ?? profileId;
+      const synced: ProfileMutationSuccess = {
+        ok: true,
+        toast: `"${name}" now carries the template's grants · changes apply from the next run`,
+        profileId,
+      };
+      return synced;
+    }
     if (intent === "delete-profile") {
       const result = await deleteAgentProfile(
         db,
@@ -261,6 +303,7 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
       projectSlug={layout?.board.project.slug ?? ""}
       projectName={loaderData.projectName}
       myRole={layout?.myRole ?? null}
+      viewerIsOrgAdmin={loaderData.viewerIsOrgAdmin}
       resourceCatalog={loaderData.resourceCatalog}
       backendHealth={loaderData.backendHealth}
     />

@@ -50,6 +50,10 @@ import {
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { seedDefaultAgentAssets } from "~/server/seed/default-assets.server";
+import { deployAgentProfileFromLibrary } from "~/features/agents/agent-profile-actions.server";
+import { saveGlobalAgentProfile } from "~/server/org/gagents.server";
+import { propagateTemplateResources } from "~/server/org/template-propagation.server";
 import {
   resetFakeVendorEnv,
   setFakeVendorMode,
@@ -780,6 +784,42 @@ describe("governed actions record audit rows (table-driven)", () => {
             actor: actorArda(),
           }),
       },
+      {
+        // Ruling 156 (pass 35): a template's grants copied onto a project's
+        // deployment, one row per project.
+        name: "propagateTemplateResources",
+        action: "project.agent_profile.resources_synced",
+        run: async () => {
+          seedDefaultAgentAssets(store.dataRoot);
+          rebuildAll(store.db, fileCtx);
+          await deployAgentProfileFromLibrary(
+            store.db,
+            { projectSlug: store.slug, profileId: "developer" },
+            actorArda(),
+            fileCtx,
+          );
+          await saveGlobalAgentProfile(
+            store.db,
+            {
+              id: "developer",
+              name: "Developer",
+              backend: "claude",
+              summary: "Implements the change.",
+              persona: "",
+              stages: ["ready", "impl"],
+              mcps: ["github"],
+            },
+            actorArda(),
+            fileCtx,
+          );
+          await propagateTemplateResources(
+            store.db,
+            { profileId: "developer", projectSlugs: [store.slug] },
+            actorArda(),
+            fileCtx,
+          );
+        },
+      },
     ];
 
     for (const row of table) {
@@ -806,6 +846,8 @@ describe("governed actions record audit rows (table-driven)", () => {
         "profile.backend.login_started",
         "profile.backend.login_failed",
         "profile.backend.login_cancelled",
+        // Ruling 156: a project-scoped row with no task.
+        "project.agent_profile.resources_synced",
       ].includes(row.action);
       if (!taskless) {
         expect(

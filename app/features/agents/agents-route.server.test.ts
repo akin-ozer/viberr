@@ -57,6 +57,8 @@ type LoaderData = {
   stages: { id: string; name: string; color: string }[];
   projectName: string;
   backendHealth: Record<"codex" | "claude", BackendConnectionSummaryData>;
+  /** Ruling 156 (owner, Q35-8): who may copy a template's grants here. */
+  viewerIsOrgAdmin: boolean;
 };
 
 beforeAll(async () => {
@@ -469,6 +471,107 @@ describe("action RBAC (profile CRUD is admin-only)", () => {
   it("rejects unknown intents", async () => {
     const result = await postAction(ids.arda, { intent: "frobnicate" });
     expect(refusalStatus(result)).toBe(400);
+  });
+});
+
+/**
+ * Ruling 156 (pass 35, F35-7): "Use the template's grants" on the Agents page
+ * rewrites this project's copy of a template's grants. Org admins only (owner,
+ * Q35-8): a project admin who is not one sees the marker and asks. The button
+ * carries the record the page rendered (B5), so a stale one is refused.
+ */
+describe("sync-profile-resources (ruling 156)", () => {
+  const PROFILE = "sync-probe";
+
+  async function saveTemplate(mcps: string[], create = false) {
+    const { saveGlobalAgentProfile } = await import("~/server/org/gagents.server");
+    await saveGlobalAgentProfile(
+      app.db,
+      {
+        id: create ? null : PROFILE,
+        name: "Sync Probe",
+        backend: "claude",
+        summary: "Probes the grant propagation.",
+        persona: "",
+        stages: ["impl"],
+        mcps,
+      },
+      { userId: ids.arda, label: "Arda" },
+      { dataRoot: app.dataRoot },
+    );
+  }
+
+  async function copyMcps(): Promise<string[] | undefined> {
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    return readProjectFile({ projectSlug: "viberr-core", dataRoot: app.dataRoot })!
+      .parsed.frontmatter.agents.find((a) => a.profileId === PROFILE)!.definition
+      ?.resources?.mcps;
+  }
+
+  it("an org admin rewrites the copy and the audit row lands; a reviewer answers 403; a stale fingerprint is refused", async () => {
+    // A fresh template, deployed from the library (the deploy writes the copy),
+    // then granted on the template so the copy drifts.
+    await saveTemplate([], true);
+    const deployed = saved(
+      await postAction(ids.arda, { intent: "deploy-profile", profileId: PROFILE }),
+    );
+    expect(deployed.ok).toBe(true);
+    await saveTemplate(["github"]);
+    expect(await copyMcps()).toEqual([]);
+    const loaded = await runLoader(ids.arda);
+    const drifted = loaded.profiles.find((p) => p.id === PROFILE)!;
+    expect(drifted.templateDrift).toMatchObject({ missing: { mcps: ["github"] } });
+    expect(loaded.viewerIsOrgAdmin).toBe(true);
+    expect((await runLoader(ids.selin)).viewerIsOrgAdmin).toBe(false);
+
+    // A reviewer is refused at the project's own gate.
+    const denied = await postAction(ids.selin, {
+      intent: "sync-profile-resources",
+      profileId: PROFILE,
+      fingerprint: drifted.fingerprint,
+    });
+    expect(refusalStatus(denied)).toBe(403);
+
+    // A stale record is refused with the editor's own sentence, nothing written.
+    const stale = await postAction(ids.arda, {
+      intent: "sync-profile-resources",
+      profileId: PROFILE,
+      fingerprint: "stale",
+    });
+    expect(refusalError(stale)).toContain("changed while the editor was open");
+    expect(await copyMcps()).toEqual([]);
+
+    // Canary: drop the `sync-profile-resources` arm and this reads the
+    // "Unknown action." 400.
+    const synced = saved(
+      await postAction(ids.arda, {
+        intent: "sync-profile-resources",
+        profileId: PROFILE,
+        fingerprint: drifted.fingerprint,
+      }),
+    );
+    expect(synced.toast).toBe(
+      '"Sync Probe" now carries the template\'s grants · changes apply from the next run',
+    );
+    expect(await copyMcps()).toEqual(["github"]);
+    expect(
+      (await runLoader(ids.arda)).profiles.find((p) => p.id === PROFILE)!.templateDrift,
+    ).toBeNull();
+    const audit = listAuditEvents(app.db, {
+      action: "project.agent_profile.resources_synced",
+    });
+    expect(audit[0]).toMatchObject({
+      projectSlug: "viberr-core",
+      subjectId: PROFILE,
+      details: { templateId: PROFILE, mcps: ["github"] },
+    });
+
+    // Leave the store as the seed shipped it for the cases that follow: the
+    // deployment goes, then the template file.
+    expect(
+      saved(await postAction(ids.arda, { intent: "delete-profile", profileId: PROFILE })).ok,
+    ).toBe(true);
+    rmSync(path.join(app.dataRoot, "agents", "profiles", `${PROFILE}.md`), { force: true });
   });
 });
 
@@ -1352,7 +1455,7 @@ describe("F15-05/06 — a brand-new profile claims no verdict authority", () => 
 
   it("org-created → library-deployed: no verdict outcomes, no unasked resources", async () => {
     const { saveGlobalAgentProfile } = await import("~/server/org/gagents.server");
-    saveGlobalAgentProfile(
+    await saveGlobalAgentProfile(
       app.db,
       {
         name: "Org docs writer",

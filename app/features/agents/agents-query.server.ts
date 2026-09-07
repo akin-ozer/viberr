@@ -34,7 +34,12 @@ import {
 import { humanGatesPreWorkAdvance } from "~/shared/workflow/stage-roles";
 import { specialistGrantModes } from "~/server/tasks/specialist-tool-policy";
 import { DEFAULT_PROFILE_ROLE_LABEL } from "./agent-types";
-import type { AgentProfileView, LibraryProfileView } from "./agent-types";
+import type {
+  AgentProfileView,
+  LibraryProfileView,
+  TemplateDrift,
+} from "./agent-types";
+import { resourceDrift } from "~/server/org/template-propagation.server";
 
 /**
  * Roster assembly for the Agents/Policy surfaces (two-layer agent model,
@@ -253,8 +258,10 @@ function identityOverride(
     [def.icon, template.icon],
     [list(def.backends), list(template.backends)],
     [def.model, template.model],
-    // A template declares no `effort` at all, so any stored effort is an override.
-    [def.effort, undefined],
+    // Ruling 153 (pass 35): a template may declare `effort` now, and the
+    // library deploy copies it, so a stored tier equal to the template's is not
+    // an override; one the template never named still is.
+    [def.effort, template.effort],
     [def.desc, template.desc],
     // A template's persona is its markdown BODY (F10-30) — the same value the
     // view's `definition` field falls back to.
@@ -265,6 +272,31 @@ function identityOverride(
   return fields.some(([mine, base]) => mine !== undefined && mine !== base);
 }
 
+
+/**
+ * Ruling 156 (pass 35, F35-7): how a deployment's COPY of the grants differs
+ * from its template's. Null when there is no template (a project-created
+ * profile), no copy (a definition-less deployment resolves the template live)
+ * or no difference. The card renders the exact difference and, for an org
+ * admin, the button that takes the template's grants.
+ */
+function templateDriftOf(
+  def: AgentDeploymentDefinition | null,
+  template: TemplateProfile | null,
+): TemplateDrift | null {
+  if (!template || !def?.resources) return null;
+  const drift = resourceDrift(def.resources, template.resources);
+  if (!drift) return null;
+  return {
+    missing: drift.missing,
+    extra: drift.extra,
+    templateResources: {
+      skills: template.resources.skills,
+      mcps: template.resources.mcps,
+      kb: template.resources.kb,
+    },
+  };
+}
 
 /**
  * Effective profile for ONE deployment entry (exported for actions/tests).
@@ -459,7 +491,9 @@ export function effectiveProfileView(
     model,
     modelLabel,
     modelKnown,
-    effort: def?.effort ?? "",
+    // Ruling 153: a definition-less deployment (the seeded rows) resolves the
+    // template live, its default effort included.
+    effort: def?.effort ?? template?.effort ?? "",
     scope: def?.scope ?? template?.scope ?? "",
     // OBS-7: a deployment holds a `definition` only once this project WROTE one
     // — the seeded roster carries none (agent-catalog.server.ts deploys
@@ -507,6 +541,10 @@ export function effectiveProfileView(
       mcps: def?.resources?.mcps ?? template?.resources.mcps ?? [],
       kb: def?.resources?.kb ?? template?.resources.kb ?? [],
     },
+    // Ruling 156 (F35-7): the grants signal beside the identity one. A copy
+    // exists only when the deployment wrote `definition.resources`; a
+    // definition-less row resolves the template live and cannot drift.
+    templateDrift: templateDriftOf(def, template),
     source: template ? "template" : "project",
     // B5: the record this view was built from, for the editor to submit back.
     fingerprint: deploymentFingerprint(deployment),

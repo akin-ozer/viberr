@@ -206,17 +206,20 @@ describe("claude adapter (SDK, injected fake query)", () => {
     await drain();
 
     expect(lines[0]!.facts.usage).toBeUndefined();
-    // msg_1: its whole prompt (2 + 2796 + 10300), cache reads as the subset,
-    // the placeholder output; the SDK's counter starts at one.
-    expect(lines[1]!.facts.usage).toEqual({ input_tokens: 13098, cached_input_tokens: 10300, output_tokens: 8 });
+    // msg_1: its whole prompt (2 + 2796 + 10300), cache reads as the subset;
+    // the SDK's counter starts at one. Output is the ESTIMATE from the block
+    // (F35-1): one thinking character rounds up to one token, and the
+    // placeholder 8 is nowhere in the facts.
+    expect(lines[1]!.facts.usage).toEqual({ input_tokens: 13098, cached_input_tokens: 10300, output_tokens: 1, outputEstimated: true });
     expect(lines[1]!.facts.turns).toBe(1);
-    // The second block of the SAME message changes nothing. Canary: drop the
-    // `seenMessages` dedupe and this doubles.
-    expect(lines[2]!.facts.usage).toEqual({ input_tokens: 13098, cached_input_tokens: 10300, output_tokens: 8 });
+    // The second block of the SAME message adds its own output (the `{}` tool
+    // input, one token) and nothing on the prompt side. Canary: drop the
+    // `seenMessages` dedupe and the prompt doubles.
+    expect(lines[2]!.facts.usage).toEqual({ input_tokens: 13098, cached_input_tokens: 10300, output_tokens: 2, outputEstimated: true });
     // A tool result is one more turn, on the user line itself.
     expect(lines[3]!.facts.turns).toBe(2);
     // msg_2 adds its own whole prompt: 13098 + (2 + 861 + 13096).
-    expect(lines[4]!.facts.usage).toEqual({ input_tokens: 27057, cached_input_tokens: 23396, output_tokens: 33 });
+    expect(lines[4]!.facts.usage).toEqual({ input_tokens: 27057, cached_input_tokens: 23396, output_tokens: 3, outputEstimated: true });
     expect(lines[4]!.facts.turns).toBe(2);
     expect(lines[5]!.facts.turns).toBe(3);
     expect(lines[6]!.facts.turns).toBe(4);
@@ -224,12 +227,64 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(lines[7]!.facts.usage).toBeUndefined();
     // msg_3: 27057 + (2 + 4438 + 13957) — and the live prompt figures now EQUAL
     // the result's (6 + 8095 + 37353), so the sink's max fold has nothing to
-    // correct on the input side; output is the placeholders' lower bound.
-    expect(lines[8]!.facts.usage).toEqual({ input_tokens: 45454, cached_input_tokens: 37353, output_tokens: 36 });
+    // correct on the input side; "done" is one more estimated token.
+    expect(lines[8]!.facts.usage).toEqual({ input_tokens: 45454, cached_input_tokens: 37353, output_tokens: 4, outputEstimated: true });
     expect(lines[8]!.facts.turns).toBe(4);
-    // Result: the SDK's totals in the same terms, untouched by the accumulator.
-    expect(lines[9]!.facts.usage).toEqual({ input_tokens: 45454, cached_input_tokens: 37353, output_tokens: 900 });
+    // Result: the SDK's totals in the same terms, untouched by the accumulator,
+    // and marked as the provider's figure.
+    expect(lines[9]!.facts.usage).toEqual({ input_tokens: 45454, cached_input_tokens: 37353, output_tokens: 900, outputEstimated: false });
     expect(lines[9]!.facts.turns).toBe(4);
+  });
+
+  /**
+   * F35-1 (pass 35): the live output figure. The SDK's per-envelope
+   * `usage.output_tokens` is the `message_start` placeholder (1 to 3 per API
+   * message), and summing it read "49 tokens" for twelve minutes of Opus
+   * writing ~20k characters of files, then jumped to 54,759 at the result. The
+   * fold now estimates output from the streamed content (text, thinking and
+   * tool-call input at ~4 characters per token) and marks the figure as an
+   * estimate; the result's total lands unmarked and replaces it in the sink.
+   */
+  it("F35-1: live output is estimated from the streamed text, and the result's figure is exact", async () => {
+    const text = "x".repeat(2000);
+    const messages = [
+      { type: "system", subtype: "init", session_id: "s", model: "claude-opus-4-1", tools: [], mcp_servers: [] },
+      {
+        type: "assistant",
+        message: {
+          id: "msg_1",
+          content: [{ type: "text", text }],
+          usage: { input_tokens: 2, cache_creation_input_tokens: 100, cache_read_input_tokens: 0, output_tokens: 2 },
+        },
+      },
+      // A tool call's arguments are output too: 1200 characters of file body.
+      {
+        type: "assistant",
+        message: {
+          id: "msg_2",
+          content: [{ type: "tool_use", name: "Write", input: { file_path: "/w/a.md", content: "y".repeat(1200) } }],
+          usage: { input_tokens: 2, cache_creation_input_tokens: 0, cache_read_input_tokens: 100, output_tokens: 3 },
+        },
+      },
+      { type: "result", subtype: "success", is_error: false, num_turns: 1, duration_ms: 1000, usage: { input_tokens: 4, cache_creation_input_tokens: 100, cache_read_input_tokens: 100, output_tokens: 900 }, total_cost_usd: 0.01 },
+    ];
+    const { q } = fakeQuery(messages);
+    const adapter = createClaudeAdapter({ queryFn: () => q });
+    const lines: EmittedLine[] = [];
+    adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
+    await drain();
+
+    // 2000 characters of prose: at least 500 tokens, marked as an estimate.
+    // Canary: restore `liveOut += u.output_tokens` and this reads 2.
+    const first = lines[1]!.facts.usage!;
+    expect(first.output_tokens).toBeGreaterThanOrEqual(500);
+    expect(first.outputEstimated).toBe(true);
+    // The tool call's JSON (over 1200 characters) grows the estimate by 300+.
+    const second = lines[2]!.facts.usage!;
+    expect(second.output_tokens).toBeGreaterThanOrEqual(first.output_tokens + 300);
+    expect(second.outputEstimated).toBe(true);
+    // The result: exactly the provider's figure, not an estimate.
+    expect(lines[3]!.facts.usage).toEqual({ input_tokens: 204, cached_input_tokens: 100, output_tokens: 900, outputEstimated: false });
   });
 
   it("errors when the result envelope is is_error", async () => {
@@ -1133,7 +1188,7 @@ describe("ruling 130(a): structured classification", () => {
     expect(terminal?.display?.text).toContain("Profile → Agent accounts");
     expect(terminal?.display?.failure).toEqual({
       kind: "auth", resetsAt: null, window: null, windowRejected: false,
-      apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error",
+      apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error", origin: null,
     });
     // The banner is an error line, never the reply.
     expect(lines.find((l) => l.display?.tag === "assistant·oauth_org_not_allowed")?.display?.ev).toBe("err");
@@ -1203,8 +1258,50 @@ describe("ruling 130(a): structured classification", () => {
     expect(terminal?.display?.text).not.toContain("Profile → Agent accounts");
     expect(terminal?.display?.failure).toEqual({
       kind: "overloaded", resetsAt: null, window: null, windowRejected: false,
-      apiError: null, apiErrorStatus: 529, terminalReason: "api_error",
+      apiError: null, apiErrorStatus: 529, terminalReason: "api_error", origin: "provider",
     });
+  });
+
+  /**
+   * U35-11 (pass 35): live, nine runs died on the CLI's "API Error: Unable to
+   * connect to API (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)" under a
+   * `server_error` banner with no HTTP status, while the container's own
+   * fetch was the thing failing; the overload arm narrated it as "the
+   * provider failed on its own side". Same class and retry, its own origin
+   * and sentence. Canary: delete the local-network arm and the first case
+   * falls to the overload arm's "failed on its own side".
+   */
+  it("a connection that failed before the provider answered classifies `overloaded` with origin `local` and names this deployment, not the provider", async () => {
+    const tls = await run([
+      { type: "assistant", error: "server_error", message: { content: [{ type: "text", text: "API Error: Unable to connect to API (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)" }], usage: {} } },
+      { type: "result", subtype: "success", is_error: true, num_turns: 1, usage: {}, api_error_status: null, terminal_reason: "api_error", result: "API Error: Unable to connect to API (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)" },
+    ]);
+    expect(tls.terminal?.display?.tag).toBe("run·error·overloaded");
+    expect(tls.terminal?.display?.text).toContain(
+      "Claude could not be reached from this deployment: the connection failed before the provider answered (UNKNOWN_CERTIFICATE_VERIFICATION_ERROR). Nothing about the account or the task is wrong; check this deployment's network path (TLS, DNS, proxy) and retry in a few minutes.",
+    );
+    expect(tls.terminal?.display?.text).not.toContain("failed on its own side");
+    expect(tls.terminal?.display?.failure).toMatchObject({ kind: "overloaded", origin: "local", apiError: "server_error", apiErrorStatus: null });
+
+    // A thrown stream error with the same shape, no envelope evidence at all.
+    for (const text of ["fetch failed", "connect ECONNREFUSED 10.0.0.1:443", "getaddrinfo ENOTFOUND api.anthropic.com"]) {
+      const { q } = fakeQuery([], { rejectWith: new Error(text) });
+      const adapter = createClaudeAdapter({ queryFn: () => q });
+      const lines: EmittedLine[] = [];
+      adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
+      await drain();
+      const terminal = lines.find((l) => (l.display?.tag ?? "").startsWith("run·error·"));
+      expect(terminal?.display?.tag, text).toBe("run·error·overloaded");
+      expect(terminal?.display?.failure?.origin, text).toBe("local");
+    }
+
+    // The provider DID answer with a 5xx: never local, whatever the prose says.
+    const answered = await run([
+      { type: "assistant", error: "server_error", message: { content: [{ type: "text", text: "connection error upstream" }], usage: {} } },
+      { type: "result", subtype: "success", is_error: true, num_turns: 1, usage: {}, api_error_status: 502, terminal_reason: "api_error", result: "" },
+    ]);
+    expect(answered.terminal?.display?.failure).toMatchObject({ kind: "overloaded", origin: "provider", apiErrorStatus: 502 });
+    expect(answered.terminal?.display?.text).toContain("failed on its own side (HTTP 502)");
   });
 
   it("the assistant banner's `overloaded` / `server_error` codes classify the same class; a plain 5xx reads as the provider's own failure", async () => {

@@ -621,67 +621,28 @@ export function TaskDetailPage({
       tabIndex={-1}
       data-screen-label={"Task " + task.key}
     >
-      {/* U7 (D2's other half): the side column is FIRST in the DOM.
-          UX spec §Breakpoint Strategy asks for a reading order — "the task
-          detail's side-by-side regions stack, preserving reading order: current
-          state, latest packet, next action, then the timeline" — and reading
-          order is source order, which is what a screen reader announces and
-          what Tab walks. Pass 20 fixed only the paint (`order: -1` at 1100px)
-          and recorded the departure in a CSS comment that cited this very
-          sentence; below that width a sighted keyboard user then SAW "Accept
-          completion → Done" at the top and reached it LAST, after every
-          timeline entry (WCAG 2.2 SC 1.3.2 / 2.4.3). The desktop layout is
-          unchanged: `.detail` is a grid and both columns name their cell in
-          app.css, so main still paints left of side at any source order. */}
-      <div className="detail-side">
-        <GithubTrace
-          task={task}
-          githubHost={githubHost}
-          acceptance={acceptance}
-          reconciledAt={githubReconciledAt}
-          checkedAt={githubCheckedAt}
-          {...(onCompleteMerge
-            ? { onCompleteMerge: () => setConfirmAccept({ mode: "complete-merge" }) }
-            : {})}
-          {...(onForceAccept
-            ? { onForceAccept: () => setConfirmAccept({ mode: "force" }) }
-            : {})}
-          {...(canDeliver && !taskClosed ? { onDeliver } : {})}
-          delivering={deliverBusy}
-          merging={runBusy}
-        />
-        <CurrentStatePanel
-          task={task}
-          stage={stage}
-          meId={me.id}
-          myRole={myRole}
-          archived={archived}
-          acceptance={acceptance}
-          ownerBusy={ownerBusy}
-          onOwner={onOwner}
-          onRelease={() => setReleasing(true)}
-          onArchive={() => (archived ? submitArchive(false) : setArchiving(true))}
-          onAccept={() => setConfirmAccept({ mode: "accept" })}
-          onTransition={onTransition}
-          transitionBusy={transitionBusy}
-          acceptBusy={acceptBusy}
-          dispositionBusy={archiveBusy}
-        />
-        <TaskDetailsPanel
-          task={task}
-          canEdit={canEditMeta}
-          labelSuggestions={labelSuggestions}
-        />
-        <PolicyPanel
-          projectSlug={task.projectSlug}
-          myRole={myRole}
-          stages={task.stages}
-          ownsTask={isOwner}
-          acceptanceAuthority={acceptanceAuthority}
-        />
-      </div>
-
-      <div className="detail-main">
+      {/* U35-2 (pass 35): three regions, and source order IS the reading order
+          at every width, so a screen reader, the Tab key and the one-column
+          phone stack all meet the page in the same sequence. Below 1100px the
+          grid placement drops (app.css) and the DOM order is the stack:
+            1. `.detail-head`: the task's name and goal, then the open decision
+               packet, the page's most important object. Before this the side
+               rail came first (U7 chose it for "current state, latest packet,
+               next action, then the timeline"), but the title and the packet
+               lived in the main column, so on a 390px viewport a person read
+               the GitHub card, Current state, Details and Permissions before
+               the task's name (y=1659 on KNC-6) or the question it asked
+               (y=2070).
+            2. `.detail-side`: Current state first (it carries the next action
+               and the acceptance button), then the GitHub trace, Details and
+               Permissions.
+            3. `.detail-main`: the live run, diagnostics, continuity,
+               recommendations, the run controls, the console and the timeline.
+          On desktop `.detail-head` spans both columns and the two columns
+          keep their cells by PLACEMENT (`grid-column`/`grid-row` in app.css),
+          never by `order`, which U7 found re-splits what the eye and the focus
+          ring see (WCAG 2.2 SC 1.3.2 / 2.4.3). */}
+      <div className="detail-head">
         <TaskHero
           task={task}
           stage={stage}
@@ -689,36 +650,11 @@ export function TaskDetailPage({
           archived={archived}
           editGoalSignal={editGoalSignal}
           editGoalDraft={editGoalDraft}
+          // F35-6: while a decided edit_goal packet waits, the hero's own Edit
+          // opens with the SAME draft the decided card shows (one mapping
+          // field), not the goal the decision asked to replace.
+          pendingGoalDraft={task.packet?.goalDraft ?? null}
         />
-
-        {runtime.length > 0 ? (
-          <LiveRunPanel
-            runtime={runtime}
-            onViewLogs={onViewLogs}
-            // D6: the button opens a confirm instead of interrupting on the click.
-            onInterrupt={(id) => setConfirmInterrupt(id)}
-            canInterrupt={canInterrupt}
-            interrupting={runBusy}
-          />
-        ) : null}
-
-        <DiagnosticsPanel diagnostics={task.diagnostics} />
-
-        {/* D18 — above the packet, not below it. The Operator Desk order canon
-            names is "current state, execution truth, latest packet, steering
-            actions above timeline depth": degraded continuity is execution
-            TRUTH, so it sits with Diagnostics, ahead of the decision it may
-            well explain. It renders itself away when there is nothing to
-            report. */}
-        <ContinuityRecoveryPanel
-          timeline={task.timeline}
-          runtime={runtime}
-          runsVisible={runsVisible}
-          canRunAgents={canRunAgents}
-          {...(runsVisible ? { onOpenConsole: onViewLogs } : {})}
-          onAsk={() => setAsk((a) => a + 1)}
-        />
-
         {task.packet && (
           <DecisionPacket
             packet={task.packet}
@@ -770,6 +706,86 @@ export function TaskDetailPage({
             }}
           />
         )}
+      </div>
+
+      <div className="detail-side">
+        <CurrentStatePanel
+          task={task}
+          stage={stage}
+          meId={me.id}
+          myRole={myRole}
+          archived={archived}
+          acceptance={acceptance}
+          ownerBusy={ownerBusy}
+          onOwner={onOwner}
+          onRelease={() => setReleasing(true)}
+          onArchive={() => (archived ? submitArchive(false) : setArchiving(true))}
+          onAccept={() => setConfirmAccept({ mode: "accept" })}
+          onTransition={onTransition}
+          transitionBusy={transitionBusy}
+          acceptBusy={acceptBusy}
+          dispositionBusy={archiveBusy}
+        />
+        <GithubTrace
+          task={task}
+          githubHost={githubHost}
+          acceptance={acceptance}
+          reconciledAt={githubReconciledAt}
+          checkedAt={githubCheckedAt}
+          {...(onCompleteMerge
+            ? { onCompleteMerge: () => setConfirmAccept({ mode: "complete-merge" }) }
+            : {})}
+          {...(onForceAccept
+            ? { onForceAccept: () => setConfirmAccept({ mode: "force" }) }
+            : {})}
+          {...(canDeliver && !taskClosed ? { onDeliver } : {})}
+          delivering={deliverBusy}
+          merging={runBusy}
+        />
+        <TaskDetailsPanel
+          task={task}
+          canEdit={canEditMeta}
+          labelSuggestions={labelSuggestions}
+        />
+        <PolicyPanel
+          projectSlug={task.projectSlug}
+          myRole={myRole}
+          stages={task.stages}
+          ownsTask={isOwner}
+          acceptanceAuthority={acceptanceAuthority}
+        />
+      </div>
+
+      <div className="detail-main">
+        {runtime.length > 0 ? (
+          <LiveRunPanel
+            runtime={runtime}
+            onViewLogs={onViewLogs}
+            // D6: the button opens a confirm instead of interrupting on the click.
+            onInterrupt={(id) => setConfirmInterrupt(id)}
+            canInterrupt={canInterrupt}
+            interrupting={runBusy}
+          />
+        ) : null}
+
+        <DiagnosticsPanel diagnostics={task.diagnostics} />
+
+        {/* D18: with Diagnostics, ahead of the recommendations and the
+            timeline. The Operator Desk order canon names is "current state,
+            execution truth, latest packet, steering actions above timeline
+            depth": degraded continuity is execution TRUTH, so it sits with
+            Diagnostics. U35-2 moved the open packet into `.detail-head` above
+            every column, so this no longer precedes the decision it may
+            explain; it still precedes every steering action. It renders
+            itself away when there is nothing to report. */}
+        <ContinuityRecoveryPanel
+          timeline={task.timeline}
+          runtime={runtime}
+          runsVisible={runsVisible}
+          canRunAgents={canRunAgents}
+          {...(runsVisible ? { onOpenConsole: onViewLogs } : {})}
+          onAsk={() => setAsk((a) => a + 1)}
+        />
 
         <OperatorRecommendations
           recommendations={recommendations}
