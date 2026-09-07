@@ -329,13 +329,13 @@ export function storeLayoutPrefix(projectSlug: string): string {
 /**
  * Ruling 159 (pass 35, F35-10): every path in the revision's tree that lies
  * under the store's own layout for this project. Read from HEAD itself
- * (`git ls-tree -r --name-only HEAD -- <prefix>`), not from a range: a path
+ * (`git ls-tree -r -z --name-only HEAD -- <prefix>`), not from a range: a path
  * that reached origin under an older prompt is still Viberr's layout in a
  * customer repository, and the next delivery must refuse to carry it forward
  * until a person removes it. `null` when git could not read the tree at all,
  * which is not a measurement (the push then answers for itself).
  */
-async function storeLayoutFilesInTree(
+export async function storeLayoutFilesInTree(
   exec: Exec,
   repoDir: string,
   projectSlug: string,
@@ -343,14 +343,19 @@ async function storeLayoutFilesInTree(
   const prefix = storeLayoutPrefix(projectSlug);
   const res = await exec(
     "git",
-    ["-C", repoDir, "ls-tree", "-r", "--name-only", "HEAD", "--", prefix],
+    // `-z` is what makes this a MEASUREMENT. Without it git prints paths under
+    // `core.quotePath` (on by default), so a name carrying a single non-ASCII
+    // byte — an accented screenshot an agent saved — comes back C-quoted as
+    // `"projects/…/r\303\251sum\303\251.png"`, starting with a double quote.
+    // The prefix filter then dropped it and the guard reported a clean tree:
+    // the one failure mode ruling 159(b) cannot have, because an empty list
+    // means "no store layout" and lets the push go. `-z` also ends the need to
+    // trim, so a name with leading or trailing spaces is reported verbatim.
+    ["-C", repoDir, "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", prefix],
     { cwd: repoDir, timeoutMs: 10_000 },
   );
   if (!res.ok) return null;
-  return res.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith(prefix));
+  return res.stdout.split("\0").filter((line) => line.startsWith(prefix));
 }
 
 /**

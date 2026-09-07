@@ -50,6 +50,24 @@ function bindPat() {
   setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, SYS);
 }
 
+/**
+ * git's own `core.quotePath` rendering: a path with a byte outside printable
+ * ASCII is emitted as a C-quoted string (octal escapes, wrapped in double
+ * quotes). Modelled here so the fake cannot be kinder to the guard than git is.
+ */
+function gitQuotePath(p: string): string {
+  const bytes = Buffer.from(p, "utf8");
+  if (bytes.every((b) => b >= 0x20 && b < 0x7f && b !== 0x22 && b !== 0x5c)) return p;
+  const body = [...bytes]
+    .map((b) =>
+      b >= 0x20 && b < 0x7f && b !== 0x22 && b !== 0x5c
+        ? String.fromCharCode(b)
+        : `\\${b.toString(8).padStart(3, "0")}`,
+    )
+    .join("");
+  return `"${body}"`;
+}
+
 /** A fake git that answers the helper's probes and records the push. `dirty`
  * simulates uncommitted working-tree changes the agent left behind; once the
  * helper commits them, the ahead-count reflects the new commit. */
@@ -123,7 +141,14 @@ function fakeGit(opts: {
       const files = committed
         ? (opts.storeLayoutFilesAfterCommit ?? opts.storeLayoutFiles ?? [])
         : (opts.storeLayoutFiles ?? []);
-      return { ok: true, stdout: files.join("\n"), stderr: "" };
+      // Real git's two output modes, because the difference between them is
+      // the whole finding: `-z` prints raw NUL-terminated paths, and WITHOUT
+      // it `core.quotePath` (on by default) C-quotes any name carrying a
+      // non-ASCII byte, so the line starts with a double quote and no prefix
+      // filter can see it.
+      return args.includes("-z")
+        ? { ok: true, stdout: files.map((f) => `${f}\0`).join(""), stderr: "" }
+        : { ok: true, stdout: files.map(gitQuotePath).join("\n"), stderr: "" };
     }
     if (args.includes("--name-only")) {
       if (opts.workflowLogFails) {
@@ -1103,7 +1128,7 @@ describe("ruling 159: the store layout never reaches origin", () => {
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
     // The tree was read under the project's own prefix, from HEAD.
     const lsTree = git.calls.find((c) => c.includes("ls-tree"));
-    expect(lsTree).toEqual(["-C", expect.any(String), "ls-tree", "-r", "--name-only", "HEAD", "--", `projects/${store.slug}/tasks/`]);
+    expect(lsTree).toEqual(["-C", expect.any(String), "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", `projects/${store.slug}/tasks/`]);
   });
 
   it("a stray folder the agent left UNCOMMITTED is caught after the delivery auto-commit", async () => {
@@ -1119,6 +1144,19 @@ describe("ruling 159: the store layout never reaches origin", () => {
     const res = await push(git);
     expect(res).toMatchObject({ status: "push_refused_store_layout", files: [stray] });
     expect(git.calls.some((c) => c.includes("commit"))).toBe(true);
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+  });
+
+  it("a stray file whose NAME is non-ASCII is seen too (git would quote it)", async () => {
+    bindPat();
+    // The realistic occupant of an attachments folder: a screenshot an agent
+    // named with an accent. Under git's default `core.quotePath` this path is
+    // printed C-quoted, and a guard that reads the quoted line measures an
+    // EMPTY tree and lets the push publish the store layout.
+    const stray = `projects/${store.slug}/tasks/VIB-1/attachments/résumé.png`;
+    const git = fakeGit({ branch: "vib-1-work", ahead: 1, storeLayoutFiles: [stray] });
+    const res = await push(git);
+    expect(res).toMatchObject({ status: "push_refused_store_layout", files: [stray] });
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
   });
 
