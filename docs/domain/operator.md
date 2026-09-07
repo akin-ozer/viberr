@@ -364,10 +364,24 @@ Resolution effects by option kind (`resolvePacket`):
 | `edit_goal` | The only kind that keeps its packet open (`awaiting: goal_edit`, plus `decided` recording the chosen option); cleared when the edited goal is saved. The card then reads decided (chosen option locked, no Confirm, one "Edit the goal" control), the readiness shows `goal_edit_pending`, the review queue row says a goal edit is owed, and `get_task` sees `packet.awaiting` (ruling 138). |
 | `archive_task` | The archive contract; with `deleteBranch: true` also deletes the remote branch (the product's only remote-branch deletion besides collision resolution). Ruling 161 (U35-8): `get_task` carries `foreignHead` when origin's branch holds commits this task did not author, the toolkit tells the operator to say so in the option text, the confirm dialog says it before the button, and the audit records both heads. Requires `approve-transition`. |
 | `discard_branch` | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. Ruling 161: offered while the revision has not left the workspace (no PR on the branch, no unowned PR on the name, no `pushedAt` from a delivery push), a reported head included; the discard retires that revision (`kind: discarded`, verdicts kept as history, `validation: none`). The operator's push-conflict reply says the refused push means the draft never left, so the discard may be offered when the person's choice is to throw it away, never as the way to clear the remote. Requires `approve-transition`. |
+| `force_accept` | Ruling 164 (F35-14): runs `forceAcceptCompletion`, the same function the task page's Force accept button calls, so the same admin-only tier (`force-accept-completion`), the same disclosure echo, the same irreducible gate (a PR closed unmerged is refused) and the same `task.acceptance.forced` record naming every bypassed gate. The card opens the FORCE form of the acceptance ceremony with the option's title as its subject. Not re-queued: the task is Done. |
+| `move_stage` | Ruling 164 (F35-14): moves the task to the option's own `toStage` through `transitionStage({ manual: true })`, the stage picker's path, so the same `approve-transition` tier, the same off-graph licence, the same transition event and `task.transition` row, and the operator re-invoked at the stage it lands on. The terminal stage is refused at authoring and at resolution (moving there accepts the completion). Best-effort after the resolution write: a refused move leaves a plain timeline note and the toast says the move did not complete. |
 | `resolve_remote_collision` | Deletes the stale remote branch, closes the recorded unowned PR, re-delivers this task's local work; ends with exactly one operator hand-off carrying the outcome (ruling 136). When the PR on the ref turns out to be the task's own open review PR there is no collision: a behind or absent remote gets the push, a diverged one keeps the block. Requires `approve-transition`. |
 
+An option TITLE is a promise the resolution keeps (ruling 164). `operatorOpenPacket`
+refuses a send-back option (`custom`, `redirect`, `request_edit`, whose resolution only
+hands the task back to the agent side) whose title or detail describes a force-accept, a
+move to one of this board's stages, or an edit to an agent profile, and the refusal names
+the kind that performs it: `force_accept`, `move_stage` with `toStage`, or, for a profile,
+the project's Agents surface (nothing a person confirms on a packet changes an agent's
+configuration, ruling 85). `toStage` is refused off `move_stage`, and a `move_stage`
+option that names no stage, an unknown stage, the terminal stage or the stage the task
+already stands at is refused where it is authored.
+
 Who may resolve: `accept_completion` is guarded by `requireAcceptCompletion` (admin,
-maintainer, or the live task owner); every other kind by the owner exception or
+maintainer, or the live task owner); `force_accept` by `force-accept-completion` (admin);
+`move_stage`, `archive_task`, `discard_branch` and `resolve_remote_collision` by
+`approve-transition` (admin, maintainer); every other kind by the owner exception or
 `resolve-packet` (admin, maintainer). A stranded contributor-owner can
 `request-maintainer-decision`, which notifies and audits `task.packet.escalated`
 without touching the packet. `packetIdentity` (the id, or a content fingerprint) is

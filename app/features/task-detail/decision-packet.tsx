@@ -635,6 +635,11 @@ interface PacketTierGrants {
   canEditGoal: boolean;
   canArchive: boolean;
   canDiscardBranch: boolean;
+  /** Ruling 164: `force-accept-completion` is admin-only, the tier the task
+   *  page's own Force accept button holds. */
+  canForceAccept: boolean;
+  /** Ruling 164: `approve-transition`, the tier the stage picker holds. */
+  canMoveStage: boolean;
 }
 
 /** One gated option kind: the grant it needs and how a refusal is stated. */
@@ -715,6 +720,32 @@ const PACKET_TIER_GATES = new Map<PacketOptionKind, PacketTierGate>([
     },
   ],
   [
+    "force_accept",
+    {
+      // Ruling 164 (pass 35, F35-14): the resolution runs the admin override
+      // itself, so the option carries the Force accept button's own tier.
+      held: (grants) => grants.canForceAccept,
+      denyNote: "Force-accepting past the review gate is reserved for admins.",
+      option: {
+        title: "Force-accepting past the review gate is reserved for admins",
+        note: " · your role can't force-accept (an admin must)",
+      },
+    },
+  ],
+  [
+    "move_stage",
+    {
+      // Ruling 164: the move runs on the stage picker's path, which takes the
+      // same `approve-transition` tier the picker itself takes.
+      held: (grants) => grants.canMoveStage,
+      denyNote: "Moving the task to another stage is reserved for maintainers and admins.",
+      option: {
+        title: "Moving the task to another stage is reserved for maintainers and admins",
+        note: " · your role can't move the task (a maintainer or admin must)",
+      },
+    },
+  ],
+  [
     "resolve_remote_collision",
     {
       // F31-6: deleting a remote ref takes the same `approve-transition` tier
@@ -752,6 +783,8 @@ export function DecisionPacket({
   canEditGoal,
   canArchive,
   canDiscardBranch = false,
+  canForceAccept = false,
+  canMoveStage = false,
   archiveDisclosure,
   onResolve,
   onResolveCustom,
@@ -786,6 +819,13 @@ export function DecisionPacket({
    *  authority the archive-with-branch-deletion needs). Same block-with-reason
    *  treatment as `canArchive`. */
   canDiscardBranch?: boolean;
+  /** Ruling 164 (pass 35, F35-14): whether the viewer holds
+   *  `force-accept-completion` (admin), the tier a `force_accept` option
+   *  re-checks server-side with the Force accept button's own sentence. */
+  canForceAccept?: boolean;
+  /** Ruling 164: whether the viewer holds `approve-transition`, the tier a
+   *  `move_stage` option re-checks (it is the stage picker's own move). */
+  canMoveStage?: boolean;
   /** UX19-9: what an `archive_task` resolution destroys, for its confirm. */
   archiveDisclosure?: PacketArchiveDisclosure;
   onResolve: (optionIndex: number, note: string) => void;
@@ -908,6 +948,8 @@ export function DecisionPacket({
     canEditGoal,
     canArchive,
     canDiscardBranch,
+    canForceAccept,
+    canMoveStage,
   };
   /** The gate a kind TRIPS, or null when this viewer holds its tier (or it has
    *  no tier at all: `custom`, `request_edit`, the rest). */

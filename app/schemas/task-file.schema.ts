@@ -166,6 +166,20 @@ export const PACKET_OPTION_KINDS = [
   // is why authoring refuses to offer discard on a delivered/occupied branch.
   // Resolution enforces `approve-transition` (it deletes a remote ref).
   "resolve_remote_collision",
+  // Ruling 164 (pass 35, F35-14): the admin acceptance override, as a packet
+  // option. The resolution runs `forceAcceptCompletion` — the same path, the
+  // same disclosure and the same audited bypass record as the task page's
+  // Force accept button — and refuses a non-admin with that button's own
+  // sentence. Before it, an operator could only write the promise as a `custom`
+  // option title ("Force-accept as admin without a fresh verdict", KNC-3), whose
+  // resolution re-ran the operator into a no-op behind the verdict gate.
+  "force_accept",
+  // Ruling 164 (pass 35, F35-14): a manual board move to the option's own
+  // `toStage`, performed through `transitionStage({ manual: true })` — the same
+  // path as the task page's stage picker, with the same `approve-transition`
+  // tier and the same transition event and audit row. Before it, "Move KNC-16
+  // back to Review" was a `redirect` title and the resolution moved nothing.
+  "move_stage",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -676,6 +690,10 @@ export const packetOptionSchema = z
      *  what the goal editor opens with (`goalDraftForOption`); an option without
      *  one prefills the title and detail verbatim. Refused on any other kind. */
     goalDraft: z.string().optional(),
+    /** move_stage — ruling 164 (pass 35, F35-14): the stage the resolution
+     *  moves the task to, as a stage id of this project. Required on the kind
+     *  (authoring refuses one without it) and refused on every other kind. */
+    toStage: z.string().optional(),
     /** redirect — ruling 163 (pass 35, F35-13): the resolution RETURNS the
      *  task to the review stage when it stands at or past it, so the reworked
      *  revision gets its verdict where the reviewers are eligible. Written by

@@ -3166,3 +3166,218 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
     expect(fm.pr?.state).toBe("accepted");
   });
 });
+
+/**
+ * Ruling 164 (pass 35, F35-14) — the two kinds that perform what their title
+ * promises.
+ *
+ * Live: KNC-3's `custom` "Force-accept as admin without a fresh verdict"
+ * recorded a decision and re-ran the operator into a no-op behind the verdict
+ * gate; KNC-16's `redirect` "Move KNC-16 back to Review" moved nothing. These
+ * cases assert the acts themselves, on the same paths their buttons take.
+ */
+describe("ruling 164: force_accept and move_stage perform their option's promise", () => {
+  const forcePacket: TaskPacket = {
+    type: "blocked",
+    kind: "Blocked decision",
+    from: "operator",
+    title: "No verdict-capable agent can run at this stage",
+    body: "b",
+    observations: [],
+    options: [
+      {
+        kind: "force_accept",
+        t: "Force-accept as admin without a fresh verdict",
+        d: "",
+        rec: true,
+      },
+    ],
+  };
+
+  const movePacket = (toStage: string): TaskPacket => ({
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "The reviewer cannot run where the task stands",
+    body: "b",
+    observations: [],
+    options: [
+      {
+        kind: "move_stage",
+        t: "Move VIB-1 back to Review so the reviewer can verdict",
+        d: "",
+        rec: true,
+        toStage,
+      },
+    ],
+  });
+
+  /** A task wedged exactly as KNC-3 was: a standing rejection on the current
+   *  revision, so the acceptance gate refuses and only the override is left. */
+  function wedged(store: TestStore, packet: TaskPacket): void {
+    withTask(
+      store,
+      {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        branch: "vib-1-work",
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        workRevision: workRev("rev_1"),
+        verdicts: [rejectionVerdict("rev_1")],
+        validation: "failing",
+      },
+      packet,
+    );
+  }
+
+  it("force_accept: an admin's confirm closes the task through the force path, audited", async () => {
+    const store = prepared();
+    wedged(store, forcePacket);
+
+    const res = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda), // admin: the Force accept button's own tier
+      { dataRoot: store.dataRoot },
+    );
+    expect(res.option.kind).toBe("force_accept");
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // The act, not just its record: the task is closed and the durable bypass
+    // fact is stamped, exactly as the button leaves it.
+    expect(fm.stage).toBe("done");
+    expect(fm.acceptance).toBe("forced");
+    // The same audited bypass record, naming the gate it overrode.
+    const forced = listAuditEvents(store.db, { action: "task.acceptance.forced" });
+    expect(forced).toHaveLength(1);
+    expect(String(forced[0]!.details!.bypassed)).toContain("request");
+    // The decision is on the record too, above the acceptance it caused.
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map(
+      (e) => e.text,
+    );
+    expect(texts).toContain(
+      "**Decision:** Force-accept as admin without a fresh verdict.",
+    );
+    expect(texts.some((t) => t.includes("Completion accepted"))).toBe(false);
+  });
+
+  it("force_accept: a maintainer is refused in the Force accept button's own words, and the packet stands", async () => {
+    const store = prepared();
+    wedged(store, forcePacket);
+
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.murat), // maintainer: may resolve packets, may not force
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/force-accept past the review gate/i);
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    // Refused BEFORE the write: the decision is still open and nothing closed.
+    expect(parsed.frontmatter.stage).toBe("impl");
+    expect(parsed.packet).not.toBeNull();
+    expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(0);
+  });
+
+  it("move_stage: the confirm moves the task on the stage picker's path, with its transition record", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      },
+      movePacket("review"),
+    );
+
+    const res = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat), // maintainer: the stage picker's own tier
+      { dataRoot: store.dataRoot },
+    );
+    expect(res.task.stage).toBe("review");
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.frontmatter.previousStageId).toBe("impl");
+    expect(parsed.packet).toBeNull();
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map(
+      (e) => e.text,
+    );
+    // The decision states the decision; the move's own event states the move.
+    expect(texts).toContain(
+      "**Decision:** Move VIB-1 back to Review so the reviewer can verdict.",
+    );
+    expect(
+      texts.some((t) => t.includes("**Transition:**") && t.includes("to Review")),
+    ).toBe(true);
+    const moves = listAuditEvents(store.db, { action: "task.transition" });
+    expect(moves).toHaveLength(1);
+    expect(moves[0]!.details!.to).toBe("review");
+    expect(moves[0]!.details!.manual).toBe(true);
+  });
+
+  it("move_stage: a stage this project does not have is refused before the packet clears", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, movePacket("nowhere"));
+
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/not a stage of this project/i);
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.frontmatter.stage).toBe("impl");
+    expect(parsed.packet).not.toBeNull();
+  });
+
+  it("move_stage: a contributor owner hears the stage picker's tier, not a silent widening", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.selin.id }, // selin = contributor
+      movePacket("review"),
+    );
+
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/change the task stage/i);
+
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.stage,
+    ).toBe("impl");
+  });
+});

@@ -622,6 +622,57 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(submitted[0]!.ackVerdict).toBe("healthy");
   });
 
+  /**
+   * Ruling 164 (pass 35, F35-14): a `force_accept` option performs the admin
+   * override, so it opens the same ceremony the Force accept button opens (the
+   * force form: skipped stages, the bypassed refusal, the danger confirm) and
+   * still travels as the packet resolution the server dispatches on.
+   */
+  it("ruling 164: a force_accept option opens the FORCE ceremony and resolves the packet with its echo", async () => {
+    // Canary: route the option through the plain packet ceremony (or through no
+    // ceremony at all) and the heading is "Accept this completion?", with an
+    // echo-less POST the server refuses.
+    const { container, submitted, getByText } = renderPage({
+      myRole: "admin",
+      // Off the boundary and refused: the wedge a force-accept exists for.
+      acceptance: { atBoundary: false, blockedReason: "The latest review requests changes." },
+      task: {
+        stage: "triage",
+        validation: "failing",
+        packet: {
+          ...packetWith("force_accept"),
+          options: [
+            {
+              kind: "force_accept",
+              t: "Force-accept as admin without a fresh verdict",
+              d: "",
+              rec: true,
+            },
+            { kind: "request_edit", t: "Send it back for edits", d: "", rec: false },
+          ],
+        },
+      },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    expect(submitted).toHaveLength(0);
+    expect(getByText("Force-accept this completion?")).toBeTruthy();
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    // The option's own title is the subject, and the force form states what the
+    // close jumps: the stages it skips and the refusal it bypasses.
+    expect(dialog.textContent).toContain("Force-accept as admin without a fresh verdict");
+    expect(dialog.textContent).toContain("Bypassing");
+    expect(dialog.textContent).toContain("The latest review requests changes.");
+    fireEvent.click(findButton(container, "Force-accept VIB-151")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    // The packet resolution, not the force-accept intent: the server resolves
+    // the decision and runs the override behind it.
+    expect(submitted[0]!.intent).toBe("resolve-packet");
+    expect(submitted[0]!.option).toBe("0");
+    expect(submitted[0]!.ackVerdict).toBe("failing");
+  });
+
   it("every OTHER packet option still resolves in one click — none of them writes to GitHub", async () => {
     const { container, submitted, queryByText } = renderPage({
       myRole: "admin",

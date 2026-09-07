@@ -76,7 +76,11 @@ import {
 type PendingAccept =
   | { mode: Extract<AcceptCeremonyMode, "accept" | "force" | "complete-merge"> }
   | { mode: "apply-recommendation"; recId: string; label: string }
-  | { mode: "packet"; option: number; note: string; label: string }
+  /** Ruling 164 (pass 35, F35-14): `force` marks the `force_accept` option,
+   *  whose resolution runs the admin override — so the ceremony opens in its
+   *  FORCE form (the skipped stages, the bypassed refusal, the danger confirm)
+   *  while the click still travels as a packet resolution. */
+  | { mode: "packet"; option: number; note: string; label: string; force?: true }
   | { mode: "stage-move"; toStageId: string; label: string };
 
 /**
@@ -295,6 +299,12 @@ export function TaskDetailPage({
   // card blocks it with the reason instead of 403ing on click (same treatment
   // as edit_goal / accept_completion).
   const canArchiveViaPacket = roleCan(role, "approve-transition");
+  // Ruling 164 (pass 35, F35-14): a `force_accept` packet option performs the
+  // admin override itself, whose tier is `force-accept-completion` (admin) —
+  // NOT the packet-resolver set and not the archive tier. Same treatment as its
+  // siblings: the card blocks the option with the reason instead of letting a
+  // maintainer click into the server's refusal.
+  const canForceAcceptViaPacket = roleCan(role, "force-accept-completion");
 
   // F7-UI1: "operator active" reflects a LIVE operator run (queued/running),
   // never mere attachment. The runtime projection already carries kind+state.
@@ -318,6 +328,13 @@ export function TaskDetailPage({
   // action has to replay — a recommendation id, a packet option + its note, or
   // the stage the human picked out of the Current-state menu (F19-37).
   const [confirmAccept, setConfirmAccept] = useState<PendingAccept | null>(null);
+  // Ruling 164 (pass 35, F35-14): the pending decision is the `force_accept`
+  // option, so the one ceremony opens in its force form (heading, bypass row,
+  // danger confirm) while the confirmed click still travels as a packet
+  // resolution. Derived once: the dialog reads it for BOTH the mode it renders
+  // and the refusal that mode is allowed to bypass.
+  const forcedCeremony =
+    confirmAccept?.mode === "packet" && confirmAccept.force === true;
   // D6: two consequential single-click actions gained a confirm — interrupting a
   // live run (discards its in-flight, uncommitted work) and dismissing an
   // operator recommendation (withdraws a governed, audited decision). Both were
@@ -478,6 +495,21 @@ export function TaskDetailPage({
         option: optionIndex,
         note,
         label: option.t,
+      });
+      return;
+    }
+    // Ruling 164 (pass 35, F35-14): a `force_accept` option runs the admin
+    // override, and the server refuses a resolution that carries no echo of it
+    // (`forceAcceptCompletion` holds the same ceremony the button does). Open
+    // the FORCE form of the one dialog: it names the stages the close skips and
+    // the refusal it bypasses, which a title alone never did.
+    if (option?.kind === "force_accept") {
+      setConfirmAccept({
+        mode: "packet",
+        option: optionIndex,
+        note,
+        label: option.t,
+        force: true,
       });
       return;
     }
@@ -669,6 +701,11 @@ export function TaskDetailPage({
             // F20-6: discard_branch re-checks the same `approve-transition` tier
             // the archive-with-branch-deletion needs (it destroys commits).
             canDiscardBranch={canArchiveViaPacket}
+            // Ruling 164 (pass 35, F35-14): a `force_accept` option runs the
+            // admin override, and a `move_stage` option runs the stage
+            // picker's move, so each carries that control's own tier.
+            canForceAccept={canForceAcceptViaPacket}
+            canMoveStage={canArchiveViaPacket}
             // UX19-9: what an `archive_task` resolution destroys — the branch
             // its `deleteBranch` variant deletes permanently, and the
             // recommendations the archive withdraws. The same two facts
@@ -911,11 +948,17 @@ export function TaskDetailPage({
           verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
           ceremony={
             "label" in confirmAccept
-              ? { mode: confirmAccept.mode, label: confirmAccept.label }
+              ? {
+                  // Ruling 164: the `force_accept` option is a packet
+                  // resolution that performs the override, so it wears the
+                  // force ceremony and keeps the option's title as its subject.
+                  mode: forcedCeremony ? "force" : confirmAccept.mode,
+                  label: confirmAccept.label,
+                }
               : { mode: confirmAccept.mode }
           }
           blockedReason={
-            confirmAccept.mode === "force"
+            confirmAccept.mode === "force" || forcedCeremony
               ? (task.blockReason ??
                 acceptance.blockedReason ??
                 (task.packet?.type === "blocked"

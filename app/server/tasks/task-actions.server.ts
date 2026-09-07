@@ -173,6 +173,7 @@ import type {
 } from "~/server/github/github-reconciler.server";
 import type { updateWorkspaceBranchFromBase } from "~/server/github/update-branch.server";
 import { verdictStageFor } from "~/shared/workflow/verdict-stage";
+import { moveStageTarget } from "~/shared/workflow/packet-options";
 import type { GithubContextOptions } from "~/server/github/github-context.server";
 import { PROVIDER_TEXT_CHARS } from "~/server/secrets/git-output-redact.server";
 import {
@@ -7837,6 +7838,91 @@ export async function resolvePacket(
       clearPacket = true;
       break;
     }
+    case "force_accept": {
+      // Ruling 164 (pass 35, F35-14): an option's title is a promise the
+      // resolution keeps. KNC-3's "Force-accept as admin without a fresh
+      // verdict" was a `custom` option: the resolution recorded the decision,
+      // re-ran the operator, whose `accept_completion` returned a no-op behind
+      // the verdict gate, and the operator had to ask the owner to press the
+      // button by hand. This kind performs the override itself, through
+      // `forceAcceptCompletion` — the same function the task page's Force
+      // accept button calls, so the same disclosure ceremony, the same
+      // irreducible gate and the same audited bypass record.
+      //
+      // The authority is that button's own: `force-accept-completion` is
+      // admin-only, so a maintainer (or a contributor-owner the packet
+      // admitted) hears the button's own refusal sentence rather than a
+      // packet-shaped one.
+      requireAction(
+        db,
+        project,
+        actor,
+        "force-accept-completion",
+        "force-accept past the review gate",
+      );
+      // Both refusals the force path can still make are run HERE, before the
+      // resolution write: that write clears the packet, and a refusal
+      // discovered after it would leave the decision recorded with no
+      // acceptance behind it. `forceAcceptCompletion` re-checks them on its own
+      // terms below (it is a public door in its own right).
+      const irreducible = forceIrreducibleRefusal(
+        existing.parsed.frontmatter,
+        input.taskKey,
+      );
+      if (irreducible) throw AppError.conflict(irreducible);
+      assertAcceptanceDisclosure(
+        existing.parsed.frontmatter,
+        input.ack,
+        input.taskKey,
+        "full",
+      );
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        // F33-2: the decision, never its effect — the acceptance below writes
+        // its own completion event and `task.acceptance.forced` audit row.
+        text: option.ev ?? `**Decision:** ${option.t}.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = () => {};
+      clearPacket = true;
+      break;
+    }
+    case "move_stage": {
+      // Ruling 164 (pass 35, F35-14): the option names a stage and the
+      // resolution moves the task there, through `transitionStage` with
+      // `manual: true` — the stage picker's own path, so the same
+      // `approve-transition` tier, the same off-graph licence a person's move
+      // carries, and the same transition event and `task.transition` audit row.
+      // KNC-16's "Move KNC-16 back to Review" was a `redirect`: it recorded the
+      // decision and moved nothing.
+      requireAction(
+        db,
+        project,
+        actor,
+        "approve-transition",
+        "change the task stage",
+      );
+      const moveTarget = moveStageTarget(option, project.stages, input.taskKey);
+      if (!moveTarget.ok) throw AppError.conflict(moveTarget.refusal);
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        // F33-2 again: the move runs after this write and can refuse, and its
+        // own transition event (or the refusal note) carries the outcome.
+        text: option.ev ?? `**Decision:** ${option.t}.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = () => {};
+      clearPacket = true;
+      break;
+    }
     default: {
       // request_edit | redirect | custom — send back to the agent side.
       // Ruling 163 (pass 35, F35-13 (b)): a redirect the branch-conflict
@@ -8007,6 +8093,12 @@ export async function resolvePacket(
     "retry_other_backend", // starts a specialist run above; its completion re-invokes
     "discard_branch", // cleanup only, no coordination change
     "resolve_remote_collision", // the re-delivery's own machinery owns the follow-up
+    // Ruling 164 (pass 35, F35-14): the task is Done (the acceptance below),
+    // and the move re-invokes the operator at the stage it lands on
+    // (`transitionStage`), so a second hand-off here would pay for a duplicate
+    // turn on the stage the first one is already reading.
+    "force_accept",
+    "move_stage",
   ];
   const requeue = !NO_REQUEUE.includes(option.kind);
   if (requeue) {
@@ -8533,6 +8625,71 @@ export async function resolvePacket(
         "packet-resolved",
         { resolvedOption: handoff },
       );
+    }
+  }
+
+  // force_accept (ruling 164, pass 35, F35-14): the decision IS the override.
+  // It runs AFTER the resolution write, on the same footing as the archive and
+  // the discard above: the packet is answered on the record first (so the
+  // acceptance withdraws nothing and its "the decision was never answered" note
+  // never fires on a decision that was), and then the admin override runs
+  // through the task page's own function. Every refusal it can make was already
+  // made inside the case arm, above the write; a race that refuses here surfaces
+  // as the acceptance's own conflict, with the decision recorded and the Force
+  // accept button still standing.
+  if (option.kind === "force_accept") {
+    const forced: Parameters<typeof forceAcceptCompletion>[1] = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+    };
+    if ("ack" in input) forced.ack = input.ack ?? null;
+    await forceAcceptCompletion(db, forced, actor, ctx);
+  }
+
+  // move_stage (ruling 164, pass 35, F35-14): the decision IS the move, made
+  // through `transitionStage` with `manual: true` — the stage picker's path,
+  // which re-checks `approve-transition`, writes the transition event and the
+  // `task.transition` row, and re-invokes the operator at the stage the task
+  // lands on. Best-effort like the sibling ceremonies: a refused move never
+  // un-resolves the packet, and its outcome lands on the timeline in plain
+  // words rather than as a thrown error over a decision that stands.
+  if (option.kind === "move_stage") {
+    const target = moveStageTarget(option, project.stages, input.taskKey);
+    if (target.ok) {
+      try {
+        await transitionStage(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            toStageId: target.stage.id,
+            manual: true,
+          },
+          actor,
+          ctx,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn("move_stage resolution could not move the task", {
+          taskKey: input.taskKey,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+        await updateTaskFile(
+          taskRef(ctx, input.projectSlug, input.taskKey),
+          (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "policy-engine" },
+              title: null,
+              text: `${input.taskKey} was **not** moved to ${target.stage.name}: ${message}`,
+              toAgent: false,
+              evidence: null,
+            });
+          },
+        );
+        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      }
     }
   }
 

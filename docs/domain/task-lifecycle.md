@@ -505,7 +505,13 @@ Every writer to the terminal stage goes through one contract:
    `forceIrreducibleRefusal`, and on an archived task the affordance is withdrawn rather
    than disabled. The offer itself appears only once the task has something to accept — a
    branch, a PR or a delivered revision — or is demonstrably wedged by an open `blocked`
-   packet (ruling 124).
+   packet (ruling 124). Since ruling 164 (pass 35, F35-14) a packet can offer the same
+   override as a `force_accept` option: the resolution calls `forceAcceptCompletion`
+   itself, so the tier, the ceremony, the irreducible gate and the audit record are the
+   button's, and a non-admin resolver hears the button's own refusal instead of a
+   decision that records nothing. Its sibling `move_stage` performs a manual board move
+   on the stage picker's path; the terminal stage is refused there, because a move to it
+   is this contract, not a move.
 5. **PR head containment**: the PR head must contain the delivered commit. A head
    ahead of the reviewed revision is accepted with a disclosed divergence (ruling 42; since
    ruling 132 the disclosure is the classified drift sentence: authored commits are named

@@ -96,3 +96,24 @@ describe("R19-1: the persona grounds repo claims in the read-only checkout", () 
     );
   });
 });
+
+/**
+ * Ruling 164 (pass 35, F35-14) — the persona is read on every turn, and it was
+ * silent on the one thing that made KNC-3's decision inert: the operator wrote
+ * "Force-accept as admin without a fresh verdict" as a `custom` title because
+ * nothing told it a kind existed that performs it.
+ */
+describe("ruling 164: the persona says an option title is a promise", () => {
+  it("names the promise, the two kinds that keep it, and the Agents surface for a profile", () => {
+    // Canary: drop the paragraph and the operator is free to write a title its
+    // kind cannot honour again.
+    expect(operatorDefinitionMd).toMatch(
+      /Every option you write is a promise the resolution keeps/,
+    );
+    expect(operatorDefinitionMd).toContain("`force_accept`");
+    expect(operatorDefinitionMd).toContain("`move_stage` with `toStage`");
+    expect(operatorDefinitionMd).toMatch(
+      /Nothing a person confirms on a packet edits an agent profile/,
+    );
+  });
+});

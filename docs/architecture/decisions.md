@@ -3301,3 +3301,30 @@ available. It reads nobody else's session.)*
     changed or failing revision (`via: delivery`). The operator's acceptance refusal on
     such a task names the way back: the rework move, and the person's stage picker on the
     task page.
+
+164. **An option title is a promise the resolution keeps (pass 35, F35-14).** A packet
+    option is resolved by its `kind` and never by its English title (ruling 7), so a title
+    naming an act its kind cannot perform is a decision that does nothing. Two live ones:
+    KNC-3's `custom` "Force-accept as admin without a fresh verdict" (2026-09-07 06:06:57Z)
+    recorded the decision, re-ran the operator into a no-op behind the verdict gate, and
+    ended with the operator asking the owner to press the button by hand; KNC-16's
+    `redirect` "Move KNC-16 back to Review" (2026-09-06 20:53:26Z) moved nothing. Two new
+    kinds make the promise keepable and one guard stops it being written anywhere else.
+    `force_accept` runs `forceAcceptCompletion`, the function behind the task page's Force
+    accept button: the same admin-only tier (`force-accept-completion`), the same
+    disclosure ceremony (the card opens the dialog's force form, naming the skipped stages
+    and the bypassed refusal), the same irreducible gate, and the same
+    `task.acceptance.forced` record. `move_stage` carries `toStage` and runs
+    `transitionStage({ manual: true })`, the stage picker's path: the same
+    `approve-transition` tier, the same transition event and `task.transition` row, and the
+    operator re-invoked at the stage the task lands on; the terminal stage is refused
+    because moving there is an acceptance, not a move. Both perform their act AFTER the
+    resolution write, so the packet is answered on the record first and a refusal lands as
+    a plain timeline note rather than as an error over a decision that stands. The guard
+    sits where options are authored (`operatorOpenPacket`, so both operator backends reach
+    it): a send-back option (`custom`, `redirect`, `request_edit`) whose title or detail
+    describes a force-accept, a move to one of this board's own stages, or an edit to an
+    agent profile is refused, and the refusal names the kind that performs it, or, for a
+    profile, the Agents surface a person uses (ruling 85 already says the operator points
+    at that configuration and never changes it). The toolkit description and the operator
+    definition carry the same sentence.

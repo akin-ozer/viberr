@@ -597,7 +597,11 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
         if (note.trim()) resolveInput.note = note;
         if (custom.trim()) resolveInput.custom = custom;
-        const { option } = await resolvePacket(db, resolveInput, actor);
+        const { task: resolvedTask, option } = await resolvePacket(
+          db,
+          resolveInput,
+          actor,
+        );
         const retryStarted =
           option.kind === "retry_other_backend" &&
           listRunsForTask(db, projectSlug, taskKey).some(
@@ -606,6 +610,23 @@ export async function action({ request, params }: Route.ActionArgs) {
         const toast =
           option.kind === "accept_completion"
             ? `Completion accepted · ${taskKey} moved to Done`
+            // Ruling 164 (pass 35, F35-14): the two kinds that PERFORM what
+            // their title promises say what happened, in the same words the
+            // button and the picker use. A generic "Decision recorded" was the
+            // whole defect: the record read like an act.
+            : option.kind === "force_accept"
+              ? `Force-accepted ${taskKey} · moved to Done (review gate overridden)`
+              : option.kind === "move_stage"
+                ? resolvedTask.stage === option.toStage
+                  ? `Decision recorded · ${taskKey} moved to ${
+                      getProject(db, projectSlug)?.stages.find(
+                        (s) => s.id === resolvedTask.stage,
+                      )?.name ?? resolvedTask.stage
+                    }`
+                  : // Toast honesty: the move runs after the decision and can
+                    // refuse (the task moved underneath it, the project froze).
+                    // Its reason is the timeline note the resolution wrote.
+                    "Decision recorded, but the stage move did NOT complete. The reason is on the timeline"
             : option.kind === "block_on_policy"
               ? // R20-1 (F20-5): the option UNBLOCKS + re-queues the operator now
                 // (it used to hold the task and deep-nav to settings).

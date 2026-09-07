@@ -550,4 +550,35 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(declared).toContain("written AS a goal");
     expect(declared).toContain("Refused on any other kind");
   });
+
+  /**
+   * Ruling 164 (pass 35, F35-14): the tool that AUTHORS options says the title
+   * is a promise, names the two kinds that keep it, and declares `toStage`.
+   * The operator wrote "Force-accept as admin ..." as a `custom` title because
+   * nothing here told it there was another way.
+   */
+  it("ruling 164: the tool text names the promise, force_accept, move_stage and toStage", () => {
+    // Canary: restore the description and the option schema from before S18.
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const def = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
+    expect(def.description).toContain("An option TITLE is a promise the resolution keeps");
+    expect(def.description).toContain("'force_accept'");
+    expect(def.description).toContain("'move_stage'");
+    // SAFETY: as above, the SDK types the raw input fields loosely; `options`
+    // is the zod array whose JSON Schema form carries the per-option fields.
+    const options = (def.inputSchema as { options: z.ZodType }).options;
+    const declared = JSON.stringify(z.toJSONSchema(options));
+    expect(declared).toContain('"toStage"');
+    expect(declared).toContain("move_stage only");
+  });
 });

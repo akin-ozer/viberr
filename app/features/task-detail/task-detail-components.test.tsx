@@ -2728,6 +2728,58 @@ describe("DecisionPacket — pass-20 governance", () => {
   });
 
   /**
+   * Ruling 164 (pass 35, F35-14): the two new kinds carry the tier of the
+   * control they perform, in the same table every other gated kind reads. A
+   * maintainer holds `approve-transition` (the stage picker) but not
+   * `force-accept-completion` (admin), so one option is live and one is not.
+   */
+  it("ruling 164: force_accept takes the admin tier and move_stage the stage picker's, each with its own sentence", () => {
+    // Canary: drop either row from PACKET_TIER_GATES and a maintainer is
+    // offered a click the server answers with a 403.
+    const { container } = render(
+      <DecisionPacket
+        packet={withOptions([
+          {
+            kind: "force_accept",
+            t: "Force-accept without a fresh verdict",
+            d: "",
+            rec: true,
+          },
+          {
+            kind: "move_stage",
+            t: "Move VIB-1 back to Review",
+            d: "",
+            toStage: "review",
+          },
+        ])}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        canDiscardBranch
+        canForceAccept={false}
+        canMoveStage
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const opts = container.querySelectorAll<HTMLButtonElement>(".options .opt");
+    expect(opts[0]!.getAttribute("aria-disabled")).toBe("true");
+    expect(opts[0]!.querySelector(".od")!.textContent).toContain(
+      "your role can't force-accept",
+    );
+    // The move stays live for the same viewer: it is the picker's own tier.
+    expect(opts[1]!.getAttribute("aria-disabled")).toBeNull();
+    const denies = container.querySelectorAll(".deny-note");
+    expect(denies).toHaveLength(1);
+    expect(denies[0]!.textContent).toContain(
+      "Force-accepting past the review gate is reserved for admins.",
+    );
+  });
+
+  /**
    * Ruling 161 (pass 35, U35-8): the delete-branch ceremony says what origin
    * holds when the reconciler recorded a foreign head. Live (KNC-21) the
    * dialog promised to delete "this task's" branch while the ref held a

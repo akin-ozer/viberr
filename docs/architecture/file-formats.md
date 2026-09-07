@@ -335,8 +335,13 @@ said "The 8 kinds" and omitted `archive_task`, which arrived with R14-3 (the tas
 Updated 2026-08-15, pass 20 — F20-6/R20-2 added `discard_branch` (decisions.md ruling 7), so
 the block that said "The 9 kinds" was itself the straggler. Updated 2026-08-31, pass 31 —
 F31-6 added `resolve_remote_collision`, the branch-collision remedy (close the unowned PR,
-delete the stale remote branch, re-deliver the local work). Eleven is the count today —
-re-derive it from the schema rather than from here.)*
+delete the stale remote branch, re-deliver the local work). Updated 2026-09-07, pass 35 —
+F35-14 added `force_accept` (the admin override, run through the same path as the task
+page's Force accept button) and `move_stage` (a manual board move to the option's own
+`toStage`, run through the stage picker's path), because an option title is a promise the
+resolution keeps and both acts were being written as `custom` and `redirect` titles that
+performed nothing. Thirteen is the count today — re-derive it from the schema rather than
+from here.)*
 
 *(Corrected 2026-08-31, pass 31 — A3. The option sample below carried an `accept: true` field
 annotated "acceptance path marker — human-only". `packetOptionSchema` has no such field:
@@ -345,9 +350,11 @@ re-check in `resolvePacket`. The schema is `.loose()`, so an `accept:` key copie
 doc would round-trip as an unknown field and be read by nothing — a silent no-op that looked
 load-bearing. Beyond the four keys shown, the fields the schema actually defines on an option
 are `ev`, `backend`, `profileId`, `deleteBranch`, since pass 34 (ruling 138) `goalDraft` on
-an `edit_goal` option, and since pass 35 (ruling 163) `rework` on a `redirect` option: the
+an `edit_goal` option, since pass 35 (ruling 163) `rework` on a `redirect` option (the
 branch-conflict packet sets it when the task stands past the stage where its reviewers can
-run, and `resolvePacket` then returns the task to that stage in the same write.)*
+run, and `resolvePacket` then returns the task to that stage in the same write), and since
+pass 35 (ruling 164) `toStage` on a `move_stage` option: the stage id the resolution moves
+the task to, required on that kind and refused on every other.)*
 
 ```yaml
 type: input                       # input | blocked (card tint)
@@ -360,12 +367,13 @@ observations:
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
 options:
-  - kind: accept_completion       # STABLE kind (ruling 7). The 11 kinds:
+  - kind: accept_completion       # STABLE kind (ruling 7). The 13 kinds:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
     rec: true                     #   redirect | retry_other_backend |
                                   #   edit_goal | archive_task | discard_branch |
-                                  #   resolve_remote_collision | custom
+                                  #   resolve_remote_collision | force_accept |
+                                  #   move_stage | custom
                                   # There is NO acceptance marker field: the
                                   # acceptance path is gated on the KIND alone.
                                   # Source of truth: PACKET_OPTION_KINDS in
@@ -375,6 +383,11 @@ options:
     d: …
     rec: false
     ev: "**Decision:** request one edit. …"   # pre-authored timeline copy
+  - kind: move_stage              # ruling 164: the stage the resolution moves to,
+    t: Move KNC-16 back to Review #   on the stage picker's own path. Required on
+    d: So the reviewer can run.   #   this kind, refused on every other, and the
+    toStage: review               #   terminal stage is refused (that is an accept).
+    rec: false
   - kind: edit_goal
     t: Align the goal to the merged spec
     d: Why the goal should change.

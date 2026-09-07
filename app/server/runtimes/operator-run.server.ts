@@ -1970,6 +1970,15 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                   description:
                     "archive_task only: true = ALSO delete the task's remote branch (discard the rejected work). Null otherwise.",
                 },
+                // Ruling 164 (pass 35, F35-14): a move_stage option names the
+                // stage its resolution moves the task to. Without it the
+                // Codex operator could author the kind and the confirm would
+                // have nowhere to move.
+                toStage: {
+                  type: ["string", "null"],
+                  description:
+                    "move_stage only: the stage id this option moves the task to. Null on every other kind. The terminal stage is refused (moving there accepts the completion).",
+                },
                 // Ruling 138: the goal editor opens with this text when the
                 // human confirms an edit_goal option, so it is written AS a
                 // goal, never as an instruction to the human.
@@ -1979,7 +1988,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                     "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Null on every other kind.",
                 },
               },
-              required: ["kind", "title", "detail", "recommended", "backend", "profileId", "deleteBranch", "goalDraft"],
+              required: ["kind", "title", "detail", "recommended", "backend", "profileId", "deleteBranch", "toStage", "goalDraft"],
             },
           },
         },
@@ -2024,6 +2033,7 @@ const operatorPlanActionSchema = z.strictObject({
         backend: z.enum(["claude", "codex"]).nullable().optional(),
         profileId: z.string().nullable().optional(),
         deleteBranch: z.boolean().nullable().optional(),
+        toStage: z.string().nullable().optional(),
         goalDraft: z.string().nullable().optional(),
       }),
     )
@@ -2060,6 +2070,7 @@ export function authoredPacketOptions(
         backend?: RealBackend | null;
         profileId?: string | null;
         deleteBranch?: boolean | null;
+        toStage?: string | null;
         goalDraft?: string | null;
       }[]
     | null,
@@ -2091,6 +2102,10 @@ export function authoredPacketOptions(
     // archive_task only — any other kind ignores it at resolution, so gating
     // here would just second-guess the resolver.
     if (o.deleteBranch) option.deleteBranch = true;
+    // Ruling 164: move_stage carries its target; `operatorOpenPacket` refuses
+    // it on any other kind and validates the stage id against the board.
+    const toStage = o.toStage?.trim();
+    if (toStage) option.toStage = toStage;
     return option;
   });
 }

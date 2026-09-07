@@ -3,6 +3,11 @@ import {
   type RevisionDrift,
 } from "~/shared/revision-drift";
 import { resolveDependencies } from "~/server/projections/dependencies.server";
+import {
+  misdirectedOptionPromise,
+  misdirectedPromiseRefusal,
+  moveStageTarget,
+} from "~/shared/workflow/packet-options";
 import { setTaskDependencies } from "./dependencies.server";
 import type { TaskActor } from "./task-mutation.server";
 import {
@@ -101,6 +106,7 @@ import {
   OPERATOR_TASK_ACTOR,
   RECOMMENDATION_DISMISSED_AUDIT_ACTION,
   acceptanceRefusalFor,
+  acceptanceTerminallyBlocked,
   mergeReadinessRefusal,
   applyAcceptanceWrite,
   notifyTaskWatchers,
@@ -953,6 +959,9 @@ export interface OperatorPacketOptionInput {
   /** redirect — ruling 163: the resolution returns the task to the review
    *  stage when it stands at or past it (the branch-conflict packet sets it). */
   rework?: boolean;
+  /** move_stage only — ruling 164: the stage id the resolution moves the task
+   *  to. Required on the kind and refused on every other one. */
+  toStage?: string;
   /** edit_goal only — ruling 138: the proposed goal text itself, what the goal
    *  editor opens with when the human confirms. Refused on any other kind. */
   goalDraft?: string;
@@ -1172,6 +1181,83 @@ export async function operatorOpenPacket(
     };
   }
 
+  // Ruling 164 (pass 35, F35-14): an option TITLE is a promise the resolution
+  // keeps, and the send-back kinds (custom / redirect / request_edit) keep no
+  // promise but "the agent side hears about it". KNC-3's custom "Force-accept
+  // as admin without a fresh verdict" re-ran the operator into a no-op behind
+  // the verdict gate; KNC-16's redirect "Move KNC-16 back to Review" moved
+  // nothing. Refuse the authoring where the option is written and name the kind
+  // that performs the act. The stage list is this project's own, so the move
+  // detector recognises the board's real stage names.
+  {
+    const projectStages = readProjectFile({
+      projectSlug: input.projectSlug,
+      dataRoot: ctx.dataRoot,
+    })?.parsed.frontmatter.stages ?? [];
+    for (const o of rawOptions) {
+      const promise = misdirectedOptionPromise(
+        {
+          kind: o.kind,
+          title: o.title,
+          detail: o.detail ?? "",
+          // Ruling 163: the branch-conflict packet's rework redirect really
+          // does return the task to the review stage, and says so.
+          rework: o.rework === true,
+        },
+        projectStages,
+      );
+      if (promise) {
+        return {
+          outcome: "noop",
+          message: misdirectedPromiseRefusal(promise, o, input.taskKey),
+        };
+      }
+    }
+    // `move_stage` names the stage it moves to, and only that kind carries the
+    // field: the same two refusals `resolvePacket` makes, made here so the
+    // option is never written in a shape the confirm would refuse.
+    const strayStage = rawOptions.find(
+      (o) => o.kind !== "move_stage" && (o.toStage ?? "").trim() !== "",
+    );
+    if (strayStage) {
+      return {
+        outcome: "noop",
+        message:
+          `toStage only fits a move_stage option. "${strayStage.title}" is ${strayStage.kind}, ` +
+          "and its resolution reads no stage.",
+      };
+    }
+    for (const o of rawOptions) {
+      if (o.kind !== "move_stage") continue;
+      const target = moveStageTarget(o, projectStages, input.taskKey);
+      if (!target.ok) {
+        return { outcome: "noop", message: target.refusal };
+      }
+      if (target.stage.id === existing.parsed.frontmatter.stage) {
+        return {
+          outcome: "noop",
+          message:
+            `${input.taskKey} already stands at ${target.stage.name}, so "${o.title}" would move ` +
+            "nothing. Offer the stage the work should be shown at, or a kind that acts on the task.",
+        };
+      }
+    }
+    // `force_accept` is the admin override of a WEDGED gate. A pull request a
+    // person closed unmerged is not wedged, it is decided (R16-3), and the
+    // force path refuses it: an option offered there promises a close the
+    // confirm cannot perform.
+    const forceOption = rawOptions.find((o) => o.kind === "force_accept");
+    if (forceOption && acceptanceTerminallyBlocked(existing.parsed.frontmatter)) {
+      return {
+        outcome: "noop",
+        message:
+          `force_accept cannot close ${input.taskKey}: its pull request was closed without ` +
+          "merging, which no override can undo. Offer archive_task (with deleteBranch to " +
+          "discard the work) or a redirect that delivers again.",
+      };
+    }
+  }
+
   // Ruling 138: `goalDraft` is the goal editor's prefill, which only an
   // `edit_goal` option opens — on any other kind it is a claim nothing reads,
   // so the authoring is refused by name (the ruling-115 precedent above).
@@ -1221,6 +1307,8 @@ export async function operatorOpenPacket(
     if (o.deleteBranch) option.deleteBranch = true;
     // Ruling 163: only a redirect returns the task to the review stage.
     if (o.rework && o.kind === "redirect") option.rework = true;
+    // Ruling 164: the stage a move_stage resolution moves to, validated above.
+    if (o.kind === "move_stage" && o.toStage) option.toStage = o.toStage.trim();
     // Ruling 138: the draft is model-authored prose bound for task.md — capped
     // here, the one chokepoint both operator backends reach.
     const goalDraft = o.goalDraft?.trim();

@@ -411,7 +411,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "open_decision_packet",
-        "Open a STRUCTURED decision or blocking packet for a human to resolve — the canonical governed hand-off (not a comment). Use it when you reach a genuine decision point or the limit of your authority (a task stuck after repeated no-progress, a policy/credential block, or a completion the human must accept). Prefer this over a plain comment for anything requiring a human choice. Set `packetType` to 'blocked' when work is stuck (also marks the task blocked) or 'input' for a decision. Give 2-4 `options`, each with a stable `kind` and a short title; mark exactly one `recommended`. Use kind 'edit_goal' for an option that asks the human to refine/specify the task GOAL — confirming it opens the goal editor and the packet clears automatically when the edited goal is saved. ONE packet stands at a time: this REFUSES while a packet is already open (whoever is answering it must not be stranded) — answer from that packet, or withdraw it with resolve_decision_packet when it is genuinely moot, then open yours. Ruling 85: when the blocker is a CAPABILITY no deployed agent declares (see `deployedSpecialists[].capabilities` — browser, web, verdict, delivery), state the gap as an observation AND name the product's remedy — that capability is grantable on an agent profile from the project's Agents surface — and offer it as an option beside any workaround; a packet that offers only workarounds hides the fix. You never change that configuration yourself. The human resolves it from the task page.",
+        "Open a STRUCTURED decision or blocking packet for a human to resolve — the canonical governed hand-off (not a comment). Use it when you reach a genuine decision point or the limit of your authority (a task stuck after repeated no-progress, a policy/credential block, or a completion the human must accept). Prefer this over a plain comment for anything requiring a human choice. Set `packetType` to 'blocked' when work is stuck (also marks the task blocked) or 'input' for a decision. Give 2-4 `options`, each with a stable `kind` and a short title; mark exactly one `recommended`. An option TITLE is a promise the resolution keeps: the resolver dispatches on the `kind` alone, so a title that names an act the kind cannot perform is refused here (ruling 164). Use 'force_accept' for the admin override of a wedged acceptance gate, 'move_stage' with `toStage` for a board move, and never a redirect or custom option that describes either, or that asks a person to edit an agent profile. Use kind 'edit_goal' for an option that asks the human to refine/specify the task GOAL — confirming it opens the goal editor and the packet clears automatically when the edited goal is saved. ONE packet stands at a time: this REFUSES while a packet is already open (whoever is answering it must not be stranded) — answer from that packet, or withdraw it with resolve_decision_packet when it is genuinely moot, then open yours. Ruling 85: when the blocker is a CAPABILITY no deployed agent declares (see `deployedSpecialists[].capabilities` — browser, web, verdict, delivery), state the gap as an observation AND name the product's remedy — that capability is grantable on an agent profile from the project's Agents surface — and offer it as an option beside any workaround; a packet that offers only workarounds hides the fix. You never change that configuration yourself. The human resolves it from the task page.",
         {
           packetType: z
             .enum(["input", "blocked"])
@@ -434,7 +434,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                 kind: z
                   .enum(PACKET_OPTION_KINDS)
                   .describe(
-                    "Stable option kind the resolver dispatches on. For a delivery push_conflict caused by an UNRELATED remote branch squatting on this task's branch name (usually with an unowned PR), use 'resolve_remote_collision' — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work. Never author 'discard_branch' as the way to clear the remote: it deletes the LOCAL branch and is refused once the revision has left the workspace (a PR tracks the branch, an unowned PR stands on the name, or a delivery push published the head; ruling 161). A revision the agent reported but never pushed does not block it: offer 'discard_branch' when the person's choice is to throw the local draft away, and the discard retires that revision. When offering 'archive_task' with deleteBranch on a task whose get_task shows `foreignHead`, say in the option text that origin's branch carries commits this task did not author and deleting it removes them too.",
+                    "Stable option kind the resolver dispatches on. For a delivery push_conflict caused by an UNRELATED remote branch squatting on this task's branch name (usually with an unowned PR), use 'resolve_remote_collision' — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work. Never author 'discard_branch' as the way to clear the remote: it deletes the LOCAL branch and is refused once the revision has left the workspace (a PR tracks the branch, an unowned PR stands on the name, or a delivery push published the head; ruling 161). A revision the agent reported but never pushed does not block it: offer 'discard_branch' when the person's choice is to throw the local draft away, and the discard retires that revision. When offering 'archive_task' with deleteBranch on a task whose get_task shows `foreignHead`, say in the option text that origin's branch carries commits this task did not author and deleting it removes them too. Ruling 164: 'force_accept' performs the admin force-accept itself, on the same disclosure and the same audited bypass record as the task page's Force accept button, and only an admin may resolve it, so offer it when a wedged gate leaves no other route and never as a custom option that merely describes one. 'move_stage' carries `toStage` and performs the move on the stage picker's own path; it is how a person shows the task at another stage when you cannot make the move yourself. Neither kind, and no other, can edit an agent profile: name the Agents surface as the remedy instead.",
                   ),
                 title: z.string().describe("Button label, e.g. 'Reassign to a different developer'."),
                 detail: z.string().optional().describe("Short explanation under the option."),
@@ -456,6 +456,12 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   .optional()
                   .describe(
                     "archive_task only: ALSO delete the task's remote branch (discard the rejected work entirely).",
+                  ),
+                toStage: z
+                  .string()
+                  .optional()
+                  .describe(
+                    "move_stage only: the stage id this option moves the task to. Required on that kind; refused on every other one, and refused for the terminal stage (moving there accepts the completion, which is accept_completion or force_accept).",
                   ),
                 goalDraft: z
                   .string()
@@ -482,6 +488,9 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               if (o.backend) option.backend = o.backend;
               if (o.profileId) option.profileId = o.profileId;
               if (o.deleteBranch) option.deleteBranch = true;
+              // Ruling 164: the stage a move_stage option moves to;
+              // `operatorOpenPacket` refuses it off that kind and validates it.
+              if (o.toStage) option.toStage = o.toStage.trim();
               // Ruling 138: the goal draft is prose bound for the goal editor;
               // `operatorOpenPacket` caps it and refuses it off edit_goal.
               if (o.goalDraft) option.goalDraft = prose(o.goalDraft);

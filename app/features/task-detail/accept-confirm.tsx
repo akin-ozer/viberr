@@ -111,6 +111,11 @@ function subjectKeyFor(mode: AcceptCeremonyMode): string | undefined {
   switch (mode) {
     case "apply-recommendation":
       return "Applying";
+    // Ruling 164 (pass 35, F35-14): force-accepting is an indirect path now
+    // too. The task page's own button passes no label, so the row still does
+    // not render for it; a `force_accept` packet option passes its title.
+    case "force":
+      return "Decision";
     case "packet":
       return "Decision";
     case "stage-move":

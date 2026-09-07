@@ -59,6 +59,7 @@ import {
   operatorBackendFor,
   resolveOperatorAuthority,
   type OperatorAutonomy,
+  type OperatorPacketOptionInput,
   GOAL_DRAFT_MAX_CHARS,
 } from "./operator-actions.server";
 
@@ -2635,6 +2636,145 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(refused.message).toContain("`8c463b7` was pushed to origin at 2026-09-06T19:10:35.000Z");
     expect(refused.message).toContain("archive_task with deleteBranch");
     expect(task().packet).toBeNull();
+  });
+
+  /**
+   * Ruling 164 (pass 35, F35-14) — an option title is a promise the resolution
+   * keeps, checked where the option is AUTHORED (the one door both operator
+   * backends reach). The two live titles are the cases; the third is the
+   * profile surgery KNC-20's packet offered, which no kind can perform.
+   */
+  it("ruling 164: refuses a send-back option that promises a force-accept, a stage move, or a profile edit", async () => {
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    const open = (option: OperatorPacketOptionInput) => {
+      seedTask("impl");
+      return operatorOpenPacket(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          packetType: "blocked",
+          title: "Stuck at the acceptance boundary",
+          options: [option, { kind: "archive_task", title: "Archive it" }],
+        },
+        authority("supervised"),
+      );
+    };
+
+    const force = await open({
+      kind: "custom",
+      title: "Force-accept as admin without a fresh verdict",
+      recommended: true,
+    });
+    expect(force.outcome).toBe("noop");
+    expect(force.message).toContain("'force_accept'");
+    expect(force.message).toContain("promise the resolution keeps");
+    expect(task().packet).toBeNull();
+
+    const move = await open({
+      kind: "redirect",
+      title: "Move VIB-1 back to Review so the reviewer can verdict 701b5b3",
+      recommended: true,
+    });
+    expect(move.outcome).toBe("noop");
+    expect(move.message).toContain("'move_stage'");
+    expect(move.message).toContain("toStage: 'review'");
+    expect(task().packet).toBeNull();
+
+    const profile = await open({
+      kind: "custom",
+      title: "Add Review to the two reviewer profiles",
+      detail: "The product's own remedy for the eligibility gap.",
+      recommended: true,
+    });
+    expect(profile.outcome).toBe("noop");
+    expect(profile.message).toContain("Agents");
+    expect(task().packet).toBeNull();
+
+    // The stock send-back vocabulary is untouched: a guard that refused this
+    // would take the operator's ordinary options away.
+    const fine = await open({
+      kind: "redirect",
+      title: "Reassign or redirect the work",
+      recommended: true,
+    });
+    expect(fine.outcome).toBe("done");
+    expect(task().packet!.options[0]!.kind).toBe("redirect");
+  });
+
+  it("ruling 164: a move_stage option names a stage the resolution can move to, and only that kind carries one", async () => {
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    const open = (option: OperatorPacketOptionInput, stage = "impl") => {
+      seedTask(stage);
+      return operatorOpenPacket(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          packetType: "input",
+          title: "Where should this task be shown?",
+          options: [option, { kind: "custom", title: "Answer in my own words" }],
+        },
+        authority("supervised"),
+      );
+    };
+
+    const noStage = await open({ kind: "move_stage", title: "Move it back", recommended: true });
+    expect(noStage.outcome).toBe("noop");
+    expect(noStage.message).toContain("has to name the stage");
+
+    const unknown = await open({
+      kind: "move_stage",
+      title: "Move it to QA",
+      toStage: "qa",
+      recommended: true,
+    });
+    expect(unknown.outcome).toBe("noop");
+    expect(unknown.message).toContain("not a stage of this project");
+
+    const terminal = await open({
+      kind: "move_stage",
+      title: "Move it to Done",
+      toStage: "done",
+      recommended: true,
+    });
+    expect(terminal.outcome).toBe("noop");
+    expect(terminal.message).toContain("accepts its completion");
+
+    const standingThere = await open({
+      kind: "move_stage",
+      title: "Move it to In Progress",
+      toStage: "impl",
+      recommended: true,
+    });
+    expect(standingThere.outcome).toBe("noop");
+    expect(standingThere.message).toContain("already stands at");
+
+    const stray = await open({
+      kind: "redirect",
+      title: "Send it back",
+      toStage: "review",
+      recommended: true,
+    });
+    expect(stray.outcome).toBe("noop");
+    expect(stray.message).toContain("toStage only fits a move_stage option");
+
+    const good = await open({
+      kind: "move_stage",
+      title: "Show it at Review while the reviewer runs",
+      toStage: "review",
+      recommended: true,
+    });
+    expect(good.outcome).toBe("done");
+    expect(task().packet!.options[0]!.toStage).toBe("review");
   });
 
   it("rejects an unknown option kind", async () => {
