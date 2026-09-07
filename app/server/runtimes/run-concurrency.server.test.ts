@@ -426,3 +426,195 @@ describe("run concurrency cap — reserved (specialist) runs", () => {
     expect(runConcurrencySnapshot(store.db)).toMatchObject({ cap: 1, live: 1 });
   });
 });
+
+/**
+ * Ruling 152(b) (pass 35, G35-5): under a cap the coordination turns have their
+ * own lane. Live, fourteen operator turns waited ten minutes behind six
+ * four-minute builds because `admitRun` and `drainRunQueue` were one FIFO with
+ * no idea of kind. Now an operator or controller turn is admitted up to
+ * `cap + coordinationLane(cap)` (one extra slot per four of the cap, minimum
+ * one) and the drain promotes the coordination queue before the delivery one.
+ * A delivery run still only ever competes for the cap itself.
+ */
+describe("run concurrency cap — the coordination lane (ruling 152)", () => {
+  /** An operator turn that stays live until interrupted — the coordination
+   *  kind. Operator rows carry no single-flight index, so several coexist on
+   *  one task under distinct thread ids. */
+  async function startHeldCoordinationRun(
+    threadId: string,
+    kind: "operator" | "controller" = "operator",
+  ): Promise<string> {
+    queueFakeRun({
+      lines: [{ t: "1", ev: "text", tag: "assistant", text: "deciding" }],
+      keepRunning: true,
+    });
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId,
+      role: kind === "operator" ? "Operator" : "Controller",
+      kind,
+      backend: "claude",
+      model: "claude-sonnet-4-5",
+      agentProfileId: kind,
+      credentialUserId: store.users.arda.id,
+      prompt: "decide on VIB-1",
+      dataRoot: store.dataRoot,
+    });
+    return runId;
+  }
+
+  function interrupt(runId: string) {
+    return interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId, dataRoot: store.dataRoot },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
+  }
+
+  it("an operator turn launches in the lane past a full cap; a third delivery run parks", async () => {
+    // Canary: admit every kind through the delivery bound (drop the lane from
+    // `admissionBound`) and the operator lands `queued` behind the two builds.
+    setMaxConcurrentRuns(store.db, 2);
+    const a = await startHeldRun("d0");
+    const b = await startHeldRun("d1");
+    await settle();
+    expect(getRun(store.db, a)?.state).toBe("running");
+    expect(getRun(store.db, b)?.state).toBe("running");
+
+    const op = await startHeldCoordinationRun("op-0");
+    const c = await startHeldRun("d2");
+    await settle();
+    expect(getRun(store.db, op)?.state).toBe("running");
+    expect(getRun(store.db, c)?.state).toBe("queued");
+    expect(runConcurrencySnapshot(store.db)).toEqual({
+      cap: 2,
+      lane: 1,
+      live: 3,
+      queued: 1,
+    });
+  });
+
+  it("a controller turn takes the lane the same way", async () => {
+    setMaxConcurrentRuns(store.db, 1);
+    const a = await startHeldRun("d0");
+    const ctl = await startHeldCoordinationRun("controller", "controller");
+    await settle();
+    expect(getRun(store.db, a)?.state).toBe("running");
+    expect(getRun(store.db, ctl)?.state).toBe("running");
+    expect(runConcurrencySnapshot(store.db)).toMatchObject({ cap: 1, lane: 1, live: 2 });
+  });
+
+  it("a freed slot promotes the parked operator before the parked build", async () => {
+    // Canary: admit every kind through the delivery rule (drop the lane from
+    // `canAdmit`) and the second operator turn stays queued behind the build
+    // that was parked before it.
+    setMaxConcurrentRuns(store.db, 2);
+    const a = await startHeldRun("d0");
+    const b = await startHeldRun("d1");
+    const op1 = await startHeldCoordinationRun("op-1");
+    await settle();
+    expect(getRun(store.db, op1)?.state).toBe("running"); // the lane's one slot
+    // The delivery run is queued BEFORE the second operator turn: FIFO order
+    // alone would promote it first.
+    const c = await startHeldRun("d2");
+    const op2 = await startHeldCoordinationRun("op-2");
+    await settle();
+    expect(getRun(store.db, c)?.state).toBe("queued");
+    expect(getRun(store.db, op2)?.state).toBe("queued");
+    expect(runConcurrencySnapshot(store.db)).toMatchObject({ live: 3, queued: 2 });
+
+    // A build finishes: live drops to 2, under the coordination bound of 3 but
+    // not under the cap of 2, so ONLY the operator turn goes.
+    await interrupt(a);
+    await settle();
+    expect(getRun(store.db, op2)?.state).toBe("running");
+    expect(getRun(store.db, c)?.state).toBe("queued");
+
+    // The first operator turn ends: one build and one operator turn are live,
+    // so the cap has a delivery slot free and the build launches beside the
+    // operator turn (three in all: two under the cap, one in the lane).
+    await interrupt(op1);
+    await settle();
+    expect(getRun(store.db, c)?.state).toBe("running");
+    expect(getRun(store.db, b)?.state).toBe("running");
+    expect(runConcurrencySnapshot(store.db)).toEqual({ cap: 2, lane: 1, live: 3, queued: 0 });
+
+    await interrupt(op2);
+    await settle();
+    expect(runConcurrencySnapshot(store.db)).toEqual({ cap: 2, lane: 1, live: 2, queued: 0 });
+  });
+
+  it("a live operator turn never costs a build its slot: the cap counts delivery runs", async () => {
+    // Canary: bound delivery by the TOTAL live count (`liveCount(state) < cap`
+    // in `canAdmit`) and the build parks behind the operator turn at cap 1,
+    // which is the "capped at 1, 1 run live" an admin would read as a cap
+    // that does not hold for builds.
+    setMaxConcurrentRuns(store.db, 1);
+    const op = await startHeldCoordinationRun("op-0");
+    await settle();
+    expect(getRun(store.db, op)?.state).toBe("running");
+    // The cap's one delivery slot is still free: the build launches.
+    const a = await startHeldRun("d0");
+    await settle();
+    expect(getRun(store.db, a)?.state).toBe("running");
+    // Cap + lane = 2 slots are now held: a second build (cap full) and a second
+    // operator turn (total full) both park.
+    const b = await startHeldRun("d1");
+    const op2 = await startHeldCoordinationRun("op-1");
+    await settle();
+    expect(getRun(store.db, b)?.state).toBe("queued");
+    expect(getRun(store.db, op2)?.state).toBe("queued");
+    expect(runConcurrencySnapshot(store.db)).toEqual({ cap: 1, lane: 1, live: 2, queued: 2 });
+
+    // The operator turn ends: the freed slot goes to the parked operator turn,
+    // not to the build (the cap's delivery slot is still taken by `a`).
+    await interrupt(op);
+    await settle();
+    expect(getRun(store.db, op2)?.state).toBe("running");
+    expect(getRun(store.db, b)?.state).toBe("queued");
+  });
+
+  it("an operator's reservation is granted against the lane, and the lane fills too", () => {
+    // The operator drive reserves its row before its clone (operator-run);
+    // that reservation used to be declined by a full delivery cap, demoting
+    // the turn to the stripless queued path. It now commits a lane slot.
+    setMaxConcurrentRuns(store.db, 1);
+    const build = reserveRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "res-build",
+      role: "Reviewer",
+      kind: "reviewer",
+      backend: "claude",
+      model: "claude-sonnet-4-5",
+      agentProfileId: "reviewer-res-build",
+      credentialUserId: store.users.arda.id,
+      phase: "Preparing workspace",
+    });
+    expect(build).not.toBeNull();
+    const reserveOperator = (threadId: string) =>
+      reserveRun(store.db, {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        threadId,
+        role: "Operator",
+        kind: "operator",
+        backend: "claude",
+        model: "claude-sonnet-4-5",
+        agentProfileId: "operator",
+        credentialUserId: store.users.arda.id,
+        phase: "Preparing workspace",
+      });
+    const op = reserveOperator("res-op-1");
+    expect(op).not.toBeNull();
+    expect(runConcurrencySnapshot(store.db)).toMatchObject({ cap: 1, lane: 1, live: 2 });
+    // The lane is one slot at cap 1: a second operator reservation is declined
+    // and falls through to the queued path like any run past its bound.
+    expect(reserveOperator("res-op-2")).toBeNull();
+  });
+
+  it("cap 0 carries no lane", () => {
+    expect(runConcurrencySnapshot(store.db)).toMatchObject({ cap: 0, lane: 0 });
+  });
+});

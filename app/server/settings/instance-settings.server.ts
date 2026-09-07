@@ -90,6 +90,20 @@ export function getMaxConcurrentRuns(db: DatabaseSync): number {
   return getSetting(db, MAX_CONCURRENT_RUNS_KEY, concurrencySchema) ?? 0;
 }
 
+/**
+ * Ruling 152(b): the coordination lane a cap carries. Operator and controller
+ * turns are admitted up to `cap + lane` slots, one extra per four of the cap
+ * (minimum one), so a decision never queues behind the delivery runs it is
+ * deciding about. Derived from the cap rather than stored beside it: there is
+ * ONE knob (`maxConcurrentRuns`), and the org-settings copy, the run-service
+ * gate and the health snapshot all read the same arithmetic. 0 when the cap is
+ * 0, where the gate is off and no lane is needed.
+ */
+export function coordinationLane(cap: number): number {
+  if (cap <= 0) return 0;
+  return Math.max(1, Math.ceil(cap / 4));
+}
+
 /** Persist the cap. Clamps into [0, ceiling]; a non-integer/NaN is refused so a
  *  bad form value can never disable the gate silently. */
 export function setMaxConcurrentRuns(db: DatabaseSync, value: number): number {

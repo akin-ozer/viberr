@@ -20,7 +20,10 @@ import {
   canInterruptControllerRun,
   controllerRunRoute,
 } from "~/server/controller/controller-conversations.server";
-import { getMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
+import {
+  coordinationLane,
+  getMaxConcurrentRuns,
+} from "~/server/settings/instance-settings.server";
 import {
   RUN_PHASE,
   type RunHandle,
@@ -98,7 +101,8 @@ import { newId } from "~/shared/ids/new-id.server";
 // ---------------------------------------------- live handle registry
 
 interface ServiceState {
-  handles: Map<string, RunHandle>;
+  /** Live adapters by run id, each with the lane its slot counts in. */
+  handles: Map<string, LiveSlot>;
   /**
    * F26-1: run ids RESERVED (a `running`/`queued`-row committed to a live slot by
    * `reserveRun`) whose adapter has NOT launched yet — the workspace is still
@@ -107,9 +111,10 @@ interface ServiceState {
    * so the cap must count it. Without this, every specialist dispatch (which always
    * reserves) bypassed the cap entirely: `handles.size` alone saw nothing during
    * the multi-minute clone window, so N delivering/reviewer runs all launched at
-   * once regardless of the configured cap.
+   * once regardless of the configured cap. Keyed to the lane the slot counts
+   * in (ruling 152(b)), like `handles`.
    */
-  reserved: Set<string>;
+  reserved: Map<string, RunLane>;
   adapters: AdapterSet;
   /**
    * In-process run-completion callbacks keyed by run id. `launch()`'s onExit
@@ -125,22 +130,65 @@ interface ServiceState {
    */
   completions: Map<string, RunCompletionCallback>;
   /**
-   * FIFO of runs admitted past the concurrency cap: their DB row is `queued`
-   * and their adapter has NOT been launched. The drain (run onExit) promotes
-   * the oldest whose row is still `queued` when a live slot frees. In-process
-   * only — a restart's orphan recovery finalizes any surviving `queued` row.
+   * Runs admitted past the concurrency cap: their DB row is `queued` and their
+   * adapter has NOT been launched. The drain (run onExit) promotes the oldest
+   * whose row is still `queued` when a live slot frees. In-process only — a
+   * restart's orphan recovery finalizes any surviving `queued` row.
+   *
+   * Ruling 152(b): two FIFOs, one per lane. `coordination` holds operator and
+   * controller turns, admitted up to `cap + coordinationLane(cap)` and promoted
+   * first; `delivery` holds every other kind under the cap itself.
    */
-  pending: PendingRun[];
+  pending: PendingQueues;
   /** Reentrancy guard for `drainRunQueue` — a synchronously-exiting promoted run
    *  fires onExit (→ drain) during its own launch; the outer drain loop handles
    *  the freed slot, so the nested call returns immediately. */
   draining?: boolean;
 }
 
+/** A live adapter and the admission lane its slot is counted in. */
+interface LiveSlot {
+  handle: RunHandle;
+  lane: RunLane;
+}
+
 /** A run waiting for a concurrency slot: launch it by calling `launch`. */
 interface PendingRun {
   runId: string;
   launch: () => void;
+}
+
+/** The two admission lanes of ruling 152(b). */
+type RunLane = "coordination" | "delivery";
+
+interface PendingQueues {
+  coordination: PendingRun[];
+  delivery: PendingRun[];
+}
+
+function emptyQueues(): PendingQueues {
+  return { coordination: [], delivery: [] };
+}
+
+/** Which lane a run kind is admitted through: the operator's and the
+ *  controller's turns are coordination, everything else is delivery. */
+function laneOf(kind: RunKind): RunLane {
+  return kind === "operator" || kind === "controller" ? "coordination" : "delivery";
+}
+
+/**
+ * Ruling 152(b): may a run in `lane` take a slot right now? Cap 0 is the gate
+ * off. Otherwise the instance holds at most `cap + coordinationLane(cap)` runs
+ * in total, and at most `cap` of them are delivery runs: the copy's "up to N
+ * agent runs at once" is the delivery count, so an operator turn that is live
+ * never costs a build its slot, while the operator may borrow a cap slot no
+ * build is using. Both counts come from the held slots themselves (`handles`
+ * and `reserved` carry their lane), never from a counter that could drift.
+ */
+function canAdmit(state: ServiceState, cap: number, lane: RunLane): boolean {
+  if (cap === 0) return true;
+  if (liveCount(state) >= cap + coordinationLane(cap)) return false;
+  return lane === "coordination" || deliveryLiveCount(state) < cap;
 }
 
 /** Invoked once when a registered run reaches a terminal state. */
@@ -154,10 +202,10 @@ function getState(): ServiceState {
   if (!state) {
     state = {
       handles: new Map(),
-      reserved: new Set(),
+      reserved: new Map(),
       adapters: createAdapters(),
       completions: new Map(),
-      pending: [],
+      pending: emptyQueues(),
     };
     cache[SERVICE_KEY] = state;
   }
@@ -255,10 +303,10 @@ export function configureRunServiceForTests(adapters: AdapterSet): void {
   const cache: Record<symbol, ServiceState | undefined> = globalThis;
   cache[SERVICE_KEY] = {
     handles: new Map(),
-    reserved: new Set(),
+    reserved: new Map(),
     adapters,
     completions: new Map(),
-    pending: [],
+    pending: emptyQueues(),
   };
 }
 
@@ -492,8 +540,12 @@ export function reserveRun(
   // non-reserved path, where `startRun` parks it as `queued` behind the cap. The
   // only cost is no live "Preparing" strip during that run's clone — the rare
   // cap-full case — instead of the cap being silently exceeded on every dispatch.
+  // Ruling 152(b): an operator's reservation is measured against its lane's
+  // bound (cap + lane), so a full delivery cap does not demote its clone to the
+  // stripless queued path either.
   const cap = getMaxConcurrentRuns(db);
-  if (cap !== 0 && liveCount(state) >= cap) {
+  const lane = laneOf(input.kind);
+  if (!canAdmit(state, cap, lane)) {
     return null;
   }
   const runId = newId("run");
@@ -534,7 +586,7 @@ export function reserveRun(
   }
   // The reserved row now holds a concurrency slot until `startRun` adopts it (→
   // handles) or `abandon()` releases it.
-  state.reserved.add(runId);
+  state.reserved.set(runId, lane);
   const publish = (state: "running" | "error") => {
     publishRunStateChanged({
       projectSlug: input.projectSlug,
@@ -941,7 +993,7 @@ export async function startRun(
     state.reserved.delete(reservation.runId);
     launchThunk();
   } else {
-    admitRun(db, runId, launchThunk);
+    admitRun(db, runId, launchThunk, input.kind);
   }
   return { runId };
 }
@@ -1508,6 +1560,15 @@ function liveCount(state: ServiceState): number {
   return state.handles.size + state.reserved.size;
 }
 
+/** How many of the held slots are delivery runs (ruling 152(b)): the count the
+ *  cap itself bounds. */
+function deliveryLiveCount(state: ServiceState): number {
+  let n = 0;
+  for (const slot of state.handles.values()) if (slot.lane === "delivery") n += 1;
+  for (const lane of state.reserved.values()) if (lane === "delivery") n += 1;
+  return n;
+}
+
 /**
  * Admit a run for launch under the instance concurrency cap.
  *
@@ -1515,24 +1576,35 @@ function liveCount(state: ServiceState): number {
  * ground truth of how many runs hold a slot right now, with no separate counter
  * to leak or drift. When the cap (getMaxConcurrentRuns) is 0 the gate is off and
  * every run launches immediately (the historical behavior, so an untouched
- * deployment is unchanged). Otherwise a run that would exceed the cap is PARKED:
- * its DB row stays `queued` (that is the state startRun already inserts for a
- * non-reserved run) and its launch thunk waits in `state.pending`, promoted by
+ * deployment is unchanged). Otherwise a run that would exceed its lane's bound
+ * ({@link canAdmit}: at most `cap` delivery runs and `cap + lane` runs in all,
+ * the lane for operator and controller turns, ruling 152(b)) is PARKED: its DB
+ * row stays `queued` (that is the state startRun already inserts for a
+ * non-reserved run) and its launch thunk waits in the lane's queue, promoted by
  * `drainRunQueue` when a live slot frees.
  */
-function admitRun(db: DatabaseSync, runId: string, launchThunk: () => void): void {
+function admitRun(
+  db: DatabaseSync,
+  runId: string,
+  launchThunk: () => void,
+  kind: RunKind,
+): void {
   const state = getState();
   const cap = getMaxConcurrentRuns(db);
-  if (cap === 0 || liveCount(state) < cap) {
+  const lane = laneOf(kind);
+  if (canAdmit(state, cap, lane)) {
     launchThunk();
     return;
   }
-  state.pending.push({ runId, launch: launchThunk });
+  const queue = state.pending[lane];
+  queue.push({ runId, launch: launchThunk });
   logger.info("run queued behind the concurrency cap", {
     runId,
+    lane,
     live: liveCount(state),
     cap,
-    queuedAhead: state.pending.length - 1,
+    coordinationLane: coordinationLane(cap),
+    queuedAhead: queue.length - 1,
   });
 }
 
@@ -1543,6 +1615,11 @@ function admitRun(db: DatabaseSync, runId: string, launchThunk: () => void): voi
  * it must never spring to life. The cap is re-read each pass so an admin lowering
  * it mid-drain is honored; `handles.size` grows as each promoted run launches,
  * so the loop is self-limiting.
+ *
+ * Ruling 152(b): the coordination queue is drained first; a delivery run is
+ * promoted only when no coordination run can go and the cap itself has room.
+ * So a freed slot goes to the operator turn that was parked behind the builds
+ * before the next build.
  */
 export function drainRunQueue(db: DatabaseSync): void {
   const state = getState();
@@ -1553,8 +1630,7 @@ export function drainRunQueue(db: DatabaseSync): void {
   try {
     for (;;) {
       const cap = getMaxConcurrentRuns(db);
-      if (cap !== 0 && liveCount(state) >= cap) return;
-      const next = state.pending.shift();
+      const next = nextPromotable(state, cap);
       if (!next) return;
       const row = getRun(db, next.runId);
       if (!row || row.state !== "queued") continue; // stopped while waiting
@@ -1565,15 +1641,31 @@ export function drainRunQueue(db: DatabaseSync): void {
   }
 }
 
+/** The oldest parked run whose lane has room right now, coordination first;
+ *  null when neither lane can admit (or nothing waits). Shifts it off its queue. */
+function nextPromotable(state: ServiceState, cap: number): PendingRun | null {
+  const lanes: readonly RunLane[] = ["coordination", "delivery"];
+  for (const lane of lanes) {
+    const queue = state.pending[lane];
+    if (queue.length === 0) continue;
+    if (!canAdmit(state, cap, lane)) continue;
+    return queue.shift() ?? null;
+  }
+  return null;
+}
+
 /** A point-in-time view of the run concurrency gate. */
 export interface RunConcurrencySnapshot {
   /** Configured cap (0 = unlimited). */
   cap: number;
+  /** Ruling 152(b): the extra slots operator and controller turns may take
+   *  beyond the cap (one per four of it, minimum one; 0 when the cap is 0). */
+  lane: number;
   /** Runs holding a slot right now — live adapters plus reserved-but-not-yet-
    *  launched runs (still preparing their workspace). This is what the cap gates
    *  against, so it is what the admin card must show. */
   live: number;
-  /** Runs parked behind the cap right now. */
+  /** Runs parked behind the cap right now, both lanes together. */
   queued: number;
 }
 
@@ -1581,10 +1673,12 @@ export interface RunConcurrencySnapshot {
  *  concurrency card and diagnostics. */
 export function runConcurrencySnapshot(db: DatabaseSync): RunConcurrencySnapshot {
   const state = getState();
+  const cap = getMaxConcurrentRuns(db);
   return {
-    cap: getMaxConcurrentRuns(db),
+    cap,
+    lane: coordinationLane(cap),
     live: liveCount(state),
-    queued: state.pending.length,
+    queued: state.pending.coordination.length + state.pending.delivery.length,
   };
 }
 
@@ -1721,7 +1815,7 @@ function launch(
   // deletes the not-yet-set handle; setting it here afterward would leave a
   // stale handle for an already-finished run — making `fireIfAlreadyTerminal`
   // (and interrupt) think a dead run is live. Guard on the exit flag.
-  if (!exited) state.handles.set(spec.runId, handle);
+  if (!exited) state.handles.set(spec.runId, { handle, lane: laneOf(spec.kind) });
 }
 
 // ---------------------------------------------- interrupt
@@ -1791,9 +1885,9 @@ export async function interruptRun(
   }
 
   const state = getState();
-  const handle = state.handles.get(input.runId);
-  if (handle) {
-    handle.interrupt();
+  const slot = state.handles.get(input.runId);
+  if (slot) {
+    slot.handle.interrupt();
     state.handles.delete(input.runId);
     // The adapter's onExit → sink.finalize sets the interrupted state; stamp
     // the interrupter here so it lands regardless of the adapter's timing.

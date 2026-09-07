@@ -307,6 +307,19 @@ clone. `startRun` audits `runtime.run.started`, substitutes foreign-backend mode
 fails unavailable backends, and otherwise `launch`es a reserved row or `admitRun`s into
 a `pending` queue drained on every completion. The cap is the instance setting
 `maxConcurrentRuns` (0 = unlimited, ceiling 64, Org settings → set-concurrency).
+
+**The coordination lane (ruling 152(b), pass 35).** A positive cap carries a lane of
+`coordinationLane(cap) = max(1, ceil(cap / 4))` extra slots for `operator` and
+`controller` runs, so a decision never queues behind the builds it is deciding about
+(live, fourteen operator turns waited ten minutes behind six four-minute builds). The
+instance holds at most `cap + lane` runs in all and at most `cap` DELIVERY runs
+(`primary`, `reviewer`) among them: a live operator turn never costs a build its slot,
+and an operator turn may borrow a cap slot no build is using. `reserveRun` and
+`admitRun` both apply the rule by the run's kind; the pending queue is one FIFO per
+lane and `drainRunQueue` promotes the coordination queue first. Every held slot
+(`handles`, `reserved`) carries its lane, so the two counts are read from the slots
+themselves, never from a counter. `runConcurrencySnapshot` is `{cap, lane, live,
+queued}` (`live` and `queued` count both lanes). Cap 0 has no lane.
 Default thread ids: `op-<8>`, `primary-<8>`, `r<idx>-<8>`, `controller`.
 
 ### 3.3 Streaming
@@ -722,7 +735,8 @@ Every mutating request is also bounded by a 30 s action watchdog (503 on an asyn
   event; supporting runs get the read-only paragraph and the delivery denies.
 - Bounds: operator react depth 4, transition chain 8, carried triggers 8, recovery
   re-invokes 3 per 30 min, schedule retries 3, Claude max turns 2000, idle 15 min per
-  backend, action watchdog 30 s.
+  backend, action watchdog 30 s, coordination lane `max(1, ceil(cap / 4))` extra slots
+  beyond the run cap for operator and controller turns (§3.2, ruling 152(b)).
 
 ## 10. Seeded catalog
 

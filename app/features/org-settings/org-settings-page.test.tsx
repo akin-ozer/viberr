@@ -1197,7 +1197,7 @@ describe("F32-2 (pass 32): the Settings page holds a live stream", () => {
           }}
           meId={ME.id}
           callbackOrigin="http://localhost:5173"
-          runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+          runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
           s3Audit={null}
           controllerConfig={CONTROLLER_CONFIG}
           controllerLocks={CONTROLLER_LOCKS}
@@ -1234,7 +1234,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
         }}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1290,7 +1290,7 @@ describe("C9: instance storage line", () => {
         })}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1320,7 +1320,7 @@ describe("C9: instance storage line", () => {
         })}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1354,7 +1354,7 @@ describe("run concurrency control", () => {
         view={viewBase}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 2, live: 2, queued: 1 }}
+        runConcurrency={{ cap: 2, lane: 1, live: 2, queued: 1 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1365,13 +1365,54 @@ describe("run concurrency control", () => {
     expect(getByText(/2 runs live, 1 queued/)).toBeTruthy();
   });
 
+  // Ruling 152(b): a cap carries a coordination lane, and the control says so
+  // under the field, because "capped at 2" beside three live runs would
+  // otherwise read as a cap that does not hold.
+  it("ruling 152: a positive cap names the coordination lane under the field", () => {
+    // Canary: drop the `.conc-lane` sentence from RunConcurrencyControl and
+    // the first assertion fails.
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 2, lane: 1, live: 3, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    const sentence = getByText(/Cap 2: up to 2 agent runs at once\./);
+    expect(sentence.textContent).toContain(
+      "Operator and controller turns get one extra slot per four so coordination never waits behind delivery.",
+    );
+    expect(sentence.className).toContain("conc-lane");
+  });
+
+  it("ruling 152: an unlimited cap has no lane sentence", () => {
+    const { queryByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    expect(queryByText(/one extra slot per four/)).toBeNull();
+  });
+
   it("says unlimited when the cap is 0", () => {
     const { getByText } = renderPanel(
       <OrgSettingsPage
         view={viewBase}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1391,7 +1432,7 @@ describe("run concurrency control", () => {
         view={viewBase}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1438,7 +1479,7 @@ describe("run concurrency control", () => {
         view={viewBase}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1463,7 +1504,7 @@ describe("run concurrency control", () => {
         view={viewBase}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 2, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 2, lane: 1, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1507,7 +1548,7 @@ describe("run concurrency control", () => {
         view={viewBase}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 2, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 2, lane: 1, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1556,7 +1597,7 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
       }}
       meId={ME.id}
       callbackOrigin="http://localhost:5173"
-      runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+      runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
       s3Audit={s3Audit}
       controllerConfig={CONTROLLER_CONFIG}
       controllerLocks={CONTROLLER_LOCKS}
@@ -1696,7 +1737,7 @@ describe("FR33: the audit card discloses the export-before-purge record", () => 
         }}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1742,7 +1783,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
         }}
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, live: 0, queued: 0 }}
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}

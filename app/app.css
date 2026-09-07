@@ -5813,3 +5813,9 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
    shared one is scoped to `.field input`. */
 .op-run .sub.err { color: var(--coral-dark); font-weight: 600; }
 .agent-select-input[aria-invalid="true"] { border-color: var(--coral-dark); }
+
+/* ---------- appended: ruling 152, the coordination lane sentence ---------- */
+/* The run-concurrency control says what the cap carries beyond itself (the
+   operator and controller lane) on its own full line under the field and the
+   counts, the slot the ruling-147 refusal already takes in this wrapping row. */
+.conc-body .conc-lane { flex-basis: 100%; color: var(--muted); }

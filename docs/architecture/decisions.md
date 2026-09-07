@@ -2928,6 +2928,29 @@ by rewriting those paragraphs:*
     `features/runtime/runs-panels.tsx`; `features/org-settings/users-panel.tsx`;
     `features/project-settings/settings-page.tsx`.)
 
+152. **Coordination cost is a product cost (owner, 2026-09-06, Q35-5 and Q35-15; G35-4,
+    G35-5).** **(a)** An operator turn may cross consecutive `auto` boundaries in one turn:
+    the transition reply names the next boundary, and a transition made by a live operator
+    run queues no fresh operator turn; the stranded-stage backstop covers a chain the model
+    abandons. **(b)** Under a concurrency cap, coordination has its own lane: operator and
+    controller turns are admitted up to one slot per four of the cap beyond it (minimum
+    one) and are promoted ahead of queued delivery runs. The cap itself bounds the
+    DELIVERY runs (`primary`, `reviewer`) and the instance holds at most cap plus lane runs
+    in all, so a live operator turn never costs a build its slot while an operator turn may
+    borrow a cap slot no build is using; the lane is derived from `maxConcurrentRuns`
+    (`coordinationLane`), not a second setting, and the org-settings control says so under
+    the field ("Cap N: up to N agent runs at once. Operator and controller turns get one
+    extra slot per four so coordination never waits behind delivery."). **(c)** No dispatch
+    starts on a backend the instance already knows is spent: a dispatch aimed at a backend
+    whose exhaustion record has not passed its reset instant (or is younger than 30 minutes
+    when the instant is unknown) is held, recorded on the timeline with an audit row, and
+    re-scheduled for the reopen time; the provider's wall-clock sentence is read in the
+    process's own time zone, the zone the CLI printed it in. A hold is not a decision
+    packet and costs no operator turn. (Pass 35: (b) in `run-service.server.ts`
+    `canAdmit`/`drainRunQueue`, `instance-settings.server.ts` `coordinationLane`,
+    `org-settings-page.tsx` `RunConcurrencyControl`; (a) and (c) in the operator actions
+    and the backend-quota hold of the same pass.)
+
 *(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
 on this list: they are **rulings 109–120** above. Everything still listed here predates
 that pass and remains unnumbered.)*

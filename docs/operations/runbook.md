@@ -315,7 +315,9 @@ recommendation is open. Nothing is owed by anyone while it waits.
   (`pinnedBackend`). The Agent-logs "Retry on <other>" button passes the same test, so a
   task never offers in one surface what the other withholds.
 - Concurrency: Org settings → runtime sets `maxConcurrentRuns` (0 = unlimited, ceiling
-  64); excess runs wait in a `pending` queue that drains on every completion.
+  64); excess runs wait in a `pending` queue that drains on every completion. Operator
+  and controller turns have a lane of `max(1, ceil(cap / 4))` extra slots beyond the cap
+  and are promoted first (ruling 152(b)), so `live` may exceed the cap by that many.
 - After a restart, orphaned `running|queued` rows are finalized as `error`
   (`interruptedBy: restart`) and the operator is re-invoked once per affected task
   (capped 3 per 30 min); finished runs whose completion never posted are replayed. This
