@@ -967,6 +967,84 @@ describe("resolvePacket kind matrix", () => {
     });
   });
 
+  it("ruling 152(c) + 164: the option that says the window has reset RETIRES the exhaustion record", async () => {
+    // The specialist quota packet's "The window has reset …, or the Codex
+    // account changed: send @dev back to continue" and the operator's "…: re-run"
+    // are the person's statement that the stored record is stale. Nothing else
+    // retires it — only a run that COMPLETES on the backend clears it, and the
+    // dispatch hold stops any run from starting until the recorded instant
+    // passes — so the option resolved, the dispatch was held again and the
+    // stated remedy was overridden by the record it contradicts. Canary: drop
+    // the `clearBackendQuotaExhaustion` call from `resolvePacket`.
+    const store = prepared();
+    const quotaPacket: TaskPacket = {
+      ...PACKET,
+      options: [
+        {
+          kind: "request_edit",
+          t: "The window has reset (Sep 7, 2026 · 16:00 UTC), or the Codex account changed: send @dev back to continue",
+          d: "Closes this decision and re-runs the agent on the owner's current account with the same directive.",
+          rec: true,
+          backend: "codex",
+        },
+        { kind: "redirect", t: "Redirect with sharper guidance", d: "", rec: false },
+      ],
+    };
+    withTask(store, { stage: "review", waiting: "human" }, quotaPacket);
+    const { recordBackendQuotaExhaustion, backendDispatchHold } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    const record = {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt: Math.round(Date.now() / 1000) + 6 * 3600,
+      resetsAtPrecision: "clock" as const,
+      providerText: "You've hit your usage limit.",
+      runId: "run_refused",
+      observedAt: new Date().toISOString(),
+    };
+    recordBackendQuotaExhaustion(store.db, "codex", record);
+    const hold = { credentialUserId: store.users.arda.id };
+    expect(backendDispatchHold(store.db, "codex", hold)).not.toBeNull();
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(backendDispatchHold(store.db, "codex", hold)).toBeNull();
+
+  });
+
+  it("an option that asserts nothing about quota names no backend and leaves the record standing", async () => {
+    const store = prepared();
+    withTask(store, { stage: "review", waiting: "human" }, PACKET);
+    const { recordBackendQuotaExhaustion, backendDispatchHold } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    recordBackendQuotaExhaustion(store.db, "codex", {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt: Math.round(Date.now() / 1000) + 6 * 3600,
+      resetsAtPrecision: "clock",
+      providerText: "You've hit your usage limit.",
+      runId: "run_refused",
+      observedAt: new Date().toISOString(),
+    });
+    // Option 1 is the plain "Request one edit": a send-back that says nothing
+    // about anyone's usage window.
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(
+      backendDispatchHold(store.db, "codex", { credentialUserId: store.users.arda.id }),
+    ).not.toBeNull();
+  });
+
   it("R20-1 block_on_policy: UNBLOCKS (readiness→ready, waiting→agent), resolves, refuses a second confirm", async () => {
     const store = prepared();
     withTask(store, { stage: "review", waiting: "human" }, PACKET);

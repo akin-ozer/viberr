@@ -122,11 +122,13 @@ import {
   noChangeCompletionEvent,
 } from "./no-change-completion.server";
 import {
+  isDispatchHeld,
   listDeployedSpecialists,
   projectBoard,
   runEligibilityFor,
   startAgentRun,
   type DeployedSpecialistView,
+  type DispatchHeldError,
 } from "./specialist-run.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 import {
@@ -2771,6 +2773,24 @@ export async function operatorDispatchAgent(
     // task-key branch exists on GitHub. Best-effort, degrades cleanly.
     await ensureTaskBranchBestEffort(db, ctx, input.projectSlug, input.taskKey);
   }
+  // Ruling 152(c) (pass 35, G35-4): a HOLD is the task's state ruling the
+  // dispatch out for now, which is exactly what `noop` means — never a
+  // failure. The plan says so and the Codex operator makes it load-bearing:
+  // its plan executor ABORTS every remaining action on a thrown one and writes
+  // "Coordination stopped" on the timeline, so a held `run_agent` step cost the
+  // rest of a paid turn (the transitions, comments and packets after it) for a
+  // hold whose own note says nothing was dispatched and no decision is needed.
+  // The retry is already on the task's schedule, so the message ends the
+  // subject rather than inviting a packet.
+  const heldNoop = (error: DispatchHeldError): OperatorActionResult => {
+    const other = error.hold.backend === "codex" ? "Claude" : "Codex";
+    return {
+      outcome: "noop",
+      message:
+        `${error.userMessage} Do not open a packet for this; ` +
+        `pick a ${other} profile if the work cannot wait.`,
+    };
+  };
   if (prompt) {
     const promptInput: Parameters<typeof operatorPromptAgent>[1] = {
       projectSlug: input.projectSlug,
@@ -2783,7 +2803,12 @@ export async function operatorDispatchAgent(
     // the same rule as the trace above, and an explicit `true` is what asks
     // assignSpecialist for a delivery hand-off.
     if (input.delivers !== undefined) promptInput.delivers = input.delivers;
-    await operatorPromptAgent(db, promptInput, ctx);
+    try {
+      await operatorPromptAgent(db, promptInput, ctx);
+    } catch (error) {
+      if (isDispatchHeld(error)) return heldNoop(error);
+      throw error;
+    }
     return {
       outcome: "done",
       message: `Prompted @${agent.name} (${as}) and started its run.`,
@@ -2795,7 +2820,13 @@ export async function operatorDispatchAgent(
     profileId: input.profileId,
   };
   if (input.delivers !== undefined) dispatch.delivers = input.delivers;
-  const result = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx(ctx));
+  let result: Awaited<ReturnType<typeof startAgentRun>>;
+  try {
+    result = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx(ctx));
+  } catch (error) {
+    if (isDispatchHeld(error)) return heldNoop(error);
+    throw error;
+  }
   return {
     outcome: "done",
     message: `Started a ${result.backend === "claude" ? "Claude" : "Codex"} run for ${agent.name} (${as}).`,

@@ -4743,4 +4743,85 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
       prompt: "@dev continue the migration",
     });
   });
+
+  it("a repeat dispatch inside one window reuses the pending retry: one schedule, one note, and the audit row says it was reused", async () => {
+    // Cluster review (pass 35): the hold is reached by every door and a spent
+    // window is exactly what makes a person dispatch again, so an
+    // unconditional `scheduleTaskAction` turned N held attempts into N pending
+    // `run-agent` occurrences all due at the same instant. At reopen the first
+    // starts the run and the rest bounce off the single-flight 409, defer back
+    // to pending with no retry spent, and start the SAME directive again once
+    // that run ends. Canary: reuse the `scheduleTaskAction` call
+    // unconditionally in `holdDispatch` and this reads 3 / 3.
+    deployDevSpecialist(["codex"]);
+    const resetsAt = Math.round(Date.now() / 1000) + 3600;
+    await exhaustCodex(resetsAt);
+    const held = async (directive: string): Promise<DispatchHeldError> => {
+      try {
+        await startAgentRun(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", directive },
+          actor(store.users.arda),
+          { dataRoot: store.dataRoot },
+        );
+      } catch (error) {
+        if (!isDispatchHeld(error)) throw error;
+        return error;
+      }
+      throw new Error("expected the dispatch to be held");
+    };
+    const first = await held("continue the migration");
+    const second = await held("continue the migration");
+    const third = await held("continue the migration");
+    expect(second.hold.scheduleId).toBe(first.hold.scheduleId);
+    expect(third.hold.scheduleId).toBe(first.hold.scheduleId);
+
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const pending = file.parsed.frontmatter.schedules.filter((x) => x.status === "pending");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.prompt).toBe("continue the migration");
+    expect(file.parsed.timeline.filter((e) => e.title === "Dispatch held")).toHaveLength(1);
+    // The "Scheduled:" event beside it is not repeated either.
+    expect(
+      file.parsed.timeline.filter((e) => e.text.includes("**Scheduled:** a **dev** run")),
+    ).toHaveLength(1);
+    // The audit row IS written for every held attempt — it is the machine's
+    // record of the repeat — and names which one minted the retry.
+    const rows = listAuditEvents(store.db, { action: "task.agent.run_held" });
+    expect(rows).toHaveLength(3);
+    // Newest first: the two repeats reused the retry the first one minted.
+    // SAFETY: `details` is this action's own audit payload, written two lines
+    // of product code above with exactly this key.
+    expect(rows.map((r) => (r.details as { reusedSchedule?: boolean }).reusedSchedule)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+  });
+
+  it("a repeat dispatch carrying a NEWER directive replaces the pending one and says so, still without a second schedule", async () => {
+    deployDevSpecialist(["codex"]);
+    await exhaustCodex(Math.round(Date.now() / 1000) + 3600);
+    const held = async (directive: string): Promise<void> => {
+      try {
+        await startAgentRun(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", directive },
+          actor(store.users.arda),
+          { dataRoot: store.dataRoot },
+        );
+      } catch (error) {
+        if (!isDispatchHeld(error)) throw error;
+        return;
+      }
+      throw new Error("expected the dispatch to be held");
+    };
+    await held("continue the migration");
+    await held("drop the migration and fix the flake first");
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const pending = file.parsed.frontmatter.schedules.filter((x) => x.status === "pending");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.prompt).toBe("drop the migration and fix the flake first");
+    expect(file.parsed.timeline.filter((e) => e.title === "Dispatch held")).toHaveLength(2);
+  });
 });

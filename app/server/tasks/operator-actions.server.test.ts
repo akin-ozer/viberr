@@ -482,6 +482,72 @@ describe("operatorDispatchAgent", () => {
     await interruptRunningRuns("VIB-1");
   });
 
+  it("ruling 152(c): a dispatch into a held backend is a NOOP naming the hold, never a throw", async () => {
+    // The plan's own shape for this door. It matters most on the Codex
+    // operator: its plan executor catches a throw from any governed action,
+    // ABORTS every remaining step and writes "Coordination stopped" on the
+    // timeline — so one held `run_agent` cost the rest of a paid turn for a
+    // hold whose own note says nothing was dispatched and no decision is
+    // needed. Canary: remove the `isDispatchHeld` arms in
+    // `operatorDispatchAgent` and both calls throw.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    // The hold is read for the account the run would bill, so the owner has to
+    // have one connected (ruling 127); without it the dispatch is refused for
+    // the credential before quota is anyone's question.
+    const { connectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    await connectFakeBackend(store.db, store.users.arda.id, "claude");
+    const { recordBackendQuotaExhaustion } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    const resetsAt = Math.round(Date.now() / 1000) + 3600;
+    recordBackendQuotaExhaustion(store.db, "claude", {
+      credentialUserId: null,
+      credentialLabel: null,
+      resetsAt,
+      resetsAtPrecision: "clock",
+      providerText: "5-hour limit reached",
+      runId: "run_refused",
+      observedAt: new Date().toISOString(),
+    });
+    const bare = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      authority("supervised"),
+    );
+    expect(bare.outcome).toBe("noop");
+    expect(bare.message).toContain("Claude is out of quota until");
+    expect(bare.message).toContain(
+      "Do not open a packet for this; pick a Codex profile if the work cannot wait.",
+    );
+    // The prompt arm is the same door and answers the same way.
+    const prompted = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        prompt: "continue the migration",
+      },
+      authority("supervised"),
+    );
+    expect(prompted.outcome).toBe("noop");
+    expect(prompted.message).toContain("Claude is out of quota until");
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
+    // The hold wrote its own record, and ONE retry stands for both tries: the
+    // second attempt carried a directive the first did not, so it replaced the
+    // pending occurrence's prompt rather than adding an occurrence.
+    const pending = task().frontmatter.schedules.filter((x) => x.status === "pending");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ action: "run-agent", profileId: "developer" });
+    expect(pending[0]!.prompt).toContain("continue the migration");
+    expect(task().timeline.some((e) => e.title === "Dispatch held")).toBe(true);
+  });
+
   it("recommend mode adds ONE actionable run_agent card and does NOT engage or run", async () => {
     deployRoster([{ capabilityId: "dispatch-agents", mode: "recommend" }, { capabilityId: "append-typed-events", mode: "direct" }]);
     seedTask("impl");

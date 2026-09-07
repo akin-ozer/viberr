@@ -516,12 +516,28 @@ once the provider's total landed.
   `task.agent.run_held { backend, until, scheduleId, profileId }`, re-projects, and
   throws `DispatchHeldError` (`ERROR_CODES.DISPATCH_HELD`, 409, `hold` record, user
   message "Held: Codex is out of quota until …; Developer's run is scheduled for
-  then."). Every door passes through the same read against its own target backend, so
-  a Claude retry proceeds while Codex is held: the Run control toasts the sentence and
-  writes no hand-off comment (`isDispatchHeld`), an @mention returns it as
-  `runNotStarted`, the operator's `run_agent` and the controller's `run_agent_on_task`
-  surface it as the tool's refusal text, and a scheduled occurrence retires
-  `held-quota` (§4.5). A hold is not a decision packet and costs no operator turn.
+  then."). ONE retry stands per profile per window: a repeat dispatch inside the same
+  hold reuses the pending `run-agent` occurrence (a newer directive replaces its
+  prompt) instead of adding a second, writes no second note and no second "Scheduled:"
+  event, and its audit row records `reusedSchedule`. Without that, N held attempts
+  became N occurrences all due at the reopen instant, and the ones that lost the
+  single-flight race at reopen deferred and then ran the same directive again.
+  Every door passes through the same read (`assertDispatchNotHeld`) against its own
+  target backend, so a Claude retry proceeds while Codex is held: the Run control
+  toasts the sentence and writes no hand-off comment (`isDispatchHeld`), an @mention
+  returns it as `runNotStarted` on both of `commentToAgent`'s branches — the RESUME
+  branch reads the hold itself, before the confinement's MCP pre-flight and skill
+  re-mount, because it never reaches `dispatchAgentRun` — the operator's `run_agent`
+  answers `noop` with the sentence plus "Do not open a packet for this; pick a Claude
+  profile if the work cannot wait" (a throw would abort the rest of the Codex
+  operator's plan), the controller's `run_agent_on_task` surfaces it as the tool's
+  refusal text, and a scheduled occurrence retires `held-quota` (§4.5). A hold is not a
+  decision packet and costs no operator turn. The record behind it is retired by a run
+  that COMPLETES on the backend and by one other thing: a person resolving the quota or
+  auth packet's option that states the window has reset or the account changed
+  (`run-failure-remedy.server.ts` names the backend on that option; `resolvePacket`
+  clears it), because the option promises the agent continues now and the record would
+  otherwise park it until the recorded instant (ruling 164).
   The operator's PROMPT door (`operatorPromptAgent`) writes no "did NOT start a run"
   note for a hold either: its own note asks for the directive to be re-sent, which
   the "Dispatch held" note two lines above says is not needed and which would mint a

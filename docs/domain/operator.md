@@ -235,11 +235,14 @@ Details that matter:
   contradictory hints are refused as `noop`. Every selection writes
   `task.operator.agent_selected` listing each candidate with eligibility and the
   choice. A dispatch into a backend the instance already knows is out of quota for the
-  task owner's account is held by `startAgentRun` itself (ruling 152(c), pass 35): the
-  tool call fails with the hold sentence ("Held: Codex is out of quota until …;
-  Developer's run is scheduled for then."), the retry is already on the task's
-  schedule and the timeline carries the "Dispatch held" note; the operator opens no
-  packet for it and picks the other backend only when the work cannot wait.
+  task owner's account is held by `startAgentRun` itself (ruling 152(c), pass 35). The
+  tool answers `noop` with the hold sentence ("Held: Codex is out of quota until …;
+  Developer's run is scheduled for then. Do not open a packet for this; pick a Claude
+  profile if the work cannot wait."), the retry is already on the task's schedule and
+  the timeline carries the "Dispatch held" note; the operator opens no packet for it
+  and picks the other backend only when the work cannot wait. A hold is the task's
+  state ruling the step out, never a failure, so the Codex plan mirror records the
+  `noop` and executes the rest of the plan rather than aborting it.
 - **Transitions.** An `auto` boundary is crossed directly even when supervised; an
   `approval` boundary always files a recommendation card for a human, whatever the
   autonomy or the grant (ruling 151); a `human` boundary is refused; a backward move

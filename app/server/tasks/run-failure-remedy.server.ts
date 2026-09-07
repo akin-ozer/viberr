@@ -187,10 +187,11 @@ export function describeRunFailure(
   }
 
   const options = input.role === "operator"
-    ? operatorOptions(kind, backend, resetLabel)
+    ? operatorOptions(kind, backend, input.backend, resetLabel)
     : specialistOptions(
         kind,
         backend,
+        input.backend,
         other,
         ownerHasOther,
         resetLabel,
@@ -208,6 +209,10 @@ export function describeRunFailure(
 function operatorOptions(
   kind: RunFailure["kind"],
   backend: string,
+  /** The backend that refused, as its id: an option asserting the window has
+   *  reset or the account changed names it, and the resolution retires that
+   *  backend's exhaustion record on the strength of the assertion. */
+  failed: RealBackend,
   resetLabel: string | null,
 ): OperatorPacketOptionInput[] {
   const rerun: OperatorPacketOptionInput = {
@@ -233,6 +238,7 @@ function operatorOptions(
         title: `The usage window has reset${resetLabel ? ` (${resetLabel})` : ""}, or I switched the ${backend} account: re-run`,
         detail: "Closes this decision and starts a fresh operator run on the owner's current account. If it fails again you get a new decision packet.",
         recommended: true,
+        backend: failed,
         ev: "**Decision:** the usage window has reset or the account was switched; re-run the operator. No project policy was changed.",
       },
       redirect,
@@ -246,6 +252,7 @@ function operatorOptions(
         title: `I connected a different ${backend} account or an API key on Profile → Agent accounts: re-run`,
         detail: "Closes this decision and starts a fresh operator run on the owner's current account.",
         recommended: true,
+        backend: failed,
         ev: `**Decision:** a different ${backend} account or an API key was connected; re-run the operator. No project policy was changed.`,
       },
       redirect,
@@ -262,6 +269,8 @@ function operatorOptions(
 function specialistOptions(
   kind: RunFailure["kind"],
   backend: string,
+  /** The backend that refused (see `operatorOptions`). */
+  failed: RealBackend,
   other: RealBackend,
   ownerHasOther: boolean,
   resetLabel: string | null,
@@ -291,7 +300,7 @@ function specialistOptions(
       if (profileId) retry.profileId = profileId;
       options.push(retry);
     }
-    options.push({
+    const sendBack: OperatorPacketOptionInput = {
       kind: "request_edit",
       title:
         kind === "quota"
@@ -318,7 +327,17 @@ function specialistOptions(
               ? `**Decision:** this deployment could not reach ${backend}; the agent is retried as it was. No account or project policy was changed.`
               : `**Decision:** ${backend} was overloaded; the agent is retried as it was. No account or project policy was changed.`
             : `**Decision:** the ${backend} credential was changed on the owner's profile; the agent continues.`,
-    });
+    };
+    // The two titles that assert the SPENT WINDOW is over (or that a different
+    // account now answers for it) name the backend they assert about, so the
+    // resolution can retire that backend's exhaustion record. Without it the
+    // record outlives the person's statement: only a run that COMPLETES clears
+    // it, the dispatch hold (ruling 152(c)) stops any run from starting until
+    // the recorded instant passes, and the option's own promise — "send the
+    // agent back to continue" — cannot be kept (ruling 164). The overloaded and
+    // unavailable titles assert nothing about quota and name nothing.
+    if (kind === "quota" || kind === "auth") sendBack.backend = failed;
+    options.push(sendBack);
     options.push(redirect);
     return options;
   }

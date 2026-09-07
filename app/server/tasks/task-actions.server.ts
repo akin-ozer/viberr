@@ -1891,6 +1891,28 @@ export async function commentToAgent(
       input.taskKey,
       resumeBackend,
     );
+    // Ruling 152(c) (pass 35, G35-4), cluster review: a resume IS a dispatch —
+    // it spends the same provider window. This branch never reaches
+    // `dispatchAgentRun`, so the hold was read for a fresh mention and skipped
+    // for the far more common one: @mentioning the agent that is already
+    // working the task. Held here, before the confinement's MCP spawns and the
+    // skill re-mount, the retry lands on the same schedule every other door's
+    // hold uses; the A8 catch below turns the throw into the honest partial
+    // success (comment posted, `runNotStarted` carrying the hold sentence).
+    if (resumePrincipal.ok) {
+      const { assertDispatchNotHeld } = await import("./specialist-run.server");
+      await assertDispatchNotHeld(db, ctx, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        backend: resumeBackend,
+        credentialUserId: resumePrincipal.principal.userId,
+        profileId: target.profileId,
+        agentName: target.name,
+        deployed: true,
+        directive: input.text.trim(),
+        actor: { userId: actor.userId, label: actor.label },
+      });
+    }
     // Re-establish the specialist's run confinement — denylist, git ceiling,
     // MCP set, persona — that the fresh-run path applies. Without this a
     // resumed (@mention) specialist runs unconfined (XS-1). A refused resume
@@ -8122,6 +8144,31 @@ export async function resolvePacket(
         packetKind: packet.kind,
       },
     });
+  }
+
+  // Ruling 164 + ruling 152(c) (pass 35, cluster review): the two options that
+  // say the spent window is over — the specialist's "The window has reset …,
+  // or the Codex account changed: send @dev back to continue" and the
+  // operator's "The usage window has reset …, or I switched the Codex account:
+  // re-run" — are the person's statement that the instance's exhaustion record
+  // is stale. Nothing else retires that record: it is cleared only by a run
+  // that COMPLETES on the backend, and the dispatch hold stops any run from
+  // starting until the recorded instant passes, so the option resolved, the
+  // operator was re-queued, its dispatch was held again and the stated remedy
+  // was overridden by the record it contradicts. That matters most when the
+  // record is wrong: a reset time the provider gave as a bare clock reading is
+  // resolved to the next occurrence, so an observation past that time parks the
+  // account until tomorrow. The option names the backend it asserts about
+  // (`run-failure-remedy.server.ts`); no other kind carries one but
+  // `retry_other_backend`, which names the OTHER backend and is handled above.
+  if (
+    (option.kind === "request_edit" || option.kind === "block_on_policy") &&
+    option.backend
+  ) {
+    const { clearBackendQuotaExhaustion } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    clearBackendQuotaExhaustion(db, option.backend);
   }
 
   // R20-1 (F20-5): every settled decision consumes the packet approval. Holds

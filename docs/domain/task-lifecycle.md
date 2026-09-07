@@ -407,9 +407,15 @@ anything ambiguous fails closed with the reason recorded.
   row, and a `run-agent` schedule for one minute after the window reopens (thirty
   minutes after the refusal when the provider named no instant) carrying the same
   profile and prompt. The door reads "Held: Codex is out of quota until Sep 6, 2026 ·
-  18:18 UTC; Developer's run is scheduled for then." A hold is not a decision packet and
+  18:18 UTC; Developer's run is scheduled for then." A repeat dispatch inside the same
+  window reuses that pending occurrence — one retry per profile per window, a newer
+  directive replacing its prompt, no second note — so a cascade of held attempts cannot
+  become a queue of duplicate runs at reopen. A hold is not a decision packet and
   costs no operator turn; a scheduled occurrence that lands on a hold retires
-  `held-quota`.
+  `held-quota`. Resolving the quota or auth packet's option that states the window has
+  reset (or that the account changed) retires the instance's exhaustion record for that
+  backend: the option promises the agent continues now, and only a completed run would
+  otherwise clear it (ruling 164).
 
 ## 10. Delivery
 

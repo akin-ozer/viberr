@@ -1561,22 +1561,17 @@ async function dispatchAgentRun(
   // is held. After the eligibility gates above: an ineligible dispatch is
   // refused with its own sentence, never parked.
   if (principal.ok) {
-    const hold = backendDispatchHold(db, backend, {
+    await assertDispatchNotHeld(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      backend,
       credentialUserId: principal.principal.userId,
+      profileId: engagement.profileId,
+      agentName,
+      deployed: resolved !== null,
+      directive: input.directive ?? null,
+      actor: auditActor,
     });
-    if (hold) {
-      throw await holdDispatch(db, ctx, {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        backend,
-        hold,
-        profileId: engagement.profileId,
-        agentName,
-        deployed: resolved !== null,
-        directive: input.directive ?? null,
-        actor: auditActor,
-      });
-    }
   }
   // The clone gate, and every other "will a provider process actually consume
   // this?" gate below. A refused run still becomes a RUN ROW — `startRun`
@@ -2294,6 +2289,49 @@ function dispatchHeldSentence(input: {
 }
 
 /**
+ * Ruling 152(c): the ONE read every door that starts provider work passes
+ * through, against its own target backend and the account the work bills.
+ * `dispatchAgentRun` is one caller; `commentToAgent`'s RESUME branch is the
+ * other, because it goes straight to `resumeRun` and would otherwise pay the
+ * MCP pre-flight, the skill re-mount and a refused provider run on a window
+ * the instance already knows is spent — the common repeat, since a hold is
+ * usually recorded because a run FAILED and the agent therefore has a session.
+ * Returns nothing and throws `DispatchHeldError` when the backend is held.
+ */
+export async function assertDispatchNotHeld(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    backend: RealBackend;
+    /** The user the work bills (ruling 127); the hold is scoped to it. */
+    credentialUserId: string;
+    profileId: string;
+    agentName: string;
+    deployed: boolean;
+    directive: string | null;
+    actor: AuditActor;
+  },
+): Promise<void> {
+  const hold = backendDispatchHold(db, input.backend, {
+    credentialUserId: input.credentialUserId,
+  });
+  if (!hold) return;
+  throw await holdDispatch(db, ctx, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    backend: input.backend,
+    hold,
+    profileId: input.profileId,
+    agentName: input.agentName,
+    deployed: input.deployed,
+    directive: input.directive,
+    actor: input.actor,
+  });
+}
+
+/**
  * Ruling 152(c): record a held dispatch and hand back the error the door
  * throws. Nothing here is a run: no row, no reservation, no process. The
  * schedule is the retry (`run-agent`, the same profile and directive, due one
@@ -2325,8 +2363,42 @@ async function holdDispatch(
   const reopensMs =
     input.hold.until ?? (Number.isFinite(observedMs) ? observedMs : Date.now()) + UNDATED_HOLD_MS;
   const dueAt = new Date(Math.max(reopensMs + 60_000, Date.now() + 60_000)).toISOString();
-  let scheduleId: string | null = null;
-  if (input.deployed) {
+  // Cluster review (pass 35): ONE pending retry per profile per window. Every
+  // door reaches this function and a spent window is exactly what makes a
+  // person (and the operator) dispatch again, so an unconditional
+  // `scheduleTaskAction` turned N refused dispatches into N pending
+  // `run-agent` occurrences all due at the same reopen instant. They are
+  // claimed in one tick: the first starts the run, the rest bounce off the
+  // single-flight 409, defer back to pending with no retry spent, and start
+  // the SAME directive again once that run ends — the paid runs G35-5(c)
+  // exists to stop, moved to the other side of the window. A pending
+  // occurrence for this profile due at or after this hold's reopen instant IS
+  // the retry, so it is reused.
+  const pendingRetry =
+    readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))
+      ?.parsed.frontmatter.schedules.find(
+        (s) =>
+          s.status === "pending" &&
+          s.action === "run-agent" &&
+          s.profileId === input.profileId &&
+          Date.parse(s.dueAt) >= reopensMs,
+      ) ?? null;
+  let scheduleId: string | null = pendingRetry?.id ?? null;
+  /** A repeat hold that changed nothing says nothing: the note, and the
+   *  "Scheduled:" event beside it, are already on the timeline. */
+  let restate = pendingRetry === null;
+  /** The newest directive wins over the pending occurrence's own (the machine
+   *  triggers' rule), and a directive that replaced another is worth the note
+   *  the reader needs to see what the reopen will actually run. */
+  const newerDirective =
+    pendingRetry !== null &&
+    input.directive !== null &&
+    input.directive.trim() !== "" &&
+    input.directive !== pendingRetry.prompt
+      ? input.directive
+      : null;
+  if (pendingRetry !== null && newerDirective !== null) restate = true;
+  if (pendingRetry === null && input.deployed) {
     const { scheduleTaskAction } = await import("./schedule.server");
     const scheduleInput: Parameters<typeof scheduleTaskAction>[1] = {
       projectSlug: input.projectSlug,
@@ -2349,7 +2421,7 @@ async function holdDispatch(
       });
     }
   }
-  const dueLabel = scheduleId ? formatResetLabel(dueAt) : null;
+  const dueLabel = scheduleId ? formatResetLabel(pendingRetry?.dueAt ?? dueAt) : null;
   const quoted = input.hold.providerText.trim();
   const said = quoted ? ` (the provider said: "${quoted}")` : "";
   const retry = scheduleId
@@ -2360,18 +2432,24 @@ async function holdDispatch(
   const text = untilLabel
     ? `**Held:** ${backendLabel} is out of quota until ${untilLabel}${said}. ${retry}`
     : `**Held:** ${backendLabel} is out of quota${said}; ${retry}`;
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
-      type: "note",
-      actor: { kind: "system", systemId: "policy-engine" },
-      title: "Dispatch held",
-      text,
-      toAgent: false,
-      evidence: null,
+  if (restate) {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      if (newerDirective !== null) {
+        const target = parsed.frontmatter.schedules.find((s) => s.id === scheduleId);
+        if (target && target.status === "pending") target.prompt = newerDirective;
+      }
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: "Dispatch held",
+        text,
+        toAgent: false,
+        evidence: null,
+      });
     });
-  });
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+    reproject(db, ctx, input.projectSlug, input.taskKey);
+  }
   recordAudit(db, {
     action: "task.agent.run_held",
     actor: input.actor,
@@ -2384,6 +2462,10 @@ async function holdDispatch(
       until: untilIso,
       scheduleId,
       profileId: input.profileId,
+      // The machine's record of a repeat: the audit row stands for every held
+      // attempt (the timeline note does not), and this says which of them
+      // minted the retry and which reused it.
+      reusedSchedule: pendingRetry !== null,
     },
   });
   return new DispatchHeldError(

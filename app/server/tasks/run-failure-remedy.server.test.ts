@@ -71,6 +71,46 @@ describe("describeRunFailure", () => {
     expect(d.reason + d.remedy).not.toMatch(/retry on the other backend|review the runtime configuration|fix the credential/i);
   });
 
+  it("ruling 152(c): the options that assert the window has reset NAME the backend they assert about", () => {
+    // The assertion is what retires the instance's exhaustion record
+    // (`resolvePacket`), and the record is per backend — so the option carries
+    // the backend that refused. Canary: drop `backend: failed` from the quota
+    // and auth arms and the resolution has nothing to clear, so the hold that
+    // ruling 152(c) put on the next dispatch outlives the person's statement.
+    const store = setupTestStore(ctx);
+    const operatorQuota = describe_(store, {
+      failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: RESET }),
+    });
+    expect(operatorQuota.options.find((o) => o.recommended)).toMatchObject({
+      kind: "block_on_policy",
+      backend: "claude",
+    });
+    const operatorAuth = describe_(store, {
+      failure: failure("auth", { apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error" }),
+    });
+    expect(operatorAuth.options.find((o) => o.recommended)).toMatchObject({
+      kind: "block_on_policy",
+      backend: "claude",
+    });
+    const specialistQuota = describe_(store, {
+      role: "specialist",
+      agentHandle: "jc-developer",
+      failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: RESET }),
+    });
+    expect(specialistQuota.options[0]).toMatchObject({
+      kind: "request_edit",
+      backend: "claude",
+    });
+    // An overload asserts nothing about a usage window, so it names nothing.
+    const overloaded = describe_(store, {
+      role: "specialist",
+      agentHandle: "jc-developer",
+      failure: failure("overloaded", { apiErrorStatus: 529 }),
+    });
+    expect(overloaded.options[0]!.kind).toBe("request_edit");
+    expect(overloaded.options[0]!.backend).toBeUndefined();
+  });
+
   it("auth (operator): names the org restriction and the account remedy, and says a retry fails the same way", () => {
     const store = setupTestStore(ctx);
     const d = describe_(store, {
