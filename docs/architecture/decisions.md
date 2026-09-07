@@ -3388,6 +3388,33 @@ by rewriting those paragraphs:*
     in `operatorOpenPacket` and the two new kinds' resolution in
     `app/server/tasks/task-actions.server.ts` `resolvePacket`.)
 
+165. **Connecting a different agent account retires the refusal Viberr observed on the old
+    one (owner, 2026-09-07).** The Agent-accounts card kept "usage window spent · reopens
+    21:30" after the owner signed the same backend into another account: the runs on the new
+    account went through, and the notice contradicted them. A quota or credential refusal is
+    evidence about the account that was billed (ruling 130(d)), and short of the provider's
+    own reset instant a completed run was its only retirement, so a person who did exactly
+    what the remedy asked (connect a different account or an API key on Profile → Agent
+    accounts) carried the old account's verdict, and the dispatch hold that rests on it
+    (ruling 152(c)), onto the new one until something happened to run. Now every write to a
+    person's credential slot on a backend retires that backend's exhaustion and
+    credential-refusal records when they name that person: a confirmed sign-in
+    (`recordBackendLogin`), a pasted key the vendor accepted (`setBackendApiKey`), a
+    disconnect (`disconnectBackend`) and an account removal (`retireUserBackends`), through
+    one `retireBackendRefusalsFor` called from the store's own writers, so the driver's
+    confirmation and an org admin's removal reach it without passing through the Profile
+    action. The hold lifts with the record, so the next run on the new credential is the
+    real probe rather than a wait for an instant the old account named. A record naming
+    another person, or nobody (a row older than ruling 130(d)), is untouched: nothing here
+    knows whose account it was about. Signing back into the SAME spent account retires it
+    too, because Viberr never stores the vendor identity behind a sign-in (ruling 127) and
+    cannot tell; one refused run re-records the window, which is cheaper than a notice that
+    lies about a new account. The card and the Insights row name the second retirement
+    beside the first. Extends rulings 130(d), 146 and 152(c), which already let a person's
+    packet answer "I switched the account" retire the same record.
+    (`app/server/runtimes/backend-quota.server.ts`, `backend-credentials.server.ts`; copy in
+    `agent-accounts-panel.tsx` and `insights-page.tsx`.)
+
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is
 corrected on the page named; the note stays here so a reader who meets the old wording, in

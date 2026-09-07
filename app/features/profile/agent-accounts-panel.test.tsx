@@ -455,10 +455,15 @@ describe("AgentAccountsPanel", () => {
     expect(note.textContent).toContain("last refusal Viberr observed on this account");
     expect(note.textContent).toContain("not proof the account works");
     expect(note.textContent).toContain("any completed Claude run retires it");
+    // Ruling 165: the card names the second retirement, the one the remedy
+    // asks for, so a person who connects another account is not told the old
+    // account's verdict still stands.
+    expect(note.textContent).toContain("as does connecting a different Claude account here");
     const window_ = container.querySelector('[data-refusal="quota"]')!;
     expect(window_.textContent).toContain("Spent as of");
     expect(window_.textContent).toContain("reopens");
     expect(window_.textContent).toContain("Any completed Codex run retires this notice");
+    expect(window_.textContent).toContain("as does connecting a different Codex account here");
   });
 
   it("ruling 130(d): no refusal, no pill and no note", () => {

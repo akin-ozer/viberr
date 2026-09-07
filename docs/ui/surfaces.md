@@ -169,6 +169,15 @@ Intents behind `project.task.tsx` are explained in
   agent profile editor.
   A save with nothing changed and a typed-name destructive confirmation keep
   `disabled` on purpose (147(d)).
+  While the request is in flight (2026-09-07), the New project primary shows
+  it: the `loader` glyph spins where the plus was and the label reads
+  "Creating project…" until the action answers. The dialog's task-key
+  collision note reads the project list as it was when Create was pressed,
+  not the live one: `/` revalidates its projects on the all-projects live
+  scope the moment the new project is projected, still mid-request, and the
+  live list then carried the key being created (the note flipped to "Another
+  project already uses PA" for the last ~300ms of every create). It reads the
+  live list again once a refused submit has settled.
 
 ## 3. Org settings intents
 

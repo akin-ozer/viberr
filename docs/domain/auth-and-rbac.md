@@ -355,6 +355,17 @@ reopens <when>" pill with a "Usage window" row. The copy says what the pill is: 
 refusal Viberr observed on this account, which any completed run on that backend
 retires, so the absence of a pill is not proof the account works. Another person's
 refusal, or a record written before principals were stored, never appears on this card.
+Ruling 165 (2026-09-07): the record is evidence about the account that was billed, so a
+change to the viewer's credential on that backend retires it too: a confirmed sign-in, a
+pasted key the vendor accepted, a disconnect, or the removal of their account
+(`retireBackendRefusalsFor`, called from the credential store's own writers, so the
+driver's confirmation and an org admin's account removal reach it without passing through
+the Profile action). The card says so ("as does connecting a different Claude account
+here"), and the dispatch hold that rests on the same record lifts with it. Live, the card
+kept "usage window spent · reopens 21:30" over a freshly connected account whose runs were
+going through. A record naming another person, or nobody, is untouched; signing back into
+the SAME spent account retires it as well, because Viberr never stores the vendor identity
+behind a sign-in and cannot tell, and one refused run re-records the window.
 
 Viberr never implements the vendors' OAuth, never reads, copies or stores a Claude.ai or
 ChatGPT **session** token, and offers no setup-token field: Anthropic's Claude Code

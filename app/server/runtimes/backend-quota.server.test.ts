@@ -2,9 +2,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   backendDispatchHold,
+  latestBackendRateLimits,
   parseQuotaResetAt,
+  recordBackendCredentialRefusal,
   recordBackendQuotaExhaustion,
+  retireBackendRefusalsFor,
   UNDATED_HOLD_MS,
+  type BackendCredentialRefusal,
   type BackendQuotaExhaustion,
 } from "./backend-quota.server";
 
@@ -143,5 +147,85 @@ describe("backendDispatchHold (ruling 152(c))", () => {
   it("no record, no hold", () => {
     const db = ctx.makeDb();
     expect(backendDispatchHold(db, "codex", { nowMs, credentialUserId: OWNER })).toBeNull();
+  });
+});
+
+/**
+ * Ruling 165: a change to the named person's credential retires the records
+ * observed on the credential it replaces, and the dispatch hold with them.
+ * Live (2026-09-07) a Claude card kept "usage window spent · reopens 21:30"
+ * after its owner signed the backend into another account.
+ *
+ * Canaries: drop the `credentialUserId` comparison in `retireBackendRefusalsFor`
+ * and the ruling-146 case fails; drop either `deleteSetting` and the first case
+ * fails on that record.
+ */
+describe("retireBackendRefusalsFor (ruling 165)", () => {
+  const OBSERVED = "2026-09-07T15:33:00.000Z";
+  const nowMs = Date.parse(OBSERVED) + 5 * 60_000;
+  const nowIso = new Date(nowMs).toISOString();
+  const OWNER = "u_arda";
+  function exhaustion(over: Partial<BackendQuotaExhaustion> = {}): BackendQuotaExhaustion {
+    return {
+      credentialUserId: OWNER,
+      credentialLabel: "Arda",
+      resetsAt: Math.round(nowMs / 1000) + 3600,
+      resetsAtPrecision: "exact",
+      providerText: "Claude AI usage limit reached|1780000000",
+      runId: "run_spent",
+      observedAt: OBSERVED,
+      ...over,
+    };
+  }
+  function refusal(over: Partial<BackendCredentialRefusal> = {}): BackendCredentialRefusal {
+    return {
+      credentialUserId: OWNER,
+      credentialLabel: "Arda",
+      providerText: "The account's organization does not allow Claude Code (oauth_org_not_allowed).",
+      runId: "run_refused",
+      observedAt: OBSERVED,
+      ...over,
+    };
+  }
+  const rowsOf = (db: Parameters<typeof latestBackendRateLimits>[0]) =>
+    new Map(latestBackendRateLimits(db, nowIso).map((row) => [row.backend, row]));
+
+  it("retires the exhaustion and the credential refusal naming the person, on that backend only, and the hold with them", () => {
+    const db = ctx.makeDb();
+    recordBackendQuotaExhaustion(db, "claude", exhaustion());
+    recordBackendCredentialRefusal(db, "claude", refusal());
+    recordBackendQuotaExhaustion(db, "codex", exhaustion());
+    expect(backendDispatchHold(db, "claude", { nowMs, credentialUserId: OWNER })).not.toBeNull();
+
+    retireBackendRefusalsFor(db, "claude", OWNER);
+
+    const rows = rowsOf(db);
+    expect(rows.get("claude")).toMatchObject({ exhausted: null, credentialRefused: null });
+    // The other backend's record is about a different account of the same
+    // person, and nothing about it changed.
+    expect(rows.get("codex")!.exhausted).not.toBeNull();
+    // The next run on the new credential is the real probe: no hold stands.
+    expect(backendDispatchHold(db, "claude", { nowMs, credentialUserId: OWNER })).toBeNull();
+  });
+
+  it("ruling 146: a record naming another person, or nobody, is not this person's to retire", () => {
+    const db = ctx.makeDb();
+    recordBackendQuotaExhaustion(db, "claude", exhaustion({ credentialUserId: "u_murat", credentialLabel: "Murat" }));
+    recordBackendCredentialRefusal(db, "claude", refusal({ credentialUserId: null, credentialLabel: null }));
+
+    retireBackendRefusalsFor(db, "claude", OWNER);
+
+    const claude = rowsOf(db).get("claude")!;
+    expect(claude.exhausted?.credentialUserId).toBe("u_murat");
+    expect(claude.credentialRefused).not.toBeNull();
+    expect(claude.credentialRefused?.credentialUserId).toBeNull();
+    // Still nobody's record, so it still holds everyone (ruling 146).
+    expect(backendDispatchHold(db, "claude", { nowMs, credentialUserId: OWNER })).toBeNull();
+  });
+
+  it("nothing recorded, nothing to retire, no error", () => {
+    const db = ctx.makeDb();
+    expect(() => retireBackendRefusalsFor(db, "codex", OWNER)).not.toThrow();
+    expect(rowsOf(db).get("codex")).toMatchObject({ exhausted: null, credentialRefused: null });
   });
 });

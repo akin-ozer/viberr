@@ -161,14 +161,17 @@ names (ruling 146; a record naming nobody holds every dispatch on the backend). 
 §4.1. Ruling 130(d): every record (reading, exhaustion, credential refusal)
 names the account it billed (`credentialUserId`, `credentialLabel`, the run's
 principal under ruling 127); one latest record per backend, and a completed run by
-ANY person retires an exhaustion or refusal. The principal reaches Insights (org
+ANY person retires an exhaustion or refusal, as does a change to the named person's
+credential on that backend (a confirmed sign-in, a pasted key, a disconnect, an account
+removal; ruling 165, `retireBackendRefusalsFor`). The principal reaches Insights (org
 admin), `instance_health` (signed in) and the person's own Profile card; it is stripped
 from the unauthenticated `/resources/health` body. Insights renders both; "no reading
 yet" is neutral; a refused row says whose account, and a reading row names the hour
 of its reset. The Profile card (`getProfileBackends` → `lastRefusal`) shows the
 viewer's OWN record only: a `risk` "refused by the provider · <when>" pill with the
 provider's sentence, or a neutral "usage window spent · reopens <when>" pill, each
-stated as the last refusal Viberr observed, retired by any completed run.
+stated as the last refusal Viberr observed, retired by any completed run or by
+connecting a different account there (ruling 165).
 
 ### 2.4 Claude adapter
 
@@ -537,11 +540,13 @@ once the provider's total landed.
   operator's plan), the controller's `run_agent_on_task` surfaces it as the tool's
   refusal text, and a scheduled occurrence retires `held-quota` (§4.5). A hold is not a
   decision packet and costs no operator turn. The record behind it is retired by a run
-  that COMPLETES on the backend and by one other thing: a person resolving the quota or
+  that COMPLETES on the backend and by two other things: a person resolving the quota or
   auth packet's option that states the window has reset or the account changed
   (`run-failure-remedy.server.ts` names the backend on that option; `resolvePacket`
   clears it), because the option promises the agent continues now and the record would
-  otherwise park it until the recorded instant (ruling 164).
+  otherwise park it until the recorded instant (ruling 164); and the named person
+  actually changing their credential on that backend (ruling 165), because the account
+  the record was about is no longer the one the dispatch would bill.
   The operator's PROMPT door (`operatorPromptAgent`) writes no "did NOT start a run"
   note for a hold either: its own note asks for the directive to be re-sent, which
   the "Dispatch held" note two lines above says is not needed and which would mint a

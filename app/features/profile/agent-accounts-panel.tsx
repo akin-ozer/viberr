@@ -650,7 +650,8 @@ function AgentAccountCard({
                     <LocalDayDotTime iso={lastRefusal.observedAt} />:{" "}
                     {lastRefusal.providerText} This is the last refusal Viberr
                     observed on this account; any completed {label} run retires
-                    it, so its absence is not proof the account works.
+                    it, as does connecting a different {label} account here, so
+                    its absence is not proof the account works.
                   </>
                 ) : (
                   <>
@@ -660,7 +661,8 @@ function AgentAccountCard({
                         ; reopens <LocalDayDotTime iso={lastRefusal.resetsAt} />
                       </>
                     ) : null}
-                    . Any completed {label} run retires this notice; until then,
+                    . Any completed {label} run retires this notice, as does
+                    connecting a different {label} account here; until then,
                     runs billed to this account are refused.
                   </>
                 )}

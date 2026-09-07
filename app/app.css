@@ -5837,3 +5837,11 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
    acceptance criteria read as written. Same text the editor opens with. */
 .goal-draft { margin: .75rem 0 0; }
 .goal-draft-text { margin: .375rem 0 0; padding: .5rem .75rem; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: .8rem; line-height: 1.5; color: var(--fg); background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-small); }
+
+/* ---------- appended: the busy step wins over the disabled step ---------- */
+/* The sheet names two opacity steps for unavailable controls, .45 disabled
+   and .7 busy, but `.btn:disabled` is declared after `.btn[aria-busy="true"]`
+   at equal specificity, so a primary that is BOTH (every create/save button
+   sets `disabled={busy}`) painted at .45 with a not-allowed cursor: the New
+   project spinner read as a washed-out refusal. In flight is not refused. */
+.btn[aria-busy="true"]:disabled { opacity: .7; cursor: default; }
