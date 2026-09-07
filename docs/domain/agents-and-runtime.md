@@ -522,6 +522,10 @@ once the provider's total landed.
   `runNotStarted`, the operator's `run_agent` and the controller's `run_agent_on_task`
   surface it as the tool's refusal text, and a scheduled occurrence retires
   `held-quota` (§4.5). A hold is not a decision packet and costs no operator turn.
+  The operator's PROMPT door (`operatorPromptAgent`) writes no "did NOT start a run"
+  note for a hold either: its own note asks for the directive to be re-sent, which
+  the "Dispatch held" note two lines above says is not needed and which would mint a
+  second schedule over the one the hold already made carrying that same directive.
 - Then: mount granted skills (Claude), resolve the browser MCP, build the persona and
   the analyze prompt (task text, comments and repo content are **data**, never
   authority; ruling 159: every path the prompt hands the agent is ABSOLUTE, so the
@@ -534,7 +538,10 @@ once the provider's total landed.
   `readiness: ready`, a "Hold lifted" note naming the dispatched agent,
   `task.hold.lifted {cause: "dispatch", profileId}`; ruling 157), mark `waiting:
   agent`, register the completion callback. A resume re-derives all of it
-  (`resolveResumeConfinement`).
+  (`resolveResumeConfinement`), the hold lift included: an @mention that resumes an
+  existing session never reaches `dispatchAgentRun`, so `commentToAgent` calls
+  `liftHoldForRun` itself on that branch. That is the common case for a hold, since a
+  hold is usually set because a run FAILED and the agent therefore has a session.
 - Git identity in the run: `<profileId>@viberr.local`; `GIT_CEILING_DIRECTORIES` is the
   task dir.
 

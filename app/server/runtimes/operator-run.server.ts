@@ -819,6 +819,15 @@ async function noteQueuedTriggerFireFailed(
  * Triage → Ready transition", and stopped — but nothing re-invokes the
  * operator for its own `set_goal`, so the task sat at an auto stage labeled
  * "waiting on a human" with nothing for the human to decide.
+ *
+ * Ruling 152(a) (pass 35, G35-5): `ownMoveLandedHere` widens the LAST test,
+ * never the guards above it. Since the drive's own transitions queue no
+ * re-trigger, a stage the drive itself moved the task onto is a stage nothing
+ * else will follow up on — and on the shipped board the operator's own move
+ * lands on In Progress, whose outbound boundary is `approval`, so the
+ * `auto` test alone left every such move with no follow-up at all: no
+ * re-trigger, no resume, and `clearWaitingToHuman` flipped the board to
+ * "waiting on you" with no agent engaged and no packet.
  */
 export function operatorLeftTaskStranded(
   task: {
@@ -830,6 +839,8 @@ export function operatorLeftTaskStranded(
     blockedBy: readonly unknown[];
   },
   workflow: readonly { from: string; to: string; boundary: string }[],
+  /** The finished drive's OWN last transition landed the task on this stage. */
+  ownMoveLandedHere = false,
 ): boolean {
   if (task.archived) return false;
   if (task.packet) return false; // a decision IS pending — the human's move
@@ -837,6 +848,7 @@ export function operatorLeftTaskStranded(
   // Ruling 131(d): a task waiting on other work is holding on purpose; the
   // paid nudge would only rediscover the wait (JC-9: five runs, no dispatch).
   if (task.blockedBy.length > 0) return false;
+  if (ownMoveLandedHere) return true;
   return workflow.some((w) => w.from === task.stage && w.boundary === "auto");
 }
 
@@ -924,6 +936,9 @@ export async function maybeResumeStrandedOperator(
   // judge: a chain the model abandons at an `auto` stage gets the one nudge.
   const stageLeftAt = ref.ownRun?.movedToStageId ?? ref.stageAtStart;
   if (file.parsed.frontmatter.stage !== stageLeftAt) return false;
+  const autoStage = project.parsed.frontmatter.workflow.some(
+    (w) => w.from === file.parsed.frontmatter.stage && w.boundary === "auto",
+  );
   const stranded = operatorLeftTaskStranded(
     {
       archived: file.parsed.frontmatter.archived,
@@ -933,6 +948,10 @@ export async function maybeResumeStrandedOperator(
       blockedBy: file.parsed.frontmatter.blockedBy,
     },
     project.parsed.frontmatter.workflow,
+    // The drive MOVED the task here and then stopped: nothing else follows up
+    // on its own move any more, whatever the new stage's outbound boundary is.
+    ref.ownRun?.movedToStageId !== undefined &&
+      ref.ownRun.movedToStageId === file.parsed.frontmatter.stage,
   );
   if (!stranded) return false;
 
@@ -986,7 +1005,9 @@ export async function maybeResumeStrandedOperator(
           actor: { kind: "system", systemId: "policy-engine" },
           title: null,
           text:
-            "**Note:** this stage auto-advances, but the operator held it twice in a row without advancing, dispatching, or opening a packet — treating that as a deliberate hold. " +
+            (autoStage
+              ? "**Note:** this stage auto-advances, but the operator held it twice in a row without advancing, dispatching, or opening a packet — treating that as a deliberate hold. "
+              : "**Note:** the operator moved the task to this stage and then held it twice in a row without dispatching or opening a packet — treating that as a deliberate hold. ") +
             "Coordination is paused here: run the operator manually when the hold should end, adjust the goal, or loosen the boundary in Policy → Workflow rules.",
           toAgent: false,
           evidence: null,
@@ -1039,7 +1060,7 @@ export async function maybeResumeStrandedOperator(
         actor: { kind: "system", systemId: "policy-engine" },
         title: null,
         text:
-          `**Note:** the operator ended ${OPERATOR_TRANSITION_CHAIN_CAP} consecutive runs without advancing this auto stage, opening a packet, or engaging an agent. ` +
+          `**Note:** the operator ended ${OPERATOR_TRANSITION_CHAIN_CAP} consecutive runs without advancing this ${autoStage ? "auto stage" : "task"}, opening a packet, or engaging an agent. ` +
           "Run the operator manually or adjust the goal.",
         toAgent: false,
         evidence: null,

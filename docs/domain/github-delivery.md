@@ -316,7 +316,9 @@ and the note itself, used to assert the reused-key origin alone.)*
   card's "conflicts" pill all read it), and the reconciler withdraws a pending
   `accept_completion` card when `mergeable` flips to conflicting.
 - **The base refresh happens once, at acceptance** (ruling 162 / G35-5(d)): the
-  ceremony runs `updateWorkspaceBranchFromBase` before the gate re-check and the merge,
+  ceremony runs `updateWorkspaceBranchFromBase` between two runs of the gate re-check
+  (the refresh publishes, so nothing is pushed under a decision the caller can no
+  longer confirm) and before the merge,
   records the refresh (`baseRefreshes`, the shared `recordBranchRefresh`, audit
   `github.branch_update.acceptance`), refuses on a conflict with the gate's sentence
   after recording `mergeable: conflicting` and the conflicting paths, and proceeds to

@@ -3333,6 +3333,45 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     expect(moves[0]!.details!.manual).toBe(true);
   });
 
+  it("move_stage: resolving a BLOCKED packet lifts the block it was holding down", async () => {
+    // Canary: restore `mutate = () => {}` in the move_stage arm. The packet
+    // clears, `transitionStage` deliberately lets a stored `blocked` survive a
+    // move, and the board is left showing a blocked task with no decision on
+    // it and nothing a person can do — the shape this kind was created for
+    // (KNC-16: the reviewer cannot run where the task stands, which arrives as
+    // a `blocked` packet).
+    const store = prepared();
+    const blockedMove: TaskPacket = { ...movePacket("review"), type: "blocked" };
+    withTask(
+      store,
+      {
+        stage: "impl",
+        readiness: "blocked",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      },
+      blockedMove,
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.packet).toBeNull();
+    expect(parsed.frontmatter.readiness).toBe("ready");
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")!.displayReadiness).not.toBe("blocked");
+  });
+
   it("move_stage: a stage this project does not have is refused before the packet clears", async () => {
     const store = prepared();
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, movePacket("nowhere"));

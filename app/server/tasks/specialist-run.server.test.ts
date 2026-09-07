@@ -4700,4 +4700,47 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
       actor(store.users.arda),
     );
   });
+
+  it("an operator prompt into a held backend leaves the hold note alone: no 'needs to be re-sent' note, one pending schedule", async () => {
+    // Canary: drop the `isDispatchHeld(error)` re-throw from
+    // `operatorPromptAgent`'s catch (task-actions.server.ts) — the catch then
+    // writes "the prompt above did NOT start a run: Held: … The directive needs
+    // to be re-sent once the blocker is resolved.", which contradicts the hold
+    // note's "nothing was dispatched and no decision is needed" and asks for a
+    // re-send that mints a SECOND schedule on top of the pending one.
+    deployDevSpecialist(["codex"]);
+    await exhaustCodex(Math.round(Date.now() / 1000) + 3600);
+    const { operatorPromptAgent } = await import("./task-actions.server");
+    let thrown: DispatchHeldError | null = null;
+    try {
+      await operatorPromptAgent(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          profileId: "dev",
+          handle: "dev",
+          directive: "continue the migration",
+        },
+        { dataRoot: store.dataRoot },
+      );
+    } catch (error) {
+      if (!isDispatchHeld(error)) throw error;
+      thrown = error;
+    }
+    if (!thrown) throw new Error("expected the prompt's dispatch to be held");
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.timeline.find((e) => e.title === "Dispatch held")).toBeDefined();
+    const notes = file.parsed.timeline.filter((e) => e.type === "note");
+    expect(notes.some((e) => e.text.includes("did NOT start a run"))).toBe(false);
+    expect(notes.some((e) => e.text.includes("needs to be re-sent"))).toBe(false);
+    // The directive rides the hold's own schedule, and only that one.
+    const pending = file.parsed.frontmatter.schedules.filter((x) => x.status === "pending");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      action: "run-agent",
+      profileId: "dev",
+      prompt: "@dev continue the migration",
+    });
+  });
 });

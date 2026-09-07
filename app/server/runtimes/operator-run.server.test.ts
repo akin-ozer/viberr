@@ -1366,6 +1366,12 @@ describe("stranded auto-stage resume", () => {
     // Ruling 131(d): a task waiting on other work is a RECORDED hold, never a
     // stranding. Canary: delete the `blockedBy` early return.
     expect(operatorLeftTaskStranded({ ...base, blockedBy: ["JC-3"] }, wf)).toBe(false);
+    // Ruling 152(a) review: a stage THIS drive's own move landed on is stranded
+    // whatever its outbound boundary, since nothing else follows that move up.
+    // The guards above still rank first.
+    expect(operatorLeftTaskStranded({ ...base, stage: "impl" }, wf, true)).toBe(true);
+    expect(operatorLeftTaskStranded({ ...base, stage: "impl", packet: { title: "?" } }, wf, true)).toBe(false);
+    expect(operatorLeftTaskStranded({ ...base, stage: "impl", blockedBy: ["JC-3"] }, wf, true)).toBe(false);
   });
 
   it("goal-drafting is labeled SETUP in the turn instruction — the live stranding's exact misreading", () => {
@@ -1588,6 +1594,66 @@ describe("stranded auto-stage resume", () => {
       // Give the settle a beat: no fourth drive appears.
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(operatorRuns()).toHaveLength(3);
+    });
+
+    /**
+     * Ruling 152(a) review (pass 35, G35-5): the drive's OWN move queues no
+     * re-trigger any more, so the settle-time backstop is the whole follow-up
+     * for it — and on the shipped board the operator's own move lands on In
+     * Progress, whose outbound boundary is `approval`. Judged by the `auto`
+     * test alone the task was not "stranded", so nothing followed up at all
+     * and `clearWaitingToHuman` flipped the board to "waiting on you" with no
+     * agent engaged, no packet and nothing to decide.
+     */
+    it("a drive that MOVES the task onto a non-auto stage and then does nothing is resumed there", async () => {
+      // Canary: drop the `ownMoveLandedHere` argument at the
+      // `operatorLeftTaskStranded` call site — exactly one run.
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          title: "list files in the project",
+          stage: "ready",
+          readiness: "ready",
+          waiting: "human",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "List the files.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "create",
+        dataRoot: store2.dataRoot,
+      });
+      expect(adapter2.pending).not.toBeNull();
+
+      // The drive crosses Ready to In Progress (auto) and stops: no dispatch,
+      // no packet, no recommendation. In Progress's outbound boundary is
+      // `approval`.
+      adapter2.finish(
+        store2,
+        JSON.stringify({
+          reasoning: "",
+          actions: [transitionAction({ toStageId: "impl", reason: "Ready for work." })],
+        }),
+        "finished",
+      );
+
+      await eventually(() => {
+        const fm = readTaskFile({
+          projectSlug: store2.slug,
+          taskKey: "VIB-1",
+          dataRoot: store2.dataRoot,
+        })!.parsed.frontmatter;
+        expect(fm.stage).toBe("impl");
+        // The settle resumed the chain at the stage the drive's own move
+        // landed on, instead of leaving the task with no follow-up.
+        expect(operatorRuns()).toHaveLength(2);
+        expect(adapter2.pending).not.toBeNull();
+      });
     });
 
     /**

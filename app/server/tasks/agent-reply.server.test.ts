@@ -1038,6 +1038,68 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
   });
 });
 
+/**
+ * Ruling 157 (pass 35, F35-8): the hold lift belongs to every door that starts
+ * work. `commentToAgent` has TWO run-start branches, and only the fresh one
+ * goes through `dispatchAgentRun`, where the sibling lift sits — the RESUME
+ * branch calls `resumeRun` directly. KNC-25 is that branch: the hold exists
+ * because an agent's run failed, so the agent HAS a prior session, so a
+ * person's "@dev try again" resumes it.
+ */
+describe("ruling 157: an @mention that RESUMES a session lifts a packet-less hold", () => {
+  it("readiness returns to ready with a 'Hold lifted' note and task.hold.lifted", async () => {
+    // Canary: remove the `liftHoldForRun` call from the `triggered ===
+    // "resumed"` branch in commentToAgent.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        // The hold shape: stored `blocked`, no packet, no dependency list.
+        readiness: "blocked",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    upsertRun(store.db, {
+      id: "run_dev_failed",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "dev-thread",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: "run_dev_failed-session",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev try again" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("resumed");
+
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.frontmatter.readiness).toBe("ready");
+    const note = file.parsed.timeline.find((e) => e.title === "Hold lifted")!;
+    expect(note).toBeDefined();
+    expect(note.text).toBe(
+      "**Hold lifted:** dev was dispatched, so VIB-1 is no longer held. The run's outcome decides what happens next.",
+    );
+    const rows = listAuditEvents(store.db, { action: "task.hold.lifted" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({ cause: "dispatch", profileId: "dev", previous: "blocked" });
+  });
+});
+
 describe("commentToAgent", () => {
   it("records a plain comment with no agent (superset of appendComment)", async () => {
     const result = await commentToAgent(

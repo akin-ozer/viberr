@@ -2023,6 +2023,19 @@ export async function commentToAgent(
   //    reads the reply and proposes the next step (fixes the old bug where an
   //    @mention dropped the verdict/reconcile and never re-engaged the operator).
   if (triggered === "resumed") {
+    // Ruling 157 (pass 35, F35-8): the lift belongs to every door that starts
+    // work, and this branch is a door — it resumes the provider session
+    // directly, so it never passes through `dispatchAgentRun`, where the
+    // sibling lift sits. The KNC-25 shape is exactly this one: the hold exists
+    // because an agent's run FAILED, so that agent HAS a prior session, so a
+    // person's "@Developer try again" takes this branch and used to leave
+    // `readiness: blocked` standing beside `waiting: agent`.
+    await liftHoldForRun(db, ctx, input.projectSlug, input.taskKey, {
+      kind: "dispatch",
+      profileId: target.profileId,
+      name: target.name,
+      by: ctx.operatorAuthorized ? null : { userId: actor.userId, label: actor.label },
+    });
     await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
     const completion: Parameters<typeof registerAgentCompletion>[2] = {
       projectSlug: input.projectSlug,
@@ -4597,7 +4610,7 @@ export async function operatorPromptAgent(
   });
 
   // 2. Trigger the agent's run with the operator's directive as its turn focus.
-  const { startAgentRun } = await import("./specialist-run.server");
+  const { isDispatchHeld, startAgentRun } = await import("./specialist-run.server");
   let runId: string;
   try {
     const dispatch: Parameters<typeof startAgentRun>[1] = {
@@ -4615,6 +4628,15 @@ export async function operatorPromptAgent(
     // standing as a delivered hand-off. Live-caught: an orphaned
     // "@blog-writer Rework…" from a refused start read as "already prompted"
     // to every later operator turn, so nothing ever re-engaged the deliverer.
+    // Ruling 152(c) (pass 35, G35-4): a HOLD is not a refused start. The
+    // dispatcher already wrote its own "Dispatch held" note ("nothing was
+    // dispatched and no decision is needed") and already scheduled a
+    // `run-agent` occurrence carrying THIS directive, so a second note here
+    // told the timeline the opposite of the first one and asked for a re-send
+    // that would mint a duplicate schedule on top of the pending one. The hold
+    // is the record; the error still travels so the caller can read it as the
+    // noop it is.
+    if (isDispatchHeld(error)) throw error;
     const message = error instanceof Error ? error.message : String(error);
     await updateTaskFile(
       taskRef(opCtx, input.projectSlug, input.taskKey),
@@ -6913,6 +6935,16 @@ async function attemptAcceptanceMerge(
     // gate (`beforeMerge`), merge. A conflict found here refuses the acceptance
     // with the gate's own sentence and records `mergeable: conflicting` so
     // every surface says the same thing before the next click.
+    // P14-GV-05, applied to the refresh: the refresh is itself an external,
+    // irreversible publish (a workspace merge PUSHED to origin), so the
+    // caller's last check runs BEFORE it as well as after. Without the first
+    // call a packet replaced during the await, or a verdict that flipped to
+    // request_changes, moved the PR head, re-triggered CI and wrote
+    // "Accepting the completion brought ..." on the timeline, and only then
+    // refused the acceptance. The callback is a pure throwing re-read, so
+    // running it twice is safe; the second call is still needed because the
+    // refresh changes the facts it reads.
+    beforeMerge?.();
     const refresh = await refreshBranchForAcceptance(db, ctx, projectSlug, taskKey, actor);
     if (refresh) return refresh;
     beforeMerge?.();
@@ -7923,7 +7955,16 @@ export async function resolvePacket(
         toAgent: false,
         evidence: null,
       };
-      mutate = () => {};
+      // The block the packet held down goes with it, exactly as every sibling
+      // arm does (`block_on_policy`, the send-back default, the collision
+      // ceremony's `liftBlock`, the operator's withdrawal). `transitionStage`
+      // deliberately lets a stored `blocked` survive a move, so leaving it
+      // here left the board showing a blocked task with no packet on it and
+      // nothing a person could do about it — which is the shape KNC-16 opened
+      // this kind for.
+      mutate = (fm) => {
+        if (fm.readiness === "blocked") fm.readiness = "ready";
+      };
       clearPacket = true;
       break;
     }
@@ -9075,6 +9116,22 @@ export function forceAcceptDisclosure(
   };
 }
 
+/**
+ * A gate's own words, without its remedy. The gates are multi-sentence
+ * REFUSALS ("… not Review. A completion can only be accepted from the boundary
+ * the workflow puts before Done. Move the task through the workflow first."),
+ * written for someone deciding whether to accept. Spliced whole into the
+ * bypass list they produced `.;` seams and three imperatives telling the reader
+ * to do things the acceptance had just made impossible. The audit panel already
+ * ruled on this shape (`activity-feed.server.ts`, `task.acceptance.forced`:
+ * "the reader is looking at a record of an override that already happened"), so
+ * the clause takes the same first sentence; `details.bypassedGates` keeps every
+ * sentence for a reader that wants the remedy text.
+ */
+function gateClaim(gate: string): string {
+  return gate.split(/(?<=\.)\s/)[0]!.replace(/\.$/, "");
+}
+
 /** The clause the forced `completion` event appends (U35-3). Empty when the
  *  force bypassed nothing. */
 function forceBypassClause(project: ProjectContext, disclosure: ForceAcceptDisclosure): string {
@@ -9085,7 +9142,7 @@ function forceBypassClause(project: ProjectContext, disclosure: ForceAcceptDiscl
     );
     parts.push("the review gate");
   }
-  parts.push(...disclosure.gates);
+  parts.push(...disclosure.gates.map(gateClaim));
   if (disclosure.withdrawnPacket) {
     parts.push(`the open decision "${disclosure.withdrawnPacket}" withdrawn unanswered`);
   }

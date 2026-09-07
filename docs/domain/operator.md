@@ -143,13 +143,17 @@ dead callback.
 `OPERATOR_TRANSITION_CHAIN_CAP = 8` (operator-authored transitions; a human move
 resets the chain), and a boot recovery re-invoke cap of 3 per task per 30 minutes.
 Hitting a cap opens a stuck-loop packet instead of looping. A stranded drive (no
-packet, no recommendation, an outbound `auto` boundary) gets one resume nudge; a
-drive that strands again records a deliberate hold (`heldAtStage`) rather than
-nudging forever. Since ruling 152(a) the backstop judges the stage the drive's own
-last transition landed on (`ctx.operatorRun.movedToStageId`, shared with the lease):
-a nudged drive that moved the task and stopped at the next `auto` stage made
-progress and gets a fresh nudge, bounded by the chain cap; only a nudge that ends
-where it started is the deliberate hold.
+packet, no recommendation, and either an outbound `auto` boundary or a stage this
+drive's own move landed on) gets one resume nudge; a drive that strands again
+records a deliberate hold (`heldAtStage`) rather than nudging forever. Since ruling
+152(a) the backstop judges the stage the drive's own last transition landed on
+(`ctx.operatorRun.movedToStageId`, shared with the lease): a nudged drive that moved
+the task and stopped made progress and gets a fresh nudge, bounded by the chain cap;
+only a nudge that ends where it started is the deliberate hold. The drive's own move
+counts whatever the new stage's outbound boundary is, because that move queues no
+re-trigger: on the standard board the operator's own move lands on In Progress,
+whose outbound boundary is `approval`, and judging it by the `auto` test alone left
+it with no follow-up at all.
 
 ## 4. The turn
 

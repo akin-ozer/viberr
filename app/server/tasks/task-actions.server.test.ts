@@ -4581,6 +4581,19 @@ describe("pass 35: operator and task actions", () => {
       const completion = file(store).timeline.find((e) => e.type === "completion")!;
       expect(completion.text).toMatch(/Bypassed: Review skipped; the review gate; /);
       expect(completion.text).toContain("Pick a recovery path");
+      // The clause carries each gate's CLAIM, not the refusal's remedy half.
+      // Canary: splice `disclosure.gates` whole instead of mapping `gateClaim`.
+      expect(completion.text).toContain("VIB-1 is at In Progress, not Review;");
+      expect(completion.text).not.toContain(".;");
+      for (const remedy of [
+        "Move the task through the workflow first",
+        "Rework and re-review before accepting",
+        "Resolve the operator's packet before accepting it",
+      ]) {
+        expect(completion.text).not.toContain(remedy);
+      }
+      // The full sentences stay where a reader can still ask for them.
+      expect(gates.some((g) => g.includes("Move the task through the workflow first"))).toBe(true);
     });
   });
 
@@ -5118,6 +5131,82 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(parsed.frontmatter.pr?.mergeable).toBe("conflicting");
     const line = parsed.timeline.find((e) => e.type === "github" && e.text.includes("CONFLICT"))!;
     expect(line.text).toContain("README.md, Makefile");
+  });
+
+  /**
+   * P14-GV-05 applied to the acceptance-time refresh: the refresh is itself an
+   * irreversible publish (a workspace merge PUSHED to origin), so the caller's
+   * last check has to run BEFORE it too. The window it guards is real: the
+   * outer gate runs, then the no-change probe and the PR head read await
+   * GitHub, and a verdict that flips during those awaits used to move the PR
+   * head, re-trigger CI and write "Accepting the completion brought ..." before
+   * the acceptance was refused.
+   */
+  it("G35-5 (d) review: a gate that stands by merge time refuses BEFORE the branch is refreshed and pushed", async () => {
+    // Canary: call `beforeMerge?.()` only after `refreshBranchForAcceptance`
+    // in attemptAcceptanceMerge — the refresh then runs and publishes first.
+    const REPO_PATH = "/repos/akin-ozer/viberr";
+    const store = prepared();
+    seedChangedAt(store, "review", {
+      workRevision: workRev("rev_1"),
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+      ],
+      validation: "healthy",
+      readiness: "ready",
+      waiting: "human",
+    });
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_beforemerge000000001" }, actor(store.users.arda));
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor(store.users.arda));
+    // The reviewer flips to request_changes during the head read — the await
+    // window between the outer gate and the merge ceremony.
+    const fetchImpl: typeof fetch = async (target) => {
+      // `Request` accepts every form the fetch signature allows, so the URL is
+      // read without branching on the argument's representation.
+      const url = new Request(target).url;
+      if (url.includes(`${REPO_PATH}/pulls/7`)) {
+        await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+          parsed.frontmatter.verdicts = [
+            { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "request_changes", reason: "needs tests", at: "2026-08-19T10:30:00.000Z" },
+          ];
+        });
+      }
+      return new Response(
+        JSON.stringify({ number: 7, state: "open", merged: false, head: { sha: "a".repeat(40) } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
+    const refreshMock = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+      status: "updated",
+      branch: "vib-1-work",
+      base: "main",
+      commits: 2,
+      mergeSha: "m".repeat(40),
+      baseSha: "b".repeat(40),
+      remoteBefore: { kind: "current", headSha: "a".repeat(40) },
+      remote: { kind: "current", headSha: "m".repeat(40) },
+    }));
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => ({
+      status: "merged",
+      prNumber: 7,
+      sha: "m".repeat(40),
+    }));
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, fetchImpl, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
+      ),
+    ).rejects.toThrow(/requests changes on the current revision/);
+    // Nothing was published under the decision the gate had already withdrawn.
+    expect(refreshMock).not.toHaveBeenCalled();
+    expect(mergeMock).not.toHaveBeenCalled();
+    const parsed = taskFile(store);
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.frontmatter.baseRefreshes).toHaveLength(0);
+    expect(parsed.timeline.some((e) => e.text.startsWith("Accepting the completion brought"))).toBe(false);
+    expect(listAuditEvents(store.db, { action: "github.branch_update.acceptance" })).toHaveLength(0);
   });
 });
 

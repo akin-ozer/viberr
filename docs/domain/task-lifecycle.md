@@ -479,8 +479,8 @@ Every writer to the terminal stage goes through one contract:
    confirm, the GitHub card wears the "conflicts" pill, and the reconciler withdraws a
    pending `accept_completion` card the moment `mergeable` flips to conflicting, with a
    "Conflict:" note on the timeline.
-3a. **The base refresh, once** (ruling 162 / G35-5(d)): before the gate re-check and the
-   merge, the acceptance ceremony brings the branch up to date with the base through the
+3a. **The base refresh, once** (ruling 162 / G35-5(d)): after the gate re-check and
+   before the merge, the acceptance ceremony brings the branch up to date with the base through the
    same workspace merge `update_branch_from_base` performs, records it in
    `baseRefreshes` (ruling 132), reconciles, writes "Accepting the completion brought
    `<branch>` up to date with `<base>` ..." on the timeline and audits
@@ -488,6 +488,11 @@ Every writer to the terminal stage goes through one contract:
    with the gate's sentence, records `mergeable: conflicting` and names the conflicting
    paths on the timeline; a branch that cannot be refreshed from here (no workspace, no
    credential, a diverged origin) proceeds to the merge, where GitHub decides. The
+   The refresh is itself an irreversible publish (the workspace merge is pushed), so
+   the gate stack runs on BOTH sides of it: the packet path's identity check
+   (P14-GV-05) and the full acceptance gate refuse before the branch is moved, and
+   again afterwards, since the refresh changes the facts they read.
+   The
    operator's own tool refuses at the acceptance-boundary stage and past it ("... the
    branch is brought up to date once, at acceptance time, and merged in the same
    ceremony"), except on a PR GitHub already reports conflicting, where its job is to
@@ -498,9 +503,13 @@ Every writer to the terminal stage goes through one contract:
    `bypassedGates` is the full refusal list in gate order, `skippedStages` the stage
    ids jumped, `validation`, `withdrawnPacket`; `bypassed` keeps the sentences joined
    with " | " for older readers), records `acceptance: forced`, and the forced
-   `completion` event appends the same list ("Bypassed: Review skipped; the review
-   gate; VIB-1 is at In Progress, not Review ...; the latest review requests changes
-   ...; the open decision "..." withdrawn unanswered"). Force never bypasses two facts: a closed unmerged
+   `completion` event appends the same list, each gate reduced to its FIRST sentence
+   ("Bypassed: Review skipped; the review gate; VIB-1 is at In Progress, not Review;
+   This task's latest review requests changes on the current revision; the open
+   decision "..." withdrawn unanswered"). The remedy half of each refusal
+   ("Move the task through the workflow first") stays in `bypassedGates` only: the
+   reader of a completion event is looking at an override that already happened, the
+   same rule the audit panel applies to this row. Force never bypasses two facts: a closed unmerged
    PR (ruling 37) and, since ruling 123, an **archived** task — restore it first. Both are
    `forceIrreducibleRefusal`, and on an archived task the affordance is withdrawn rather
    than disabled. The offer itself appears only once the task has something to accept — a
@@ -511,7 +520,10 @@ Every writer to the terminal stage goes through one contract:
    button's, and a non-admin resolver hears the button's own refusal instead of a
    decision that records nothing. Its sibling `move_stage` performs a manual board move
    on the stage picker's path; the terminal stage is refused there, because a move to it
-   is this contract, not a move.
+   is this contract, not a move. Resolving a `move_stage` option lifts a stored
+   `blocked` the packet was holding down, as every other resolution arm does: a
+   transition deliberately lets a block survive, so leaving it would show a blocked
+   task with no packet on it.
 5. **PR head containment**: the PR head must contain the delivered commit. A head
    ahead of the reviewed revision is accepted with a disclosed divergence (ruling 42; since
    ruling 132 the disclosure is the classified drift sentence: authored commits are named
