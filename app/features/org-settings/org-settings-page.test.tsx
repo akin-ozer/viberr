@@ -1420,11 +1420,50 @@ describe("run concurrency control", () => {
         auditEvents={[]}
       />,
     );
-    const sentence = getByText(/Cap 2: up to 2 agent runs at once\./);
+    const sentence = getByText(/Cap 2: up to 2 agent runs at once,/);
     expect(sentence.textContent).toContain(
-      "Operator and controller turns get one extra slot per four so coordination never waits behind delivery.",
+      "plus 1 slot for operator and controller turns so a decision is not stuck behind the builds it is about.",
     );
     expect(sentence.className).toContain("conc-lane");
+  });
+
+  // The lane is `max(1, ceil(cap / 4))`, so a sentence that states the rule
+  // instead of the number lies at every cap that is not a multiple of four:
+  // "one extra slot per four" reads as none at cap 2 and as one at cap 5.
+  it("ruling 152: the sentence prints the lane the server derived, at any cap", () => {
+    // Canary: render the words "one extra slot per four" again (or `cap` in
+    // place of `countLabel`) and both assertions fail.
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 5, lane: 2, live: 5, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    expect(
+      getByText(/Cap 5: up to 5 agent runs at once, plus 2 slots for/).textContent,
+    ).toContain("operator and controller turns");
+  });
+
+  it("ruling 152: a cap of 1 counts one agent run and one slot", () => {
+    const { getByText } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 1, lane: 1, live: 1, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    expect(getByText(/Cap 1: up to 1 agent run at once, plus 1 slot for/)).toBeTruthy();
   });
 
   it("ruling 152: an unlimited cap has no lane sentence", () => {
@@ -1440,7 +1479,7 @@ describe("run concurrency control", () => {
         auditEvents={[]}
       />,
     );
-    expect(queryByText(/one extra slot per four/)).toBeNull();
+    expect(queryByText(/for operator and controller turns/)).toBeNull();
   });
 
   it("says unlimited when the cap is 0", () => {

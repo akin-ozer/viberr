@@ -2965,10 +2965,15 @@ by rewriting those paragraphs:*
     one) and are promoted ahead of queued delivery runs. The cap itself bounds the
     DELIVERY runs (`primary`, `reviewer`) and the instance holds at most cap plus lane runs
     in all, so a live operator turn never costs a build its slot while an operator turn may
-    borrow a cap slot no build is using; the lane is derived from `maxConcurrentRuns`
-    (`coordinationLane`), not a second setting, and the org-settings control says so under
-    the field ("Cap N: up to N agent runs at once. Operator and controller turns get one
-    extra slot per four so coordination never waits behind delivery."). **(c)** No dispatch
+    borrow a cap slot no build is using. The lane's own slots are unconditional; past them
+    the borrow lasts only while no build wants the slot back, so a freed slot goes to a
+    parked build once coordination already holds its whole lane (without that, coordination's
+    bound contains delivery's and a coordination backlog starves the cap's own runs
+    outright). The lane is derived from `maxConcurrentRuns` (`coordinationLane`), not a
+    second setting, and the org-settings control prints the derived number rather than the
+    rule it came from, because the rule names the wrong lane at every cap that is not a
+    multiple of four ("Cap N: up to N agent runs at once, plus M slots for operator and
+    controller turns so a decision is not stuck behind the builds it is about."). **(c)** No dispatch
     starts on a backend the instance already knows is spent: a dispatch aimed at a backend
     whose exhaustion record has not passed its reset instant (or is younger than 30 minutes
     when the instant is unknown) is held, recorded on the timeline with an audit row, and

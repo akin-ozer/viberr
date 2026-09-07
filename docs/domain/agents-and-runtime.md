@@ -340,7 +340,11 @@ a `pending` queue drained on every completion. The cap is the instance setting
 (live, fourteen operator turns waited ten minutes behind six four-minute builds). The
 instance holds at most `cap + lane` runs in all and at most `cap` DELIVERY runs
 (`primary`, `reviewer`) among them: a live operator turn never costs a build its slot,
-and an operator turn may borrow a cap slot no build is using. `reserveRun` and
+and an operator turn may borrow a cap slot no build is using. The lane's own slots are
+unconditional; past them a coordination turn takes a slot only while the delivery queue
+is empty, so a freed slot returns to a parked build once coordination holds its whole
+lane (otherwise the coordination bound contains the delivery one and a backlog of turns
+starves the cap's own runs). `reserveRun` and
 `admitRun` both apply the rule by the run's kind; the pending queue is one FIFO per
 lane and `drainRunQueue` promotes the coordination queue first. Every held slot
 (`handles`, `reserved`) carries its lane, so the two counts are read from the slots

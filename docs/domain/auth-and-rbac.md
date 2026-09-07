@@ -184,9 +184,10 @@ the tabs sit the Audit log card and the run-concurrency control.
 - **Run concurrency**: `set-concurrency` writes `maxConcurrentRuns` (0 = unlimited,
   ceiling 64) and drains the queue. The control shows the cap, the live and queued
   counts, and under the field, for a positive cap, the lane sentence of ruling 152(b):
-  "Cap N: up to N agent runs at once. Operator and controller turns get one extra slot
-  per four so coordination never waits behind delivery." That is why a cap of 2 can
-  show three runs live; the extra one is an operator or controller turn
+  "Cap N: up to N agent runs at once, plus M slots for operator and controller turns so
+  a decision is not stuck behind the builds it is about." M is the lane the server
+  derived (`max(1, ceil(cap / 4))`), printed rather than stated as a rule. That is why a
+  cap of 2 can show three runs live; the extra one is an operator or controller turn
   ([agents-and-runtime.md §3.2](agents-and-runtime.md#32-reservation-and-admission)).
 - **Audit log card**: §5.
 

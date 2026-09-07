@@ -505,10 +505,13 @@ describe("run concurrency cap — the coordination lane (ruling 152)", () => {
     expect(runConcurrencySnapshot(store.db)).toMatchObject({ cap: 1, lane: 1, live: 2 });
   });
 
-  it("a freed slot promotes the parked operator before the parked build", async () => {
-    // Canary: admit every kind through the delivery rule (drop the lane from
-    // `canAdmit`) and the second operator turn stays queued behind the build
-    // that was parked before it.
+  it("a freed cap slot goes back to the parked build once coordination holds its whole lane", async () => {
+    // The lane's own slot is unconditional (the test below: a freed lane slot
+    // goes to the parked operator turn ahead of the parked build). Past it, a
+    // coordination turn is only BORROWING a cap slot, and a parked build wants
+    // that slot back. Canary: drop the `state.pending.delivery.length === 0`
+    // clause from `canAdmit` and the third operator turn takes the freed slot
+    // again while the build keeps waiting under a cap with delivery room.
     setMaxConcurrentRuns(store.db, 2);
     const a = await startHeldRun("d0");
     const b = await startHeldRun("d1");
@@ -524,25 +527,55 @@ describe("run concurrency cap — the coordination lane (ruling 152)", () => {
     expect(getRun(store.db, op2)?.state).toBe("queued");
     expect(runConcurrencySnapshot(store.db)).toMatchObject({ live: 3, queued: 2 });
 
-    // A build finishes: live drops to 2, under the coordination bound of 3 but
-    // not under the cap of 2, so ONLY the operator turn goes.
+    // A build finishes: the cap has a delivery slot free again and the lane's
+    // one slot is already held by op1, so the BUILD launches and the second
+    // operator turn keeps waiting. Three live: two under the cap, one in the
+    // lane.
     await interrupt(a);
     await settle();
-    expect(getRun(store.db, op2)?.state).toBe("running");
-    expect(getRun(store.db, c)?.state).toBe("queued");
+    expect(getRun(store.db, c)?.state).toBe("running");
+    expect(getRun(store.db, op2)?.state).toBe("queued");
+    expect(runConcurrencySnapshot(store.db)).toEqual({ cap: 2, lane: 1, live: 3, queued: 1 });
 
-    // The first operator turn ends: one build and one operator turn are live,
-    // so the cap has a delivery slot free and the build launches beside the
-    // operator turn (three in all: two under the cap, one in the lane).
+    // The first operator turn ends: the lane is free, so the parked operator
+    // turn takes it beside the two builds.
     await interrupt(op1);
     await settle();
-    expect(getRun(store.db, c)?.state).toBe("running");
+    expect(getRun(store.db, op2)?.state).toBe("running");
     expect(getRun(store.db, b)?.state).toBe("running");
     expect(runConcurrencySnapshot(store.db)).toEqual({ cap: 2, lane: 1, live: 3, queued: 0 });
 
     await interrupt(op2);
     await settle();
     expect(runConcurrencySnapshot(store.db)).toEqual({ cap: 2, lane: 1, live: 2, queued: 0 });
+  });
+
+  it("a coordination backlog never starves delivery: two borrowed slots, and the build still goes", async () => {
+    // The reported deadlock (G35-5 ran fourteen operator turns against six
+    // builds): coordination's bound used to contain delivery's, so every freed
+    // slot was re-lent to the next parked operator turn and a build waited
+    // with the cap's own delivery slot held by coordination.
+    setMaxConcurrentRuns(store.db, 1);
+    const op1 = await startHeldCoordinationRun("op-1");
+    const op2 = await startHeldCoordinationRun("op-2"); // borrows the cap slot
+    await settle();
+    expect(getRun(store.db, op1)?.state).toBe("running");
+    expect(getRun(store.db, op2)?.state).toBe("running");
+
+    const build = await startHeldRun("d0");
+    const op3 = await startHeldCoordinationRun("op-3");
+    await settle();
+    expect(getRun(store.db, build)?.state).toBe("queued");
+    expect(getRun(store.db, op3)?.state).toBe("queued");
+    expect(runConcurrencySnapshot(store.db)).toEqual({ cap: 1, lane: 1, live: 2, queued: 2 });
+
+    // One operator turn ends. The lane still holds op2, so the freed slot is
+    // the borrowed cap slot: it goes to the build, not to op3.
+    await interrupt(op1);
+    await settle();
+    expect(getRun(store.db, build)?.state).toBe("running");
+    expect(getRun(store.db, op3)?.state).toBe("queued");
+    expect(runConcurrencySnapshot(store.db)).toEqual({ cap: 1, lane: 1, live: 2, queued: 1 });
   });
 
   it("a live operator turn never costs a build its slot: the cap counts delivery runs", async () => {

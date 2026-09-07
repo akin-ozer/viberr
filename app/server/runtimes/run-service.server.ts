@@ -184,11 +184,24 @@ function laneOf(kind: RunKind): RunLane {
  * never costs a build its slot, while the operator may borrow a cap slot no
  * build is using. Both counts come from the held slots themselves (`handles`
  * and `reserved` carry their lane), never from a counter that could drift.
+ *
+ * The lane's own slots are unconditional: a coordination turn goes as long as
+ * fewer than `lane` of them are held, which is the ruling's promise that a
+ * decision never queues behind the builds it is about. BEYOND the lane a
+ * coordination turn only borrows, and only a cap slot no build is using: a
+ * parked delivery run is a build waiting for exactly that slot. Without the
+ * borrow check the coordination bound (`cap + lane`) strictly contains the
+ * delivery one, so every freed slot was re-lent to the next parked coordination
+ * turn and a build waited for as long as coordination kept arriving — with
+ * fourteen operator turns pending (G35-5) the cap's own runs never ran.
  */
 function canAdmit(state: ServiceState, cap: number, lane: RunLane): boolean {
   if (cap === 0) return true;
-  if (liveCount(state) >= cap + coordinationLane(cap)) return false;
-  return lane === "coordination" || deliveryLiveCount(state) < cap;
+  const laneSize = coordinationLane(cap);
+  if (lane === "coordination" && coordinationLiveCount(state) < laneSize) return true;
+  if (liveCount(state) >= cap + laneSize) return false;
+  if (lane === "delivery") return deliveryLiveCount(state) < cap;
+  return state.pending.delivery.length === 0;
 }
 
 /** Invoked once when a registered run reaches a terminal state. */
@@ -1569,6 +1582,13 @@ function deliveryLiveCount(state: ServiceState): number {
   return n;
 }
 
+/** How many of the held slots are coordination turns (ruling 152(b)): the count
+ *  the lane bounds. Anything past `coordinationLane(cap)` is a borrowed cap
+ *  slot, which the next parked build takes back ({@link canAdmit}). */
+function coordinationLiveCount(state: ServiceState): number {
+  return liveCount(state) - deliveryLiveCount(state);
+}
+
 /**
  * Admit a run for launch under the instance concurrency cap.
  *
@@ -1619,7 +1639,9 @@ function admitRun(
  * Ruling 152(b): the coordination queue is drained first; a delivery run is
  * promoted only when no coordination run can go and the cap itself has room.
  * So a freed slot goes to the operator turn that was parked behind the builds
- * before the next build.
+ * before the next build — until coordination holds its whole lane, when the
+ * freed slot is a borrowed cap slot and {@link canAdmit} hands it to the parked
+ * build instead.
  */
 export function drainRunQueue(db: DatabaseSync): void {
   const state = getState();
