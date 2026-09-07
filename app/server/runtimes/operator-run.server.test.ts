@@ -1945,6 +1945,28 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     expect(prompt).toContain("never change that configuration yourself");
   });
 
+  /**
+   * Pass-35 cluster review: ruling 164's authoring door refuses a send-back
+   * option whose words ask a person to edit an agent profile, and this turn
+   * text (the ONE both backends receive) still told the operator to write one.
+   * The remedy is still named on every turn; it is named in the packet's own
+   * words instead of as an option the door answers `noop` to.
+   */
+  it("ruling 85 under ruling 164: the remedy is named in the packet, never authored as an option", () => {
+    // Canary: restore "offer it as an option a human can act on".
+    for (const prompt of [
+      operatorPrompts.buildOperatorTurnPrompt(snap(), "create"),
+      operatorPrompts.buildCodexOperatorPrompt(snap(), "create"),
+    ]) {
+      expect(prompt).toContain("grantable on an agent profile");
+      expect(prompt).toContain("lists only workarounds hides the fix");
+      expect(prompt).toContain("Never write it as an OPTION");
+      expect(prompt).not.toMatch(/offer it as an option/i);
+      // The named-resource half of the same instruction says it too.
+      expect(prompt).not.toMatch(/offer granting it .{0,60} as an option/i);
+    }
+  });
+
   it("ruling 152(a): the stage rule says to walk consecutive auto boundaries in ONE turn", () => {
     // Pass 35, G35-5: the old sentence ("advancing one boundary and stopping is
     // fine") paid a fresh operator turn per stage. Canary: restore it.

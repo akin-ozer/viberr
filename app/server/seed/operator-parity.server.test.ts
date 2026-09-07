@@ -116,4 +116,16 @@ describe("ruling 164: the persona says an option title is a promise", () => {
       /Nothing a person confirms on a packet edits an agent profile/,
     );
   });
+
+  /**
+   * Pass-35 cluster review: the persona said both things. The capability-gap
+   * paragraph told the operator to "offer it beside any workaround you
+   * propose"; the paragraph four lines below refuses that option. Canary:
+   * restore the older half.
+   */
+  it("says the capability remedy is named, not offered as an option", () => {
+    expect(operatorDefinitionMd).toContain("grantable on an agent profile");
+    expect(operatorDefinitionMd).toContain("Never write it as an OPTION");
+    expect(operatorDefinitionMd).not.toMatch(/offer it beside any workaround/i);
+  });
 });

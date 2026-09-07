@@ -197,6 +197,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Pass 35 cluster review: before the ruling-85 clause stopped telling the
+    // operator to OFFER the profile grant as an option the ruling-164 door
+    // refuses, and before the acceptance-stage move was keyed on the pull
+    // request rather than on `notAcceptableReason`.
+    "0a65da9c91b81dee99de6cc9e5b641cf59850e5c14e9feed9fb3c243b5210608",
     // Pass 35 S18: before the option-title-is-a-promise paragraph (ruling 164).
     "da74b11b369961a7b99065589cfb7cab3eb3c33ee8901311fd6e3c76e233a47a",
     // Pass 35 S15: before the acceptance-time refresh and the

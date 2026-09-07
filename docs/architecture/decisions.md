@@ -1148,6 +1148,10 @@ inventory is not regenerated automatically and has drifted; the verified module 
     option beside the workarounds. The division of labour is untouched — capability and policy edits
     are a human action (`change-project-policy` sits on the always-human list, ruling 2), so the
     operator points at the remedy and never applies it. Extends ruling 75 (R19-19).
+    *(Amended by ruling 164, pass 35: the remedy is named in the packet's own words — the body
+    and the observations, beside the workarounds — and never as an OPTION. No option kind edits
+    an agent profile, so an option that promised the grant resolved to a send-back that changed
+    nothing, which is the failure 164 exists for. What the packet must SAY is unchanged.)*
     (packet construction in `app/server/runtimes/operator-run.server.ts`; `app/shared/capabilities.ts`;
     the surface is `app/features/agents/agents-page.tsx`)
 

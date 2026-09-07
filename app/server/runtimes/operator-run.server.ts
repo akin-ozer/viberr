@@ -3592,13 +3592,15 @@ const CAPABILITY_GAP_REMEDY_INSTRUCTION =
   "e.g. nothing holds `browser` for a task that must drive a live browser, or nothing holds `web`, `verdict` or `delivery`), " +
   "say that plainly AND name the product's own remedy: the capability is grantable on an agent profile from the project's " +
   "Agents surface (Agents → the profile → its capability matrix), and a re-run picks it up with no change to this task. " +
-  "Carry it as an observed fact (e.g. k: \"Capability gap\", v: \"no deployed agent holds `browser`\") and offer it as an " +
-  "option a human can act on, alongside any workaround you propose — a packet that offers only workarounds hides the fix. " +
+  "Carry it as an observed fact (e.g. k: \"Capability gap\", v: \"no deployed agent holds `browser`\") and say the " +
+  "remedy in the packet's own words, alongside any workaround you propose. Never write it as an OPTION: no option kind " +
+  "edits an agent profile, and the authoring door refuses a title that says one does (ruling 164). A packet that stays " +
+  "silent about the remedy and lists only workarounds hides the fix. " +
   "You never change that configuration yourself; you point at it. " +
   "The same honesty applies to NAMED RESOURCES (F31-3): when the goal cites a knowledge base, skill or MCP server by name, " +
   "check `orgResources` in the snapshot before claiming it does not exist. A name there that no `deployedSpecialists[].resources` " +
   "carries means it EXISTS at the instance level but is granted to nothing on this project — say exactly that (\"exists, not " +
-  "granted here\"), and offer granting it from the project's Agents surface as an option. Only a name absent from `orgResources` " +
+  "granted here\"), and name granting it from the project's Agents surface as the remedy a person applies there. Only a name absent from `orgResources` " +
   "too may be described as not existing. ";
 
 /**

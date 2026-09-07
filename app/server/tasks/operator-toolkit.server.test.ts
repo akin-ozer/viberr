@@ -581,4 +581,37 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(declared).toContain('"toStage"');
     expect(declared).toContain("move_stage only");
   });
+
+  /**
+   * Pass-35 cluster review: ONE description carried both halves of a
+   * contradiction. Ruling 164's new sentence refuses "a custom option that asks
+   * a person to edit an agent profile", while the older ruling-85 clause still
+   * told the operator to offer exactly that ("offer it as an option beside any
+   * workaround"). An operator following the second sentence burned a turn on
+   * the first: `operatorOpenPacket` answers `noop`. Ruling 85's substance is
+   * untouched (the remedy is still named); only the surface it is named ON is
+   * settled here, which is what ruling 164 already says the refusal means.
+   */
+  it("ruling 85 and ruling 164 agree in one string: the remedy is named, never offered as an option", () => {
+    // Canary: restore "and offer it as an option beside any workaround".
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const def = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
+    // Ruling 85 still stands: the capability and where a human grants it.
+    expect(def.description).toContain("grantable on an agent profile");
+    expect(def.description).toContain("Agents surface");
+    expect(def.description).toContain("lists only workarounds hides the fix");
+    // Ruling 164 decides the surface, and nothing here contradicts it.
+    expect(def.description).toContain("never write it as an OPTION");
+    expect(def.description).not.toMatch(/offer it (as an option )?beside any workaround/i);
+  });
 });
