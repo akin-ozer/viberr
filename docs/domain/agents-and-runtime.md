@@ -251,7 +251,7 @@ stated as the last refusal Viberr observed, retired by any completed run.
 - `agent_runs`: `id, task_key, project_slug, thread_id, role, kind, backend, model,
   session_id, sdk, state (queued|running|finished|error|interrupted), phase, step,
   started_at, finished_at, turns, input_tokens, cached_input_tokens, output_tokens,
-  total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key,
+  usage_final, total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key,
   credential_user_id`.
 - **Token columns mean the same thing on both backends.** `input_tokens` is the total
   input the provider processed for the run, cache reads and cache writes included: Codex
@@ -265,12 +265,23 @@ stated as the last refusal Viberr observed, retired by any completed run.
   plus the `user`-type messages that flowed through the SDK loop, so every tool result
   counts) and Codex's count of completed turns. The strip's **Tokens** is
   `input_tokens + output_tokens`: total tokens processed. During a Claude run the row
-  holds the adapter's live lower bound (each API message's whole prompt summed once per
-  `message.id`, output as the `message_start` placeholders), folded by max; the result
-  envelope supplies the final figures. Claude `result.usage` covers the main loop only
-  while `total_cost_usd` also covers side-model calls, so tokens and cost sit on slightly
-  different bases; a resumed Codex thread reports the thread's cumulative total. Claude
-  rows written before this normalization hold the uncached slice only.
+  holds the adapter's live figure: each API message's whole prompt summed once per
+  `message.id` (exact; it reproduced `result.usage` on every stored run) and an
+  **estimate** of the output from the streamed content (text, thinking and tool-call
+  input at about four characters per token, summed per envelope), because the SDK's
+  per-envelope `output_tokens` is the `message_start` placeholder of a few tokens
+  (F35-1: a twelve-minute Opus run writing 20k characters read "49 tokens" until its
+  result said 54,759). The prompt figures fold by max; the estimate folds by max while
+  it is an estimate and is **replaced** by the provider's figure when one lands (a
+  Claude `result`, a Codex `turn.completed`), which also sets `usage_final = 1`. While
+  `usage_final` is 0 the row is not a total: the Live run panel prints it as `~n`
+  with a tooltip, a Codex run whose turn has not ended prints "pending", and Insights
+  leaves the row out of its token sums. An errored result carrying an empty usage
+  reports nothing and leaves the estimate and the flag alone. Claude `result.usage`
+  covers the main loop only while `total_cost_usd` also covers side-model calls, so
+  tokens and cost sit on slightly different bases; a resumed Codex thread reports the
+  thread's cumulative total. Claude rows written before this normalization hold the
+  uncached slice only.
 - `credential_user_id` (ruling 127) is the run's **credential principal**: whose account
   it billed. It is written on the reserved row and on the started row, carried in the
   `runtime.run.started` audit, and read back by the transcript locator and the run
@@ -416,7 +427,12 @@ two stories. With no offer the footer states the failure and advertises no retry
 The task page's own controls answer from the loader's `runPrincipal` (the owner's
 per-backend health), so a disabled Run names the person, never a deployment credential.
 Telemetry tags are collapsed by `log-noise.ts`, and the console shows the redacted
-`run·inputs` line so a human can see exactly what the agent was given.
+`run·inputs` line so a human can see exactly what the agent was given. The strip's
+**Tokens** cell (F35-1) reads `RunView.tokens` and `tokensEstimated`: `~1.2M` with the
+tooltip "Estimated from the streamed text; the provider's total replaces it when the run
+ends" while the row's `usage_final` is 0 and the run is live, "pending" while no usage
+envelope has landed at all (a Codex run before its turn ends), and the plain figure once
+the provider's total landed or the run is over.
 
 ## 4. Specialist runs
 

@@ -19,7 +19,7 @@ function mkRun(patch: Partial<RunView>): RunView {
     backend: "claude", sdk: "Claude Agent SDK", model: "claude-sonnet-4-5",
     exportable: false, sid: "51d8f0e2-3a7b", state: "running", lifecycle: "running", interruptedBy: null,
     phase: "Running validation sweep", step: "Bash · npm test", startedAt: new Date(Date.now() - 402_000).toISOString(),
-    finished: null, turns: 0, tokens: 0,
+    finished: null, turns: 0, tokens: 0, tokensEstimated: false,
     lines: [{ t: "1", ev: "init", tag: "system·init", text: "session x" }],
     raw: ['{"type":"system","subtype":"init","session_id":"51d8f0e2"}'], lineCount: 1,
     logWindow: { totalLines: 1, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: 0 },
@@ -45,6 +45,31 @@ describe("LiveRunPanel", () => {
     expect(container.querySelector(".who-chip")).not.toBeNull();
     // Elapsed derives from startedAt (~402s → 06:42), never a fabricated count.
     expect(getByText("06:42")).toBeTruthy();
+  });
+
+  /**
+   * F35-1: the Tokens cell tells an estimate from a total. While the row holds
+   * the Claude adapter's live estimate it prints `~n` with the tooltip; a
+   * Codex run before its turn ends prints "pending"; a provider total prints
+   * plain. Canary: print `fmtTok(run.tokens)` unconditionally and both the
+   * tilde and the tooltip are gone.
+   */
+  it("prints an estimated token figure as ~n with a tooltip, null as pending, a total plain", () => {
+    const cell = (run: RunView) => {
+      const { container, unmount } = render(
+        <LiveRunPanel runtime={[run]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />,
+      );
+      const vals = [...container.querySelectorAll(".run-cell")].find((c) => c.querySelector(".lbl")?.textContent === "Tokens")!.querySelector<HTMLElement>(".val")!;
+      const out = { text: vals.textContent, title: vals.getAttribute("title") };
+      unmount();
+      return out;
+    };
+    expect(cell(mkRun({ tokens: 1500, tokensEstimated: true }))).toEqual({
+      text: "~1.5k",
+      title: "Estimated from the streamed text; the provider's total replaces it when the run ends",
+    });
+    expect(cell(mkRun({ tokens: null, tokensEstimated: true }))).toEqual({ text: "pending", title: null });
+    expect(cell(mkRun({ tokens: 1500, tokensEstimated: false }))).toEqual({ text: "1.5k", title: null });
   });
 
   it("shows the AgentPicker when 2+ runs are running (concurrent case)", () => {

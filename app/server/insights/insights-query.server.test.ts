@@ -23,6 +23,8 @@ function insertRun(
     turns?: number;
     startedAt?: string | null;
     finishedAt?: string | null;
+    /** F35-1: 0 while the row holds a live estimate (default 1: a total). */
+    usageFinal?: 0 | 1;
   },
 ) {
   seq += 1;
@@ -30,8 +32,8 @@ function insertRun(
     `INSERT INTO agent_runs
        (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
         started_at, finished_at, turns, input_tokens, cached_input_tokens,
-        output_tokens, total_cost_usd, created_at, updated_at, agent_profile_id)
-     VALUES (?, ?, ?, ?, 'Dev', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        output_tokens, usage_final, total_cost_usd, created_at, updated_at, agent_profile_id)
+     VALUES (?, ?, ?, ?, 'Dev', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
              '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', 'developer')`,
   ).run(
     `run_${seq}`,
@@ -48,6 +50,7 @@ function insertRun(
     r.inTok ?? 0,
     r.cachedTok ?? 0,
     r.outTok ?? 0,
+    r.usageFinal ?? 1,
     r.cost ?? null,
   );
 }
@@ -75,6 +78,25 @@ describe("getInsightsSummary", () => {
     expect(s.outcomes.running).toBe(1);
     // 2 finished of (2+1+1)=4 terminal → 0.5.
     expect(s.outcomes.successRate).toBeCloseTo(0.5, 5);
+  });
+
+  /**
+   * F35-1 (pass 35): a running row's token columns hold the Claude adapter's
+   * live ESTIMATE (or nothing, on Codex), not a total. The sums used to add
+   * them in, so the headline moved with every streamed envelope and then
+   * corrected itself at the result. Runs and turns still count the row.
+   */
+  it("F35-1: token totals leave out rows whose provider total has not landed", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { state: "finished", outTok: 100, inTok: 50, cachedTok: 20, turns: 2 });
+    // Canary: restore the plain SUM and the totals read 5100 / 1050 / 420.
+    insertRun(db, { state: "running", outTok: 5000, inTok: 1000, cachedTok: 400, turns: 3, usageFinal: 0 });
+    const s = getInsightsSummary(db, NOW);
+    expect(s.totals.runs).toBe(2);
+    expect(s.totals.turns).toBe(5);
+    expect(s.totals.outputTokens).toBe(100);
+    expect(s.totals.inputTokens).toBe(50);
+    expect(s.totals.cachedInputTokens).toBe(20);
   });
 
   it("a day whose runs all report no cost shows null, not $0, in the daily series (bug-sweep #15)", () => {

@@ -106,6 +106,7 @@ function run(patch: Partial<RunView> = {}): RunView {
     finished: "9:41",
     turns: 3,
     tokens: 1200,
+    tokensEstimated: false,
     lines: [plainLine],
     raw: ["{}"],
     lineCount: 1,

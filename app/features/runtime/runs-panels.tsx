@@ -242,7 +242,22 @@ export function LiveRunPanel({
           </div>
           <div className="run-cell">
             <div className="lbl">Tokens</div>
-            <div className="val mono">{fmtTok(run.tokens)}</div>
+            {/* F35-1: an estimate is marked as one. The live figure used to be
+                the SDK's placeholder output (a few tokens per API message)
+                and read "49" for twelve minutes of writing; now it is a text
+                estimate that the provider's total replaces at the result. */}
+            {run.tokens === null ? (
+              <div className="val mono">pending</div>
+            ) : run.tokensEstimated ? (
+              <div
+                className="val mono"
+                title="Estimated from the streamed text; the provider's total replaces it when the run ends"
+              >
+                ~{fmtTok(run.tokens)}
+              </div>
+            ) : (
+              <div className="val mono">{fmtTok(run.tokens)}</div>
+            )}
           </div>
           <div className="run-cell">
             <div className="lbl">Runtime</div>

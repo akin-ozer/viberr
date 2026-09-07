@@ -163,6 +163,9 @@ const BASELINE_COLUMNS: readonly {
       // every run start rather than degrade — the exact failure this healer
       // exists for.
       { name: "credential_user_id", ddl: "credential_user_id TEXT" },
+      // F35-1: the sink patches it on every persisted line, so a root that
+      // predates it would fail every run's first line.
+      { name: "usage_final", ddl: "usage_final INTEGER NOT NULL DEFAULT 0" },
     ],
   },
   {

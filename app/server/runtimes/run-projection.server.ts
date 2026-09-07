@@ -256,7 +256,15 @@ function projectRow(
     startedAt: row.started_at,
     finished,
     turns: row.turns,
-    tokens: row.input_tokens + row.output_tokens,
+    // F35-1: null until a usage envelope has landed (a Codex run before its
+    // turn ends, a Claude run before its first API message), an ESTIMATE
+    // while the row is live and no provider figure has replaced it, plain
+    // once one has or the run is over.
+    tokens:
+      row.usage_final === 0 && row.input_tokens + row.output_tokens === 0 && !finished
+        ? null
+        : row.input_tokens + row.output_tokens,
+    tokensEstimated: row.usage_final === 0 && !finished,
     lines,
     raw,
     // P13-D-11: the count of lines that EXIST, not of the ones this payload

@@ -70,14 +70,15 @@ describe("projectEnvelope — Claude stream-json", () => {
     // disjoint prompt figures summed), `cached_input_tokens` its cache-read
     // subset. Canary: read `usage.input_tokens` alone again and the row goes
     // back to the two-tokens-per-call figure the strip showed for months.
-    expect(facts.usage).toEqual({ input_tokens: 40022, cached_input_tokens: 38210, output_tokens: 2140 });
+    // F35-1: a result is the provider's figure, never an estimate.
+    expect(facts.usage).toEqual({ input_tokens: 40022, cached_input_tokens: 38210, output_tokens: 2140, outputEstimated: false });
     expect(display?.stats).toMatchObject({ in: 40022, cached: 38210, out: 2140 });
     expect(display?.text).toBe("success · 4 turns · 132s · $0.31 · in 40.0k (cached 38.2k) · out 2.1k tokens");
   });
 
   it("a result without cache figures keeps the plain input", () => {
     const raw = { type: "result", subtype: "success", is_error: false, num_turns: 1, duration_ms: 1000, total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 3 } };
-    expect(projectEnvelope("claude", raw).facts.usage).toEqual({ input_tokens: 10, cached_input_tokens: 0, output_tokens: 3 });
+    expect(projectEnvelope("claude", raw).facts.usage).toEqual({ input_tokens: 10, cached_input_tokens: 0, output_tokens: 3, outputEstimated: false });
   });
 
   it("result with error subtype → isError true", () => {
@@ -194,7 +195,7 @@ describe("projectEnvelope — Codex JSONL", () => {
     const raw = { type: "turn.completed", usage: { input_tokens: 51234, cached_input_tokens: 38912, output_tokens: 1954 } };
     const { display, facts } = projectEnvelope("codex", raw);
     expect(display?.ev).toBe("result");
-    expect(facts.usage).toEqual({ input_tokens: 51234, cached_input_tokens: 38912, output_tokens: 1954 });
+    expect(facts.usage).toEqual({ input_tokens: 51234, cached_input_tokens: 38912, output_tokens: 1954, outputEstimated: false });
     expect(facts.costUsd).toBeUndefined();
   });
 

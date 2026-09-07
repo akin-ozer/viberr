@@ -16,11 +16,16 @@ export function clockOf(iso?: string): string {
 export interface EnvelopeFacts {
   sessionId?: string | null;
   model?: string | null;
-  /** Cumulative usage this envelope reports (claude result / codex turn). */
+  /** Cumulative usage this envelope reports (claude result / codex turn, or
+   *  the Claude adapter's live fold). `outputEstimated` (F35-1) says whether
+   *  `output_tokens` is the PROVIDER's figure (a result / turn.completed) or
+   *  the adapter's estimate from the streamed text: the sink keeps an estimate
+   *  as a monotone lower bound and lets a provider figure REPLACE it. */
   usage?: {
     input_tokens: number;
     cached_input_tokens: number;
     output_tokens: number;
+    outputEstimated: boolean;
   } | null;
   /** Dollar cost — claude result only. */
   costUsd?: number | null;
@@ -471,7 +476,7 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
           },
         },
         facts: {
-          usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok },
+          usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok, outputEstimated: false },
           costUsd: e.total_cost_usd,
           turns: e.num_turns,
           isError: e.is_error,
@@ -547,7 +552,7 @@ function projectCodex(e: CodexEnvelope, t: string): ProjectedEnvelope | null {
         // Each completed turn counts as one turn (codex has no cumulative
         // num_turns); the adapter overrides this with a running count for a
         // multi-turn run, so the live Turns counter isn't stuck at 0.
-        facts: { usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok }, turns: 1 },
+        facts: { usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok, outputEstimated: false }, turns: 1 },
       };
     }
     case "turn.failed":

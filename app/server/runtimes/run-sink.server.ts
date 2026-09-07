@@ -234,10 +234,19 @@ export function createRunSink(
   // its distinct API calls, and the result envelope then carries the SDK's own
   // total), so max per field keeps the row monotone and lets the final figure
   // win (tokens/cost from real envelopes ONLY — no fabrication).
+  //
+  // F35-1: output is the exception. The Claude adapter's live figure is an
+  // ESTIMATE from the streamed text (`outputEstimated: true`), folded by max
+  // like the rest; a provider figure (a Claude result, a Codex turn.completed)
+  // REPLACES it, because an estimate may overshoot and max would then keep the
+  // wrong number for good. `usageFinal` records that a provider figure landed
+  // (`agent_runs.usage_final`): the projection prints the row as an estimate
+  // until it does, and Insights leaves the row out of its token totals.
   let turns = 0;
   let inputTokens = 0;
   let cachedInputTokens = 0;
   let outputTokens = 0;
+  let usageFinal = false;
   let totalCostUsd: number | null = null;
 
   // P13-U-1: built once per run — see createLineRedactor. `opts.secrets` is the
@@ -423,7 +432,19 @@ export function createRunSink(
           }
           inputTokens = Math.max(inputTokens, f.usage.input_tokens);
           cachedInputTokens = Math.max(cachedInputTokens, f.usage.cached_input_tokens);
-          outputTokens = Math.max(outputTokens, f.usage.output_tokens);
+          if (f.usage.outputEstimated) {
+            outputTokens = Math.max(outputTokens, f.usage.output_tokens);
+          } else if (
+            f.usage.input_tokens > 0 ||
+            f.usage.cached_input_tokens > 0 ||
+            f.usage.output_tokens > 0
+          ) {
+            // The provider's own figure replaces the estimate. An EMPTY usage
+            // (an errored result that never reached the API) reports nothing
+            // and leaves both the estimate and `usageFinal` alone.
+            outputTokens = f.usage.output_tokens;
+            usageFinal = true;
+          }
         }
         if (f.costUsd != null) totalCostUsd = f.costUsd;
         // Backend quota telemetry (pass 29): a rate_limit_event's reading is
@@ -538,6 +559,7 @@ export function createRunSink(
           inputTokens,
           cachedInputTokens,
           outputTokens,
+          usageFinal: usageFinal ? 1 : 0,
           totalCostUsd,
         });
 

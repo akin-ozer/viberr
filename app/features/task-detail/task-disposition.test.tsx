@@ -2206,6 +2206,7 @@ describe("D6: consequential actions confirm before they act", () => {
     finished: null,
     turns: 1,
     tokens: 0,
+    tokensEstimated: false,
     lines: [],
     raw: [],
     lineCount: 0,

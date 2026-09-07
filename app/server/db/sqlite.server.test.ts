@@ -40,10 +40,12 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         // Ruling 127: `upsertRun` names the credential principal on every
         // insert, so a root without this column could not start a run at all.
         "credential_user_id",
+        // F35-1: the sink patches it on every persisted line.
+        "usage_final",
       ]);
       // Second boot: nothing to add, nothing thrown.
       ensureBaselineColumns(db);
-      expect(columns()).toHaveLength(5);
+      expect(columns()).toHaveLength(6);
       db.prepare(`UPDATE agent_runs SET dispatched_by_name = ? WHERE id = ?`).run("x", "none");
       db.close();
     } finally {

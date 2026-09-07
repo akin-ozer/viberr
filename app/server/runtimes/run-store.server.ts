@@ -39,6 +39,11 @@ export type AgentRunRow = {
   input_tokens: number;
   cached_input_tokens: number;
   output_tokens: number;
+  /** F35-1: 1 once a PROVIDER usage figure landed on the row (a Claude result,
+   *  a Codex turn.completed), 0 while the token columns hold the Claude
+   *  adapter's live estimate or nothing at all. The projection prints an
+   *  estimated row as `~n`; Insights leaves it out of its token totals. */
+  usage_final: number;
   total_cost_usd: number | null;
   interrupted_by: string | null;
   created_at: string;
@@ -169,6 +174,8 @@ export interface RunPatch {
   inputTokens?: number;
   cachedInputTokens?: number;
   outputTokens?: number;
+  /** See `AgentRunRow.usage_final` (F35-1): 1 once a provider figure landed. */
+  usageFinal?: 0 | 1;
   totalCostUsd?: number | null;
   interruptedBy?: string | null;
   backend?: RunBackend;
@@ -204,6 +211,7 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     inputTokens: ["input_tokens", patch.inputTokens],
     cachedInputTokens: ["cached_input_tokens", patch.cachedInputTokens],
     outputTokens: ["output_tokens", patch.outputTokens],
+    usageFinal: ["usage_final", patch.usageFinal],
     totalCostUsd: ["total_cost_usd", patch.totalCostUsd],
     interruptedBy: ["interrupted_by", patch.interruptedBy],
     backend: ["backend", patch.backend],

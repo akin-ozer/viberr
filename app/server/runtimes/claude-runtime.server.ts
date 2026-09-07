@@ -499,6 +499,42 @@ async function realQuery(): Promise<ClaudeQueryFn> {
   return cachedQuery;
 }
 
+/** The three block shapes that carry OUTPUT the model wrote: prose, its
+ *  thinking, and a tool call's arguments. Every other block kind (a
+ *  `tool_result` the SDK echoes, an image) reads as empty and estimates 0. */
+const claudeContentBlock = z
+  .object({
+    type: z.string().catch(""),
+    text: z.string().catch(""),
+    thinking: z.string().catch(""),
+    input: z.record(z.string(), z.json().catch(null)).nullable().catch(null),
+  })
+  .catch({ type: "", text: "", thinking: "", input: null });
+type ClaudeContentBlock = z.infer<typeof claudeContentBlock>;
+
+/** Characters of model output per token, the rough figure the live estimate
+ *  divides by (F35-1). English prose and JSON both sit near it; the result's
+ *  own `output_tokens` replaces the estimate when the run ends. */
+const OUTPUT_CHARS_PER_TOKEN = 4;
+
+/**
+ * F35-1: a lower-bound ESTIMATE of the output tokens one streamed envelope's
+ * content blocks represent: the text, the thinking and the JSON of a tool
+ * call's input, at ~4 characters per token, rounded up. The SDK's per-envelope
+ * `usage.output_tokens` is the `message_start` placeholder (1 to 3 per API
+ * message), so a run that wrote 20k characters of files read "49 tokens" for
+ * twelve minutes; this reads a few thousand, which is the right order.
+ */
+function estimateOutputTokens(blocks: ClaudeContentBlock[]): number {
+  let chars = 0;
+  for (const block of blocks) {
+    if (block.type === "text") chars += block.text.length;
+    else if (block.type === "thinking") chars += block.thinking.length;
+    else if (block.type === "tool_use" && block.input) chars += JSON.stringify(block.input).length;
+  }
+  return Math.ceil(chars / OUTPUT_CHARS_PER_TOKEN);
+}
+
 /**
  * The fields the ADAPTER itself reads off a streamed SDK envelope, decoded once
  * per message at the stream boundary (the console line is projected separately
@@ -539,9 +575,11 @@ const claudeEnvelopeSchema = z
      *  fold leaves them out too. */
     parent_tool_use_id: z.string().nullable().catch(null),
     /** `assistant` envelopes: the API message's id (one message yields one
-     *  envelope per content block, all carrying the same usage) and its
-     *  `message_start` usage. Anything that is not a finite number counts as 0,
-     *  exactly as the run row folds it. */
+     *  envelope per content block, all carrying the same usage), its
+     *  `message_start` usage, and the content blocks THIS envelope carries
+     *  (F35-1: the live output estimate is read off them, because the usage's
+     *  `output_tokens` is a placeholder until the result). Anything that is
+     *  not a finite number counts as 0, exactly as the run row folds it. */
     message: z
       .object({
         id: z.string().nullable().catch(null),
@@ -551,6 +589,7 @@ const claudeEnvelopeSchema = z
           cache_creation_input_tokens: z.number().catch(0),
           cache_read_input_tokens: z.number().catch(0),
         }),
+        content: z.array(claudeContentBlock).catch(() => []),
       })
       .nullable()
       .catch(null),
@@ -568,16 +607,17 @@ const claudeEnvelopeSchema = z
   });
 type ClaudeEnvelope = z.infer<typeof claudeEnvelopeSchema>;
 
-/** The live token counters one API message contributes, in the run row's
+/** The live PROMPT counters one API message contributes, in the run row's
  *  terms (wire-format.server.ts, `result`): `input_tokens` is the WHOLE prompt
  *  of the call (uncached slice + cache writes + cache reads),
- *  `cached_input_tokens` its cache-read subset. */
+ *  `cached_input_tokens` its cache-read subset. Output is not here: the
+ *  envelope's `output_tokens` is the `message_start` placeholder, and the live
+ *  figure is `estimateOutputTokens` over the content blocks (F35-1). */
 interface StepUsage {
   /** The API message id: the dedupe key across the envelopes of one message.
    *  Null when the SDK sent none, which counts the envelope once. */
   messageId: string | null;
   input_tokens: number;
-  output_tokens: number;
   cached_input_tokens: number;
 }
 
@@ -603,7 +643,6 @@ function assistantUsage(envelope: ClaudeEnvelope): StepUsage | null {
   return {
     messageId: envelope.message?.id ?? null,
     input_tokens: input_tokens + cache_creation_input_tokens + cache_read_input_tokens,
-    output_tokens,
     cached_input_tokens: cache_read_input_tokens,
   };
 }
@@ -1202,8 +1241,16 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         // distinct ids reproduced `result.usage` exactly on every run this
         // instance had stored. (It used to max the uncached slice and sum the
         // placeholders, which pinned the live strip at a few hundred tokens
-        // while the run was at a few million.) Output stays a lower bound until
-        // the result's total lands; the sink's max fold lets the result win.
+        // while the run was at a few million.)
+        //
+        // Output (F35-1) is ESTIMATED from the blocks each envelope carries
+        // (`estimateOutputTokens`), summed per envelope: a block arrives once,
+        // so the per-envelope sum is the per-message sum without a second
+        // dedupe. The placeholders used to be summed here and read "49 tokens"
+        // for twelve minutes of Opus writing 20k characters, then jumped to
+        // 54,759 at the result. The estimate is published with
+        // `outputEstimated: true`; the sink keeps it as a monotone lower bound
+        // and REPLACES it with the result's figure (an estimate may overshoot).
         // Subagent traffic (`parent_tool_use_id`) is left out: the result's
         // `usage` covers the main loop only, and a live figure above the final
         // one would read as a regression.
@@ -1216,7 +1263,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         // all but the single-turn one.
         let liveUsers = 0;
         let liveTurns = 0;
-        let liveOut = 0;
+        let liveOutEstimate = 0;
         let liveIn = 0;
         let liveCached = 0;
         const seenMessages = new Set<string>();
@@ -1248,8 +1295,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               liveUsers += 1;
               liveTurns = 1 + liveUsers;
               facts.turns = liveTurns;
-            } else {
-              const u = envelope.parent_tool_use_id ? null : assistantUsage(envelope);
+            } else if (envelope.type === "assistant" && !envelope.parent_tool_use_id) {
+              const u = assistantUsage(envelope);
               if (u) {
                 const firstOfMessage =
                   u.messageId === null || !seenMessages.has(u.messageId);
@@ -1257,13 +1304,17 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
                   if (u.messageId !== null) seenMessages.add(u.messageId);
                   liveIn += u.input_tokens;
                   liveCached += u.cached_input_tokens;
-                  liveOut += u.output_tokens;
                 }
+              }
+              const estimate = estimateOutputTokens(envelope.message?.content ?? []);
+              liveOutEstimate += estimate;
+              if (u || estimate > 0) {
                 liveTurns = Math.max(liveTurns, 1);
                 facts.usage = {
                   input_tokens: liveIn,
                   cached_input_tokens: liveCached,
-                  output_tokens: liveOut,
+                  output_tokens: liveOutEstimate,
+                  outputEstimated: true,
                 };
                 facts.turns = liveTurns;
               }

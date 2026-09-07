@@ -319,8 +319,15 @@ export interface RunView {
    *  every call (cache reads and writes included) plus the output, i.e. the
    *  row's `input_tokens + output_tokens`, which means the same thing on both
    *  backends (wire-format.server.ts normalizes Claude's three prompt figures
-   *  into one). Real usage envelopes only; a lower bound until the result. */
-  tokens: number;
+   *  into one). Null while no usage envelope has landed (a Codex run before
+   *  its turn ends); the cell prints "pending". */
+  tokens: number | null;
+  /** F35-1: the figure is the Claude adapter's live ESTIMATE (the prompt sum
+   *  is exact; the output is estimated from the streamed text at ~4 characters
+   *  per token) and the provider's total will replace it when the run ends.
+   *  False once a provider figure landed (`agent_runs.usage_final`) or the run
+   *  is over. The cell prints `~1.2M` with a tooltip while true. */
+  tokensEstimated: boolean;
   /** The projected log lines for the group's bounded window (newest last),
    * with UI-53's synthetic `── resumed · run N of M ──` boundaries between
    * runs. NOT the whole history since P13-D-11 — see `logWindow`. */

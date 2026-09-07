@@ -142,7 +142,7 @@ files) · **C** cache/operational (safe to lose).
 
 | Table | Kind | What it holds |
 |---|---|---|
-| `agent_runs` | P | One row per run: `kind` (`operator \| primary \| reviewer \| controller`, a **delivery axis**: `primary` = delivering, `reviewer` = any supporting run), `backend`, `model`, `session_id`, `state` (`queued \| running \| finished \| error \| interrupted`), `phase`/`step`, token and cost counters, `interrupted_by`, `agent_profile_id`, `outcome_key`, `credential_user_id`. Controller turns use `project_slug = ''` and `task_key = <conversation id>`. |
+| `agent_runs` | P | One row per run: `kind` (`operator \| primary \| reviewer \| controller`, a **delivery axis**: `primary` = delivering, `reviewer` = any supporting run), `backend`, `model`, `session_id`, `state` (`queued \| running \| finished \| error \| interrupted`), `phase`/`step`, token and cost counters, `usage_final` (F35-1: 1 once a provider usage figure landed; 0 while the token columns hold the Claude adapter's live estimate or nothing, which the Live run panel prints as an estimate and Insights leaves out of its token sums), `interrupted_by`, `agent_profile_id`, `outcome_key`, `credential_user_id`. Controller turns use `project_slug = ''` and `task_key = <conversation id>`. |
 | `run_log_lines` | C | Projected console lines per run (`raw_json`, `display_json`, `seq`). Retained 30 days; the `.jsonl` file is the truth. |
 | `staged_outcomes` | C | A Claude `report_outcome` envelope staged mid-run until the completion callback consumes it; orphans pruned after 24 h. |
 
@@ -195,10 +195,10 @@ only; an existing root keeps its old DDL. Boot detects two drift shapes on
 `task_projections` / `task_events` and logs a `projection schema drift` WARN naming
 the remedy: a CHECK that refuses a value the build now produces, and a column the
 rebuilder INSERTs that the live table lacks. The second shape is repaired at open for
-the columns that carry it: `ensureRunRowColumns` (`app/server/db/sqlite.server.ts`)
-`ALTER TABLE agent_runs ADD COLUMN`s each missing `RUN_ROW_COLUMNS` entry
-(`dispatched_by_name`, `dispatched_by_user_id`, `credential_user_id`) idempotently on
-every boot, so additive
+the columns that carry it: `ensureBaselineColumns` (`app/server/db/sqlite.server.ts`)
+`ALTER TABLE agent_runs ADD COLUMN`s each missing `BASELINE_COLUMNS` entry
+(`dispatched_by_name`, `dispatched_by_user_id`, `credential_user_id`, `usage_final`)
+idempotently on every boot, so additive
 drift there needs no operator action at all. For a CHECK that no ALTER can widen, the
 remedy is to re-baseline — preferably preserve-copy (fresh file + migrations, then copy
 the non-rebuildable tables across with foreign keys off, the shape

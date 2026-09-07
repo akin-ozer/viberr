@@ -116,6 +116,22 @@ describe("InsightsPage", () => {
     expect(getByText("3m 5s")).toBeTruthy(); // avg duration 185s
   });
 
+  // F35-1: the token sums cover provider totals only, and the card says so
+  // while a run is running (FULL has two). Canary: drop the `outcomes.running`
+  // clause on the card and the sentence is gone.
+  it("F35-1: the token card says running runs are not counted while one is running", () => {
+    const { container } = renderPage(FULL);
+    const note = "Running runs are not counted until their provider total lands.";
+    expect(container.textContent).toContain(note);
+    cleanup();
+    const quiet = renderPage(structuredClone(FULL));
+    expect(quiet.container.textContent).toContain(note);
+    cleanup();
+    const idle = structuredClone(FULL);
+    idle.outcomes.running = 0;
+    expect(renderPage(idle).container.textContent).not.toContain(note);
+  });
+
   it("renders the breakdown bars and the daily chart", () => {
     const { container, getByText, getAllByText } = renderPage(FULL);
     expect(getByText("By backend")).toBeTruthy();
