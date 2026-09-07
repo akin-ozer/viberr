@@ -2981,7 +2981,19 @@ by rewriting those paragraphs:*
     when the instant is unknown) is held, recorded on the timeline with an audit row, and
     re-scheduled for the reopen time; the provider's wall-clock sentence is read in the
     process's own time zone, the zone the CLI printed it in. A hold is not a decision
-    packet and costs no operator turn. (Pass 35: (b) in `run-service.server.ts`
+    packet and costs no operator turn. As shipped, refined in this pass's own review: the
+    hold is scoped to the account the dispatch would bill (ruling 146 — a refusal is a
+    statement about ONE person's account, so a record naming another person holds nothing
+    here, and a record naming nobody holds every dispatch on that backend); every dispatch
+    door reads it through one `assertDispatchNotHeld`, the resume branch of an `@mention`
+    included, ahead of the MCP pre-flight and skill re-mount a refused run would pay for; a
+    repeat dispatch inside one window reuses the pending `run-agent` occurrence instead of
+    minting a second, so a window costs one retry per profile and a newer directive replaces
+    its prompt; `operatorDispatchAgent` answers a held dispatch as `noop` rather than
+    throwing, because the Codex plan executor abandons the rest of a paid turn on a throw;
+    and resolving the quota or auth packet option that states the window has reset (or that
+    the account changed) retires that backend's exhaustion record, so the option's own
+    promise can be kept. (Pass 35: (b) in `run-service.server.ts`
     `canAdmit`/`drainRunQueue`, `instance-settings.server.ts` `coordinationLane`,
     `org-settings-page.tsx` `RunConcurrencyControl`; (a) and (c) in the operator actions
     and the backend-quota hold of the same pass.)
@@ -3071,44 +3083,6 @@ by rewriting those paragraphs:*
     pass; the display half is `deriveDisplayReadiness`'s fourth argument, `carriedHold`, read
     from the STORED readiness and the dependency list, so a diagnostics floor and a dependency
     hold keep reading blocked.)
-
-*(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
-on this list: they are **rulings 109–120** above. Everything still listed here predates
-that pass and remains unnumbered.)*
-
-## Route map
-
-```
-/login  /logout  /api/auth/*            (better-auth, incl. OAuth callbacks)
-/                                       → home (project list)
-/projects                               → home (bare /projects is not a 404 — N5)
-/projects/:slug                         → redirect to board
-/projects/:slug/board  /review  /controller  /agents  /policy  /github  /activity  /settings
-/projects/:slug/tasks/:key
-/projects/:slug/tasks/:key/attachments/:file   (R19-19 — member-only, raw bytes)
-/org/settings                           (org admin, tabbed — incl. the Controller tab)
-/org/settings/audit-export              (org admin — CSV/JSON audit download, pass 26)
-/controller                             (ruling 99 — every signed-in user)
-/insights                               (org admin — run analytics, pass 29)
-/profile   /notifications   /notifications/read   /prefs/theme
-/resources/events  (SSE)   /resources/health   /resources/run-log
-/resources/search   /resources/session-export   /resources/model-catalog
-/resources/controller                   (ruling 121 — the dock's GET view + POST send)
-/resources/backend-login                (ruling 127 — the signed-in viewer's own sign-in session)
-```
-
-*(Corrected 2026-08-06, pass 19, against `app/routes.ts`: `/projects`, `/notifications/read`,
-`/prefs/theme` and `/resources/search` — the ⌘K palette query from ruling 23 / R15-5 — ship but
-were never added here.)*
-
-*(Corrected 2026-09-01: `/org/settings/audit-export` and `/insights` ship and were missing. The
-per-route guard and form-intent inventory is in [`../ui/surfaces.md`](../ui/surfaces.md).)*
-
-*(Updated 2026-09-02 for ruling 127, branch `claude/per-user-codex-auth-difdnn`:
-`/resources/backend-login` — `GET ?backend=claude|codex` behind `requireUser`, answering the
-CALLER's own live sign-in session plus the public half of their `userBackendHealth` (no
-`verification` verdict, no ids), so the Profile poller stops when the backend flips to
-available. It reads nobody else's session.)*
 
 158. **No process but the server opens a live root's `projection.sqlite`; every other
     reader copies first (owner, 2026-09-06, Q35-14; pass 35 F35-9).** The writer lock
@@ -3248,9 +3222,12 @@ available. It reads nobody else's session.)*
     always answerable
     (the operator's withdrawal stamps nothing); a reopen on GitHub drops the closure with
     the closed state. **(d)** `performDelivery` reports `closed_by_human` on the task
-    (one sentence, `closedByHumanDeliveryText`, on the operator's reply, the Deliver
-    control and the timeline), and the `deliver_for_review` description says a closed
-    PR is a person's decision and names the packet. (`openTaskPr` in
+    (one sentence, `closedByHumanDeliveryText`, on the operator's reply and the timeline;
+    the Deliver control states the same refusal before the click from its own client-side
+    `CLOSED_PR_DELIVERY_REFUSAL`, a hand-kept pair with the server's sentence in the shape
+    `DIVERGED_PUSH_REFUSAL` already set, since the server's lives in a `.server` module),
+    and the `deliver_for_review` description says a closed PR is a person's decision and
+    names the packet. (`openTaskPr` in
     `app/server/github/pr-open.server.ts`; `readTerminalPrByNumber` and `readPrCloser`
     in `app/server/github/pr-linker.server.ts`; the closure stamp in
     `app/server/github/github-reconciler.server.ts`; `closedByHumanDeliveryText` and the
@@ -3313,9 +3290,15 @@ available. It reads nobody else's session.)*
     GitHub-fact half of the gate (an unpushed delivered revision, ruling 135, then a
     conflicting pull request) is one function, `mergeReadinessRefusal`, and the whole stack
     reaches the operator as `get_task`'s `notAcceptableReason` beside `pr.mergeable`: a PR
-    the gate would refuse cannot be recommended for acceptance, and the operator may not
-    move a task into the acceptance-boundary stage while it stands (Merge means mergeable;
-    the task stays at the work stage where the conflict packet is the path). The task page
+    the gate would refuse cannot be recommended for acceptance. The MOVE into the
+    acceptance-boundary stage reads the pull-request half ALONE (`mergeStageEntryRefusal`
+    over `mergeReadinessRefusal`: a conflicting pull request, or an unpushed delivered
+    revision), never `notAcceptableReason` (corrected in this pass's review: that field is
+    `acceptanceRefusalFor`, whose third gate is "this task is not at the boundary yet", so
+    it stands on every task short of the acceptance stage and its own remedy is that very
+    move; the three shipped texts that keyed the move on it told the operator a legal,
+    required move would be refused). Merge means mergeable: while the pull request
+    conflicts the task stays at the work stage where the conflict packet is the path. The task page
     reads the same verdict: the recommendation card keeps its Apply (ruling 147's shape)
     and prints the refusal as a keyed alert, the accept dialog prints it above a disabled
     confirm, the GitHub card wears the "conflicts" pill, and the reconciler withdraws a
@@ -3330,13 +3313,26 @@ available. It reads nobody else's session.)*
     date once, at acceptance time, and merged in the same ceremony"), except on a PR
     GitHub already reports conflicting, where its job is to record the conflict list and
     open the packet whose redirect carries that list to the resolver.
+    (`mergeReadinessRefusal` and the acceptance ceremony's refresh in
+    `app/server/tasks/task-actions.server.ts`; `mergeStageEntryRefusal` and the snapshot's
+    `notAcceptableReason` in `app/server/tasks/operator-actions.server.ts`; the tool texts
+    in `operator-toolkit.server.ts` and `app/server/seed/assets/operator.definition.md`;
+    the refusal alert and the disabled confirm in `app/features/task-detail/`
+    `decision-packet.tsx` and `task-detail-page.tsx`; the acceptance-time refusal of
+    `update_branch_from_base` in `app/server/github/update-branch-operator.server.ts`.)
 
 163. **A revision that changes after a verdict returns the task to the review stage
     (owner, 2026-09-06, Q35-19; F35-13).** No task waits at Merge for a verdict nobody can
-    give there. "The review stage" is where the task's required reviewers can run
-    (`verdictStageFor`: the nearest earlier stage where a verdict-capable engagement is
-    eligible; the acceptance-boundary stage when none is deployed; nothing when one is
-    eligible where the task stands). Three doors return the task automatically, each with
+    give there. "The review stage" is where the task's required reviewers can run, and only
+    a task standing AT OR PAST the structural review stage is ever moved (`verdictStageFor`,
+    narrowed in this pass's review: null before that stage, because the task is still doing
+    the work; null at the terminal stage; null when a required reviewer is eligible where
+    the task stands; otherwise the nearest EARLIER stage where one is eligible; and when no
+    required reviewer is deployed at all, the structural acceptance-boundary stage, and only
+    while the task stands past it. Without the floor the backward scan reached from a WORK
+    stage: the seeded reviewer declares Implementation and Review, so a delivery at a
+    Validation stage between them walked the task back to Implementation, a stage that
+    reviews nothing). Three doors return the task automatically, each with
     a `transition` event and a `task.transition` audit row: the operator's backward move
     on `validation: changed` (a rework move it performs itself, offered in
     `reworkStages` beside the `failing` license of R7-4), the resolution of a
@@ -3344,7 +3340,11 @@ available. It reads nobody else's session.)*
     saying so before the person decides), and a delivery that moved the PR's head on a
     changed or failing revision (`via: delivery`). The operator's acceptance refusal on
     such a task names the way back: the rework move, and the person's stage picker on the
-    task page.
+    task page. (`verdictStageFor` in `app/shared/workflow/verdict-stage.ts`, read by the
+    operator's rework move and acceptance refusal in
+    `app/server/tasks/operator-actions.server.ts`, by the delivery arm in
+    `app/server/tasks/task-actions.server.ts`, and by the conflict packet's redirect in
+    `app/server/github/update-branch-operator.server.ts`.)
 
 164. **An option title is a promise the resolution keeps (pass 35, F35-14).** A packet
     option is resolved by its `kind` and never by its English title (ruling 7), so a title
@@ -3371,4 +3371,85 @@ available. It reads nobody else's session.)*
     agent profile is refused, and the refusal names the kind that performs it, or, for a
     profile, the Agents surface a person uses (ruling 85 already says the operator points
     at that configuration and never changes it). The toolkit description and the operator
-    definition carry the same sentence.
+    definition carry the same sentence. As shipped the guard reads the option's own ACT,
+    not its vocabulary, and it runs on both sides of the promise (refined in this pass's
+    review): the movement verbs bind to one of THIS project's stage names, so the delivery
+    idioms ("send the fix to review", "advance it") pass and a bare "send it back to the
+    specialist" is not a move; the ruling-163 rework redirect is exempt, because it really
+    does return the task to the verdict stage and says so; `toStage` is refused on any kind
+    but `move_stage`, whose resolution reads no stage; a `move_stage` naming the stage the
+    task already stands at is refused as a move that would move nothing; a `move_stage`
+    whose TITLE names a stage other than its own `toStage` is refused, since the card shows
+    the words and the resolution reads the id; and `force_accept` is refused on a task whose
+    pull request a person closed without merging, which is decided rather than wedged
+    (R16-3) and which no override can undo, the refusal naming `archive_task` and a
+    delivering redirect instead. (`misdirectedOptionPromise`, `moveStagePromiseMismatch` and
+    `SEND_BACK_OPTION_KINDS` in `app/shared/workflow/packet-options.ts`; the authoring guard
+    in `operatorOpenPacket` and the two new kinds' resolution in
+    `app/server/tasks/task-actions.server.ts` `resolvePacket`.)
+
+*(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
+found five places where a page or a sentence said something the code did not. Each is
+corrected on the page named; the note stays here so a reader who meets the old wording, in
+a ledger or in an older branch, can see when it stopped being true. Drift ids are the
+discovery index's, `planning/discovery-2026-09-06-pass35-k9s-clone/reference/INDEX.md`.)*
+
+- **D14** — `docs/README.md` said the controller had "38 tools" while 39 were registered
+  and `controller-and-goals.md` said 39. Ruling 153 adds `schedule_task_action` and
+  `cancel_task_schedule`, so the number is now **41** and both pages say it; the count is
+  `grep -c "^  add(" app/server/controller/controller-toolkit.server.ts`.
+- **D22** — `docs/architecture/data-model.md`'s `instance_settings` row named quota keys the
+  writer never used. It now names the three live keys as `backend-quota.server.ts` writes
+  them (`backendRateLimit.<backend>`, `backendQuotaExhausted.<backend>` with `resetsAt` and
+  its `resetsAtPrecision`, and `backendCredentialRefused.<backend>`), each carrying the
+  account it billed since ruling 130(d).
+- **D40** — no page said `users.github_handle` had exactly ONE writer, GitHub OAuth
+  sign-in, so ruling 68's human-approval verdict was unreachable on a deployment that signs
+  in locally. Ruling 154 gives the column its second writer and the org admin's door;
+  `github-delivery.md` §10 records the correction, and §5 now lists every writer.
+- **D88** — the `unlinked_handle` refusal told people to "link it on their profile", while
+  the profile card on an OAuth-less deployment offered nothing to connect. Ruling 154's
+  sentence names both doors: Org settings, Users & access, and the profile where GitHub
+  sign-in is configured.
+- **D97** — the stage-eligibility refusal printed the raw stage id (`impl`) where a person
+  reads a name. `stageRefusalSentence` (`app/server/tasks/specialist-run.server.ts`) resolves
+  both the task's stage and the profile's declared stages through the board, which is also
+  what makes F35-5's "Mention not started" timeline note readable.
+
+*(Added 2026-09-02, pass 32 — the pass-32 owner decisions were promoted rather than left
+on this list: they are **rulings 109–120** above. Everything still listed here predates
+that pass and remains unnumbered.)*
+
+## Route map
+
+```
+/login  /logout  /api/auth/*            (better-auth, incl. OAuth callbacks)
+/                                       → home (project list)
+/projects                               → home (bare /projects is not a 404 — N5)
+/projects/:slug                         → redirect to board
+/projects/:slug/board  /review  /controller  /agents  /policy  /github  /activity  /settings
+/projects/:slug/tasks/:key
+/projects/:slug/tasks/:key/attachments/:file   (R19-19 — member-only, raw bytes)
+/org/settings                           (org admin, tabbed — incl. the Controller tab)
+/org/settings/audit-export              (org admin — CSV/JSON audit download, pass 26)
+/controller                             (ruling 99 — every signed-in user)
+/insights                               (org admin — run analytics, pass 29)
+/profile   /notifications   /notifications/read   /prefs/theme
+/resources/events  (SSE)   /resources/health   /resources/run-log
+/resources/search   /resources/session-export   /resources/model-catalog
+/resources/controller                   (ruling 121 — the dock's GET view + POST send)
+/resources/backend-login                (ruling 127 — the signed-in viewer's own sign-in session)
+```
+
+*(Corrected 2026-08-06, pass 19, against `app/routes.ts`: `/projects`, `/notifications/read`,
+`/prefs/theme` and `/resources/search` — the ⌘K palette query from ruling 23 / R15-5 — ship but
+were never added here.)*
+
+*(Corrected 2026-09-01: `/org/settings/audit-export` and `/insights` ship and were missing. The
+per-route guard and form-intent inventory is in [`../ui/surfaces.md`](../ui/surfaces.md).)*
+
+*(Updated 2026-09-02 for ruling 127, branch `claude/per-user-codex-auth-difdnn`:
+`/resources/backend-login` — `GET ?backend=claude|codex` behind `requireUser`, answering the
+CALLER's own live sign-in session plus the public half of their `userBackendHealth` (no
+`verification` verdict, no ids), so the Profile poller stops when the backend flips to
+available. It reads nobody else's session.)*
