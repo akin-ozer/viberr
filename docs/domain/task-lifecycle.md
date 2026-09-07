@@ -537,9 +537,11 @@ entry is now done is released), and the board renders "accepted".
 
 **The review queue's membership** (`review-queue.server.ts`, U35-5, pass 35) has two
 halves with two rules. "Waiting on your acceptance" is about the boundary: a
-non-archived task at the resolved review stage (the stage with the edge into the
-terminal stage) that waits on a human, whose acceptance nothing in the stack above
-refuses, for a viewer who may accept it (maintainer+, or the owner). "Still in review"
+non-archived task standing at a stage acceptance is legal from (the acceptance
+boundary the workflow graph declares, the same predicate the accept writer and the
+board gate use, so a board with several edges into the terminal stage keeps them all)
+that waits on a human, whose acceptance nothing in the stack above refuses, for a
+viewer who may accept it (maintainer+, or the owner). "Still in review"
 is about review work, which the board defines by engagements and verdicts rather than
 by one stage id: every other non-archived, non-terminal task that sits at the review
 stage, or carries a pull request open for review (`pr.state: review`), or has a
@@ -547,7 +549,11 @@ required reviewer (`verdictCapable`) whose verdict on the current revision is mi
 (`validation: changed`) or is request_changes (`failing`). On the default board the two
 rules coincide at Review; on a board whose reviews happen at Validation and Review while
 the edge into Done leaves Merge, the second rule is what lists the work. The row names
-its stage ("Review in progress at Validation · PR #8 · awaiting verdict"), the header
+its stage ("Review in progress at Validation · PR #8 · awaiting verdict"), with a live
+pull-request fact taking the place of the verdict words when there is one ("Review in
+progress at Validation · PR #8 does not carry the delivered revision 385047c. Deliver
+the branch to push it." — ruling 135, and the same for a conflict or a drifted head),
+the header
 reads "N in review · M waiting on your acceptance", and the workspace rail badge is the
 queue's `total`. Nothing before the boundary is ever offered for acceptance.
 

@@ -72,7 +72,7 @@ describe("/projects/:slug/review", () => {
     expect(result.working.map((t) => t.key)).toEqual(["VIB-142", "VIB-145", "VIB-160"]);
 
     const vib160 = result.working.find((t) => t.key === "VIB-160")!;
-    expect(vib160.atReviewStage).toBe(false);
+    expect(vib160.atAcceptanceBoundary).toBe(false);
     expect(vib160.stageName).toBe("In Progress");
     expect(reviewRowSub(vib160)).toBe(
       "Review in progress at In Progress · changes requested",
@@ -126,7 +126,7 @@ describe("/projects/:slug/review", () => {
       key: "VIB-999",
       title: "t",
       stageName: "Review",
-      atReviewStage: true,
+      atAcceptanceBoundary: true,
       priority: "normal",
       labels: [],
       dueDate: null,

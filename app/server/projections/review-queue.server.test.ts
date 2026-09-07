@@ -969,7 +969,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     at: "2026-09-06T11:00:00.000Z",
   });
 
-  function seed() {
+  function seed(workflow: typeof WORKFLOW = WORKFLOW) {
     const store = setupTestStore(ctx);
     writeProject(store.dataRoot, {
       name: "k9s clone",
@@ -979,7 +979,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
       taskPrefix: "KNC",
       nextTaskNumber: 20,
       stages: STAGES,
-      workflow: WORKFLOW,
+      workflow,
       members: [{ userId: store.users.arda.id, role: "admin" }],
       agents: [],
       credentialPolicy: null,
@@ -1070,7 +1070,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     const row = q.working.find((t) => t.key === "KNC-8")!;
     expect(row).toBeTruthy();
     expect(row.stageName).toBe("Validation");
-    expect(row.atReviewStage).toBe(false);
+    expect(row.atAcceptanceBoundary).toBe(false);
     expect(row.pr).toMatchObject({ number: 8, state: "review" });
     expect(row.validation).toBe("changed");
     expect(reviewRowSub(row)).toBe(
@@ -1114,8 +1114,32 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
       viewerUserId: store.users.arda.id,
     });
     expect(q.ready.map((t) => t.key)).toEqual(["KNC-3"]);
-    expect(q.ready[0]!.atReviewStage).toBe(true);
+    expect(q.ready[0]!.atAcceptanceBoundary).toBe(true);
     expect(q.ready[0]!.stageName).toBe("Merge");
     expect(q.working.map((t) => t.key)).toEqual(["KNC-5", "KNC-7", "KNC-8", "KNC-9"]);
+  });
+
+  it("the acceptance half is the graph's boundary, not the first stage with an edge into Done", () => {
+    // A board may declare SEVERAL edges into the terminal stage — the acceptance
+    // writer allows every one of them (`acceptanceStageBlockedReason`), and the
+    // board offers Accept on every one of them (`atAcceptanceBoundary`).
+    // `resolveStageRoles` names only the FIRST as `reviewId`, so keying the
+    // queue's ready half on `stage === reviewId` filed a task the server would
+    // accept, and the board offers Accept on, under "Still in review" with a
+    // "Review in progress" subline.
+    // CANARY: set the row's `atAcceptanceBoundary` from `t.stage === reviewId`
+    // again — KNC-3 drops out of `ready` and reads as still in review.
+    const store = seed([
+      ...WORKFLOW.filter((w) => w.to !== "done"),
+      edge("review", "done", "human"),
+      edge("merge", "done", "human"),
+    ]);
+    const q = getReviewQueue(store.db, "k9c", {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    expect(q.ready.map((t) => t.key)).toEqual(["KNC-3"]);
+    expect(q.ready[0]!.stageName).toBe("Merge");
+    expect(q.working.map((t) => t.key)).not.toContain("KNC-3");
   });
 });

@@ -82,11 +82,14 @@ export interface ReviewQueueRow {
    *  it ("Review in progress at Validation"), because the rows no longer share
    *  a stage. */
   stageName: string;
-  /** U35-5: true when the task sits at the project's resolved review stage
-   *  (`reviewId`), the only stage acceptance is legal FROM. `ready` requires
-   *  it; the subline builder picks the boundary sentences for it and the
-   *  "Review in progress at <stage>" sentence otherwise. */
-  atReviewStage: boolean;
+  /** U35-5: true when acceptance is legal FROM the stage the task sits at —
+   *  the graph's own answer (`isAtAcceptanceBoundary`, the predicate behind
+   *  `acceptanceStageBlockedReason` and the board's accept gate), NOT
+   *  `stage === reviewId`: a board may declare several edges into the terminal
+   *  stage and `reviewId` is only the first of them. `ready` requires it; the
+   *  subline builder picks the boundary sentences for it and the "Review in
+   *  progress at <stage>" sentence otherwise. */
+  atAcceptanceBoundary: boolean;
   /** F26-14: lightweight triage metadata carried to the acceptance boundary,
    *  the same values the board card reads. */
   priority: TaskPriority;
@@ -262,7 +265,11 @@ export function getReviewQueue(
       title: t.title,
       // U35-5: the row names its stage, since the rows no longer share one.
       stageName: stageName(stages, t.stage),
-      atReviewStage: t.stage === reviewId,
+      // The summary already carries the graph's answer, derived server-side
+      // through the same `resolveStageRoles` the acceptance writer uses; a
+      // second, narrower predicate here filed a legally acceptable task under
+      // "Still in review" while the board offered Accept on the same row.
+      atAcceptanceBoundary: t.atAcceptanceBoundary,
       // F26-14: carry the triage metadata to the review queue (same source the
       // board card reads), so a high/urgent or overdue task is visible at the
       // acceptance boundary too.
@@ -352,11 +359,12 @@ export function getReviewQueue(
   // (closed unmerged) — a rejected-PR task can't be accepted (its work was
   // declined); it needs a rework/reopen/archive decision, so it belongs in
   // "Still in review", not the acceptance panel (NEW-1).
-  // U35-5: only the review stage is a stage acceptance is legal FROM
-  // (`acceptanceStageBlockedReason`, task-actions.server.ts); review work at an
-  // earlier stage is listed, never offered for acceptance.
+  // U35-5: only a stage acceptance is legal FROM earns the acceptance half
+  // (`acceptanceStageBlockedReason`, task-actions.server.ts, whose predicate
+  // this is); review work before the boundary is listed, never offered for
+  // acceptance.
   const isReady = (r: ReviewQueueRow): boolean =>
-    r.atReviewStage &&
+    r.atAcceptanceBoundary &&
     r.waiting === "human" &&
     canAccept(r.key) &&
     r.blockReason === null &&

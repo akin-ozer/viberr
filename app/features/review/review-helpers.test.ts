@@ -6,7 +6,7 @@ const base: ReviewRowView = {
   key: "VIB-1",
   title: "t",
   stageName: "Review",
-  atReviewStage: true,
+  atAcceptanceBoundary: true,
   priority: "normal",
   labels: [],
   dueDate: null,
@@ -220,7 +220,7 @@ describe("ruling 138: reviewRowSub on a decided edit_goal packet", () => {
       key: "VIB-9",
       title: "t",
       stageName: "Review",
-      atReviewStage: true,
+      atAcceptanceBoundary: true,
       priority: "normal" as const,
       labels: [],
       dueDate: null,
@@ -245,14 +245,14 @@ describe("ruling 138: reviewRowSub on a decided edit_goal packet", () => {
  * review PR, or a required reviewer's verdict outstanding on the current
  * revision) describes where it is and what the verdict state is, instead of
  * the boundary sentences that assume the task sits at the review stage.
- * Canary: drop the `!t.atReviewStage` arm in `reviewRowSub` and every case
+ * Canary: drop the `!t.atAcceptanceBoundary` arm in `reviewRowSub` and every case
  * below falls through to the block reason / PR / placeholder sentences.
  */
 describe("U35-5: reviewRowSub for review work before the boundary", () => {
   const atValidation: ReviewRowView = {
     ...base,
     stageName: "Validation",
-    atReviewStage: false,
+    atAcceptanceBoundary: false,
     pr: { number: 8, state: "review" },
     validation: "changed",
     blockReason: "Waiting on 1 required reviewer approval of the current revision.",
@@ -292,8 +292,55 @@ describe("U35-5: reviewRowSub for review work before the boundary", () => {
   });
 
   it("a row AT the boundary keeps the boundary sentences", () => {
-    expect(reviewRowSub({ ...atValidation, stageName: "Review", atReviewStage: true })).toBe(
+    expect(reviewRowSub({ ...atValidation, stageName: "Review", atAcceptanceBoundary: true })).toBe(
       "Waiting on 1 required reviewer approval of the current revision.",
+    );
+  });
+
+  it("a live PR fact outranks the in-progress sentence, and the stage still says where", () => {
+    // Ruling 135 names the review row subline as a consumer of the unpushed
+    // revision; ruling 132 the drift sentence; P14-LV-07 the conflict. These
+    // rows are exactly where they fire (rule (b) admits any non-terminal task
+    // with an open PR), and nothing else on the row renders them.
+    // CANARY: rank `actionablePrSub` below the "Review in progress" sentence
+    // again in `reviewInProgressSub` — all three read "· PR #8 · awaiting
+    // verdict" and the person is never told what to do.
+    expect(
+      reviewRowSub({
+        ...atValidation,
+        pr: {
+          number: 8,
+          state: "review",
+          headSha: "b".repeat(40),
+          unpushedRevision: {
+            revisionSha: "385047c" + "0".repeat(33),
+            prHeadSha: "b".repeat(40),
+            relation: "behind",
+          },
+        },
+      }),
+    ).toBe(
+      "Review in progress at Validation · PR #8 does not carry the delivered revision 385047c. Deliver the branch to push it.",
+    );
+    expect(
+      reviewRowSub({
+        ...atValidation,
+        pr: { number: 8, state: "review", mergeable: "conflicting" },
+      }),
+    ).toBe(
+      "Review in progress at Validation · PR #8 conflicts with the base branch. GitHub can't merge it until the branch is rebased.",
+    );
+    expect(
+      reviewRowSub({
+        ...atValidation,
+        pr: {
+          number: 8,
+          state: "review",
+          revisionDrift: { headSha: "c".repeat(40), authored: 2, baseRefresh: null },
+        },
+      }),
+    ).toBe(
+      "Review in progress at Validation · PR #8 is open. 2 authored commits since review merge unreviewed.",
     );
   });
 });
