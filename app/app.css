@@ -1327,6 +1327,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .detail {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
+  /* Owner, 2026-09-08: three explicit rows. Row 1 is the head (title and
+     goal, both columns); row 2 opens with the packet in the main column and
+     the side column beside it; row 3 is the rest of the main column — `1fr`,
+     so a side column taller than packet + main grows THIS row and never the
+     packet's (an `auto` row 3 would split the surplus between the two rows
+     and open a void under the packet). */
+  grid-template-rows: auto auto 1fr;
   gap: 1rem;
   padding: 1rem 1.5rem var(--dock-clear);
   overflow-y: auto;
@@ -1377,8 +1384,15 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   min-width: 0; max-width: 980px;
   grid-column: 1 / -1; grid-row: 1;
 }
-.detail-main { display: flex; flex-direction: column; gap: 1rem; min-width: 0; grid-column: 1; grid-row: 2; }
-.detail-side { display: flex; flex-direction: column; gap: 1rem; grid-column: 2; grid-row: 2; }
+/* Owner, 2026-09-08: the open packet is the main column's first object — the
+   same width and left edge as the panels under it — not a banner across both
+   columns that pushed the side column under it. The side column spans rows 2
+   and 3: with a packet it rises to sit beside the packet, without one it sits
+   beside the main column, which auto-places into row 2 (no packet) or row 3
+   (under the packet) — no `:has()`, no phantom row gap. */
+.detail-packet { grid-column: 1; grid-row: 2; min-width: 0; }
+.detail-main { display: flex; flex-direction: column; gap: 1rem; min-width: 0; grid-column: 1; grid-row: auto; }
+.detail-side { display: flex; flex-direction: column; gap: 1rem; grid-column: 2; grid-row: 2 / span 2; }
 
 .panel {
   border: 1px solid var(--hairline);
@@ -5189,19 +5203,21 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 @media (max-width: 1100px) {
   /* forms */
   .field-row { grid-template-columns: 1fr; }
-  /* task detail: the three regions stack in source order, the side panels
-     go side-by-side under the head */
-  .detail { grid-template-columns: 1fr; }
+  /* task detail: the four regions stack in source order, the side panels
+     go side-by-side under the packet */
+  .detail { grid-template-columns: 1fr; grid-template-rows: none; }
   /* D2 (pass-20) / U7 (pass-21) / U35-2 (pass-35): the stack is the DOM order
-     (head: title, goal and the open packet; side: Current state with the
-     primary "Accept completion → Done" button, GitHub, Details, Permissions;
-     main: runs and the timeline), so the 1-up stack needs no `order` at all:
-     drop the desktop cell placement and the three regions fall into the single
-     column in source order. Pass 20's `order: -1` did this visually and left
-     the DOM (hence the screen reader and the keyboard) reading timeline-first,
-     which is the half of D2 U7 reopened. Nothing here may reintroduce `order`:
-     it would re-split what the eye and the focus ring see. */
+     (head: title and goal; packet: the open decision; side: Current state
+     with the primary "Accept completion → Done" button, GitHub, Details,
+     Permissions; main: runs and the timeline), so the 1-up stack needs no
+     `order` at all: drop the desktop cell placement and the four regions fall
+     into the single column in source order. Pass 20's `order: -1` did this
+     visually and left the DOM (hence the screen reader and the keyboard)
+     reading timeline-first, which is the half of D2 U7 reopened. Nothing here
+     may reintroduce `order`: it would re-split what the eye and the focus
+     ring see. */
   .detail-head,
+  .detail-packet,
   .detail-main,
   .detail-side { grid-column: 1; grid-row: auto; min-width: 0; }
   .detail-side { flex-direction: row; flex-wrap: wrap; }

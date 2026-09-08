@@ -653,27 +653,33 @@ export function TaskDetailPage({
       tabIndex={-1}
       data-screen-label={"Task " + task.key}
     >
-      {/* U35-2 (pass 35): three regions, and source order IS the reading order
-          at every width, so a screen reader, the Tab key and the one-column
-          phone stack all meet the page in the same sequence. Below 1100px the
-          grid placement drops (app.css) and the DOM order is the stack:
-            1. `.detail-head`: the task's name and goal, then the open decision
-               packet, the page's most important object. Before this the side
+      {/* U35-2 (pass 35): source order IS the reading order at every width,
+          so a screen reader, the Tab key and the one-column phone stack all
+          meet the page in the same sequence. Below 1100px the grid placement
+          drops (app.css) and the DOM order is the stack:
+            1. `.detail-head`: the task's name and goal. Before this the side
                rail came first (U7 chose it for "current state, latest packet,
                next action, then the timeline"), but the title and the packet
                lived in the main column, so on a 390px viewport a person read
                the GitHub card, Current state, Details and Permissions before
                the task's name (y=1659 on KNC-6) or the question it asked
                (y=2070).
-            2. `.detail-side`: Current state first (it carries the next action
+            2. `.detail-packet`: the open decision packet, the page's most
+               important object. Owner, 2026-09-08: its own region, not part of
+               the head — on desktop it sits at the top of the MAIN column, the
+               same width as the panels under it, and the side column rises to
+               sit beside it (a head-wide packet pushed Current state under
+               the packet). Rendered only while a packet is open, so without
+               one the two columns meet at the same row as before.
+            3. `.detail-side`: Current state first (it carries the next action
                and the acceptance button), then the GitHub trace, Details and
                Permissions.
-            3. `.detail-main`: the live run, diagnostics, continuity,
+            4. `.detail-main`: the live run, diagnostics, continuity,
                recommendations, the run controls, the console and the timeline.
-          On desktop `.detail-head` spans both columns and the two columns
-          keep their cells by PLACEMENT (`grid-column`/`grid-row` in app.css),
-          never by `order`, which U7 found re-splits what the eye and the focus
-          ring see (WCAG 2.2 SC 1.3.2 / 2.4.3). */}
+          On desktop `.detail-head` spans both columns and the regions keep
+          their cells by PLACEMENT (`grid-column`/`grid-row` in app.css), never
+          by `order`, which U7 found re-splits what the eye and the focus ring
+          see (WCAG 2.2 SC 1.3.2 / 2.4.3). */}
       <div className="detail-head">
         <TaskHero
           task={task}
@@ -687,7 +693,10 @@ export function TaskDetailPage({
           // field), not the goal the decision asked to replace.
           pendingGoalDraft={task.packet?.goalDraft ?? null}
         />
-        {task.packet && (
+      </div>
+
+      {task.packet && (
+        <div className="detail-packet">
           <DecisionPacket
             packet={task.packet}
             busy={resolveBusy}
@@ -742,8 +751,8 @@ export function TaskDetailPage({
               setEditGoalSignal((n) => n + 1);
             }}
           />
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="detail-side">
         <CurrentStatePanel

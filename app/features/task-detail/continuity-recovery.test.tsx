@@ -545,12 +545,15 @@ describe("task detail wiring", () => {
     expect(packet).not.toBeNull();
     expect(firstEventRow).not.toBeNull();
     // U35-2 (pass 35): the open packet is the page's most important object and
-    // lives in `.detail-head` with the title, above every column, so a phone
+    // follows the title directly — its own `.detail-packet` region (owner,
+    // 2026-09-08) right after the head, ahead of every column, so a phone
     // reads the question before the metadata. D18 kept execution TRUTH ahead
-    // of the decision it may explain; that is now the head-then-main order the
-    // whole page follows, and the panel still precedes every steering action
-    // and history — "status before history / decisions before discussion".
-    expect(packet.closest(".detail-head")).not.toBeNull();
+    // of the decision it may explain; that is now the packet-then-main order
+    // the whole page follows, and the panel still precedes every steering
+    // action and history — "status before history / decisions before
+    // discussion".
+    expect(packet.closest(".detail-packet")).not.toBeNull();
+    expect(packet.closest(".detail-head")).toBeNull();
     expect(panel.closest(".detail-main")).not.toBeNull();
     expect(
       packet.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING,

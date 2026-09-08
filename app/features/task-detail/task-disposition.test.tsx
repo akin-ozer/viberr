@@ -2521,7 +2521,9 @@ describe("D6: consequential actions confirm before they act", () => {
  * and the open decision packet lived in the main column, so a 390px viewport
  * stacked the GitHub card, Current state, Details and Permissions ABOVE the
  * title (y=1659 on KNC-6) and the question the packet asked (y=2070). The page
- * is three regions now: `.detail-head` (title, goal, the open packet), then
+ * is four regions now: `.detail-head` (title and goal), `.detail-packet` (the
+ * open packet — owner, 2026-09-08: its own region so the desktop paint can put
+ * it at the top of the main column with the side column beside it), then
  * `.detail-side` (Current state first, with the next action), then
  * `.detail-main` (runs and the timeline); placed by grid cell in app.css, so the
  * desktop paint keeps two columns while one order serves both. This asserts the
@@ -2549,19 +2551,25 @@ describe("U7 / U35-2: the task detail's reading order matches its stacking rule"
     const detail = container.querySelector(".detail")!;
     const regions = Array.from(detail.children)
       .map((el) => el.className)
-      .filter((c) => c === "detail-head" || c === "detail-main" || c === "detail-side");
-    expect(regions).toEqual(["detail-head", "detail-side", "detail-main"]);
+      .filter((c) => c.startsWith("detail-"));
+    expect(regions).toEqual(["detail-head", "detail-packet", "detail-side", "detail-main"]);
 
     const head = detail.querySelector(".detail-head")!;
+    const packetRegion = detail.querySelector(".detail-packet")!;
     const side = detail.querySelector(".detail-side")!;
     const main = detail.querySelector(".detail-main")!;
-    // The head carries the task's name and the decision it asks for…
+    // The head carries the task's name; the packet region carries the decision
+    // it asks for — and nothing else, so the grid can place it alone.
     expect(head.querySelector(".task-hero h1")?.textContent).toBe("Compress long-running task timelines");
-    expect(head.querySelector(".packet")).not.toBeNull();
-    expect(head.textContent).toContain("Which spec wins?");
+    expect(head.querySelector(".packet")).toBeNull();
+    expect(packetRegion.querySelector(".packet")).not.toBeNull();
+    expect(packetRegion.children).toHaveLength(1);
+    expect(packetRegion.textContent).toContain("Which spec wins?");
     expect(main.querySelector(".packet")).toBeNull();
-    // …the head precedes the side rail, and the side rail precedes the main column.
-    expect(head.compareDocumentPosition(side) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // …the head precedes the packet, the packet precedes the side rail, and
+    // the side rail precedes the main column.
+    expect(head.compareDocumentPosition(packetRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(packetRegion.compareDocumentPosition(side) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(side.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // The consequential action really is in the region that comes second…
     expect(side.textContent).toContain("Accept completion → Done");

@@ -1036,12 +1036,17 @@ describe("app.css breakpoints (P16-F8)", () => {
    * to any region would silently reopen that split, so the sheet is pinned
    * against it: the desktop arrangement must come from placement, and the
    * stacked one from source order. Pass 35 (U35-2) added the head region: the
-   * title, goal and open packet span both columns on row 1, so a phone reads
-   * them before the metadata panels instead of two screens after them.
+   * title and goal span both columns on row 1, so a phone reads them before
+   * the metadata panels instead of two screens after them. Owner, 2026-09-08:
+   * the open packet is its own region right after the head — on desktop it
+   * opens the MAIN column (row 2, column 1) and the side column spans rows 2–3
+   * to sit beside it, while main auto-places under the packet or, without
+   * one, into row 2 beside the side column. A head-wide packet had pushed
+   * Current state under the packet instead.
    */
   it("U7 / U35-2: the detail regions are placed by grid cell — never by `order`", () => {
-    const rules = CODE.match(/\.detail-(head|main|side)[^{]*\{[^}]*\}/g) ?? [];
-    expect(rules.length, "all three regions must still be styled").toBeGreaterThan(2);
+    const rules = CODE.match(/\.detail-(head|packet|main|side)[^{]*\{[^}]*\}/g) ?? [];
+    expect(rules.length, "all four regions must still be styled").toBeGreaterThan(3);
     for (const rule of rules) {
       expect(rule, `\`order\` is banned on the detail regions:\n${rule}`).not.toMatch(
         /(^|[\s;{])order\s*:/,
@@ -1049,14 +1054,19 @@ describe("app.css breakpoints (P16-F8)", () => {
     }
     // The desktop arrangement, stated explicitly so source order cannot decide
     // which side of the page a region lands on: the head across both columns
-    // on the first row, main left and side right on the second.
+    // on the first row, the packet opening the main column on the second, the
+    // side column spanning the second and third, main auto-placed in column 1.
+    expect(CODE).toMatch(/\.detail\s*\{[^}]*grid-template-rows:\s*auto auto 1fr/);
     expect(CODE).toMatch(/\.detail-head\s*\{[^}]*grid-column:\s*1 \/ -1[^}]*grid-row:\s*1/);
-    expect(CODE).toMatch(/\.detail-main\s*\{[^}]*grid-column:\s*1[^}]*grid-row:\s*2/);
-    expect(CODE).toMatch(/\.detail-side\s*\{[^}]*grid-column:\s*2[^}]*grid-row:\s*2/);
-    // And the 1100px collapse releases all three into the single column.
+    expect(CODE).toMatch(/\.detail-packet\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*2/);
+    expect(CODE).toMatch(/\.detail-main\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*auto/);
+    expect(CODE).toMatch(/\.detail-side\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*2 \/ span 2/);
+    // And the 1100px collapse releases all four into the single column and
+    // drops the explicit rows with them.
     const collapse = CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/)![1];
+    expect(collapse).toMatch(/\.detail\s*\{[^}]*grid-template-rows:\s*none/);
     expect(collapse).toMatch(
-      /\.detail-head,\s*\.detail-main,\s*\.detail-side\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*auto/,
+      /\.detail-head,\s*\.detail-packet,\s*\.detail-main,\s*\.detail-side\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*auto/,
     );
   });
 });
