@@ -264,9 +264,7 @@ describe("interface review 2026-09-06: the lane outline and the card corner", ()
   });
 
   it("puts the readiness pill beside the key, leaving the corner to the stage control", () => {
-    const { container } = renderBoard([
-      task({ key: "VIB-1", stage: "impl", waiting: "human" }),
-    ]);
+    const { container } = renderBoard([task({ key: "VIB-1", stage: "impl" })]);
     const top = container.querySelector('[data-board-card="VIB-1"] .card-top')!;
     const kids = [...top.children].map((c) => c.className);
     expect(kids[0]).toBe("key");
@@ -309,11 +307,11 @@ describe("P13-D-6: the card and the list row draw validation status (FR24)", () 
 
   it("renders it in the list row too", () => {
     const { container } = renderBoard(
-      [task({ key: "VIB-1", validation: "healthy" })],
+      [task({ key: "VIB-1", validation: "failing" })],
       { view: "list" },
     );
     expect(container.querySelector(".card")!.textContent).toContain(
-      "validation healthy",
+      "validation failing",
     );
   });
 
@@ -669,16 +667,21 @@ describe("F15-09/R21-8: 'agent working' renders once, and input-required yields 
     expect(container.textContent).not.toContain("input required");
   });
 
-  it("'input required' reasserts in the card top the moment waiting flips to human", () => {
+  it("when waiting flips to human, the foot's wait tag speaks and the top stays quiet (ruling 168)", () => {
+    // Before ruling 168 "input required" reasserted in the top slot here —
+    // the one demand said twice, once as the pill and once as the tag.
     const { container } = renderBoard([
       task({
         waiting: "human",
+        waitingOnMe: true,
         readiness: "input_required",
         displayReadiness: "input_required",
       }),
     ]);
-    expect(container.querySelector(".card-top .pill")!.textContent).toBe(
-      "input required",
+    expect(container.querySelector(".card-top .pill")).toBeNull();
+    expect(container.textContent).not.toContain("input required");
+    expect(container.querySelector(".card .wait-tag")!.textContent!.trim()).toBe(
+      "waiting on you",
     );
   });
 
@@ -2547,17 +2550,119 @@ describe("the card's owner line names the agent PROFILE, not its role (owner, 20
   const ownerLine = (container: HTMLElement) =>
     container.querySelector('[data-board-card="VIB-1"] .card-owner')!.textContent;
 
-  it("prints the deployed profile's name beside the backend", () => {
+  it("prints the deployed profile's name beside the backend's glyph", () => {
     const { container } = renderBoard([engaged("Developer")]);
-    // "Claude · Developer": the backend names the actor as every surface does;
-    // the profile name says WHICH agent, where the role ("Implementation") did
-    // not — two profiles can share a role.
-    expect(ownerLine(container)).toBe("Claude· Developer");
+    // The profile name says WHICH agent, where the role ("Implementation") did
+    // not — two profiles can share a role. The backend is the glyph, labelled
+    // (ruling 168(c)): "Claude · Developer" had said it twice.
+    expect(ownerLine(container)).toBe("Developer");
     expect(ownerLine(container)).not.toContain("Implementation");
+    expect(
+      container
+        .querySelector('[data-board-card="VIB-1"] .card-owner .agent-glyph')!
+        .getAttribute("aria-label"),
+    ).toBe("Claude");
   });
 
   it("falls back to the role for a profile no longer deployed — there is no live name to give", () => {
     const { container } = renderBoard([engaged(null)]);
-    expect(ownerLine(container)).toBe("Claude· Implementation");
+    expect(ownerLine(container)).toBe("Implementation");
+  });
+});
+
+/**
+ * Ruling 168 (owner, 2026-09-09): the board card states each fact once. A Ready
+ * card read "blocked" in its top slot, "Claude · Developer" on its owner line
+ * and "awaiting verdict" in its foot, above "waiting on you" — three
+ * restatements of "a human must act" and two of "Claude". The task hero keeps
+ * every value; the board card and the list row draw the demand once, validation
+ * only as a problem, and the agent as its glyph and its name.
+ */
+describe("ruling 168: the board card states each fact once", () => {
+  const held = (patch: Partial<BoardTask> = {}) =>
+    task({
+      key: "VIB-1",
+      readiness: "blocked",
+      displayReadiness: "blocked",
+      waiting: "human",
+      waitingOnMe: true,
+      validation: "changed",
+      specialist: {
+        kind: "agent",
+        backend: "claude",
+        name: "Claude",
+        role: "Implementation",
+        profileId: "developer",
+        profileName: "Developer",
+      },
+      ...patch,
+    });
+
+  it("a packet's hold on a human: the wait tag speaks, the readiness pill and the verdict chip stay silent", () => {
+    const { container } = renderBoard([held()]);
+    const card = container.querySelector(".card")!;
+    expect(card.querySelector(".card-top .pill")).toBeNull();
+    expect(card.textContent).not.toContain("blocked");
+    expect(card.textContent).not.toContain("awaiting verdict");
+    expect(card.querySelector(".wait-tag")!.textContent!.trim()).toBe("waiting on you");
+  });
+
+  it.each(["ready", "input_required", "goal_edit_pending"] as const)(
+    "'%s' yields to a human wait tag the same way",
+    (r) => {
+      const { container } = renderBoard([held({ displayReadiness: r })]);
+      expect(container.querySelector(".card-top .pill")).toBeNull();
+      expect(container.querySelector(".card .wait-tag")).toBeTruthy();
+    },
+  );
+
+  it("a dependency hold keeps its 'blocked' pill — nobody is waited on, so nothing else says it", () => {
+    const { container } = renderBoard([held({ waiting: "none", waitingOnMe: false })]);
+    expect(container.querySelector(".card-top .pill")!.textContent).toBe("blocked");
+    expect(container.querySelector(".wait-tag")).toBeNull();
+  });
+
+  it("a problem never yields: inconsistency risk stays beside 'waiting on you'", () => {
+    const { container } = renderBoard([
+      held({
+        readiness: "inconsistency_risk_detected",
+        displayReadiness: "inconsistency_risk_detected",
+      }),
+    ]);
+    expect(container.querySelector(".card-top .pill")!.textContent).toBe("inconsistency risk");
+    expect(container.querySelector(".wait-tag")!.textContent!.trim()).toBe("waiting on you");
+  });
+
+  it.each(["changed", "healthy", "none"] as const)(
+    "validation '%s' is a description and stays off the card",
+    (v) => {
+      const { container } = renderBoard([task({ key: "VIB-1", validation: v })]);
+      const text = container.querySelector(".card")!.textContent!;
+      expect(text).not.toContain("validation");
+      expect(text).not.toContain("awaiting verdict");
+    },
+  );
+
+  it("validation 'failing' is a problem and renders", () => {
+    const { container } = renderBoard([task({ key: "VIB-1", validation: "failing" })]);
+    expect(container.querySelector(".card")!.textContent).toContain("validation failing");
+  });
+
+  it("the agent line is the backend's glyph and the agent's name", () => {
+    const { container } = renderBoard([held()]);
+    const owner = container.querySelector(".card-owner")!;
+    expect(owner.textContent).toBe("Developer");
+    expect(owner.querySelector(".agent-glyph")!.getAttribute("aria-label")).toBe("Claude");
+    expect(owner.querySelector(".agent-glyph")!.getAttribute("title")).toBe("Claude");
+  });
+
+  it("the list row makes the same three cuts", () => {
+    const { container } = renderBoard([held()], { view: "list" });
+    const row = container.querySelector(".list-row")!;
+    expect(row.textContent).not.toContain("blocked");
+    expect(row.textContent).not.toContain("awaiting verdict");
+    expect(row.textContent).not.toContain("Claude");
+    expect(row.querySelector(".wait-tag")!.textContent!.trim()).toBe("waiting on you");
+    expect(row.querySelector(".card-owner")!.textContent).toBe("Developer");
   });
 });

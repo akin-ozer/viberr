@@ -52,7 +52,7 @@ import { Icon, type IconName } from "~/ui/icon";
 import type { DependencyRender } from "~/shared/dependencies";
 import { LabelInput } from "~/ui/label-input";
 import { AgentGlyph } from "~/ui/identity";
-import { Pill, ReadinessPill, ValidationPill, validationLabel } from "~/ui/pill";
+import { Pill, ReadinessPill, ValidationPill, validationLabel, validationQuiet } from "~/ui/pill";
 import {
   DueDatePill,
   LabelChips,
@@ -430,9 +430,16 @@ function StateSignals({ task }: { task: BoardTask }) {
       ),
     });
   }
-  // P13-D-6 (FR24): validation renders (the "Blocked or waiting" filter
-  // matches on it); "none" stays silent; C2: withdrawn once terminal.
-  if (!terminal && task.validation !== "none") {
+  // P13-D-6 (FR24): validation renders when it is a PROBLEM — the fill tier
+  // of the vocabulary ("validation failing"; "gate bypassed" is terminal and
+  // withdrawn by C2 above). Ruling 168: the quiet tier — "awaiting verdict",
+  // "validation healthy" — describes where the evidence stands without asking
+  // anything of the reader, and the owner's card (2026-09-09) read "awaiting
+  // verdict" beside "waiting on you", the verdict being exactly what was
+  // waited on. The card and the list row leave descriptions to the task hero,
+  // which draws every value. The "Blocked or waiting" filter matches `failing`
+  // only, so nothing it selects goes unexplained here.
+  if (!terminal && !validationQuiet(task.validation)) {
     statePills.push({
       key: "validation",
       label: validationLabel(task.validation),
@@ -540,15 +547,17 @@ function OwnerLine({ task }: { task: TaskSummary }) {
   if (sp) {
     return (
       <div className="card-owner">
-        {/* `sp.name` IS the backend label, so the glyph is a pictogram here. */}
-        <AgentGlyph backend={sp.backend} decorative />
-        <span className="nm">{sp.name}</span>
-        {/* The profile's NAME, not its role (owner, 2026-09-08): two profiles
-            can share "Implementation", and "Developer" is what the roster and
-            the task page's engagement rows call this agent. The role stands
-            in only for a profile no longer deployed — there is no live name
-            left to give. */}
-        <span className="lbl">· {sp.profileName ?? sp.role}</span>
+        {/* Ruling 168(c): the glyph IS the backend — Claude or Codex — and
+            carries that name for assistive technology and on hover; the text
+            beside it is the agent's NAME, the deployed profile's (owner,
+            2026-09-08: not its role — two profiles can share "Implementation",
+            and "Developer" is what the roster and the task page's engagement
+            rows call this agent). "Claude · Developer" said the backend twice,
+            once as the mark and once as a word (owner, 2026-09-09: noise), so
+            the word went. The role stands in only for a profile no longer
+            deployed — there is no live name left to give. */}
+        <AgentGlyph backend={sp.backend} />
+        <span className="nm">{sp.profileName ?? sp.role}</span>
       </div>
     );
   }
@@ -721,6 +730,29 @@ function TaskCard({
  * and, faded, by the drop preview, so a preview stands exactly as tall as the
  * card that will replace it.
  */
+/**
+ * Whether the readiness pill has anything to add beside the foot's wait tag.
+ *
+ * F15-09/R21-8 made a card state its demand ONCE and had the pill yield to
+ * "agent working". The owner's card of 2026-09-09 — "blocked" in the top slot,
+ * "waiting on you" in the foot — was the same duplicate with a human waited on:
+ * the pill's whole content was the demand the tag already names. So when the
+ * wait tag speaks for a human, the readiness values that ARE that demand, or
+ * the baseline it supersedes, yield (ruling 168(a)): `input_required` and
+ * `goal_edit_pending` (a packet asks), `blocked` (a packet's hold — a
+ * dependency hold leaves `waiting` at "none" and keeps its pill, ruling 131),
+ * `ready` ("someone will act" — the tag says who). An inconsistency risk is a
+ * problem, not a demand, and accepted/merged are statuses: they keep the slot.
+ * The VALUE is decided server-side (`deriveDisplayReadiness`); this is the
+ * board's rendering choice, made identically by the card and the list row.
+ */
+function readinessYields(task: TaskSummary): boolean {
+  const r = task.displayReadiness;
+  if (r === "agent_working") return true;
+  if (task.waiting !== "human") return false;
+  return r === "ready" || r === "input_required" || r === "blocked" || r === "goal_edit_pending";
+}
+
 function CardFace({ task, archived }: { task: BoardTask; archived: boolean }) {
   return (
     <>
@@ -728,29 +760,23 @@ function CardFace({ task, archived }: { task: BoardTask; archived: boolean }) {
         <span className="key">{task.key}</span>
         {/* No spacer: the pill sits beside the key so the card's top-right
             corner stays free for `.card-move` (app.css `.card-top`). */}
-        {/* R21-8 (supersedes C3's both-pills arrangement): "input required"
-            claims a human is needed RIGHT NOW — false while an agent is
-            actively carrying the work (`waiting === "agent"`), so the pill
-            yields for that state and the foot's WaitTag ("agent working")
-            speaks alone. F15-09's rule still holds: the claim is made ONCE —
-            this slot never duplicates the wait tag. The moment a packet
-            flips `waiting` to "human", input-required reasserts here. The
-            task hero makes the identical yield (task-main-sections.tsx), so
-            the two surfaces keep agreeing mid-run — C3's actual complaint.
-            Blocked / inconsistency-risk never yield.
+        {/* The card makes each claim ONCE (F15-09). R21-8: "input required"
+            claims a human is needed RIGHT NOW — false while an agent carries
+            the work, so the slot yields to the foot's "agent working". Ruling
+            168(a) extends the yield to a human waited on: a "blocked" pill
+            above "waiting on you" is one demand said twice, so when the wait
+            tag names a human the readiness values that ARE that demand yield
+            to it (`readinessYields`); problems and terminal facts never do.
+            The task hero keeps drawing the value — it is the detail surface.
 
             F19-8: an archived card says "archived" here instead — the same
             swap UXO-1 made in the task hero, for the same reason. Readiness
             is an ACTIONABLE claim ("ready · awaiting verdict" = someone owes
             a verdict); on abandoned work nobody does, and the board drew that
             claim directly under a banner calling the work abandoned. */}
-        {/* R21-8/F15-09: an agent-carried task goes QUIET in this slot — the
-            foot's WaitTag already says "agent working", and the claim is made
-            exactly once per card. The DECISION is server-side
-            (`deriveDisplayReadiness`); this is only the rendering choice. */}
         {archived ? (
           <ArchivedPill />
-        ) : task.displayReadiness === "agent_working" ? null : (
+        ) : readinessYields(task) ? null : (
           <ReadinessPill value={task.displayReadiness} sm />
         )}
       </div>
@@ -1065,16 +1091,14 @@ function ListRow({
           <DueDatePill dueDate={task.dueDate} sm />
         </span>
       )}
-      {/* F15-09: same duplicate as the card — the row's own WaitTag
-          below already says "agent working". F19-8: and the same
-          readiness → "archived" swap the card makes. R21-8: and the same
-          input-required-yields-while-an-agent-works rule — the card top's
-          comment carries the reasoning. */}
-      {/* Same quiet slot as the card, same reason (the row's own WaitTag
-          carries "agent working"). */}
+      {/* F15-09: same duplicate as the card — the row's own WaitTag below
+          already says "agent working", or names the human waited on. F19-8:
+          and the same readiness → "archived" swap the card makes. R21-8 /
+          ruling 168(a): the same yield rule (`readinessYields`) — the card
+          top's comment carries the reasoning. */}
       {archived ? (
         <ArchivedPill />
-      ) : task.displayReadiness === "agent_working" ? null : (
+      ) : readinessYields(task) ? null : (
         <ReadinessPill value={task.displayReadiness} sm />
       )}
       {/* F19-13: the card's state block verbatim — the row used to draw

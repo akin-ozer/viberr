@@ -3455,6 +3455,31 @@ by rewriting those paragraphs:*
     — retire with it; the rules they described still hold and are enforced where they always
     were, server-side and on the Policy page.
 
+168. **The board card states each fact once (owner, 2026-09-09).** A card in the Ready lane
+    read `blocked` in its top slot, `Claude · Developer` on its owner line and `awaiting
+    verdict` in its foot, above `waiting on you`, and the owner called the three redundant.
+    They were: the pill, the verdict chip and the tag all said "a human must act", and the
+    glyph and the word both said Claude. Three rules, on the board card and the list row
+    only — the task hero is the detail surface and keeps every value:
+    (a) *The demand is made once.* F15-09/R21-8 already had the readiness pill yield to the
+    foot's "agent working"; it yields to a human wait tag too, for the values that ARE the
+    demand or the baseline it supersedes — `input required`, `blocked` (a packet's hold; a
+    dependency hold leaves `waiting` at none and keeps its pill, ruling 131), `goal edit
+    pending`, `ready`. An inconsistency risk is a problem, not a demand, and accepted/merged
+    are statuses: they keep the slot. The rendering choice is `readinessYields`
+    (board-page.tsx), shared by the card and the row; the value stays
+    `deriveDisplayReadiness`'s.
+    (b) *Validation on the card is a problem or nothing.* The quiet tier — `awaiting verdict`,
+    `validation healthy`, `no validation` — describes where the evidence stands; the card and
+    the row draw only the fill tier (`validation failing`; `gate bypassed` is terminal and
+    already withdrawn by C2). The "Blocked or waiting" filter matches `failing` only, so no
+    card it selects goes unexplained. The tier is read from the vocabulary
+    (`validationQuiet`, pill.tsx), never restated in a component.
+    (c) *The agent line is the glyph and the agent's name.* The glyph is the backend, labelled
+    for assistive technology and on hover; the text is the deployed profile's name (owner,
+    2026-09-08: not its role), the role only for a profile no longer deployed. The backend's
+    name as a word is gone from the line.
+
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is
 corrected on the page named; the note stays here so a reader who meets the old wording, in
