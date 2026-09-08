@@ -38,6 +38,10 @@ function notification(i: number): NotificationView {
 function renderIn(node: React.ReactNode) {
   const Stub = createRoutesStub([
     { path: "/", Component: () => <ToastProvider>{node}</ToastProvider> },
+    // The account menu's Theme item really posts here. Without the route the
+    // fetcher 404s and React Router's default ErrorBoundary replaces the whole
+    // tree — which reads in a test exactly like the menu having closed.
+    { path: "/prefs/theme", action: () => ({ ok: true, theme: "light" }) },
   ]);
   return render(<Stub initialEntries={["/"]} />);
 }
@@ -89,18 +93,28 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
         theme="system"
       />,
     );
-    fireEvent.click(getByLabelText("Account menu"));
-    // It declared role="menu"/"menuitem" with NO arrow-key handling — a broken
-    // ARIA contract. Plain buttons + links in Tab order is what it implements.
-    expect(container.querySelector('[role="menu"]')).toBeNull();
-    expect(container.querySelector('[role="menuitem"]')).toBeNull();
-    expect(document.activeElement).toBe(container.querySelector(".user-menu"));
-    // Interface review 2026-09-06: the focused panel is the dialog the trigger's
-    // aria-haspopup promises — a role-less div drops its label in readers.
-    expect(container.querySelector(".user-menu")!.getAttribute("role")).toBe("dialog");
-    expect(container.querySelector(".user-menu")!.getAttribute("aria-label")).toBe(
-      "Account menu",
-    );
+    // Radix opens on pointerdown, which is what the first half of a real click
+    // is; `fireEvent.click` alone never reaches the trigger's handler.
+    fireEvent.pointerDown(getByLabelText("Account menu"), { button: 0 });
+    // Ruling 166: the menu roles are BACK, and this time they are honoured.
+    // UI-45 had dropped them because they were declared with no arrow-key
+    // handling — a contract that promises Up/Down navigation that does not
+    // exist. Radix implements the widget, so the promise is kept.
+    const menu = container.querySelector('[role="menu"]');
+    expect(menu, "the panel is a real menu again").not.toBeNull();
+    expect(menu).toBe(container.querySelector(".user-menu"));
+    expect(container.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0);
+    // The menu is NAMED by the control that opened it, rather than repeating
+    // the string — one source for the name instead of two that can drift.
+    const trigger = container.querySelector<HTMLElement>(".home-user")!;
+    expect(menu!.getAttribute("aria-labelledby")).toBe(trigger.id);
+    expect(trigger.getAttribute("aria-label")).toBe("Account menu");
+    // The trigger promises what the panel is.
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    // Focus moves into the menu on open (Radix), as it did when this was a
+    // hand-rolled panel with its own focus effect.
+    expect(container.contains(document.activeElement)).toBe(true);
     // The theme item names its action, not just the current value.
     const theme = [...container.querySelectorAll(".menu-item")].find((b) =>
       b.textContent!.includes("Switch theme"),
@@ -110,12 +124,16 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
 });
 
 /**
- * P16-UI-12 — both shell popovers moved from a hand-rolled `window` keydown
- * listener to the shared `useDismiss` hook. They pass `{ outside: false }`,
- * which is not an oversight: the account menu is meant to be cycled in place
- * (the Theme item deliberately does not close it) and the bell closes on an
- * explicit action. Converting them to the hook's DEFAULT would silently take
- * that away, and nothing would have noticed — so it is asserted here.
+ * P16-UI-12 — the bell popover moved from a hand-rolled `window` keydown
+ * listener to the shared `useDismiss` hook, and passes `{ outside: false }`
+ * deliberately: it closes on an explicit action, not on any press. Converting
+ * it to the hook's DEFAULT would silently take that away, so it is asserted.
+ *
+ * The account menu no longer uses the hook at all (ruling 166 — Radix owns its
+ * dismissal). What that block protected for the menu was never "ignore outside
+ * presses" for its own sake; it was "the Theme item cycles in place". That is
+ * now asserted directly, which is a better test than the proxy it replaces —
+ * and pressing outside a menu to close it is what a menu should do.
  */
 describe("P16-UI-12: the shell popovers dismiss on Escape, not on any press", () => {
   function openMenu() {
@@ -131,14 +149,17 @@ describe("P16-UI-12: the shell popovers dismiss on Escape, not on any press", ()
         theme="system"
       />,
     );
-    fireEvent.click(view.getByLabelText("Account menu"));
+    fireEvent.pointerDown(view.getByLabelText("Account menu"), { button: 0 });
     expect(view.container.querySelector(".user-menu")).not.toBeNull();
     return view;
   }
 
-  it("the account menu survives an outside press (theme cycling in place)", () => {
-    const { container } = openMenu();
-    fireEvent.mouseDown(document.body);
+  it("the account menu cycles theme in place, without closing", () => {
+    // The behaviour the old outside-press assertion stood in for. Every other
+    // item dismisses the menu; this one must not, or cycling
+    // light -> dark -> system becomes three trips through the trigger.
+    const { container, getByText } = openMenu();
+    fireEvent.click(getByText(/Switch theme/));
     expect(container.querySelector(".user-menu")).not.toBeNull();
   });
 

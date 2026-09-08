@@ -498,18 +498,23 @@ h1, h2, h3, h4 {
 .rail-spacer { flex: 1; }
 
 .menu-scrim { position: fixed; inset: 0; z-index: 40; }
+/* Ruling 166: PLACEMENT belongs to Radix now (floating-ui, collision aware, so
+   the menu flips instead of running off a narrow viewport); this rule keeps
+   only the menu's appearance. `position: relative` is here for one reason — a
+   static box ignores z-index, and the popper wrapper Radix positions carries
+   none of its own. The old `.user-menu.from-top` override is folded in: it was
+   the only variant any caller used, so the base rule now IS it. */
 .user-menu {
-  position: absolute;
-  bottom: calc(100% + .5rem);
-  left: 0; right: 0;
+  position: relative;
   z-index: 50;
+  width: 250px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-box);
   box-shadow: var(--shadow-menu);
   padding: .375rem;
-  transform-origin: 50% 100%;
-  animation: menu-in-up .16s var(--ease-out);
+  transform-origin: top right;
+  animation: menu-in .16s var(--ease-out);
 }
 .user-menu-head { display: flex; align-items: center; gap: .5rem; padding: .5rem .5rem .5rem; }
 .user-menu-head .who { font-size: .86rem; font-weight: 800; font-family: var(--font-display); }
@@ -3134,15 +3139,6 @@ dialog[data-closing]::backdrop {
   border-radius: var(--radius-chip);
 }
 .home-user:hover .avatar, .home-user.open .avatar { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 78%); }
-.user-menu.from-top {
-  top: calc(100% + .55rem);
-  bottom: auto;
-  left: auto;
-  right: 0;
-  width: 250px;
-  transform-origin: top right;
-  animation: menu-in .16s var(--ease-out);
-}
 
 /* notifications popover (global bell, shared by Home + workspace) */
 .ntf-pop {

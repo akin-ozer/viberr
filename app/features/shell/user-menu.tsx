@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Form, Link, useFetcher, useLocation, useNavigate } from "react-router";
+import { DropdownMenu } from "radix-ui";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Avatar } from "~/ui/avatar";
 import { initialsOf } from "~/ui/initials";
@@ -7,18 +8,32 @@ import { CsrfInput, useCsrfToken } from "~/ui/csrf-input";
 import { applyThemePreference } from "./theme-preference";
 import { Icon } from "~/ui/icon";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
-import { useDismiss } from "~/ui/use-dismiss";
 import { useToast } from "~/ui/toast";
 
 /**
- * Account menu (`user-menu from-top`) — ONE implementation for the
- * workspace topbar and the Home header (the mock duplicates it). Real
- * session identity, real logout POST, theme cycling persisted to the user
- * row + cookie via /prefs/theme.
+ * Account menu (`user-menu`) — ONE implementation for the workspace topbar and
+ * the Home header (the mock duplicates it). Real session identity, real logout
+ * POST, theme cycling persisted to the user row + cookie via /prefs/theme.
  *
  * Deliberate mock behavior kept: the Theme item does NOT close the menu
  * (rapid cycling UX). Additions (sanctioned): Escape closes; admins get an
  * "Org settings" quick link to the instance admin surface.
+ *
+ * Ruling 166 (2026-09-08): this is a real ARIA menu again. UI-45 had DROPPED
+ * `role="menu"`/`role="menuitem"` because they were declared with no arrow-key
+ * handling — a contract that tells a screen-reader user to expect Up/Down
+ * navigation that does not exist — and hand-rolling a full menu widget (roving
+ * tabindex, typeahead, Home/End) for six links was not worth it. Radix ships
+ * exactly that widget, unstyled, so the roles come back and this time they are
+ * honoured: arrows, typeahead, Home/End, focus in on open and back to the
+ * avatar on close, and outside-press dismissal.
+ *
+ * That also retires three hand-rolled pieces: the `menu-scrim` div (Radix
+ * dismisses on outside press), the `useDismiss` subscription, and the
+ * focus-in/focus-restore effect that existed because the panel used to be
+ * rendered BEFORE its trigger. Placement is floating-ui's now — collision
+ * aware, so the menu no longer runs off a narrow viewport — and `app.css`
+ * keeps only the menu's appearance.
  */
 
 export interface MenuUser {
@@ -60,19 +75,11 @@ export function UserMenu({
   showSwitchProject?: boolean;
 }) {
   const [menu, setMenu] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const fetcher = useFetcher<{ ok: boolean; theme?: ThemePreference; error?: string }>();
   const csrf = useCsrfToken();
   const push = useToast();
-
-  // P16-UI-12: one shared dismiss hook (`app/ui/use-dismiss.ts`) instead of a
-  // hand-rolled listener. `outside: false` preserves the deliberate behaviour
-  // here — this menu stays open until Escape or an explicit action, because the
-  // Theme item is meant to be cycled in place.
-  useDismiss(menu, () => setMenu(false), { outside: false });
 
   // Toast only once the server confirms the theme write — a failed POST
   // (expired session/CSRF) reports the failure, not a false success (P11-40).
@@ -81,16 +88,6 @@ export function UserMenu({
     else if (!data.ok)
       push(data.error ?? "Theme change failed. Try again", "error");
   });
-
-  // UI-45: the panel is rendered BEFORE its trigger, so without this a keyboard
-  // user who opened the menu and pressed Tab left it entirely. Focus in on open,
-  // restore to the avatar on close.
-  const wasOpen = useRef(false);
-  useEffect(() => {
-    if (menu) menuRef.current?.focus();
-    else if (wasOpen.current) buttonRef.current?.focus();
-    wasOpen.current = menu;
-  }, [menu]);
 
   const person = { initials: initialsOf(user.name), tone: user.avatarTone };
 
@@ -102,86 +99,85 @@ export function UserMenu({
     fd.set("theme", next);
     fetcher.submit(fd, { method: "post", action: "/prefs/theme" });
     // Toast fires on the server result (effect above), not on submit.
-    // Menu intentionally stays open (mock behavior — rapid cycling).
   };
+
+  const triggerProps = { className: "home-user" + (menu ? " open" : "") };
+  const contentProps = { className: "user-menu" };
 
   return (
     <div className="home-user-wrap">
-      {menu && (
-        <>
-          {/* Mouse-only dismiss affordance; keyboard users close via the
-              window-level Escape handler above, so hide from the a11y tree. */}
-          <div
-            className="menu-scrim"
-            aria-hidden="true"
-            onClick={() => setMenu(false)}
-          />
-          {/*
-            UI-45: this declared `role="menu"` / `role="menuitem"` with NO
-            arrow-key handling — a broken ARIA menu contract, which tells a
-            screen-reader user to expect Up/Down navigation that does not exist.
-            Rather than hand-roll a full menu widget (roving tabindex, typeahead,
-            Home/End) for six links, the roles are DROPPED: this is a small group
-            of buttons and links, and plain Tab order is a contract the code
-            actually honours. Focus moves into the panel on open and returns to
-            the avatar on close (the popover is rendered before its trigger).
-            The PANEL keeps one role: `dialog`, the thing the trigger's
-            `aria-haspopup` already promises, so the element that receives
-            focus on open is not a nameless generic (ARIA prohibits a label
-            on one, and readers drop it).
-          */}
-          <div
-            className="user-menu from-top"
-            ref={menuRef}
-            role="dialog"
-            tabIndex={-1}
-            aria-label="Account menu"
+      <DropdownMenu.Root
+        open={menu}
+        onOpenChange={setMenu}
+        // Not modal: this is a six-item account menu in the page header, not a
+        // task that owns the screen. `modal` would mark the rest of the page
+        // aria-hidden and lock scrolling for it, which is heavier than the
+        // interaction deserves — and heavier than the scrim it replaces was.
+        modal={false}
+      >
+        <DropdownMenu.Trigger asChild>
+          <button type="button" {...triggerProps} aria-label="Account menu">
+            <Avatar person={person} size="lg" />
+          </button>
+        </DropdownMenu.Trigger>
+        {/* No Portal on purpose. Radix positions the popper `fixed`, so no
+            ancestor can clip it, and staying in the tree keeps the menu inside
+            the component's own DOM — which is what the shell tests query and
+            what keeps `.home-user-wrap` meaningful. */}
+        <DropdownMenu.Content
+          {...contentProps}
+          side="bottom"
+          align="end"
+          // `.55rem` — the gap the stylesheet used to express as
+          // `top: calc(100% + .55rem)`.
+          sideOffset={9}
+          // No aria-label here: Radix points the menu's `aria-labelledby` at
+          // the trigger, so the panel is named by the control that opened it —
+          // one source for the name instead of two that can drift.
+        >
+          <DropdownMenu.Label className="user-menu-head">
+            <Avatar person={person} size="lg" />
+            <span>
+              <div className="who">{user.name}</div>
+              <div className="role">{user.email}</div>
+            </span>
+          </DropdownMenu.Label>
+          <DropdownMenu.Item
+            className="menu-item"
+            onSelect={() =>
+              navigate("/profile", {
+                state: { returnTo: location.pathname + location.search },
+              })
+            }
           >
-            <div className="user-menu-head">
-              <Avatar person={person} size="lg" />
-              <span>
-                <div className="who">{user.name}</div>
-                <div className="role">{user.email}</div>
-              </span>
-            </div>
-            <button
-              type="button"
-              className="menu-item"
-              onClick={() => {
-                setMenu(false);
-                navigate("/profile", {
-                  state: { returnTo: location.pathname + location.search },
-                });
-              }}
-            >
-              <Icon name="user" />
-              Profile &amp; preferences
-            </button>
-            {showSwitchProject && (
-              <Link
-                className="menu-item"
-                to="/"
-                onClick={() => setMenu(false)}
-              >
+            <Icon name="user" />
+            Profile &amp; preferences
+          </DropdownMenu.Item>
+          {showSwitchProject && (
+            <DropdownMenu.Item asChild>
+              <Link className="menu-item" to="/">
                 <Icon name="board" />
                 Switch project
               </Link>
-            )}
-            <button
-              type="button"
-              className="menu-item"
-              onClick={cycleTheme}
-            >
-              <Icon name="sparkle" />
-              Switch theme ·{" "}
-              <span className="faint">{themeLabel(theme)}</span>
-            </button>
-            {user.role === "admin" && (
-              <Link
-                className="menu-item"
-                to="/org/settings"
-                onClick={() => setMenu(false)}
-              >
+            </DropdownMenu.Item>
+          )}
+          <DropdownMenu.Item
+            className="menu-item"
+            // The one item that does not close the menu: theme is cycled in
+            // place (light → dark → system), so closing after every press would
+            // make three presses into three round trips through the trigger.
+            onSelect={(e) => {
+              e.preventDefault();
+              cycleTheme();
+            }}
+          >
+            <Icon name="sparkle" />
+            Switch theme ·{" "}
+            <span className="faint">{themeLabel(theme)}</span>
+          </DropdownMenu.Item>
+          {user.role === "admin" && (
+            <DropdownMenu.Item asChild>
+              <Link className="menu-item" to="/org/settings">
                 <Icon name="sliders" />
                 {/* D2 (pass 23): the destination's own H1 and every other
                     direction call it "Instance settings"; the only nav entry to
@@ -189,29 +185,25 @@ export function UserMenu({
                     a name the menu doesn't show. One name. */}
                 Instance settings
               </Link>
-            )}
-            <div className="menu-sep" />
-            <Form method="post" action="/logout">
-              <CsrfInput />
+            </DropdownMenu.Item>
+          )}
+          <DropdownMenu.Separator className="menu-sep" />
+          <Form method="post" action="/logout">
+            <CsrfInput />
+            <DropdownMenu.Item
+              asChild
+              // Closing unmounts the form mid-submit. Let the POST and its
+              // redirect take the page instead; nothing is left to return to.
+              onSelect={(e) => e.preventDefault()}
+            >
               <button className="menu-item danger" type="submit">
                 <Icon name="ext" />
                 Sign out
               </button>
-            </Form>
-          </div>
-        </>
-      )}
-      <button
-        type="button"
-        ref={buttonRef}
-        className={"home-user" + (menu ? " open" : "")}
-        onClick={() => setMenu((m) => !m)}
-        aria-haspopup="dialog"
-        aria-expanded={menu}
-        aria-label="Account menu"
-      >
-        <Avatar person={person} size="lg" />
-      </button>
+            </DropdownMenu.Item>
+          </Form>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
     </div>
   );
 }
