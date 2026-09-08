@@ -268,7 +268,7 @@ export function SsoPanel({
                 )}
               </span>
               {p.active ? (
-                <Pill kind="ready" sm>
+                <Pill kind="ready" sm quiet>
                   live
                 </Pill>
               ) : (

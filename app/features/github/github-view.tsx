@@ -116,7 +116,7 @@ export function RepositoryPanel({
                 : undefined
             }
           >
-            <Pill kind={conn.kind} dot sm>
+            <Pill kind={conn.kind} dot sm quiet={conn.quiet}>
               {conn.label}
             </Pill>
             {showProbeNote && (
@@ -206,6 +206,9 @@ export function PullRequestsPanel({
         )}
         {prs.map((row) => {
           const pill = prStatePill(row.state);
+          const checks = row.checks ? checksPill(row.checks) : null;
+          const review = row.review ? reviewPill(row.review) : null;
+          const conflict = mergeablePill(row.mergeable);
           return (
             <button
               type="button"
@@ -226,24 +229,28 @@ export function PullRequestsPanel({
                     this PR safe to accept". CI health was fetched on every
                     reconcile pass and discarded, and GitHub's review verdict
                     was never read at all. */}
-                {row.checks && (
-                  <Pill kind={checksPill(row.checks).kind} sm>
-                    {checksPill(row.checks).label}
+                {/* Design pass 2026-09-08: each view says which tier it is in
+                    (`quiet` — passing checks, an approval, a merge — describes;
+                    a fill is a problem or a demand), so a row in review is read
+                    by the one chip that still has colour. */}
+                {checks && (
+                  <Pill kind={checks.kind} sm quiet={checks.quiet}>
+                    {checks.label}
                   </Pill>
                 )}
-                {row.review && (
-                  <Pill kind={reviewPill(row.review).kind} sm>
-                    {reviewPill(row.review).label}
+                {review && (
+                  <Pill kind={review.kind} sm quiet={review.quiet}>
+                    {review.label}
                   </Pill>
                 )}
                 {/* F17-L6: a conflicting PR cannot be merged — surface it here,
                     where a human decides whether it is safe to accept. */}
-                {mergeablePill(row.mergeable) && (
-                  <Pill kind={mergeablePill(row.mergeable)!.kind} sm>
-                    {mergeablePill(row.mergeable)!.label}
+                {conflict && (
+                  <Pill kind={conflict.kind} sm>
+                    {conflict.label}
                   </Pill>
                 )}
-                <Pill kind={pill.kind} sm dot>
+                <Pill kind={pill.kind} sm dot quiet={pill.quiet}>
                   {pill.label}
                 </Pill>
               </span>
@@ -303,6 +310,8 @@ export function BranchesPanel({
           {branches.map((row) => {
             const s = syncPill(row.sync);
             const prPill = row.pr ? prStatePill(row.pr.state) : null;
+            // The two states the chip does not spell out (see F20-23 below).
+            const bare = row.pr?.state === "review" || row.pr?.state === "merged";
             return (
               <button
                 type="button"
@@ -336,12 +345,13 @@ export function BranchesPanel({
                           "merge pending" — the way the PR list above does. An
                           open "in review" PR and a "merged" one stay bare here:
                           the Sync column already says "merged", and the narrow
-                          column keeps the common open state uncluttered. */}
-                      <Pill kind={prPill.kind} sm>
+                          column keeps the common open state uncluttered. And a
+                          bare chip is a QUIET one (design pass 2026-09-08): it
+                          is then an id, and the Sync column beside it carries
+                          the state; the fill arrives with the word. */}
+                      <Pill kind={prPill.kind} sm quiet={bare}>
                         #{row.pr.number}
-                        {row.pr.state !== "review" &&
-                          row.pr.state !== "merged" &&
-                          ` · ${prPill.label}`}
+                        {!bare && ` · ${prPill.label}`}
                       </Pill>
                       {/* P13-D-28: only the actionable state here — this is a
                           single narrow column, and the PR list above carries
@@ -372,7 +382,7 @@ export function BranchesPanel({
                   )}
                 </span>
                 <span>
-                  <Pill kind={s.kind} sm dot>
+                  <Pill kind={s.kind} sm dot quiet={s.quiet}>
                     {s.label}
                   </Pill>
                 </span>

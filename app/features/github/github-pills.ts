@@ -13,6 +13,13 @@ import type { RepoAccessResult } from "~/server/github/repo-access-check.server"
 export interface PillView {
   kind: PillKind;
   label: string;
+  /** The second pill tier (design pass 2026-09-08; `Pill`'s `quiet` prop): a
+   *  FILL is a problem or a demand, an OUTLINE describes. The settled facts —
+   *  merged, synced, approved, connected, every check passing — carry `quiet`
+   *  here so every surface that renders them says so the same way; the
+   *  states that want a person (closed, behind main, changes requested, a
+   *  failing check, a missing credential) keep their fills. */
+  quiet?: boolean;
 }
 
 /**
@@ -28,9 +35,9 @@ export interface PillView {
 export type SyncState = "merged" | "behind_main" | "synced" | "unknown";
 
 export const SYNC_PILL = {
-  merged: { kind: "done", label: "merged" },
+  merged: { kind: "done", label: "merged", quiet: true },
   behind_main: { kind: "risk", label: "behind main" },
-  synced: { kind: "ready", label: "synced" },
+  synced: { kind: "ready", label: "synced", quiet: true },
   unknown: { kind: "neutral", label: "not compared" },
 } satisfies Record<SyncState, PillView>;
 
@@ -45,7 +52,7 @@ export function syncPill(state: SyncState): PillView {
  * branch panel, anything else ("review", open/draft) → info "in review".
  */
 export function prStatePill(state: string): PillView {
-  if (state === "merged") return { kind: "done", label: "merged" };
+  if (state === "merged") return { kind: "done", label: "merged", quiet: true };
   if (state === "closed") return { kind: "risk", label: "closed" };
   if (state === "accepted") return { kind: "input", label: "merge pending" };
   return { kind: "info", label: "in review" };
@@ -83,7 +90,7 @@ export function checksPill(checks: {
       label: `${checks.unknown ?? checks.total}/${checks.total} checks unknown`,
     };
   }
-  return { kind: "ready", label: `${checks.total} checks passing` };
+  return { kind: "ready", label: `${checks.total} checks passing`, quiet: true };
 }
 
 /**
@@ -99,7 +106,7 @@ export function reviewPill(
   review: "approved" | "changes_requested" | "review_required",
 ): PillView {
   if (review === "changes_requested") return { kind: "risk", label: "changes requested" };
-  if (review === "approved") return { kind: "ready", label: "approved" };
+  if (review === "approved") return { kind: "ready", label: "approved", quiet: true };
   return { kind: "input", label: "review required" };
 }
 
@@ -130,7 +137,7 @@ export function connectionPill(
 ): PillView {
   switch (connection.status) {
     case "connected":
-      return { kind: "ready", label: "connected" };
+      return { kind: "ready", label: "connected", quiet: true };
     case "no_repo_configured":
       return { kind: "neutral", label: "no repository" };
     case "no_pat_configured":

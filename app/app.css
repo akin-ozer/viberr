@@ -805,6 +805,16 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   box-shadow: inset 0 0 0 1px var(--hairline);
   font-weight: 600;
 }
+/* A quiet chip keeps its tone in the DOT. The word carries the meaning; the
+   dot lets a column be scanned for the one row that differs; the fill stays
+   reserved for a problem or a demand. Without this the dot took the quiet ink
+   and every dotted chip in a Sync column was the same grey. */
+.pill.quiet.ready .pdot { background: var(--teal-dark); }
+.pill.quiet.done .pdot { background: var(--success-dark); }
+.pill.quiet.info .pdot { background: var(--blue-pressed); }
+.pill.quiet.input .pdot { background: var(--amber-dark); }
+.pill.quiet.risk .pdot, .pill.quiet.blocked .pdot { background: var(--coral-dark); }
+.pill.quiet.agent .pdot { background: var(--agent-dark); }
 /* The glyph deliberately takes the pill's own ink rather than a step lighter:
    `--faint` inside a transparent chip is measured by the AA sweep against the
    base `.pill` fill it overrides, and lands at 4.20:1 in dark. One voice per
@@ -2149,7 +2159,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .stage-chip .sdot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--placeholder); flex: none; }
 .stage-chip.elig { color: var(--fg); border-color: var(--border); }
-.stage-chip.off { opacity: .55; text-decoration: line-through; text-decoration-color: var(--placeholder); }
+/* An ineligible stage is demoted in INK, not opacity: the AA sweep cannot read
+   through an opacity, and --placeholder is a measured step of the ladder. */
+.stage-chip.off { color: var(--placeholder); text-decoration: line-through; text-decoration-color: var(--placeholder); }
 
 /* capability matrix */
 .cap-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; }
@@ -2895,18 +2907,29 @@ dialog[data-closing]::backdrop {
    credential-card.tsx, which is also the only thing the component test can name
    the slot by. Same declarations, in the sheet. */
 .cred-manage { display: flex; flex-wrap: wrap; gap: .375rem; margin-top: .5rem; }
+/* Design pass 2026-09-08: the task key is a control in the QUIET tier. It was
+   a filled --blue-soft chip on every row of the stream — thirty rows, thirty
+   blue chips, the only saturated colour in the column — and because every
+   row had one, the fill differentiated nothing. Its edge is --border-control
+   (a border that identifies a control needs 3:1, not the hairline a
+   descriptive pill gets); the blue comes back on hover, where it means "this
+   one". */
 .keybtn {
   font-family: var(--font-mono); font-size: .75rem; font-weight: 600;
-  color: var(--blue-pressed); background: var(--blue-soft);
+  color: var(--muted); background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border-control);
   border: 0; border-radius: var(--radius-small); padding: .125rem .375rem;
   cursor: pointer;
-  transition: background .12s ease;
+  transition: background .12s ease, color .12s ease, box-shadow .12s ease;
 }
-.keybtn:hover { background: color-mix(in srgb, var(--blue), transparent 74%); }
+.keybtn:hover {
+  background: var(--blue-soft); color: var(--blue-pressed);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue), transparent 60%);
+}
 /* F18-1: an orphan row's project is gone — the label is a non-navigable note,
    not a live-looking pill (the bell popover shows the same note inline). */
-.keybtn.dead { color: var(--faint); background: none; cursor: default; }
-.keybtn.dead:hover { background: none; }
+.keybtn.dead { color: var(--faint); background: none; box-shadow: none; cursor: default; }
+.keybtn.dead:hover { background: none; color: var(--faint); box-shadow: none; }
 
 /* policy activity */
 .pev-list { display: flex; flex-direction: column; }
@@ -2933,7 +2956,10 @@ dialog[data-closing]::backdrop {
 .act-preview { color: var(--muted); }
 /* P13-D-18: was var(--link, …); --link is defined nowhere, so only the fallback
    ever rendered. Resolved to the token that was already doing the work. */
-.act-toggle { font-size: .75rem; font-weight: 600; color: var(--teal-dark); }
+/* "Show more" borrowed `.keybtn` for its shape. It is a tertiary action, so
+   now that the key has an edge it drops that edge and reads as a link. */
+.act-toggle { font-size: .75rem; font-weight: 600; color: var(--teal-dark); box-shadow: none; padding-inline: 0; }
+.act-toggle:hover { background: none; color: var(--teal-dark); text-decoration: underline; }
 /* R19-7: the rows an "N runtime sessions opened" summary stands for, revealed
    in place. Indented to the summary's TEXT column — the `.pev-ico` box (26px)
    plus the `.pol-ev` gap (.75rem) — so the run reads as belonging to the line
@@ -4877,9 +4903,11 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    scrollbar. Full values live in `title`. */
 .audit-action { font-family: var(--font-mono); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .audit-scope { display: inline-flex; align-items: center; gap: .375rem; justify-self: end; color: var(--muted); }
-.audit-scope-tag { font-family: var(--font-mono); font-size: .69rem; padding: .06rem .375rem; border-radius: var(--radius-small);
-  background: var(--tint-press); color: var(--muted); white-space: nowrap; }
-.audit-scope-tag.org { background: var(--focus-wash); color: var(--blue-pressed); }
+/* Design pass 2026-09-08: the scope tag is in the quiet tier. `.audit-scope-tag.org`
+   is gone — "org" on every row was a blue fill on every row of the log, and the
+   word already says which scope an event has. */
+.audit-scope-tag { font-family: var(--font-mono); font-size: .69rem; padding: .125rem .375rem; border-radius: var(--radius-small);
+  background: transparent; box-shadow: inset 0 0 0 1px var(--hairline); color: var(--muted); white-space: nowrap; }
 .audit-subject { font-family: var(--font-mono); font-size: .75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
 .audit-browse-foot { margin-top: .5rem; }
 .audit-dl { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }

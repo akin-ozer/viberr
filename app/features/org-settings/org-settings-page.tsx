@@ -316,7 +316,7 @@ function AuditBrowse({ events }: { events: AuditBrowseRow[] }) {
               <span className="audit-actor" title={e.actorLabel}>{e.actorLabel}</span>
               <span className="audit-action" title={e.action}>{e.action}</span>
               <span className="audit-scope">
-                <span className={e.projectSlug ? "audit-scope-tag" : "audit-scope-tag org"}>
+                <span className="audit-scope-tag">
                   {e.projectSlug ?? "org"}
                 </span>
                 {e.subjectId ? (

@@ -3251,3 +3251,40 @@ describe("app.css paints a busy AND disabled button with the busy step", () => {
     expect(both![1]).not.toMatch(/cursor:\s*not-allowed/);
   });
 });
+
+// Design pass 2026-09-08: the second pill tier (`.pill.quiet`) reaches the
+// chips that are not `.pill`, and the tone survives in the dot.
+describe("app.css: the quiet tier reaches every surface (design pass 2026-09-08)", () => {
+  const declsOf = (selector: string) => {
+    const rule = RULES.find((r) => r.selector === selector);
+    expect(rule, selector).toBeDefined();
+    return rule!.decls;
+  };
+  it("the task key rests quiet with a control edge, and takes its blue on hover", () => {
+    // It was a filled --blue-soft chip on every row of the activity stream.
+    const rest = declsOf(".keybtn");
+    expect(rest.get("background")).toBe("transparent");
+    expect(rest.get("color")).toBe("var(--muted)");
+    expect(rest.get("box-shadow")).toContain("var(--border-control)");
+    expect(declsOf(".keybtn:hover").get("background")).toBe("var(--blue-soft)");
+    // "Show more" shares the class and is a link, not a key.
+    expect(declsOf(".act-toggle").get("box-shadow")).toBe("none");
+  });
+  it("the audit log's scope tag has one look; the blue `org` variant is gone", () => {
+    expect(declsOf(".audit-scope-tag").get("background")).toBe("transparent");
+    expect(RULES.some((r) => r.selector === ".audit-scope-tag.org")).toBe(false);
+  });
+  it("an ineligible stage chip is demoted in ink, not opacity", () => {
+    const off = declsOf(".stage-chip.off");
+    expect(off.get("opacity")).toBeUndefined();
+    expect(off.get("color")).toBe("var(--placeholder)");
+  });
+  it("a quiet chip keeps its tone in the dot", () => {
+    for (const kind of ["ready", "done", "info", "input", "agent"]) {
+      expect(
+        RULES.some((r) => r.selector === `.pill.quiet.${kind} .pdot`),
+        kind,
+      ).toBe(true);
+    }
+  });
+});

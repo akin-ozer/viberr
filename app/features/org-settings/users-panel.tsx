@@ -693,7 +693,7 @@ export function UsersPanel({
                   any Google account with this domain · joins as {d.role}
                 </div>
               </span>
-              <Pill kind="ready" sm>
+              <Pill kind="ready" sm quiet>
                 domain allowlist
               </Pill>
               <button
@@ -723,12 +723,12 @@ export function UsersPanel({
               </span>
               <IdpChip idp={u.idp} />
               {u.status === "invited" && (
-                <Pill kind="neutral" sm>
+                <Pill kind="neutral" sm quiet>
                   setup pending
                 </Pill>
               )}
               {u.status === "whitelisted" && (
-                <Pill kind="neutral" sm>
+                <Pill kind="neutral" sm quiet>
                   whitelisted
                 </Pill>
               )}
@@ -738,7 +738,7 @@ export function UsersPanel({
                 </Pill>
               )}
               {u.disabled && (
-                <Pill kind="neutral" sm>
+                <Pill kind="neutral" sm quiet>
                   disabled
                 </Pill>
               )}

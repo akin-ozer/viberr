@@ -90,7 +90,16 @@ function RQRow({
             and the queue's density rule is the board card's (only ACTIONABLE
             state earns a second label). */}
         {t.pr && (
-          <Pill kind={prStatePill(t.pr.state).kind} sm>
+          <Pill
+            kind={prStatePill(t.pr.state).kind}
+            sm
+            // Design pass 2026-09-08: the same pair goes QUIET. An open review
+            // PR is the normal condition of everything in this queue, so its
+            // fill differentiated nothing — and it was the loudest chip on a
+            // row whose real state (awaiting verdict) sits in the quiet tier.
+            // `closed` and `merge pending` keep the fill with their word.
+            quiet={t.pr.state === "merged" || t.pr.state === "review"}
+          >
             PR #{t.pr.number}
             {t.pr.state === "merged" || t.pr.state === "review"
               ? ""

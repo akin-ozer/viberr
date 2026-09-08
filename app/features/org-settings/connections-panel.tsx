@@ -344,7 +344,7 @@ export function ConnectionsPanel({
                 </Pill>
               )}
               {c.def && (
-                <Pill kind="info" sm>
+                <Pill kind="info" sm quiet>
                   default
                 </Pill>
               )}

@@ -9,18 +9,18 @@ import {
 
 describe("syncPill (ruling 12 vocabulary)", () => {
   it("maps the three sync states to the mock pill kinds", () => {
-    expect(syncPill("merged")).toEqual({ kind: "done", label: "merged" });
+    expect(syncPill("merged")).toEqual({ kind: "done", label: "merged", quiet: true });
     expect(syncPill("behind_main")).toEqual({
       kind: "risk",
       label: "behind main",
     });
-    expect(syncPill("synced")).toEqual({ kind: "ready", label: "synced" });
+    expect(syncPill("synced")).toEqual({ kind: "ready", label: "synced", quiet: true });
   });
 });
 
 describe("prStatePill (ruling 12 incl. the closed-unmerged risk state)", () => {
   it("merged → done pill", () => {
-    expect(prStatePill("merged")).toEqual({ kind: "done", label: "merged" });
+    expect(prStatePill("merged")).toEqual({ kind: "done", label: "merged", quiet: true });
   });
   it("closed-unmerged → risk pill 'closed'", () => {
     expect(prStatePill("closed")).toEqual({ kind: "risk", label: "closed" });
@@ -44,6 +44,7 @@ describe("connectionPill (spec §7.9c: never claim connected when degraded)", ()
     expect(connectionPill({ status: "connected" })).toEqual({
       kind: "ready",
       label: "connected",
+      quiet: true,
     });
   });
   it("every degraded status renders a non-ready pill", () => {
@@ -132,10 +133,42 @@ describe("checksPill / reviewPill (P13-D-28)", () => {
       kind: "risk",
       label: "changes requested",
     });
-    expect(reviewPill("approved")).toEqual({ kind: "ready", label: "approved" });
+    expect(reviewPill("approved")).toEqual({ kind: "ready", label: "approved", quiet: true });
     expect(reviewPill("review_required")).toEqual({
       kind: "input",
       label: "review required",
     });
+  });
+});
+
+// Design pass 2026-09-08: the second pill tier lives in this vocabulary, not in
+// the components — a fill is a problem or a demand, an outline describes.
+describe("the quiet tier marks the settled facts, never the states that want a person", () => {
+  it("settled facts are quiet", () => {
+    expect(syncPill("merged").quiet).toBe(true);
+    expect(syncPill("synced").quiet).toBe(true);
+    expect(prStatePill("merged").quiet).toBe(true);
+    expect(reviewPill("approved").quiet).toBe(true);
+    expect(connectionPill({ status: "connected" }).quiet).toBe(true);
+    expect(
+      checksPill({ total: 3, passing: 3, failing: 0, pending: 0, state: "passing" }).quiet,
+    ).toBe(true);
+  });
+  it("demands keep their fill", () => {
+    for (const view of [
+      syncPill("behind_main"),
+      syncPill("unknown"),
+      prStatePill("closed"),
+      prStatePill("accepted"),
+      prStatePill("review"),
+      reviewPill("changes_requested"),
+      reviewPill("review_required"),
+      connectionPill({ status: "no_pat_configured" }),
+      connectionPill({ status: "auth_failed", reason: "expired" }),
+      checksPill({ total: 3, passing: 2, failing: 1, pending: 0, state: "failing" }),
+      checksPill({ total: 3, passing: 2, failing: 0, pending: 1, state: "pending" }),
+    ]) {
+      expect(view.quiet, view.label).toBeUndefined();
+    }
   });
 });
