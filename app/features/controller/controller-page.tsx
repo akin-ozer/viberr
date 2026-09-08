@@ -128,7 +128,12 @@ export function ControllerPage({
   }, [send.state, send.data, params, setParams, push]);
 
   return (
-    <main className="ctl-wrap" data-screen-label="Controller">
+    // The instance controller (/controller) mounts with no shell around it,
+    // so it keeps a frame of its own; inside a project it takes the shell's.
+    <main
+      className={"ctl-wrap" + (projectSlug ? "" : " standalone")}
+      data-screen-label="Controller"
+    >
       <header className="ctl-head">
         <span className="ctl-head-icon">
           <Icon name="cpu" />
@@ -349,9 +354,13 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
       {view.viewerIsOrgAdmin && (
         <p className="fine xs dim ctl-all-toggle">
           {view.showingAll ? (
-            <Link to="?">Show mine only</Link>
+            <Link className="linkish" to="?">
+              Show mine only
+            </Link>
           ) : (
-            <Link to="?all=1">Show everyone's (org admin)</Link>
+            <Link className="linkish" to="?all=1">
+              Show everyone&apos;s (org admin)
+            </Link>
           )}
         </p>
       )}
@@ -400,13 +409,32 @@ function Transcript({ view }: { view: ControllerSurfaceView }) {
 
   if (!view.conversation) {
     return (
-      <section className="panel ctl-transcript">
-        <div className="empty">
+      // Design pass 2026-09-08: this was a bordered, shadowed panel — the
+      // page's heaviest frame — drawn around 320px of nothing, with the one
+      // sentence pinned to its top edge in --placeholder. It is the app's
+      // composed empty state now (the hero Home and Insights use), centred in
+      // the column the transcript will fill; the composer under it is the
+      // page's single object until something is said.
+      <section className="ctl-transcript">
+        <div className="empty-hero" data-screen-label="Empty state">
+          <span className="glyph">
+            <Icon name="cpu" />
+          </span>
+          <h2>Nothing asked yet</h2>
           <p>
             Ask a question or ask for a change: boards, tasks, users, resources,
             agents, goal chains. Everything runs with your own permissions, and
             refusals say why.
           </p>
+          {!view.available && (
+            <p>
+              Claude isn&apos;t connected for you yet:{" "}
+              <Link className="linkish" to="/profile">
+                Profile → Agent accounts
+              </Link>
+              .
+            </p>
+          )}
         </div>
       </section>
     );
