@@ -332,6 +332,27 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     ]);
   });
 
+  it("a mirror whose HEAD names a branch it does not have never becomes an empty checkout", async () => {
+    // Caught live while repairing VIB-1: a mirror with every object and every
+    // ref, whose HEAD still named the `git init` default branch, cloned to an
+    // empty tree — `git clone` warns "remote HEAD refers to nonexistent ref"
+    // and exits 0. Canary: weaken `mirrorCanCheckOut` to "does it hold any
+    // refs?" and this workspace comes back with no README.
+    await makeOrigin();
+    await withOrigin(origins, () => clone("a"));
+    await exec("git", ["-C", mirrorDir(), "symbolic-ref", "HEAD", "refs/heads/nope"]);
+    await breakMirrorRemote();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+    const result = await withOrigin(origins, () => clone("b"));
+
+    expect(warn.mock.calls.map(([msg]) => msg)).toContain(
+      "the project's repository mirror has no branch to check out — cloning from GitHub",
+    );
+    expect(result.viaMirror).toBe(false);
+    expect(existsSync(path.join(workspace("b"), "README.md"))).toBe(true);
+  });
+
   it("a mirror with NO branches never becomes an empty checkout", async () => {
     // `git clone <ref-less repo>` warns and exits 0, so this arm used to report
     // success while handing a specialist a tree with no history and no
@@ -353,7 +374,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     const result = await withOrigin(origins, () => clone("b"));
 
     expect(warn.mock.calls.map(([msg]) => msg)).toContain(
-      "the project's repository mirror holds no branches — cloning from GitHub",
+      "the project's repository mirror has no branch to check out — cloning from GitHub",
     );
     expect(result.viaMirror).toBe(false);
     expect(existsSync(path.join(workspace("b"), "README.md"))).toBe(true);

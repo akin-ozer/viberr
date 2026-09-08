@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
 } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -181,17 +181,35 @@ function mirrorIsComplete(mirrorDir: string): boolean {
   }
 }
 
-/** Does the mirror actually hold branches to cut a working tree from? A
- *  complete mirror of an EMPTY upstream repository legitimately holds none;
- *  `cloneWorkspaceRepo` is what that distinction matters to. */
-function mirrorHasRefs(mirrorDir: string): boolean {
+/**
+ * Can a working tree be cut from this mirror — i.e. does its `HEAD` resolve to a
+ * branch it actually holds?
+ *
+ * That is precisely what `git clone <mirror>` needs to check anything out. It
+ * warns ("remote HEAD refers to nonexistent ref") and exits 0 otherwise, so
+ * every weaker test — "the directory is there", "it has some refs" — lets an
+ * EMPTY working tree through as a success. A mirror of a genuinely empty
+ * upstream repository answers false here, which is correct: there is nothing to
+ * cut, and `cloneWorkspaceRepo` should go and ask GitHub rather than invent a
+ * checkout.
+ */
+function mirrorCanCheckOut(mirrorDir: string): boolean {
+  let head: string;
   try {
-    if (statSync(path.join(mirrorDir, "packed-refs")).size > 0) return true;
+    head = readFileSync(path.join(mirrorDir, "HEAD"), "utf8").trim();
   } catch {
-    // Unpacked — the loose refs below are the answer.
+    return false;
   }
+  const symbolic = /^ref:\s*(refs\/\S+)$/.exec(head);
+  // A detached HEAD names its own commit — there is nothing to look up.
+  if (!symbolic) return /^[0-9a-f]{40,64}$/.test(head);
+  const ref = symbolic[1]!;
+  if (existsSync(path.join(mirrorDir, ...ref.split("/")))) return true;
+  // Freshly cloned mirrors pack their refs, so the loose file above is absent.
   try {
-    return readdirSync(path.join(mirrorDir, "refs", "heads")).length > 0;
+    return readFileSync(path.join(mirrorDir, "packed-refs"), "utf8")
+      .split("\n")
+      .some((line) => line.endsWith(` ${ref}`));
   } catch {
     return false;
   }
@@ -583,10 +601,14 @@ export async function cloneWorkspaceRepo(
   // `mirrorIsComplete` should already keep a half-built mirror out of here; a
   // genuinely EMPTY upstream repository is the honest way to reach this, and it
   // costs only a cheap network clone of a repository with nothing in it.
-  const usable = mirror && mirrorHasRefs(mirror.dir) ? mirror : null;
+  // Caught live while repairing VIB-1: a hand-seeded mirror whose `HEAD` still
+  // named the `git init` default branch had every object and every ref, and
+  // still cloned to nothing — which is why the test is HEAD-resolves, not
+  // has-refs.
+  const usable = mirror && mirrorCanCheckOut(mirror.dir) ? mirror : null;
   if (mirror && !usable) {
     mirrorWarn(
-      "the project's repository mirror holds no branches — cloning from GitHub",
+      "the project's repository mirror has no branch to check out — cloning from GitHub",
       { projectSlug: input.projectSlug, repo: input.repo },
       "",
     );

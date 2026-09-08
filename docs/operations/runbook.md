@@ -433,11 +433,15 @@ removing one for a task in progress forces a re-clone and interrupts a running a
 The mirror is built in a `<mirror>.building` sidecar and renamed into place, and a mirror
 counts as usable only once its `remote.origin.fetch` refspec is written — so a clone killed
 mid-download (a container stop, an interrupted run) leaves nothing the cache will serve, and
-the next clone rebuilds. Symptoms of an older half-built mirror, all at once: a
-`.repo-mirror/<owner>__<repo>.git` with zero refs and orphaned `objects/pack/tmp_pack_*`,
-repeated `mirror could not be refreshed — serving a possibly stale mirror` warnings, and
-agents reporting an EMPTY repository. The repair is to delete the mirror directory and the
-affected task's `workspace/`; both re-clone on the next run.
+the next clone rebuilds. A mirror whose `HEAD` does not resolve to a branch it holds is
+skipped for the same reason: `git clone` warns and exits 0 on one, producing an empty tree.
+Symptoms of an older half-built mirror, all at once: a `.repo-mirror/<owner>__<repo>.git`
+with zero refs and orphaned `objects/pack/tmp_pack_*`, repeated `mirror could not be
+refreshed — serving a possibly stale mirror` warnings, and agents reporting an EMPTY
+repository — after which a delivering agent commits with no ancestry and the push is refused
+as non-fast-forward. That refusal is NOT a stale remote branch: check the workspace's
+`git log` before clearing anything on GitHub. The repair is to delete the mirror directory
+and the affected task's `workspace/`; both re-clone on the next run.
 
 ## The single-writer lock and CLI refusals
 
