@@ -2520,3 +2520,35 @@ describe("the board's notices separate attention from fault", () => {
     expect(node.classList.contains("notice")).toBe(false);
   });
 });
+
+describe("the card's owner line names the agent PROFILE, not its role (owner, 2026-09-08)", () => {
+  const engaged = (profileName: string | null) =>
+    task({
+      key: "VIB-1",
+      stage: "impl",
+      specialist: {
+        kind: "agent",
+        backend: "claude",
+        name: "Claude",
+        role: "Implementation",
+        profileId: "developer",
+        profileName,
+      },
+    });
+  const ownerLine = (container: HTMLElement) =>
+    container.querySelector('[data-board-card="VIB-1"] .card-owner')!.textContent;
+
+  it("prints the deployed profile's name beside the backend", () => {
+    const { container } = renderBoard([engaged("Developer")]);
+    // "Claude · Developer": the backend names the actor as every surface does;
+    // the profile name says WHICH agent, where the role ("Implementation") did
+    // not — two profiles can share a role.
+    expect(ownerLine(container)).toBe("Claude· Developer");
+    expect(ownerLine(container)).not.toContain("Implementation");
+  });
+
+  it("falls back to the role for a profile no longer deployed — there is no live name to give", () => {
+    const { container } = renderBoard([engaged(null)]);
+    expect(ownerLine(container)).toBe("Claude· Implementation");
+  });
+});

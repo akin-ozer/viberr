@@ -7,7 +7,8 @@ import {
   mapPrChecks,
   mapPrReview,
   mapTaskProjectionRow,
-  withLiveAgentBackends,
+  withLiveAgentIdentities,
+  type LiveAgentIdentity,
   type TaskProjectionRow,
 } from "./task.server";
 
@@ -587,7 +588,7 @@ describe("mapOperatorRef sinceLabel (F7-UI2)", () => {
  * backend (the one Run actually launches), keeping the snapshot solely for
  * profiles no longer deployed.
  */
-describe("withLiveAgentBackends (live deployment wins over the engage-time snapshot)", () => {
+describe("withLiveAgentIdentities (live deployment wins over the engage-time snapshot)", () => {
   const engaged = (profileId: string, backend: "codex" | "claude") =>
     ({ profileId, backend, role: "Implementation" });
   const base = () =>
@@ -598,21 +599,38 @@ describe("withLiveAgentBackends (live deployment wins over the engage-time snaps
       }),
       false,
     );
+  const identities = (entries: [string, LiveAgentIdentity][]) =>
+    new Map<string, LiveAgentIdentity>(entries);
 
-  it("patches specialist AND reviewers to the deployed backend — name included", () => {
-    const live = new Map<string, "codex" | "claude">([
-      ["developer", "claude"],
-      ["reviewer", "claude"],
+  it("patches specialist AND reviewers to the deployed backend — name included — and carries the profile's name", () => {
+    const live = identities([
+      ["developer", { backend: "claude", name: "Developer" }],
+      ["reviewer", { backend: "claude", name: "Reviewer" }],
     ]);
-    const out = withLiveAgentBackends(base(), live);
-    expect(out.specialist).toMatchObject({ backend: "claude", name: "Claude" });
-    expect(out.reviewers[0]).toMatchObject({ backend: "claude", name: "Claude" });
+    const out = withLiveAgentIdentities(base(), live);
+    expect(out.specialist).toMatchObject({
+      backend: "claude",
+      name: "Claude",
+      profileName: "Developer",
+    });
+    expect(out.reviewers[0]).toMatchObject({
+      backend: "claude",
+      name: "Claude",
+      profileName: "Reviewer",
+    });
   });
 
-  it("F27-B1: a PINNED engagement keeps its backend — a stuck retry pin wins over the live deployment", () => {
+  it("the engagement row stores no name: a fresh render reads profileName null until the overlay", () => {
+    // The board card falls back to the role for exactly this null (an
+    // undeployed profile never gets a live name).
+    expect(base().specialist).toMatchObject({ profileName: null, role: "Implementation" });
+  });
+
+  it("F27-B1: a PINNED engagement keeps its backend — a stuck retry pin wins over the live deployment — but still takes the profile's name", () => {
     // The engagement was switched to Codex by a retry and PINNED there; the
     // profile is now Claude. The run resolves to the pin, so the card must too:
-    // withLiveAgentBackends must NOT patch a pinned agent to the live Claude.
+    // the overlay must NOT patch a pinned agent to the live Claude. The pin
+    // says nothing about what the profile is called.
     const pinned = summarize(
       row({
         specialist_json: JSON.stringify({
@@ -625,35 +643,38 @@ describe("withLiveAgentBackends (live deployment wins over the engage-time snaps
       }),
       false,
     );
-    const live = new Map<string, "codex" | "claude">([["developer", "claude"]]);
-    expect(withLiveAgentBackends(pinned, live).specialist).toMatchObject({
+    const live = identities([["developer", { backend: "claude", name: "Developer" }]]);
+    expect(withLiveAgentIdentities(pinned, live).specialist).toMatchObject({
       backend: "codex",
       name: "Codex",
+      profileName: "Developer",
     });
   });
 
-  it("a profile absent from the map (undeployed since engagement) keeps its snapshot", () => {
-    const out = withLiveAgentBackends(
+  it("a profile absent from the map (undeployed since engagement) keeps its snapshot, name and all", () => {
+    const out = withLiveAgentIdentities(
       base(),
-      new Map<string, "codex" | "claude">([["someone-else", "claude"]]),
+      identities([["someone-else", { backend: "claude", name: "Someone" }]]),
     );
-    expect(out.specialist).toMatchObject({ backend: "codex", name: "Codex" });
-    expect(out.reviewers[0]).toMatchObject({ backend: "codex", name: "Codex" });
+    expect(out.specialist).toMatchObject({ backend: "codex", name: "Codex", profileName: null });
+    expect(out.reviewers[0]).toMatchObject({ backend: "codex", name: "Codex", profileName: null });
   });
 
-  it("agreeing backends return the summary UNCHANGED (same reference)", () => {
-    const summary = base();
-    const agreeing = new Map<string, "codex" | "claude">([
-      ["developer", "codex"],
-      ["reviewer", "codex"],
+  it("an agreeing map returns the summary UNCHANGED (same reference)", () => {
+    const live = identities([
+      ["developer", { backend: "codex", name: "Developer" }],
+      ["reviewer", { backend: "codex", name: "Reviewer" }],
     ]);
-    expect(withLiveAgentBackends(summary, agreeing)).toBe(summary);
-    expect(withLiveAgentBackends(summary, new Map())).toBe(summary);
+    // The first pass writes the names; a second pass with the same map has
+    // nothing to change and hands back the same object.
+    const summary = withLiveAgentIdentities(base(), live);
+    expect(withLiveAgentIdentities(summary, live)).toBe(summary);
+    expect(withLiveAgentIdentities(summary, new Map())).toBe(summary);
   });
 
   it("an unengaged task passes through", () => {
     const summary = summarize(row(), false);
-    const live = new Map<string, "codex" | "claude">([["developer", "claude"]]);
-    expect(withLiveAgentBackends(summary, live)).toBe(summary);
+    const live = identities([["developer", { backend: "claude", name: "Developer" }]]);
+    expect(withLiveAgentIdentities(summary, live)).toBe(summary);
   });
 });

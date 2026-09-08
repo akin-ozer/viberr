@@ -489,7 +489,12 @@ function OwnerLine({ task }: { task: TaskSummary }) {
         {/* `sp.name` IS the backend label, so the glyph is a pictogram here. */}
         <AgentGlyph backend={sp.backend} decorative />
         <span className="nm">{sp.name}</span>
-        <span className="lbl">· {sp.role}</span>
+        {/* The profile's NAME, not its role (owner, 2026-09-08): two profiles
+            can share "Implementation", and "Developer" is what the roster and
+            the task page's engagement rows call this agent. The role stands
+            in only for a profile no longer deployed — there is no live name
+            left to give. */}
+        <span className="lbl">· {sp.profileName ?? sp.role}</span>
       </div>
     );
   }

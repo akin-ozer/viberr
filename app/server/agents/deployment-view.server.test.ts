@@ -5,6 +5,8 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import {
+  deployedSpecialistBackends,
+  deployedSpecialistIdentities,
   deploymentRuntimeIdentity,
   parseDeploymentDefinition,
   primaryRunBackend,
@@ -121,5 +123,38 @@ describe("deploymentRuntimeIdentity", () => {
     expect(view.kind).toBe(overlay.kind);
     // …and the map a run reads agrees with the primary-backend rule.
     expect(primaryRunBackend(view.backends)).toBe("claude");
+  });
+
+  it("deployedSpecialistIdentities names each deployed specialist as the roster does — override over template — and the backend map is its projection", async () => {
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    const { effectiveProfileView, VIEW_WITHOUT_POLICY } = await import(
+      "~/features/agents/agents-query.server"
+    );
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const ref = { projectSlug: "viberr-core", dataRoot: app.dataRoot };
+    // Rename the Developer in the deployment override only; the template still
+    // says "Developer". The board card must print the override, exactly as the
+    // roster does.
+    await updateProjectFile(ref, (parsed) => {
+      const dev = parsed.frontmatter.agents.find((a) => a.profileId === "developer")!;
+      dev.definition = { ...dev.definition, name: "Dev (fast lane)" };
+    });
+    const identities = deployedSpecialistIdentities("viberr-core", app.dataRoot);
+    expect(identities.get("developer")?.name).toBe("Dev (fast lane)");
+    // The reviewer has no override: the template's name stands.
+    expect(identities.get("reviewer")?.name).toBe("Reviewer");
+    // The operator is instance machinery, never an engaged specialist.
+    expect(identities.has("operator")).toBe(false);
+    // One computation: the display view and this map agree on every name…
+    for (const dep of readProjectFile(ref)!.parsed.frontmatter.agents) {
+      const live = identities.get(dep.profileId);
+      if (!live) continue;
+      expect(live.name).toBe(effectiveProfileView(dep, app.dataRoot, VIEW_WITHOUT_POLICY).name);
+    }
+    // …and the backend map is a projection of it, never a second read.
+    const backends = deployedSpecialistBackends("viberr-core", app.dataRoot);
+    expect([...backends.entries()]).toEqual(
+      [...identities.entries()].map(([id, live]) => [id, live.backend]),
+    );
   });
 });

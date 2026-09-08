@@ -4,6 +4,7 @@ import type {
   AgentDeployment,
   AgentDeploymentDefinition,
 } from "~/schemas/project-file.schema";
+import type { LiveAgentIdentity } from "~/shared/mapping/task.server";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import { agentProfileFilePath } from "~/server/files/file-store-root.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -216,15 +217,43 @@ export function deployedSpecialistBackends(
   dataRoot?: string,
 ): ReadonlyMap<string, "codex" | "claude"> {
   const map = new Map<string, "codex" | "claude">();
+  for (const [profileId, live] of deployedSpecialistIdentities(projectSlug, dataRoot)) {
+    map.set(profileId, live.backend);
+  }
+  return map;
+}
+
+/**
+ * The live map above, with the profile's current display NAME beside the
+ * backend (owner, 2026-09-08: the board card named an engaged agent by its
+ * backend and its ROLE — "Claude · Implementation" — when the roster and the
+ * task page call it "Developer"). The name resolves as `effectiveProfileView`
+ * writes it — override, then template, then the id — so the card, the roster
+ * and the engagement rows print one name for one profile. The engagement rows
+ * in task.md never stored a name (only the role; the ruling is to join by
+ * profile id, never by role string), so this overlay is where the name comes
+ * from. A profile no longer deployed contributes nothing, and the render keeps
+ * its role as the only descriptor it has.
+ *
+ * Tolerant like the backend map: any read/parse failure yields an empty map.
+ */
+export function deployedSpecialistIdentities(
+  projectSlug: string,
+  dataRoot?: string,
+): ReadonlyMap<string, LiveAgentIdentity> {
+  const map = new Map<string, LiveAgentIdentity>();
   try {
     const file = readProjectFile(
       dataRoot === undefined ? { projectSlug } : { projectSlug, dataRoot },
     );
     if (!file?.parsed) return map;
     for (const deployment of file.parsed.frontmatter.agents) {
-      const { kind, backends } = deploymentRuntimeIdentity(deployment, dataRoot);
+      const { kind, backends, def, template } = deploymentRuntimeIdentity(deployment, dataRoot);
       if (kind === "operator") continue;
-      map.set(deployment.profileId, primaryRunBackend(backends));
+      map.set(deployment.profileId, {
+        backend: primaryRunBackend(backends),
+        name: def?.name ?? template?.name ?? deployment.profileId,
+      });
     }
   } catch {
     return map;

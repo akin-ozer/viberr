@@ -14,11 +14,11 @@ import {
 } from "~/shared/mapping/task-event.server";
 import {
   mapTaskProjectionRow,
-  withLiveAgentBackends,
+  withLiveAgentIdentities,
   type TaskProjectionRow,
   type TaskSummary,
 } from "~/shared/mapping/task.server";
-import { deployedSpecialistBackends } from "~/server/agents/deployment-view.server";
+import { deployedSpecialistIdentities } from "~/server/agents/deployment-view.server";
 import {
   getProject,
   listProjectMembers,
@@ -115,9 +115,9 @@ export function getTaskSummary(
   // The engaged agents' backend follows the LIVE deployment, not the
   // engage-time snapshot — the run already does (specialist-run.server.ts), so
   // the exec profile's "Run" button must be labeled with what it launches.
-  return withLiveAgentBackends(
+  return withLiveAgentIdentities(
     summary,
-    deployedSpecialistBackends(slug, opts.dataRoot),
+    deployedSpecialistIdentities(slug, opts.dataRoot),
   );
 }
 

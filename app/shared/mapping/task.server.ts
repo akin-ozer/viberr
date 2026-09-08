@@ -97,6 +97,15 @@ export type TaskProjectionRow = {
   parsed_at: string;
 };
 
+/** One deployed specialist as the run and the display agree on it: the backend
+ * a run started now would use, and the profile's current display name. Built
+ * by `deployedSpecialistIdentities` (server/agents/deployment-view), consumed
+ * by `withLiveAgentIdentities` below. */
+export interface LiveAgentIdentity {
+  backend: "codex" | "claude";
+  name: string;
+}
+
 /** Agent chip render shape (mock AgentActor + the profile-id join key). */
 export interface AgentRender {
   kind: "agent";
@@ -105,7 +114,12 @@ export interface AgentRender {
   /** "Codex" | "Claude". */
   name: string;
   role: string;
-  /** F27-B1: a stuck retry pin. When set, `withLiveAgentBackends` does NOT
+  /** The deployed profile's display name ("Developer"), written by
+   *  `withLiveAgentIdentities` from the live deployment — the engagement row
+   *  in task.md stores no name. `null` when the profile is no longer deployed
+   *  (the role stands in on the card); absent on a render built by hand. */
+  profileName?: string | null;
+  /** F27-B1: a stuck retry pin. When set, `withLiveAgentIdentities` does NOT
    *  overlay the live profile backend — the run follows the pin, so the card
    *  must too. */
   pinnedBackend?: "codex" | "claude" | null;
@@ -430,6 +444,7 @@ export function mapAgentRef(ref: AgentRef | null): AgentRender | null {
     backend: ref.backend,
     name: agentBackendName(ref.backend),
     role: ref.role,
+    profileName: null,
     pinnedBackend: ref.pinnedBackend ?? null,
     // U35-5: the projection stores the whole engagement (rebuilder
     // `supportingEngagements`), whose parser defaults the flag to false; an
@@ -448,25 +463,32 @@ export function mapAgentRef(ref: AgentRef | null): AgentRender | null {
  * run start heals them only when the next run actually happens
  * (specialist-run.server.ts), so between a profile edit and that run the
  * snapshot lies about what Run does. This patches specialist + reviewers from
- * the live `profileId → backend` map (`deployedSpecialistBackends` in
- * server/agents/deployment-view
- * — the same primary-backend rule the run resolves with); a profile absent
- * from the map (undeployed since engagement) keeps its snapshot, exactly the
- * run path's own fallback. Pure — the map is built by the server query layer,
- * so board, review queue and task detail all inherit one answer.
+ * the live `profileId → { backend, name }` map (`deployedSpecialistIdentities`
+ * in server/agents/deployment-view — the same primary-backend rule the run
+ * resolves with, and the same name rule the roster displays with); a profile
+ * absent from the map (undeployed since engagement) keeps its snapshot,
+ * exactly the run path's own fallback. Pure — the map is built by the server
+ * query layer, so board, review queue and task detail all inherit one answer.
+ *
+ * The profile NAME rides the same overlay (owner, 2026-09-08): the engagement
+ * row stores the role, and the board card printed it — "Claude ·
+ * Implementation" — where every other surface says "Developer".
  */
-export function withLiveAgentBackends(
+export function withLiveAgentIdentities(
   summary: TaskSummary,
-  live: ReadonlyMap<string, "codex" | "claude">,
+  live: ReadonlyMap<string, LiveAgentIdentity>,
 ): TaskSummary {
   if (live.size === 0) return summary;
   const patch = (agent: AgentRender): AgentRender => {
-    // F27-B1: a STUCK retry pin wins over the live profile — the run resolves to
-    // it (specialist-run backend resolution), so the card must show it too.
-    if (agent.pinnedBackend) return agent;
-    const backend = live.get(agent.profileId);
-    if (!backend || backend === agent.backend) return agent;
-    return { ...agent, backend, name: agentBackendName(backend) };
+    const deployed = live.get(agent.profileId);
+    if (!deployed) return agent;
+    // F27-B1: a STUCK retry pin wins over the live profile BACKEND — the run
+    // resolves to it (specialist-run backend resolution), so the card must
+    // show it too. The pin says nothing about the profile's name, which still
+    // follows the deployment.
+    const backend = agent.pinnedBackend ? agent.backend : deployed.backend;
+    if (backend === agent.backend && (agent.profileName ?? null) === deployed.name) return agent;
+    return { ...agent, backend, name: agentBackendName(backend), profileName: deployed.name };
   };
   const specialist = summary.specialist ? patch(summary.specialist) : null;
   const reviewers = summary.reviewers.map(patch);
