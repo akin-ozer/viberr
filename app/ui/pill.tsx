@@ -72,10 +72,12 @@ export type ReadinessDisplayValue =
   | "agent_working"
   | "goal_edit_pending";
 
-/** What a pill renders for one value: its CSS kind and its label. */
+/** What a pill renders for one value: its CSS kind and its label, plus whether
+ *  it belongs to the quiet tier — see `Pill`'s `quiet` prop. */
 interface PillDisplay {
   kind: PillKind;
   label: string;
+  quiet?: boolean;
 }
 
 const READINESS_DISPLAY = {
@@ -143,15 +145,29 @@ export type ValidationValue =
   | "none"
   | "bypassed";
 
+/**
+ * Design pass 2026-09-08 — which of these fill and which stay quiet.
+ *
+ * Readiness and validation are different questions ("what is this task waiting
+ * for?" vs "what does the evidence say?"), but two of their values map to the
+ * same amber `input` tone, so a card in review printed `input required` and
+ * `awaiting verdict` as twin amber pills and neither read as distinct.
+ *
+ * The rule that separates them: a FILL is a problem or a demand; an OUTLINE
+ * describes. `failing` and `bypassed` are problems and keep their fills. The
+ * other three state where the evidence stands without asking anything of the
+ * reader — including `healthy`, which is the least actionable thing on a board,
+ * and was spending a green fill to say "nothing to do here".
+ */
 const VALIDATION_DISPLAY = {
-  healthy: { kind: "ready", label: "validation healthy" },
+  healthy: { kind: "ready", label: "validation healthy", quiet: true },
   // `changed` = the delivered revision has no reviewer verdict covering it
   // (never reviewed, or re-delivered since the last verdict). The old label
   // "evidence changed" described the MECHANISM; this one names what is owed —
   // owner feedback 2026-07-26.
-  changed: { kind: "input", label: "awaiting verdict" },
+  changed: { kind: "input", label: "awaiting verdict", quiet: true },
   failing: { kind: "blocked", label: "validation failing" },
-  none: { kind: "neutral", label: "no validation" },
+  none: { kind: "neutral", label: "no validation", quiet: true },
   // N20-14 (§5c / C2): a durable force-accept fact — `deriveValidation` returns
   // "bypassed" when `acceptance === "forced"`. `risk`-toned because it is an
   // OVERRIDE, not a clean pass: a human accepted the completion past the verdict
@@ -182,7 +198,7 @@ export function ValidationPill({
 }) {
   const v = VALIDATION_BY_VALUE.get(value) ?? VALIDATION_DISPLAY.none;
   return (
-    <Pill kind={v.kind} sm={sm}>
+    <Pill kind={v.kind} sm={sm} quiet={v.quiet}>
       {v.label}
     </Pill>
   );

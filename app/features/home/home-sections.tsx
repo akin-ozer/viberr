@@ -501,8 +501,16 @@ export function SettingsPanel({
   isAdmin: boolean;
 }) {
   return (
-    <section className="panel" data-screen-label="Settings">
-      <div className="panel-head">
+    // Design pass 2026-09-08: this was a `.panel` — a bordered, shadowed,
+    // full-width box holding bordered tiles — sitting directly under the
+    // project cards that are the page's actual content. The heaviest container
+    // on Home belonged to its least important section, which is hierarchy
+    // upside down. It takes the same `.sec-h` section header the three project
+    // sections above it use, so the page reads as four peers with the projects
+    // carrying the weight, and the tiles are the objects rather than being
+    // objects inside a bigger object.
+    <section data-screen-label="Settings">
+      <div className="sec-h">
         <Icon name="sliders" />
         <h2>Settings</h2>
       </div>

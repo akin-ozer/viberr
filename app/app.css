@@ -1296,7 +1296,22 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    their cells on row 2. The explicit rows are load-bearing: auto-placement
    is sparse and would otherwise push the main column onto its own row once
    the side column claims column 2 first. */
-.detail-head { display: flex; flex-direction: column; gap: 1rem; min-width: 0; grid-column: 1 / -1; grid-row: 1; }
+/* The head spans both grid columns, so before the 2026-09-08 pass its content —
+   the hero, and the decision packet, which is the densest reading on the page —
+   ran the full 1160px while the hero's own goal line was capped at 70ch. The
+   packet's prose was set at roughly 140 characters a line, about twice a
+   comfortable measure, and its action row reached the far right of the
+   viewport, where the controller dock's fixed button sits: "Confirm decision",
+   the primary action of the most consequential interaction in the product, was
+   partly underneath it.
+   A max-width fixes both at once, and is the honest fix rather than moving the
+   dock — the dock's placement is ruling 121's, and it was never the thing in
+   the wrong place. */
+.detail-head {
+  display: flex; flex-direction: column; gap: 1rem;
+  min-width: 0; max-width: 980px;
+  grid-column: 1 / -1; grid-row: 1;
+}
 .detail-main { display: flex; flex-direction: column; gap: 1rem; min-width: 0; grid-column: 1; grid-row: 2; }
 .detail-side { display: flex; flex-direction: column; gap: 1rem; grid-column: 2; grid-row: 2; }
 
@@ -4150,7 +4165,11 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .org-tile {
   border: 1px solid var(--hairline);
   border-radius: var(--radius-box);
-  background: color-mix(in srgb, var(--surface), transparent 25%);
+  /* Full surface, not a 75% wash: the tiles used to sit inside a `.panel` that
+     supplied the solid ground under them, and Home's Settings section dropped
+     that panel in the 2026-09-08 pass. A tile is its own object now, so it
+     paints its own ground. */
+  background: var(--surface);
   padding: .75rem 1rem .75rem;
   display: flex; flex-direction: column; gap: .5rem;
 }
