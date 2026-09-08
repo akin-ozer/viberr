@@ -1349,11 +1349,14 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    otherwise leave the UA outline around the whole drawer. */
 .rail:focus,
 .rail:focus-visible { outline: none; }
-/* U35-2 (pass 35), on U7 (D2, second half): the task page is THREE regions in
+/* U35-2 (pass 35), on U7 (D2, second half): the task page is FOUR regions in
    the markup, and the markup order is the reading order at every width,
    because a screen reader and the keyboard follow the DOM, not the paint:
-     `.detail-head`  the task's name and goal, then the open decision packet;
-     `.detail-side`  Current state (the next action), GitHub, Details, Permissions;
+     `.detail-head`   the task's name and goal;
+     `.detail-packet` the open decision packet (owner, 2026-09-08: its own
+                      region, so the desktop grid can seat it in the main
+                      column with the side column beside it);
+     `.detail-side`   Current state (the next action), GitHub, Details;
      `.detail-main`  the live run, diagnostics, recommendations, run controls,
                      the console and the timeline.
    U7 put the side column first for the UX spec's stacking rule ("preserving
@@ -2051,15 +2054,6 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .commit .sha { font-family: var(--font-mono); font-size: .75rem; color: var(--blue-pressed); }
 .commit .msg { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.policy-line {
-  display: flex; align-items: center; justify-content: space-between; gap: .5rem;
-  padding: .5rem 0; font-size: .88rem;
-  border-bottom: 1px solid var(--hairline);
-}
-.policy-line:last-child { border-bottom: 0; }
-.policy-line .k { color: var(--faint); display: inline-flex; align-items: center; gap: .375rem; }
-.policy-line .k .ico { width: 14px; height: 14px; }
-.policy-line .v { font-weight: 700; font-family: var(--font-display); font-size: .75rem; }
 
 /* toast */
 .toast-wrap { position: fixed; bottom: 1.4rem; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; flex-direction: column; gap: .5rem; align-items: center; }
@@ -4861,7 +4855,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    same-specificity rule that used to lose to the inline style (`.n.agent` vs
    `.ag-stat .n`, `.count.violations` vs `.nav-item .count`). */
 
-/* --- task detail: GitHub, permissions, acceptance and state side panels --- */
+/* --- task detail: GitHub, acceptance and state side panels --- */
 .panel-act { width: 100%; margin-top: .75rem; }
 .more-act { width: 100%; margin-top: .5rem; }
 .force-accept { margin-top: .75rem; }
@@ -4870,7 +4864,6 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .diff-del { color: var(--coral-dark); }
 .commit-list { margin-top: .75rem; }
 .commit-list .flabel { margin-bottom: .25rem; }
-.perm-intro { margin: 0 0 .5rem; line-height: 1.4; }
 .archive-hint { margin: .375rem 0 0; }
 .by-human { color: var(--blue-pressed); }
 .by-agent { color: var(--agent-dark); }
@@ -5208,8 +5201,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .detail { grid-template-columns: 1fr; grid-template-rows: none; }
   /* D2 (pass-20) / U7 (pass-21) / U35-2 (pass-35): the stack is the DOM order
      (head: title and goal; packet: the open decision; side: Current state
-     with the primary "Accept completion → Done" button, GitHub, Details,
-     Permissions; main: runs and the timeline), so the 1-up stack needs no
+     with the primary "Accept completion → Done" button, GitHub, Details;
+     main: runs and the timeline), so the 1-up stack needs no
      `order` at all: drop the desktop cell placement and the four regions fall
      into the single column in source order. Pass 20's `order: -1` did this
      visually and left the DOM (hence the screen reader and the keyboard)

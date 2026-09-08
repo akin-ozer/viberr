@@ -50,7 +50,6 @@ import {
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { splitDependencyText } from "~/shared/dependencies";
 import { activeWorkRevision, coercePriority } from "~/schemas/task-file.schema";
-import { resolveAcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   countTaskAttachments,
@@ -358,12 +357,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     operatorBackend: operatorBackendFor({}, params.slug),
     // R19-A: the ceiling, so the run picker offers only what will actually run.
     operatorAutonomy: operatorAutonomyFor({}, params.slug),
-    // A6 (pass 23): does THIS project's operator hold the one exception to the
-    // human-only Done boundary (full autonomy + completion-for-acceptance:
-    // direct)? The Permissions panel's boundary row stated the rule flatly on
-    // every project, contradicting the Review queue one click away. Same read
-    // model the queue uses, so the two surfaces cannot disagree.
-    acceptanceAuthority: resolveAcceptanceAuthority(params.slug),
     // Ruling 127: every agent run on this task bills its OWNER's accounts, so
     // "which backends can run here" is a question about the owner — not about
     // this deployment and not about the viewer. `null` means the task has no
@@ -1236,7 +1229,6 @@ export default function TaskDetailRoute({
       schedules={loaderData.schedules}
       archived={loaderData.archived}
       acceptance={loaderData.acceptance}
-      acceptanceAuthority={loaderData.acceptanceAuthority}
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
       githubCheckedAt={loaderData.githubCheckedAt}

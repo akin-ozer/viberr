@@ -1442,59 +1442,6 @@ describe("R14-3: the task archive", () => {
   });
 });
 
-describe("P14-GV-04: the Permissions panel tells the owner the truth", () => {
-  it("names the owner's acceptance authority instead of 'maintainer or admin only'", () => {
-    const { container, getByText } = renderPage({
-      myRole: "contributor",
-      meId: "u-selin",
-    });
-    expect(getByText("You own this task, so you can accept it → Done")).toBeTruthy();
-    // The row used to read "Maintainer or admin only" while the server let this
-    // very user accept — the "Run agents" row below it still says that, and for
-    // a contributor it is true.
-    const acceptRow = [...container.querySelectorAll(".policy-line")].find((r) =>
-      r.textContent?.startsWith("Accept completion"),
-    )!;
-    expect(acceptRow.textContent).not.toContain("Maintainer or admin only");
-  });
-
-  it("still refuses a contributor who does NOT own it", () => {
-    const { getByText } = renderPage({
-      myRole: "contributor",
-      meId: "u-baris",
-    });
-    expect(getByText("Maintainer, admin, or the task's own owner")).toBeTruthy();
-  });
-
-  it("E1: the Comments row states membership, not 'Every registered user'", () => {
-    // Verified live this pass: a signed-in NON-member gets 404 on this page and
-    // on the comment POST. The row was a hardcoded string promising the
-    // opposite, on the one panel whose entire job is stating what the server
-    // enforces. Canary: restore the literal and this fails on both assertions.
-    const { container } = renderPage({ myRole: "viewer", meId: "u-elif" });
-    const commentRow = [...container.querySelectorAll(".policy-line")].find((r) =>
-      r.textContent?.startsWith("Comments"),
-    )!;
-    expect(commentRow.textContent).not.toContain("Every registered user");
-    // A viewer IS a member and holds `comment`, so it reads as permitted…
-    expect(commentRow.textContent).toContain("every project member");
-  });
-
-  it("E3: the ownership row reads the release-any grant, not a hardcoded admin literal", () => {
-    const asAdmin = renderPage({ myRole: "admin", meId: "u-arda" });
-    const adminRow = [...asAdmin.container.querySelectorAll(".policy-line")].find(
-      (r) => r.textContent?.startsWith("Task ownership"),
-    )!;
-    expect(adminRow.textContent).toContain("you can release anyone");
-    cleanup();
-    const asMaintainer = renderPage({ myRole: "maintainer", meId: "u-murat" });
-    const maintRow = [
-      ...asMaintainer.container.querySelectorAll(".policy-line"),
-    ].find((r) => r.textContent?.startsWith("Task ownership"))!;
-    expect(maintRow.textContent).toContain("your own seat");
-  });
-});
-
 const ACCEPT_DIALOG = 'dialog[data-screen-label="Accept completion dialog"]';
 const acceptDialog = (container: HTMLElement) =>
   container.ownerDocument.querySelector(ACCEPT_DIALOG);

@@ -356,7 +356,7 @@ export function TaskHero({
 }
 
 /* Task metadata (priority/labels/due date) now lives in its own side panel —
-   TaskDetailsPanel in task-side-panels.tsx — beside Current state and Permissions. */
+   TaskDetailsPanel in task-side-panels.tsx — beside Current state and the GitHub trace. */
 
 /** Execution profile plus the run/schedule/release mutations it drives
  * (dynamic-dispatch rework 2026-08-29: one run-agent intent replaced the

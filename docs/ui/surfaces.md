@@ -137,7 +137,7 @@ Intents behind `project.task.tsx` are explained in
   inputs, the store browser's inputs and the concurrency field (the 720px block
   in `app.css` is the list). Under the 1100px collapse the task page stacks
   title and goal, the open decision, current state and next action, then the
-  rest (GitHub, Details, Permissions, runs, the timeline): the page is four
+  rest (GitHub, Details, runs, the timeline): the page is four
   regions in source order (`.detail-head`, `.detail-packet`, `.detail-side`,
   `.detail-main`) and the stack is that order, so the screen reader, the Tab
   key and the phone read the task's name and the question it asks before its

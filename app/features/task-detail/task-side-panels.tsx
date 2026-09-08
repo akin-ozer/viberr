@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { unpushedRevisionOf } from "~/schemas/task-file.schema";
-import { Link, useFetcher } from "react-router";
+import { useFetcher } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import {
   coercePriority,
@@ -18,15 +18,16 @@ import { LocalRelative } from "~/ui/local-time";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
-import type { AcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { checksPill, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
 /**
- * The task-detail SIDE column, in its contracted order (spec §2): GitHub trace
- * → current state → permissions. Split out of `task-detail-page.tsx` (pass 16,
- * pure structural refactor — no behaviour or copy change).
+ * The task-detail SIDE column: Current state (the next action), the GitHub
+ * trace and Details. Split out of `task-detail-page.tsx` (pass 16, pure
+ * structural refactor). The Permissions panel that used to close the column
+ * — the viewer's role grants restated row by row — is gone (owner, 2026-09-08,
+ * ruling 167): what a person may do here is said where they would do it.
  */
 
 /** The layout hands these panels `myRole` as a raw string. Decode it to the
@@ -486,7 +487,7 @@ export function GithubTrace({
 
 /**
  * The task's lightweight planning metadata (priority · labels · due date) as a
- * side panel, in the contracted order between Current state and Permissions.
+ * side panel, after Current state and the GitHub trace.
  * Reads as `.kv` rows like the panels around it; a contributor+ (`edit-task-meta`)
  * gets an inline editor. Re-seeds from server truth on every open so a concurrent
  * edit is never clobbered (the goal-editor rule).
@@ -714,126 +715,6 @@ export function TaskDetailsPanel({
             ))}
         </>
       )}
-    </div>
-  );
-}
-
-export function PolicyPanel({
-  projectSlug,
-  myRole,
-  stages,
-  ownsTask,
-  // Defaults to the strict human-only boundary — the same fallback
-  // `resolveAcceptanceAuthority` returns when a project file can't be read, so a
-  // bare test render or a missing value never OVER-states the exception.
-  acceptanceAuthority = { operatorCanAccept: false, operatorName: "the operator" },
-}: {
-  projectSlug: string;
-  myRole: string | null;
-  /** UI-15/UI-49 family: the boundary row names the project's OWN review and
-   *  terminal stages instead of the literals "Review → Done". */
-  stages: TaskDetail["stages"];
-  /** P14-GV-04: this viewer holds the task's owner seat. The acceptance row is
-   *  the one platform rule that is NOT identical for every task — R6-2 gives the
-   *  owner acceptance authority whatever their project role — and this panel
-   *  told a contributor-owner "Maintainer or admin only" while the server let
-   *  them accept and the review queue counted them as the one who must. */
-  ownsTask: boolean;
-  /** A6 (pass 23): whether THIS project's operator holds the one exception to
-   *  the human-only Done boundary (full autonomy + completion-for-acceptance:
-   *  direct). The boundary row read it so it never states the rule flatly on a
-   *  full-autonomy project, contradicting the Review queue one click away. */
-  acceptanceAuthority?: AcceptanceAuthority;
-}) {
-  const reviewName =
-    stages.length >= 2 ? stages[stages.length - 2]!.name : "the review stage";
-  const terminalName =
-    stages.length >= 1 ? stages[stages.length - 1]!.name : "the final stage";
-  const r = viewerRole(myRole);
-  const role = myRole || "viewer";
-  // Render exactly what the canonical matrix (app/shared/rbac.ts) enforces for
-  // THIS viewer's role — no aspirational copy that the server would 403.
-  const rows: { k: string; v: string; icon: "user" | "flag" | "plus" | "message" | "cpu" | "lock" }[] = [
-    { k: "Your role", v: role.charAt(0).toUpperCase() + role.slice(1), icon: "user" },
-    {
-      // E1: this was hardcoded "Every registered user" — false, and false on a
-      // surface whose whole job is stating what the server enforces. A
-      // signed-in non-member 404s on this page and on the comment POST;
-      // membership is the gate, and every project role holds `comment` inside
-      // it. Read from the matrix like every other row so it cannot drift again.
-      k: "Comments",
-      v: roleCan(r, "comment")
-        ? "You can comment (every project member can)"
-        : "Project members only",
-      icon: "message",
-    },
-    {
-      k: "Task ownership",
-      v: roleCan(r, "own-task")
-        ? roleCan(r, "release-any-ownership")
-          ? "Take / release · you can release anyone"
-          : "Take / release your own seat"
-        : "View only (contributor+ to own)",
-      icon: "plus",
-    },
-    {
-      k: "Accept completion",
-      v: roleCan(r, "accept-completion")
-        ? "You can accept → Done"
-        : ownsTask
-          ? "You own this task, so you can accept it → Done"
-          : "Maintainer, admin, or the task's own owner",
-      icon: "flag",
-    },
-    {
-      k: "Run agents",
-      v: roleCan(r, "run-agents") ? "You can run agents" : "Maintainer or admin only",
-      icon: "cpu",
-    },
-    {
-      k: `${reviewName} → ${terminalName}`,
-      // A6: flat on every project before — false one click from the Review queue
-      // on a full-autonomy project whose operator holds the accept-into-Done
-      // grant. Same read model the queue uses, so the two cannot disagree.
-      v: acceptanceAuthority.operatorCanAccept
-        ? `Human decision, or ${acceptanceAuthority.operatorName} at full autonomy with the accept-into-Done grant`
-        : "Human decision, locked at the review boundary",
-      icon: acceptanceAuthority.operatorCanAccept ? "flag" : "lock",
-    },
-  ];
-  return (
-    <div className="panel">
-      <div className="panel-head">
-        <Icon name="shield" />
-        <h2>Permissions</h2>
-        <span className="right sub fine xs">V1 rules</span>
-      </div>
-      {/* UX19-1: this cited "the owner authority R6-2 adds" — an internal
-          decisions.md ruling id in copy an end user reads, who has no way to
-          look it up and nothing to do with it. Say what the ruling MEANS. The
-          ruling-id citations in this file's CODE COMMENTS (above, and on the
-          `ownsTask` prop) are the right place for them and stay. */}
-      <p className="fine xs perm-intro">
-        Platform rules as they apply to <b>you on this task</b>: role grants,
-        plus the authority that comes with owning this task. This task's live
-        stage, owner and waiting-on are in <b>Current state</b> above.
-      </p>
-      {rows.map((r) => (
-        <div className="policy-line" key={r.k}>
-          <span className="k">
-            <Icon name={r.icon} />
-            {r.k}
-          </span>
-          <span className="v">{r.v}</span>
-        </div>
-      ))}
-      <Link
-        className="btn ghost sm panel-act"
-        to={`/projects/${projectSlug}/policy`}
-      >
-        <Icon name="shield" />
-        View project policy
-      </Link>
     </div>
   );
 }

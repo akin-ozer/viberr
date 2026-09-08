@@ -7,7 +7,6 @@ import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
-import type { AcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { AcceptConfirm, type AcceptCeremonyMode } from "./accept-confirm";
 import { ArchiveConfirm } from "./archive-confirm";
 import { ContinuityRecoveryPanel } from "./continuity-recovery";
@@ -45,7 +44,6 @@ import {
 import {
   CurrentStatePanel,
   GithubTrace,
-  PolicyPanel,
   TaskDetailsPanel,
 } from "./task-side-panels";
 import {
@@ -130,7 +128,6 @@ export function TaskDetailPage({
   schedules,
   archived = false,
   acceptance,
-  acceptanceAuthority = { operatorCanAccept: false, operatorName: "the operator" },
   githubHost,
   githubReconciledAt = null,
   githubCheckedAt = null,
@@ -196,12 +193,6 @@ export function TaskDetailPage({
   /** P14-LV-06: the viewer's acceptance authority + the exact refusal, resolved
    *  server-side by the predicate the review queue also counts with. */
   acceptance: AcceptanceAffordance;
-  /** A6 (pass 23): whether THIS project's operator holds the one exception to
-   *  the human-only Done boundary. The Permissions panel's boundary row reads it
-   *  so it can never state the rule flatly on a full-autonomy project. Defaults
-   *  to the strict boundary for bare test renders (the loader always supplies
-   *  the real value). */
-  acceptanceAuthority?: AcceptanceAuthority;
   /** GitHub web host for browse links — the loader's `githubWebHost()`. */
   githubHost: string;
   /** UI-57: newest `github.reconcile` for this task (freshness cue) — the last
@@ -672,8 +663,9 @@ export function TaskDetailPage({
                the packet). Rendered only while a packet is open, so without
                one the two columns meet at the same row as before.
             3. `.detail-side`: Current state first (it carries the next action
-               and the acceptance button), then the GitHub trace, Details and
-               Permissions.
+               and the acceptance button), then the GitHub trace and Details.
+               The Permissions panel that closed the column is gone (owner,
+               2026-09-08, ruling 167).
             4. `.detail-main`: the live run, diagnostics, continuity,
                recommendations, the run controls, the console and the timeline.
           On desktop `.detail-head` spans both columns and the regions keep
@@ -792,13 +784,6 @@ export function TaskDetailPage({
           task={task}
           canEdit={canEditMeta}
           labelSuggestions={labelSuggestions}
-        />
-        <PolicyPanel
-          projectSlug={task.projectSlug}
-          myRole={myRole}
-          stages={task.stages}
-          ownsTask={isOwner}
-          acceptanceAuthority={acceptanceAuthority}
         />
       </div>
 

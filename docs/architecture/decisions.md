@@ -3439,6 +3439,22 @@ by rewriting those paragraphs:*
     explicitly out of scope. (`app/app.css.test.ts`; the survey and its element-level
     evidence in the ReUI migration plan.)
 
+167. **The task page carries no Permissions panel (owner, 2026-09-08).** The side column
+    used to close with a panel that restated the viewer's role grants row by row — comments,
+    task ownership, accepting completion, running agents, the review boundary — under a
+    "V1 rules" tag, with a link to the project's Policy page. The owner does not want it.
+    What a person may do on a task is said where they would do it: Current state carries the
+    acceptance button and its refusal sentence, the owner seat carries Assign and Release,
+    the run controls carry their own gating; the whole matrix is one click away on Policy,
+    and the profile's "Your access" lists the same grants for the person. The panel, its
+    `PolicyPanel` component, its `.policy-line` / `.perm-intro` rules and the
+    task loader's `acceptanceAuthority` field (A6, pass 23 — read by nothing else on the
+    page; the Review queue resolves its own) are removed. The pass findings that shaped the
+    panel's copy — P14-GV-04 (the owner's acceptance authority named truthfully), E1
+    (comments are members-only), E3 (the release-any grant), UX19-1 (no ruling ids in copy)
+    — retire with it; the rules they described still hold and are enforced where they always
+    were, server-side and on the Policy page.
+
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is
 corrected on the page named; the note stays here so a reader who meets the old wording, in

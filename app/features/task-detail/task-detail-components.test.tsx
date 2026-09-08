@@ -19,7 +19,7 @@ import {
   DecisionPacket,
   observationLabel,
 } from "./decision-packet";
-import { GithubTrace, PolicyPanel } from "./task-side-panels";
+import { GithubTrace } from "./task-side-panels";
 import { DiagnosticsPanel, TaskHero } from "./task-main-sections";
 import type { DiagnosticRecord } from "~/server/projections/task-query.server";
 import { ReleaseConfirm } from "./release-confirm";
@@ -1965,60 +1965,6 @@ describe("F19-22: the GitHub panel names the last CHANGE, not the last check", (
     // must be able to hold both at once.
     expect(checked.querySelector("time")).not.toBeNull();
     expect(change.textContent).toContain("recorded at delivery");
-  });
-});
-
-/**
- * UX19-1 — the Permissions panel's intro cited "the owner authority R6-2 adds":
- * an internal decisions.md ruling id in copy an end user reads. Nobody outside
- * the repo can look it up, and knowing the number changes nothing they can do —
- * so the sentence has to say what the ruling MEANS. (The same citations in this
- * file's CODE COMMENTS are correct and stay; only the render layer is in scope.)
- */
-describe("UX19-1: no internal ruling ids in Permissions copy", () => {
-  const intro = (myRole: string, ownsTask = false) => {
-    const { container } = render(
-      <MemoryRouter>
-        <PolicyPanel
-          projectSlug="viberr-core"
-          myRole={myRole}
-          stages={[
-            { id: "review", name: "Review", color: "#5b76fe" },
-            { id: "done", name: "Done", color: "#00b473" },
-          ]}
-          ownsTask={ownsTask}
-        />
-      </MemoryRouter>,
-    );
-    return container.querySelector(".perm-intro")!;
-  };
-
-  it("names the owner's authority in words, not by ruling number", () => {
-    const p = intro("contributor", true);
-    expect(p.textContent).toContain(
-      "plus the authority that comes with owning this task",
-    );
-    expect(p.textContent).not.toMatch(/\bR\d{1,2}-\d+\b/);
-  });
-
-  it("holds for every role the panel renders", () => {
-    for (const role of ["viewer", "contributor", "maintainer", "admin"]) {
-      const { container } = render(
-        <MemoryRouter>
-          <PolicyPanel
-            projectSlug="viberr-core"
-            myRole={role}
-            stages={[
-              { id: "review", name: "Review", color: "#5b76fe" },
-              { id: "done", name: "Done", color: "#00b473" },
-            ]}
-            ownsTask={role === "contributor"}
-          />
-        </MemoryRouter>,
-      );
-      expect(container.textContent).not.toMatch(/\bR\d{1,2}-\d+\b/);
-      cleanup();
-    }
   });
 });
 
