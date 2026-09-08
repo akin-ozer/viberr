@@ -1479,9 +1479,10 @@ describe("app.css owns the shared idioms — hoisting is not an escape hatch (F1
     // Delete these and the counts/notes lose their type scale and spacing with
     // nothing in the markup to fall back on.
     const fine = utilities.find((u) => u.selector === ".fine")!.decls;
-    // Pass 30 snapped the whole sheet onto the 13-step type scale; .fine's
-    // step is .74rem (11.8px, a 0.3px move from the old .76).
-    expect(fine.get("font-size")).toBe(".74rem");
+    // The 2026-09-08 recut merged the five near-identical small steps into two.
+    // `.fine` is the app's secondary-text utility, so it sits on the secondary
+    // step: .81rem (13px), up from .74rem (11.8px).
+    expect(fine.get("font-size")).toBe(".81rem");
     expect(fine.get("color")).toBe("var(--faint)");
     // .75rem since the pass-30 spacing snap (.85 was off-scale).
     expect(CODE).toMatch(/\.pol-note\.after\s*\{[^}]*margin-top:\s*\.75rem/);
@@ -2696,13 +2697,12 @@ describe("app.css field chrome covers every text-like input type (P21)", () => {
 
 /* --------------------------------------------------------- the type scale */
 
-describe("app.css type scale (pass 30)", () => {
-  // The whole sheet was snapped onto 13 hand-picked steps (documented at the
-  // token block). This is the lock that keeps the next `.73rem` from creeping
-  // back in: a new size is a deliberate widening of the scale, made here.
+describe("app.css type scale (recut 2026-09-08)", () => {
+  // Six steps, one per role (documented at the token block). This is the lock
+  // that keeps the next `.73rem` from creeping back in: a new size is a
+  // deliberate widening of the scale, made here.
   const TYPE_SCALE = [
-    ".62rem", ".68rem", ".74rem", ".8rem", ".86rem", ".92rem", ".98rem",
-    "1.05rem", "1.18rem", "1.3rem", "1.5rem", "1.7rem", "1.9rem",
+    ".69rem", ".81rem", ".94rem", "1.13rem", "1.5rem", "1.88rem",
   ];
 
   it("every font-size is a scale step (or the sanctioned 0/inherit)", () => {
@@ -2959,7 +2959,14 @@ describe("interface review 2026-09-06: the rules the fixes rest on", () => {
     for (const type of ["text", "email", "password"]) {
       expect(block).toContain(`.field input[type="${type}"].mono`);
     }
-    expect(block).toMatch(/\.cmdk-input[^{]*\{\s*font-size:\s*1\.05rem/);
+    // Asserts the INTENT, not a literal step: iOS zooms the viewport when a
+    // focused input is under 16px, so the mobile block has to lift it to at
+    // least 1rem. Pinning the exact value made the 2026-09-08 scale recut fail
+    // here for no reason — the size had moved from 16.8px to 18px, which is
+    // more compliant, not less.
+    const cmdk = block.match(/\.cmdk-input[^{]*\{\s*font-size:\s*([\d.]+)rem/);
+    expect(cmdk, ".cmdk-input must be resized in the mobile block").toBeTruthy();
+    expect(Number(cmdk![1]), "16px minimum, or iOS zooms on focus").toBeGreaterThanOrEqual(1);
   });
 
   it("marks an invalid field on the control itself, frame included", () => {
