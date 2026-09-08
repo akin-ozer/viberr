@@ -1086,13 +1086,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border: 1px solid var(--hairline);
   border-radius: var(--radius-card);
   background: var(--surface);
-  /* Owner, 2026-09-08 ("less bloaty"): a card is a row of a list, not a
-     panel. Half a rem above and below, three-eighths between its lines; the
-     title steps down to .88rem; the glyph matches the 22px avatar beside it. */
-  padding: .5rem .75rem;
+  padding: .75rem .75rem .75rem;
   box-shadow: var(--shadow-card);
   transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
-  display: flex; flex-direction: column; gap: .375rem;
+  display: flex; flex-direction: column; gap: .5rem;
 }
 .card:hover { background: var(--tint-hover); border-color: var(--border); }
 /* P16-UI-01: the focus ring is the app-wide `:focus-visible` rule at the top of
@@ -1255,13 +1252,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    values and is not a key any more. A task key is one identifier, so it never
    wraps; the pill beside it is prose and takes the squeeze instead. */
 .card-top .key { font-family: var(--font-mono); font-size: .75rem; color: var(--faint); white-space: nowrap; }
-.card h3 { font-size: .88rem; line-height: 1.25; font-weight: 700; }
+.card h3 { font-size: 1rem; line-height: 1.18; font-weight: 800; }
 
 .card-owner {
   display: flex; align-items: center; gap: .5rem;
+  padding-top: .125rem;
 }
-.card-owner .agent-glyph { width: 22px; height: 22px; }
-.card-owner .agent-glyph .ico { width: 12px; height: 12px; }
 .card-owner .lbl { font-size: .75rem; color: var(--faint); }
 .card-owner .nm { font-size: .75rem; font-weight: 700; font-family: var(--font-display); }
 
@@ -1271,7 +1267,8 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    the foot's own items, which is the same information the line was carrying,
    without the ink. */
 .card-foot {
-  display: flex; align-items: center; gap: .25rem .5rem;
+  display: flex; align-items: center; gap: .5rem;
+  margin-top: .125rem;
   flex-wrap: wrap;
 }
 .trace {
@@ -1285,7 +1282,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* Lightweight task metadata row (priority flag, freeform labels, due date).
    Sits between the owner row and the trace foot, and only renders when the
    task carries non-default metadata (board card + task hero share it). */
-.card-meta { display: flex; align-items: center; gap: .375rem; flex-wrap: wrap; padding-top: .125rem; }
+.card-meta { display: flex; align-items: center; gap: .375rem; flex-wrap: wrap; padding-top: .5rem; }
 /* Freeform labels: the neutral-pill pairing (--muted on a 94%-transparent
    --fg wash), which the R19-12 contrast sweep already clears. */
 /* Freeform labels are descriptive by definition, so they wear the quiet tier's
