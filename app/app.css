@@ -786,6 +786,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   color: var(--teal-dark);
 }
 .pill .pdot { width: .42rem; height: .42rem; border-radius: 50%; background: currentColor; }
+/* Owner, 2026-09-08 ("less bloaty" — the labels): an icon inside a pill took
+   the sheet's 16px `svg.ico` default, taller than the pill's own 11–12px text,
+   so every icon pill stood 24px next to a 19px text pill and read as a badge.
+   The glyph is text-sized now: 12px in a pill, 11px in a small one. */
+.pill .ico { width: 12px; height: 12px; }
 .pill.ready   { background: var(--teal-light); color: var(--teal-dark); }
 .pill.input   { background: var(--amber-light); color: var(--amber-dark); }
 .pill.risk    { background: var(--rose-light); color: var(--coral-dark); }
@@ -794,7 +799,8 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .pill.agent   { background: var(--agent-soft); color: var(--agent-dark); }
 .pill.neutral { background: var(--tint-press); color: var(--muted); }
 .pill.done    { background: var(--success-soft); color: var(--success-dark); }
-.pill.sm { font-size: .69rem; padding: .25rem .375rem; }
+.pill.sm { font-size: .69rem; padding: .125rem .375rem; gap: .25rem; }
+.pill.sm .ico { width: 11px; height: 11px; }
 /* THE SECOND PILL TIER (design pass, 2026-09-08).
    Every pill was a filled tint at weight 700, so a board card carrying six of
    them — readiness, priority, two labels, a due date, a verdict — gave all six
@@ -1291,8 +1297,8 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    should not be mistaken for a state the system computed. */
 .label-chip {
   display: inline-flex; align-items: center;
-  padding: .125rem .5rem; border-radius: var(--radius-button);
-  font-size: .69rem; font-weight: 600; font-family: var(--font-mono);
+  padding: .125rem .375rem; border-radius: var(--radius-button);
+  font-size: .69rem; font-weight: 600; font-family: var(--font-mono); line-height: 1;
   background: transparent; color: var(--muted);
   box-shadow: inset 0 0 0 1px var(--hairline);
   white-space: nowrap;
