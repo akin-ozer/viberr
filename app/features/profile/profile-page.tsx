@@ -190,11 +190,13 @@ function ProfileIdentity({
       <div className="kv spaced">
         {memberships.length ? (
           memberships.map((m, i) => (
-            <div className="kv-row" key={m.slug}>
+            <div className="kv-row membership" key={m.slug}>
               <span className="k">{i === 0 ? "Member of" : ""}</span>
               <span className="v">
                 {m.name}
-                <Pill kind="info" sm>
+                {/* Quiet: the role describes; the panel-head pill on Your
+                    access keeps its fill because it is that panel's subject. */}
+                <Pill kind="info" sm quiet>
                   {m.role}
                 </Pill>
               </span>

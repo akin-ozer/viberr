@@ -638,12 +638,18 @@ function AgentAccountCard({
               </Pill>
             ) : null}
           </div>
+          {/* Design pass 2026-09-08: a forty-word sentence is prose, not a
+              datum — as a `.kv-row` value it sat right-aligned across the
+              card's width with no measure. It is the sheet's note idiom now
+              (icon, sentence, 70ch), with the label folded in as its lead. */}
           {lastRefusal ? (
-            <div className="kv-row" data-refusal={lastRefusal.kind}>
-              <span className="k">
-                {lastRefusal.kind === "credential" ? "Last refusal" : "Usage window"}
-              </span>
-              <span className="v plain">
+            <div className="pol-note after last" data-refusal={lastRefusal.kind}>
+              <Icon name="alert" />
+              <span>
+                <strong>
+                  {lastRefusal.kind === "credential" ? "Last refusal" : "Usage window"}
+                </strong>
+                {" · "}
                 {lastRefusal.kind === "credential" ? (
                   <>
                     Refused by the provider on{" "}
@@ -708,19 +714,27 @@ function AgentAccountCard({
         </>
       ) : (
         <>
-          <div className="cred-warn">
-            <Icon name="alert" />
+          {/* Design pass 2026-09-08: not connected is the RESTING state of a
+              fresh account, not an alarm. The badge above already says it, so
+              the sentence is the sheet's quiet note rather than an amber box
+              inside a card inside a panel; a failed sign-in still reports in
+              `.cred-warn` above. */}
+          <div className="pol-note after last">
+            <Icon name="cpu" />
             <span>
-              Not connected. Runs on tasks you own, and your controller
-              conversations, use your own {label} account.
+              Runs on tasks you own, and your controller conversations, use
+              your own {label} account.
             </span>
           </div>
           <div className="cred-manage">
-            {methods.signIn.map((method) => (
+            {methods.signIn.map((method, i) => (
               <button
                 key={method}
                 type="button"
-                className="btn sm"
+                // The vendor's own sign-in leads; the other sign-ins stay
+                // neutral and the paste methods ghost — one recommended path
+                // per card instead of six equal buttons.
+                className={"btn sm" + (i === 0 ? " primary" : "")}
                 disabled={busy}
                 onClick={() =>
                   submit({ intent: "backend-login-start", backend, method })

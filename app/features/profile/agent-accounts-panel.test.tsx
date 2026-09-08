@@ -122,7 +122,7 @@ describe("AgentAccountsPanel", () => {
     expect(getByText("Agent accounts")).toBeTruthy();
     expect(container.querySelectorAll(".cred-card")).toHaveLength(2);
     expect(
-      getAllByText(/Not connected\. Runs on tasks you own/),
+      getAllByText(/Runs on tasks you own/),
     ).toHaveLength(2);
 
     // Claude: two Anthropic flows plus a Console key. Codex: the ChatGPT device

@@ -2538,6 +2538,10 @@ dialog[data-closing]::backdrop {
   margin: .125rem 0 .75rem; font-size: .75rem; line-height: 1.5; color: var(--faint);
 }
 .cap-exception svg { width: 13px; height: 13px; margin-top: .125rem; flex: none; color: var(--placeholder); }
+/* The capability and eligibility prose on a profile ran the full panel width
+   (~140 characters a line); a measure, on these two sites only — `.fine` is an
+   inline utility used everywhere and takes no width of its own. */
+.ag-detail .cap-exception, .ag-detail p.fine { max-width: 70ch; }
 .cap-exception strong { color: var(--muted); font-weight: 600; }
 /* R15-12: unenforced capability lines, collapsed. Native <details> so keyboard
    and screen-reader behavior come for free — the panel already ships in the
@@ -2843,6 +2847,9 @@ dialog[data-closing]::backdrop {
    over a 3% fill is nearly invisible against --surface, so it cost a nesting
    level and returned nothing. Only the spacing survives. */
 .cred-card { margin-top: 1rem; }
+/* Two accounts in one panel: more space around a group than within it (the
+   name-to-note step inside a card is .75rem). */
+.cred-card + .cred-card { margin-top: 1.5rem; }
 .cred-top { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .cred-top .ico { width: 15px; height: 15px; color: var(--muted); }
 .cred-name { font-family: var(--font-display); font-weight: 700; font-size: .88rem; }
@@ -4800,10 +4807,12 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    The search input is a borderless fill inside a framed wrapper, so the ring
    is drawn by :focus-within (P16-UI-01's rule for exactly this shape); the
    task and date inputs keep their own borders and take the shared treatment. */
+/* Design pass 2026-09-08: separated from the feed by space, not by a fourth
+   rule on a page that already rules every row. */
 .feed-filters {
   display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
-  padding: .5rem 0 .75rem; border-bottom: 1px solid var(--hairline);
-  margin-bottom: .375rem;
+  padding: .5rem 0 .75rem;
+  margin-bottom: .75rem;
 }
 .feed-filters .ff-search {
   flex: 1 1 150px; min-width: 130px; display: flex; align-items: center; gap: .375rem;
@@ -5032,6 +5041,11 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* --- shell / home / login --- */
 .count.violations { color: var(--coral-dark); font-weight: 700; }
 .kv.spaced { margin-top: 1rem; }
+/* Design pass 2026-09-08: memberships are one fact with N values, not N ruled
+   rows two of which have an empty label. The divider closes the group under
+   the last membership only; the role chips describe (quiet). */
+.kv-row.membership:has(+ .kv-row.membership) { border-bottom: 0; padding-bottom: .125rem; }
+.kv-row.membership + .kv-row.membership { padding-top: .125rem; }
 /* `.form-err` carries the same nudge: inside a `.confirm-card` (a plain block,
    no flex gap) the repo-repair dialog's error sits directly under the note it
    follows. */

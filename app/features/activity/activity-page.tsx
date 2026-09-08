@@ -406,20 +406,26 @@ function AuditLogs({
           policy &amp; access · {entries.length} of {total} entries
         </span>
       </div>
-      <FeedFilters
-        legend="audit logs"
-        params={{
-          q: "aq",
-          type: "aky",
-          actor: "aac",
-          task: "atk",
-          from: "afrom",
-          to: "ato",
-        }}
-        typeLabel="kind"
-        typeOptions={AUDIT_KIND_OPTIONS}
-        actorOptions={actorOptions}
-      />
+      {/* Design pass 2026-09-08: the bar renders only for a log longer than
+          one page. A one-entry log carried five controls above it — the
+          filter apparatus was larger than the content it filtered — and a
+          list you can read whole does not need a search. */}
+      {total > AUDIT_STEP && (
+        <FeedFilters
+          legend="audit logs"
+          params={{
+            q: "aq",
+            type: "aky",
+            actor: "aac",
+            task: "atk",
+            from: "afrom",
+            to: "ato",
+          }}
+          typeLabel="kind"
+          typeOptions={AUDIT_KIND_OPTIONS}
+          actorOptions={actorOptions}
+        />
+      )}
       <div className="pev-list">
         {compactAuditEntries(entries).map((row) =>
           row.compacted ? (

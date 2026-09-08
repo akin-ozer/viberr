@@ -724,7 +724,11 @@ describe("hydration first pass (SSR)", () => {
 
 describe("per-panel feed filters (P21)", () => {
   it("renders one filter bar per panel, with the panel's own vocabulary", () => {
-    const { getByLabelText, getAllByText } = renderActivity();
+    // The audit bar renders only for a log longer than one page (design pass
+    // 2026-09-08), so the fixture claims more entries than it carries.
+    const { getByLabelText, getAllByText } = renderActivity(undefined, undefined, {
+      auditTotal: 75,
+    });
     // Stream bar.
     expect(getByLabelText("Search the activity stream")).not.toBeNull();
     expect(getByLabelText("Filter the activity stream by type")).not.toBeNull();
@@ -745,6 +749,15 @@ describe("per-panel feed filters (P21)", () => {
     ) as HTMLSelectElement;
     const kinds = [...kindSelect.options].map((o) => o.value);
     expect(kinds).toEqual(["", "violation", "blockedact", "change", "audit"]);
+  });
+
+  it("a log that fits on one page carries no filter bar", () => {
+    // Design pass 2026-09-08: five controls above one entry was the filter
+    // apparatus outweighing its content. The stream bar is untouched.
+    const { queryByLabelText, getByLabelText } = renderActivity();
+    expect(queryByLabelText("Filter the audit logs by kind")).toBeNull();
+    expect(queryByLabelText("Search the audit logs")).toBeNull();
+    expect(getByLabelText("Search the activity stream")).not.toBeNull();
   });
 
   it("typing a search writes the panel's own URL param and Clear removes it", () => {

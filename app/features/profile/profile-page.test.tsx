@@ -252,7 +252,7 @@ describe("ProfilePage", () => {
     const { container, getByText, getAllByText } = renderProfile();
     expect(getByText("Agent accounts")).toBeTruthy();
     // Both backends read "Not connected" on a fresh account.
-    expect(getAllByText(/Not connected\. Runs on tasks you own/)).toHaveLength(2);
+    expect(getAllByText(/Runs on tasks you own/)).toHaveLength(2);
     // Order within the right column: the panel that decides whether this
     // person's agents can run at all comes before the attribution card.
     const headings = [...container.querySelectorAll(".profile-col")][1]!;
