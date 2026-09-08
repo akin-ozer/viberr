@@ -1481,8 +1481,8 @@ describe("app.css owns the shared idioms — hoisting is not an escape hatch (F1
     const fine = utilities.find((u) => u.selector === ".fine")!.decls;
     // The 2026-09-08 recut merged the five near-identical small steps into two.
     // `.fine` is the app's secondary-text utility, so it sits on the secondary
-    // step: .81rem (13px), up from .74rem (11.8px).
-    expect(fine.get("font-size")).toBe(".81rem");
+    // step: .75rem (12px), within a pixel of the .74rem (11.8px) it always had.
+    expect(fine.get("font-size")).toBe(".75rem");
     expect(fine.get("color")).toBe("var(--faint)");
     // .75rem since the pass-30 spacing snap (.85 was off-scale).
     expect(CODE).toMatch(/\.pol-note\.after\s*\{[^}]*margin-top:\s*\.75rem/);
@@ -2702,7 +2702,7 @@ describe("app.css type scale (recut 2026-09-08)", () => {
   // that keeps the next `.73rem` from creeping back in: a new size is a
   // deliberate widening of the scale, made here.
   const TYPE_SCALE = [
-    ".69rem", ".81rem", ".94rem", "1.13rem", "1.5rem", "1.88rem",
+    ".69rem", ".75rem", ".88rem", "1rem", "1.25rem", "1.75rem",
   ];
 
   it("every font-size is a scale step (or the sanctioned 0/inherit)", () => {
