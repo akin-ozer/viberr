@@ -4619,7 +4619,12 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 
 @media (max-width: 1000px) {
   .set-layout { grid-template-columns: 1fr; }
-  .set-nav { flex-direction: row; overflow-x: auto; position: static; }
+  /* Interface review 2026-09-08: the row WRAPS rather than scrolls. Five tabs
+     are the page's primary navigation, and `overflow-x: auto` hid the last
+     ones behind a scroll edge whose only cue was a clipped label ("Users &
+     acces" at 390px, with three tabs past it). A second line of tabs is
+     always reachable; a scrolled one is not. */
+  .set-nav { flex-direction: row; flex-wrap: wrap; position: static; }
   .set-nav .nav-item { white-space: nowrap; }
   .rsrc-grid { grid-template-columns: 1fr; }
 }
