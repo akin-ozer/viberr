@@ -119,7 +119,7 @@ describe("ReviewQueuePage", () => {
     // C4: the viewer-scoped canonical phrase — the same "waiting on you" the
     // board card uses. (The panel HEADING still names the acceptance action;
     // this per-row tag is a status, and shares the app's two-phrase vocabulary.)
-    expect(first.querySelector(".wait-tag.human")!.textContent).toContain(
+    expect(first.querySelector(".wait-tag.you")!.textContent).toContain(
       "waiting on you",
     );
     expect(first.textContent).toContain("PR #318");

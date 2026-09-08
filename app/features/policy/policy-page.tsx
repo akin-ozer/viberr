@@ -315,12 +315,10 @@ export function AgentCapability({
   profiles,
   onOpenProfile,
   onManageProfiles,
-  onMatrix,
 }: {
   profiles: PcapProfile[];
   onOpenProfile: (profileId: string) => void;
   onManageProfiles: () => void;
-  onMatrix: () => void;
 }) {
   return (
     <div className="panel">
@@ -426,8 +424,13 @@ export function AgentCapability({
         })}
       </div>
 
+      {/* Design pass 2026-09-08: this block asks nothing of the reader, and it
+          shouted three times — a danger-red eyebrow, a rose-filled pill on
+          every row and a rule fencing it off. The eyebrow is the ordinary
+          label, the pills describe (quiet), space does the fencing, and the
+          coral locks stay as the one warm signal. */}
       <div className="human-only">
-        <div className="flabel danger">
+        <div className="flabel">
           Always reserved for humans
         </div>
         {ALWAYS_HUMAN_ROWS.map((row) => (
@@ -439,18 +442,16 @@ export function AgentCapability({
                 <em className="ho-exc"> · {row.exception}</em>
               ) : null}
             </span>
-            <Pill kind="risk" sm>
+            <Pill kind="risk" sm quiet>
               {row.exception ? "agent profiles" : "all profiles"}
             </Pill>
           </div>
         ))}
       </div>
 
+      {/* One "Capability matrix" on this screen: the page header's. The copy
+          that lived here opened the same modal from the same handler. */}
       <div className="pol-actions">
-        <button type="button" className="btn ghost sm" onClick={onMatrix}>
-          <Icon name="shield" />
-          Capability matrix
-        </button>
         <button type="button" className="btn sm" onClick={onManageProfiles}>
           <Icon name="agents" />
           Manage profiles
@@ -996,7 +997,6 @@ export function PolicyPage({
                 navigate(`/projects/${projectSlug}/agents?profile=${id}`)
               }
               onManageProfiles={() => navigate(`/projects/${projectSlug}/agents`)}
-              onMatrix={() => setMatrixOpen(true)}
             />
             <Guardrails
               guardrails={data.guardrails}

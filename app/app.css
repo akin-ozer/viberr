@@ -1299,6 +1299,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   font-size: .75rem; font-weight: 700;
 }
 .wait-tag.human { color: var(--blue-pressed); }
+/* Design pass 2026-09-08: in the review queue blue means one thing — you owe
+   something. "waiting on you" is `.you`; someone else's wait reads in the
+   row's secondary ink. The board keeps its blue "waiting on a human". */
+.wait-tag.you { color: var(--blue-pressed); }
+.rq-row .wait-tag.human { color: var(--muted); font-weight: 600; }
 .wait-tag.agent { color: var(--agent-dark); }
 .wait-tag .ico { width: 13px; height: 13px; }
 .wait-tag .working { width: .42rem; height: .42rem; border-radius: 50%; background: var(--agent); animation: pulse-a 1.6s ease-out infinite; }
@@ -1375,6 +1380,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: 1rem 1rem;
 }
 .panel.flush { padding: 0; overflow: hidden; }
+/* A section with nothing to demand is a well, not a raised card — the same
+   rule as `.pill.quiet`: a fill (a frame, a shadow) is a demand. */
+.panel.quiet { background: var(--tint-well); border-color: transparent; box-shadow: none; }
 .panel-head {
   display: flex; align-items: center; gap: .5rem;
   margin-bottom: .75rem;
@@ -2706,20 +2714,26 @@ dialog[data-closing]::backdrop {
   transition: background .12s ease, color .12s ease, transform .1s var(--ease-out);
 }
 .mini-seg button:hover:not(:disabled) { color: var(--fg); }
-.mini-seg button.on { background: var(--fg); color: var(--surface); }
+/* Design pass 2026-09-08: the selected segment is a pressed well, not an ink
+   slab. This is the one segmented control that repeats down a list (a role
+   picker per member row) and sits beside panel titles (the stream's filter),
+   where four black bars were the heaviest ink on the page. `.seg`/`.cap-seg`
+   keep their fill: a page-level filter is a single, deliberate loud choice. */
+.mini-seg button.on { background: var(--tint-press); color: var(--fg); }
 /* D32-5 (pass 32): the hover rule above outranks `.on` (its `:not(:disabled)`
    adds specificity), so a SELECTED segment under the pointer painted --fg on
    --fg — invisible text on the Policy role radios and the Add-MCP transport
    segment. The selected color wins under hover too. */
-.mini-seg button.on:hover:not(:disabled) { background: var(--fg); color: var(--surface); }
+.mini-seg button.on:hover:not(:disabled) { background: var(--tint-press); color: var(--fg); }
 
 /* rbac matrix */
 .rbac-scroll { overflow-x: auto; }
+/* Design pass 2026-09-08: no frame of its own — the panel is the box, and the
+   table sits flush with its padding like a list. The header band steps one
+   rung up the tint ladder so it still grounds in dark without the frame. */
 .rbac-table {
   width: 100%; border-collapse: separate; border-spacing: 0;
   font-size: .75rem;
-  border: 1px solid var(--hairline); border-radius: var(--radius-button);
-  overflow: hidden;
 }
 .rbac-table th, .rbac-table td { padding: .5rem .5rem; border-bottom: 1px solid var(--hairline); text-align: center; }
 /* The role columns hold a 16px check each; without a cap they steal width and
@@ -2727,7 +2741,7 @@ dialog[data-closing]::backdrop {
 .rbac-table thead th:not(:first-child) { width: 5.75rem; }
 .rbac-table tr:last-child td { border-bottom: 0; }
 .rbac-table thead th {
-  background: var(--tint-well);
+  background: var(--tint-press);
   font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
   white-space: nowrap;
 }
@@ -2788,8 +2802,11 @@ dialog[data-closing]::backdrop {
 .pcap-counts { display: inline-flex; gap: .5rem; flex: 0 1 auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
 .pcap-counts .cs { display: inline-flex; align-items: center; gap: .25rem; font-family: var(--font-mono); font-size: .69rem; color: var(--faint); }
 .pcap-counts .cs .d { width: .5rem; height: .5rem; border-radius: 50%; flex: none; }
+/* In a roster row the scope tag is a footnote, not a section eyebrow: the
+   quiet tier, scoped so the capability-matrix modal (its home) is untouched. */
+.pcap-counts .mx-scope { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--hairline); text-transform: none; letter-spacing: 0; }
 
-.human-only { display: flex; flex-direction: column; gap: .5rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--hairline); }
+.human-only { display: flex; flex-direction: column; gap: .5rem; margin-top: 1.5rem; }
 /* Anchored to the FIRST text line, not the block center: a row whose exception
    clause wraps ("Transition a task to Done · except …") used to float its lock
    and pill midway between the two lines, aligned with neither. The margins
@@ -2927,12 +2944,13 @@ dialog[data-closing]::backdrop {
 
 /* policy activity */
 .pev-list { display: flex; flex-direction: column; }
+/* Design pass 2026-09-08: the stream is a document, not a ruled table. No
+   rule between events — space separates them (24px between rows against
+   ~22px between lines) — and the one rule kept moves to the day boundary. */
 .pol-ev {
   display: flex; align-items: flex-start; gap: .75rem;
-  padding: .5rem 0;
-  border-bottom: 1px solid var(--hairline);
+  padding: .75rem 0;
 }
-.pol-ev:last-child { border-bottom: 0; }
 .pev-ico {
   width: 26px; height: 26px; border-radius: 50%; flex: none;
   display: grid; place-items: center;
@@ -2952,8 +2970,8 @@ dialog[data-closing]::backdrop {
    ever rendered. Resolved to the token that was already doing the work. */
 /* "Show more" borrowed `.keybtn` for its shape. It is a tertiary action, so
    now that the key has an edge it drops that edge and reads as a link. */
-.act-toggle { font-size: .75rem; font-weight: 600; color: var(--teal-dark); box-shadow: none; padding-inline: 0; }
-.act-toggle:hover { background: none; color: var(--teal-dark); text-decoration: underline; }
+.act-toggle { font-size: .75rem; font-weight: 600; color: var(--blue-pressed); box-shadow: none; padding-inline: 0; }
+.act-toggle:hover { background: none; color: var(--blue-pressed); text-decoration: underline; }
 /* R19-7: the rows an "N runtime sessions opened" summary stands for, revealed
    in place. Indented to the summary's TEXT column — the `.pev-ico` box (26px)
    plus the `.pol-ev` gap (.75rem) — so the run reads as belonging to the line
@@ -2968,10 +2986,11 @@ dialog[data-closing]::backdrop {
 .activity-cols { display: grid; grid-template-columns: 1.55fr 1fr; gap: 1rem; align-items: start; }
 .act-day {
   font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
-  color: var(--placeholder);
-  padding: .75rem 0 .25rem;
+  color: var(--faint);
+  border-top: 1px solid var(--hairline); margin-top: .5rem;
+  padding: 1rem 0 .375rem;
 }
-.panel > div:first-of-type .act-day { padding-top: .125rem; }
+.panel > div:first-of-type .act-day { padding-top: .125rem; border-top: 0; margin-top: 0; }
 .act-actor { color: var(--fg); font-family: var(--font-display); font-weight: 800; }
 .act-sep { color: var(--placeholder); margin: 0 .375rem; }
 .pev-ico.act-comment { background: var(--tint-hover); color: var(--muted); }
@@ -4986,7 +5005,6 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .daily-col:hover .daily-bar { background: var(--blue-pressed); }
 
 .deny-note.before { margin-bottom: .5rem; }
-.flabel.danger { color: var(--danger); }
 .probe-note {
   flex-basis: 100%;
   font-size: .75rem; font-weight: 400; line-height: 1.4;

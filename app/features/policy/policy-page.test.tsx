@@ -254,7 +254,6 @@ describe("AgentCapability", () => {
         profiles={PROFILES}
         onOpenProfile={onOpenProfile}
         onManageProfiles={() => {}}
-        onMatrix={() => {}}
       />,
     );
     expect(getByText("2 profiles")).toBeTruthy();
@@ -284,7 +283,6 @@ describe("AgentCapability", () => {
         profiles={[codexDeveloper]}
         onOpenProfile={() => {}}
         onManageProfiles={() => {}}
-        onMatrix={() => {}}
       />,
     );
     expect(getAllByText("advisory on Codex")).toHaveLength(1);
@@ -297,7 +295,6 @@ describe("AgentCapability", () => {
         profiles={[PROFILES[1]!]}
         onOpenProfile={() => {}}
         onManageProfiles={() => {}}
-        onMatrix={() => {}}
       />,
     );
     expect(container.textContent).not.toContain("advisory on Codex");
@@ -309,7 +306,6 @@ describe("AgentCapability", () => {
         profiles={[PROFILES[0]!]}
         onOpenProfile={() => {}}
         onManageProfiles={() => {}}
-        onMatrix={() => {}}
       />,
     );
     expect(getByText("1 profile")).toBeTruthy();
@@ -328,7 +324,6 @@ describe("AgentCapability", () => {
         ]}
         onOpenProfile={() => {}}
         onManageProfiles={() => {}}
-        onMatrix={() => {}}
       />,
     );
     const row = container.querySelector(".pcap-main")!;
@@ -342,7 +337,6 @@ describe("AgentCapability", () => {
         profiles={[PROFILES[1]!]}
         onOpenProfile={() => {}}
         onManageProfiles={() => {}}
-        onMatrix={() => {}}
       />,
     );
     expect(
@@ -667,7 +661,6 @@ describe("policy panel heads take their count styling from the sheet (F19-33)", 
         profiles={PROFILES}
         onOpenProfile={() => {}}
         onManageProfiles={() => {}}
-        onMatrix={() => {}}
       />,
     );
     expectSheetStyledCount(container);

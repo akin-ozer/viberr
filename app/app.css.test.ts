@@ -3191,7 +3191,6 @@ describe("app.css ruling 149: the destructive control is GitHub's danger button"
       ".menu-item.danger",
       ".danger-panel",
       ".fm-act.del",
-      ".flabel.danger",
     ]) {
       const body = decls(selector);
       expect(body, selector).not.toMatch(/--coral-/);

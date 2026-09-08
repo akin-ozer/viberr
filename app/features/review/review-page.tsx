@@ -144,7 +144,7 @@ function RQRow({
           </span>
         )}
         {ready ? (
-          <span className="wait-tag human">
+          <span className="wait-tag you">
             <Icon name="hand" />
             waiting on you
           </span>
@@ -169,10 +169,12 @@ function RQRow({
             making opposite claims one click apart, the exact defect R8-3 fixed
             for "human". Silence is the board's answer, so it is this row's too;
             the subline carries the fact in words (review-helpers.ts). */}
-        <span className="rq-go" aria-hidden="true">
-          Review
-          <Icon name="chevron" />
-        </span>
+      </span>
+      {/* Design pass 2026-09-08: the action holds one right edge on every
+          row; the chips wrap behind it instead of pushing it around. */}
+      <span className="rq-go" aria-hidden="true">
+        Review
+        <Icon name="chevron" />
       </span>
     </button>
   );
@@ -250,7 +252,9 @@ export function ReviewQueuePage({
       </div>
 
       <div className="policy-wrap">
-        <div className="panel">
+        {/* A section with nothing to demand is a well (`.panel.quiet`), not
+            the page's heaviest frame drawn around an empty sentence. */}
+        <div className={ready.length ? "panel" : "panel quiet"}>
           <div className="panel-head">
             <Icon name="hand" />
             <h2>Waiting on your acceptance</h2>
@@ -265,7 +269,7 @@ export function ReviewQueuePage({
               ))}
             </div>
           ) : (
-            <div className="empty">
+            <div className="empty sm">
               Nothing waits on you. Completion reports land here when a task
               reaches the boundary.
             </div>
