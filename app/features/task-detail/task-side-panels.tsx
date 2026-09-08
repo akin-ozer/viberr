@@ -1033,7 +1033,7 @@ export function CurrentStatePanel({
                 // where that belongs.
                 title="Human owner: reviews and accepts this task, and its agent runs use their own Claude and Codex accounts"
               >
-                <Avatar person={owner} />
+                <Avatar person={owner} size="xs" />
                 <span className="rs-names">
                   {owner.name.split(" ")[0]}
                   {ownerMine ? " (you)" : ""}

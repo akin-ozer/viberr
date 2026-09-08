@@ -138,7 +138,7 @@ export function UserMenu({
             aria-label="Account menu"
           >
             <div className="user-menu-head">
-              <Avatar person={person} lg />
+              <Avatar person={person} size="lg" />
               <span>
                 <div className="who">{user.name}</div>
                 <div className="role">{user.email}</div>
@@ -210,7 +210,7 @@ export function UserMenu({
         aria-expanded={menu}
         aria-label="Account menu"
       >
-        <Avatar person={person} lg />
+        <Avatar person={person} size="lg" />
       </button>
     </div>
   );

@@ -3415,6 +3415,30 @@ by rewriting those paragraphs:*
     (`app/server/runtimes/backend-quota.server.ts`, `backend-credentials.server.ts`; copy in
     `agent-accounts-panel.tsx` and `insights-page.tsx`.)
 
+166. **Headless primitives may enter `app/`; utility classes may not (2026-09-08).** The
+    "No Tailwind" prohibition in §UI porting rules stands exactly as written, and this
+    ruling narrows rather than softens it. A survey of the whole UI against the ReUI/shadcn
+    registry (1,294 elements across all twelve surfaces) found that the value those
+    libraries market — listbox and menu semantics, typeahead, roving focus, dismiss layering
+    — lives in *unstyled* primitive packages (`@base-ui/react`, `radix-ui`), while ReUI and
+    shadcn add only a Tailwind skin on top of them. Of 1,293 mapped elements just 24 were
+    worth swapping and 577 were net negative, so adopting the skin was never the trade; the
+    behaviour underneath sometimes is. Therefore: a third-party UI package may be imported
+    into `app/` **only** when (a) it ships behaviour, not appearance, (b) every element it
+    renders is styled with class names `app/app.css` already defines, and (c) it lands
+    behind an existing viberr component boundary (`app/ui/*`), so a revert is one file. No
+    `tailwindcss`, no `class-variance-authority`, no `tailwind-merge`, no `lucide-react`, no
+    `next-themes`, and `npx shadcn add` is not a viberr workflow — a registry component is
+    read as a design reference the way `design/html-app` is, never installed. The
+    orphan-class gate in `app/app.css.test.ts` is the enforcement and does not move: no
+    utility class may enter a `className` in `app/`, and `CLASSLESS_BY_DESIGN` stays capped.
+    A companion check fails any file that imports a primitive package and passes a
+    Tailwind-shaped class, so the boundary is mechanical rather than remembered. Rulings 16
+    (native `<dialog>` + `showModal()` is the only dialog mechanism) and the one-`Icon`
+    rule are untouched and are the reason the dialog, toast, calendar and icon families are
+    explicitly out of scope. (`app/app.css.test.ts`; the survey and its element-level
+    evidence in the ReUI migration plan.)
+
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is
 corrected on the page named; the note stays here so a reader who meets the old wording, in

@@ -45,5 +45,10 @@ npm run e2e            # production image in Docker; the only gate that boots th
 - Reverse a numbered ruling silently; say so and get it re-ruled.
 - Add `vi.mock`, Tailwind, inline hex colours, `console.log` in server code, or a second
   definition of something that has one home.
+- Run `npx shadcn add` (or paste a shadcn/ReUI component). A registry component is a design
+  reference, read the way `design/html-app` is — never an install. Ruling 166 permits only
+  UNSTYLED primitive packages, rendered with class names `app/app.css` already defines and
+  placed behind an `app/ui/*` boundary; `app.css.test.ts` fails the build on a utility class
+  or a Tailwind toolchain in `package.json`.
 - Bypass the writer lock: `seed`, `seed:demo`, `rescan`, `restore`, `keys -- reseal` refuse
   against a running app on purpose.

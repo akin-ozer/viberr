@@ -39,7 +39,15 @@ export function PriorityFlag({
 }
 
 /** Freeform label chips. Caps the visible set and folds the rest into a `+N`
- *  chip so a heavily-tagged card never blows out the column width. */
+ *  chip so a heavily-tagged card never blows out the column width.
+ *
+ *  The folded labels are named twice, because the two audiences need different
+ *  things and `title` only serves one of them: `title` is the sighted pointer
+ *  user's hover, and a `.vh` span is what actually reaches the accessibility
+ *  tree. `title` on a role-less `<span>` is not a reliable accessible name —
+ *  it is skipped outright by several screen readers and is unreachable by
+ *  touch and by keyboard, so on its own it left "+2" announced as "+2" with the
+ *  labels it stands for available to nobody. */
 export function LabelChips({
   labels,
   max = 3,
@@ -49,7 +57,7 @@ export function LabelChips({
 }) {
   if (labels.length === 0) return null;
   const shown = labels.slice(0, max);
-  const extra = labels.length - shown.length;
+  const hidden = labels.slice(max);
   return (
     <>
       {shown.map((l) => (
@@ -57,9 +65,10 @@ export function LabelChips({
           {l}
         </span>
       ))}
-      {extra > 0 && (
-        <span className="label-chip more" title={labels.slice(max).join(", ")}>
-          +{extra}
+      {hidden.length > 0 && (
+        <span className="label-chip more" title={hidden.join(", ")}>
+          +{hidden.length}
+          <span className="vh">{hidden.join(", ")}</span>
         </span>
       )}
     </>

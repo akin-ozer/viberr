@@ -529,7 +529,7 @@ function ReviewerStack({ task, label }: { task: TaskSummary; label?: boolean }) 
       aria-label={"Owner: " + o.name}
     >
       {label && <span className="rs-lbl">owner</span>}
-      <Avatar person={o} />
+      <Avatar person={o} size="xs" />
     </span>
   );
 }

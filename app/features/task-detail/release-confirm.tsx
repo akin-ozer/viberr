@@ -1,6 +1,7 @@
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import { Avatar } from "~/ui/avatar";
 import { Icon } from "~/ui/icon";
+import { IconTile } from "~/ui/identity";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
@@ -72,9 +73,7 @@ export function ReleaseConfirm({
       ref={panelRef}
     >
       <div className="modal-head">
-        <span className="agent-glyph lg warn">
-          <Icon name="hand" />
-        </span>
+        <IconTile tone="warn" icon="hand" lg />
         <div className="mh-main">
           <h2>Release ownership?</h2>
           <div className="mh-sub">
@@ -95,7 +94,7 @@ export function ReleaseConfirm({
           <div className="obs">
             <span className="k">Owner</span>
             <span className="rel-owner">
-              <Avatar person={o} />
+              <Avatar person={o} size="xs" />
               <strong>{o.name}</strong>
               <span className="faint">
                 {mine ? "· you" : ""}
@@ -157,7 +156,7 @@ export function ReleaseConfirm({
                       onOwner(isMe ? "take" : "assign", m);
                     }}
                   >
-                    <Avatar person={m.user} />
+                    <Avatar person={m.user} size="xs" />
                     <span className="nm">
                       {m.user.name.split(" ")[0]}
                       {isMe ? " · you" : ""}

@@ -779,6 +779,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   font-size: .74rem;
   border: 1px solid color-mix(in srgb, var(--blue), transparent 70%);
 }
+/* The size ladder. `xs` (22px) and `sm` (24px) were five contextual descendant
+   overrides — `.rev-stack .avatar`, `.stack .avatar`, `.own-menu .avatar`,
+   `.rel-owner .avatar`, `.handoff-chip .avatar` — so an avatar's size depended
+   on its ancestor and a sixth surface wanting 22px meant a sixth selector.
+   They are sizes now, set by the `size` prop. */
+.avatar.xs { width: 22px; height: 22px; font-size: .62rem; font-weight: 700; }
+.avatar.sm { width: 24px; height: 24px; font-size: .62rem; }
 .avatar.lg { width: 34px; height: 34px; font-size: .86rem; }
 .avatar.rose { background: var(--rose-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 78%); }
 .avatar.teal { background: var(--teal-light); color: var(--teal-dark); border-color: color-mix(in srgb, var(--teal-dark), transparent 78%); }
@@ -3187,6 +3194,9 @@ dialog[data-closing]::backdrop {
   animation: pop-center .18s var(--ease-out);
   display: flex; flex-direction: column;
 }
+/* Position only. The button's APPEARANCE is `.modal-close` (one rule, shared
+   with every modal head, at the end of the sheet); `.overlay-x` says only where
+   it sits on the overlay. */
 .overlay-x {
   position: absolute; top: .85rem; right: .85rem; z-index: 5;
 }
@@ -3395,9 +3405,12 @@ dialog[data-closing]::backdrop {
 .owner-row .card-owner .nm, .owner-row .card-owner .lbl { white-space: nowrap; }
 .owner-row .card-owner .nm { flex: none; }
 .owner-row .card-owner .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* One avatar, a label and a release button — a labelled owner chip, not a
+   stack (the name is historical). Its avatar takes `size="xs"`; the overlap
+   ring the old `.rev-stack .avatar` carried never drew, because nothing here
+   ever renders a second avatar to overlap. Real overlapping groups are
+   `.avatar-group`. */
 .rev-stack { display: inline-flex; align-items: center; flex: none; }
-.rev-stack .avatar { width: 22px; height: 22px; font-size: .62rem; font-weight: 700; margin-left: -8px; box-shadow: 0 0 0 2px var(--surface); position: relative; }
-.rev-stack .avatar:first-of-type { margin-left: 0; }
 .rev-stack .rs-lbl { font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); margin-right: .375rem; }
 .rev-stack .rs-names { margin-left: .5rem; font-family: var(--font-display); font-weight: 700; font-size: .8rem; color: var(--fg); }
 .rev-add.sm { padding: .125rem .5rem; font-size: .74rem; }
@@ -3433,7 +3446,6 @@ dialog[data-closing]::backdrop {
    re-anchored by hand. This retires an inline style object in settings-page.tsx. */
 .own-menu.to-right { left: auto; right: 0; transform-origin: top right; }
 .own-menu .menu-item { width: 100%; border-radius: var(--radius-button); }
-.own-menu .avatar { width: 22px; height: 22px; font-size: .62rem; flex: none; }
 .own-lbl { font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); padding: .5rem .5rem .25rem; }
 .own-x {
   display: grid; place-items: center;
@@ -3451,7 +3463,6 @@ dialog[data-closing]::backdrop {
 .release-card { width: min(560px, calc(100vw - 2rem)); }
 .release-card .mh-sub .mono { font-weight: 600; }
 .rel-owner { display: inline-flex; align-items: center; gap: .5rem; font-family: var(--font-display); }
-.rel-owner .avatar { width: 22px; height: 22px; font-size: .62rem; }
 .rel-open { display: inline-flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .rel-lbl { font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); margin-bottom: .5rem; }
 .rel-row { display: flex; flex-wrap: wrap; gap: .5rem; }
@@ -3464,7 +3475,6 @@ dialog[data-closing]::backdrop {
   transition: border-color .14s ease, background .14s ease;
 }
 .handoff-chip:hover { border-color: var(--blue); background: color-mix(in srgb, var(--blue), transparent 92%); }
-.handoff-chip .avatar { width: 22px; height: 22px; font-size: .62rem; }
 .handoff-chip .rl { font-size: .68rem; font-weight: 600; color: var(--faint); }
 
 /* topbar responsiveness — crumbs truncate before touching search */
@@ -3993,9 +4003,26 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   /* Pin to the bottom of the (stretched) card so footers align across a row. */
   margin-top: auto;
 }
-.stack { display: flex; }
-.stack .avatar { width: 24px; height: 24px; font-size: .62rem; border: 2px solid var(--surface); }
-.stack .avatar + .avatar { margin-left: -7px; }
+/* Overlapping avatars for a set of people (`AvatarGroup`). The overlap and the
+   surface-coloured ring that separates one disc from the next are the GROUP's
+   job; the discs themselves are sized by their own `size` prop, so the group
+   no longer reaches inside to resize its children. */
+.avatar-group { display: flex; }
+.avatar-group .avatar { border: 2px solid var(--surface); }
+.avatar-group .avatar + .avatar { margin-left: -7px; }
+/* The `+N` chip closing a folded group: an avatar-shaped disc in the neutral
+   well, so the row keeps its rhythm and the count reads as one more face.
+   The fill is mixed against --surface rather than taken from --tint-press,
+   because the tint ladder is TRANSLUCENT: over `.avatar`'s own --blue-soft it
+   composited to a muddy blue and dropped the count to 4.17:1 (light) / 3.76:1
+   (dark). An opaque 8% well replaces the blue instead of tinting it, and
+   --muted carries the digits at 5.5:1 / 8.2:1. */
+.avatar.count {
+  background: color-mix(in srgb, var(--fg), var(--surface) 92%);
+  color: var(--muted);
+  border-color: var(--hairline);
+  font-weight: 700;
+}
 .pj-foot .upd { margin-left: auto; font-family: var(--font-mono); font-size: .68rem; color: var(--placeholder); }
 
 .pj-star {
@@ -5675,8 +5702,15 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 /* The close control, one design on every modal head and the page overlay: a
    borderless circle that takes a soft fill on hover and the app's press scale.
    The bordered, shadowed square it replaces read as a card of its own in the
-   corner of every dialog. */
-.icon-btn.modal-close, .overlay-x {
+   corner of every dialog.
+
+   Phase 1 (ruling 166 pattern port, 2026-09-08): the overlay's button now WEARS
+   `.modal-close` instead of being named a second time in every selector here.
+   `.overlay-x` kept only what is genuinely different — where the button sits —
+   so appearance lives in one rule and position in the other. Before this, the
+   two classes were a de-facto pair maintained by hand across three selectors,
+   and `.icon-btn.modal-close` vs `.overlay-x` looked like two controls. */
+.icon-btn.modal-close {
   width: 34px; height: 34px;
   border-color: transparent;
   border-radius: 50%;
@@ -5685,12 +5719,12 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
   color: var(--faint);
   transition: background .15s ease, color .15s ease, transform .1s var(--ease-out);
 }
-.icon-btn.modal-close:hover:not(:disabled), .overlay-x:hover:not(:disabled) {
+.icon-btn.modal-close:hover:not(:disabled) {
   border-color: transparent;
   background: var(--tint-well);
   color: var(--fg);
 }
-.icon-btn.modal-close .ico, .overlay-x .ico { width: 16px; height: 16px; }
+.icon-btn.modal-close .ico { width: 16px; height: 16px; }
 
 /* 148(c): with the in-app kill switch gone, the OS preference also stills the
    live pulse (the removed setting's copy promised "pauses live pulses"). */

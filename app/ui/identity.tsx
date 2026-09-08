@@ -1,4 +1,64 @@
-import { Icon } from "./icon";
+import { Icon, type IconName } from "./icon";
+
+/** The tinted medallion tones `.agent-glyph` defines. `warn` is the
+ *  release-ownership dialog's; the other three are backends. */
+export type IconTileTone = "codex" | "claude" | "op" | "warn";
+
+/**
+ * A glyph in a tinted round medallion — the shape `.agent-glyph` has always
+ * drawn, now with a name and a `tone` prop instead of a class string each
+ * caller assembles.
+ *
+ * It exists because `.agent-glyph.warn` had no component: the release-ownership
+ * dialog hand-wrote `<span className="agent-glyph lg warn"><Icon name="hand" /></span>`,
+ * a second copy of AgentGlyph's markup that no prop could reach and that quietly
+ * skipped the accessibility branch below. One tile, four tones, one place where
+ * the aria decision is made.
+ *
+ * `label` is the accessible name; omit it for a decorative tile (one whose
+ * meaning is already in visible text beside it), and the tile leaves the
+ * accessibility tree rather than being announced twice.
+ */
+export function IconTile({
+  tone,
+  icon,
+  lg,
+  label,
+}: {
+  tone: IconTileTone;
+  icon: IconName;
+  lg?: boolean;
+  /** Accessible name. Omit for a decorative tile. */
+  label?: string;
+}) {
+  // The class string is built inline in BOTH branches rather than hoisted to a
+  // `const`: app.css.test.ts harvests the static chunks of a class-attribute
+  // concatenation, so passing a bare identifier instead would read to it as a
+  // class literally named after that variable. Keeping the string literal at
+  // the attribute is what keeps `agent-glyph` and `lg` visible to the
+  // orphan-class gate. (The gate scans source text, comments included — so this
+  // note deliberately does not spell out the attribute-plus-identifier form.)
+  if (!label) {
+    return (
+      <span
+        className={"agent-glyph " + tone + (lg ? " lg" : "")}
+        aria-hidden="true"
+      >
+        <Icon name={icon} />
+      </span>
+    );
+  }
+  return (
+    <span
+      className={"agent-glyph " + tone + (lg ? " lg" : "")}
+      role="img"
+      aria-label={label}
+      title={label}
+    >
+      <Icon name={icon} />
+    </span>
+  );
+}
 
 /**
  * Agent backend glyph.
@@ -31,26 +91,12 @@ export function AgentGlyph({
 }) {
   const claude = !op && backend === "claude";
   const name = op ? "Operator" : claude ? "Claude" : "Codex";
-  const icon = op ? "shield" : claude ? "sparkle" : "cpu";
-  const cls = op ? "op" : claude ? "claude" : "codex";
-  if (decorative) {
-    return (
-      <span
-        className={"agent-glyph " + cls + (lg ? " lg" : "")}
-        aria-hidden="true"
-      >
-        <Icon name={icon} />
-      </span>
-    );
-  }
   return (
-    <span
-      className={"agent-glyph " + cls + (lg ? " lg" : "")}
-      role="img"
-      aria-label={name}
-      title={name}
-    >
-      <Icon name={icon} />
-    </span>
+    <IconTile
+      tone={op ? "op" : claude ? "claude" : "codex"}
+      icon={op ? "shield" : claude ? "sparkle" : "cpu"}
+      lg={lg}
+      label={decorative ? undefined : name}
+    />
   );
 }

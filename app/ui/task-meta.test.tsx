@@ -53,6 +53,26 @@ describe("LabelChips", () => {
     expect(chips).toHaveLength(4);
     expect(container.textContent).toContain("+2");
   });
+
+  it("names the folded labels in the accessibility tree, not only in `title`", () => {
+    // Phase 1 (2026-09-08): "+2" on its own tells a screen-reader user that two
+    // labels exist and never which ones. `title` on a role-less span is not a
+    // dependable accessible name and is unreachable by touch and keyboard, so
+    // the folded set is also carried in a visually-hidden span. `title` stays —
+    // it is the sighted pointer user's hover, a different audience.
+    const { container } = render(
+      <LabelChips labels={["alpha", "beta", "gamma", "delta", "epsilon"]} max={3} />,
+    );
+    const more = container.querySelector(".label-chip.more");
+    expect(more).toBeTruthy();
+    expect(more!.getAttribute("title")).toBe("delta, epsilon");
+    const announced = more!.querySelector(".vh");
+    expect(announced, "the folded labels must reach the a11y tree").toBeTruthy();
+    expect(announced!.textContent).toBe("delta, epsilon");
+    // The shown labels stay out of the hidden list — it names the fold, not
+    // the whole set, so nothing is announced twice.
+    expect(announced!.textContent).not.toContain("alpha");
+  });
 });
 
 describe("DueDatePill", () => {

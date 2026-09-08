@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { countLabel } from "~/shared/text/plural";
-import { Avatar } from "~/ui/avatar";
+import { AvatarGroup } from "~/ui/avatar";
 import { useRelativeTime } from "~/ui/use-relative-time";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
@@ -209,24 +209,17 @@ function RepoLine({
   );
 }
 
+/** Phase 1 (2026-09-08): the hand-rolled `.stack` is now `AvatarGroup`, which
+ *  owns the overlap, the `role="img"` label idiom and the `+N` fold.
+ *
+ *  `max` closes a latent layout hole: this row was uncapped, so a project with
+ *  twenty members drew twenty discs across a card footer. Five matches the cap
+ *  the org tile already applies server-side (`users.slice(0, 5)` in
+ *  home-query.server.ts), so the two member rows in the app now agree. Nobody
+ *  is lost to the fold — AvatarGroup's label names every member, folded ones
+ *  included. */
 export function MemberStack({ members }: { members: HomeMember[] }) {
-  // An image with an empty name is an axe violation, and there is nothing to
-  // show: a project can lose every member only by hand-editing.
-  if (members.length === 0) return null;
-  return (
-    // role="img": the avatars are initials only, and ARIA prohibits a label on
-    // a role-less span (readers drop it), so the names were never announced.
-    // Same idiom as StageMeter above.
-    <span
-      className="stack"
-      role="img"
-      aria-label={members.map((m) => m.name).join(", ")}
-    >
-      {members.map((m) => (
-        <Avatar key={m.name} person={m} />
-      ))}
-    </span>
-  );
+  return <AvatarGroup people={members} max={5} />;
 }
 
 export function ProjectCard({

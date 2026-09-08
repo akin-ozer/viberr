@@ -27,7 +27,7 @@ export function PageOverlay({
     >
       <button
         type="button"
-        className="icon-btn overlay-x"
+        className="icon-btn modal-close overlay-x"
         onClick={close}
         aria-label="Close"
       >

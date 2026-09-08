@@ -138,7 +138,7 @@ function ProfileIdentity({
       <div className="profile-id">
         <Avatar
           person={{ initials: initialsOf(name), tone: user.avatarTone }}
-          xl
+          size="xl"
         />
         <div className="profile-fields">
           <div className="field-row">

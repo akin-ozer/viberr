@@ -140,11 +140,30 @@ describe("interface review 2026-09-06: the member stack is a named image", () =>
         }),
       ]),
     );
-    const stack = container.querySelector(".stack")!;
+    // Phase 1 (2026-09-08): `.stack` is now the shared `AvatarGroup`
+    // (`.avatar-group`), which owns the overlap, this label idiom and the `+N`
+    // fold. The contract under test is unchanged.
+    const stack = container.querySelector(".avatar-group")!;
     // ARIA prohibits aria-label on a role-less span and readers drop it, so the
     // names were never announced; the avatars are initials only.
     expect(stack.getAttribute("role")).toBe("img");
     expect(stack.getAttribute("aria-label")).toBe("Arda Kaya, Selin Aksoy");
+  });
+
+  it("folds past five into +N and still names everyone", () => {
+    // The row was uncapped, so a twenty-member project drew twenty discs across
+    // a card footer. The fold is presentational only: the group's label is the
+    // full list, so nobody is hidden from a screen reader by a visual cap.
+    const members = ["Arda Kaya", "Selin Aksoy", "Deniz Ari", "Ece Kurt", "Mert Oz", "Zeynep Il", "Kaan Ates"]
+      .map((name) => ({ name, initials: name.slice(0, 2).toUpperCase(), tone: "" }));
+    const { container } = renderHome(baseData([card({ members })]));
+    const group = container.querySelector(".avatar-group")!;
+    expect(group.querySelectorAll(".avatar:not(.count)")).toHaveLength(5);
+    const count = group.querySelector(".avatar.count")!;
+    expect(count.textContent).toBe("+2");
+    // The fold is decorative — the group's own label already carries the names.
+    expect(count.getAttribute("aria-hidden")).toBe("true");
+    expect(group.getAttribute("aria-label")).toBe(members.map((m) => m.name).join(", "));
   });
 });
 

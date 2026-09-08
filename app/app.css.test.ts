@@ -752,6 +752,123 @@ describe("app.css defines every class the markup uses (P16-UI-02)", () => {
   });
 });
 
+/* ---------------------------- ruling 166: headless yes, utility classes no --- */
+
+/**
+ * Ruling 166 lets an UNSTYLED primitive package (`@base-ui/react`, `radix-ui`)
+ * into `app/` on the condition that every element it renders wears a class
+ * `app.css` already defines. The orphan-class gate above already fails a
+ * Tailwind class that reaches a `className` — but only once someone ships one,
+ * and by then the diff is a whole pasted component and the tempting fix is to
+ * widen `CLASSLESS_BY_DESIGN`.
+ *
+ * This is the earlier, narrower alarm: it fails the moment a file both imports
+ * a primitive and carries utility-shaped classes, which is the signature of a
+ * registry component pasted in wholesale rather than a primitive rendered with
+ * viberr's own classes. It also pins the dependency half of the ruling, because
+ * a Tailwind toolchain in `package.json` is the thing that would make every
+ * other check here negotiable.
+ */
+describe("ruling 166: primitives may ship behaviour, never appearance", () => {
+  // SAFETY: the file read is the repo's own `package.json`, which npm itself
+  // requires to be a JSON object; only the two dependency maps are read, and
+  // both are declared optional here, so a manifest without them still types.
+  const PKG = JSON.parse(
+    readFileSync(path.join(path.dirname(APP_DIR), "package.json"), "utf8"),
+  ) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  const deps = { ...PKG.dependencies, ...PKG.devDependencies };
+
+  /** The packages ruling 166 names as the skin, not the behaviour. */
+  const FORBIDDEN = [
+    "tailwindcss",
+    "@tailwindcss/vite",
+    "@tailwindcss/postcss",
+    "class-variance-authority",
+    "tailwind-merge",
+    "tw-animate-css",
+    "lucide-react",
+    "next-themes",
+    "shadcn",
+    "shadcn-ui",
+  ];
+
+  /** Unstyled primitives ruling 166 permits behind an `app/ui/*` boundary. */
+  const PRIMITIVES = ["@base-ui/react", "@base-ui-components/react", "radix-ui", "@radix-ui/"];
+
+  /** `bg-primary`, `px-1.5`, `min-w-5`, `size-(--x)`, `rounded-sm` — a utility
+   *  class is a known prefix followed by a value, which viberr's flat,
+   *  unprefixed vocabulary (`card-top`, `pill`, `rev-stack`) never looks like.
+   *  Anchored so `text-meta` style names in app.css cannot match by accident:
+   *  the tail must be numeric, a bracket/paren value, or a Tailwind colour. */
+  const UTILITY =
+    /^(?:bg|text|border|ring|shadow|rounded|p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|w|h|min-w|min-h|max-w|max-h|gap|space|flex|grid|col|row|items|justify|self|z|opacity|size|inset|top|left|right|bottom|leading|tracking|font|whitespace|overflow|outline|transition|duration|ease|animate)-(?:\d|\[|\()|^(?:bg|text|border|ring)-(?:primary|secondary|muted|accent|destructive|foreground|background|card|popover|input|border)(?:-|$)/;
+
+  it("carries no Tailwind or shadcn toolchain in package.json", () => {
+    const present = FORBIDDEN.filter((name) => name in deps);
+    expect(
+      present,
+      "ruling 166 permits behaviour packages only — these are the skin",
+    ).toEqual([]);
+  });
+
+  it("no file that imports a primitive also ships utility classes", () => {
+    const offenders: string[] = [];
+    for (const file of sourceFiles(APP_DIR)) {
+      const src = readFileSync(file, "utf8");
+      const importsPrimitive = PRIMITIVES.some(
+        (p) => src.includes(`from "${p}`) || src.includes(`from '${p}`),
+      );
+      if (!importsPrimitive) continue;
+      const utilities = new Set<string>();
+      for (const expr of classNameExpressions(src)) {
+        for (const chunk of literalChunks(stripNonClassLiterals(expr))) {
+          for (const name of chunk.split(/\s+/).filter(Boolean)) {
+            if (UTILITY.test(name)) utilities.add(name);
+          }
+        }
+      }
+      if (utilities.size > 0) {
+        const rel = path.relative(path.dirname(APP_DIR), file);
+        offenders.push(`${rel} — ${[...utilities].sort().join(" ")}`);
+      }
+    }
+    expect(
+      offenders,
+      "a primitive must be rendered with app.css class names, not pasted with its skin",
+    ).toEqual([]);
+  });
+
+  it("recognises a utility class when it sees one", () => {
+    // Canary: without this the check above passes for the wrong reason, since
+    // it is vacuously green until the first primitive lands.
+    for (const util of [
+      "bg-primary",
+      "text-muted-foreground",
+      "px-1.5",
+      "min-w-5",
+      "size-(--icon-tile-size)",
+      "rounded-[8px]",
+      "gap-1",
+    ]) {
+      expect(UTILITY.test(util), `${util} must read as a utility class`).toBe(true);
+    }
+    // …and must not fire on viberr's own flat, unprefixed vocabulary.
+    for (const own of [
+      "card-top",
+      "rev-stack",
+      "avatar-group",
+      "agent-glyph",
+      "label-chip",
+      "own-menu",
+      "text-col",
+      "grid-view",
+      "flex-foot",
+    ]) {
+      expect(UTILITY.test(own), `${own} is a viberr class, not a utility`).toBe(false);
+    }
+  });
+});
+
 /* ------------------------------------------------- W5: F7 / F6 / F8 / G3 */
 
 describe("app.css hover-revealed board actions (P16-F7)", () => {
@@ -2935,15 +3052,22 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
   });
 
   it("one close control on every modal head and the page overlay", () => {
-    const rule = CODE.match(/\.icon-btn\.modal-close, \.overlay-x\s*\{([^}]*)\}/);
+    const rule = CODE.match(/(?:^|[};])\s*\.icon-btn\.modal-close\s*\{([^}]*)\}/);
     expect(rule, "the shared close rule must exist").toBeTruthy();
     expect(rule![1]).toMatch(/border-radius:\s*50%/);
     expect(rule![1]).toMatch(/background:\s*transparent/);
     expect(rule![1]).toMatch(/box-shadow:\s*none/);
-    // The overlay's own rule no longer paints the shadowed box the shared
-    // rule removes (it would win by source order for nothing).
-    const overlay = CODE.match(/\.overlay-x\s*\{([^}]*)\}/);
+    // Phase 1 (2026-09-08): the page overlay's button WEARS `.modal-close`
+    // rather than being named beside it in every selector, so `.overlay-x`
+    // carries position and nothing else. Guard both halves: the appearance
+    // rule must not re-acquire the overlay selector, and the overlay rule must
+    // paint nothing (a fill or radius here means the pair drifted apart again).
+    expect(CODE).not.toMatch(/\.icon-btn\.modal-close,\s*\.overlay-x/);
+    const overlay = CODE.match(/(?:^|[};])\s*\.overlay-x\s*\{([^}]*)\}/);
+    expect(overlay, "the overlay's positioning rule must exist").toBeTruthy();
     expect(overlay![1]).not.toMatch(/box-shadow:\s*var/);
+    expect(overlay![1]).not.toMatch(/background|border-radius|width|height/);
+    expect(overlay![1]).toMatch(/position:\s*absolute/);
     // Interface review 2026-09-06: the temp-password notice's dismiss joined
     // the same control at notice scale — one design, two sizes, and the glyph
     // keeps the 34/16 ratio. `flex: none` is what its old `.stg-x` carried:
