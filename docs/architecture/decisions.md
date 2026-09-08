@@ -3499,6 +3499,22 @@ by rewriting those paragraphs:*
     is a problem and keeps its own pill. Nothing is re-derived: the status reads
     `deriveDisplayReadiness`'s value and the validation vocabulary's tier (`validationQuiet`).
 
+170. **The GitHub trace sits at the top right of the task page, beside the goal (owner,
+    2026-09-09).** The head spanned both grid columns, so the cell to the right of the hero —
+    a panel wide and the goal tall — was empty, while the GitHub trace queued in the side column
+    under Current state. The owner wants it in that cell, and Current state left where it is.
+    So the head opens the main column alone (`grid-column: 1`), and the side column spans all
+    three rows (`grid-row: 1 / span 3`) with the GitHub trace first, then Current state, then
+    Details. Two facts make the rest of the page hold still: the side column crosses the `1fr`
+    row, so its height sizes only that row and never the head's or the packet's (grid items
+    spanning a flexible track are excluded from intrinsic row sizing), and the packet and main
+    keep their cells. One order everywhere: the right column reads GitHub, Current state,
+    Details on desktop, and the DOM — hence the phone stack, the Tab key and a screen reader —
+    reads the same, because placement may seat regions but never reorder what a region
+    contains (U7/U35-2's rule against `order`). The phone therefore meets the GitHub card one
+    card before Current state; the title and the open packet still come first. Current state
+    moves only by the difference between the GitHub trace's height and the hero's.
+
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is
 corrected on the page named; the note stays here so a reader who meets the old wording, in

@@ -136,15 +136,17 @@ Intents behind `project.task.tsx` are explained in
   controller composers, the goal editor, the label, stage and steer
   inputs, the store browser's inputs and the concurrency field (the 720px block
   in `app.css` is the list). Under the 1100px collapse the task page stacks
-  title and goal, the open decision, current state and next action, then the
-  rest (GitHub, Details, runs, the timeline): the page is four
-  regions in source order (`.detail-head`, `.detail-packet`, `.detail-side`,
-  `.detail-main`) and the stack is that order, so the screen reader, the Tab
-  key and the phone read the task's name and the question it asks before its
-  metadata (pass 35, U35-2). On desktop the head spans both columns; the open
-  packet opens the main column at the same width as the panels under it, and
-  the side column rises to sit beside it while one is open, then meets the main
-  column at the top again once it resolves (owner, 2026-09-08).
+  title and goal, the open decision, then the side column (GitHub, current
+  state and next action, Details), then the rest (runs, the timeline): the
+  page is four regions in source order (`.detail-head`, `.detail-packet`,
+  `.detail-side`, `.detail-main`) and the stack is that order, so the screen
+  reader, the Tab key and the phone read the task's name and the question it
+  asks before its metadata (pass 35, U35-2). On desktop the head opens the main
+  column, the open packet follows it at the same width as the panels under it,
+  and the side column stands beside all of it from the top: the GitHub trace
+  parallel to the goal, Current state under it (owner, 2026-09-09, ruling 170;
+  before that the head spanned both columns and the side column started under
+  it, owner 2026-09-08).
 - **Dock clearance**: `--dock-clear` (`:root`) is the fixed dock trigger's reach,
   `44px + max(20px, safe-area-inset-bottom) + 1rem`; the scroll containers that
   end under the trigger (`.home-shell`, `.insights`, `.policy-wrap`, `.detail`,

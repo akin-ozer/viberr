@@ -662,16 +662,21 @@ export function TaskDetailPage({
                sit beside it (a head-wide packet pushed Current state under
                the packet). Rendered only while a packet is open, so without
                one the two columns meet at the same row as before.
-            3. `.detail-side`: Current state first (it carries the next action
-               and the acceptance button), then the GitHub trace and Details.
-               The Permissions panel that closed the column is gone (owner,
-               2026-09-08, ruling 167).
+            3. `.detail-side`: the GitHub trace first (owner, 2026-09-09,
+               ruling 170: on desktop it sits at the top right, beside the
+               goal, where the cell used to be empty), then Current state (the
+               next action and the acceptance button), then Details. The
+               Permissions panel that closed the column is gone (owner,
+               2026-09-08, ruling 167). One order everywhere: the right column
+               reads GitHub, Current state, Details on desktop, and so does the
+               phone stack — placement may not reorder what the DOM says.
             4. `.detail-main`: the live run, diagnostics, continuity,
                recommendations, the run controls, the console and the timeline.
-          On desktop `.detail-head` spans both columns and the regions keep
-          their cells by PLACEMENT (`grid-column`/`grid-row` in app.css), never
-          by `order`, which U7 found re-splits what the eye and the focus ring
-          see (WCAG 2.2 SC 1.3.2 / 2.4.3). */}
+          On desktop `.detail-head` opens the main column, the side column
+          spans every row beside it, and the regions keep their cells by
+          PLACEMENT (`grid-column`/`grid-row` in app.css), never by `order`,
+          which U7 found re-splits what the eye and the focus ring see (WCAG
+          2.2 SC 1.3.2 / 2.4.3). */}
       <div className="detail-head">
         <TaskHero
           task={task}
@@ -747,6 +752,22 @@ export function TaskDetailPage({
       )}
 
       <div className="detail-side">
+        <GithubTrace
+          task={task}
+          githubHost={githubHost}
+          acceptance={acceptance}
+          reconciledAt={githubReconciledAt}
+          checkedAt={githubCheckedAt}
+          {...(onCompleteMerge
+            ? { onCompleteMerge: () => setConfirmAccept({ mode: "complete-merge" }) }
+            : {})}
+          {...(onForceAccept
+            ? { onForceAccept: () => setConfirmAccept({ mode: "force" }) }
+            : {})}
+          {...(canDeliver && !taskClosed ? { onDeliver } : {})}
+          delivering={deliverBusy}
+          merging={runBusy}
+        />
         <CurrentStatePanel
           task={task}
           stage={stage}
@@ -763,22 +784,6 @@ export function TaskDetailPage({
           transitionBusy={transitionBusy}
           acceptBusy={acceptBusy}
           dispositionBusy={archiveBusy}
-        />
-        <GithubTrace
-          task={task}
-          githubHost={githubHost}
-          acceptance={acceptance}
-          reconciledAt={githubReconciledAt}
-          checkedAt={githubCheckedAt}
-          {...(onCompleteMerge
-            ? { onCompleteMerge: () => setConfirmAccept({ mode: "complete-merge" }) }
-            : {})}
-          {...(onForceAccept
-            ? { onForceAccept: () => setConfirmAccept({ mode: "force" }) }
-            : {})}
-          {...(canDeliver && !taskClosed ? { onDeliver } : {})}
-          delivering={deliverBusy}
-          merging={runBusy}
         />
         <TaskDetailsPanel
           task={task}

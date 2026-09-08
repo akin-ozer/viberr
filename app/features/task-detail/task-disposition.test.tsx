@@ -2471,7 +2471,9 @@ describe("D6: consequential actions confirm before they act", () => {
  * is four regions now: `.detail-head` (title and goal), `.detail-packet` (the
  * open packet — owner, 2026-09-08: its own region so the desktop paint can put
  * it at the top of the main column with the side column beside it), then
- * `.detail-side` (Current state first, with the next action), then
+ * `.detail-side` (the GitHub trace, then Current state with the next action,
+ * then Details — ruling 170 put GitHub at the top right beside the goal, and
+ * the DOM says the same), then
  * `.detail-main` (runs and the timeline); placed by grid cell in app.css, so the
  * desktop paint keeps two columns while one order serves both. This asserts the
  * order and its CONTENT — a swap that moved empty divs would pass on order
@@ -2521,8 +2523,11 @@ describe("U7 / U35-2: the task detail's reading order matches its stacking rule"
     // The consequential action really is in the region that comes second…
     expect(side.textContent).toContain("Accept completion → Done");
     expect(main.textContent).not.toContain("Accept completion → Done");
-    // …Current state leads it (it carries the next action), ahead of GitHub…
-    expect(side.firstElementChild?.textContent).toContain("Accept completion → Done");
+    // …the GitHub trace leads it (ruling 170: top right, beside the goal) and
+    // Current state comes second, so the desktop paint and the DOM agree…
+    expect(side.children[0].textContent).toMatch(/GitHub|no PR|PR #/);
+    expect(side.children[0].textContent).not.toContain("Accept completion → Done");
+    expect(side.children[1].textContent).toContain("Accept completion → Done");
     // …and the timeline really is in the region that follows both.
     expect(main.querySelector(".tl-list, .timeline, .tl-wrap")).not.toBeNull();
   });
