@@ -2657,7 +2657,13 @@ dialog[data-closing]::backdrop {
 /* Ruling 148(a): a row's two panels end on one line (grid items stretch by
    default). `.activity-cols` keeps `align-items: start` on purpose: a feed
    beside a short panel would only stretch the panel into a tall empty box. */
-.policy-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+/* `minmax(0, 1fr)`, not `1fr` (interface review 2026-09-08): a bare `1fr`
+   floors the column at its panel's min-content, and the RBAC table's four
+   nowrap role headers made that ~32rem — wider than a phone, so the PAGE
+   scrolled sideways while `.rbac-scroll` idled. A zero floor lets the panel
+   shrink and the scroll box do its job. `.activity-cols` below, same story
+   with the Stream head's filter cluster. */
+.policy-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
 
 .pol-note {
   display: flex; gap: .5rem; align-items: flex-start;
@@ -3003,7 +3009,7 @@ dialog[data-closing]::backdrop {
 /* ============================================================
    ACTIVITY
    ============================================================ */
-.activity-cols { display: grid; grid-template-columns: 1.55fr 1fr; gap: 1rem; align-items: start; }
+.activity-cols { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
 .act-day {
   font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
   color: var(--faint);
@@ -3801,6 +3807,23 @@ dialog[data-closing]::backdrop {
   .audit-browse .audit-actor { grid-column: 2 / -1; }
   .audit-browse .audit-action { grid-column: 1 / 3; }
   .audit-browse .audit-scope { grid-column: 3; }
+  /* Interface review 2026-09-08 (pre-existing): a panel head whose right-side
+     cluster is wider than a phone (the Stream's actor filter and its count)
+     drops the cluster under the title instead of pushing the panel past the
+     viewport. The cluster may shrink to its widest child and wraps the count
+     under the segments; `.right`'s `flex: none` would have held it at its
+     unwrapped width. */
+  .panel-head { flex-wrap: wrap; }
+  .panel-head .act-filter-right { flex: 0 1 auto; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; }
+  /* Interface review 2026-09-08 (pre-existing): the 1100px strip — a row of
+     profile cards with the group labels inline — is a tablet shape; at phone
+     width it read as a ribbon whose first tile said "ORCHESTRATION". The list
+     is a column again here, every profile visible, the detail under it. One
+     selector more than the 1100px rules, which are declared later. */
+  .agents-layout .profile-list { flex-direction: column; overflow: visible; padding-bottom: 0; }
+  .agents-layout .profile-list .ag-group-label { flex: none; align-self: stretch; padding: 1rem .25rem .375rem; }
+  .agents-layout .profile-list .ag-group-label:first-child { padding-top: .25rem; }
+  .agents-layout .ag-item { min-width: 0; }
   /* iOS Safari zooms the whole page when a focused input is under 16px, and
      every input in the app sits at .8-.98rem. 1.05rem (16.8px) is the first
      scale step past the threshold. The `.mono` faces need their own line: the
@@ -5195,8 +5218,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .ag-item { min-width: 200px; }
   .cap-cols, .res-groups, .runtime-row { grid-template-columns: 1fr; }
   /* the three 2-up pages */
-  .policy-cols { grid-template-columns: 1fr; }
-  .activity-cols { grid-template-columns: 1fr; }
+  .policy-cols { grid-template-columns: minmax(0, 1fr); }
+  .activity-cols { grid-template-columns: minmax(0, 1fr); }
   .profile-cols { grid-template-columns: 1fr; }
   /* the audit-export S3 field grid */
   .audit-s3-grid { grid-template-columns: 1fr; }
@@ -5222,9 +5245,15 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .gh-table, .live-wrap { overflow-x: auto; }
   .gh-table .live-head, .gh-table .live-row { min-width: 34rem; }
   .live-wrap .live-head, .live-wrap .live-row { min-width: 42rem; }
-  /* Ruling 99: the controller's side column joins the 2-up collapse. */
-  .ctl-layout { grid-template-columns: minmax(0, 1fr); }
-  .ctl-transcript { max-height: none; }
+  /* Ruling 99: the controller's side column joins the 2-up collapse.
+     `.ctl-wrap .ctl-layout`, not `.ctl-layout`: the base rules are declared
+     LATER in this sheet (the controller section), so at equal specificity
+     they won here and the collapse never applied — at 390px the transcript
+     and composer sat in a 40px sliver beside a 340px sidebar (interface
+     review 2026-09-08). One selector more settles it, the `.dock .dock-panel`
+     precedent in the 720px block. */
+  .ctl-wrap .ctl-layout { grid-template-columns: minmax(0, 1fr); }
+  .ctl-wrap .ctl-transcript { max-height: none; }
 }
 
 /* ============================================================
