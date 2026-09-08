@@ -1,5 +1,12 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { projectDir } from "~/server/files/file-store-root.server";
@@ -82,6 +89,12 @@ const execFileAsync = promisify(execFile);
  * hiccuped, and then downloading it again over that same network, is the worst
  * available move. Corruption still self-heals: two consecutive refresh failures
  * condemn the copy, and the next clone-side caller rebuilds it from scratch.
+ *
+ * "EXISTS" is `mirrorIsComplete`, not a directory on disk: a mirror is built in
+ * a sidecar and renamed into place, so a build killed mid-download leaves
+ * nothing the cache will serve. That distinction is load-bearing — the stale
+ * arm above is a deliberate choice to serve an OLD copy, and it is only ever a
+ * good one when what it serves is a WHOLE one.
  */
 
 /** `owner/repo` — the only shape that becomes a mirror directory name. Anything
@@ -124,14 +137,76 @@ export function projectRepoMirrorDir(
 }
 
 /**
+ * The mirror's fetch refspec — and this module's COMPLETION MARKER.
+ *
+ * `--bare` writes `remote.origin.url` but NO fetch refspec, so a mirror without
+ * this line is one a `fetch origin` could not update anyway. It is written LAST,
+ * after the bare clone returns, which is what makes its presence mean "a whole
+ * mirror finished landing here". Branch heads only: GitHub also advertises
+ * `refs/pull/*`, which `--mirror`'s `+refs/*:refs/*` would drag in for no
+ * benefit to a workspace clone.
+ */
+const MIRROR_FETCH_REFSPEC = "+refs/heads/*:refs/heads/*";
+
+/**
+ * Has a COMPLETE mirror landed at `mirrorDir`?
+ *
+ * Not `existsSync(<dir>/HEAD)`, which is what this module used to ask. `git
+ * clone --bare` creates the destination and writes `HEAD` (as
+ * `ref: refs/heads/.invalid`) BEFORE it transfers a single object, and it only
+ * cleans the destination up when it exits on its own. A clone killed
+ * mid-transfer — a container stop, a `docker compose restart`, an interrupted
+ * run — therefore left a directory that passed the old test: a `HEAD`, zero
+ * refs, no refspec, and a pile of orphaned `objects/pack/tmp_pack_*`.
+ *
+ * Live (VIB-1, 2026-09-08): two killed clones left exactly that. Every later
+ * look called the mirror warm, the refresh arm below spent its whole 120 s
+ * budget on a `fetch origin` that had no refspec to work with, and the workspace
+ * clone cut from it handed the delivering agent an EMPTY checkout — which it
+ * committed a parentless commit into, and delivery was then refused as
+ * non-fast-forward against the real branch. 510 MB of temp packs, no refs.
+ *
+ * The marker fails in the safe direction: a build killed between the clone and
+ * the config write reads as incomplete and is rebuilt, which costs a download
+ * and never serves an empty cache.
+ */
+function mirrorIsComplete(mirrorDir: string): boolean {
+  try {
+    return readFileSync(path.join(mirrorDir, "config"), "utf8").includes(
+      MIRROR_FETCH_REFSPEC,
+    );
+  } catch {
+    // No config at all — not a repository, let alone a finished mirror.
+    return false;
+  }
+}
+
+/** Does the mirror actually hold branches to cut a working tree from? A
+ *  complete mirror of an EMPTY upstream repository legitimately holds none;
+ *  `cloneWorkspaceRepo` is what that distinction matters to. */
+function mirrorHasRefs(mirrorDir: string): boolean {
+  try {
+    if (statSync(path.join(mirrorDir, "packed-refs")).size > 0) return true;
+  } catch {
+    // Unpacked — the loose refs below are the answer.
+  }
+  try {
+    return readdirSync(path.join(mirrorDir, "refs", "heads")).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * D1 (pass 23, owner ruling Q3): is THIS clone the cold FIRST-task clone?
  *
  * Only the first task in a project pays the full network clone (minutes on a
  * large repo); every later task fetches from the local mirror in seconds. A
- * present mirror `HEAD` means the mirror already exists (warm); its absence means
- * this run is building it. A repo that does not resolve to a mirror path (invalid
- * owner/name) reports NOT cold — there is nothing to prewarm, and the caller's
- * clone will fail honestly on its own terms rather than mislabel the wait.
+ * COMPLETE mirror (`mirrorIsComplete`) means later tasks are fetching warm; its
+ * absence means this run is building one. A repo that does not resolve to a
+ * mirror path (invalid owner/name) reports NOT cold — there is nothing to
+ * prewarm, and the caller's clone will fail honestly on its own terms rather
+ * than mislabel the wait.
  */
 export function mirrorIsCold(
   projectSlug: string,
@@ -139,7 +214,7 @@ export function mirrorIsCold(
   dataRoot?: string,
 ): boolean {
   const dir = projectRepoMirrorDir(projectSlug, repo, dataRoot);
-  return dir !== null && !existsSync(path.join(dir, "HEAD"));
+  return dir !== null && !mirrorIsComplete(dir);
 }
 
 /** D1: the reservation step label for a workspace clone, honest about whether it
@@ -291,7 +366,7 @@ async function ensureProjectMirror(input: {
   const env = auth.env;
   try {
     let rebuilding = false;
-    if (existsSync(path.join(mirrorDir, "HEAD"))) {
+    if (mirrorIsComplete(mirrorDir)) {
       try {
         await execFileAsync("git", ["-C", mirrorDir, "fetch", "--prune", "origin"], {
           timeout: MIRROR_REFRESH_TIMEOUT_MS,
@@ -326,38 +401,48 @@ async function ensureProjectMirror(input: {
       // Nothing cached and no licence to pay for one: the caller degrades.
       return null;
     }
-    // A previous attempt died mid-clone (a directory with no `HEAD` is not a
-    // repository, and `git clone` refuses a non-empty destination), or the
-    // repeated fetch failures above condemned this copy.
-    rmSync(mirrorDir, { recursive: true, force: true });
+    // Nothing usable is cached here: either no mirror was ever finished (a
+    // first build, or a previous attempt that died mid-clone) or the repeated
+    // fetch failures above condemned this copy.
+    //
+    // Build into a SIDECAR and rename it into place, so the mirror path only
+    // ever appears complete. `git clone --bare` writes `HEAD` before it
+    // transfers an object and cleans up after itself only on a clean exit, so
+    // building in place is what let a killed clone leave a half-built directory
+    // that every later look accepted (`mirrorIsComplete`). A rename within the
+    // `.repo-mirror` directory is atomic; a killed build now leaves only the
+    // sidecar, which `pruneStaleMirrors` sweeps on the next successful build.
+    const building = `${mirrorDir}.building`;
+    rmSync(building, { recursive: true, force: true });
     mkdirSync(path.dirname(mirrorDir), { recursive: true });
     // F27-U1: `--progress` makes git emit transfer percentages to stderr even
     // without a TTY; `runGitCloneWithProgress` streams them to `onCloneProgress`
     // while keeping execFile's resolve/reject/`.stderr`/timeout contract, so the
     // failure path below (and its redaction) is unchanged.
     await runGitCloneWithProgress(
-      ["clone", "--bare", "--progress", remoteUrl, mirrorDir],
+      ["clone", "--bare", "--progress", remoteUrl, building],
       // The first mirror build is a full clone, so it gets the clone budget.
       { timeout: cloneTimeoutMs(), env },
       input.onCloneProgress,
     );
-    // `--bare` writes `remote.origin.url` but NO fetch refspec, so a later
-    // `fetch origin` would update nothing. Branch heads only: GitHub also
-    // advertises `refs/pull/*`, which `--mirror`'s `+refs/*:refs/*` would drag
-    // in for no benefit to a workspace clone.
+    // The refspec, written LAST — see MIRROR_FETCH_REFSPEC. Without it a later
+    // `fetch origin` would update nothing, and with it the sidecar is a
+    // finished mirror, so this is the write the rename publishes.
     await execFileAsync(
       "git",
       [
         "-C",
-        mirrorDir,
+        building,
         "config",
         "--local",
         "--replace-all",
         "remote.origin.fetch",
-        "+refs/heads/*:refs/heads/*",
+        MIRROR_FETCH_REFSPEC,
       ],
       { timeout: 10_000 },
     );
+    rmSync(mirrorDir, { recursive: true, force: true });
+    renameSync(building, mirrorDir);
     mirrorFetchFailures.delete(mirrorDir);
     logger.info(
       rebuilding
@@ -426,8 +511,9 @@ export function refreshProjectMirror(
 }
 
 /** Drop mirrors for repositories this project no longer points at — otherwise a
- *  repo change leaves a full copy of the old one on disk forever. Best-effort
- *  and silent: a cache that cannot tidy itself is not a failure. */
+ *  repo change leaves a full copy of the old one on disk forever. This is also
+ *  what reclaims a `<mirror>.building` sidecar abandoned by a killed build.
+ *  Best-effort and silent: a cache that cannot tidy itself is not a failure. */
 function pruneStaleMirrors(mirrorDir: string): void {
   const parent = path.dirname(mirrorDir);
   const keep = path.basename(mirrorDir);
@@ -489,13 +575,30 @@ export async function cloneWorkspaceRepo(
   if (input.onCloneProgress) mirrorRequest.onCloneProgress = input.onCloneProgress;
   const mirror = await refreshProjectMirror(mirrorRequest);
 
-  if (mirror) {
+  // A mirror with no branches clones into an EMPTY working tree: `git clone`
+  // says so in a warning and still exits 0, so this arm would hand a specialist
+  // a checkout with no history, no `origin/<base>` and no error to notice.
+  // (VIB-1, 2026-09-08: the delivering agent committed a parentless commit into
+  // one, and delivery was refused as non-fast-forward against the real branch.)
+  // `mirrorIsComplete` should already keep a half-built mirror out of here; a
+  // genuinely EMPTY upstream repository is the honest way to reach this, and it
+  // costs only a cheap network clone of a repository with nothing in it.
+  const usable = mirror && mirrorHasRefs(mirror.dir) ? mirror : null;
+  if (mirror && !usable) {
+    mirrorWarn(
+      "the project's repository mirror holds no branches — cloning from GitHub",
+      { projectSlug: input.projectSlug, repo: input.repo },
+      "",
+    );
+  }
+
+  if (usable) {
     try {
       // Local clone ⇒ git hardlinks the object store: seconds and ~no disk,
       // with no alternates file, so this tree outlives the mirror. No
       // credential is involved at all — this step never leaves the disk — and
       // the prompt suppression is belt and braces against a hang.
-      await execFileAsync("git", ["clone", mirror.dir, input.destination], {
+      await execFileAsync("git", ["clone", usable.dir, input.destination], {
         timeout: cloneTimeoutMs(),
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
       });

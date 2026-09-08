@@ -173,6 +173,16 @@ export function OrgSettingsPage({
             </button>
           ))}
         </nav>
+        {/* Design pass 2026-09-08: Run concurrency, the audit card and the
+            storage line used to be siblings OF `.set-layout`, so they never
+            entered its content column. Two cards with identical treatment —
+            same hairline, radius and shadow — sat at two different left edges
+            and two different widths, stacked directly on each other, and the
+            page read as an indented column on top and a different page
+            underneath. Inside `.set-main` they share the column with
+            everything above them, and one flex gap replaces the margins that
+            were standing in for a column they were never part of. */}
+        <div className="set-main">
         <div className="set-content">
           {tab === "connections" && <ConnectionsPanel connections={view.connections} />}
           {tab === "users" && (
@@ -212,8 +222,7 @@ export function OrgSettingsPage({
             />
           )}
         </div>
-      </div>
-      <RunConcurrencyControl runConcurrency={runConcurrency} />
+        <RunConcurrencyControl runConcurrency={runConcurrency} />
       {/* Review F7 (pass 32): the card's open state is seeded from the target
           once; keying it on the stored target resets it when a save or clear
           lands from elsewhere, so an open target modal never outlives the target
@@ -224,7 +233,9 @@ export function OrgSettingsPage({
         s3Audit={s3Audit}
         events={auditEvents}
       />
-      <StorageLine storage={view.storage} />
+        <StorageLine storage={view.storage} />
+        </div>
+      </div>
     </main>
   );
 }
@@ -537,7 +548,7 @@ function AuditExportCard({
   // primary (the active tab's own), and the card's own actions stay put.
   const [open, setOpen] = useState(false);
   return (
-    <section className="panel audit-export">
+    <section className="panel" data-screen-label="Audit log">
       <div className="panel-head">
         <Icon name="file" />
         <h2>Audit log</h2>

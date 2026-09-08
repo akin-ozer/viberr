@@ -262,6 +262,103 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     expect(head.stdout.trim()).toBe(second);
   });
 
+  /** Exactly what `git clone --bare` leaves behind when it is KILLED mid-
+   *  transfer: the destination it created, the `HEAD` it wrote before the first
+   *  object landed, no refs, no fetch refspec, and the temp pack it was still
+   *  streaming into. */
+  function leaveKilledCloneAtMirror(): string {
+    const dir = mirrorDir();
+    mkdirSync(path.join(dir, "objects", "pack"), { recursive: true });
+    mkdirSync(path.join(dir, "refs", "heads"), { recursive: true });
+    writeFileSync(path.join(dir, "HEAD"), "ref: refs/heads/.invalid\n");
+    writeFileSync(
+      path.join(dir, "config"),
+      '[core]\n\tbare = true\n[remote "origin"]\n\turl = https://github.com/acme/widgets.git\n',
+    );
+    const orphan = path.join(dir, "objects", "pack", "tmp_pack_killed");
+    writeFileSync(orphan, "half a pack\n");
+    return orphan;
+  }
+
+  it("a mirror left HALF-BUILT by a killed clone is rebuilt, never served", async () => {
+    // VIB-1 (2026-09-08): a `docker compose` restart killed two bare clones of a
+    // 190 MB repo. Each left a directory with a `HEAD` and nothing else, which
+    // the old `existsSync(HEAD)` test accepted as a mirror — so the refresh arm
+    // burned its 120 s budget on a `fetch origin` with no refspec to work with,
+    // and the workspace cut from it was EMPTY. Canary: put `existsSync(HEAD)`
+    // back in `ensureProjectMirror` and this test's workspace has no README.
+    await makeOrigin();
+    const orphan = leaveKilledCloneAtMirror();
+
+    const result = await withOrigin(origins, () => clone("a"));
+
+    // Rebuilt from the origin, not served: the working tree has real content…
+    expect(result.viaMirror).toBe(true);
+    expect(existsSync(path.join(workspace("a"), "README.md"))).toBe(true);
+    // …the mirror carries the origin's branch and its completion marker…
+    const head = await exec("git", ["-C", mirrorDir(), "rev-parse", "main"]);
+    expect(head.stdout.trim()).toBe(firstCommit);
+    const refspec = await exec("git", [
+      "-C",
+      mirrorDir(),
+      "config",
+      "--get",
+      "remote.origin.fetch",
+    ]);
+    expect(refspec.stdout.trim()).toBe("+refs/heads/*:refs/heads/*");
+    // …and the killed clone's leavings are gone, which a mere fetch would have
+    // kept. That is the difference between a rebuild and serving the wreckage.
+    expect(existsSync(orphan)).toBe(false);
+  });
+
+  it("the mirror is PUBLISHED by rename — no sidecar survives a successful build", async () => {
+    // Building in place is what let a killed clone leave something servable at
+    // the mirror path. The build now lands in `<mirror>.building` and is renamed
+    // in, so an abandoned sidecar is never mistaken for a mirror — and is swept.
+    // Canary: clone straight to `mirrorDir` again and the sidecar assertions
+    // stop meaning anything (the leftover below is served instead of rebuilt).
+    await makeOrigin();
+    const sidecar = `${mirrorDir()}.building`;
+    mkdirSync(sidecar, { recursive: true });
+    writeFileSync(path.join(sidecar, "HEAD"), "ref: refs/heads/.invalid\n");
+
+    const result = await withOrigin(origins, () => clone("a"));
+
+    expect(result.viaMirror).toBe(true);
+    expect(existsSync(path.join(workspace("a"), "README.md"))).toBe(true);
+    expect(existsSync(sidecar)).toBe(false);
+    expect(readdirSync(path.dirname(mirrorDir()))).toEqual([
+      path.basename(mirrorDir()),
+    ]);
+  });
+
+  it("a mirror with NO branches never becomes an empty checkout", async () => {
+    // `git clone <ref-less repo>` warns and exits 0, so this arm used to report
+    // success while handing a specialist a tree with no history and no
+    // `origin/<base>` — the shape VIB-1's delivering agent committed a
+    // parentless commit into. Canary: drop the `mirrorHasRefs` guard and the
+    // README assertion fails on an empty workspace.
+    await makeOrigin();
+    await withOrigin(origins, () => clone("a"));
+    // Strip every ref and break the remote, so the refresh cannot quietly put
+    // them back: a mirror that is COMPLETE, served stale, and holds nothing.
+    rmSync(path.join(mirrorDir(), "packed-refs"), { force: true });
+    rmSync(path.join(mirrorDir(), "refs", "heads"), {
+      recursive: true,
+      force: true,
+    });
+    await breakMirrorRemote();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+    const result = await withOrigin(origins, () => clone("b"));
+
+    expect(warn.mock.calls.map(([msg]) => msg)).toContain(
+      "the project's repository mirror holds no branches — cloning from GitHub",
+    );
+    expect(result.viaMirror).toBe(false);
+    expect(existsSync(path.join(workspace("b"), "README.md"))).toBe(true);
+  });
+
   it("a read-side refresh never CREATES a mirror — it degrades instead", async () => {
     // A tool call inside an operator turn must not become a 113 MB download.
     // Canary: default `create` to true in `refreshProjectMirror` and this fails.
@@ -455,13 +552,25 @@ describe("D1: mirrorIsCold + cloneStepLabel (first-task clone honesty)", () => {
   });
   afterEach(() => ctx.cleanup());
 
-  it("is COLD when no mirror HEAD exists, WARM once it does", () => {
-    // No mirror on disk → the first task is building it.
+  it("is COLD until a COMPLETE mirror lands — a killed clone's leftovers do not count", () => {
+    // Canary: go back to `existsSync(<dir>/HEAD)` and the half-built case below
+    // reports warm, which is what dropped the honest "this can take a few
+    // minutes" label on VIB-1's multi-minute first clone.
     expect(mirrorIsCold("p", "acme/widgets", root)).toBe(true);
-    // Materialize a mirror HEAD → later tasks fetch warm.
+
+    // What `git clone --bare` leaves when it is KILLED mid-transfer: a HEAD
+    // written before the first object, no refs, and no fetch refspec.
     const dir = projectRepoMirrorDir("p", "acme/widgets", root)!;
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(path.join(dir, "HEAD"), "ref: refs/heads/.invalid\n");
+    writeFileSync(path.join(dir, "config"), "[core]\n\tbare = true\n");
+    expect(mirrorIsCold("p", "acme/widgets", root)).toBe(true);
+
+    // The refspec is written last, after the clone returns — that is the marker.
+    writeFileSync(
+      path.join(dir, "config"),
+      '[core]\n\tbare = true\n[remote "origin"]\n\tfetch = +refs/heads/*:refs/heads/*\n',
+    );
     expect(mirrorIsCold("p", "acme/widgets", root)).toBe(false);
   });
 

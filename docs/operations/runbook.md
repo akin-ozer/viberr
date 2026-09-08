@@ -430,6 +430,15 @@ pass, for tasks in their project's terminal stage, logging `reclaimed finished t
 workspaces` with count and MB. Removing a finished task's `workspace/` by hand is safe;
 removing one for a task in progress forces a re-clone and interrupts a running agent.
 
+The mirror is built in a `<mirror>.building` sidecar and renamed into place, and a mirror
+counts as usable only once its `remote.origin.fetch` refspec is written — so a clone killed
+mid-download (a container stop, an interrupted run) leaves nothing the cache will serve, and
+the next clone rebuilds. Symptoms of an older half-built mirror, all at once: a
+`.repo-mirror/<owner>__<repo>.git` with zero refs and orphaned `objects/pack/tmp_pack_*`,
+repeated `mirror could not be refreshed — serving a possibly stale mirror` warnings, and
+agents reporting an EMPTY repository. The repair is to delete the mirror directory and the
+affected task's `workspace/`; both re-clone on the next run.
+
 ## The single-writer lock and CLI refusals
 
 `<dataRoot>/state/writer.lock` holds `{ pid, hostname, startedAt, bootId }`. A second app

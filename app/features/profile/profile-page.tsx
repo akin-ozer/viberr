@@ -460,7 +460,16 @@ function ProfileAccess({
         )}
       </div>
       {role ? (
-        <div className="kv">
+        // `grants` (design pass 2026-09-08): twenty permission rows, each ruled
+        // off and each ending in a filled tile at the far right of a ~400px
+        // gap, took half this overlay for a reference list read once — and for
+        // an admin every row says yes, so twenty identical fills carried no
+        // information at all. The modifier ungroups it by SPACE instead of
+        // rules, strips the tile to a bare glyph, and puts the marker first so
+        // there is one left-aligned column the eye can run down. The point is
+        // not the ledger: it is that Agent accounts, the panel that decides
+        // whether this person's agents can run, now reaches the first screen.
+        <div className="kv grants">
           {RBAC_ROWS.map((r) => (
             <div className="kv-row" key={r.action}>
               <span className="k strong">

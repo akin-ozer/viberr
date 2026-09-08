@@ -1687,7 +1687,13 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
     expect(document.querySelector(".audit-s3-grid")).toBeNull();
     expect(getByText("No S3 target")).toBeTruthy();
     // D04-U7: the card still adds no primary to the page.
-    expect(container.querySelector(".audit-export .btn.primary")).toBeNull();
+    // Selected by the section's screen label rather than by `.audit-export`,
+    // which was a presentational class carrying one margin. `.set-main`'s gap
+    // owns that spacing now, so the class went with its rule (the sheet's gate
+    // requires the two to travel together) and the hook became a semantic one.
+    expect(
+      container.querySelector('[data-screen-label="Audit log"] .btn.primary'),
+    ).toBeNull();
     fireEvent.click(getByText("Set up S3 target").closest("button")!);
     expect(document.querySelector(".audit-s3-grid")).toBeTruthy();
     expect(getByText("Save target")).toBeTruthy();
