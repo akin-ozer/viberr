@@ -753,6 +753,27 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .pill.neutral { background: var(--tint-press); color: var(--muted); }
 .pill.done    { background: var(--success-soft); color: var(--success-dark); }
 .pill.sm { font-size: .68rem; padding: .25rem .375rem; }
+/* THE SECOND PILL TIER (design pass, 2026-09-08).
+   Every pill was a filled tint at weight 700, so a board card carrying six of
+   them — readiness, priority, two labels, a due date, a verdict — gave all six
+   the same shout, and the card read as a heap of coloured chips rather than as
+   a task with a title. The tints were never the problem; having only ONE
+   volume was.
+   A filled tint now means one thing: the state this card is waiting in.
+   Anything merely descriptive takes `.quiet` — no fill, secondary ink, a
+   hairline edge that holds the pill's shape without claiming attention.
+   Geometry is identical (the edge is an inset shadow, not a border), so a chip
+   can move between tiers without the row reflowing. */
+.pill.quiet {
+  background: transparent;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font-weight: 600;
+}
+/* The glyph deliberately takes the pill's own ink rather than a step lighter:
+   `--faint` inside a transparent chip is measured by the AA sweep against the
+   base `.pill` fill it overrides, and lands at 4.20:1 in dark. One voice per
+   chip is the better answer anyway — the word carries the meaning. */
 
 /* ---------- Agent / human identity ---------- */
 .agent-glyph {
@@ -1164,10 +1185,14 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .card-owner .lbl { font-size: .74rem; color: var(--faint); }
 .card-owner .nm { font-size: .8rem; font-weight: 700; font-family: var(--font-display); }
 
+/* Design pass 2026-09-08: the divider is gone. A card is one object, and a rule
+   across it says "two things" — which is why a card with a branch line read as
+   a little table. Grouping is space now: more of it above the foot than between
+   the foot's own items, which is the same information the line was carrying,
+   without the ink. */
 .card-foot {
   display: flex; align-items: center; gap: .5rem;
-  padding-top: .5rem;
-  border-top: 1px solid var(--hairline);
+  margin-top: .125rem;
   flex-wrap: wrap;
 }
 .trace {
@@ -1184,11 +1209,16 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .card-meta { display: flex; align-items: center; gap: .375rem; flex-wrap: wrap; padding-top: .5rem; }
 /* Freeform labels: the neutral-pill pairing (--muted on a 94%-transparent
    --fg wash), which the R19-12 contrast sweep already clears. */
+/* Freeform labels are descriptive by definition, so they wear the quiet tier's
+   treatment rather than a private grey fill of their own. They keep the mono
+   face and the softer radius — a label is a token the person typed, and it
+   should not be mistaken for a state the system computed. */
 .label-chip {
   display: inline-flex; align-items: center;
   padding: .125rem .5rem; border-radius: var(--radius-button);
   font-size: .68rem; font-weight: 600; font-family: var(--font-mono);
-  background: var(--tint-press); color: var(--muted);
+  background: transparent; color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--hairline);
   white-space: nowrap;
 }
 /* Mono ships no weight above 600, so the declared-700 emphasis was a no-op;

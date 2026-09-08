@@ -31,7 +31,10 @@ export function PriorityFlag({
   if (priority === "normal") return null;
   const d = PRIORITY_DISPLAY[priority];
   return (
-    <Pill kind={d.kind} sm={sm}>
+    // `low` is a description of the task; `high` and `urgent` are a claim on the
+    // reader's attention. Only the latter two earn a fill (design pass
+    // 2026-09-08) — a low-priority card used to shout as loudly as an urgent one.
+    <Pill kind={d.kind} sm={sm} quiet={priority === "low"}>
       <Icon name="flag" />
       {d.label}
     </Pill>
@@ -138,7 +141,9 @@ export function DueDatePill({
   const effectiveToday = today ?? (hydrated ? todayISO() : null);
   const overdue = effectiveToday != null && isOverdue(dueDate, effectiveToday);
   return (
-    <Pill kind={overdue ? "blocked" : "neutral"} sm={sm}>
+    // A date that has not passed is a fact about the task; an overdue one is a
+    // problem. Only the problem gets a fill (design pass 2026-09-08).
+    <Pill kind={overdue ? "blocked" : "neutral"} sm={sm} quiet={!overdue}>
       <Icon name="clock" />
       {overdue ? `overdue · ${formatDueDate(dueDate)}` : `due ${formatDueDate(dueDate)}`}
     </Pill>

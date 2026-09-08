@@ -27,14 +27,24 @@ export function Pill({
   children,
   dot,
   sm,
+  quiet,
 }: {
   kind?: PillKind | "";
   children?: ReactNode;
   dot?: boolean;
   sm?: boolean;
+  /** Descriptive, not a state: drop the fill and let the states be the loud
+   *  things on the row. `quiet` is a TIER, orthogonal to `kind` — it overrides
+   *  the tone's fill, so pass it when the chip describes the task rather than
+   *  telling the reader what the task is waiting for. */
+  quiet?: boolean;
 }) {
   return (
-    <span className={"pill " + (kind || "") + (sm ? " sm" : "")}>
+    <span
+      className={
+        "pill " + (kind || "") + (sm ? " sm" : "") + (quiet ? " quiet" : "")
+      }
+    >
       {dot && <span className="pdot" />}
       {children}
     </span>
