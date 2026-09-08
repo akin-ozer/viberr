@@ -1041,10 +1041,14 @@ describe("F19-8: an archived card is inert and honest", () => {
     expect(card).not.toContain("awaiting verdict");
     expect(container.querySelector(".wait-tag")).toBeNull();
     // "How far did this get?" stays answerable — the hero keeps its stage pill
-    // for the same reason.
+    // for the same reason. Ruling 171: the PR chip is the one trace chip when a
+    // PR exists (it implies the branch); the branch name is the chip only
+    // before a PR opens.
     expect(card).toContain("VIB-9");
     expect(card).toContain("#124");
-    expect(card).toContain("VIB-9-abandoned");
+    cleanup();
+    const noPr = renderBoard([archivedTask({ pr: null })], { search: ARCHIVED });
+    expect(noPr.container.querySelector(".card")!.textContent).toContain("VIB-9-abandoned");
   });
 
   it("keeps the urgent/waiting card treatment off an archived card", () => {
@@ -2578,6 +2582,125 @@ describe("the card's owner line names the agent PROFILE, not its role (owner, 20
  * every value; the board card and the list row draw the demand once, validation
  * only as a problem, and the agent as its glyph and its name.
  */
+/**
+ * Ruling 171 (owner, 2026-09-09): one card anatomy, whatever a task has. Two
+ * cards side by side read in two grammars — a human-owned task put its owner
+ * at the LEFT with a name and a role word and left the right end empty, an
+ * agent-carried one put the agent at the left and the owner at the right as an
+ * avatar — and the foot wrapped "waiting on you" onto a line of its own as soon
+ * as a PR chip joined the branch. Now the left seat is the carrier (the agent,
+ * or "no agent"), the right seat is the owner (avatar, or the empty seat), and
+ * the foot is two cells: traces and problem pills on the left, the status on
+ * the right.
+ */
+describe("ruling 171: every card has the same seats and the same foot", () => {
+  const arda = { kind: "human" as const, userId: "u-arda", name: "Arda Kaya", initials: "AK", tone: "" };
+  const developer = {
+    kind: "agent" as const,
+    backend: "claude" as const,
+    name: "Claude",
+    role: "Implementation",
+    profileId: "developer",
+    profileName: "Developer",
+  };
+  const seats = (root: ParentNode) => ({
+    carrier: root.querySelector(".owner-row .card-owner")!.textContent!.trim(),
+    owner: root.querySelector(".owner-row .rev-stack")?.getAttribute("aria-label") ?? null,
+  });
+
+  it("a human-owned task with no agent: the carrier seat is empty, the owner sits at the right", () => {
+    const { container } = renderBoard([task({ key: "VIB-2", owner: arda })]);
+    expect(seats(container)).toEqual({ carrier: "no agent", owner: "Owner: Arda Kaya" });
+    // Nothing of the old left-seat grammar survives.
+    expect(container.querySelector(".card")!.textContent).not.toContain("· owner");
+    expect(container.querySelector(".card")!.textContent).not.toContain("Arda");
+  });
+
+  it("an agent-carried task reads the same way: agent left, owner right", () => {
+    const { container } = renderBoard([task({ key: "VIB-1", owner: arda, specialist: developer })]);
+    expect(seats(container)).toEqual({ carrier: "Developer", owner: "Owner: Arda Kaya" });
+  });
+
+  it("an unowned task keeps both seats and says what the owner seat waits for", () => {
+    const { container } = renderBoard([task({ key: "VIB-3" })]);
+    expect(seats(container)).toEqual({ carrier: "no agent", owner: "Owner: unassigned" });
+    expect(container.querySelector(".owner-row .rev-stack .avatar.ghost")).toBeTruthy();
+    cleanup();
+    const withOperator = renderBoard([
+      task({
+        key: "VIB-4",
+        operator: {
+          name: "Operator",
+          assignedAtStageId: "triage",
+          sinceStageIndex: 1,
+          sinceLabel: "since Triage",
+        },
+      }),
+    ]);
+    expect(seats(withOperator.container).owner).toBe("Owner: awaiting owner");
+  });
+
+  it("the empty carrier tile is decorative; an agent's tile names its backend", () => {
+    const { container } = renderBoard([task({ key: "VIB-2", owner: arda })]);
+    const tile = container.querySelector(".owner-row .card-owner .agent-glyph")!;
+    expect(tile.classList.contains("none")).toBe(true);
+    expect(tile.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("the foot keeps the traces left and the status right, with a PR and without a branch alike", () => {
+    const withPr = renderBoard([
+      task({
+        key: "VIB-1",
+        owner: arda,
+        specialist: developer,
+        branch: "vib-1-b3e3",
+        pr: { number: 291, state: "review", title: "t" },
+        waiting: "human",
+        waitingOnMe: true,
+      }),
+    ]);
+    const foot = withPr.container.querySelector(".card-foot")!;
+    // One trace chip: the PR stands in for the branch it implies, so the
+    // narrowest lane still holds the chip and the status on one line.
+    expect(foot.querySelector(".card-trace")!.textContent).toContain("#291");
+    expect(foot.querySelector(".card-trace")!.textContent).not.toContain("vib-1-b3e3");
+    expect(foot.querySelector(".card-trace .wait-tag")).toBeNull();
+    expect(foot.querySelector(".card-status .wait-tag")!.textContent!.trim()).toBe("waiting on you");
+    cleanup();
+    const bare = renderBoard([task({ key: "VIB-2", owner: arda, waiting: "human", waitingOnMe: true })]);
+    const foot2 = bare.container.querySelector(".card-foot")!;
+    expect(foot2.querySelector(".card-trace")!.textContent).toContain("no branch");
+    expect(foot2.querySelector(".card-status .wait-tag")!.textContent!.trim()).toBe("waiting on you");
+    cleanup();
+    const branched = renderBoard([task({ key: "VIB-3", owner: arda, branch: "vib-3-long-branch-name" })]);
+    expect(branched.container.querySelector(".card-trace .trace.ok")!.textContent).toContain("vib-3-long");
+  });
+
+  it("problem pills belong to the trace cell, the quiet cue to the status cell", () => {
+    const { container } = renderBoard([
+      task({
+        key: "VIB-1",
+        validation: "failing",
+        waiting: "agent",
+        quiet: true,
+        lastActivityAt: new Date(Date.now() - 4 * 60 * 60_000).toISOString(),
+      }),
+    ]);
+    const foot = container.querySelector(".card-foot")!;
+    expect(foot.querySelector(".card-trace .pill.blocked")!.textContent).toContain("validation failing");
+    expect(foot.querySelector(".card-status .pill.neutral")!.textContent).toContain("no activity");
+    expect(foot.querySelector(".card-status .wait-tag")!.textContent).toContain("agent working");
+  });
+
+  it("the list row seats the same two identities", () => {
+    const { container } = renderBoard([task({ key: "VIB-2", owner: arda })], { view: "list" });
+    const row = container.querySelector(".list-row")!;
+    expect(row.querySelector(".card-owner")!.textContent!.trim()).toBe("no agent");
+    expect(row.querySelector(".rev-stack")!.getAttribute("aria-label")).toBe("Owner: Arda Kaya");
+    expect(row.querySelector(".rev-stack .rs-lbl")!.textContent).toBe("owner");
+  });
+});
+
 describe("ruling 168: the board card states each fact once", () => {
   const held = (patch: Partial<BoardTask> = {}) =>
     task({

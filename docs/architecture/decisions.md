@@ -3515,6 +3515,39 @@ by rewriting those paragraphs:*
     card before Current state; the title and the open packet still come first. Current state
     moves only by the difference between the GitHub trace's height and the hero's.
 
+171. **The board card has one anatomy, whatever a task has (owner, 2026-09-09).** Two cards
+    side by side read in two grammars: a human-owned task with no agent put its owner at the
+    LEFT of the owner row, avatar, first name and "· owner", and left the right end empty; an
+    agent-carried task put the agent at the left and the owner at the right as a small avatar.
+    And the foot, one wrapping run, sent "waiting on you" onto a line of its own the moment a
+    PR chip joined the branch chip. The owner: "whether or not of a task's info situation the
+    task's view type shouldn't change." So every ingredient has one seat:
+    (a) *The left seat is the carrier.* The engaged agent — the backend's glyph and the
+    profile's name — or, when nobody carries the task yet, the seat itself: the agent tile
+    dimmed (`.agent-glyph.none`) and "no agent", the way the foot says "no branch".
+    (b) *The right seat is the owner, on every card and every list row.* The human owner's
+    avatar with the name as its accessible label and title, or the empty seat — a ghost
+    avatar labelled "awaiting owner" while an operator is assigned to find one, "unassigned"
+    before that (the old left-seat fallback's two words). The owner's name is no longer
+    printed on the card; it never was beside an agent.
+    (c) *The foot is two cells.* The trace chip and the problem pills fill the left cell and
+    wrap there; the status seat — the quiet cue, then the wait tag — is the right cell, the
+    card's bottom-right corner regardless of what the left holds. `StateSignals` split into
+    `StatePills` and `StatusTags` for it; the list row still runs both inline.
+    (d) *One trace chip.* A PR supersedes the branch on the card: it is the stronger trace and
+    implies the branch (the task page's GitHub trace shows both), and the narrowest lane
+    (218px) cannot hold a branch name, a PR number and "waiting on you" on one line — the
+    branch was shrinking to nothing beside them. Without a PR the branch name is the chip and
+    yields to an ellipsis before anything wraps; without a branch the chip says "no branch".
+    (e) *A narrow card reflows on its own width.* At the board's narrowest lane (218px — every
+    lane, at 1440px with five stages) the foot cannot hold a trace chip and "waiting on a human"
+    side by side, and a placeholder cut to "no…" is no placeholder. Under 210px of card content
+    (`@container`, the sheet's one container query; it measures the content box, so this is a
+    card under about 234px — the 218px lane's card has 187px inside) the foot is two rows for
+    every card in the lane — the trace, then the status seat right-aligned — decided by the
+    card's width, never by what the card holds, so a lane stays uniform; wider cards keep the
+    one line ("no branch" and "waiting on a human" need about 208px together).
+
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is
 corrected on the page named; the note stays here so a reader who meets the old wording, in

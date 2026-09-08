@@ -337,7 +337,7 @@ export function waitChip(entries: readonly DependencyRender[]): WaitChip {
   };
 }
 
-function StateSignals({ task }: { task: BoardTask }) {
+function StatePills({ task }: { task: BoardTask }) {
   if (isArchived(task)) return null;
   // C2 (⇄ N20-14 / UXO-1): the validation pill asserts a LIVE obligation
   // ("awaiting verdict" / "validation failing"). UXO-1 withdrew it on archived
@@ -469,10 +469,30 @@ function StateSignals({ task }: { task: BoardTask }) {
           +{folded.length}
         </span>
       )}
-      {/* Gap-10: the quiet cue sits after validation and before the wait tag,
-          the order both board views share. */}
+    </>
+  );
+}
+
+/** The card's STATUS tags — the quiet cue, then the wait tag (Gap-10's order,
+ *  shared by both board views). Silent on an archived task, like the pills:
+ *  nobody is waited on for abandoned work (F19-8). Ruling 171 seats them in
+ *  the foot's right cell on the card; the list row runs them inline. */
+function StatusTags({ task }: { task: BoardTask }) {
+  if (isArchived(task)) return null;
+  return (
+    <>
       <QuietTag task={task} />
       <WaitTag task={task} />
+    </>
+  );
+}
+
+/** The list row's state block: the pills and the status tags in one run. */
+function StateSignals({ task }: { task: BoardTask }) {
+  return (
+    <>
+      <StatePills task={task} />
+      <StatusTags task={task} />
     </>
   );
 }
@@ -542,7 +562,20 @@ function ContinuityTag({ task }: { task: BoardTask }) {
   );
 }
 
-function OwnerLine({ task }: { task: TaskSummary }) {
+/**
+ * Ruling 171 (owner, 2026-09-09): the CARRIER seat — who carries the task. The
+ * engaged agent, as the backend's glyph and the profile's name; or, when
+ * nobody does yet, the empty seat itself, dimmed: "no agent". The human owner
+ * is never here — the owner seat (`OwnerSeat`, the row's right end) carries
+ * them on every card. Before this a human-owned task with no agent put the
+ * owner HERE, avatar, first name and a role word, and left the right seat
+ * empty, while an agent-carried task did the reverse: two cards side by side
+ * read in two grammars, and which one a task got depended on what it happened
+ * to have ("the task's view type shouldn't change"). One anatomy now: the
+ * left seat is the carrier, the right seat is the owner, and an empty seat
+ * says so the way the foot's "no branch" does.
+ */
+function CarrierSeat({ task }: { task: TaskSummary }) {
   const sp = task.specialist;
   if (sp) {
     return (
@@ -561,43 +594,46 @@ function OwnerLine({ task }: { task: TaskSummary }) {
       </div>
     );
   }
-  const o = task.owner;
-  if (o && o.kind === "human") {
-    return (
-      <div className="card-owner">
-        <Avatar person={o} />
-        <span className="nm">{o.name.split(" ")[0]}</span>
-        <span className="lbl">· owner</span>
-      </div>
-    );
-  }
   return (
     <div className="card-owner">
-      <span className="avatar ghost">
-        ?
+      {/* The seat's own shape, emptied: the agent tile's cut-corner square in
+          the dim tone, a dot for a mark. Decorative — the words beside it
+          say it. */}
+      <span className="agent-glyph none" aria-hidden="true">
+        <Icon name="dot" />
       </span>
-      <span className="lbl">{task.operator ? "awaiting owner" : "unassigned"}</span>
+      <span className="lbl">no agent</span>
     </div>
   );
 }
 
-function ReviewerStack({ task, label }: { task: TaskSummary; label?: boolean }) {
+/**
+ * Ruling 171: the OWNER seat — the row's right end, on every card. The human
+ * owner's avatar (initials; the name is the accessible label and the title),
+ * or the empty seat when nobody owns the task yet: "awaiting owner" while an
+ * operator is assigned and will be asked to find one, "unassigned" before
+ * that — the two words the old left-seat fallback used. It used to render
+ * only beside an engaged agent, which is what left a human-owned card without
+ * one with a bare right end.
+ */
+function OwnerSeat({ task, label }: { task: TaskSummary; label?: boolean }) {
   const o = task.owner;
-  if (!o || o.kind !== "human" || !task.specialist) return null;
+  const human = o && o.kind === "human" ? o : null;
+  const name = human ? human.name : task.operator ? "awaiting owner" : "unassigned";
   return (
     <span
       className="rev-stack"
-      title={"Owner · human reviewer & acceptance: " + o.name}
+      title={human ? "Owner · human reviewer & acceptance: " + human.name : "Owner: " + name}
       // The Avatar renders initials only; expose the real name to keyboard/
       // touch/SR users too (title alone is a weak accessible name), matching
       // MemberStack's convention. `role="img"` is what makes the label count:
       // ARIA prohibits `aria-label` on a role-less span and readers drop it,
       // so without the role the owner read as bare initials.
       role="img"
-      aria-label={"Owner: " + o.name}
+      aria-label={"Owner: " + name}
     >
       {label && <span className="rs-lbl">owner</span>}
-      <Avatar person={o} size="xs" />
+      {human ? <Avatar person={human} size="xs" /> : <span className="avatar xs ghost">?</span>}
     </span>
   );
 }
@@ -782,8 +818,8 @@ function CardFace({ task, archived }: { task: BoardTask; archived: boolean }) {
       </div>
       <h3>{task.title}</h3>
       <div className="owner-row">
-        <OwnerLine task={task} />
-        <ReviewerStack task={task} />
+        <CarrierSeat task={task} />
+        <OwnerSeat task={task} />
       </div>
       {!archived && hasVisibleMeta(task) && (
         <div className="card-meta">
@@ -792,24 +828,46 @@ function CardFace({ task, archived }: { task: BoardTask; archived: boolean }) {
           <DueDatePill dueDate={task.dueDate} sm />
         </div>
       )}
+      {/* Ruling 171: the foot is TWO cells, not one wrapping run. The left
+          cell holds the traces (branch, PR) and the problem pills and wraps
+          as it must; the right cell is the status seat — the quiet cue and
+          the wait tag — and is the card's bottom-right corner on every card.
+          One run wrapped "waiting on you" onto a line of its own the moment a
+          PR chip joined the branch (owner, 2026-09-09: "in the lower side
+          seems redundant"), so where the status sat depended on how far the
+          task had got. */}
       <div className="card-foot">
-        {task.branch ? (
-          <span className="trace ok">
-            <Icon name="branch" />
-            {shortBranch(task.branch)}
+        <div className="card-trace">
+          {/* ONE trace chip, on one line with the status seat. A PR supersedes
+              the branch here: it is the stronger trace and implies the branch
+              (the task page's GitHub trace shows both), and the narrowest lane
+              (218px) cannot hold a branch name, a PR number and "waiting on
+              you" on one line — the branch was shrinking to nothing beside
+              them. Without a PR the branch name is the chip, and it gives way
+              to an ellipsis before anything wraps; without a branch the chip
+              says so. */}
+          <span className="trace-line">
+            {task.pr ? (
+              <span className="trace pr">
+                <Icon name="pr" />#{task.pr.number}
+              </span>
+            ) : task.branch ? (
+              <span className="trace ok">
+                <Icon name="branch" />
+                <span className="t">{shortBranch(task.branch)}</span>
+              </span>
+            ) : (
+              <span className="trace">
+                <Icon name="branch" />
+                <span className="t">no branch</span>
+              </span>
+            )}
           </span>
-        ) : (
-          <span className="trace">
-            <Icon name="branch" />
-            no branch
-          </span>
-        )}
-        {task.pr && (
-          <span className="trace pr">
-            <Icon name="pr" />#{task.pr.number}
-          </span>
-        )}
-        <StateSignals task={task} />
+          <StatePills task={task} />
+        </div>
+        <div className="card-status">
+          <StatusTags task={task} />
+        </div>
       </div>
     </>
   );
@@ -1079,8 +1137,8 @@ function ListRow({
           {stageName}
         </span>
       )}
-      <OwnerLine task={task} />
-      <ReviewerStack task={task} label />
+      <CarrierSeat task={task} />
+      <OwnerSeat task={task} label />
       {/* F19-13's own rule, finished: the list used to silently drop the
           priority/labels/due-date trio the stage layout draws — an `urgent` +
           `overdue` task showed zero urgency cue one toggle away. */}

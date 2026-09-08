@@ -849,6 +849,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .agent-glyph.lg { width: 34px; height: 34px; }
 .agent-glyph.codex { background: var(--codex-soft); }
 .agent-glyph.claude { background: var(--claude-soft); color: var(--claude-fg); border-color: var(--claude-line); }
+/* Ruling 171: the empty carrier seat — the same tile, unfilled: a hairline
+   outline on the card's own ground, a faint dot for a mark. */
+.agent-glyph.none { background: transparent; color: var(--faint); border-color: var(--hairline); }
 
 .avatar {
   display: grid;
@@ -1096,6 +1099,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   box-shadow: var(--shadow-card);
   transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
   display: flex; flex-direction: column; gap: .5rem;
+  /* Ruling 171(e): the card is a container so its foot can reflow on the
+     card's own width (see `@container` below). */
+  container-type: inline-size;
 }
 .card:hover { background: var(--tint-hover); border-color: var(--border); }
 /* P16-UI-01: the focus ring is the app-wide `:focus-visible` rule at the top of
@@ -1278,10 +1284,38 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    a little table. Grouping is space now: more of it above the foot than between
    the foot's own items, which is the same information the line was carrying,
    without the ink. */
+/* Ruling 171: two cells. Traces and problem pills fill the left and wrap
+   there; the status seat (quiet cue, wait tag) is the right cell — the same
+   corner on every card, whatever the left cell holds. A single wrapping run
+   sent "waiting on you" to a line of its own as soon as a PR chip joined the
+   branch chip. */
 .card-foot {
-  display: flex; align-items: center; gap: .5rem;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start; column-gap: .5rem;
   margin-top: .125rem;
-  flex-wrap: wrap;
+}
+.card-trace { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; min-width: 0; }
+/* The branch and PR chips share one line and the branch name yields first:
+   it shrinks to an ellipsis before the PR chip or the status seat moves. */
+.trace-line { display: inline-flex; align-items: center; gap: .5rem; min-width: 0; max-width: 100%; }
+.trace-line .trace { min-width: 0; }
+.trace-line .trace.pr { flex: none; }
+.trace-line .trace .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-status { display: flex; flex-direction: column; align-items: flex-end; gap: .25rem; }
+/* Ruling 171(e): at the board's narrowest lane (218px, every lane at 1440px
+   with five stages) a card's foot cannot hold a trace chip and "waiting on a
+   human" side by side, and a placeholder cut to "no…" is no placeholder. Under
+   210px of card CONTENT (a container query measures the content box — the
+   218px lane's card has 187px inside, a 259px card 235px) the foot is two rows
+   for EVERY card in the lane — the trace, then the status seat, right-aligned —
+   decided by the card's width, never by what the card holds, so a lane stays
+   uniform. Wider cards keep the one line: "no branch" and "waiting on a human"
+   need about 208px together. */
+@container (max-width: 210px) {
+  .card-foot { grid-template-columns: minmax(0, 1fr); }
+  /* The row gap rides on the status seat's first tag, so a card with no
+     status (Done) gains no empty row — and nothing is hidden by width. */
+  .card-status > :first-child { margin-top: .25rem; }
 }
 .trace {
   display: inline-flex; align-items: center; gap: .25rem;

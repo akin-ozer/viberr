@@ -963,6 +963,10 @@ const BREAKPOINTS = {
   "max-width: 760px": "topbar tier 2 — the middle crumb",
   "max-width: 720px": "MOBILE SHELL — the project rail becomes an overlay",
   "max-width: 560px": "phone-width home rows — the pipeline meter yields",
+  // The one @container query (ruling 171(e)): a board CARD with under 210px of
+  // content stacks its foot — decided by the card's width (a container query
+  // measures the content box), so a whole lane reflows together.
+  "max-width: 210px": "narrow board card — the foot becomes two rows",
 } satisfies Record<string, string>;
 
 describe("app.css breakpoints (P16-F8)", () => {
@@ -1071,6 +1075,17 @@ describe("app.css breakpoints (P16-F8)", () => {
     expect(collapse).toMatch(
       /\.detail-head,\s*\.detail-packet,\s*\.detail-main,\s*\.detail-side\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*auto/,
     );
+  });
+});
+
+describe("ruling 171(e): the narrow card's foot reflows on the card's width", () => {
+  it("is a @container query on the card, stacking the foot under 210px of content", () => {
+    expect(CODE).toMatch(/\.card\s*\{[^}]*container-type:\s*inline-size/);
+    const block = CODE.match(/@container \(max-width: 210px\)\s*\{([\s\S]*?)\n\}/);
+    expect(block, "the narrow-card container block").toBeTruthy();
+    expect(block![1]).toMatch(/\.card-foot\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/);
+    // The status seat stays a right-aligned column, so the tag keeps the corner.
+    expect(CODE).toMatch(/\.card-status\s*\{[^}]*align-items:\s*flex-end/);
   });
 });
 
