@@ -3101,7 +3101,7 @@ describe("app.css ruling 149: every typing control wears the sheet's chrome", ()
   };
   const mobile = CODE.match(/@media \(max-width: 720px\)\s*\{([\s\S]*?)\n\}/)![1];
 
-  it("the guardrail threshold field is boxed like its twin in org settings", () => {
+  it("the guardrail threshold field is boxed, and org settings' cap field IS that rule", () => {
     // It was the app's only text-like input outside `.field`: UA border, UA
     // fill, UA radius, no focus wash, beside an `Apply` wearing `.btn`.
     // Canary: cut the rule back to `width: 5.5rem` and this goes red.
@@ -3111,11 +3111,10 @@ describe("app.css ruling 149: every typing control wears the sheet's chrome", ()
     expect(box).toMatch(/background:\s*var\(--surface\)/);
     expect(box).toMatch(/color:\s*var\(--fg\)/);
     expect(box).toMatch(/padding:\s*\.25rem \.5rem/);
-    // Same pair of declarations the sibling number field already carries.
-    const twin = decls(".conc-edit input");
-    for (const decl of ["border:", "border-radius:", "background:", "color:"]) {
-      expect(twin, decl).toContain(decl);
-    }
+    // Design pass 2026-09-08: the run-concurrency field used to carry a twin
+    // copy of these declarations under `.conc-edit input`; it sits in a
+    // `.guard-ctl` now and the copy is gone, so there is one box to drift.
+    expect(CODE).not.toMatch(/\.conc-edit/);
     expect(decls('.guard-ctl input[type="number"]:focus')).toMatch(
       /box-shadow:\s*0 0 0 3px var\(--focus-wash\)/,
     );

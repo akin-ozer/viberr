@@ -1398,7 +1398,7 @@ describe("run concurrency control", () => {
       auditEvents={[]}
       />,
     );
-    expect(getByText(/capped at 2/)).toBeTruthy();
+    expect(getByText(/Capped at 2/)).toBeTruthy();
     expect(getByText(/2 runs live, 1 queued/)).toBeTruthy();
   });
 
@@ -1495,9 +1495,37 @@ describe("run concurrency control", () => {
       auditEvents={[]}
       />,
     );
-    // The lead reads "…· unlimited · 0 runs live" — distinct from the "0 =
+    // The reading says "Unlimited · 0 runs live" — distinct from the "0 =
     // unlimited" field hint.
-    expect(getByText(/unlimited · 0 runs live/)).toBeTruthy();
+    expect(getByText(/Unlimited · 0 runs live/)).toBeTruthy();
+  });
+
+  // Design pass 2026-09-08: the control was a `.pol-note` — fine print with
+  // the field pushed to the far end of the line, unframed between two panels.
+  // It is a guard row (Policy's numeric-guardrail shape) on a well now, and
+  // the field sits under `.guard-ctl` so it is boxed by that one rule.
+  it("is a guard row on a well, not a footnote", () => {
+    const { getByLabelText, getByRole } = renderPanel(
+      <OrgSettingsPage
+        view={viewBase}
+        meId={ME.id}
+        callbackOrigin="http://localhost:5173"
+        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        s3Audit={null}
+        controllerConfig={CONTROLLER_CONFIG}
+        controllerLocks={CONTROLLER_LOCKS}
+        auditEvents={[]}
+      />,
+    );
+    const input = getByLabelText(/Maximum concurrent agent runs/);
+    expect(input.closest(".guard-ctl")).not.toBeNull();
+    const row = input.closest(".guard-row")!;
+    expect(row.querySelector(".guard-name")?.textContent).toBe("Run concurrency");
+    expect(input.closest(".pol-note")).toBeNull();
+    // The well is the group, named by the row's own name.
+    const group = getByRole("group", { name: "Run concurrency" });
+    expect(group.className).toBe("conc-well");
+    expect(group.contains(input)).toBe(true);
   });
 
   // PG26-A: the in-app audit browse + the Org-scoped toggle that isolates the

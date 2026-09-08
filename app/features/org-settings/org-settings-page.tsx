@@ -667,6 +667,15 @@ function AuditExportCard({
  * lane is `max(1, ceil(cap / 4))`, so "one extra slot per four" named the wrong
  * number at every cap that is not a multiple of four (zero at a cap of 2, one
  * at a cap of 5 where the instance grants two).
+ *
+ * Design pass 2026-09-08: this was a `.pol-note` — twelve-pixel fine print
+ * with the number field pushed to the far end of the line by
+ * `margin-left: auto`, unframed between two panels. It is the one
+ * instance-wide knob outside the tabs, so it takes the shape Policy already
+ * gives a numeric guardrail (a `.guard-row`: name and reading on the left,
+ * the field and its Save on the right) on a tinted well, which gives the row
+ * edges without promoting it to a titled section. The field is
+ * `.guard-ctl input[type="number"]` itself now, not a twin rule.
  */
 function RunConcurrencyControl({
   runConcurrency,
@@ -704,22 +713,28 @@ function RunConcurrencyControl({
     submit({ intent: "set-concurrency", maxConcurrentRuns: trimmed });
   };
   return (
-    <div className="pol-note after conc">
-      <Icon name="cpu" />
-      <span className="conc-body">
-        <span className="conc-lead">
-          <strong>Run concurrency</strong> ·{" "}
-          {runConcurrency.cap === 0
-            ? "unlimited"
-            : `capped at ${runConcurrency.cap}`}
-          {" · "}
-          {countLabel(runConcurrency.live, "run")} live
-          {runConcurrency.queued > 0 && `, ${runConcurrency.queued} queued`}
-        </span>
-        <span className="conc-edit">
-          <label htmlFor="max-concurrent-runs" className="conc-label">
-            Max at once
-          </label>
+    <div
+      className="conc-well"
+      role="group"
+      aria-labelledby="run-concurrency-name"
+    >
+      <div className="guard-row">
+        <div className="guard-main">
+          <span className="guard-name" id="run-concurrency-name">
+            <Icon name="cpu" />
+            Run concurrency
+          </span>
+          <span className="guard-desc">
+            {runConcurrency.cap === 0
+              ? "Unlimited"
+              : `Capped at ${runConcurrency.cap}`}
+            {" · "}
+            {countLabel(runConcurrency.live, "run")} live
+            {runConcurrency.queued > 0 && `, ${runConcurrency.queued} queued`}
+          </span>
+        </div>
+        <span className="guard-ctl">
+          <label htmlFor="max-concurrent-runs">Max at once</label>
           <input
             ref={capRef}
             id="max-concurrent-runs"
@@ -741,10 +756,10 @@ function RunConcurrencyControl({
           >
             Save
           </button>
-          <span className="conc-hint fine sm">0 = unlimited</span>
+          <span className="faint">0 = unlimited</span>
         </span>
         {runConcurrency.cap > 0 && (
-          <span className="conc-lane fine sm">
+          <span className="conc-lane">
             Cap {runConcurrency.cap}: up to{" "}
             {countLabel(runConcurrency.cap, "agent run")} at once, plus{" "}
             {countLabel(runConcurrency.lane, "slot")} for operator and controller
@@ -762,7 +777,7 @@ function RunConcurrencyControl({
             <span>Enter a whole number (0 = unlimited).</span>
           </span>
         )}
-      </span>
+      </div>
     </div>
   );
 }

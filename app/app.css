@@ -2668,8 +2668,8 @@ dialog[data-closing]::backdrop {
 /* Ruling 149: the guardrail threshold field was the only text-like input in
    the app outside `.field`, so it painted in UA chrome (UA border, UA fill,
    UA radius) next to an `Apply` wearing `.btn`. Same treatment as its twin in
-   org settings (`.conc-edit input`); the rest fill is declared here so the
-   sheet's contrast sweep pairs --fg with --surface. */
+   org settings, which is this same rule now; the rest fill is declared here
+   so the sheet's contrast sweep pairs --fg with --surface. */
 .guard-ctl input[type="number"] {
   width: 5.5rem; font: inherit; font-size: .88rem;
   color: var(--fg); background: var(--surface);
@@ -3710,7 +3710,7 @@ dialog[data-closing]::backdrop {
   /* The rest are declared in appended sections at equal specificity, so each
      needs one selector more to be reached from here. */
   .field .repo-input input, .field .repo-input .pre, input.fm-newinp, .fm-gh input[type="text"],
-  .fm-toolbar select[aria-label], .conc-edit input[type="number"],
+  .fm-toolbar select[aria-label],
   .ctl-composer textarea[rows], .dock-composer .ctl-composer textarea[rows],
   .field textarea[rows].mono { font-size: 1rem; }
   /* Ruling 121: the controller dock becomes a bottom sheet — full width,
@@ -4856,20 +4856,6 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .pol-note.before { margin-bottom: .75rem; }
 .pol-note.last { margin-bottom: 0; }
 
-/* Instance run-concurrency admin control (org settings footer). */
-.pol-note.conc { align-items: center;
-  /* Exempt: this note wraps a full-width control whose input is pulled right
-     by margin-left:auto; capping it would strand the field mid-panel. */
-  max-width: none;
-}
-.conc-body { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; width: 100%; }
-.conc-lead { color: var(--muted); }
-.conc-edit { display: inline-flex; align-items: center; gap: .5rem; margin-left: auto; }
-.conc-label { color: var(--muted); font-size: .75rem; }
-.conc-edit input { width: 4.5rem; font: inherit; font-size: .88rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-button); padding: .25rem .5rem; }
-.conc-edit input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
-.conc-hint { color: var(--muted); }
-
 /* Audit-log export card (org settings footer). */
 /* `.audit-export` is gone: it carried one margin-top, `.set-main`'s gap owns
    that spacing now, and the class left the markup with its rule. */
@@ -5963,13 +5949,6 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 .stg-add .stg-err { flex-basis: 100%; font-size: .75rem; font-weight: 600; color: var(--coral-dark); }
 .stg-input[aria-invalid="true"] { border-color: var(--coral-dark); }
 
-/* ---------- appended: ruling 147, the run-concurrency refusal ---------- */
-/* Save is gated only by "nothing changed" now, so an unusable cap is refused in
-   the framed error treatment instead. `.conc-body` is a wrapping flex row whose
-   `.conc-edit` is pushed right by `margin-left: auto`; the sentence takes a full
-   line under both rather than squeezing them. Colour comes from `.form-err`. */
-.conc-body .form-err { flex-basis: 100%; }
-
 /* ---------- appended: ruling 147, the guardrail-value refusal ---------- */
 /* Apply keeps only the nothing-changed gate, so an unusable threshold is
    refused in words on its own line of the wrapping `.guard-row` instead of
@@ -6041,12 +6020,6 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 .op-run .sub.err { color: var(--coral-dark); font-weight: 600; }
 .agent-select-input[aria-invalid="true"] { border-color: var(--coral-dark); }
 
-/* ---------- appended: ruling 152, the coordination lane sentence ---------- */
-/* The run-concurrency control says what the cap carries beyond itself (the
-   operator and controller lane) on its own full line under the field and the
-   counts, the slot the ruling-147 refusal already takes in this wrapping row. */
-.conc-body .conc-lane { flex-basis: 100%; color: var(--muted); }
-
 /* ---------- appended: F35-6, the requested goal on a decided card ---------- */
 /* A decided edit_goal packet used to show only the chosen option's title and
    detail; the goal it asked for lived in the editor's prefill and nowhere on
@@ -6064,3 +6037,26 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
    sets `disabled={busy}`) painted at .45 with a not-allowed cursor: the New
    project spinner read as a washed-out refusal. In flight is not refused. */
 .btn[aria-busy="true"]:disabled { opacity: .7; cursor: default; }
+
+/* ---------- appended: design pass 2026-09-08, run concurrency gets a ground ---------- */
+/* Instance settings' one knob outside the tabs was a `.pol-note`: fine print
+   with a number field pushed to the far end of the line by `margin-left: auto`,
+   unframed between two panels, so the sentence and its control read as two
+   unrelated things 270px apart. It is a `.guard-row` now — the shape Policy
+   already gives a numeric guardrail — on a well. The well is the tinted ground
+   the board's lanes stand on, not a panel: the row is a setting, not a section,
+   and a bordered card with one row in it would claim the rank of the tabbed
+   panel above it. Same radius and inset as `.panel`, so the name sits on the
+   panels' left edge. The `.conc-edit` family (a second copy of the guardrail
+   field's box, focus and phone rules) went with the note. */
+.conc-well { background: var(--tint-well); border-radius: var(--radius-panel); padding: .25rem 1rem; }
+.conc-well .guard-name .ico { width: 14px; height: 14px; color: var(--faint); }
+/* The lane sentence (ruling 152) and the refusal (ruling 147) each take a full
+   line under the row — the slot `.guard-ctl.err` takes in Policy's rows. */
+.conc-lane { flex-basis: 100%; font-size: .75rem; line-height: 1.5; color: var(--muted); }
+.conc-well .form-err { flex-basis: 100%; }
+/* At phone width the row puts the control under the name, and the control's
+   parts must then wrap as whole words: without this the label broke into
+   "Max at / once" and the hint into "0 = / unlimited" beside a full-height field. */
+.conc-well .guard-ctl { flex-wrap: wrap; }
+.conc-well .guard-ctl label, .conc-well .guard-ctl .faint { white-space: nowrap; }
