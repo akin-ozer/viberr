@@ -684,7 +684,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   transition: transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
 }
 .btn:hover:not(:disabled) { transform: translateY(-1px); border-color: var(--fg); }
-.btn:active:not(:disabled) { transform: translateY(0) scale(.97); }
+.btn:active:not(:disabled) { transform: translateY(0) scale(.96); }
 .btn.primary { background: var(--cta-bg); border-color: var(--cta-bg); color: var(--cta-fg); }
 .btn.primary:hover:not(:disabled) { background: var(--blue-pressed); border-color: var(--blue-pressed); color: var(--cta-fg); }
 .btn.ghost { background: transparent; border-color: var(--hairline); color: var(--muted); }
@@ -740,7 +740,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   transition: border-color .15s ease, color .15s ease, transform .1s var(--ease-out);
 }
 .icon-btn:hover:not(:disabled) { border-color: var(--border); color: var(--fg); }
-.icon-btn:active:not(:disabled) { transform: scale(.94); }
+.icon-btn:active:not(:disabled) { transform: scale(.96); }
 .icon-btn .ico { width: 17px; height: 17px; }
 
 /* ---------- Pills (state vocabulary) ---------- */
@@ -1002,7 +1002,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .column {
   display: flex; flex-direction: column; min-height: 0;
   background: var(--tint-well);
-  border-radius: var(--radius-card);
+  /* Concentric: the outer radius wants to be the inner radius plus the padding
+     between them. Cards are --radius-card (16) and sit in .col-body's .5rem (8)
+     gutter, so the lane wants 24 and takes --radius-panel (22) — the scale's
+     nearest step. Matching the card's own 16 here made the lane corner sit
+     inside the card's, which is the specific thing that reads as "off". */
+  border-radius: var(--radius-panel);
 }
 .col-head {
   display: flex; align-items: center; gap: .5rem;
@@ -1013,7 +1018,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
      the head follows the lane it sits in — including the blue wash the lane
      takes while a card is dragged over it. */
   background-color: inherit;
-  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
 }
 .col-head .nm { font-family: var(--font-display); font-weight: 800; font-size: .94rem; }
 .col-head .ct {
@@ -3656,7 +3661,7 @@ dialog[data-closing]::backdrop {
     right: 0; bottom: 0; left: 0;
     width: 100%;
     height: min(80dvh, 640px);
-    border-radius: var(--radius-card) var(--radius-card) 0 0;
+    border-radius: var(--radius-panel) var(--radius-panel) 0 0;
     border-bottom: 0;
     transform-origin: bottom center;
     animation: dock-sheet-in .22s var(--ease-out);
@@ -4243,7 +4248,11 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   padding: 3rem 2rem;
   display: flex; flex-direction: column; align-items: center; text-align: center; gap: .5rem;
 }
-.empty-hero .plus {
+/* The medallion. `.plus` is what the new-project hero calls it; `.glyph` is the
+   same treatment for an empty state whose mark is not a plus — nothing here is
+   about addition, so a hero that draws an analytics or inbox icon should not
+   have to wear a class called "plus". One rule, two honest names. */
+.empty-hero .plus, .empty-hero .glyph {
   display: grid; place-items: center;
   width: 46px; height: 46px;
   border-radius: var(--radius-box);
@@ -4485,13 +4494,25 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .tp-foot { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; padding-top: .75rem; border-top: 1px solid var(--hairline); }
 
 /* Press feedback and reduced-motion preferences. */
+/* PRESS FEEDBACK — two steps, and a rule for choosing between them.
+   These values were picked one control at a time and had drifted to six
+   different numbers: .9 .94 .96 .97 .985 .99. A 10% shrink on a 20px icon
+   button (the .9 group) reads as a flinch, while .985 on a nav item reads as
+   nothing at all, so the app's controls did not agree on what a press feels
+   like.
+     .96  CONTROLS — buttons, icon buttons, chips, segmented options, nav items.
+          Small enough that 4% is a few pixels of travel.
+     .99  SURFACES — cards, rows, tiles. The same 4% on a 340px card would move
+          it 13px, which reads as the card jumping rather than depressing.
+   Two steps because perceived travel, not the ratio, is what should be
+   constant. Anything below .95 feels exaggerated at control size. */
 .card:active, .pj-new:active { transform: scale(.99); }
 .opt:active, .ag-item:active, .rq-row:active, .pcap-row:active,
 .be-opt:active, .org-tile.go:active, .pj-card:active { transform: translateY(0) scale(.99); }
 .deploy-row:active, .pj-row:active { transform: translateX(0) scale(.99); }
 .seg button:active:not(:disabled), .fchip:active:not(:disabled), .pick-chip:active, .tl-filter button:active, .cap-seg button:active:not(:disabled), .mini-seg button:active:not(:disabled), .stage-menu-btn:active:not(:disabled), .own-btn:active, .rev-add:active, .handoff-chip:active, .keybtn:active, .goal-edit-btn:active { transform: scale(.96); }
-.nav-item:active { transform: scale(.985); }
-.rev-x:active, .stg-x:active, .own-x:active, .tag button:active, .ag-add:active, .col-head .add:active, .session-id-copy:active { transform: scale(.9); }
+.nav-item:active { transform: scale(.96); }
+.rev-x:active, .stg-x:active, .own-x:active, .tag button:active, .ag-add:active, .col-head .add:active, .session-id-copy:active { transform: scale(.96); }
 .fm-act:active { transform: translateY(0) scale(.94); }
 .pj-star:active { transform: scale(.9); }
 .pj-row .pj-star:active { transform: translateY(-50%) scale(.9); }

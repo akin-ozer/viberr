@@ -64,9 +64,21 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
       </div>
 
       {empty ? (
-        <div className="empty">
-          No agent runs yet. Once agents start working, their cost, tokens and
-          outcomes show up here.
+        // Design pass 2026-09-08: this was a bare `.empty` — one centred
+        // sentence adrift in a full-height page, left-aligned header above it
+        // and 600px of nothing below. A page-level empty state is a composed
+        // object, and the app already has one: `.empty-hero`, which Home uses
+        // when a person has no projects. Same idiom here, so the two pages
+        // teach the same thing.
+        <div className="empty-hero" data-screen-label="Empty state">
+          <span className="glyph">
+            <Icon name="activity" />
+          </span>
+          <h2>No agent runs yet</h2>
+          <p>
+            Once agents start working, their cost, tokens, timing and outcomes
+            show up here.
+          </p>
         </div>
       ) : (
         <>
