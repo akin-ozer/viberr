@@ -3480,6 +3480,25 @@ by rewriting those paragraphs:*
     2026-09-08: not its role), the role only for a profile no longer deployed. The backend's
     name as a word is gone from the line.
 
+169. **The task hero's stage and status are labelled fields, and the status is one word
+    (owner, 2026-09-09).** The hero read `Ready · blocked · awaiting verdict` and the owner
+    asked what "ready" meant: "a task can't be blocked, ready, and awaiting verdict at the
+    same time." Ready was the STAGE — the default workflow's second stage — drawn as a bare
+    pill beside two status pills, and C5's status glyph on the readiness chip did not keep
+    the classes apart. Two rules for the hero (the board card has its own, ruling 168):
+    (a) *The stage and the status are fields.* Each wears the key the Current state panel
+    already gives it — `Stage`, `Status` — as a small-caps label (`.hero-field-lbl`, the
+    house field label). A stage named Ready, Blocked or Done can no longer be read as a
+    status word.
+    (b) *The status is one word.* Readiness and validation are different questions, but
+    drawn as peers they contradicted each other. The readiness value is the status; the one
+    quiet validation value that names an obligation — `awaiting verdict` — takes the slot
+    only when readiness is `ready` (which said nothing about what for), so a held task says
+    `blocked` alone and a task in review says `awaiting verdict` alone. `validation healthy`
+    and `no validation` describe and stay off the hero, as on the card; `validation failing`
+    is a problem and keeps its own pill. Nothing is re-derived: the status reads
+    `deriveDisplayReadiness`'s value and the validation vocabulary's tier (`validationQuiet`).
+
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is
 corrected on the page named; the note stays here so a reader who meets the old wording, in

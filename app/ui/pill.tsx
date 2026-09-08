@@ -117,6 +117,9 @@ const READINESS_UNKNOWN: PillDisplay = {
  * kind) so it reads as a different CLASS of object from the stage's colour dot.
  * This reuses the existing Icon-in-Pill pattern (the `archived` pill does the
  * same) — no new app.css class, which the stylesheet's integrity gate requires.
+ * Ruling 169 went further on the hero: the stage and the status there are
+ * labelled fields ("Stage", "Status"), because the glyph alone still let the
+ * owner read the Ready stage as a status word.
  */
 export function ReadinessPill({
   value,

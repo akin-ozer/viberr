@@ -7,7 +7,7 @@ import type {
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
-import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
+import { Pill, ReadinessPill, ValidationPill, validationQuiet } from "~/ui/pill";
 import { Markdown } from "~/ui/markdown";
 import {
   ExecutionProfile,
@@ -190,13 +190,23 @@ export function TaskHero({
             archived
           </Pill>
         )}
-        <Pill kind="neutral">
-          <span
-            className="col-stage-dot sm"
-            style={{ background: stage?.color }}
-          />
-          {stage?.name ?? ""}
-        </Pill>
+        {/* Ruling 169 (owner, 2026-09-09): the stage and the status are FIELDS,
+            each under the key the Current state panel gives it. The default
+            workflow's second stage is called Ready, so the bare stage pill read
+            as a status word — "Ready · blocked · awaiting verdict" was read as
+            three statuses that cannot be true at once ("what does ready
+            mean?"). C5's status glyph on the readiness chip was not enough to
+            tell the two classes apart; the label is. */}
+        <span className="hero-field">
+          <span className="hero-field-lbl">Stage</span>
+          <Pill kind="neutral">
+            <span
+              className="col-stage-dot sm"
+              style={{ background: stage?.color }}
+            />
+            {stage?.name ?? ""}
+          </Pill>
+        </span>
         {/* UXO-1: an ARCHIVED task is out of the flow — the archive confirm and
             the acceptance panel both already say so. Its readiness pill kept
             asserting a live obligation ("ready" = someone will act) that is
@@ -208,12 +218,39 @@ export function TaskHero({
             the board card, and again on the list row, with two different
             gates). It is one server-side derivation now —
             `deriveDisplayReadiness` — so this surface renders the value and
-            does not re-decide it. */}
-        {!archived && <ReadinessPill value={task.displayReadiness} />}
+            does not re-decide it.
+
+            Ruling 169: ONE status word. Readiness and validation are different
+            questions, but the hero drew both as peers, and "blocked" beside
+            "awaiting verdict" read as a contradiction (a held task is not up
+            for a verdict yet). The readiness value is the status; the one
+            quiet validation value that names an obligation — `changed`,
+            "awaiting verdict" — takes the slot only when readiness is `ready`
+            and so said nothing about what for (and, beside the Ready stage,
+            said "ready" twice). The other quiet values — healthy, none —
+            describe and stay off the hero, as they do on the card (ruling
+            168(b)); a failing validation is a problem and keeps its own pill
+            below. */}
+        {!archived && (
+          <span className="hero-field">
+            <span className="hero-field-lbl">Status</span>
+            {!terminal &&
+            task.displayReadiness === "ready" &&
+            task.validation === "changed" ? (
+              <ValidationPill value="changed" />
+            ) : (
+              <ReadinessPill value={task.displayReadiness} />
+            )}
+          </span>
+        )}
         {/* C2 (⇄ N20-14/UXO-1): the validation pill is a live obligation and is
             withdrawn on every terminal task, not just archived ones — see the
-            `terminal` note above. */}
-        {!terminal && <ValidationPill value={task.validation} />}
+            `terminal` note above. Ruling 169: and it renders here only as a
+            PROBLEM (the fill tier — "validation failing"); see the status
+            slot's note for where "awaiting verdict" went. */}
+        {!terminal && !validationQuiet(task.validation) && (
+          <ValidationPill value={task.validation} />
+        )}
         {/* Ruling 99: this task is one link of a goal chain — the chip names
             the chain and links to the project Controller surface, where the
             whole chain is read and redirected. */}

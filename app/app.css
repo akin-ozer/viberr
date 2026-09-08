@@ -1582,6 +1582,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .lc-plus .ico { width: 13px; height: 13px; }
 
 .hero-meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+/* Ruling 169: the hero's stage and status are labelled fields (the Current
+   state panel's own row keys), so a stage NAMED Ready can no longer be read as
+   a status word beside "blocked". The label is the house field label
+   (.rs-lbl / .res-group .lbl): .69rem caps on --placeholder. */
+.hero-field { display: inline-flex; align-items: center; gap: .375rem; }
+.hero-field-lbl { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
 .hero-file {
   display: inline-flex; align-items: center; gap: .375rem;
   font-family: var(--font-mono); font-size: .75rem; color: var(--faint);

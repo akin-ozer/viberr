@@ -3339,8 +3339,10 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     );
     const liveText = live.container.querySelector(".hero-meta")!.textContent!;
     expect(liveText).toContain("Review");
-    expect(liveText).toContain("ready");
-    expect(liveText).toContain("awaiting verdict"); // the live obligation
+    // Ruling 169: the live obligation IS the status — a `ready` task whose
+    // revision awaits a verdict says "awaiting verdict", not "ready" as well.
+    expect(liveText).toContain("awaiting verdict");
+    expect(liveText).not.toMatch(/\bready\b/);
     live.unmount();
 
     const archived = renderWithRouter(
@@ -3546,6 +3548,88 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
     expect(meta.textContent).toContain("unknown");
     // The greenwash the fix forbids: a malformed value read as healthy.
     expect(meta.querySelector(".pill.ready")).toBeNull();
+  });
+});
+
+/**
+ * Ruling 169 (owner, 2026-09-09): "a task can't be blocked, ready, and awaiting
+ * verdict at the same time. What does ready mean?" — the hero read the Ready
+ * STAGE as a status word beside a readiness pill and a validation pill drawn as
+ * peers. The stage and the status are labelled fields now, and the status is
+ * one word; validation appears on its own only as a problem.
+ */
+describe("ruling 169: the hero's stage and status are labelled fields, and the status is one word", () => {
+  const ready = { id: "ready", name: "Ready", color: "#2fbf9a" };
+  const meta = (el: HTMLElement) => el.querySelector(".hero-meta")!;
+  const fields = (el: HTMLElement) =>
+    [...meta(el).querySelectorAll(".hero-field")].map((f) => ({
+      label: f.querySelector(".hero-field-lbl")!.textContent,
+      value: f.querySelector(".pill")!.textContent!.trim(),
+    }));
+
+  it("names the stage as the stage and the readiness as the status", () => {
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "blocked", validation: "changed" })}
+        stage={ready}
+        canEditGoal
+      />,
+    );
+    expect(fields(container)).toEqual([
+      { label: "Stage", value: "Ready" },
+      { label: "Status", value: "blocked" },
+    ]);
+    // A held task is not up for a verdict: the quiet validation value does not
+    // compete with the status word.
+    expect(meta(container).textContent).not.toContain("awaiting verdict");
+  });
+
+  it("a `ready` task whose revision awaits a verdict says so, once", () => {
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "ready", validation: "changed" })}
+        stage={{ id: "review", name: "Review", color: "#5b76fe" }}
+        canEditGoal
+      />,
+    );
+    expect(fields(container)).toEqual([
+      { label: "Stage", value: "Review" },
+      { label: "Status", value: "awaiting verdict" },
+    ]);
+    expect(meta(container).querySelectorAll(".pill.ready")).toHaveLength(0);
+  });
+
+  it("the other quiet validation values stay off the hero; a failing one keeps its own pill", () => {
+    for (const v of ["healthy", "none"] as const) {
+      const { container, unmount } = renderWithRouter(
+        <TaskHero task={heroTask({ displayReadiness: "ready", validation: v })} stage={ready} canEditGoal />,
+      );
+      expect(fields(container).map((f) => f.value)).toEqual(["Ready", "ready"]);
+      expect(meta(container).textContent).not.toContain("validation");
+      unmount();
+    }
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "input_required", validation: "failing" })}
+        stage={ready}
+        canEditGoal
+      />,
+    );
+    expect(fields(container).map((f) => f.value)).toEqual(["Ready", "input required"]);
+    expect(meta(container).textContent).toContain("validation failing");
+  });
+
+  it("an archived task keeps its stage field and has no status field", () => {
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ displayReadiness: "ready", validation: "changed" })}
+        stage={ready}
+        canEditGoal
+        archived
+      />,
+    );
+    expect(fields(container)).toEqual([{ label: "Stage", value: "Ready" }]);
+    expect(meta(container).textContent).toContain("archived");
   });
 });
 
