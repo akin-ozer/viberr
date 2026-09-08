@@ -993,11 +993,27 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .board-orphan-key:hover { background: color-mix(in srgb, var(--coral-dark), transparent 86%); }
 
-.column { display: flex; flex-direction: column; min-height: 0; }
+/* The lane has a ground now. Until the 2026-09-08 pass a column was invisible
+   at rest — only `.drop-over` painted anything — so the board read as cards
+   floating on the page, the drop target appeared only once a drag was already
+   underway, and an empty stage was a gap rather than a place to put something.
+   A 3% ink wash is enough: the cards are `--surface`, so they lift off it
+   without needing more contrast, and the blue drag wash still reads over it. */
+.column {
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--tint-well);
+  border-radius: var(--radius-card);
+}
 .col-head {
   display: flex; align-items: center; gap: .5rem;
-  padding: .25rem .25rem .75rem;
+  padding: .5rem .5rem .75rem;
   position: sticky; top: 0;
+  /* The head is sticky over a scrolling list and had no ground of its own, so
+     cards scrolled THROUGH the stage name. `inherit` rather than a literal so
+     the head follows the lane it sits in — including the blue wash the lane
+     takes while a card is dragged over it. */
+  background-color: inherit;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
 }
 .col-head .nm { font-family: var(--font-display); font-weight: 800; font-size: .94rem; }
 .col-head .ct {
@@ -3713,7 +3729,11 @@ dialog[data-closing]::backdrop {
    the .tl-text color/size so it sits flush in the comment card. */
 .md-body > :first-child { margin-top: 0; }
 .md-body > :last-child { margin-bottom: 0; }
-.md-body p { margin: .375rem 0; }
+/* Same measure for rendered markdown — comments and agent replies are the
+   app's other long-form prose, and a full-width paragraph in a wide panel is
+   the same reading problem. Applied to the paragraph rather than the container
+   so tables, code blocks and images keep the full width they need. */
+.md-body p { margin: .375rem 0; max-width: 70ch; }
 .md-body ul, .md-body ol { margin: .375rem 0; padding-left: 1.5rem; }
 /* Item-to-item distance must beat the intra-item leading or wrapped lines and
    new bullets blur together; paragraphs inside one item stay tight. */
@@ -4622,7 +4642,17 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .packet-obs.flush { margin: 0; }
 .modal-body.tight { gap: 1rem; }
 .from-name { font-family: var(--font-display); }
-.packet-lede { color: var(--muted); font-size: .81rem; line-height: 1.5; margin: 0; }
+/* Prose gets a measure. The packet card is as wide as the page's head allows,
+   which is right for the option rows — they carry a title, a description and a
+   shortcut number across the full width — but wrong for a paragraph: the lede
+   was setting at roughly 110 characters a line, well past the 45-75 where the
+   eye reliably finds the next line's start. 70ch is the measure the hero's goal
+   line already uses, so the two blocks of prose on this page now agree. The
+   options are untouched and still span the card. */
+.packet-lede {
+  color: var(--muted); font-size: .81rem; line-height: 1.5; margin: 0;
+  max-width: 70ch;
+}
 .packet-lede.spaced { margin-top: .75rem; }
 .field.packet-note-field { margin-top: .5rem; }
 .composer-err { font-size: .81rem; color: var(--coral-dark); }
