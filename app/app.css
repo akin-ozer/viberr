@@ -1376,19 +1376,6 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: 1rem 1rem;
 }
 .panel.flush { padding: 0; overflow: hidden; }
-/* A panel whose content is a list of objects that already carry their own edges
-   — review rows, agent rows — does not need edges of its own. The rows are
-   `--surface` on a `--surface` panel, so their border is the ONLY thing drawing
-   them and cannot go; what can go is the second box around them. `.flat` keeps
-   the panel's heading and its grouping and drops its chrome, which is the same
-   move Home's Settings section made: the container is secondary, the rows are
-   the content, and two nested borders around one list read as a form. */
-.panel.flat {
-  border-color: transparent;
-  background: none;
-  box-shadow: none;
-  padding-inline: 0;
-}
 .panel-head {
   display: flex; align-items: center; gap: .5rem;
   margin-bottom: .75rem;
@@ -3132,16 +3119,24 @@ dialog[data-closing]::backdrop {
 }
 *::-webkit-scrollbar-track { background: transparent; }
 
-.rq-list { display: flex; flex-direction: column; gap: .5rem; }
+/* Design pass 2026-09-08: a queue row is a ROW, not a card. It was a bordered
+   `--surface` box on a bordered, shadowed `--surface` panel — a box of boxes,
+   and in dark the row's hairline over the panel was nearly invisible, so the
+   list read as text with ghost edges. The panel is the object now; the rows are
+   its list, told apart by their own rhythm (mono key, display title, chips)
+   and a fill on hover. No lift: a row inside a card should not rise off it —
+   the press scale (`.rq-row:active`) and the "Review ›" shift are its feedback.
+   Same rule on GitHub's pull-request list and the review queue. */
+.rq-list { display: flex; flex-direction: column; }
 .rq-row {
   display: flex; align-items: center; gap: 1rem;
   width: 100%; text-align: left;
-  padding: .75rem .75rem;
-  border: 1px solid var(--hairline); border-radius: var(--radius-card);
-  background: var(--surface);
-  transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease;
+  padding: .75rem .5rem;
+  border: 0; border-radius: var(--radius-box);
+  background: transparent;
+  transition: background .14s ease;
 }
-.rq-row:hover { border-color: var(--blue); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.rq-row:hover { background: var(--tint-hover); }
 .rq-key { font-family: var(--font-mono); font-size: .75rem; color: var(--faint); flex: none; width: 62px; }
 .rq-main { flex: 1; min-width: 0; }
 .rq-main .ttl { font-family: var(--font-display); font-weight: 800; font-size: 1rem; }
@@ -3166,7 +3161,15 @@ dialog[data-closing]::backdrop {
   .rq-row:hover .rq-go { transform: none; }
 }
 
-.gh-table .live-head, .gh-table .live-row { grid-template-columns: 1.8fr 1.4fr .9fr 1fr; }
+/* Design pass 2026-09-08: inside the branches panel the table drops its own
+   frame (border, shadow, radius, fill — the panel is the box), its header is
+   a labelled rule rather than a filled band, and the title column stops being
+   the starved one: 2.4fr on a 1078px panel is 460px, so most titles hold one
+   line. Scoped to `.gh-table`: the Agents roster uses `.live-table` as a
+   top-level object and keeps its frame. */
+.gh-table .live-table { border: 0; box-shadow: none; border-radius: 0; background: transparent; }
+.gh-table .live-head { background: transparent; border-bottom-color: var(--border); }
+.gh-table .live-head, .gh-table .live-row { grid-template-columns: 2.4fr 1.5fr .8fr .9fr; }
 
 /* members */
 .you-tag {

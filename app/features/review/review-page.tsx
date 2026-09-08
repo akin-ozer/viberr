@@ -250,7 +250,7 @@ export function ReviewQueuePage({
       </div>
 
       <div className="policy-wrap">
-        <div className="panel flat">
+        <div className="panel">
           <div className="panel-head">
             <Icon name="hand" />
             <h2>Waiting on your acceptance</h2>
@@ -301,7 +301,7 @@ export function ReviewQueuePage({
           </div>
         </div>
 
-        <div className="panel flat">
+        <div className="panel">
           <div className="panel-head">
             <Icon name="activity" />
             <h2>Still in review</h2>
