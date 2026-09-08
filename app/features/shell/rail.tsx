@@ -45,8 +45,11 @@ export function Rail({
     <nav className="rail" aria-label="Primary" ref={navRef} tabIndex={-1}>
       <Link className="project-switch" to="/" title="All projects">
         <span>
-          <div className="pj-name">{projectName}</div>
-          {/* One line, clipped: the full text rides in `title`. */}
+          {/* Both lines clip to one row and each carries its full text in
+              `title`; the link's own title keeps naming the destination. */}
+          <div className="pj-name" title={projectName}>
+            {projectName}
+          </div>
           <div
             className="pj-meta"
             title={

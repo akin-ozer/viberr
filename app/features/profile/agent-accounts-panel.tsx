@@ -722,8 +722,8 @@ function AgentAccountCard({
           <div className="pol-note after last">
             <Icon name="cpu" />
             <span>
-              Runs on tasks you own, and your controller conversations, use
-              your own {label} account.
+              Tasks you own and your controller conversations run on your
+              own {label} account.
             </span>
           </div>
           <div className="cred-manage">

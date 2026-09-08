@@ -550,6 +550,14 @@ h1, h2, h3, h4 {
   transform-origin: top right;
   animation: menu-in .16s var(--ease-out);
 }
+/* Interface review 2026-09-08: Radix flips the menu above a trigger with no
+   room below it and says so in `data-side`/`data-align`. The origin follows
+   the edge that touches the trigger and the entrance comes from that side
+   (menu-in-up: trigger below the menu, §4.1); an origin left at `top right`
+   on a flipped menu grows it from the corner farthest from its button. */
+.user-menu[data-side="top"] { transform-origin: bottom right; animation-name: menu-in-up; }
+.user-menu[data-align="start"] { transform-origin: top left; }
+.user-menu[data-side="top"][data-align="start"] { transform-origin: bottom left; }
 .user-menu-head { display: flex; align-items: center; gap: .5rem; padding: .5rem .5rem .5rem; }
 .user-menu-head .who { font-size: .88rem; font-weight: 800; font-family: var(--font-display); }
 .user-menu-head .role { font-size: .75rem; color: var(--faint); }
@@ -2722,17 +2730,21 @@ dialog[data-closing]::backdrop {
   transition: background .12s ease, color .12s ease, transform .1s var(--ease-out);
 }
 .mini-seg button:hover:not(:disabled) { color: var(--fg); }
-/* Design pass 2026-09-08: the selected segment is a pressed well, not an ink
-   slab. This is the one segmented control that repeats down a list (a role
-   picker per member row) and sits beside panel titles (the stream's filter),
-   where four black bars were the heaviest ink on the page. `.seg`/`.cap-seg`
-   keep their fill: a page-level filter is a single, deliberate loud choice. */
-.mini-seg button.on { background: var(--tint-press); color: var(--fg); }
+/* Design pass 2026-09-08: the selected segment is not an ink slab. This is
+   the one segmented control that repeats down a list (a role picker per
+   member row) and sits beside panel titles (the stream's filter), where four
+   black bars were the heaviest ink on the page. `.seg`/`.cap-seg` keep their
+   fill: a page-level filter is a single, deliberate loud choice.
+   Interface review 2026-09-08: it wears the sheet's one selected pair
+   (`.nav-item.active`, `.pick-chip.on`, `.cal-day.sel`) rather than a
+   pressed well — --tint-press over the --tint-well track was a 1.2:1 step,
+   and in dark the chosen role was carried by font weight alone. */
+.mini-seg button.on { background: var(--blue-soft); color: var(--blue-pressed); }
 /* D32-5 (pass 32): the hover rule above outranks `.on` (its `:not(:disabled)`
    adds specificity), so a SELECTED segment under the pointer painted --fg on
    --fg — invisible text on the Policy role radios and the Add-MCP transport
    segment. The selected color wins under hover too. */
-.mini-seg button.on:hover:not(:disabled) { background: var(--tint-press); color: var(--fg); }
+.mini-seg button.on:hover:not(:disabled) { background: var(--blue-soft); color: var(--blue-pressed); }
 
 /* rbac matrix */
 .rbac-scroll { overflow-x: auto; }
@@ -3183,6 +3195,11 @@ dialog[data-closing]::backdrop {
   display: inline-flex; align-items: center; gap: .125rem;
   font-size: .75rem; font-weight: 700; color: var(--muted);
   flex: none; white-space: nowrap;
+  /* Interface review 2026-09-08: the row wraps under 1100px, and the action
+     sits at the trailing edge of whichever line it lands on rather than
+     mid-row after the last pill. On the one-line row `.rq-main`'s flex-grow
+     leaves no free space, so the margin resolves to zero there. */
+  margin-left: auto;
   transition: color .14s ease, transform .14s ease;
 }
 .rq-go svg { width: 14px; height: 14px; }
@@ -3772,6 +3789,18 @@ dialog[data-closing]::backdrop {
      hold real controls — stack them one-per-row on a phone so every action stays
      in the viewport instead of being clipped off the right edge. */
   .profile-grid { grid-template-columns: 1fr; }
+  /* Interface review 2026-09-08: four audit columns cannot share 18rem. The
+     row reflows to two lines — when and actor, then the event name with its
+     scope at the right — rather than scrolling sideways in a 15rem box. The
+     list stops being a grid so the rows stop being subgrids; `.audit-browse`
+     is one selector more than the base rules, which are declared later. */
+  .audit-browse .audit-list { display: block; }
+  /* `fit-content(7rem)` for the scope: the event name is the row's point, so
+     it is the opaque subject id that truncates first (full value in `title`). */
+  .audit-browse .audit-row { grid-template-columns: max-content minmax(0, 1fr) fit-content(7rem); column-gap: .5rem; row-gap: .125rem; }
+  .audit-browse .audit-actor { grid-column: 2 / -1; }
+  .audit-browse .audit-action { grid-column: 1 / 3; }
+  .audit-browse .audit-scope { grid-column: 3; }
   /* iOS Safari zooms the whole page when a focused input is under 16px, and
      every input in the app sits at .8-.98rem. 1.05rem (16.8px) is the first
      scale step past the threshold. The `.mono` faces need their own line: the
@@ -4669,7 +4698,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    what nauseates; opacity still aids comprehension). Ruling 148(c): this OS
    preference is the ONE reduced-motion signal; the in-app kill switch is gone. */
 @media (prefers-reduced-motion: reduce) {
-  .user-menu, .ntf-pop, .rsel-menu, .own-menu, .stage-menu-pop, .datepick-pop,
+  .user-menu, .user-menu[data-side="top"], .ntf-pop, .rsel-menu, .own-menu, .stage-menu-pop, .datepick-pop,
   .confirm-card, .modal-card, .page-overlay, .toast, .login-card,
   .cap-mbody { animation: fade-in .12s ease; }
   .toast.leaving { transform: none; transition: opacity .12s ease; }
@@ -4947,9 +4976,17 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    .mx-scroll/.rbac-table, the other bordered scroll boxes). */
 /* Design pass 2026-09-08: the list owns the column tracks and the rows share
    them (subgrid), so the time and actor columns size to their widest real
-   value instead of a fixed 8.5rem/9rem that opened every row with a void. */
-.audit-list { list-style: none; margin: 0; padding: 0; max-height: 15rem; overflow-y: auto;
-  display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 16rem) 1fr auto; column-gap: .5rem;
+   value instead of a fixed 8.5rem/9rem that opened every row with a void.
+   Interface review 2026-09-08: `fit-content(16rem)`, not `minmax(0, 16rem)`
+   — a fixed growth limit is reached before any `fr` track sees free space,
+   so the actor column WAS 16rem wide at every width and the void was back.
+   The action track keeps a 10rem floor: with a bare `1fr` it shrank to
+   nothing at phone width and the row's event name, the one thing a row is
+   for, was gone with nothing to scroll to. When the box is squeezed the actor
+   and the subject give way first (each truncates, its full value in `title`);
+   under 720px the row reflows to two lines instead (the mobile block). */
+.audit-list { list-style: none; margin: 0; padding: 0; max-height: 15rem; overflow: auto;
+  display: grid; grid-template-columns: max-content fit-content(16rem) minmax(10rem, 1fr) auto; column-gap: .5rem;
   border: 1px solid var(--hairline); border-radius: var(--radius-button); }
 .audit-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline;
   padding: .375rem .5rem; border-bottom: 1px solid var(--hairline); font-size: .75rem; }
@@ -4960,7 +4997,9 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    long subject widened the row and sheared every column with a horizontal
    scrollbar. Full values live in `title`. */
 .audit-action { font-family: var(--font-mono); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.audit-scope { display: inline-flex; align-items: center; gap: .375rem; justify-self: end; color: var(--muted); }
+/* `min-width: 0`: the cell's `auto` track would otherwise floor at the tag plus
+   a 14rem subject and starve the action; the subject truncates instead. */
+.audit-scope { display: inline-flex; align-items: center; gap: .375rem; justify-self: end; color: var(--muted); min-width: 0; }
 /* Design pass 2026-09-08: the scope tag is in the quiet tier. `.audit-scope-tag.org`
    is gone — "org" on every row was a blue fill on every row of the log, and the
    word already says which scope an event has. */
