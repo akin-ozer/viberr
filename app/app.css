@@ -1325,10 +1325,6 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .trace.pr { color: var(--blue-pressed); }
 .trace.ok { color: var(--teal-dark); }
 
-/* Lightweight task metadata row (priority flag, freeform labels, due date).
-   Sits between the owner row and the trace foot, and only renders when the
-   task carries non-default metadata (board card + task hero share it). */
-.card-meta { display: flex; align-items: center; gap: .375rem; flex-wrap: wrap; padding-top: .5rem; }
 /* Freeform labels: the neutral-pill pairing (--muted on a 94%-transparent
    --fg wash), which the R19-12 contrast sweep already clears. */
 /* Freeform labels are descriptive by definition, so they wear the quiet tier's

@@ -1935,28 +1935,17 @@ describe("gap-10: the board says when a task has gone quiet", () => {
       ...patch,
     });
 
-  it("draws the cue on the card, and nothing at all on a moving task", () => {
+  it("ruling 172: the card and the row no longer print the cue — the chip carries it", () => {
+    // Gap-10 drew "no activity · 4h" in the card's foot; the owner (2026-09-09)
+    // wants last activity off the board's cards. The wait tag is the whole
+    // status seat, and the "No activity" filter chip below still finds the task.
     const { container } = renderBoard([quietTask()]);
     const foot = container.querySelector(".card-foot")!;
-    expect(foot.textContent).toContain("no activity");
-    // The neutral pill, not one of the loud state colours (risk/blocked/input).
-    expect(container.querySelector(".card-foot .pill.neutral")).toBeTruthy();
-    // The wait tag stays — "agent working" and "no activity 4h" together are the
-    // whole point: the badge alone was the lie.
+    expect(foot.textContent).not.toContain("no activity");
     expect(foot.textContent).toContain("agent working");
     cleanup();
-
-    const moving = renderBoard([task({ waiting: "agent" })]);
-    expect(
-      moving.container.querySelector(".card-foot")!.textContent,
-    ).not.toContain("no activity");
-  });
-
-  it("draws the same cue on the list row — one board, two views, one vocabulary", () => {
-    const { container } = renderBoard([quietTask()], { view: "list" });
-    expect(container.querySelector(".list-row")!.textContent).toContain(
-      "no activity",
-    );
+    const list = renderBoard([quietTask()], { view: "list" });
+    expect(list.container.querySelector(".list-row")!.textContent).not.toContain("no activity");
   });
 
   it("never draws it on an archived card", () => {
@@ -2301,7 +2290,11 @@ describe("D9: the board announces moves to a screen reader", () => {
   });
 });
 
-describe("ruling 131: the wait chip on the card and the list row", () => {
+describe("ruling 172: a held task's card says `blocked`, not what it waits on", () => {
+  // Ruling 131(a) drew a neutral "blocked by goal-1 link 2 (JC-3), …" chip on
+  // the card and the row; the owner (2026-09-09) wants goal links off the
+  // board. The readiness pill still carries the hold, and the task page — the
+  // hero's wait chips and Details' "Blocked by" — names the entries.
   const held = () =>
     task({
       key: "JC-9",
@@ -2315,24 +2308,21 @@ describe("ruling 131: the wait chip on the card and the list row", () => {
       ],
     });
   const waitChipOf = (root: Element) =>
-    [...root.querySelectorAll(".pill.neutral.sm")].find((p) => (p.textContent ?? "").startsWith("blocked by "));
+    [...root.querySelectorAll(".pill")].find((p) => (p.textContent ?? "").startsWith("blocked by "));
 
-  it("draws the NEUTRAL chip first, naming two entries and folding its own overflow, with every state in the title", () => {
-    // Canary: remove the `statePills.push` for the wait (no chip), or push it
-    // last (the fold below swallows it on a stormy card).
+  it("draws the readiness pill and no 'blocked by' chip, on the card and the row", () => {
     for (const view of [undefined, "list" as const]) {
       const { container } = renderBoard([held()], view ? { view } : {});
-      const chip = waitChipOf(container)!;
-      expect(chip, `wait chip in ${view ?? "card"} view`).toBeTruthy();
-      expect(chip.textContent).toBe("blocked by goal-1 link 2 (JC-3), goal-1 link 3 +1");
-      expect(chip.className).not.toMatch(/\b(blocked|risk)\b/);
-      expect(chip.getAttribute("title")).toBe(
-        "goal-1 link 2 (JC-3) · done · goal-1 link 3 · open · JC-6 · failed",
-      );
+      expect(waitChipOf(container), `no wait chip in ${view ?? "card"} view`).toBeUndefined();
+      expect(
+        [...container.querySelectorAll(".pill.blocked")].some((p) => p.textContent?.trim() === "blocked"),
+      ).toBe(true);
+      expect(container.textContent).not.toContain("goal-1");
+      cleanup();
     }
   });
 
-  it("leads the state stack: on a stormy card the wait chip is shown and the fold counts the rest", () => {
+  it("the fold counts the problem pills alone", () => {
     const stormy = task({
       ...held(),
       pr: { number: 124, state: "closed", title: "Attach a credential" },
@@ -2342,10 +2332,10 @@ describe("ruling 131: the wait chip on the card and the list row", () => {
     });
     const { container } = renderBoard([stormy]);
     const card = container.querySelector(".card")!;
-    expect(waitChipOf(card)).toBeTruthy();
+    expect(waitChipOf(card)).toBeUndefined();
     const fold = [...card.querySelectorAll(".pill.neutral.sm")].find((p) => /^\+\d+$/.test(p.textContent ?? ""))!;
-    // wait + pr shown; checks, review, validation folded.
-    expect(fold.textContent).toBe("+3");
+    // pr + checks shown; review, validation folded.
+    expect(fold.textContent).toBe("+2");
     expect(fold.getAttribute("title")).not.toContain("blocked by");
   });
 });
@@ -2676,19 +2666,10 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
     expect(branched.container.querySelector(".card-trace .trace.ok")!.textContent).toContain("vib-3-long");
   });
 
-  it("problem pills belong to the trace cell, the quiet cue to the status cell", () => {
-    const { container } = renderBoard([
-      task({
-        key: "VIB-1",
-        validation: "failing",
-        waiting: "agent",
-        quiet: true,
-        lastActivityAt: new Date(Date.now() - 4 * 60 * 60_000).toISOString(),
-      }),
-    ]);
+  it("problem pills belong to the trace cell, the wait tag to the status cell", () => {
+    const { container } = renderBoard([task({ key: "VIB-1", validation: "failing", waiting: "agent" })]);
     const foot = container.querySelector(".card-foot")!;
     expect(foot.querySelector(".card-trace .pill.blocked")!.textContent).toContain("validation failing");
-    expect(foot.querySelector(".card-status .pill.neutral")!.textContent).toContain("no activity");
     expect(foot.querySelector(".card-status .wait-tag")!.textContent).toContain("agent working");
   });
 

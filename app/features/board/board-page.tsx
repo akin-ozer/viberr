@@ -49,16 +49,9 @@ import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";
 import { Icon, type IconName } from "~/ui/icon";
-import type { DependencyRender } from "~/shared/dependencies";
 import { LabelInput } from "~/ui/label-input";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill, ReadinessPill, ValidationPill, validationLabel, validationQuiet } from "~/ui/pill";
-import {
-  DueDatePill,
-  LabelChips,
-  PriorityFlag,
-  hasVisibleMeta,
-} from "~/ui/task-meta";
 import {
   checksPill,
   connectionPill,
@@ -71,7 +64,6 @@ import {
   acceptanceDisclosureFields,
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
-import { LocalRelative } from "~/ui/local-time";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -315,28 +307,14 @@ function WaitTag({ task }: { task: TaskSummary }) {
  * number) stay: "how far did this get?" is still a true question about an
  * archived task, exactly as the hero keeps its stage pill.
  *
- * Gap-10: the "gone quiet" cue lives here too, rendered between validation and
- * the wait tag. Putting it INSIDE this block means the archived-null return
- * above guards it for free — an archived task is a terminal disposition and is
- * never "quiet".
+ * Ruling 172 (owner, 2026-09-09): the card carries STATUS, not planning
+ * metadata or history. The priority flag, the labels and the due date (the
+ * `.card-meta` row), the "blocked by …" names a held task used to print here
+ * (ruling 131(a)) and the "no activity" cue (Gap-10) left the card and the
+ * list row; the task page keeps every one of them — Details, the hero's wait
+ * chips, Current state's last activity — and the board's filter chips
+ * ("Urgent", "No activity", "Blocked or waiting") still select on the facts.
  */
-/** Ruling 131: the wait chip's label (two entries, then "+N") and its title
- *  (every entry with its resolved state). Shared by the card and the list row
- *  through `StateSignals`. */
-export interface WaitChip {
-  label: string;
-  title: string;
-}
-
-export function waitChip(entries: readonly DependencyRender[]): WaitChip {
-  const shown = entries.slice(0, 2).map((e) => e.label);
-  const more = entries.length - shown.length;
-  return {
-    label: `blocked by ${shown.join(", ")}${more > 0 ? ` +${more}` : ""}`,
-    title: entries.map((e) => `${e.label} · ${e.state}`).join(" · "),
-  };
-}
-
 function StatePills({ task }: { task: BoardTask }) {
   if (isArchived(task)) return null;
   // C2 (⇄ N20-14 / UXO-1): the validation pill asserts a LIVE obligation
@@ -358,29 +336,11 @@ function StatePills({ task }: { task: BoardTask }) {
   // whose title lists them (the exact LabelChips pattern, task-meta.tsx).
   // Every fact stays visible — on hover here, in full on the task page —
   // which is what rulings 40/12/14 require; what changes is that five
-  // near-identical coral chips no longer compete as equals. The quiet/wait
-  // tags stay outside the fold: they are the card's status line, not the
-  // red stack.
+  // near-identical coral chips no longer compete as equals. The wait tag
+  // stays outside the fold: it is the card's status seat, not the red stack.
+  // (Ruling 172: a held task's "blocked by …" names no longer lead the stack;
+  // the readiness pill says `blocked` and the task page names the entries.)
   const statePills: { key: string; label: string; node: ReactNode }[] = [];
-  // Ruling 131(a) (pass 34): the wait chip leads the stack. NEUTRAL, not
-  // `blocked`: the readiness pill already carries the red for a held task
-  // (the derived readiness is `blocked`), and pass 30's density rule forbids
-  // two equal-weight coral chips on one card. The chip names the first two
-  // entries and folds its OWN overflow into "+N"; every entry with its live
-  // state sits in the title.
-  if (task.blockedBy.length > 0) {
-    const wait = waitChip(task.blockedBy);
-    statePills.push({
-      key: "wait",
-      label: wait.label,
-      node: (
-        <span className="pill neutral sm" title={wait.title}>
-          <Icon name="lock" />
-          {wait.label}
-        </span>
-      ),
-    });
-  }
   // R16-6 (owner ruling, 2026-08-04): merge stays human-only, so a
   // full-autonomy task reaches the done stage with its PR still open —
   // `pr.state: "accepted"` is exactly "a human accepted the completion but the
@@ -473,18 +433,15 @@ function StatePills({ task }: { task: BoardTask }) {
   );
 }
 
-/** The card's STATUS tags — the quiet cue, then the wait tag (Gap-10's order,
- *  shared by both board views). Silent on an archived task, like the pills:
- *  nobody is waited on for abandoned work (F19-8). Ruling 171 seats them in
- *  the foot's right cell on the card; the list row runs them inline. */
+/** The card's STATUS seat — the wait tag. Silent on an archived task, like
+ *  the pills: nobody is waited on for abandoned work (F19-8). Ruling 171 seats
+ *  it in the foot's right cell on the card; the list row runs it inline.
+ *  Ruling 172 took the "no activity" cue (Gap-10) out of the seat: the board's
+ *  "No activity" filter chip still selects those tasks, and the task page's
+ *  Current state dates them. */
 function StatusTags({ task }: { task: BoardTask }) {
   if (isArchived(task)) return null;
-  return (
-    <>
-      <QuietTag task={task} />
-      <WaitTag task={task} />
-    </>
-  );
+  return <WaitTag task={task} />;
 }
 
 /** The list row's state block: the pills and the status tags in one run. */
@@ -505,35 +462,6 @@ function ArchivedPill() {
     <Pill kind="neutral" sm>
       <Icon name="lock" />
       archived
-    </Pill>
-  );
-}
-
-/**
- * Gap-10 — the "gone quiet" cue, and the board's only last-activity display.
- *
- * TONE, deliberately: a NEUTRAL pill, the same grey the `archived` chip uses,
- * and copy that states a fact rather than reaching a verdict. The board spends
- * its loud colours on states something asserted — blocked, inconsistency risk,
- * failing checks, a rejected PR. Going quiet is inferred from an ABSENCE of
- * events, so it earns a place on the card but not a colour that competes with a
- * real failure. The thresholds carry the "don't cry wolf" weight instead: a task
- * waiting on a human gets three days, so an overnight wait never draws this at
- * all (see task-activity.server.ts).
- *
- * It renders ONLY past the threshold. A relative stamp on every card would be
- * history on a surface whose principle is "status before history"; here the
- * elapsed time IS the status, and only when it has become one.
- */
-function QuietTag({ task }: { task: BoardTask }) {
-  if (!task.quiet || !task.lastActivityAt) return null;
-  return (
-    <Pill kind="neutral" sm>
-      {/* LocalRelative, not a bare format call: relative text depends on NOW,
-          so the SSR pass and hydration can straddle a minute boundary. It
-          renders a non-breaking space for one frame and fills in after
-          hydration (app/ui/local-time.tsx). */}
-      no activity · <LocalRelative iso={task.lastActivityAt} />
     </Pill>
   );
 }
@@ -821,13 +749,6 @@ function CardFace({ task, archived }: { task: BoardTask; archived: boolean }) {
         <CarrierSeat task={task} />
         <OwnerSeat task={task} />
       </div>
-      {!archived && hasVisibleMeta(task) && (
-        <div className="card-meta">
-          <PriorityFlag priority={task.priority} sm />
-          <LabelChips labels={task.labels} />
-          <DueDatePill dueDate={task.dueDate} sm />
-        </div>
-      )}
       {/* Ruling 171: the foot is TWO cells, not one wrapping run. The left
           cell holds the traces (branch, PR) and the problem pills and wraps
           as it must; the right cell is the status seat — the quiet cue and
@@ -1139,16 +1060,6 @@ function ListRow({
       )}
       <CarrierSeat task={task} />
       <OwnerSeat task={task} label />
-      {/* F19-13's own rule, finished: the list used to silently drop the
-          priority/labels/due-date trio the stage layout draws — an `urgent` +
-          `overdue` task showed zero urgency cue one toggle away. */}
-      {!archived && hasVisibleMeta(task) && (
-        <span className="card-meta">
-          <PriorityFlag priority={task.priority} sm />
-          <LabelChips labels={task.labels} max={2} />
-          <DueDatePill dueDate={task.dueDate} sm />
-        </span>
-      )}
       {/* F15-09: same duplicate as the card — the row's own WaitTag below
           already says "agent working", or names the human waited on. F19-8:
           and the same readiness → "archived" swap the card makes. R21-8 /

@@ -215,7 +215,7 @@ and [../operations/configuration.md §2](../operations/configuration.md).
 Every top-level surface and dialog carries `data-screen-label` so tests and agents can
 address it by name: `Login`, `Login · set new password`, `Home · project selection`,
 `Pinned projects`, `All projects`, `Archived projects`, `Store strip`, `New project
-modal`, `Board` (a held card or list row leads its state stack with a NEUTRAL "blocked by …" chip whose title lists every entry with its state, ruling 131), `Empty state`, `Review queue`, `Controller`, `Agents`, `Policy`,
+modal`, `Board` (a held card or list row says `blocked` in its readiness pill and names nothing — the "blocked by …" chip of ruling 131 left the board with ruling 172; the task page's hero wait chips and Details name every entry with its state), `Empty state`, `Review queue`, `Controller`, `Agents`, `Policy`,
 `GitHub`, `Activity`, `Settings`, `Task detail · not found`, `Accept completion dialog`,
 `Archive task dialog`, `Release ownership dialog`, `Packet archive dialog`, `Packet
 discard dialog`, `Packet collision dialog`, `Attachment lightbox`, `Command palette`,

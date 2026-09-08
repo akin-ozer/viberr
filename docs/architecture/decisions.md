@@ -3548,6 +3548,17 @@ by rewriting those paragraphs:*
     card's width, never by what the card holds, so a lane stays uniform; wider cards keep the
     one line ("no branch" and "waiting on a human" need about 208px together).
 
+172. **The board card carries status, not planning metadata or history (owner, 2026-09-09:
+    "cleanup other stuff like urgency, goal link, last activity from this board view").** Off
+    the card and the list row: the metadata row — the priority flag, the labels and the due
+    date (`.card-meta`, its rule removed); the "blocked by …" names a held task printed (ruling
+    131(a)'s card chip — the readiness pill still says `blocked`, and the hero's wait chips and
+    Details' "Blocked by" name the entries); and the "no activity · 4h" cue (pass 19's Gap-10 on
+    the card — the "No activity" filter chip still selects those tasks and Current state dates
+    them). What stays is what the card is for: the key, the title, the carrier and owner seats,
+    one trace chip, the problem pills and the wait tag. The task page and the review queue keep
+    the priority, labels and due date; nothing is lost, it is one click further in.
+
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is
 corrected on the page named; the note stays here so a reader who meets the old wording, in
