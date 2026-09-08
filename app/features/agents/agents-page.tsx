@@ -866,7 +866,9 @@ export function ProfileDetail({
                 every other surface in the app has exactly one). The selected
                 profile is a section within it. */}
             <h2 className="ag-hero-name">{a.name}</h2>
-            <Pill kind={a.kind === "operator" ? "agent" : "neutral"} sm>
+            {/* Quiet: the role describes. The "not connected" pill beside it is
+                the one thing on this line that wants a person. */}
+            <Pill kind={a.kind === "operator" ? "agent" : "neutral"} sm quiet>
               {profileRoleLabel(a.name, a.role, a.kind)}
             </Pill>
             {runningKeys.length > 0 ? (
@@ -1260,7 +1262,7 @@ export function AgentStats({
             names its own scope. F34-5: the waiting is the TASK's (an engagement
             can be running on a task that waits on a human), so the label names
             the task as the thing that waits. */}
-        <div className="l">agent threads on tasks waiting on a human · this project</div>
+        <div className="l">agent threads waiting on a human</div>
       </div>
     </div>
   );
@@ -1767,22 +1769,15 @@ export function AgentsPage({
                 onClick={() => setSel(operator.id)}
               />
             )}
-            <div className="ag-group-label ag-group-row">
+            <div className="ag-group-label">
               {/* C11: "delivering agent" is the shipped vocabulary (UXA-6);
                   "Specialist" was a third name for the same object. These are
-                  the assignable agent profiles (the operator is the one above). */}
+                  the assignable agent profiles (the operator is the one above).
+                  Design pass 2026-09-08: no "+" in the label — this view had
+                  three controls for one action (the toolbar's New profile, the
+                  dashed row under the list, and this); the two that belong to
+                  the page and to the list stay. */}
               Agent profiles
-              {canManage && (
-                <button
-                  type="button"
-                  className="ag-add"
-                  title="New agent profile"
-                  aria-label="New agent profile"
-                  onClick={() => setCreating(true)}
-                >
-                  <Icon name="plus" />
-                </button>
-              )}
             </div>
             {specialists.map((p) => (
               <ProfileItem

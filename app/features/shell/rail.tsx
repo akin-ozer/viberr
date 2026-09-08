@@ -46,7 +46,15 @@ export function Rail({
       <Link className="project-switch" to="/" title="All projects">
         <span>
           <div className="pj-name">{projectName}</div>
-          <div className="pj-meta">
+          {/* One line, clipped: the full text rides in `title`. */}
+          <div
+            className="pj-meta"
+            title={
+              (projectRepo ? projectRepo + " · " : "") +
+              membersCount +
+              (membersCount === 1 ? " member" : " members")
+            }
+          >
             {(projectRepo ? projectRepo + " · " : "") +
               membersCount +
               (membersCount === 1 ? " member" : " members")}
@@ -55,7 +63,8 @@ export function Rail({
         <Icon name="chevron" />
       </Link>
 
-      <div className="rail-label">Workspace</div>
+      {/* Design pass 2026-09-08: no "Workspace" eyebrow — it labelled the only
+          group in the rail; space under the switcher does the separating. */}
       {WORKSPACE_NAV.map((n) => (
         <Link
           key={n.id}
@@ -92,8 +101,6 @@ export function Rail({
           )}
         </Link>
       ))}
-
-      <div className="rail-spacer" />
     </nav>
   );
 }

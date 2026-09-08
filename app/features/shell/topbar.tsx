@@ -145,12 +145,15 @@ export function Topbar({
             <span className="sep sep-mid">
               <Icon name="chevron" />
             </span>
+            {/* Design pass 2026-09-08: the key alone. The title is the page's
+                H1 twenty pixels below, so the leaf was the loudest of three
+                copies of the same name; the full pair stays in `title`. */}
             <span
               className="cur"
               aria-current="page"
               title={openTask.key + " · " + openTask.title}
             >
-              {openTask.key} · {openTask.title}
+              {openTask.key}
             </span>
           </>
         ) : (

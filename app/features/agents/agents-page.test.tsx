@@ -3033,7 +3033,7 @@ describe("F34-5: the Agents stats and the pulse read runs, not the waiting flag"
     // 2 and 2 for this roster.
     const stats = renderStats();
     expect(stats.get("agent threads with a run in flight")).toBe("3");
-    expect(stats.get("agent threads on tasks waiting on a human · this project")).toBe("3");
+    expect(stats.get("agent threads waiting on a human")).toBe("3");
     // Non-vacuity: the two labels this pins really are the rendered ones, so
     // a renamed label fails here rather than passing by absence.
     expect(stats.size).toBe(4);
