@@ -31,6 +31,7 @@ import {
   defaultPreset,
   Feedback,
   PointerActivationConstraints,
+  type DropAnimationFunction,
 } from "@dnd-kit/dom";
 import { resolveBoardDrop } from "./board-dnd";
 import type { TaskSummary } from "~/shared/mapping/task.server";
@@ -189,6 +190,64 @@ const BOARD_SENSORS = [
 const BOARD_PLUGINS = defaultPreset.plugins.filter(
   (plugin) => plugin !== Accessibility,
 );
+
+/**
+ * Where a dropped card flies (owner, 2026-09-08: the move "is not smooth").
+ *
+ * dnd-kit's default drop animation returns the lifted card to the placeholder
+ * it left — the OLD lane — and the card then jumped to the new lane when the
+ * server answered: a fly-back, a pause, a teleport. The board still commits
+ * nothing client-side (§UI porting rules: no optimistic UI for governed
+ * state), so instead the card flies to the slot it asked for, where the
+ * landing preview already stands as the request, and the source stays hidden
+ * (`.in-flight`) until the server's answer renders the real card there — or
+ * refuses, and the card comes back with the toast. A cancelled drag, or a drop
+ * that changes nothing, has no landing preview and flies home as before.
+ */
+const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, placeholder }) => {
+  // Only the card that was lifted flies. When the server's answer re-renders
+  // the card in its new lane while the drop is still settling, dnd-kit adopts
+  // the new element as the operation's source and runs this again for it —
+  // against a placeholder it has already removed, whose rect is the viewport
+  // origin (observed: the landed card shot 400px up and snapped back). A
+  // detached placeholder means the flight already happened.
+  if (!placeholder?.isConnected) return;
+  const target = document.querySelector(".drop-preview.landing") ?? placeholder;
+  if (!target || !(feedbackElement instanceof HTMLElement)) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const from = feedbackElement.getBoundingClientRect();
+  const to = target.getBoundingClientRect();
+  const dx = to.left - from.left;
+  const dy = to.top - from.top;
+  if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+  // dnd-kit positions the lifted card with `translate: var(--dnd-translate)
+  // !important`, which no animation can override — its own drop animation
+  // marks the element `data-dnd-dropping` to switch that rule off. Read the
+  // current translate while the rule still applies, then release it.
+  const m = /(-?[\d.]+)px\s+(-?[\d.]+)px/.exec(getComputedStyle(feedbackElement).translate);
+  const tx = m ? Number(m[1]) : 0;
+  const ty = m ? Number(m[2]) : 0;
+  feedbackElement.setAttribute("data-dnd-dropping", "");
+  const flight = feedbackElement.animate(
+    { translate: [`${tx}px ${ty}px 0`, `${tx + dx}px ${ty + dy}px 0`] },
+    { duration: 180, easing: "cubic-bezier(.23, 1, .32, 1)", fill: "forwards" },
+  );
+  try {
+    await flight.finished;
+  } catch {
+    /* cancelled mid-flight: nothing to hold */
+  }
+  // dnd-kit's cleanup runs in the microtask after this resolves and restores
+  // the card to its DOM slot; the forward fill is released a frame later, when
+  // the in-flight card is already hidden (or, cancelled, already home). The
+  // dropping mark goes with it: dnd-kit's own path removes it, and a card that
+  // kept it would not follow the pointer on its next lift (the translate lock
+  // is `:not([data-dnd-dropping])`).
+  requestAnimationFrame(() => {
+    flight.cancel();
+    feedbackElement.removeAttribute("data-dnd-dropping");
+  });
+};
 
 /**
  * D19 (ruling R19-10) — the roving tab stop has to cover the card's Move
@@ -545,6 +604,7 @@ function TaskCard({
   index,
   canTransition,
   arrived,
+  inFlight,
   allStages,
   onMoveTask,
   roving,
@@ -553,6 +613,9 @@ function TaskCard({
   /** The key of the card immediately below this one (null when last) — used to
    *  resolve "drop below this card" into an insertion slot. */
   nextKey: string | null;
+  /** A move for this card is awaiting the server: the card hides here and the
+   *  landing preview stands in the requested slot (see `boardDropAnimation`). */
+  inFlight: boolean;
   /** Visible position within the column (sortable registration). */
   index: number;
   /** admin|maintainer — makes the card draggable between stage columns. */
@@ -576,19 +639,26 @@ function TaskCard({
   // control besides.
   const archived = isArchived(task);
   // The card is both drag source and drop target (insert-before-this-card).
-  // Clone feedback keeps today's model: the original stays as a faded ghost
-  // (`.dragging`) while a visual clone follows the pointer. Optimistic
-  // sorting is OFF — the board never reorders client-side; the DropPreview
-  // shows the requested slot and the server's answer is the only commit.
-  const { ref, isDragSource } = useSortable<CardDragData>({
+  // With clone feedback dnd-kit moves THIS element under the pointer and leaves
+  // a placeholder clone (`[data-dnd-placeholder]`) in its slot, mirroring the
+  // element's attributes — so the two are styled by dnd-kit's attributes, never
+  // by a React class (a class lands on both). Optimistic sorting is OFF — the
+  // board never reorders client-side; the DropPreview shows the requested slot
+  // and the server's answer is the only commit.
+  const { ref } = useSortable<CardDragData>({
     id: task.key,
     group: task.stage,
     index,
     data: { nextKey },
     disabled: !canTransition || archived,
+    // No index-change transition either: the only re-layouts here are the
+    // server's, and dnd-kit animated a card that arrived by revalidation from
+    // the rect it last measured in the OLD lane — a 600px excursion off-screen
+    // and back, right after the flight landed it (observed frame by frame).
+    transition: null,
     plugins: (defaults) => [
       ...defaults.filter((plugin) => plugin !== OptimisticSortingPlugin),
-      Feedback.configure({ feedback: "clone" }),
+      Feedback.configure({ feedback: "clone", dropAnimation: boardDropAnimation }),
     ],
   });
   // Pass 30: the wait-human/urgent class pushes are gone — ruling 16 removed
@@ -598,7 +668,7 @@ function TaskCard({
   const cls = ["card"];
   const wrapCls = ["card-wrap"];
   if (canTransition && !archived) wrapCls.push("draggable");
-  if (isDragSource) wrapCls.push("dragging");
+  if (inFlight) wrapCls.push("in-flight");
   if (arrived) wrapCls.push("just-arrived");
   return (
     /* D19: the lane is a list (see `Column`), so each card is one of its items —
@@ -619,67 +689,7 @@ function TaskCard({
         data-board-card={task.key}
         data-board-lane={task.stage}
       >
-        <div className="card-top">
-          <span className="key">{task.key}</span>
-          {/* No spacer: the pill sits beside the key so the card's top-right
-              corner stays free for `.card-move` (app.css `.card-top`). */}
-          {/* R21-8 (supersedes C3's both-pills arrangement): "input required"
-              claims a human is needed RIGHT NOW — false while an agent is
-              actively carrying the work (`waiting === "agent"`), so the pill
-              yields for that state and the foot's WaitTag ("agent working")
-              speaks alone. F15-09's rule still holds: the claim is made ONCE —
-              this slot never duplicates the wait tag. The moment a packet
-              flips `waiting` to "human", input-required reasserts here. The
-              task hero makes the identical yield (task-main-sections.tsx), so
-              the two surfaces keep agreeing mid-run — C3's actual complaint.
-              Blocked / inconsistency-risk never yield.
-
-              F19-8: an archived card says "archived" here instead — the same
-              swap UXO-1 made in the task hero, for the same reason. Readiness
-              is an ACTIONABLE claim ("ready · awaiting verdict" = someone owes
-              a verdict); on abandoned work nobody does, and the board drew that
-              claim directly under a banner calling the work abandoned. */}
-          {/* R21-8/F15-09: an agent-carried task goes QUIET in this slot — the
-              foot's WaitTag already says "agent working", and the claim is made
-              exactly once per card. The DECISION is server-side
-              (`deriveDisplayReadiness`); this is only the rendering choice. */}
-          {archived ? (
-            <ArchivedPill />
-          ) : task.displayReadiness === "agent_working" ? null : (
-            <ReadinessPill value={task.displayReadiness} sm />
-          )}
-        </div>
-        <h3>{task.title}</h3>
-        <div className="owner-row">
-          <OwnerLine task={task} />
-          <ReviewerStack task={task} />
-        </div>
-        {!archived && hasVisibleMeta(task) && (
-          <div className="card-meta">
-            <PriorityFlag priority={task.priority} sm />
-            <LabelChips labels={task.labels} />
-            <DueDatePill dueDate={task.dueDate} sm />
-          </div>
-        )}
-        <div className="card-foot">
-          {task.branch ? (
-            <span className="trace ok">
-              <Icon name="branch" />
-              {shortBranch(task.branch)}
-            </span>
-          ) : (
-            <span className="trace">
-              <Icon name="branch" />
-              no branch
-            </span>
-          )}
-          {task.pr && (
-            <span className="trace pr">
-              <Icon name="pr" />#{task.pr.number}
-            </span>
-          )}
-          <StateSignals task={task} />
-        </div>
+        <CardFace task={task} archived={archived} />
       </Link>
       {/* F10-25: keyboard-accessible stage move (drag is pointer-only). Sibling
           of the Link so it never triggers navigation; opens the same
@@ -706,15 +716,93 @@ function TaskCard({
 }
 
 /**
- * A ghost preview shown at the top of the column a card is being dragged over,
- * so the drop destination reads clearly (mirrors GitHub's board): the source
- * keeps a faded ghost, the target shows where the card will land.
+ * The card's face — everything inside the link. Rendered by the card itself
+ * and, faded, by the drop preview, so a preview stands exactly as tall as the
+ * card that will replace it.
  */
-function DropPreview({ task }: { task: TaskSummary }) {
+function CardFace({ task, archived }: { task: BoardTask; archived: boolean }) {
   return (
-    <div className="card-drop-preview" aria-hidden="true">
-      <span className="key">{task.key}</span>
-      <span className="dp-title">{task.title}</span>
+    <>
+      <div className="card-top">
+        <span className="key">{task.key}</span>
+        {/* No spacer: the pill sits beside the key so the card's top-right
+            corner stays free for `.card-move` (app.css `.card-top`). */}
+        {/* R21-8 (supersedes C3's both-pills arrangement): "input required"
+            claims a human is needed RIGHT NOW — false while an agent is
+            actively carrying the work (`waiting === "agent"`), so the pill
+            yields for that state and the foot's WaitTag ("agent working")
+            speaks alone. F15-09's rule still holds: the claim is made ONCE —
+            this slot never duplicates the wait tag. The moment a packet
+            flips `waiting` to "human", input-required reasserts here. The
+            task hero makes the identical yield (task-main-sections.tsx), so
+            the two surfaces keep agreeing mid-run — C3's actual complaint.
+            Blocked / inconsistency-risk never yield.
+
+            F19-8: an archived card says "archived" here instead — the same
+            swap UXO-1 made in the task hero, for the same reason. Readiness
+            is an ACTIONABLE claim ("ready · awaiting verdict" = someone owes
+            a verdict); on abandoned work nobody does, and the board drew that
+            claim directly under a banner calling the work abandoned. */}
+        {/* R21-8/F15-09: an agent-carried task goes QUIET in this slot — the
+            foot's WaitTag already says "agent working", and the claim is made
+            exactly once per card. The DECISION is server-side
+            (`deriveDisplayReadiness`); this is only the rendering choice. */}
+        {archived ? (
+          <ArchivedPill />
+        ) : task.displayReadiness === "agent_working" ? null : (
+          <ReadinessPill value={task.displayReadiness} sm />
+        )}
+      </div>
+      <h3>{task.title}</h3>
+      <div className="owner-row">
+        <OwnerLine task={task} />
+        <ReviewerStack task={task} />
+      </div>
+      {!archived && hasVisibleMeta(task) && (
+        <div className="card-meta">
+          <PriorityFlag priority={task.priority} sm />
+          <LabelChips labels={task.labels} />
+          <DueDatePill dueDate={task.dueDate} sm />
+        </div>
+      )}
+      <div className="card-foot">
+        {task.branch ? (
+          <span className="trace ok">
+            <Icon name="branch" />
+            {shortBranch(task.branch)}
+          </span>
+        ) : (
+          <span className="trace">
+            <Icon name="branch" />
+            no branch
+          </span>
+        )}
+        {task.pr && (
+          <span className="trace pr">
+            <Icon name="pr" />#{task.pr.number}
+          </span>
+        )}
+        <StateSignals task={task} />
+      </div>
+    </>
+  );
+}
+
+/**
+ * The requested slot, drawn as the card's own face — faded, in a blue dashed
+ * frame — at the card's own height, so the moment the server confirms the move
+ * the real card takes the exact pixels the preview held. Shown while a drag
+ * hovers a slot that would change something (never the card's own slot), and
+ * kept as the LANDING stand-in between the drop and the server's answer: the
+ * board never commits a move client-side, so this is the request, not the
+ * result (owner, 2026-09-08).
+ */
+function DropPreview({ task, landing = false }: { task: BoardTask; landing?: boolean }) {
+  return (
+    <div className={"card-wrap drop-preview" + (landing ? " landing" : "")} aria-hidden="true">
+      <div className="card card-drop-preview">
+        <CardFace task={task} archived={false} />
+      </div>
     </div>
   );
 }
@@ -733,6 +821,8 @@ function Column({
   dropTarget,
   previewTask,
   beforeKey,
+  landing,
+  inFlightKey,
   allStages,
   onMoveTask,
   emptyCopy,
@@ -761,6 +851,11 @@ function Column({
   previewTask: BoardTask | null;
   /** Insertion slot: render the preview before this card (null = column end). */
   beforeKey: string | null;
+  /** A move awaiting the server lands HERE: the landing preview stands before
+   *  `beforeKey` (null = column end) until the answer renders the real card. */
+  landing: { task: BoardTask; beforeKey: string | null } | null;
+  /** The card in this lane whose move is awaiting the server (hidden). */
+  inFlightKey: string | null;
   allStages: BoardStage[];
   onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
@@ -773,6 +868,7 @@ function Column({
   });
   const showPreview = dropTarget && previewTask !== null;
   const preview = showPreview ? <DropPreview task={previewTask!} /> : null;
+  const landingEl = landing ? <DropPreview task={landing.task} landing /> : null;
   return (
     <section
       className={"column" + (dropTarget ? " drop-over" : "")}
@@ -823,6 +919,8 @@ function Column({
         {tasks.length === 0 ? (
           showPreview ? (
             preview
+          ) : landing ? (
+            landingEl
           ) : (
             <div className="empty">
               {emptyCopy}
@@ -847,12 +945,14 @@ function Column({
             {tasks.map((t, i) => (
               <Fragment key={t.key}>
                 {showPreview && beforeKey === t.key && preview}
+                {landing && landing.beforeKey === t.key && landingEl}
                 <TaskCard
                   task={t}
                   nextKey={tasks[i + 1]?.key ?? null}
                   index={i}
                   canTransition={canTransition}
                   arrived={arrivedKey === t.key}
+                  inFlight={inFlightKey === t.key}
                   allStages={allStages}
                   onMoveTask={onMoveTask}
                   roving={rovingKey === t.key}
@@ -860,6 +960,7 @@ function Column({
               </Fragment>
             ))}
             {showPreview && beforeKey === null && preview}
+            {landing && landing.beforeKey === null && landingEl}
           </>
         )}
       </div>
@@ -1811,6 +1912,8 @@ function StageBoard({
   beforeKey,
   arrivedKey,
   draggedTask,
+  inFlight,
+  inFlightTask,
   onMoveTask,
   emptyCopyFor,
   rovingKey,
@@ -1836,11 +1939,45 @@ function StageBoard({
   beforeKey: string | null;
   arrivedKey: string | null;
   draggedTask: BoardTask | null;
+  /** The move awaiting the server, and the card it moves (see `boardDropAnimation`). */
+  inFlight: { key: string; from: string; to: string; beforeKey: string | null } | null;
+  inFlightTask: BoardTask | null;
   /** F10-25: the StageMenu move — the always-available non-drag path. */
   onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
   // All stages, for the per-card keyboard "Move to stage" menu (F10-25).
   const allStages = columns.map((c) => c.stage);
+  // The slot a drop would submit RIGHT NOW — the same resolution `onDragEnd`
+  // runs, so the preview shows exactly what the drop would ask for, and shows
+  // nothing where a drop would change nothing (the card's own slot in its own
+  // lane: before itself, before the card that already follows it). Before this
+  // the preview drew "before itself" over the hole the card had just left, so a
+  // card looked movable above and below its own ghost (owner, 2026-09-08).
+  const slot =
+    drag && overStage
+      ? resolveBoardDrop({
+          dragKey: drag.key,
+          fromStage: drag.fromStage,
+          overStage,
+          beforeKey,
+          columns: columns.map((c) => ({
+            stageId: c.stage.id,
+            keys: visible(c.tasks).map((t) => t.key),
+          })),
+        })
+      : null;
+  // Read against the DATA, not the request: once the server's answer has
+  // revalidated the columns the card is already in its new lane, so nothing is
+  // left to hide in the old one and the landing preview has nothing to stand
+  // in for — the real card takes its place in the same render, no blank frame
+  // and no doubled card while the fetcher settles.
+  const flightFrom =
+    inFlight &&
+    columns.some(
+      (c) => c.stage.id === inFlight.from && c.tasks.some((t) => t.key === inFlight.key),
+    )
+      ? inFlight.from
+      : null;
   if (columns.length === 0) {
     // A project whose project.md `stages:` was emptied by an external edit
     // (in-app actions can't remove the locked entry/terminal stages) would
@@ -1867,7 +2004,24 @@ function StageBoard({
           !!drag && overStage != null && overStage !== drag.fromStage;
         const isSource = crossDrag && c.stage.id === drag!.fromStage;
         const isTarget = crossDrag && c.stage.id === overStage;
-        const count = base.length + (isTarget ? 1 : 0) - (isSource ? 1 : 0);
+        // A move in flight shifts the counts the same way a cross-lane hover
+        // does: the card has left its lane for the requested one.
+        const crossFlight = !!inFlight && flightFrom !== null && inFlight.to !== flightFrom;
+        const flightSource = crossFlight && c.stage.id === flightFrom;
+        const flightTarget = crossFlight && c.stage.id === inFlight!.to;
+        const count =
+          base.length +
+          (isTarget ? 1 : 0) -
+          (isSource ? 1 : 0) +
+          (flightTarget ? 1 : 0) -
+          (flightSource ? 1 : 0);
+        const landing =
+          inFlight &&
+          inFlightTask &&
+          inFlight.to === c.stage.id &&
+          !c.tasks.some((t) => t.key === inFlight.key)
+            ? { task: inFlightTask, beforeKey: inFlight.beforeKey }
+            : null;
         return (
           <Column
             key={c.stage.id}
@@ -1883,8 +2037,10 @@ function StageBoard({
             onNew={onNew}
             arrivedKey={arrivedKey}
             dropTarget={hovered}
-            previewTask={hovered ? draggedTask : null}
-            beforeKey={beforeKey}
+            previewTask={hovered && slot ? draggedTask : null}
+            beforeKey={slot?.beforeKey ?? null}
+            landing={landing}
+            inFlightKey={inFlight && flightFrom === c.stage.id ? inFlight.key : null}
             allStages={allStages}
             onMoveTask={onMoveTask}
             rovingKey={rovingKey}
@@ -1959,6 +2115,15 @@ export function BoardPage({
   // The card the dropped card should land immediately BEFORE (null = column end).
   const [beforeKey, setBeforeKey] = useState<string | null>(null);
   const [arrivedKey, setArrivedKey] = useState<string | null>(null);
+  /** The move awaiting the server's answer: the card hides in its lane and the
+   *  landing preview stands in the requested slot until the answer renders the
+   *  real card there — or refuses, and the card comes back with the toast. */
+  const [inFlight, setInFlight] = useState<{
+    key: string;
+    from: string;
+    to: string;
+    beforeKey: string | null;
+  } | null>(null);
   /** D19: the card the roving tab stop sits on. Null until an arrow moves it —
    *  the resting stop is then the first card the layout draws (`rovingKey`). */
   const [focusKey, setFocusKey] = useState<string | null>(null);
@@ -1988,10 +2153,13 @@ export function BoardPage({
   };
 
   // dnd-kit event flow → the same drag state machine the visuals always used.
-  // A card target proposes "insert before that card"; onDragMove refines it
-  // against the pointer's vertical midpoint (top half → before it, bottom
-  // half → before the next one). Keyboard drags get no move events, so the
-  // card-target proposal stands as-is — deterministic and announced.
+  // ONE slot rule for both hover events: a card target means "before that
+  // card" when the pointer is in its top half and "before the next one" in its
+  // bottom half; a column target means the column's end. `dragover` used to
+  // propose the top half unconditionally and leave `dragmove` to correct it,
+  // so on the frame a new card came under the pointer — and at rest, when the
+  // last event before the release was the `over` — the preview sat a slot
+  // above the pointer (owner, 2026-09-08: "not smooth").
   const onDragStart = (event: DragStartEvent) => {
     const key = String(event.operation.source?.id ?? "");
     const t = allTasks.find((x) => x.key === key);
@@ -2000,7 +2168,7 @@ export function BoardPage({
     setOverStage(t.stage);
     setBeforeKey(null);
   };
-  const onDragOver = (event: DragOverEvent) => {
+  const refineSlot = (event: DragOverEvent | DragMoveEvent) => {
     const target = event.operation.target;
     if (!target) {
       setOverStage(null);
@@ -2009,7 +2177,7 @@ export function BoardPage({
     }
     const id = String(target.id);
     if (id.startsWith("stage:")) {
-      // Column body / empty space: default to the end until a card refines it.
+      // Column body / empty space: the end of the column.
       setOverStage(id.slice("stage:".length));
       setBeforeKey(null);
       return;
@@ -2017,26 +2185,25 @@ export function BoardPage({
     const t = allTasks.find((x) => x.key === id);
     if (!t) return;
     setOverStage(t.stage);
-    setBeforeKey(id);
-  };
-  const onDragMove = (event: DragMoveEvent) => {
-    const target = event.operation.target;
-    if (!target || String(target.id).startsWith("stage:")) return;
     const element = target.element;
-    const y = event.operation.position.current.y;
-    if (!element) return;
+    if (!element) {
+      setBeforeKey(id);
+      return;
+    }
     const rect = element.getBoundingClientRect();
-    const key = String(target.id);
+    const y = event.operation.position.current.y;
     // SAFETY: dnd-kit types every droppable's `data` as its own open bag, but
     // the only card droppables on this board are the `useSortable<CardDragData>`
     // above — which passes `{ nextKey }` and nothing else. Stage droppables,
-    // the one other kind, returned two lines up. `Partial` + `?.` still cover a
+    // the one other kind, returned above. `Partial` + `?.` still cover a
     // sortable that has not been given its data yet.
     const nextKey =
       (target.data as Partial<CardDragData> | undefined)?.nextKey ?? null;
-    const before = y < rect.top + rect.height / 2 ? key : nextKey;
+    const before = y < rect.top + rect.height / 2 ? id : nextKey;
     setBeforeKey((prev) => (prev === before ? prev : before));
   };
+  const onDragOver = refineSlot;
+  const onDragMove = refineSlot;
   // Fires on drop AND cancel (Escape, released outside a column). The server
   // stays authoritative: nothing commits client-side; a resolved drop submits
   // the governed reorder and revalidation applies the server's order.
@@ -2067,15 +2234,7 @@ export function BoardPage({
       });
       return;
     }
-    setArrivedKey(active.key);
-    announceMove(active.key, resolution.to); // D9
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "reorder");
-    fd.set("taskKey", active.key);
-    fd.set("to", resolution.to);
-    fd.set("beforeKey", resolution.beforeKey ?? "");
-    transitionFetcher.submit(fd, { method: "post" });
+    submitReorder(active.key, resolution.to, resolution.beforeKey ?? "");
   };
 
   /** Commit a confirmed board acceptance (B1). */
@@ -2089,7 +2248,12 @@ export function BoardPage({
     // above just displayed; without it the server refuses the acceptance.
     disclosure?: AcceptanceDisclosure,
   ) => {
-    setArrivedKey(taskKey);
+    // The request is drawn at once (landing preview in the target lane, the
+    // card hidden in its own); the arrival pulse waits for the server's yes.
+    const from = allTasks.find((t) => t.key === taskKey)?.stage;
+    if (from) {
+      setInFlight({ key: taskKey, from, to, beforeKey: beforeKey === "" ? null : beforeKey });
+    }
     announceMove(taskKey, to); // D9
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -2128,6 +2292,10 @@ export function BoardPage({
     if (moveDone.current === transitionFetcher.data) return;
     moveDone.current = transitionFetcher.data;
     const d = transitionFetcher.data;
+    // The answer is in and the loader has revalidated: the real card stands
+    // where the landing preview stood (and pulses), or is back in its lane.
+    setInFlight(null);
+    if (d.ok) setArrivedKey(inFlight?.key ?? null);
     if (d.ok && d.toast) {
       push(d.toast);
       setAnnounce(d.toast); // D9: the completed move, in the server's own words.
@@ -2140,7 +2308,7 @@ export function BoardPage({
       // consequential state change a screen-reader user must hear, not only see.
       setAnnounce(`Move refused: ${d.error}`);
     }
-  }, [transitionFetcher.state, transitionFetcher.data, push]);
+  }, [transitionFetcher.state, transitionFetcher.data, push, inFlight]);
 
   // Retire the arrival pulse after it plays.
   useEffect(() => {
@@ -2199,6 +2367,9 @@ export function BoardPage({
   // The card in flight (for the drop-preview shown in the hovered column).
   const draggedTask = drag
     ? (allTasks.find((t) => t.key === drag.key) ?? null)
+    : null;
+  const inFlightTask = inFlight
+    ? (allTasks.find((t) => t.key === inFlight.key) ?? null)
     : null;
   // F19-27: the summary the acceptance confirm discloses from. Resolved here
   // rather than captured into `pendingAccept` so it re-reads on every
@@ -2533,6 +2704,8 @@ export function BoardPage({
             beforeKey={beforeKey}
             arrivedKey={arrivedKey}
             draggedTask={draggedTask}
+            inFlight={inFlight}
+            inFlightTask={inFlightTask}
             onMoveTask={onMoveTask}
             rovingKey={rovingKey}
             onCardKeyDown={onCardKeyDown}

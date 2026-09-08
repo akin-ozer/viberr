@@ -1128,39 +1128,45 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .card-move .sm-name { display: none; }
 .card-wrap.draggable { cursor: grab; }
 .card-wrap.draggable:active { cursor: grabbing; }
-/* The card being dragged stays in the source column as a faded ghost. */
-.card-wrap.dragging .card {
-  opacity: .4;
-  border-style: dashed;
+/* Owner, 2026-09-08 ("drag is not smooth"): the lifted card is the SOURCE
+   element — dnd-kit moves it under the pointer and leaves a placeholder clone
+   in its slot that mirrors the element's attributes, so a React class lands on
+   both and cannot tell them apart. dnd-kit's own attributes can. The lifted
+   card is solid and raised; the placeholder is the hole it left: the same box
+   with nothing in it. */
+.card-wrap[data-dnd-dragging] .card { box-shadow: var(--shadow-lift); cursor: grabbing; }
+.card-wrap[data-dnd-placeholder] .card {
+  background: transparent;
+  border: 1.5px dashed var(--border);
   box-shadow: none;
-  transition: opacity .12s ease;
 }
+.card-wrap[data-dnd-placeholder] .card > *,
+.card-wrap[data-dnd-placeholder] .card-move { visibility: hidden; }
+/* A move awaiting the server: the card has left its lane (once dnd-kit has
+   released it) and the landing preview stands in the requested slot. Neither
+   the card still in flight nor its placeholder may collapse before then — a
+   ResizeObserver sizes the card in flight from its placeholder, so hiding the
+   placeholder squished the flying card to a sliver. */
+.card-wrap.in-flight:not([data-dnd-dragging]):not([data-dnd-placeholder]) { display: none; }
 /* The column under the cursor lifts and outlines to invite the drop. */
+.column { transition: background .15s ease, box-shadow .15s ease; }
 .column.drop-over {
   background: color-mix(in srgb, var(--blue), transparent 92%);
   border-radius: var(--radius-card);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--blue), transparent 55%);
 }
-/* A preview card at the top of the target column showing where it will land. */
+/* The requested slot: the card's own face, faded, in a blue dashed frame —
+   the card's own height, so the real card lands on the preview's pixels. No
+   entrance animation: the slot changes on every midpoint the pointer crosses,
+   and a fade on each read as flicker. `.landing` is the same preview kept
+   between the drop and the server's answer, a shade more present. */
 .card-drop-preview {
   border: 1.5px dashed color-mix(in srgb, var(--blue), transparent 40%);
-  border-radius: var(--radius-card);
-  background: color-mix(in srgb, var(--blue), transparent 92%);
-  padding: .75rem .75rem;
-  display: flex; flex-direction: column; gap: .25rem;
-  animation: dropPreviewIn .16s var(--ease-out);
+  background: color-mix(in srgb, var(--blue), transparent 94%);
+  box-shadow: none;
 }
-/* F21-18: same key, same rule — one identifier never wraps (see `.card-top .key`).
-   The preview sits in the narrow drop column, which is where a squeeze happens. */
-.card-drop-preview .key { font-family: var(--font-mono); font-size: .75rem; color: var(--blue-pressed); white-space: nowrap; }
-.card-drop-preview .dp-title {
-  /* The preview IS the card mid-drag: same face, weight and size as .card h3
-     (it used to inherit Noto and clamp to 700, visibly swapping typeface). */
-  font-family: var(--font-display);
-  font-size: 1rem; line-height: 1.18; font-weight: 800;
-  color: color-mix(in srgb, var(--fg), transparent 15%);
-}
-@keyframes dropPreviewIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.card-drop-preview > * { opacity: .55; }
+.drop-preview.landing .card-drop-preview > * { opacity: .75; }
 /* Pulse a highlight ring when a dropped card lands in its new column. */
 .card-wrap.just-arrived .card { animation: cardArrive 1.3s ease; }
 @keyframes cardArrive {

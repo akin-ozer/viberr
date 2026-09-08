@@ -1311,14 +1311,13 @@ describe("app.css draws a task key the same way everywhere (P16-F3 follow-on)", 
     // F3 moved its width out of an inline style and there was nothing else.
     const grid = CODE.match(/\.card-top \.key\s*\{([^}]*)\}/)?.[1] ?? "";
     const list = CODE.match(/\.card\.list-row \.key\s*\{([^}]*)\}/)?.[1] ?? "";
-    // F21-18: the third rule that draws a task key — the drop preview at the top
-    // of a target column. Its color is deliberately its own (`--blue-pressed`,
-    // the preview's accent), so it joins the nowrap assertion below rather than
-    // the value-parity loop.
-    const preview = CODE.match(/\.card-drop-preview \.key\s*\{([^}]*)\}/)?.[1] ?? "";
+    // F21-18 named a third key rule, the drop preview's. Since 2026-09-08 the
+    // preview renders the card's own face (`CardFace` in board-page.tsx), so its
+    // key IS `.card-top .key` and a private rule would be the drift this test
+    // exists to catch.
+    expect(CODE).not.toMatch(/\.card-drop-preview \.key\s*\{/);
     expect(grid, ".card-top .key must have a rule").not.toBe("");
     expect(list, ".card.list-row .key must have a rule").not.toBe("");
-    expect(preview, ".card-drop-preview .key must have a rule").not.toBe("");
     // Anchored on a declaration boundary so `color` cannot match inside
     // `background-color` and `font-family` cannot match `font-size`.
     const value = (rule: string, prop: string) =>
@@ -1329,13 +1328,13 @@ describe("app.css draws a task key the same way everywhere (P16-F3 follow-on)", 
       );
     }
     // F21-18 residual: the nowrap landed on the grid card alone, so the same key
-    // still broke mid-token ("VIB-\n8") in the list row's fixed 64px column and
-    // in the drop preview. A key is ONE identifier on every surface that draws
-    // it — reverting any of the three rules fails here.
+    // still broke mid-token ("VIB-\n8") in the list row's fixed 64px column (and,
+    // then, in the drop preview — which now draws the grid card's own key). A
+    // key is ONE identifier on every surface that draws it — reverting either
+    // rule fails here.
     for (const [where, rule] of [
       ["grid card", grid],
       ["list row", list],
-      ["drop preview", preview],
     ] as const) {
       expect(
         value(rule, "white-space"),
@@ -2609,9 +2608,11 @@ describe("app/ gates no rendering on the viewport (R19-12)", () => {
         queries.push(`${rel} — ${m[1]}`);
       }
     }
-    // Three sites: the SSR-safe first-paint script inlined in root.tsx, the
-    // listener that keeps `system` live, and `theme-preference.ts`.
-    expect(queries.length, "the scan must find the three colour-scheme reads").toBe(3);
+    // Four sites: the SSR-safe first-paint script inlined in root.tsx, the
+    // listener that keeps `system` live, `theme-preference.ts`, and the board's
+    // drop animation asking for reduced motion before it flies a card
+    // (board-page.tsx, 2026-09-08).
+    expect(queries.length, "the scan must find the four preference reads").toBe(4);
     for (const q of queries) {
       expect(q, "matchMedia may only ask about a preference").toMatch(/\(prefers-[\w-]+:/);
       expect(q, "a width query here is the banned form").not.toMatch(/width/);
