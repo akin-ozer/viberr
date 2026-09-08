@@ -31,9 +31,10 @@ import {
   defaultPreset,
   Feedback,
   PointerActivationConstraints,
+  type DragDropManager,
   type DropAnimationFunction,
 } from "@dnd-kit/dom";
-import { resolveBoardDrop } from "./board-dnd";
+import { laneAt, resolveBoardDrop, slotInLane, type LaneBlock } from "./board-dnd";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import {
   archivedTaskBlockedReason,
@@ -147,12 +148,6 @@ export interface BoardColumnData {
   stage: BoardStage;
   tasks: BoardTask[];
 }
-
-/** Data carried by every card sortable so the drag handlers can refine the
- *  insertion slot without global lookups. */
-type CardDragData = {
-  nextKey: string | null;
-};
 
 /* Drag-and-drop configuration (dnd-kit).
  *
@@ -600,7 +595,6 @@ function ReviewerStack({ task, label }: { task: TaskSummary; label?: boolean }) 
 
 function TaskCard({
   task,
-  nextKey,
   index,
   canTransition,
   arrived,
@@ -610,9 +604,6 @@ function TaskCard({
   roving,
 }: {
   task: BoardTask;
-  /** The key of the card immediately below this one (null when last) — used to
-   *  resolve "drop below this card" into an insertion slot. */
-  nextKey: string | null;
   /** A move for this card is awaiting the server: the card hides here and the
    *  landing preview stands in the requested slot (see `boardDropAnimation`). */
   inFlight: boolean;
@@ -638,18 +629,19 @@ function TaskCard({
   // directly beneath the banner calling it abandoned, with a working Move
   // control besides.
   const archived = isArchived(task);
-  // The card is both drag source and drop target (insert-before-this-card).
+  // The card is the drag source (and a sortable droppable, which dnd-kit needs
+  // for its own events — the board's slot comes from `slotInLane`, not from
+  // which card dnd-kit names as the target).
   // With clone feedback dnd-kit moves THIS element under the pointer and leaves
   // a placeholder clone (`[data-dnd-placeholder]`) in its slot, mirroring the
   // element's attributes — so the two are styled by dnd-kit's attributes, never
   // by a React class (a class lands on both). Optimistic sorting is OFF — the
   // board never reorders client-side; the DropPreview shows the requested slot
   // and the server's answer is the only commit.
-  const { ref } = useSortable<CardDragData>({
+  const { ref } = useSortable({
     id: task.key,
     group: task.stage,
     index,
-    data: { nextKey },
     disabled: !canTransition || archived,
     // No index-change transition either: the only re-layouts here are the
     // server's, and dnd-kit animated a card that arrived by revalidation from
@@ -673,7 +665,16 @@ function TaskCard({
   return (
     /* D19: the lane is a list (see `Column`), so each card is one of its items —
        that is what makes a screen reader say "3 of 7" as the arrows move. */
-    <div className={wrapCls.join(" ")} ref={ref} role="listitem">
+    <div
+      className={wrapCls.join(" ")}
+      ref={ref}
+      role="listitem"
+      /* The slot rule reads the lane's flow from the DOM (`laneBlocks`): this
+         names the card each block stands for. dnd-kit's placeholder — the hole
+         a lifted card leaves — is a clone of this element, so it carries the
+         key too and stands in the flow for the card. */
+      data-card-key={task.key}
+    >
       <Link
         className={cls.join(" ")}
         to={`/projects/${task.projectSlug}/tasks/${task.key}`}
@@ -797,6 +798,21 @@ function CardFace({ task, archived }: { task: BoardTask; archived: boolean }) {
  * board never commits a move client-side, so this is the request, not the
  * result (owner, 2026-09-08).
  */
+/** A lane's flow as drawn, top to bottom, for `slotInLane`: every `.card-wrap`
+ *  in the column body except the lifted card itself, which follows the pointer
+ *  (its hole — the placeholder dnd-kit leaves, `data-card-key` and all — stands
+ *  in the flow for it). The drop preview and a landing preview carry no key. */
+function laneBlocks(body: Element): LaneBlock[] {
+  const blocks: LaneBlock[] = [];
+  for (const el of body.children) {
+    if (!(el instanceof HTMLElement) || !el.classList.contains("card-wrap")) continue;
+    if (el.hasAttribute("data-dnd-dragging")) continue;
+    const r = el.getBoundingClientRect();
+    blocks.push({ key: el.dataset.cardKey ?? null, top: r.top, bottom: r.bottom });
+  }
+  return blocks;
+}
+
 function DropPreview({ task, landing = false }: { task: BoardTask; landing?: boolean }) {
   return (
     <div className={"card-wrap drop-preview" + (landing ? " landing" : "")} aria-hidden="true">
@@ -859,9 +875,13 @@ function Column({
   allStages: BoardStage[];
   onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
-  // Explicit column target so empty stages (and the blank space under the
-  // cards) accept drops. Priority 1 (Low) — an over-card collision (Normal, 2)
-  // always wins over the containing column.
+  // The lane is a droppable for two reasons that are not its collisions: the
+  // slot rule (`refineSlot`) finds the lanes' live rectangles through dnd-kit's
+  // registry by this id, and `dragover` fires when the pointer crosses into an
+  // empty lane. Which droppable dnd-kit calls the target no longer decides
+  // anything — the lane comes from the pointer (`laneAt`), the slot from the
+  // lane's flow (`slotInLane`). Priority 1 (Low) keeps dnd-kit's own target
+  // sensible: an over-card collision (Normal, 2) wins over its column.
   const { ref } = useDroppable({
     id: `stage:${stage.id}`,
     collisionPriority: 1,
@@ -948,7 +968,6 @@ function Column({
                 {landing && landing.beforeKey === t.key && landingEl}
                 <TaskCard
                   task={t}
-                  nextKey={tasks[i + 1]?.key ?? null}
                   index={i}
                   canTransition={canTransition}
                   arrived={arrivedKey === t.key}
@@ -2099,10 +2118,10 @@ export function BoardPage({
   const push = useToast();
 
   // Drag-and-drop stage moves. `drag` is the card in flight; `overStage` is the
-  // column under the cursor. While a card is dragged across columns, the source
-  // shows a faded ghost (`dragging`) and the target shows a drop preview + a +1
-  // count; a drop fires the governed transition and the card pulses on arrival
-  // (`arrivedKey`). One fetcher per board.
+  // lane under the pointer. While a card is dragged across lanes, its own slot
+  // shows a hole (dnd-kit's placeholder) and the target lane the drop preview
+  // + a +1 count; a drop fires the governed transition and the card pulses on
+  // arrival (`arrivedKey`). One fetcher per board.
   const transitionFetcher = useFetcher<{
     ok: boolean;
     toast?: string;
@@ -2153,53 +2172,55 @@ export function BoardPage({
   };
 
   // dnd-kit event flow → the same drag state machine the visuals always used.
-  // ONE slot rule for both hover events: a card target means "before that
-  // card" when the pointer is in its top half and "before the next one" in its
-  // bottom half; a column target means the column's end. `dragover` used to
-  // propose the top half unconditionally and leave `dragmove` to correct it,
-  // so on the frame a new card came under the pointer — and at rest, when the
-  // last event before the release was the `over` — the preview sat a slot
-  // above the pointer (owner, 2026-09-08: "not smooth").
+  // The slot is GEOMETRY, not dnd-kit's collision target: `laneAt` names the
+  // lane under the pointer and `slotInLane` reads the pointer against that
+  // lane's flow as drawn — the cards, the dragged card's hole AND the preview
+  // already standing there (board-dnd.ts says why the preview must count).
+  // The target dnd-kit reports was the loop the owner saw (2026-09-08): the
+  // preview drawn above a card pushed the card from under the pointer, the
+  // next collision pass found the column, the old rule read that as "end",
+  // the preview moved below the card and the card came back up under the
+  // pointer — every hand tremor walked it, ~10 times a second, top half only.
+  // Both hover events run the same rule (`dragover` fires when the target
+  // changes, `dragmove` when the pointer moves); state updates only when the
+  // answer changes.
   const onDragStart = (event: DragStartEvent) => {
     const key = String(event.operation.source?.id ?? "");
     const t = allTasks.find((x) => x.key === key);
     if (!t) return;
     setDrag({ key, fromStage: t.stage });
     setOverStage(t.stage);
-    setBeforeKey(null);
+    // "Before itself": the slot the card already holds, so nothing previews
+    // until the pointer moves (null would preview the lane's END on lift).
+    setBeforeKey(key);
   };
-  const refineSlot = (event: DragOverEvent | DragMoveEvent) => {
-    const target = event.operation.target;
-    if (!target) {
+  const refineSlot = (event: DragOverEvent | DragMoveEvent, manager: DragDropManager) => {
+    const { x, y } = event.operation.position.current;
+    const lanes: { stageId: string; element: Element }[] = [];
+    for (const droppable of manager.registry.droppables) {
+      const id = String(droppable.id);
+      if (id.startsWith("stage:") && droppable.element) {
+        lanes.push({ stageId: id.slice("stage:".length), element: droppable.element });
+      }
+    }
+    const stage = laneAt(
+      lanes.map(({ stageId, element }) => {
+        const r = element.getBoundingClientRect();
+        return { stageId, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+      }),
+      x,
+      y,
+    );
+    if (!stage) {
       setOverStage(null);
       setBeforeKey(null);
       return;
     }
-    const id = String(target.id);
-    if (id.startsWith("stage:")) {
-      // Column body / empty space: the end of the column.
-      setOverStage(id.slice("stage:".length));
-      setBeforeKey(null);
-      return;
-    }
-    const t = allTasks.find((x) => x.key === id);
-    if (!t) return;
-    setOverStage(t.stage);
-    const element = target.element;
-    if (!element) {
-      setBeforeKey(id);
-      return;
-    }
-    const rect = element.getBoundingClientRect();
-    const y = event.operation.position.current.y;
-    // SAFETY: dnd-kit types every droppable's `data` as its own open bag, but
-    // the only card droppables on this board are the `useSortable<CardDragData>`
-    // above — which passes `{ nextKey }` and nothing else. Stage droppables,
-    // the one other kind, returned above. `Partial` + `?.` still cover a
-    // sortable that has not been given its data yet.
-    const nextKey =
-      (target.data as Partial<CardDragData> | undefined)?.nextKey ?? null;
-    const before = y < rect.top + rect.height / 2 ? id : nextKey;
+    const body = lanes
+      .find((l) => l.stageId === stage)
+      ?.element.querySelector(":scope > .col-body");
+    const before = slotInLane(body ? laneBlocks(body) : [], y);
+    setOverStage(stage);
     setBeforeKey((prev) => (prev === before ? prev : before));
   };
   const onDragOver = refineSlot;

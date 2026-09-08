@@ -1076,6 +1076,15 @@ describe("F19-8: an archived card is inert and honest", () => {
     ).toBe(true);
   });
 
+  it("every card wrapper names its card for the drag slot rule", () => {
+    // `laneBlocks` reads a lane's flow from the DOM and keys each block by this
+    // attribute; dnd-kit's placeholder clone inherits it, so the hole a lifted
+    // card leaves stands in the flow under the card's own key.
+    const { container } = renderBoard([task({ key: "VIB-1" }), task({ key: "VIB-2" })]);
+    const wraps = [...container.querySelectorAll(".card-wrap")];
+    expect(wraps.map((w) => w.getAttribute("data-card-key"))).toEqual(["VIB-1", "VIB-2"]);
+  });
+
   it("makes the same cut in the list view", () => {
     const { container } = renderBoard([archivedTask()], {
       search: ARCHIVED,
