@@ -383,7 +383,9 @@ describe("StagesPanel", () => {
     expect(input.getAttribute("aria-invalid")).toBeNull();
     fireEvent.click(commit);
     expect(onAdd).toHaveBeenCalledWith("QA");
-    expect(container.querySelector(".stg-add")).toBeNull();
+    // The row is closed: the field is gone and the trigger is back.
+    expect(container.querySelector(".stg-add .stg-input")).toBeNull();
+    expect(getByText("Add stage").closest(".stg-add")).not.toBeNull();
   });
 
   it("ruling 147: Escape after a refusal leaves no alert behind", () => {

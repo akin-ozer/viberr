@@ -2697,8 +2697,11 @@ dialog[data-closing]::backdrop {
 
 /* members */
 .member-list { margin-bottom: 1rem; }
-.member-row { display: flex; align-items: center; gap: .5rem; padding: .5rem 0; border-bottom: 1px solid var(--hairline); flex-wrap: wrap; }
-.member-row:last-child { border-bottom: 0; }
+/* Design pass 2026-09-08: no rule between rows — the avatar and the name
+   give each row its own anchor, and space does the separating. Four ruled
+   rows sat directly above a nine-row ruled grant table on Profile, and a
+   member list is not a grid to track across. */
+.member-row { display: flex; align-items: center; gap: .5rem; padding: .625rem 0; flex-wrap: wrap; }
 .member-main { flex: 1; min-width: 120px; }
 .member-main .nm { font-family: var(--font-display); font-weight: 800; font-size: .88rem; }
 .member-main .em { font-size: .75rem; color: var(--faint); font-family: var(--font-mono); }
@@ -3002,17 +3005,31 @@ dialog[data-closing]::backdrop {
    SETTINGS
    ============================================================ */
 .set-fields { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1rem; }
+/* Four whole line boxes at the field's own size, plus its padding pair and
+   border pair — the description used to clip a line of text in half. */
+.set-fields textarea { min-height: calc(4 * 1.5em + 1rem + 2px); }
 .set-fields input.mono { font-family: var(--font-mono); }
 
 .stg-list { display: flex; flex-direction: column; }
+/* Design pass 2026-09-08: a row is a grid with the action column RESERVED.
+   As a flex row the count was pushed right by `margin-left: auto` against
+   whatever trailing controls that row happened to have, and a locked row has
+   no Move menu, so the counts zig-zagged down the list. The Move track is a
+   fixed 5rem (the menu is ~76px), so "2 tasks" ends on the same edge on every
+   row; the remove ✕ is always the last track. No rule between rows: the blue
+   insertion line (`.over`) used to compete with a grey one in the same 1px. */
 .stg-row {
-  display: flex; align-items: center; gap: .5rem;
-  padding: .375rem .125rem;
-  border-bottom: 1px solid var(--hairline);
+  display: grid;
+  grid-template-columns: 22px auto minmax(0, 1fr) auto 5rem 24px;
+  align-items: center; column-gap: .5rem;
+  padding: .5rem .125rem;
   font-size: .88rem;
   transition: box-shadow .12s ease, opacity .12s ease, background .12s ease;
 }
-.stg-row:last-child { border-bottom: 0; }
+.stg-row .stg-name, .stg-row .stg-input { justify-self: start; }
+.stg-row .stg-count { grid-column: 4; justify-self: end; }
+.stg-row .own-wrap { grid-column: 5; justify-self: end; }
+.stg-row .stg-x { grid-column: 6; }
 /* P16-UI-25: the whole row is the drag surface, so the cursor is its only
    pointer affordance — the grip that used to carry it is gone. Mirrors
    `.card-wrap.draggable` on the board exactly, which is the point: one drag
@@ -3054,7 +3071,7 @@ dialog[data-closing]::backdrop {
 .stg-add { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .stg-add .stg-input { flex: 1; width: auto; margin: 0; }
 
-.stg-count { margin-left: auto; font-family: var(--font-mono); font-size: .75rem; color: var(--faint); flex: none; }
+.stg-count { font-family: var(--font-mono); font-size: .75rem; color: var(--faint); flex: none; }
 /* P16-UI-04: `.stg-x` is named for its first site — the stage-remove ✕ in
    project settings — but it is now the app's generic 24px row-action icon
    button: browse, re-scan, test, edit, enable, disable AND remove,

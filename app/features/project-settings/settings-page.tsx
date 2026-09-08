@@ -209,7 +209,11 @@ export function ProjectPanel({
           </label>
           <textarea
             id="set-project-desc"
-            rows={2}
+            // Design pass 2026-09-08: two rows held ~61px against a 22.5px line
+            // box, so the third line of every real description was sliced in
+            // half. Four whole line boxes; `.set-fields textarea` pins the same
+            // floor so a resize cannot go below it.
+            rows={4}
             value={desc}
             disabled={!canManage}
             onChange={(e) => setDesc(e.target.value)}
@@ -307,15 +311,21 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
   };
 
   if (!naming) {
+    // Design pass 2026-09-08: the trigger sits in the same row the field
+    // replaces it with, at its natural width. It was a full-width `.panel-act`
+    // bar — the one panel on the page whose "add" was a bar rather than a
+    // button, beside Members' head-placed "Add member".
     return (
-      <button
-        type="button"
-        className="btn ghost sm panel-act"
-        onClick={() => setNaming(true)}
-      >
-        <Icon name="plus" />
-        Add stage
-      </button>
+      <div className="stg-add spaced">
+        <button
+          type="button"
+          className="btn ghost sm"
+          onClick={() => setNaming(true)}
+        >
+          <Icon name="plus" />
+          Add stage
+        </button>
+      </div>
     );
   }
   return (
