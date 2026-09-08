@@ -129,7 +129,7 @@ function githubPanel(getByText: (text: string) => HTMLElement): HTMLElement {
 
 describe("ProfilePage", () => {
   it("renders header, identity fields and membership facts", () => {
-    const { getByText, getByDisplayValue, container } = renderProfile();
+    const { getByText, getAllByText, getByDisplayValue, container } = renderProfile();
     expect(getByText("Profile & preferences")).toBeTruthy();
     expect(
       getByText(
@@ -138,8 +138,17 @@ describe("ProfilePage", () => {
     ).toBeTruthy();
     expect(getByDisplayValue("Arda Kaya")).toBeTruthy();
     expect(getByDisplayValue("Senior engineer")).toBeTruthy();
-    const email = getByDisplayValue("arda@viberr.dev").closest("input")!;
-    expect(email.disabled).toBe(true);
+    // Design pass 2026-09-08: the email is a fact row, not a disabled control
+    // — nothing on this page can edit it, so nothing on this page is a field
+    // for it. The row sits with the sign-in facts, and the governance
+    // sentence (who CAN change it) is the panel's closing note.
+    // The header prints the email too; the fact row is the one in a `.kv-row`.
+    const email = getAllByText("arda@viberr.dev")
+      .map((el) => el.closest(".kv-row"))
+      .find((row) => row !== null)!;
+    expect(email.querySelector(".k")!.textContent).toBe("Email");
+    expect(container.querySelector("input#profile-email")).toBeNull();
+    expect(container.textContent).toContain("An org admin can change your email");
     // Membership facts + role pill + sign-in method.
     expect(getByText("Member of")).toBeTruthy();
     expect(getByText("Viberr Core")).toBeTruthy();

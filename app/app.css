@@ -1383,6 +1383,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* A section with nothing to demand is a well, not a raised card — the same
    rule as `.pill.quiet`: a fill (a frame, a shadow) is a demand. */
 .panel.quiet { background: var(--tint-well); border-color: transparent; box-shadow: none; }
+/* A fine-print paragraph directly in a panel is prose and takes the measure
+   (the audit card's ran ~150 characters a line); lists and grids beside it
+   keep the full width. */
+.panel > p.fine { max-width: 70ch; }
 .panel-head {
   display: flex; align-items: center; gap: .5rem;
   margin-bottom: .75rem;
@@ -2065,7 +2069,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* Scrims/backdrops fade — a full-screen veil has no edge to slide from. */
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
-.empty { color: var(--placeholder); font-size: .88rem; text-align: center; padding: 2rem 1rem; max-width: 60ch; margin-inline: auto; }
+/* `margin-block: 0` and the `> p` reset: several sites render this on a <p>
+   or wrap a <p> in it, and the UA margin opened a hole between every card
+   title and its body. */
+.empty { color: var(--placeholder); font-size: .88rem; text-align: center; padding: 2rem 1rem; max-width: 60ch; margin-inline: auto; margin-block: 0; }
+.empty > p:only-child { margin: 0; }
 /* The teaching CTA under a virgin entry lane's empty copy (pass 30) — its own
    row, centered under the sentence. */
 .empty .empty-cta { display: flex; width: fit-content; margin: .75rem auto 0; }
@@ -3424,6 +3432,9 @@ dialog[data-closing]::backdrop {
    z-index sits below `.overlay-x` (5) and above the scrolled body (auto). */
 .page-overlay .board-head {
   padding-right: 4.4rem;
+  /* A band the content passes behind, not a blade: the sticky head is opaque
+     and had no bottom edge. */
+  border-bottom: 1px solid var(--hairline);
   position: sticky;
   top: 0;
   z-index: 4;
@@ -4416,7 +4427,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 
 /* ---------- Viberr settings (instance level) ---------- */
 .set-head { display: flex; align-items: flex-start; gap: 1rem; padding-top: .375rem; flex-wrap: wrap; }
-.set-head h1 { font-size: 1.25rem; letter-spacing: -.015em; }
+.set-head h1 { font-size: 1.75rem; letter-spacing: -.015em; }
 .set-head .sub { color: var(--muted); font-size: .88rem; margin: .375rem 0 0; max-width: 66ch; line-height: 1.5; }
 .r180 { transform: rotate(180deg); }
 
@@ -4934,9 +4945,13 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* --radius-button, NOT --radius-chip: the chip token (999px) on a scrolling
    list clipped the first and last rows inside giant corner arcs (matches
    .mx-scroll/.rbac-table, the other bordered scroll boxes). */
+/* Design pass 2026-09-08: the list owns the column tracks and the rows share
+   them (subgrid), so the time and actor columns size to their widest real
+   value instead of a fixed 8.5rem/9rem that opened every row with a void. */
 .audit-list { list-style: none; margin: 0; padding: 0; max-height: 15rem; overflow-y: auto;
+  display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 16rem) 1fr auto; column-gap: .5rem;
   border: 1px solid var(--hairline); border-radius: var(--radius-button); }
-.audit-row { display: grid; grid-template-columns: 8.5rem 9rem 1fr auto; gap: .5rem; align-items: baseline;
+.audit-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline;
   padding: .375rem .5rem; border-bottom: 1px solid var(--hairline); font-size: .75rem; }
 .audit-row:last-child { border-bottom: 0; }
 .audit-when { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -4955,7 +4970,10 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .audit-browse-foot { margin-top: .5rem; }
 .audit-dl { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }
 .audit-dl .btn { text-decoration: none; }
-.audit-s3 h3 { font-size: .75rem; font-weight: 700; margin-bottom: .5rem; }
+/* The card's one subheading is the house eyebrow, with more space around
+   the group than inside it. */
+.audit-s3 { margin-top: 1.5rem; }
+.audit-s3 h3 { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); margin-bottom: .5rem; }
 /* 1rem between field rows (2x the label-to-input .5rem) so label ownership
    stays unambiguous, matching .field-row. */
 .audit-s3-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem .75rem; }
@@ -5545,9 +5563,9 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   place-items: center;
   flex: none;
 }
-.ctl-head .pill { margin-left: auto; }
+/* The "not connected" pill sits with the title it describes; only the Home
+   link claims the right edge (it used to be the pill, 800px from its noun). */
 .ctl-home { margin-left: auto; }
-.ctl-head .pill + .ctl-home { margin-left: .5rem; }
 /* No `align-items: start`: the row stretches, the transcript fills its column
    and the composer anchors at the bottom the way a chat surface should,
    instead of the page ending two-thirds of the way up. */

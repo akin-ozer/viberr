@@ -169,16 +169,6 @@ function ProfileIdentity({
               />
             </div>
           </div>
-          <div className="field">
-            <label className="flabel" htmlFor="profile-email">
-              Email{" "}
-              <span className="fhint">
-                {signsInVia} · an org admin can change it in Instance settings →
-                Users &amp; access
-              </span>
-            </label>
-            <input id="profile-email" type="text" value={user.email} disabled />
-          </div>
           {error && (
             <div className="login-err" role="alert">
               <Icon name="alert" />
@@ -212,6 +202,15 @@ function ProfileIdentity({
             <span className="v plain">No projects yet</span>
           </div>
         )}
+        {/* Design pass 2026-09-08: the email was a disabled form control under
+            the two editable fields — a control nobody can operate. It is a
+            fact, beside the sign-in fact it belongs with. */}
+        <div className="kv-row">
+          <span className="k">Email</span>
+          <span className="v">
+            <span className="mono">{user.email}</span>
+          </span>
+        </div>
         <div className="kv-row">
           <span className="k">Signs in via</span>
           <span className="v">
@@ -232,6 +231,13 @@ function ProfileIdentity({
           </span>
         </div>
         {passwordRow}
+      </div>
+      <div className="pol-note after last">
+        <Icon name="lock" />
+        <span>
+          An org admin can change your email in Instance settings → Users &amp;
+          access.
+        </span>
       </div>
     </div>
   );

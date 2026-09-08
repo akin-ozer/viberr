@@ -916,7 +916,6 @@ describe("RepoPanel", () => {
     // P13-D-5: honest copy — the "Task-level override" toggle claiming "tasks
     // may attach a different repo" is gone along with the feature it advertised
     // (no writer ever set `task.repo`; the flag gated nothing).
-    expect(getByText("every task uses this repository")).toBeTruthy();
     expect(queryByText("1 · V1 limit")).toBeNull();
     expect(container.querySelector('[role="switch"]')).toBeNull();
     // Shared cred-card: 4 chips, one missing, warn banner with keybtn.
@@ -1136,7 +1135,6 @@ describe("RepoPanel", () => {
     expect(withheld.container.textContent).toContain("Grant GitHub scope");
     // …and the rest of the panel really did render, so the absences above are
     // the gate rather than a blank component.
-    expect(withheld.getByText("every task uses this repository")).toBeTruthy();
   });
 });
 

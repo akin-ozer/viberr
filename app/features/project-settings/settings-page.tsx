@@ -1507,13 +1507,10 @@ export function RepoPanel({
         {/* P13-D-5: a "Task-level override" toggle sat here, claiming "tasks may
             attach a different repo". Nothing ever wrote `task.repo` and no
             enforcement path read the flag, so the switch changed nothing in
-            either direction. One project, one repository — stated plainly. */}
-        <div className="kv-row">
-          <span className="k">Task attachment</span>
-          <span className="v plain">
-            every task uses this repository
-          </span>
-        </div>
+            either direction. One project, one repository. The "Task attachment
+            · every task uses this repository" row that replaced the toggle was
+            a sentence dressed as a setting (design pass 2026-09-08); the
+            absence of any per-task control says it. */}
         {/* R15-6: merged task branches piled up on the repo (vib-1..4, 7, 9 were
             still there when the ruling landed). Default ON; the deletion itself
             still refuses the default branch and any branch with an open PR. */}

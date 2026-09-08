@@ -234,15 +234,20 @@ export function ConnectionsPanel({
           </button>
         </span>
       </div>
-      <div className="pol-note">
-        <Icon name="shield" />
-        <span>
-          <strong>{countLabel(connections.length, "connection")}.</strong>{" "}
-          Every project picks one at creation. It sets the repository root. Each
-          authenticates with a <strong>PAT</strong>, validated against the minimum
-          scopes before anything is saved.
-        </span>
-      </div>
+      {/* Design pass 2026-09-08: with nothing connected the note degraded to
+          "0 connections." above an empty block that says the same thing, so
+          the zero state renders one thing, and that thing offers the action. */}
+      {connections.length > 0 && (
+        <div className="pol-note">
+          <Icon name="shield" />
+          <span>
+            <strong>{countLabel(connections.length, "connection")}.</strong>{" "}
+            Every project picks one at creation. It sets the repository root. Each
+            authenticates with a <strong>PAT</strong>, validated against the minimum
+            scopes before anything is saved.
+          </span>
+        </div>
+      )}
       <div className="conn-list">
         {connections.map((c) => {
           // An expiry the store cannot read renders "no expiry date", never a
@@ -368,7 +373,18 @@ export function ConnectionsPanel({
           );
         })}
         {connections.length === 0 && (
-          <div className="empty">No connections yet. Add one first: every project binds to a GitHub repo through a connection.</div>
+          <div className="empty">
+            No connections yet. Add one first: every project binds to a GitHub
+            repo through a connection.
+            <button
+              type="button"
+              className="btn primary empty-cta"
+              onClick={() => setModal({ item: null })}
+            >
+              <Icon name="plus" />
+              Add connection
+            </button>
+          </div>
         )}
       </div>
       {modal && (
