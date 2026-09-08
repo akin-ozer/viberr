@@ -1756,21 +1756,38 @@ describe("CreateProfileModal", () => {
    * never into this one: ←/→ did nothing, and every radio was its own tab stop
    * (15 instead of 5 for an expanded Collaboration group).
    */
-  it("UX-19 — the capability radiogroup traverses with arrow keys on one tab stop", () => {
+  it("UX-19 — the capability radiogroup traverses with arrow keys on one tab stop", async () => {
     const { container } = renderModal({ initial: null });
     const seg = container.querySelector<HTMLElement>('.cap-seg[role="radiogroup"]')!;
     const radios = [...seg.querySelectorAll<HTMLElement>('[role="radio"]')];
     expect(radios).toHaveLength(3);
-    // Roving tabindex: the checked option is the group's single tab stop.
-    expect(radios.map((r) => r.getAttribute("tabindex"))).toEqual(["0", "-1", "-1"]);
+    // Ruling 166 moved the roving wiring to Radix (`app/ui/radio-seg.tsx`), and
+    // the one-tab-stop guarantee is now expressed the other way round: the GROUP
+    // carries the tab stop and delegates entry focus to the checked option,
+    // rather than the checked radio holding `tabindex=0` itself. Either way the
+    // group is one stop, which is what UX-19 was about — 15 tab stops became 5.
+    expect(seg.getAttribute("tabindex")).toBe("0");
+    expect(radios.map((r) => r.getAttribute("tabindex"))).toEqual(["-1", "-1", "-1"]);
+    // Keys are handled on the focused OPTION, which is where a browser raises
+    // them; the retired helper listened on the group by delegation. Radix moves
+    // focus in a `setTimeout`, so each assertion waits a tick rather than
+    // reading the DOM synchronously.
     radios[0]!.focus();
-    fireEvent.keyDown(seg, { key: "ArrowRight" });
-    expect(document.activeElement).toBe(radios[1]);
-    fireEvent.keyDown(seg, { key: "ArrowLeft" });
-    expect(document.activeElement).toBe(radios[0]);
-    // The ends wrap, like every other adopter of the shared helper.
-    fireEvent.keyDown(seg, { key: "ArrowLeft" });
-    expect(document.activeElement).toBe(radios[2]);
+    fireEvent.keyDown(radios[0]!, { key: "ArrowRight" });
+    await waitFor(() => expect(document.activeElement).toBe(radios[1]));
+    fireEvent.keyDown(radios[1]!, { key: "ArrowLeft" });
+    await waitFor(() => expect(document.activeElement).toBe(radios[0]));
+    // The ends still wrap (Radix `loop`, on by default).
+    fireEvent.keyDown(radios[0]!, { key: "ArrowLeft" });
+    await waitFor(() => expect(document.activeElement).toBe(radios[2]));
+    // Home/End are NEW: the retired hand-rolled helper handled the four arrows
+    // and nothing else, so a keyboard user could not jump to either end. RTL is
+    // new too — the helper hard-coded ArrowLeft as "previous", which is
+    // backwards in a right-to-left document.
+    fireEvent.keyDown(radios[2]!, { key: "Home" });
+    await waitFor(() => expect(document.activeElement).toBe(radios[0]));
+    fireEvent.keyDown(radios[0]!, { key: "End" });
+    await waitFor(() => expect(document.activeElement).toBe(radios[2]));
   });
 
   /**

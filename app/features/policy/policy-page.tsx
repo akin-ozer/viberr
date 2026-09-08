@@ -6,7 +6,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, storeIcon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { LocalDayDotTime } from "~/ui/local-time";
-import { rovingRadioKeyDown } from "~/ui/roving-radio";
+import { RadioSeg, RadioSegOption } from "~/ui/radio-seg";
 import { useToast } from "~/ui/toast";
 import { useActionToast } from "~/ui/use-action-toast";
 import {
@@ -175,31 +175,33 @@ export function HumanAccess({
             </span>
             {canManage ? (
               /* UXA-7: a radiogroup promises arrow-key traversal; this one
-                 declared the role and never wired the keys. */
-              <div
+                 declared the role and never wired the keys. Ruling 166 moved
+                 that wiring to Radix behind `RadioSeg` — same roles, same
+                 classes, and Home/End and RTL for free. It is a toggle group
+                 rather than a radio group ON PURPOSE: selection here commits a
+                 role change, and Radix's RadioGroup selects as focus moves. */
+              <RadioSeg
                 className="mini-seg"
-                role="radiogroup"
-                aria-label={"Role for " + m.name}
-                onKeyDown={rovingRadioKeyDown}
+                label={"Role for " + m.name}
+                value={m.role}
+                // SAFETY: the options are ROLE_IDS, whose members are
+                // ProjectRole, so Radix hands back one of them.
+                onChange={(r) => setRole(m, r as ProjectRole)}
               >
                 {ROLE_IDS.map((r) => (
-                  <button
-                    type="button"
+                  <RadioSegOption
                     key={r}
-                    role="radio"
-                    aria-checked={m.role === r}
-                    tabIndex={m.role === r ? 0 : -1}
+                    value={r}
                     className={m.role === r ? "on" : ""}
                     // A deleted account cannot hold a role: the control is dead,
                     // so it no longer pretends to be live (UI-29). `canManage`
                     // is no longer part of this test — the branch above owns it.
                     disabled={busy || m.missing}
-                    onClick={() => setRole(m, r)}
                   >
                     {ROLE_LABEL[r]}
-                  </button>
+                  </RadioSegOption>
                 ))}
-              </div>
+              </RadioSeg>
             ) : (
               /* U33-4: the reading seat. The same fact the picker encoded, in
                  words — rendered for a removed account too, so the reader and a
@@ -568,11 +570,19 @@ export function WorkflowRules({
                 {o.name}
               </span>
               <span className="trans-by">{t.by}</span>
-              <div
+              <RadioSeg
                 className={"cap-seg" + (t.locked ? " locked" : "")}
-                role="radiogroup"
-                aria-label={`Boundary for ${f.name} → ${o.name}`}
-                onKeyDown={rovingRadioKeyDown}
+                label={`Boundary for ${f.name} → ${o.name}`}
+                value={t.boundary}
+                // A boundary is a governance decision (who may authorize this
+                // transition), which is exactly why this group must commit on
+                // activation and not on focus — see RadioSeg's note.
+                onChange={(next) => {
+                  if (t.boundary === next) return;
+                  // SAFETY: the options are BOUNDARIES, whose ids are exactly
+                  // these three, so Radix hands back one of them.
+                  onSetBoundary(t, next as "auto" | "approval" | "human");
+                }}
                 title={
                   t.locked
                     ? "Completion is human-authorized in V1, so this boundary can't be delegated"
@@ -580,22 +590,16 @@ export function WorkflowRules({
                 }
               >
                 {BOUNDARIES.map((b) => (
-                  <button
-                    type="button"
+                  <RadioSegOption
                     key={b.id}
-                    role="radio"
-                    aria-checked={t.boundary === b.id}
-                    tabIndex={t.boundary === b.id ? 0 : -1}
+                    value={b.id}
                     className={BCLS[b.id] + (t.boundary === b.id ? " on" : "")}
                     disabled={t.locked || !canManage || busy}
-                    onClick={() => {
-                      if (t.boundary !== b.id) onSetBoundary(t, b.id);
-                    }}
                   >
                     {b.label}
-                  </button>
+                  </RadioSegOption>
                 ))}
-              </div>
+              </RadioSeg>
               {t.locked && (
                 <span className="trans-lock">
                   <Icon name="lock" />

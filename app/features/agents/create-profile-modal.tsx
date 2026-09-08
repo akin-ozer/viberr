@@ -15,7 +15,7 @@ import {
 } from "~/server/tasks/specialist-tool-policy";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
-import { rovingRadioKeyDown } from "~/ui/roving-radio";
+import { RadioSeg, RadioSegOption } from "~/ui/radio-seg";
 import { useDialog } from "~/ui/use-dialog";
 import type { AgentProfileView } from "./agent-types";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
@@ -937,15 +937,14 @@ function CapabilityGrants({
                       capDef.id === VERDICT_CAP_ID
                         ? capModes.filter((m) => m.id !== "human")
                         : capModes;
-                    // Roving tabindex: the checked option is the group's single
-                    // tab stop. A stored mode this picker does not offer (a
-                    // legacy specialist `recommend`) leaves nothing checked, so
-                    // the first option holds the tab stop rather than the group
-                    // becoming unreachable.
-                    const checkedIdx = rowModes.findIndex(
-                      (m) => m.id === caps[capDef.id],
-                    );
-                    const tabIdx = checkedIdx < 0 ? 0 : checkedIdx;
+                    // Roving tabindex used to be computed here. Radix owns it
+                    // now (RadioSeg), including the case this code existed for:
+                    // a stored mode the picker does not offer (a legacy
+                    // specialist `recommend`) leaves nothing checked, and the
+                    // roving group stays reachable because its container keeps
+                    // `tabIndex: 0` and delegates entry focus to
+                    // `[activeItem, currentItem, ...items]` — the checked
+                    // option when there is one, the first option otherwise.
                     // B1 (pass 23): on a Codex-pinned profile, a claude-only
                     // withholding is advisory (the Codex SDK ignores tool
                     // allow/deny lists; the server-owned delivery gate is the real
@@ -1008,41 +1007,43 @@ function CapabilityGrants({
                             this one — so the group announced an interaction
                             model it did not have, and every radio was its own
                             tab stop (15 instead of 5 for Collaboration). */}
-                        <div
+                        <RadioSeg
                           className={
                             "cap-seg" + (locked || pinned ? " locked" : "")
                           }
-                          role="radiogroup"
-                          aria-label={
+                          label={
                             locked
                               ? `Policy for ${capDef.label} (locked, reserved for humans)`
                               : pinned
                                 ? `Policy for ${capDef.label} (required by Drive a live web browser: the browser is web egress)`
                                 : `Policy for ${capDef.label}`
                           }
-                          onKeyDown={rovingRadioKeyDown}
+                          value={caps[capDef.id] ?? ""}
+                          onChange={(next) =>
+                            setCaps((p) =>
+                              coupleGrants({
+                                ...p,
+                                // SAFETY: every option this group renders comes
+                                // from `rowModes`, whose ids are CapMode, so the
+                                // value Radix hands back is one of them.
+                                [capDef.id]: next as CapMode,
+                              }),
+                            )
+                          }
                         >
-                          {rowModes.map((m, mi) => (
-                            <button
-                              type="button"
+                          {rowModes.map((m) => (
+                            <RadioSegOption
                               key={m.id}
-                              role="radio"
-                              aria-checked={caps[capDef.id] === m.id}
-                              tabIndex={mi === tabIdx ? 0 : -1}
+                              value={m.id}
                               disabled={locked || pinned}
                               className={
                                 m.id + (caps[capDef.id] === m.id ? " on" : "")
                               }
-                              onClick={() =>
-                                setCaps((p) =>
-                                  coupleGrants({ ...p, [capDef.id]: m.id }),
-                                )
-                              }
                             >
                               {m.label}
-                            </button>
+                            </RadioSegOption>
                           ))}
-                        </div>
+                        </RadioSeg>
                         {pinned && (
                           // P14: a disabled control's reason must be RENDERED,
                           // not parked in a title that never opens on it (nor
