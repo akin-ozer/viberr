@@ -216,7 +216,8 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
     expect(html).toContain("profiles approved · incl. operator");
     expect(html).toContain("tasks with a live operator");
     expect(html).toContain("agent threads with a run in flight");
-    expect(html).toContain("agent threads on tasks waiting on a human · this project");
+    // Design pass 2026-09-08 trimmed the one two-line caption; the noun stays.
+    expect(html).toContain("agent threads waiting on a human");
     expect(
       BARE_SPECIALIST.test(html),
       `the Agents stat row still renders "specialist" — the objects it counts ` +
