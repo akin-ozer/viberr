@@ -977,14 +977,34 @@ export function PolicyPage({
             busy={busy}
             onSetRole={onSetRole}
           />
-          <AgentCapability
-            profiles={data.profiles}
-            onOpenProfile={(id) =>
-              navigate(`/projects/${projectSlug}/agents?profile=${id}`)
-            }
-            onManageProfiles={() => navigate(`/projects/${projectSlug}/agents`)}
-            onMatrix={() => setMatrixOpen(true)}
-          />
+          {/* Design pass 2026-09-08: the right cell used to hold Agent capability
+              alone. `.policy-cols` is a stretching grid (ruling 148(a)), and
+              Human access is far the taller of the two, so the right panel was
+              drawn as a bordered, shadowed box around roughly 430px of nothing
+              — the heaviest chrome on the page wrapped around its emptiest
+              region. Guardrails moves up beside it rather than sitting
+              full-width below, which fills the cell with the thing that was
+              always going to follow it. `.profile-col` is the sheet's existing
+              stack-of-panels-in-a-grid-cell class; its `> :last-child { flex: 1
+              0 auto }` is what absorbs the remaining slack, so the bottom panel
+              grows instead of the empty space. Reused rather than renamed: the
+              class has two emitters now, and Profile is the other. */}
+          <div className="profile-col">
+            <AgentCapability
+              profiles={data.profiles}
+              onOpenProfile={(id) =>
+                navigate(`/projects/${projectSlug}/agents?profile=${id}`)
+              }
+              onManageProfiles={() => navigate(`/projects/${projectSlug}/agents`)}
+              onMatrix={() => setMatrixOpen(true)}
+            />
+            <Guardrails
+              guardrails={data.guardrails}
+              canManage={canEditPolicy}
+              busy={busy}
+              onSet={onSetGuardrail}
+            />
+          </div>
         </div>
 
         <WorkflowRules
@@ -994,13 +1014,6 @@ export function PolicyPage({
           busy={busy}
           onSetBoundary={onSetBoundary}
           operator={operatorAutonomyState(data.profiles)}
-        />
-
-        <Guardrails
-          guardrails={data.guardrails}
-          canManage={canEditPolicy}
-          busy={busy}
-          onSet={onSetGuardrail}
         />
       </div>
 
