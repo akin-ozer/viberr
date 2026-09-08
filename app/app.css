@@ -502,12 +502,24 @@ h1, h2, h3, h4 {
   transition: background .14s ease, color .14s ease;
 }
 .nav-item:hover { background: var(--tint-hover); color: var(--fg); }
+/* "You are here" was the faintest mark in the shell. --surface and --bg are the
+   SAME colour in light (#ffffff), and the rail's own ground is a 25% wash of
+   --surface, so the active row painted white on white and was identified only
+   by a 45%-alpha hairline (about 1.2:1) and a shadow. In dark the rail ground
+   (#191b21) and --surface (#1b1d25) are four values apart and --shadow-card is
+   a black glow on a black ground, so it did nothing there either. It was also
+   the same dress as `.project-switch` — two objects, different jobs, one
+   treatment.
+   --blue-soft is the token every other "selected" control in this sheet fills
+   with (.pick-chip.on, .cal-day.sel, .pill.info), it is opaque, defined per
+   theme, and it already pairs with the --blue-pressed the active row's count
+   uses. NOT --focus-wash, which its own definition reserves as the one blue
+   tint text never sits on. A card can only lift off a ground that differs from
+   it, so the border and shadow go rather than being restated. */
 .nav-item.active {
-  background: var(--surface);
-  border-color: var(--hairline);
+  background: var(--blue-soft);
   color: var(--fg);
   font-weight: 700;
-  box-shadow: var(--shadow-card);
 }
 .nav-item .ico { width: 17px; height: 17px; flex: none; color: currentColor; opacity: .8; }
 .nav-item .count {
@@ -857,7 +869,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   flex-wrap: wrap;
 }
 .board-head h1 { font-size: 1.25rem; }
-.board-head .sub { color: var(--faint); font-size: .88rem; margin-top: .125rem; }
+.board-head .sub { color: var(--faint); font-size: .88rem; margin-top: .125rem;
+  /* Same measure. The Agents lede ran 164 characters a line under a 28px title. */
+  max-width: 70ch;
+}
 .board-tools { display: flex; align-items: center; gap: .5rem; margin-left: auto; flex-wrap: wrap; }
 
 /* F10-28: GitHub state freshness chip next to Reconcile. */
@@ -2598,6 +2613,9 @@ dialog[data-closing]::backdrop {
      (controller-admin-panel.tsx) and would otherwise keep the UA top margin
      inside its flex column. */
   margin: 0 0 1rem;
+  /* Prose gets a measure: these notes sit in full-width policy panels and were
+     setting at ~185 characters a line. 70ch is what .packet-lede already uses. */
+  max-width: 70ch;
 }
 /* D32-10: the Policy page's cross-role rules as a short list, not a nine-line
    paragraph. Lives under .pol-note so it inherits its size and colour. */
@@ -4796,7 +4814,11 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .pol-note.last { margin-bottom: 0; }
 
 /* Instance run-concurrency admin control (org settings footer). */
-.pol-note.conc { align-items: center; }
+.pol-note.conc { align-items: center;
+  /* Exempt: this note wraps a full-width control whose input is pulled right
+     by margin-left:auto; capping it would strand the field mid-panel. */
+  max-width: none;
+}
 .conc-body { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; width: 100%; }
 .conc-lead { color: var(--muted); }
 .conc-edit { display: inline-flex; align-items: center; gap: .5rem; margin-left: auto; }
