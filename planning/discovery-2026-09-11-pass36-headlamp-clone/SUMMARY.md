@@ -1,4 +1,4 @@
-# Pass 36 — summary (observation closed 18:45Z; fix phase in progress)
+# Pass 36 — summary (observation closed 18:45Z; fixes merged and re-validated live)
 
 ## What happened
 
@@ -67,8 +67,35 @@ reviewer rule; Q36-6 no recurrence; Q36-7 operator resources through the control
 Q36-8 interrupt live runs at acceptance; Q36-9 ruling 163 extends to the PR head; Q36-10
 picker eligibility before the click; Q36-11 per-run CODEX_HOME.
 
+## The fix phase (18:05–20:xxZ)
+
+Branch `pass36/headlamp-clone-fixes` → **PR #301** on akin-ozer/viberr. Rulings 177–183
+written into decisions.md; every confirmed row of FINDINGS.md fixed; every fix carries a
+test that was run red against the unfixed source (RED-PROOFS.md, ≈45 rows). Clusters 1, 2
+and 6 were implemented in this session; clusters 3, 4, 5 and ruling 178 by four parallel
+worktree agents, merged by hand (conflicts in run-service, compose, README, the controller
+test file, controller-and-goals resolved and re-tested). Preprod rules held: no migrations,
+no compatibility shims; the E4 `clearBody` flag, the in-checkout skill mount, the
+`task.reviewer.assigned` audit name and the N20-17 disclosure are gone with their tests
+rewritten.
+
+Gates on the merged branch: lint clean, typecheck clean, `npm test` 362 files / 6464 tests
+passed, `npm run e2e` 70 passed (production image, isolated stack). In-image canaries:
+ruling 180 (SDK 0.3.261 init lists `viberr:<name>`, the model invokes it), ruling 181
+(`CODEX_SQLITE_HOME` honoured, per-home `tmp/arg0`), ruling 182 (`codex sandbox` probe).
+
+Live re-validation on the rebuilt image, same data root (REVALIDATION.md has the evidence
+per row; NOTES.md the timestamps): the archived-task mention refused by name (1.1), the
+force-accept that interrupted a live run and woke nothing (1.2), the restart note (1.4),
+the budgeted poller skipping shipped tasks (1.3), the required-reviewer rule set by the
+controller and shown on Policy/Settings (2.2), per-run `CODEX_HOME`s under concurrent runs
+(3.1), the toolchain + sandbox probe on `instance_health` and the boot line (3.2), the
+escaped SKILL.md body refused (4.1), operator KB grants through the controller (4.2), the
+old → new reply (4.3), the picker's pre-click ineligibility (6.1), the suffixed-branch note
+(U36-6) and the collision notification + wake (U36-7). The HLC-18 fixture cycle
+("Add GET /api/version") covered the rest: see REVALIDATION.md rows 2.1, 2.3, 3.3, 5.1, 5.3,
+6.2.
+
 ## Next
 
-PLAN.md (rulings 177–183, six clusters, red-then-green tests, live checks) → fix branch
-`pass36/headlamp-clone-fixes` → gates → PR → rebuild + live re-validation with the reviewer
-back on luna/max → another model reviews.
+Another model reviews PR #301.

@@ -886,3 +886,75 @@ QUESTIONS.md; per-surface coverage in COVERAGE.md; screenshots in SCREENSHOTS.md
   clean, lint clean, `npm test` 362 files / 6464 passed / 0 failed (19:3xZ).
 - 19:4xZ `docker compose stop app` (no live run, goals paused) → `npm run e2e` against the
   production image built from the branch (isolated `viberr-e2e` stack) — running.
+- 19:2xZ `npm run e2e`: 70 passed (37.7 s). `docker compose build app && up -d` → boot 19:23:07Z on
+  the same data root: integrity line carries `toolchain {…, codexSandbox: {ok: true, detail:
+  "codex sandbox ran /bin/echo under a workspace-write profile"}}`, no sandbox WARN, projections
+  1/16 unchanged. PR #301 opened on akin-ozer/viberr (branch pushed after raising
+  `http.postBuffer`; the 26 MB of screenshots hung the first push).
+- 19:24:37Z LIVE RE-VALIDATION 1.1: "@operator …" on archived HLC-4 → "Mention not started"
+  note with the ruling-177 sentence, toast "Comment posted · reopen the task to run the
+  operator", audit `task.comment.unrouted {reason: run-not-started}`, no run row (shot 90).
+- 19:24:47-19:25:39Z controller turn 8 (controller-msg-8.md / controller-reply-8.md, 9 turns,
+  52 s): `instance_health` pasted the toolchain (3.2); Code Reviewer → codex/gpt-5.6-luna/max
+  with the old → new reply (U36-3); `set_required_reviewers` Code Reviewer at Agent Review +
+  `get_project.requiredReviewers` (2.2); operator granted both KBs "(none) → …" (4.2, G36-1);
+  `save_skill` with the escaped body REFUSED by name, nothing written (4.1, ruling 183). Policy
+  card and Settings section screenshotted light/dark/mobile (shots 91, 92).
+- 19:29:02Z controller turn 9: Code Reviewer TEMPORARILY back on Claude opus/high (for the
+  ruling-180 reviewer check, 5.1); fixtures HLC-17 "Observer fixture: closure probe" and HLC-18
+  "Add GET /api/version" created; operators ran at once (Intake → Ready to Build auto). The
+  canonical `hlc-18` branch was squatted on GitHub beforehand (U36-6 fixture).
+- 19:30Z 3.1: two per-run `CODEX_HOME`s under `codex-home/runs/` with distinct `tmp/arg0`
+  helper dirs, symlinked sessions/skills/memories, the shared sqlite state updated.
+- 19:31Z 6.1: HLC-16 (Intake) picker with the Code Reviewer → Run disabled with the
+  ineligibility sentence before the click, no posture line (shot 93).
+- 19:31:13Z 1.4: `docker compose restart app` with both fixture developers live → both rows
+  `interrupted / restart`, "finalized non-terminal runs at boot total 2", ONE "Interrupted by
+  a restart" note per task naming its run, operators re-invoked 19:31:25Z, developers
+  re-dispatched 19:31:47Z. (A "database closed mid-run" WARN for the developer's line writer
+  during the shutdown is the documented shutdown path, not a finding.)
+- 19:33:44Z 1.2: HLC-17 force-accepted from the page's "Force accept" button while its
+  developer ran → run `interrupted` by arda, audit `runtime.run.interrupted {reason:
+  task-closed, cause: force-accept}` + `task.acceptance.interrupted_runs` +
+  `task.acceptance.forced`, note "Interrupted by acceptance", task shipped, no packet, NO
+  operator run afterwards (shots 94, 95). The completion event took the "no changes" arm
+  (branch `hlc-17` had no commits ahead of main).
+- 19:34:51Z U36-7 fixture: observer commit cef27cf + PR #15 on `hlc-18-11aa`; "Update
+  status" (shot 96) → 19:35:09Z collision note + `policy` notification to the owner and the
+  maintainer ("Branch name collision on HLC-18: PR #15 is not this task's", shot 97) +
+  operator woke the same second. The woken operator (Codex) chose to wait for the in-flight
+  developer run ("no duplicate hand-off or collision action should be taken yet") — the
+  packet is expected after delivery is refused, as on HLC-10.
+- 19:37:46Z 1.3 schedule half: controller `schedule_task_action` on shipped HLC-15 → REFUSED at
+  creation, but with "[error] That task is already Done — nothing to schedule." on a board whose
+  terminal stage is Shipped (U36-9 class, the creation guard read the stage only). FIXED on the
+  branch: the guard now reads `taskClosure` and refuses with the ruling-177 sentence
+  ("HLC-15 is closed (Shipped is the terminal stage) — move it back to an open stage before
+  scheduling a run on it."; archived refused too); with it the last four "Done" literals
+  (the packet-side accept/force-accept toasts, the force-accept button toast, the operator's
+  full-autonomy completion text and its "already Done" noop) now name the terminal stage
+  through one `completionToast` helper / `stageNameOf`. Red proofs in RED-PROOFS.md.
+- 19:38:09Z HLC-18 developer finished (d7ca302, gate green); 19:38:51Z operator opened the
+  `blocked` collision packet; 19:39:33Z "Clear collision and re-deliver" confirmed (shot 99)
+  → PR #15 closed, branch deleted, PR #16 opened, `github.collision.resolved
+  {cleared_and_delivered}`, timeline "Branch collision cleared: closed PR #15 and deleted
+  branch `hlc-18-11aa`…" (U36-7 wording); 19:39:42Z `github.delivery.next_step {withheld:
+  verdict-pending}` and NO transition card (2.1); 19:40:10Z Claude Code Reviewer engaged
+  (`task.engagement.added {posture: reviewer}`) — plugin dir
+  `support/reviewer/.viberr-plugins/run_hU5i-xnoUILg/` with plugin.json + 2 skills beside the
+  checkout, no `.claude` anywhere (5.1); 19:41:49Z approve on d7ca302, validation healthy,
+  card written; the run's plugin subdir removed at settle (the empty `.viberr-plugins/`
+  parent stays). The picker refused the Frontend Developer at Agent Review before the click
+  (scoped to Building) — so the "supporting" posture audit stays unit-tested only.
+- 19:43:23Z card applied → Merge Approval; controller turn 11/12: Code Reviewer back on
+  codex/gpt-5.6-luna/max (permanent); the two setup skills re-saved through `save_skill` —
+  the first attempt was refused by ruling 183 ("frontmatter does not parse: Nested mappings
+  are not allowed…": the unquoted `description:` held a ": "), the controller quoted the
+  values and both landed with real newlines (40 / 38 lines).
+- 19:45:18Z ruling 179 fixture: observer commit 1cc5726 on `hlc-18-11aa` at Merge Approval →
+  "Update status" → external revision, `validation: changed`, "Revision moved after review"
+  note (missing period → fixed on the branch), policy notifications ×2, task back to Agent
+  Review via `authored-drift`, operator woke and dispatched the Codex luna/max reviewer at
+  19:45:57Z ("switched from Claude" disclosure); Commits card lists 1cc5726 apart (shot 103).
+  The operator's branch refresh step reported honestly that origin holds a commit the
+  workspace does not ("a plain push would be refused as non-fast-forward").
