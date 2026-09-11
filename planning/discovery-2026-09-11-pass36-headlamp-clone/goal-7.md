@@ -1,0 +1,1 @@
+Observer: the observation run is ending. Pause every goal chain in headlamp-clone (goal-1 through goal-5) so no new links start; leave the active tasks (HLC-3, HLC-14, HLC-16) exactly as they are. Then list each goal's status after the pause and the tool calls you made.

@@ -1,0 +1,1 @@
+Observer probe on goal-4: I archived HLC-4 (YAML route, goal-4 link 1) on purpose, so that link is failed and the chain paused with attention. Please retry that link with a fresh task (keep it waiting on the same upstream work its predecessor had), and then tell me exactly which tool you used, the new task key, and what the goal file says now. Do not touch goal-1 or HLC-11.
